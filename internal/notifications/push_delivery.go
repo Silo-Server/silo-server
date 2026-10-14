@@ -166,7 +166,10 @@ func (r *PushDeviceRepository) EnqueuePushAttempts(ctx context.Context, tx pgx.T
 }
 
 // EnqueueTestAttempt creates a pending diagnostic attempt for one enabled
-// device on the given platform.
+// device on the given platform. The attempt carries the device profile's
+// newest notification, so the device fetches and shows that notification's
+// real text exactly as for an ordinary push. A profile with no notification
+// yet gets a bare test whose push the device can only show as generic text.
 func (r *PushDeviceRepository) EnqueueTestAttempt(ctx context.Context, platform, profileID, serverDeviceID string) (*PushDeliveryAttempt, *PushDevice, error) {
 	if r == nil || r.pool == nil {
 		return nil, nil, ErrPushDeliveryUnavailable
@@ -204,12 +207,26 @@ func (r *PushDeviceRepository) EnqueueTestAttempt(ctx context.Context, platform,
 		return nil, nil, fmt.Errorf("select push test device: %w", err)
 	}
 
+	// Profile IDs are unique only within an account, so match the device's
+	// account too. The key-share lock keeps the row from being deleted
+	// before the attempt references it.
+	var deliveryID *string
+	err = tx.QueryRow(ctx, `
+		SELECT id FROM notification_deliveries
+		WHERE user_id = $1 AND profile_id = $2
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+		FOR KEY SHARE`, device.UserID, device.ProfileID).Scan(&deliveryID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, fmt.Errorf("select push test delivery: %w", err)
+	}
+
 	attemptID := ulid.Make().String()
 	rows, err := tx.Query(ctx, `
 		INSERT INTO push_delivery_attempts
 			(id, notification_delivery_id, push_device_id, trigger_type, provider, platform, attempt_number, outcome)
-		VALUES ($1, NULL, $2, $3, $4, $5, 0, $6)`+pushAttemptReturning,
-		attemptID, device.ID, PushTriggerTest, PushProviderSiloRelay, platform, PushOutcomePending)
+		VALUES ($1, $2, $3, $4, $5, $6, 0, $7)`+pushAttemptReturning,
+		attemptID, deliveryID, device.ID, PushTriggerTest, PushProviderSiloRelay, platform, PushOutcomePending)
 	if err != nil {
 		return nil, nil, fmt.Errorf("insert push test attempt: %w", err)
 	}
@@ -259,15 +276,18 @@ func (r *PushDeviceRepository) getPushDeviceByID(ctx context.Context, id string)
 	return device, nil
 }
 
+// ClaimPendingPushForDelivery claims the delivery's own pending attempts for
+// immediate dispatch. An administrator test that carries the delivery stays
+// with the request that enqueued it.
 func (r *PushDeviceRepository) ClaimPendingPushForDelivery(ctx context.Context, deliveryID string) ([]PushDeliveryAttempt, error) {
 	return r.claimPushAttempts(ctx, `
 		UPDATE push_delivery_attempts SET outcome = 'retrying', next_retry_at = now() + $2, updated_at = now()
 		WHERE id IN (
 			SELECT id FROM push_delivery_attempts
-			WHERE notification_delivery_id = $1 AND outcome = 'pending'
+			WHERE notification_delivery_id = $1 AND trigger_type = $3 AND outcome = 'pending'
 			FOR UPDATE SKIP LOCKED
 		)`+pushAttemptReturning,
-		deliveryID, webhookClaimLease)
+		deliveryID, webhookClaimLease, PushTriggerDelivery)
 }
 
 func (r *PushDeviceRepository) ClaimPushAttemptByID(ctx context.Context, attemptID string) ([]PushDeliveryAttempt, error) {

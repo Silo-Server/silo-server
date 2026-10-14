@@ -26,7 +26,7 @@ type fakeAdminAccounts struct {
 }
 
 func fixtureAdminAccounts() *fakeAdminAccounts {
-	return &fakeAdminAccounts{snapshot: handlers.AdminAccountView{User: handlers.AdminUserView{ID: 7, Username: "sample", Email: "sample@example.test", Role: "user", Enabled: true, MaxProfiles: 5, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}, Revision: 10, GroupRevision: 3}}
+	return &fakeAdminAccounts{snapshot: handlers.AdminAccountView{User: handlers.AdminUserView{ID: 7, Username: "sample", Email: "sample@example.test", Role: "user", Enabled: true, MaxProfiles: 5, EffectivePolicy: handlers.EffectivePolicyView{MaxProfiles: 5}, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}, Revision: 10, GroupRevision: 3}}
 }
 func (*fakeAdminAccounts) AdminAccountCapabilities() (bool, bool) { return true, true }
 func (f *fakeAdminAccounts) GetAdminAccount(context.Context, int) (handlers.AdminAccountView, error) {
@@ -66,6 +66,9 @@ func (f *fakeAdminAccounts) TransferAdminOwnership(_ context.Context, id int) er
 	return f.transferErr
 }
 func (f *fakeAdminAccounts) ImpersonateAdminAccount(context.Context, int, string, string) (handlers.TokenPairView, error) {
+	if f.err != nil {
+		return handlers.TokenPairView{}, f.err
+	}
 	if f.allowImpersonation {
 		return handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 7, Username: "sample", Role: "user"}}, nil
 	}
@@ -182,6 +185,11 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	if f.create.DefaultProfile.Enabled || f.create.User.LibraryIDs == nil || f.create.User.DownloadAllowed == nil || *f.create.User.DownloadAllowed {
 		t.Fatalf("creation lost explicit values: %+v", f.create)
 	}
+	// An unknown library is named at the member the account body sends.
+	unknown := requireProblem(t, do(t, h, http.MethodPost, path, strings.Replace(body, `"library_ids":[]`, `"library_ids":["9"]`, 1), actingRequestAdmin), TypeValidationFailed)
+	if len(unknown.Errors) != 1 || unknown.Errors[0].Location != locationLibraryIDs {
+		t.Fatalf("unknown library errors = %+v", unknown.Errors)
+	}
 	f.err = auth.ErrDuplicate
 	requireProblem(t, do(t, h, http.MethodPost, path, body, actingRequestAdmin), TypeConflict)
 	f.err = errors.New("storage down")
@@ -194,6 +202,14 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	if profiles.Code != 200 || !strings.Contains(profiles.Body.String(), `"id":"profile-1"`) {
 		t.Fatal(profiles.Code, profiles.Body.String())
 	}
+}
+
+func TestAdminImpersonationRevokedSource(t *testing.T) {
+	deps := requestDeps(fixtureRequests())
+	accounts := fixtureAdminAccounts()
+	accounts.err = auth.ErrSessionRevoked
+	deps.AdminAccounts = accounts
+	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, Prefix+"/admin/users/7/impersonate", "", actingRequestAdmin), TypeAuthenticationRequired)
 }
 
 // TestAdminUserIPLocation classifies each address the way stream location

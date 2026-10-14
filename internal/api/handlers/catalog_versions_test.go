@@ -80,7 +80,10 @@ func TestCatalogVersionsHTTP(t *testing.T) {
 	request := func(path string, admin bool, scope access.Scope) *http.Request {
 		r := httptest.NewRequest(http.MethodGet, path, nil).WithContext(access.SetScope(t.Context(), scope))
 		if admin {
-			r = r.WithContext(apimw.SetClaims(r.Context(), &auth.Claims{Role: "admin"}))
+			ctx := apimw.SetClaims(r.Context(), &auth.Claims{Role: "admin"})
+			// The admin acts through its primary profile.
+			ctx = apimw.SetActingAdminDecider(ctx, func(context.Context, apimw.ActingAdminRequest) (bool, error) { return true, nil })
+			r = r.WithContext(ctx)
 		}
 		return r
 	}

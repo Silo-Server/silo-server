@@ -1,5 +1,4 @@
 import type { AccessGroup, AdminPolicyDefaults, AdminUser } from "@/api/types";
-import { V2ProblemError } from "@/api/v2/request";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
@@ -138,6 +137,7 @@ const adminUser: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 4,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -157,56 +157,6 @@ const ownerViewer: AdminUser = {
   role: "admin",
   is_owner: true,
 };
-
-it("seeds list edits from canonical GET and preserves drafts through explicit conflict reload", async () => {
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
-  setAccessToken("account");
-  setProfileId("owner");
-  setProfileToken(null);
-  mocks.users = [adminUser];
-  mocks.reads = 0;
-  mocks.update
-    .mockRejectedValueOnce(
-      new V2ProblemError("updateAdminUser", {
-        type: "https://silo.example/problems/precondition_failed",
-        title: "Changed",
-        status: 412,
-        detail: "Reload",
-        instance: "/api/v2/admin/users/7",
-      }),
-    )
-    .mockResolvedValue(undefined);
-  const user = userEvent.setup();
-  renderPage();
-  await user.click(screen.getByRole("button", { name: "Edit taylor" }));
-  const dialog = await screen.findByRole("dialog");
-  const name = within(dialog).getByLabelText("Username");
-  expect(name).toHaveValue("Canonical");
-  await user.clear(name);
-  await user.type(name, "My draft");
-  const save = within(dialog).getByRole("button", { name: /save/i });
-  await user.click(save);
-  await screen.findByText(/Your draft is preserved/);
-  expect(name).toHaveValue("My draft");
-  expect(save).toBeDisabled();
-  expect(mocks.reads).toBe(1);
-  await user.click(within(dialog).getByRole("button", { name: "Reload current user" }));
-  await waitFor(() => expect(save).toBeEnabled());
-  expect(name).toHaveValue("My draft");
-  await user.click(save);
-  await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2));
-  expect(mocks.update.mock.calls.map((call) => call[0].editor.etag)).toEqual([
-    '"read-1"',
-    '"read-2"',
-  ]);
-});
 
 describe("AdminUsers row actions", () => {
   afterEach(() => vi.useRealTimers());
@@ -230,10 +180,18 @@ describe("AdminUsers row actions", () => {
     const row = screen.getByRole("link", { name: "founder" }).closest("tr")!;
     expect(within(row).getByText("owner")).toBeInTheDocument();
     expect(within(row).queryByText("admin")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit founder" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Edit founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit taylor" })).toBeInTheDocument();
+  });
+
+  it("links Edit to the account's Access tab", () => {
+    renderPage();
+    expect(screen.getByRole("link", { name: "Edit taylor" })).toHaveAttribute(
+      "href",
+      "/admin/users/7?tab=access",
+    );
   });
 
   it("keeps an admin other than the owner off other admin accounts", () => {
@@ -242,11 +200,11 @@ describe("AdminUsers row actions", () => {
     mocks.users = [adminUser, owner, other, self];
     mocks.viewer = { id: 8 };
     renderPage();
-    expect(screen.queryByRole("button", { name: "Edit other" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Edit other" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete other" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit self" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit self" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete self" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit taylor" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete taylor" })).toBeInTheDocument();
   });
 
@@ -254,9 +212,9 @@ describe("AdminUsers row actions", () => {
     mocks.users = [owner, { ...adminUser, id: 8, username: "admin", role: "admin" }];
     renderPage();
     expect(screen.getByRole("button", { name: "View as user: admin" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Edit admin" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit admin" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete admin" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit founder" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit founder" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();
   });
@@ -359,6 +317,7 @@ const defaultGroup: AccessGroup = {
   max_transcodes: 3,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 2,
   allowed_permissions: null,
   requests_allowed: true,
   is_default: true,
@@ -441,6 +400,7 @@ describe("AdminUsers user dialog policy hints", () => {
 
     expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
     expect(within(dialog).getByText("Inherited: 3")).toBeInTheDocument();
+    expect(within(dialog).getByText("Inherited: 2")).toBeInTheDocument();
   });
 
   it("uses the server defaults once a loaded list has no default group", async () => {
@@ -451,26 +411,8 @@ describe("AdminUsers user dialog policy hints", () => {
 
     // The server then creates the account without a group.
     expect(within(dialog).getAllByText("Server default: Unlimited")).toHaveLength(4);
+    expect(within(dialog).getByText("Server default: 5")).toBeInTheDocument();
     expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
-  });
-
-  it("does not show an override as the default while the server defaults load", async () => {
-    mocks.policyDefaults = undefined;
-    mocks.users = [{ ...adminUser, download_transcode_allowed: true }, ownerViewer];
-    const user = userEvent.setup();
-    renderPage();
-    const dialog = await openLimits(user, "Edit taylor");
-    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
-    // A field without an override shows the account's resolved value.
-    expect(within(dialog).getByRole("combobox", { name: "Downloads" })).toHaveTextContent(
-      "Server default: Allowed",
-    );
-
-    // This one is overridden, so its resolved value is not what clearing the
-    // override falls back to: the hint waits for the defaults.
-    await user.click(within(dialog).getByRole("combobox", { name: "Download Transcodes" }));
-    expect(await screen.findByRole("option", { name: "Server default" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /Server default: / })).toBeNull();
   });
 
   it("previews server-prepared downloads from the server's admin and no-group defaults", async () => {
@@ -498,25 +440,6 @@ describe("AdminUsers user dialog policy hints", () => {
 
   const guests = { ...defaultGroup, id: 3, name: "Guests", is_default: false } as AccessGroup;
 
-  it("lets an admin change a user's group from the list", async () => {
-    mocks.users = [{ ...adminUser, access_group_id: defaultGroup.id }];
-    mocks.accessGroups = [defaultGroup, guests];
-    mocks.accessGroupsLoaded = true;
-    mocks.update.mockReset().mockResolvedValue(undefined);
-    const user = userEvent.setup();
-    renderPage();
-    const dialog = await openAccess(user, "Edit taylor");
-
-    const group = within(dialog).getByRole("combobox", { name: "Group" });
-    expect(group).toHaveTextContent(defaultGroup.name);
-    await user.click(group);
-    await user.click(await screen.findByRole("option", { name: "Guests" }));
-    await user.click(within(dialog).getByRole("button", { name: /save/i }));
-
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    expect(mocks.update.mock.calls[0]![0].body.access_group_id).toBe(3);
-  });
-
   it("creates a user in the chosen group, defaulting to the default group", async () => {
     mocks.accessGroups = [defaultGroup, guests];
     mocks.accessGroupsLoaded = true;
@@ -541,66 +464,117 @@ describe("AdminUsers user dialog policy hints", () => {
 
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
     expect(mocks.create.mock.calls[0]![0].body.access_group_id).toBe(3);
+    // The profile limit follows the group unless the admin sets one.
+    expect(mocks.create.mock.calls[0]![0].body).not.toHaveProperty("max_profiles");
   });
 
   it("disables the group picker for admins", async () => {
-    mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];
+    mocks.users = [ownerViewer];
     mocks.accessGroups = [defaultGroup, guests];
     mocks.accessGroupsLoaded = true;
     const user = userEvent.setup();
     renderPage();
-    const dialog = await openAccess(user, "Edit root");
+    const dialog = await openLimits(user, /Add User/);
+    await chooseRole(user, dialog, "Admin");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
     expect(within(dialog).getByRole("combobox", { name: "Group" })).toBeDisabled();
     expect(within(dialog).getByText("Admin accounts can't join groups.")).toBeInTheDocument();
   });
-
-  it("keeps an admin other than the owner from changing its own access and limits", async () => {
-    // The viewer (id 1) is an admin, not the Owner.
-    mocks.users = [{ ...adminUser, id: 1, username: "me", role: "admin", max_streams: 2 }];
-    mocks.update.mockReset().mockResolvedValue(undefined);
-    const user = userEvent.setup();
+  // Overrides Max Streams to 3 in a fresh Create User dialog and fills the
+  // account fields, so only the limit can stop the save. The 3 is the last
+  // valid value a later edit could leave behind.
+  async function openCreateWithStreamsOverride(user: ReturnType<typeof userEvent.setup>) {
+    mocks.create.mockReset().mockResolvedValue({ id: 11 });
     renderPage();
-    const dialog = await openLimits(user, "Edit me");
+    const dialog = await openLimits(user, /Add User/);
+    // Max Streams is the first field on the Limits tab.
+    await user.click(within(dialog).getAllByRole("switch")[0]!);
+    await user.type(within(dialog).getByLabelText("Max Streams"), "3");
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    return dialog;
+  }
 
-    expect(
-      within(dialog).getByText("Only the server owner can change an admin's access and limits."),
-    ).toBeInTheDocument();
-    for (const control of within(dialog).getAllByRole("switch")) {
-      expect(control).toBeDisabled();
-    }
-    // Radix Select ignores a disabled fieldset and opens on pointerdown, so
-    // each menu must carry its own disabled state.
-    for (const menu of within(dialog).getAllByRole("combobox")) {
-      expect(menu).toHaveAttribute("data-disabled");
-    }
-    // Max Profiles is not access policy and stays editable.
-    expect(within(dialog).getByLabelText("Max Profiles")).toBeEnabled();
+  it("refuses to save a cleared limit from another tab and shows the Limits tab", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithStreamsOverride(user);
+    await user.clear(within(dialog).getByLabelText("Max Streams"));
 
     await user.click(within(dialog).getByRole("tab", { name: "Account" }));
-    await user.clear(within(dialog).getByLabelText("Email"));
-    await user.type(within(dialog).getByLabelText("Email"), "me@example.test");
+    // The browser reports a field by firing `invalid` at it.
+    const reported: EventTarget[] = [];
+    dialog
+      .querySelector("form")!
+      .addEventListener("invalid", (event) => reported.push(event.target!), true);
     await user.click(within(dialog).getByRole("button", { name: /save/i }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    const body = mocks.update.mock.calls[0]![0].body;
-    expect(body.email).toBe("me@example.test");
-    expect(body).not.toHaveProperty("max_streams");
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("tab", { name: "Limits" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // The field still shows the edit, not the last valid value, and the
+    // browser points at it.
+    const field = within(dialog).getByLabelText("Max Streams");
+    expect(field).toHaveValue(null);
+    expect(reported).toContain(field);
   });
 
-  it("previews the default group for an admin demoted from the list", async () => {
-    // Only the server Owner may demote another admin.
-    mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];
-    mocks.accessGroups = [defaultGroup];
-    mocks.accessGroupsLoaded = true;
+  it("keeps a non-whole limit across a tab switch and still refuses to save it", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithStreamsOverride(user);
+    await user.clear(within(dialog).getByLabelText("Max Streams"));
+    await user.type(within(dialog).getByLabelText("Max Streams"), "1.5");
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    expect(within(dialog).queryByLabelText("Max Streams")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    expect(within(dialog).getByLabelText("Max Streams")).toHaveValue(1.5);
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByLabelText("Max Streams")).toHaveValue(1.5);
+  });
+
+  it("saves the retyped value after a cleared limit", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithStreamsOverride(user);
+    await user.clear(within(dialog).getByLabelText("Max Streams"));
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    await user.type(within(dialog).getByLabelText("Max Streams"), "2");
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0]![0].body.max_streams).toBe(2);
+  });
+
+  it("refuses to save a cleared Max Profiles limit from another tab", async () => {
+    mocks.create.mockReset().mockResolvedValue({ id: 11 });
     const user = userEvent.setup();
     renderPage();
-    const dialog = await openLimits(user, "Edit root");
-    expect(within(dialog).getAllByText("Admin default: Unlimited")).toHaveLength(4);
+    const dialog = await openLimits(user, /Add User/);
+    const profilesField = within(dialog).getByText("Max Profiles").closest("div.space-y-1")!;
+    await user.click(within(profilesField as HTMLElement).getByRole("switch"));
+    await user.type(within(dialog).getByLabelText("Max Profiles"), "3");
+    await user.clear(within(dialog).getByLabelText("Max Profiles"));
 
-    // This form sends no group for a regular account, and the server moves a
-    // demoted admin into the default group.
-    await chooseRole(user, dialog, "User");
-    expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
-    expect(within(dialog).queryByText(/Server default/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("tab", { name: "Limits" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(dialog).getByLabelText("Max Profiles")).toHaveValue(null);
   });
 });
 

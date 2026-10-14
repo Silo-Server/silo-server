@@ -92,6 +92,16 @@ func adminPluginInstallationID(id ID) (int, *Problem) {
 // adminPluginMutationProblem maps the seam's typed errors. Validation detail
 // from the plugin's own schema is the operator's feedback and is kept.
 func adminPluginMutationProblem(err error) error {
+	// A package the install or update refused (download, checksum, platform,
+	// API version, identity) is the admin's to act on, so say why. An
+	// unreachable catalog or download host may answer a retry.
+	if packageErr, rejected := plugins.AsPackageError(err); rejected {
+		if packageErr.Transient {
+			return NewProblem(TypeDependencyUnavailable, packageErr.Message).WithRetryAfter(30)
+		}
+		return NewProblem(TypeValidationFailed, packageErr.Message).
+			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: packageErr.Message})
+	}
 	var validation *plugins.ConfigValidationError
 	switch {
 	case errors.Is(err, plugins.ErrInstallationNotFound):

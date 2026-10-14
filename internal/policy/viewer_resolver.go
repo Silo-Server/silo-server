@@ -93,12 +93,16 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 			return access.Scope{}, access.ErrProfileNotFound
 		}
 		var err error
-		profileVerified, err = access.VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
+		profileVerified, err = access.VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
 			return access.Scope{}, err
 		}
 	}
 
+	disabledPreference := preferences.DisabledLibraryIDs
+	if input.ContentAccessOnly {
+		disabledPreference = nil
+	}
 	policyInput := ScopeInput{
 		SchemaVersion:        1,
 		UserID:               user.ID,
@@ -108,7 +112,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		AccountRestricted:    effective.LibraryIDs != nil,
 		AccountMaxQuality:    effective.MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   preferences.DisabledLibraryIDs,
+		DisabledLibraryIDs:   disabledPreference,
 		ProfileVerified:      profileVerified,
 		RequestTime:          time.Now().UTC().Format(time.RFC3339),
 		// ResolveInput cannot distinguish API keys from compat callers that
@@ -157,6 +161,10 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	if len(disabled) == 0 {
 		disabled = nil
 	}
+	hidden := slices.Clone(decision.HiddenLibraryIDs)
+	if len(hidden) == 0 {
+		hidden = nil
+	}
 
 	allowUnrated := false
 	if r.unrated != nil {
@@ -174,6 +182,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		AllowedLibraryIDs:   allowed,
 		DisabledLibraryIDs:  disabled,
 		LibrariesRestricted: decision.LibrariesRestricted,
+		HiddenLibraryIDs:    hidden,
 		MaturityLimits: access.MaturityLimits{
 			MaxContentRating:    access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
 			AllowUnratedContent: allowUnrated,

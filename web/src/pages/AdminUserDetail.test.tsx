@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   /** The account the detail page renders, reset per test. */
   user: null as AdminUser | null,
   userError: null as Error | null,
+  /** The account read arrived without a strong ETag (a proxy stripped it). */
+  noEditor: false,
   refetchUser: vi.fn(),
   live: [] as unknown[],
   setSignIn: vi.fn(),
@@ -57,7 +59,7 @@ const adminUser: AdminUser = {
   max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
-  max_profiles: 4,
+  max_profiles: null,
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
@@ -72,6 +74,7 @@ const adminUser: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 4,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -110,9 +113,10 @@ vi.mock("@/hooks/queries/admin/users", () => ({
   }),
   useAdminUser: () => ({
     data: mocks.user ?? undefined,
-    editor: mocks.user
-      ? { user: mocks.user, etag: '"cached"', profileContext: captureProfileRequestContext() }
-      : undefined,
+    editor:
+      mocks.user && !mocks.noEditor
+        ? { user: mocks.user, etag: '"cached"', profileContext: captureProfileRequestContext() }
+        : undefined,
     isLoading: false,
     isFetching: false,
     error: mocks.userError,
@@ -148,6 +152,7 @@ vi.mock("@/hooks/queries/admin/accessGroups", () => ({
         max_transcodes: 0,
         max_remote_stream_bitrate_kbps: 8000,
         max_local_stream_bitrate_kbps: 0,
+        max_profiles: 5,
         allowed_permissions: [PERMISSION_MARKER_EDIT],
         requests_allowed: false,
         is_default: false,
@@ -281,6 +286,7 @@ beforeEach(() => {
   mocks.viewerIsOwner = false;
   mocks.available = true;
   mocks.userError = null;
+  mocks.noEditor = false;
   mocks.refetchUser.mockReset();
   mocks.live = [];
   mocks.setSignIn.mockReset();
@@ -346,6 +352,14 @@ describe("page states", () => {
     mocks.userError = userProblem(404);
     renderUserDetail();
     expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
+  });
+
+  it("says why the account can't be changed when its read had no strong ETag", () => {
+    mocks.noEditor = true;
+    renderUserDetail("/admin/users/7?tab=access");
+    expect(screen.getByRole("heading", { level: 1, name: "taylor" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("without a strong ETag");
+    expect(screen.getByRole("button", { name: "Edit Playback & streaming" })).toBeDisabled();
   });
 
   it("disables every action while user administration is unavailable", () => {
@@ -659,6 +673,33 @@ describe("unsaved changes", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(search()).toBe("?tab=access");
+  });
+
+  it("stays when a card's draft can't be saved, with the reason in the card", async () => {
+    const ui = userEvent.setup();
+    mocks.user = { ...adminUser, max_profiles: 6 };
+    renderUserDetail("/admin/users/7?tab=access");
+    await ui.click(screen.getByRole("button", { name: "Edit Sign-in & role" }));
+    const signIn = screen.getByRole("region", { name: "Sign-in & role" });
+    const username = within(signIn).getByRole("textbox", { name: "Username" });
+    await ui.clear(username);
+    await ui.type(username, "jordan");
+    const limit = within(signIn).getByRole("spinbutton", { name: "Profiles allowed" });
+    await ui.clear(limit);
+    await ui.type(limit, "0");
+    await ui.click(screen.getByRole("tab", { name: "Overview" }));
+    await ui.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Save and continue",
+      }),
+    );
+    expect(
+      await within(signIn).findByText("Allow at least 1 profile, or choose Default."),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(search()).toBe("?tab=access");
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(limit).toHaveValue(0);
   });
 
   it("asks before leaving the page too", async () => {

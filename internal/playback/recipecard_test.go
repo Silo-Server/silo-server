@@ -29,7 +29,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		ToneMapPreflightRequired: true,
 		ToneMapSourceRevision:    revision,
 		ToneMapDVConfigPresent:   true, ToneMapDVBLCompatIDPresent: true, ToneMapDVBLPresent: true, ToneMapDVRPUPresent: true,
-		VideoBitstreamFilter:   "dovi_rpu=strip=1",
+		VideoBitstreamFilter:   DV7ToHDR10BitstreamFilter,
 		VideoSampleEntry:       VideoSampleEntryDVH1,
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,
@@ -88,7 +88,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	if got.ThrottleSeconds != 180 {
 		t.Errorf("ThrottleSeconds = %d, want 180", got.ThrottleSeconds)
 	}
-	if got.VideoBitstreamFilter != "dovi_rpu=strip=1" {
+	if got.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter {
 		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
 	}
 	if got.VideoSampleEntry != VideoSampleEntryDVH1 {
@@ -156,6 +156,19 @@ func TestRecipeCardPreservesCopyVideoMPEGTS(t *testing.T) {
 	}
 	if back := RecipeCardFromClaims(ptr(card.ToClaims())); !back.CopyVideoMPEGTS {
 		t.Fatal("stream-token recipe lost copy-video MPEG-TS selection")
+	}
+}
+
+// A rebuilt session must keep serving the keyframe playlist the player has.
+func TestRecipeCardPreservesKeyframePlaylist(t *testing.T) {
+	card := NewRecipeCard(42, "profile-1", 77, "", TranscodeOpts{
+		SessionID: "planned", TargetCodecVideo: "copy", TargetCodecAudio: "copy", KeyframePlaylist: true,
+	})
+	if !card.TranscodeOpts(t.TempDir(), "/usr/bin/ffmpeg", nil).KeyframePlaylist {
+		t.Fatal("stored recipe lost the keyframe playlist")
+	}
+	if back := RecipeCardFromClaims(ptr(card.ToClaims())); !back.KeyframePlaylist {
+		t.Fatal("stream-token recipe lost the keyframe playlist")
 	}
 }
 
@@ -363,7 +376,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		ToneMapPreflightRequired: true,
 		ToneMapSourceRevision:    revision,
 		ToneMapDVConfigPresent:   true, ToneMapDVBLCompatIDPresent: true, ToneMapDVBLPresent: true, ToneMapDVRPUPresent: true,
-		VideoBitstreamFilter:   "dovi_rpu=strip=1",
+		VideoBitstreamFilter:   DV7ToHDR10BitstreamFilter,
 		VideoSampleEntry:       VideoSampleEntryDVH1,
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,

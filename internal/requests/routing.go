@@ -218,7 +218,8 @@ func anyFold(want, have []string) bool {
 
 // RouteDecision is where one quality tier of a request goes, and which route
 // sent it there. Skip marks a tier a matching route chose not to send at all
-// (skip_uhd): the title gets no copy in that tier, whatever force-dual says.
+// (skip_uhd, or Everything else with no server for the tier): the title gets
+// no copy in that tier, whatever force-dual says.
 type RouteDecision struct {
 	RouteID       string
 	RouteName     string
@@ -280,7 +281,11 @@ type RouteTrace struct {
 //
 // Everything else with no 4K server makes no 4K copy: the tier is skipped,
 // even when every request asks for 4K (force-dual), rather than left
-// undecided and failed.
+// undecided and failed. Everything else with no HD server makes no HD copy
+// when the title's 4K copy goes to a server, so a media type whose servers are
+// all marked 4K gets its 4K version without a failed HD tier. A title whose 4K
+// copy goes nowhere (a requester without 4K) keeps HD undecided, so it fails
+// rather than being sent nowhere.
 func traceRoutes(routes []Route, req Request, qualities []Quality) (map[Quality]RouteDecision, []RouteTrace) {
 	var ordered []Route
 	for _, route := range orderRoutes(routes) {
@@ -327,6 +332,17 @@ func traceRoutes(routes []Route, req Request, qualities []Quality) (map[Quality]
 				Overrides:     dest.Overrides,
 			}
 			trace.Steps[q] = RouteStepSends
+		}
+	}
+	if uhd, ok := decisions[Quality2160p]; ok && !uhd.Skip {
+		for i := range traces {
+			// The fallback passes HD only when it matched, has no HD server,
+			// and no route before it decided HD.
+			if traces[i].Route.IsFallback && traces[i].Steps[Quality1080p] == RouteStepPasses {
+				decisions[Quality1080p] = RouteDecision{RouteID: traces[i].Route.ID, RouteName: traces[i].Route.Name, Skip: true}
+				traces[i].Steps[Quality1080p] = RouteStepSkips
+				break
+			}
 		}
 	}
 	return decisions, traces

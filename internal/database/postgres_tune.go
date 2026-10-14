@@ -226,7 +226,7 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	)
 
 	if postgresMajorVersion >= 12 {
-		settings = append(settings, PostgresTuneSetting{Name: "jit", Value: "off"})
+		settings = append(settings, PostgresTuneSetting{Name: "jit", Value: jitOff})
 	}
 	if postgresMajorVersion >= 15 {
 		settings = append(settings, PostgresTuneSetting{Name: "wal_compression", Value: "lz4"})

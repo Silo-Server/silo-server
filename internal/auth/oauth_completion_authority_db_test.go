@@ -52,8 +52,8 @@ func TestOAuthCompletionReturnsLockedAccountDB(t *testing.T) {
 			if got.err != nil || got.completion.User == nil {
 				t.Fatalf("redeem updated account: %v", got.err)
 			}
-			if got.completion.User.ID != userID || got.completion.User.Role != models.RoleAdmin || got.completion.User.MaxProfiles != 9 {
-				t.Fatalf("redemption returned an account snapshot from before the locked update: id = %d, role = %q, max profiles = %d",
+			if maxProfiles := got.completion.User.MaxProfiles; got.completion.User.ID != userID || got.completion.User.Role != models.RoleAdmin || maxProfiles == nil || *maxProfiles != 9 {
+				t.Fatalf("redemption returned an account snapshot from before the locked update: id = %d, role = %q, max profiles = %v",
 					got.completion.User.ID, got.completion.User.Role, got.completion.User.MaxProfiles)
 			}
 			claims, err := rig.svc.jwt.ValidateToken(got.completion.AccessToken)

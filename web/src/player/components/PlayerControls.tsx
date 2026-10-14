@@ -17,7 +17,8 @@ import {
   AudioLines,
 } from "lucide-react";
 import { CircleButton } from "./CircleButton";
-import { SeekBar, formatTime } from "./SeekBar";
+import { SeekBar } from "./SeekBar";
+import { formatTime } from "../utils/formatTime";
 import { VolumeControl } from "./VolumeControl";
 import { QualityMenu } from "./QualityMenu";
 import { SubtitleMenu } from "./SubtitleMenu";

@@ -1,9 +1,37 @@
 package catalog
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestBuildSortPlan_EpisodeDateOrder(t *testing.T) {
+	for _, field := range []string{"release_date", "last_air_date"} {
+		for _, order := range []string{"asc", "desc"} {
+			t.Run(field+"/"+order, func(t *testing.T) {
+				plan, err := NewQueryBuilder("mi").WithMediaScope("episode").BuildSortPlan(QuerySort{Field: field, Order: order})
+				if err != nil {
+					t.Fatal(err)
+				}
+				direction := strings.ToUpper(order)
+				want := fmt.Sprintf("ORDER BY mi.episode_air_date %[1]s NULLS LAST, mi.episode_series_sort_key ASC, mi.episode_series_id ASC, mi.episode_season_number %[1]s, mi.episode_number %[1]s, mi.content_id ASC", direction)
+				if plan.OrderBy != want {
+					t.Fatalf("order = %q, want %q", plan.OrderBy, want)
+				}
+				kinds := []string{cursorKindDate, cursorKindText, cursorKindText, cursorKindNumber, cursorKindNumber, cursorKindText}
+				if len(plan.terms) != len(kinds) {
+					t.Fatalf("cursor terms = %d, want %d", len(plan.terms), len(kinds))
+				}
+				for index, kind := range kinds {
+					if plan.terms[index].kind != kind {
+						t.Fatalf("cursor term %d kind = %q, want %q", index, plan.terms[index].kind, kind)
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestBuildSortClause_LastAirDateUsesNullsLast(t *testing.T) {
 	// Migration 103 denormalized the aired-episode aggregate onto
@@ -207,8 +235,9 @@ func TestBuild_ReleaseDateInLastComparesDateExpression(t *testing.T) {
 		t.Fatalf("expected no args, got %v", args)
 	}
 	for _, want := range []string{
-		"COALESCE(mi.release_date, CASE WHEN NULLIF(BTRIM(mi.first_air_date), '') ~",
-		">= (CURRENT_DATE - INTERVAL '1 years')::date",
+		"(mi.release_date IS NOT NULL AND mi.release_date >= (CURRENT_DATE - INTERVAL '1 years')::date)",
+		"(mi.release_date IS NULL AND (CASE WHEN NULLIF(BTRIM(mi.first_air_date), '') ~",
+		"END) >= (CURRENT_DATE - INTERVAL '1 years')::date)",
 	} {
 		if !strings.Contains(clause, want) {
 			t.Fatalf("expected release_date in_last clause to contain %q, got %q", want, clause)
@@ -302,8 +331,22 @@ func TestBuildSortPlan_AddedAtUsesScopedLibraryPlaceholdersAfterExistingArgs(t *
 	if len(plan.Joins) != 1 {
 		t.Fatalf("expected one join, got %v", plan.Joins)
 	}
-	if !strings.Contains(plan.Joins[0], "mil.media_folder_id IN ($4)") {
-		t.Fatalf("expected offset placeholder in added_at join, got %q", plan.Joins[0])
+	if !strings.Contains(plan.Joins[0], "JOIN media_item_libraries sort_added ON sort_added.content_id = mi.content_id AND sort_added.media_folder_id = $4") {
+		t.Fatalf("expected offset placeholder in single-library added_at join, got %q", plan.Joins[0])
+	}
+	if !strings.Contains(plan.OrderBy, "sort_added.first_seen_at DESC,") {
+		t.Fatalf("expected the single-library sort to follow first_seen_at, got %q", plan.OrderBy)
+	}
+
+	plan, err = NewQueryBuilder("mi").
+		WithLibraryScope([]int{6, 7}).
+		WithArgIdx(4).
+		BuildSortPlan(QuerySort{Field: "added_at", Order: "desc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 || !strings.Contains(plan.Joins[0], "mil.media_folder_id IN ($4, $5)") {
+		t.Fatalf("expected offset placeholders in multi-library added_at join, got %v", plan.Joins)
 	}
 }
 

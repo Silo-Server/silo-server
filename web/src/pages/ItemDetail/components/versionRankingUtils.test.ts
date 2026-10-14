@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { FileVersion } from "@/api/types";
-import { pickBestAttributes } from "./versionRankingUtils";
+import { pickBestAttributes, selectDefaultVersion } from "./versionRankingUtils";
 
 function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
   return {
@@ -45,7 +45,47 @@ describe("pickBestAttributes", () => {
     ];
     const result = pickBestAttributes(versions);
     expect(result).not.toBeNull();
-    expect(result!.audioLabel).toBe("Atmos");
+    expect(result!.audioLabel).toBe("TrueHD Atmos");
+  });
+
+  it("labels Atmos from a later track of the same codec", () => {
+    const versions = [
+      makeVersion({
+        codec_audio: "eac3",
+        audio_tracks: [
+          { codec: "eac3", language: "en" },
+          { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos", language: "en" },
+        ],
+      }),
+    ];
+    expect(pickBestAttributes(versions)?.audioLabel).toBe("DD+ Atmos");
+  });
+
+  it("labels Atmos from the primary audio track's profile", () => {
+    const versions = [
+      makeVersion({
+        resolution: "2160p",
+        codec_audio: "eac3",
+        audio_tracks: [
+          { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos", language: "en" },
+        ],
+      }),
+    ];
+    expect(pickBestAttributes(versions)?.audioLabel).toBe("DD+ Atmos");
+  });
+
+  // Real files never pair an aac track with an Atmos profile; the mismatch
+  // proves the profile is read only from codec_audio's own stream.
+  it("does not read a profile from a first track that is not codec_audio's stream", () => {
+    const versions = [
+      makeVersion({
+        codec_audio: "eac3",
+        audio_tracks: [
+          { codec: "aac", profile: "Dolby Digital Plus + Dolby Atmos", language: "en" },
+        ],
+      }),
+    ];
+    expect(pickBestAttributes(versions)?.audioLabel).toBe("EAC3");
   });
 
   it("sets hdr true when any version has hdr", () => {
@@ -78,7 +118,7 @@ describe("pickBestAttributes", () => {
     ];
     const result = pickBestAttributes(versions);
     expect(result).not.toBeNull();
-    expect(result!.audioLabel).toBe("Atmos");
+    expect(result!.audioLabel).toBe("TrueHD Atmos");
   });
 
   it("ignores audio_tracks entries without codec", () => {
@@ -99,5 +139,20 @@ describe("pickBestAttributes", () => {
     const result = pickBestAttributes(versions);
     expect(result).not.toBeNull();
     expect(result!.audioLabel).toBe("");
+  });
+});
+
+describe("selectDefaultVersion audio matching", () => {
+  it("still matches versions by codec when the preferred track's profile names Atmos", () => {
+    const plain = makeVersion({ file_id: 1, resolution: "2160p", codec_audio: "aac" });
+    const atmos = makeVersion({
+      file_id: 2,
+      resolution: "2160p",
+      codec_audio: "eac3",
+      audio_tracks: [
+        { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos", language: "en" },
+      ],
+    });
+    expect(selectDefaultVersion([plain, atmos])?.file_id).toBe(2);
   });
 });

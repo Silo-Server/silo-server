@@ -7,6 +7,7 @@ import ActivateDevice from "./ActivateDevice";
 
 const auth = vi.hoisted(() => ({
   user: null as null | { username: string },
+  profile: null as null | { id: string },
   isImpersonating: false,
   logout: vi.fn(),
   logoutOfSiloOnly: vi.fn(),
@@ -21,6 +22,25 @@ vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null 
 vi.mock("@/api/v2/request", async (original) => ({
   ...(await original<typeof import("@/api/v2/request")>()),
   v2: vi.fn(),
+}));
+const profiles = vi.hoisted(() => ({
+  list: [] as Array<{ id: string; name: string; has_pin: boolean }>,
+  verify: vi.fn(),
+}));
+vi.mock("@/hooks/queries/profiles", () => ({
+  useProfiles: () => ({ data: profiles.list, isLoading: false, isError: false, refetch: vi.fn() }),
+  verifyProfilePIN: (...args: unknown[]) => profiles.verify(...args),
+}));
+vi.mock("@/api/client", async (original) => ({
+  ...(await original<typeof import("@/api/client")>()),
+  captureProfileRequestContext: () => null,
+  captureProfileRequestContextAs: (profileId: string, profileToken: string | null) => ({
+    accessToken: "acc",
+    authContextVersion: 1,
+    serverOrigin: "",
+    profileId,
+    profileToken,
+  }),
 }));
 
 const pending = {
@@ -76,6 +96,9 @@ function mount(entry: string) {
 
 beforeEach(() => {
   auth.user = { username: "laura" };
+  auth.profile = null;
+  profiles.list = [];
+  profiles.verify.mockReset();
   auth.isImpersonating = false;
   auth.logout.mockReset();
   auth.logoutOfSiloOnly.mockReset();
@@ -99,7 +122,7 @@ afterEach(() => {
 
 it("takes the TV's code as grouped digits and looks it up", async () => {
   mount("/activate");
-  const input = screen.getByLabelText("Enter the code on your TV");
+  const input = screen.getByLabelText("Enter the code on your TV or app");
   expect(input.getAttribute("inputmode")).toBe("numeric");
   fireEvent.change(input, { target: { value: "48217730" } });
   expect((input as HTMLInputElement).value).toBe("4821 7730");
@@ -183,7 +206,7 @@ it.each(["success", "failure"])(
     await screen.findByText("Sign in Living room TV?");
     fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
     fireEvent.click(screen.getByRole("button", { name: "Enter another code" }));
-    const input = await screen.findByLabelText("Enter the code on your TV");
+    const input = await screen.findByLabelText("Enter the code on your TV or app");
     fireEvent.change(input, { target: { value: "91536204" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await screen.findByText("Sign in Bedroom TV?");
@@ -333,4 +356,202 @@ it("explains codes it can't act on", async () => {
   lookups = [{ ...pending, status: "expired", user_code: "" }];
   mount("/activate?code=48217730");
   await screen.findByText("This code expired. Your TV is showing a new one; scan it again.");
+});
+
+const quickConnect = {
+  ...pending,
+  user_code: "482177",
+  device_name: "Firefox",
+  device_platform: "Jellyfin Web",
+  client_purpose: "jellyfin_quick_connect",
+};
+
+function recordQuickConnectDecisions() {
+  const calls: Array<{ op: string; body: unknown; profileContext?: unknown }> = [];
+  let lookupCount = 0;
+  vi.mocked(v2).mockImplementation(((
+    op: string,
+    options?: { body?: unknown; profileContext?: unknown },
+  ) => {
+    if (op === "GET /api/v2/auth/device") {
+      lookupCount++;
+      return Promise.resolve(quickConnect);
+    }
+    calls.push({ op, body: options?.body, profileContext: options?.profileContext });
+    return Promise.resolve({ status: "approved" });
+  }) as never);
+  return { calls, lookups: () => lookupCount };
+}
+
+it("asks a signed-out person to sign in before looking up a Quick Connect code", async () => {
+  auth.user = null;
+  mount("/activate");
+  const input = screen.getByLabelText("Enter the code on your TV or app");
+  fireEvent.change(input, { target: { value: "482177" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByText(/to approve code 482177 from your Jellyfin app/);
+  expect(screen.getByRole("link", { name: "Sign in to approve" }).getAttribute("href")).toBe(
+    "/login?redirect=%2Factivate%3Fcode%3D482177",
+  );
+  const quickCalls = vi
+    .mocked(v2)
+    .mock.calls.filter(([, options]) => JSON.stringify(options) === '{"query":{"code":"482177"}}');
+  expect(quickCalls).toEqual([]);
+});
+
+it("approves a Quick Connect request for the chosen profile with its PIN", async () => {
+  profiles.list = [
+    { id: "p-laura", name: "Laura", has_pin: false },
+    { id: "p-kids", name: "Kids", has_pin: true },
+  ];
+  auth.profile = { id: "p-laura" };
+  profiles.verify.mockResolvedValue({ valid: true, profile_token: "kids-token" });
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  expect(screen.getByText("Check that your app shows")).toBeTruthy();
+  expect(screen.getByText("482177")).toBeTruthy();
+  expect(screen.queryByText(/Older TV apps show/)).toBeNull();
+  expect(screen.getByText("Only approve a device that's in front of you right now.")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("radio", { name: /Kids/ }));
+  const pin = await screen.findByLabelText("Kids PIN");
+  expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  fireEvent.change(pin, { target: { value: "1234" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+  await screen.findByText("Done. Firefox is signing in as Kids.");
+  expect(profiles.verify).toHaveBeenCalledWith("p-kids", "1234");
+  expect(recorded.calls).toEqual([
+    {
+      op: "POST /api/v2/auth/device/approve-handoff",
+      body: { code: "482177" },
+      profileContext: expect.objectContaining({ profileId: "p-kids", profileToken: "kids-token" }),
+    },
+  ]);
+  // Every Quick Connect lookup spends the account's budget: no watching.
+  expect(recorded.lookups()).toBe(1);
+});
+
+it("approves a Quick Connect request for an unlocked profile without a PIN", async () => {
+  profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  expect(screen.queryByLabelText(/PIN/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByText("Done. Firefox is signing in as Laura.");
+  expect(profiles.verify).not.toHaveBeenCalled();
+  expect(recorded.calls[0]?.profileContext).toEqual(
+    expect.objectContaining({ profileId: "p-laura", profileToken: null }),
+  );
+});
+
+it("keeps a Quick Connect request pending when the PIN is wrong", async () => {
+  profiles.list = [{ id: "p-kids", name: "Kids", has_pin: true }];
+  profiles.verify.mockResolvedValue({ valid: false });
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  fireEvent.change(await screen.findByLabelText("Kids PIN"), { target: { value: "0000" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByText("That PIN isn't right.");
+  expect(recorded.calls).toEqual([]);
+});
+
+it("says when an account has tried too many Quick Connect codes", async () => {
+  vi.mocked(v2).mockImplementation((() =>
+    Promise.reject(
+      new V2ProblemError(
+        "getDeviceLogin",
+        {
+          type: "https://siloserver.org/docs/api/v2/problems/rate_limited",
+          title: "Rate limited",
+          status: 429,
+          detail: "Too many Quick Connect codes tried. Try again later.",
+          instance: "urn:silo:request:1",
+        } as never,
+        900,
+      ),
+    )) as never);
+  mount("/activate?code=482177");
+  await screen.findByText("You've tried too many codes. Try again in 15 minutes.");
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+});
+
+it("declines a Quick Connect request without looking it up again", async () => {
+  profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This sign-in was declined.");
+  expect(recorded.calls.map((c) => c.op)).toEqual(["POST /api/v2/auth/device/deny"]);
+  expect(recorded.lookups()).toBe(1);
+});
+
+it("explains that an admin viewing as someone can't look up a Quick Connect code", async () => {
+  vi.mocked(v2).mockImplementation((() =>
+    Promise.reject(
+      new V2ProblemError("getDeviceLogin", {
+        type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
+        title: "Permission denied",
+        status: 403,
+        detail: "Only the account's own signed-in session can look up a Quick Connect code.",
+        instance: "urn:silo:request:1",
+      } as never),
+    )) as never);
+  mount("/activate?code=482177");
+  await screen.findByText(/Stop viewing as laura to approve a TV/);
+});
+
+it("says a PIN lockout is about the profile, not the codes", async () => {
+  profiles.list = [{ id: "p-kids", name: "Kids", has_pin: true }];
+  profiles.verify.mockRejectedValue(
+    new V2ProblemError(
+      "verifyProfilePIN",
+      {
+        type: "https://siloserver.org/docs/api/v2/problems/rate_limited",
+        title: "Rate limited",
+        status: 429,
+        detail: "Too many incorrect PINs.",
+        instance: "urn:silo:request:1",
+      } as never,
+      300,
+    ),
+  );
+  const recorded = recordQuickConnectDecisions();
+  mount("/activate?code=482177");
+  fireEvent.change(await screen.findByLabelText("Kids PIN"), { target: { value: "0000" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByText("Too many incorrect PINs. Try again in 5 minutes.");
+  expect(recorded.calls).toEqual([]);
+});
+
+it("reloads a Quick Connect request that moved on before it was declined", async () => {
+  profiles.list = [{ id: "p-laura", name: "Laura", has_pin: false }];
+  let lookupCount = 0;
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") {
+      lookupCount++;
+      return Promise.resolve(
+        lookupCount === 1 ? quickConnect : { ...quickConnect, status: "expired" },
+      );
+    }
+    return Promise.reject(
+      new V2ProblemError("denyDeviceLogin", {
+        type: "https://siloserver.org/docs/api/v2/problems/device_login_expired",
+        title: "Expired",
+        status: 410,
+        detail: "Device login request has expired.",
+        instance: "urn:silo:request:1",
+      } as never),
+    );
+  }) as never);
+  mount("/activate?code=482177");
+  await screen.findByText("Sign in Firefox?");
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This code expired. Start Quick Connect again in the app.");
+  expect(lookupCount).toBe(2);
 });

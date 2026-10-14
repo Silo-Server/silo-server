@@ -67,7 +67,7 @@ function makeForm(
     isDirty: (key: string) => dirtyKeys.has(key),
     dirtyCount: dirtyKeys.size,
     dirtyKeys: [...dirtyKeys],
-    save: vi.fn(),
+    save: vi.fn().mockResolvedValue(undefined),
     discard: vi.fn(),
     isSaving: false,
     restartRequired: false,
@@ -119,6 +119,7 @@ describe("PlaybackSettings layout", () => {
     expect(keys).toContain("playback.allow_hevc_encoding");
     expect(keys).toContain("playback.routing.video_transcode_egress");
     expect(keys).toContain("playback.watched_threshold");
+    expect(keys).toContain("playback.copy_keyframe_playlist");
     expect(keys.some((key) => key.startsWith("download."))).toBe(false);
     // Hidden tier: still saved and readable through the API, no UI.
     expect(keys).not.toContain("playback.chapter_thumbnail_node_capacity");
@@ -380,10 +381,14 @@ describe("PlaybackSettings seek-preview node capability", () => {
   it.each([
     [{ capabilities: undefined }, true],
     [{ capabilities: { transport_features: ["chapter_extract_v1"] } }, true],
-    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, false],
+    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, true],
+    [
+      { capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] } },
+      false,
+    ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "",
         capabilities_hash: "snapshot",
       },
@@ -391,7 +396,7 @@ describe("PlaybackSettings seek-preview node capability", () => {
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "new-snapshot",
         capabilities_hash: "old-snapshot",
       },
@@ -399,14 +404,14 @@ describe("PlaybackSettings seek-preview node capability", () => {
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "snapshot",
       },
       true,
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "snapshot",
         capabilities_hash: "snapshot",
       },
@@ -428,7 +433,7 @@ describe("PlaybackSettings seek-preview node capability", () => {
     useAdminNodesMock.mockReturnValue({
       data: [
         transcodeNode({
-          capabilities: { transport_features: ["trickplay_extract_v1"] },
+          capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
           advertised_capabilities_hash: "new-snapshot",
           capabilities_hash: "old-snapshot",
         }),
@@ -471,12 +476,13 @@ describe("seek preview settings", () => {
     sheet_bytes: 0,
   });
 
-  it("asks before changing the interval while published previews are pending replacement", async () => {
+  it.each([false, true])("handles confirmed preview saves (failure=%s)", async (failure) => {
     const form = makeForm(
       { "playback.hw_accel": "none", "playback.trickplay_interval_seconds": "20" },
       ["playback.trickplay_interval_seconds"],
       { "playback.trickplay_interval_seconds": "10" },
     );
+    if (failure) form.save.mockRejectedValue(new Error("412 precondition failed"));
     useSettingsFormMock.mockReturnValue(form);
     useAdminTrickplayLibrariesMock.mockReturnValue({
       data: [{ ...library(0), pending: 3, sheet_bytes: 1000 }],
@@ -490,6 +496,7 @@ describe("seek preview settings", () => {
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
     );
     expect(form.save).toHaveBeenCalledOnce();
+    expect(form.dirtyCount).toBe(1);
   });
 
   it("manages the four seek preview keys under advanced", () => {
@@ -625,4 +632,62 @@ it("asks before changing the interval when preview status is unavailable", async
   expect(screen.getByRole("alertdialog")).toHaveTextContent(
     "Existing seek previews are made again",
   );
+});
+
+// The save bar moves to components/ but must render the same markup on every
+// settings page that uses it: scroll room, scrim and the pill.
+it("renders the settings save bar for a dirty form", () => {
+  useSettingsFormMock.mockReturnValue(
+    makeForm({ "playback.hw_accel": "none" }, ["playback.hw_accel", "playback.ffmpeg_path"]),
+  );
+  render(<PlaybackSettings />);
+
+  const pill = screen.getByText("2 unsaved changes").closest("[role=status]");
+  const scrim = pill?.previousElementSibling;
+  expect([scrim?.previousElementSibling, scrim, pill]).toMatchInlineSnapshot(`
+    [
+      <div
+        aria-hidden="true"
+        class="h-28"
+      />,
+      <div
+        aria-hidden="true"
+        class="pointer-events-none fixed right-0 bottom-0 left-0 z-30 h-40 bg-gradient-to-t from-[var(--background)] via-[color-mix(in_srgb,var(--background)_72%,transparent)] to-transparent lg:left-[240px]"
+      />,
+      <div
+        class="pointer-events-none fixed right-0 bottom-6 left-0 z-40 flex justify-center px-4 lg:left-[240px]"
+        role="status"
+      >
+        <div
+          class="glass pointer-events-auto flex max-w-full items-center gap-3 rounded-full py-2 pr-2 pl-4 shadow-2xl backdrop-blur-xl sm:gap-4 sm:pl-5"
+        >
+          <span
+            class="min-w-0 truncate text-[13px] font-medium"
+          >
+            2 unsaved changes
+          </span>
+          <span
+            class="flex shrink-0 items-center gap-1.5"
+          >
+            <button
+              class="inline-flex shrink-0 items-center justify-center text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 duration-150 hover:bg-accent hover:text-accent-foreground h-8 gap-1.5 px-3 has-[>svg]:px-2.5 rounded-full"
+              data-size="sm"
+              data-slot="button"
+              data-variant="ghost"
+            >
+              Discard
+            </button>
+            <button
+              class="inline-flex shrink-0 items-center justify-center text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 shadow-sm duration-150 h-8 gap-1.5 px-3 has-[>svg]:px-2.5 rounded-full bg-[var(--settings-accent)] text-[#15151a] hover:bg-[var(--settings-accent)] hover:brightness-110"
+              data-size="sm"
+              data-slot="button"
+              data-variant="default"
+            >
+              Save
+            </button>
+          </span>
+        </div>
+      </div>,
+    ]
+  `);
 });

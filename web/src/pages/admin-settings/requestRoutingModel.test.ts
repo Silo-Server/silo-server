@@ -18,6 +18,7 @@ import {
   ruleDraft,
   ruleSentence,
   rowsToConditions,
+  SERVER_NAMED_OVERRIDES,
   splitOverrideFields,
   traceLine,
 } from "./requestRoutingModel";
@@ -165,6 +166,22 @@ describe("rule sentences", () => {
         { options: { quality_profile_id: [{ value: "4", label: "Ultra-HD" }] } },
       ),
     ).toBe("Quality Ultra-HD");
+  });
+
+  it("names a Sonarr metadata language from the server's options", () => {
+    // A route row loads the server's options only for these keys.
+    expect(SERVER_NAMED_OVERRIDES.has("metadata_language")).toBe(true);
+    expect(
+      overridesSummary(
+        { metadata_language: 8 },
+        {
+          options: { metadata_language: [{ value: "8", label: "Japanese" }] },
+          fields: [
+            { key: "metadata_language", label: "Metadata language" } as PluginAdminFormField,
+          ],
+        },
+      ),
+    ).toBe("Metadata language Japanese");
   });
 });
 
@@ -433,6 +450,14 @@ describe("how it was decided", () => {
         ctx,
       ),
     ).toBe("Everything else — decides 4K: none");
+    expect(
+      traceLine(
+        step({ is_fallback: true, route_name: "Everything else", hd: "skips", uhd: "sends" }),
+        0,
+        {},
+        ctx,
+      ),
+    ).toBe("Everything else — decides HD: none · decides 4K");
     expect(
       traceLine(
         step({ unmet_conditions: ["year_from", "year_to"] }),

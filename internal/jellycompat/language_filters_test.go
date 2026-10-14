@@ -91,15 +91,17 @@ func TestHandleFilters2LanguageFacets(t *testing.T) {
 // views or ran a catalog browse.
 type rootRoutingContent struct {
 	countingContentService
-	browsed bool
+	browsed      bool
+	browseParams url.Values
 }
 
 func (*rootRoutingContent) ListUserLibraries(context.Context, *Session) ([]upstreamUserLibrary, error) {
 	return []upstreamUserLibrary{{ID: 3, Name: "Movies", Type: "movies"}}, nil
 }
 
-func (s *rootRoutingContent) BrowseItems(context.Context, *Session, url.Values) (*upstreamBrowseResponse, error) {
+func (s *rootRoutingContent) BrowseItems(_ context.Context, _ *Session, params url.Values) (*upstreamBrowseResponse, error) {
 	s.browsed = true
+	s.browseParams = params
 	return &upstreamBrowseResponse{}, nil
 }
 
@@ -127,6 +129,19 @@ func TestHandleItemsRootFiltersSearchRecursively(t *testing.T) {
 		{"Ids=not-an-id", views},
 		{"GenreIds=not-an-id", empty},
 		{"PersonIds=not-an-id", empty},
+		// Other filters must not drop an Ids filter that names nothing (#2264).
+		{"Ids=not-an-id&IncludeItemTypes=Movie&Recursive=true", empty},
+		{"Ids=00000000-0000-0000-0000-000000000001&IncludeItemTypes=Movie&Recursive=true", empty},
+		{"Ids=not-an-id,also-not-an-id&Recursive=true", empty},
+		{"Ids=not-an-id&IncludeItemTypes=Movie", empty},
+		{"Ids=not-an-id&MediaTypes=Video", empty},
+		{"Ids=not-an-id&IsFavorite=true", empty},
+		{"Ids=not-an-id&SearchTerm=alpha", empty},
+		{"Ids=not-an-id&Genres=Drama", empty},
+		{"GenreIds=not-an-id&IncludeItemTypes=Movie&Recursive=true", empty},
+		// A library view ID is not unresolvable; it routes as it always has.
+		{"Ids=" + EncodeNumericID(EncodedIDLibrary, 3).String() + "&IncludeItemTypes=CollectionFolder", views},
+		{"Ids=not-an-id&Ids=" + EncodeNumericID(EncodedIDLibrary, 3).String() + "&IncludeItemTypes=CollectionFolder", views},
 	}
 	for _, tc := range cases {
 		t.Run(tc.query, func(t *testing.T) {
@@ -148,5 +163,21 @@ func TestHandleItemsRootFiltersSearchRecursively(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An Ids list that names some real items keeps only those; the values that
+// resolve nothing neither widen nor empty the result.
+func TestHandleItemsPartlyResolvableIDsKeepResolvedOnes(t *testing.T) {
+	codec := NewResourceIDCodec()
+	content := &rootRoutingContent{}
+	h := &ItemsHandler{content: content, userData: &mockUserDataService{}, codec: codec, mapper: newMapper(codec, &config.Config{}), images: NewImageCache(time.Hour, time.Now)}
+	known := codec.EncodeStringID(EncodedIDItem, "movie-1")
+	performItemsRequest(t, h, "/Items?Ids=not-an-id,"+known+"&IncludeItemTypes=Movie&Recursive=true")
+	if !content.browsed {
+		t.Fatal("expected a catalog browse constrained to the resolved ID")
+	}
+	if got := content.browseParams.Get("content_ids"); got != "movie-1" {
+		t.Fatalf("content_ids = %q, want %q", got, "movie-1")
 	}
 }

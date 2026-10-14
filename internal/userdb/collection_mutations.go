@@ -44,7 +44,7 @@ func (s *SQLiteUserStore) CollectionOrderRevision(ctx context.Context) (int64, e
 func (s *SQLiteUserStore) ReorderCollectionItemsIfRevision(context.Context, string, []string, int64) error {
 	return userstore.ErrCollectionPagingUnsupported
 }
-func (s *SQLiteUserStore) ReorderCollectionsIfRevision(context.Context, string, *string, []string, int64) error {
+func (s *SQLiteUserStore) ReorderCollectionsIfRevision(context.Context, string, []string, int64) error {
 	return userstore.ErrCollectionPagingUnsupported
 }
 func (s *SQLiteUserStore) UpdateCollectionGroupIfRevision(context.Context, string, *string, *string, *userstore.GroupSortMode, int64) (*userstore.CollectionGroup, error) {

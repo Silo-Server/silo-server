@@ -58,6 +58,10 @@ type WatchDetail struct {
 	EffectiveVersionHDR             *bool                   `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo      *string                 `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey      *string                 `json:"effective_version_edition_key,omitempty"`
+	PosterURL                       string                  `json:"poster_url,omitempty" doc:"The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls"`
+	PosterThumbhash                 string                  `json:"poster_thumbhash,omitempty"`
+	BackdropURL                     string                  `json:"backdrop_url,omitempty" doc:"The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size"`
+	BackdropThumbhash               string                  `json:"backdrop_thumbhash,omitempty"`
 }
 
 // WatchFileVersion is one playable file of the item.
@@ -254,9 +258,11 @@ func registerWatch(reg *Registry) {
 		Class: ClassProfileScoped,
 		// Profile scoped without a required header, as v1 GET /watch/{id}:
 		// the catalog answer needs only the account's access; the profile,
-		// when declared, adds its progress and preferences.
-		ProfileOptional: true,
-		ServiceBacked:   true,
+		// when declared, adds its progress and preferences. A household
+		// with a limited profile must name one.
+		ProfileOptional:      true,
+		HouseholdProfileGate: true,
+		ServiceBacked:        true,
 	}, reg.getWatchState)
 
 	mark := humaOp(http.MethodPost, Prefix+"/watched/{id}", "markWatched", "watch",
@@ -367,6 +373,10 @@ func watchDetailOf(d *catalogpkg.WatchDetail) WatchDetail {
 		EffectiveVersionHDR:        d.EffectiveVersionHDR,
 		EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo,
 		EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,
+		PosterURL:                  d.PosterURL,
+		PosterThumbhash:            d.PosterThumbhash,
+		BackdropURL:                d.BackdropURL,
+		BackdropThumbhash:          d.BackdropThumbhash,
 	}
 	for _, s := range d.Subtitles {
 		out.Subtitles = append(out.Subtitles, WatchSubtitle{Source: s.Source, Language: s.Language, Codec: s.Codec, Forced: s.Forced, HearingImpaired: s.HearingImpaired, Title: s.Title})
@@ -426,7 +436,7 @@ func watchVersionOf(v catalogpkg.FileVersion) WatchFileVersion {
 		Credits:                  watchMarkerOf(v.Credits),
 		Recap:                    watchMarkerOf(v.Recap),
 		Preview:                  watchMarkerOf(v.Preview),
-		MarkerSegments:           markerOccurrences(v.EffectiveMarkerSegments()),
+		MarkerSegments:           markerOccurrences(v.EffectiveMarkerSegments(), v.MarkerPreviews),
 		TrickplayAvailable:       v.Trickplay != nil,
 	}
 	for _, t := range v.VideoTracks {

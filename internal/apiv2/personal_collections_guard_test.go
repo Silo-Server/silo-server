@@ -192,7 +192,9 @@ func TestSQLiteCollectionHTTPPreconditionsAndConcurrentCAS(t *testing.T) {
 
 func TestSQLiteCollectionHTTPProfileAccessAndCapabilities(t *testing.T) {
 	h, _ := newCollectionGuardHTTP(t)
-	shared := guardHTTPCreate(t, h, `{"name":"Shared","is_shared":true,"allowed_profile_ids":["p-primary"]}`)
+	// A per-profile allow list is gone from the contract: sharing is one switch.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"Old","is_shared":true,"allowed_profile_ids":["p-primary"]}`, viewerHeaders()), TypeValidationFailed)
+	shared := guardHTTPCreate(t, h, `{"name":"Shared","is_shared":true}`)
 	viewer := with(bearer(memberToken), "X-Profile-Id", "p-primary")
 	read := guardHTTPGet(t, h, shared, viewer)
 	requireProblem(t, do(t, h, http.MethodPatch, shared, `{"name":"Forbidden"}`, with(viewer, "If-Match", read.Header().Get("ETag"))), TypePermissionDenied)
@@ -207,12 +209,16 @@ func TestSQLiteCollectionHTTPProfileAccessAndCapabilities(t *testing.T) {
 	var features struct {
 		Groups, Imports, Artwork bool
 		ItemReorder              bool `json:"item_reorder"`
+		LoginSharing             bool `json:"login_sharing"`
 	}
 	if err := json.Unmarshal(caps.Body.Bytes(), &features); err != nil {
 		t.Fatal(err)
 	}
 	if features.Groups || features.Imports || features.Artwork || features.ItemReorder {
 		t.Fatalf("SQLite advertised unavailable features: %+v", features)
+	}
+	if !features.LoginSharing {
+		t.Fatal("login_sharing is not advertised")
 	}
 	unsupported := do(t, h, http.MethodPost, "/api/v2/collections/groups", `{"name":"Unavailable"}`, viewerHeaders())
 	if unsupported.Code != 501 {

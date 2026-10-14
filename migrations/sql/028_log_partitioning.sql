@@ -1,5 +1,9 @@
 -- +goose Up
 -- +goose StatementBegin
+-- Cut partitions at UTC boundaries, as internal/partman does when it extends
+-- them; date_trunc and interval arithmetic otherwise follow the server TimeZone.
+SET LOCAL TimeZone = 'UTC';
+
 CREATE TABLE public.operational_logs_partitioned (
     id bigint GENERATED ALWAYS AS IDENTITY,
     "timestamp" timestamp with time zone DEFAULT now() NOT NULL,

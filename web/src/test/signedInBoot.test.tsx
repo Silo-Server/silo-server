@@ -1,7 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { useEffect, type ReactNode } from "react";
 import type { createMemoryRouter } from "react-router";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import adminAccountImpersonate from "../../../contracts/api/v2/fixtures/admin_account_impersonate.json";
 import eventsSocketTicket from "../../../contracts/api/v2/fixtures/events_socket_ticket.json";
@@ -109,7 +109,6 @@ function serverRoutes() {
     "GET /api/v2/auth/signup": { body: { enabled: false } },
     "GET /api/v2/capabilities/password-reset": { body: { revision: "r", state: "disabled" } },
     "GET /api/v2/theme/branding": { body: {} },
-    "GET /api/v2/theme/admin-css": { body: {} },
     "GET /api/v2/account/me": { body: getCurrentUserOk },
     "GET /api/v2/profiles": { body: listProfilesOk },
     "GET /api/v2/settings/contract/capabilities": { body: getSettingsContractCapabilitiesOk },
@@ -146,6 +145,12 @@ async function boot(server: FakeServer) {
 describe("app boot request budget", () => {
   let server: FakeServer;
 
+  // Login is a lazy route. Loading its module first keeps the suspended
+  // route from outlasting settle(), which waits on requests, not imports.
+  beforeAll(async () => {
+    await import("@/pages/Login");
+  });
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     initialEntry = "/";
@@ -180,7 +185,7 @@ describe("app boot request budget", () => {
     vi.useRealTimers();
   });
 
-  it("restores a returning session and reaches the home layout in two waves", async () => {
+  it("restores a returning session and reaches the home layout one wave after the refresh", async () => {
     signInReturningOwner();
 
     await boot(server);
@@ -188,13 +193,17 @@ describe("app boot request budget", () => {
     const log = describeRequests(server.requests);
     expect(screen.getByTestId("home"), log).toHaveTextContent("2 sections");
     expect(measureBoot(server.requests), log).toEqual({
-      requestsBeforeHomeLayout: 6,
-      wavesBeforeHomeLayout: 2,
+      requestsBeforeHomeLayout: 4,
+      wavesBeforeHomeLayout: 1,
       unauthorized: 0,
       refreshes: 1,
       duplicateGets: 0,
-      total: 18,
+      total: 13,
     });
+    // Home starts loading as soon as the token is back, beside the account read.
+    const waveOf = (operation: string) =>
+      server.requests.find((request) => request.operation?.startsWith(operation))?.wave;
+    expect(waveOf("GET /api/v2/home/layout"), log).toBe(waveOf("GET /api/v2/account/me"));
     // The session restore starts beside the public setup reads, not after them.
     expect(
       server.requests.filter((request) => request.wave === 1).map((request) => request.operation),
@@ -231,7 +240,7 @@ describe("app boot request budget", () => {
       duplicateGets: 0,
       // Includes the login page's public signup-status and password-reset
       // capability reads.
-      total: 7,
+      total: 6,
     });
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
   });
@@ -398,7 +407,7 @@ describe("app boot request budget", () => {
       unauthorized: 0,
       refreshes: 0,
       duplicateGets: 1,
-      total: 8,
+      total: 6,
     });
     expect(
       viewedAccount.filter((request) => request.operation === "GET /api/v2/profiles"),
@@ -420,7 +429,7 @@ describe("app boot request budget", () => {
       duplicateGets: 0,
       // Includes the login page's public signup-status and password-reset
       // capability reads.
-      total: 6,
+      total: 5,
     });
   });
 });

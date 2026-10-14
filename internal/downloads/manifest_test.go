@@ -262,6 +262,101 @@ func TestManifestDescribesFrozenAudioAfterSourceReprobe(t *testing.T) {
 	}
 }
 
+// TestManifestDescribesArtifactWithoutUndecodableAudio verifies a prepared
+// file that left out an audio track FFmpeg cannot decode is described by
+// output position, and the viewer's catalog selection follows its track.
+func TestManifestDescribesArtifactWithoutUndecodableAudio(t *testing.T) {
+	b, dl := preparedManifestFixture(&Artifact{
+		ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+		AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+	})
+	audio := []models.AudioTrack{
+		{Codec: "", Channels: 6, Language: "zh", Default: true},
+		{Codec: "eac3", Channels: 6, Language: "zh"},
+		{Codec: "aac", Channels: 2, Language: "en", Title: "Commentary"},
+	}
+	selected := 2
+	b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = audio
+	b.detail.(fakeManifestSource).detail.Versions[0].EffectiveAudioTrackIndex = &selected
+	b.fileRepo.(fakeFileResolver).file.AudioTracks = audio
+	m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(m.AudioTracks) != 2 || m.AudioTracks[0].Index != 0 || m.AudioTracks[0].Language != "zh" || !m.AudioTracks[0].Default ||
+		m.AudioTracks[1].Index != 1 || m.AudioTracks[1].Title != "Commentary" || m.AudioTracks[1].Default {
+		t.Fatalf("audio tracks = %+v, want the two decodable tracks at outputs 0 and 1", m.AudioTracks)
+	}
+	if m.SelectedAudioTrackIndex == nil || *m.SelectedAudioTrackIndex != 1 {
+		t.Fatalf("selected = %v, want source track 2 at output 1", m.SelectedAudioTrackIndex)
+	}
+
+	// A re-probe that names the skipped track's codec changes the layout the
+	// current plan describes; the frozen file cannot be mapped through it.
+	frozen := m.AudioTracks
+	b.artifact = func(context.Context, string) (*Artifact, error) {
+		return &Artifact{
+			ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+			AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion, PreparedAudioTracks: frozen,
+		}, nil
+	}
+	// The viewer chose the E-AC-3 track, now source 1; positionally it would
+	// land on the frozen commentary track, which shares its language.
+	reprobed := []models.AudioTrack{
+		{Codec: "av3a", Channels: 6, Language: "zh", Default: true},
+		{Codec: "eac3", Channels: 6, Language: "en"},
+		{Codec: "aac", Channels: 2, Language: "en", Title: "Commentary"},
+	}
+	selected = 1
+	b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = reprobed
+	b.fileRepo.(fakeFileResolver).file.AudioTracks = reprobed
+	m, err = b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !reflect.DeepEqual(m.AudioTracks, frozen) || m.SelectedAudioTrackIndex == nil || *m.SelectedAudioTrackIndex != 0 {
+		t.Fatalf("audio tracks = %+v selected %v, want the frozen inventory with its default", m.AudioTracks, m.SelectedAudioTrackIndex)
+	}
+
+	// With no decodable track the prepared file carries no audio, and the
+	// scanner found no named audio codec to record for the file.
+	b.artifact = func(context.Context, string) (*Artifact, error) {
+		return &Artifact{
+			ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+			AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion,
+		}, nil
+	}
+	b.fileRepo.(fakeFileResolver).file.AudioTracks = audio[:1]
+	b.fileRepo.(fakeFileResolver).file.CodecAudio = ""
+	b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = audio[:1]
+	m, err = b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(m.AudioTracks) != 0 || m.SelectedAudioTrackIndex != nil || m.CodecAudio != "" {
+		t.Fatalf("audio tracks = %+v selected %v codec %q, want none", m.AudioTracks, m.SelectedAudioTrackIndex, m.CodecAudio)
+	}
+
+	// Once ready, that empty inventory is frozen: a later probe that names a
+	// codec does not add audio the prepared file does not contain.
+	b.artifact = func(context.Context, string) (*Artifact, error) {
+		return &Artifact{
+			ID: "a1", Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+			AudioTrackIndex: -1, TrackRecipeVersion: playback.PreparedTracksRecipeVersion, PreparedAudioTracks: []OfflineAudioTrack{},
+		}, nil
+	}
+	b.fileRepo.(fakeFileResolver).file.AudioTracks = audio[1:]
+	b.fileRepo.(fakeFileResolver).file.CodecAudio = "eac3"
+	b.detail.(fakeManifestSource).detail.Versions[0].AudioTracks = audio[1:]
+	m, err = b.Build(context.Background(), dl, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(m.AudioTracks) != 0 || m.SelectedAudioTrackIndex != nil || m.CodecAudio != "" {
+		t.Fatalf("frozen audio-less file: tracks = %+v selected %v codec %q, want none", m.AudioTracks, m.SelectedAudioTrackIndex, m.CodecAudio)
+	}
+}
+
 // TestManifestDescribesLegacySingleTrackArtifact keeps already-prepared files
 // described as the one audio stream they contain, without PGS sidecars.
 func TestManifestDescribesLegacySingleTrackArtifact(t *testing.T) {

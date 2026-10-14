@@ -1,4 +1,5 @@
 import { v2 } from "../api/v2/request";
+import type { components } from "../api/v2/schema";
 
 export type Category =
   | "library_staples"
@@ -33,12 +34,20 @@ export interface RecipeCatalogResponse {
   categories: Partial<Record<Category, RecipeDefinition[]>>;
 }
 
-// matchRecipePreset returns the gallery preset a section's config came from.
+// matchRecipePreset returns the preset a section's config came from.
 // Several presets can share one recipe type and differ only in their params
 // (TMDB Trending Today vs This Week), so the type alone cannot name the
 // section. The preset whose default params the config matches on the most
 // keys wins; a config that matches none falls back to the first preset.
 export function matchRecipePreset(
+  def: RecipeDefinition,
+  config: Record<string, unknown> | undefined,
+): GalleryPreset | undefined {
+  return findMatchingPreset(def, config) ?? def.presets[0];
+}
+
+/** The preset a config came from, or undefined when it matches none. */
+export function findMatchingPreset(
   def: RecipeDefinition,
   config: Record<string, unknown> | undefined,
 ): GalleryPreset | undefined {
@@ -54,13 +63,7 @@ export function matchRecipePreset(
       bestScore = entries.length;
     }
   }
-  return best ?? def.presets[0];
-}
-
-export interface Candidate {
-  value: string;
-  display_name: string;
-  subtitle?: string;
+  return best;
 }
 
 export interface PreviewRequest {
@@ -72,12 +75,24 @@ export interface PreviewRequest {
 }
 
 export interface PreviewResponse {
-  items: Array<{ content_id: string; title?: string; poster_path?: string }>;
+  items: Array<{
+    content_id: string;
+    title?: string;
+    /** The presigned v2 `poster_url`, ready to load; absent when the item has no poster. */
+    poster_path?: string;
+    poster_thumbhash?: string;
+  }>;
   total_count: number;
 }
 
 export async function fetchRecipeCatalog(): Promise<RecipeCatalogResponse> {
-  const catalog = await v2("GET /api/v2/sections/recipes");
+  return recipeCatalogFromV2(await v2("GET /api/v2/sections/recipes"));
+}
+
+/** The GET /api/v2/sections/recipes body keyed by category, as the web reads it. */
+export function recipeCatalogFromV2(
+  catalog: components["schemas"]["RecipeCatalog"],
+): RecipeCatalogResponse {
   const categories: Partial<Record<Category, RecipeDefinition[]>> = {};
   for (const group of catalog.categories) {
     categories[group.category as Category] = group.recipes.map((def) => ({
@@ -99,19 +114,12 @@ export async function fetchRecipeCatalog(): Promise<RecipeCatalogResponse> {
   return { categories };
 }
 
-export async function fetchCandidates(recipeType: string): Promise<Candidate[]> {
-  const body = await v2("GET /api/v2/sections/recipes/{type}/candidates", {
-    path: { type: recipeType },
-  });
-  return body.candidates.map((candidate) => ({
-    value: candidate.value,
-    display_name: candidate.display_name,
-    ...(candidate.subtitle ? { subtitle: candidate.subtitle } : {}),
-  }));
-}
-
-export async function previewSection(req: PreviewRequest): Promise<PreviewResponse> {
+export async function previewSection(
+  req: PreviewRequest,
+  signal?: AbortSignal,
+): Promise<PreviewResponse> {
   const result = await v2("POST /api/v2/admin/sections/preview", {
+    signal,
     body: {
       ...req,
       library_id: req.library_id === undefined ? undefined : String(req.library_id),
@@ -123,6 +131,7 @@ export async function previewSection(req: PreviewRequest): Promise<PreviewRespon
       content_id: item.content_id,
       title: item.title,
       poster_path: item.poster_url,
+      poster_thumbhash: item.poster_thumbhash,
     })),
     total_count: result.total_count,
   };

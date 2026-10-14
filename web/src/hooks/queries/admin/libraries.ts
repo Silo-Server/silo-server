@@ -91,11 +91,12 @@ export function fetchAdminLibraries(signal?: AbortSignal): Promise<Library[]> {
   return v2("GET /api/v2/libraries", { signal }).then(librariesFromV2);
 }
 
-export function useAdminLibraries() {
+export function useAdminLibraries({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: adminKeys.libraries(),
     queryFn: ({ signal }) => fetchAdminLibraries(signal),
     staleTime: ADMIN_STALE_TIME,
+    enabled,
   });
 }
 

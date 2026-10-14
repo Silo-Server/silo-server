@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
@@ -30,6 +31,58 @@ func TestNewClientUsesProjectAPIKeyWhenEmpty(t *testing.T) {
 
 	if _, err := client.GetCollectionPreset(context.Background(), "trending", "all", "day", 10); err != nil {
 		t.Fatalf("GetCollectionPreset returned error: %v", err)
+	}
+}
+
+func TestRequestErrorsLeaveOutTheAPIKey(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	baseURL := server.URL
+	// Nothing listens once the server is closed, so the request fails in
+	// transport and the error names the URL it requested.
+	server.Close()
+
+	client := NewClient("secret-test-key", 1000)
+	client.SetBaseURL(baseURL)
+
+	_, err := client.GetCollectionPreset(context.Background(), "trending", "all", "week", 10)
+	if err == nil {
+		t.Fatal("GetCollectionPreset returned no error for an unreachable server")
+	}
+	if strings.Contains(err.Error(), "secret-test-key") {
+		t.Fatalf("error carries the API key: %v", err)
+	}
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		t.Fatalf("error %v does not wrap a *url.Error", err)
+	}
+	if want := baseURL + "/trending/all/week"; urlErr.URL != want {
+		t.Fatalf("error URL = %q, want %q", urlErr.URL, want)
+	}
+}
+
+func TestCanceledRequestErrorKeepsItsCause(t *testing.T) {
+	arrived := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	client := NewClient("secret-test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-arrived
+		cancel()
+	}()
+	_, err := client.GetCollectionPreset(ctx, "trending", "all", "week", 10)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "secret-test-key") {
+		t.Fatalf("error carries the API key: %v", err)
 	}
 }
 

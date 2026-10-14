@@ -1845,3 +1845,73 @@ func TestMatchFolderConfigDoesNotCacheLookupFailure(t *testing.T) {
 		t.Fatalf("transient lookup failure was cached for the batch: %+v", config)
 	}
 }
+
+// TestRetryUnmatchedItems_SkipsItemsRekeyedSinceListing covers the scan retry
+// racing the series-root matcher: an item listed as unmatched is matched and
+// rekeyed (local-… to series-tvdb-…) before the retry loads it, or while the
+// retry waits on providers. That item is resolved and must not be counted as
+// retried or still unmatched, while genuine failures still count.
+func TestRetryUnmatchedItems_SkipsItemsRekeyedSinceListing(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+
+	const (
+		rekeyed    = "local-rekeyed"
+		midProcess = "local-rekeyed-mid-process"
+		matched    = "local-matched"
+		noMatch    = "local-placeholder"
+		failing    = "local-provider-error"
+		danglingNF = "local-dangling-not-found"
+	)
+	for _, id := range []string{midProcess, matched, noMatch, failing, danglingNF} {
+		h.itemRepo.items[id] = &models.MediaItem{ContentID: id, Type: "series", Status: "unmatched"}
+	}
+	// rekeyed is listed but already gone from media_items, as after a
+	// concurrent series-root match replaced it with series-tvdb-296762.
+	h.itemRepo.items["series-tvdb-296762"] = &models.MediaItem{ContentID: "series-tvdb-296762", Type: "series", Status: "matched"}
+
+	var processed []string
+	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
+		processed = append(processed, req.ContentID)
+		switch req.ContentID {
+		case rekeyed:
+			return nil, fmt.Errorf("loading existing item: %w", catalog.ErrItemNotFound)
+		case midProcess:
+			// The matcher renames the item while this retry waits on
+			// providers, and the retry then finds no match.
+			h.itemRepo.mu.Lock()
+			delete(h.itemRepo.items, midProcess)
+			h.itemRepo.mu.Unlock()
+			return &ProcessResult{Updated: false}, nil
+		case matched:
+			return &ProcessResult{Updated: true}, nil
+		case noMatch:
+			return &ProcessResult{Updated: false}, nil
+		case failing:
+			return nil, errors.New("provider unavailable")
+		case danglingNF:
+			// A not-found for some other row while the listed item still
+			// exists is a real failure, not a resolved item.
+			return nil, fmt.Errorf("loading parent: %w", catalog.ErrItemNotFound)
+		}
+		t.Fatalf("unexpected content id %q", req.ContentID)
+		return nil, nil
+	}
+
+	h.itemRepo.unmatchedIDs = []string{rekeyed, midProcess, matched, noMatch, failing, danglingNF}
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
+
+	retried, stillUnmatched, err := worker.RetryUnmatchedItemsByFolderAndPathPrefix(ctx, 1, "/media/tv")
+	if err != nil {
+		t.Fatalf("RetryUnmatchedItemsByFolderAndPathPrefix: %v", err)
+	}
+	if len(processed) != 6 {
+		t.Fatalf("processed = %v, want every listed item attempted", processed)
+	}
+	if retried != 4 {
+		t.Errorf("retried = %d, want 4 (rekeyed items excluded)", retried)
+	}
+	if stillUnmatched != 3 {
+		t.Errorf("stillUnmatched = %d, want 3 (placeholder, provider error, dangling not-found)", stillUnmatched)
+	}
+}

@@ -1,9 +1,17 @@
+import { Link } from "react-router";
+import { SquareKanban } from "lucide-react";
 import type { LibraryTabCollection, LibraryTabGroup, LibraryTabUngrouped } from "@/api/types";
 import { useLibraryCollections } from "@/hooks/queries/libraryCollections";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
 import { useUICustomization } from "@/hooks/useUICustomization";
+import { useProfiles } from "@/hooks/queries/profiles";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { ownerName } from "@/lib/collections/personalOwnership";
+import { SERVER_SCOPE } from "@/lib/collections/scope";
 import { cardGridClasses } from "@/lib/uiCustomization";
 
 interface LibraryCollectionsProps {
@@ -12,6 +20,7 @@ interface LibraryCollectionsProps {
 
 export default function LibraryCollections({ libraryId }: LibraryCollectionsProps) {
   const { data, isLoading } = useLibraryCollections(libraryId);
+  const actingAdmin = useIsActingAdmin();
   const { cardPresentation } = useUICustomization();
   const gridClasses = cardGridClasses(cardPresentation.poster_size);
 
@@ -40,9 +49,18 @@ export default function LibraryCollections({ libraryId }: LibraryCollectionsProp
         <Card className="surface-panel overflow-hidden rounded-[2rem] border-0 shadow-none">
           <CardContent className="py-10 text-center">
             <p className="text-lg font-semibold">No collections yet</p>
-            <p className="text-muted-foreground mt-2 text-sm">
-              Create library collections from the admin area to feature curated shelves here.
-            </p>
+            {actingAdmin ? (
+              <Link
+                to={SERVER_SCOPE.paths.list({ libraryId })}
+                className="text-primary mt-2 inline-block text-sm font-medium hover:underline"
+              >
+                Create collections for this library
+              </Link>
+            ) : (
+              <p className="text-muted-foreground mt-2 text-sm">
+                Collections for this library will show up here.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -58,6 +76,14 @@ export default function LibraryCollections({ libraryId }: LibraryCollectionsProp
             Browse hand-picked shelves and smart lists created for this library.
           </p>
         </div>
+        {actingAdmin ? (
+          <Button asChild variant="outline" size="sm">
+            <Link to={SERVER_SCOPE.paths.list({ libraryId, view: "arrange" })}>
+              <SquareKanban aria-hidden />
+              Arrange shelves
+            </Link>
+          </Button>
+        ) : null}
       </div>
       <div className="space-y-8">
         {buildRenderOrder(groups, ungroupedData).map((item) =>
@@ -136,12 +162,28 @@ function GroupSection({
   libraryId: number;
   gridClasses: string;
 }) {
+  const { data: profiles = [] } = useProfiles();
+  const { profile } = useCurrentProfile();
+  // Personal collections from another profile on the login carry its name.
+  const byline = (c: LibraryTabCollection) =>
+    group.kind === "user_collections" &&
+    profile &&
+    c.creator_profile_id &&
+    c.creator_profile_id !== profile.id
+      ? ownerName(profiles, c.creator_profile_id)
+      : undefined;
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold">{group.name}</h2>
       <div className={gridClasses}>
         {group.collections.map((c) => (
-          <CollectionPosterCard key={c.id} collection={c} kind={group.kind} libraryId={libraryId} />
+          <CollectionPosterCard
+            key={c.id}
+            collection={c}
+            kind={group.kind}
+            libraryId={libraryId}
+            ownerName={byline(c)}
+          />
         ))}
       </div>
     </section>

@@ -30,28 +30,34 @@ globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObse
 window.HTMLElement.prototype.hasPointerCapture ??= () => false;
 window.HTMLElement.prototype.scrollIntoView ??= () => {};
 
-function setup({ dirtyKeys = [] }: { dirtyKeys?: string[] } = {}) {
-  const values: Record<string, string> = {};
+function setup({
+  dirtyKeys = [],
+  saved = {},
+  managedByEnv = [],
+}: { dirtyKeys?: string[]; saved?: Record<string, string>; managedByEnv?: string[] } = {}) {
+  const values: Record<string, string> = { ...saved };
   const markDone = vi.fn();
   const setSummary = vi.fn();
   const save = vi.fn().mockResolvedValue(undefined);
   const setValue = vi.fn((key: string, value: string) => {
     values[key] = value;
   });
+  const buildConnectionCheckRequest = vi.fn((_keys: string[]) => ({}));
   wizardMock.mockReturnValue({ markDone, setSummary });
   formMock.mockReturnValue({
     isPending: false,
-    buildConnectionCheckRequest: () => ({}),
+    buildConnectionCheckRequest,
     getValue: (key: string) => values[key] ?? "",
+    getPersistedValue: (key: string) => saved[key] ?? "",
     setValue,
     sensitiveConfigured: [],
-    sensitiveManagedByEnv: [],
+    sensitiveManagedByEnv: managedByEnv,
     dirtyCount: 1,
     isSaving: false,
     save,
     isDirty: (key: string) => dirtyKeys.includes(key),
   });
-  return { markDone, setSummary, save, setValue };
+  return { markDone, setSummary, save, setValue, buildConnectionCheckRequest };
 }
 
 describe("StorageStep", () => {
@@ -221,6 +227,56 @@ describe("StorageStep", () => {
     await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
     await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
     expect(save).toHaveBeenCalledOnce();
+  });
+
+  it("shows the environment-managed Redis database number read-only and keeps the check available", async () => {
+    setup({ saved: { "redis.db": "3" }, managedByEnv: ["redis.url", "redis.db"] });
+    render(<StorageStep />);
+    await userEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(screen.getByLabelText("Database number")).toHaveValue(3);
+    expect(screen.getByLabelText("Database number")).toBeDisabled();
+    expect(screen.getByLabelText("Connection URL")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check connection" })).toBeEnabled();
+  });
+
+  it("stages the Redis database number and checks the connection with it", async () => {
+    const { setValue, buildConnectionCheckRequest } = setup();
+    render(<StorageStep />);
+    // Redis is the first of the "Set up" toggles.
+    await userEvent.click(screen.getAllByRole("button", { name: "Set up" })[0]!);
+    fireEvent.change(screen.getByLabelText("Database number"), { target: { value: "5" } });
+    expect(setValue).toHaveBeenCalledWith("redis.db", "5");
+    expect(formMock.mock.calls[0]?.[0].keys).toContain("redis.db");
+    expect(buildConnectionCheckRequest).toHaveBeenCalledWith(["redis.url", "redis.db"]);
+  });
+
+  it("shows the Redis database number in use and stages it with a new URL", async () => {
+    // No redis.db is saved: the server reports the 3 in the saved URL.
+    const { setValue } = setup({ saved: { "redis.db": "3" } });
+    render(<StorageStep />);
+    await userEvent.click(screen.getAllByRole("button", { name: "Set up" })[0]!);
+    expect(screen.getByLabelText("Database number")).toHaveValue(3);
+
+    fireEvent.change(screen.getByLabelText("Connection URL"), {
+      target: { value: "redis://new.example.invalid:6379/7" },
+    });
+
+    expect(setValue).toHaveBeenCalledWith("redis.url", "redis://new.example.invalid:6379/7");
+    expect(setValue).toHaveBeenCalledWith("redis.db", "3");
+  });
+
+  it("keeps the Redis database number through a URL that is emptied and typed again", async () => {
+    const { setValue } = setup({ saved: { "redis.db": "3" } });
+    const { rerender } = render(<StorageStep />);
+    await userEvent.click(screen.getAllByRole("button", { name: "Set up" })[0]!);
+    for (const value of ["r", "", "redis://new.example.invalid:6379/7"]) {
+      fireEvent.change(screen.getByLabelText("Connection URL"), { target: { value } });
+      rerender(<StorageStep />);
+    }
+
+    expect(setValue).not.toHaveBeenCalledWith("redis.db", "");
+    expect(setValue).toHaveBeenLastCalledWith("redis.db", "3");
+    expect(screen.getByLabelText("Database number")).toHaveValue(3);
   });
 
   it("reveals S3 fields and stages the backend selection", async () => {

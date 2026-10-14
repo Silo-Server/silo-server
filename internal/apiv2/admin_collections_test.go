@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -25,6 +26,16 @@ type fakeAdminCollections struct {
 	job                                                *models.AdminJob
 	syncErr                                            error
 	template                                           handlers.AdminCollectionTemplateResult
+	bundles                                            []templates.BundleWithTemplates
+	bundleReads                                        int
+	catalog                                            *templates.Catalog
+	catalogReads                                       int
+	featureReads                                       int
+	listed                                             []handlers.AdminCollection
+	listReads, sectionReads, countReads                int
+	countedIDs                                         []string
+	sections                                           []handlers.AdminCollectionSection
+	rowCounts                                          map[string]handlers.AdminCollectionRowCount
 }
 
 func newFakeAdminCollections() *fakeAdminCollections {
@@ -271,6 +282,18 @@ func TestAdminCollectionSyncRejectsUnsupportedMode(t *testing.T) {
 	}
 }
 
+// A smart collection follows its rules and has no list to fetch, so a sync
+// request for one is the same caller mistake and must not answer 500.
+func TestAdminCollectionSyncRejectsSmartCollection(t *testing.T) {
+	f := newFakeAdminCollections()
+	f.syncErr = catalogsvc.ErrLibraryCollectionSyncUnsupported
+	h := adminCollectionsTestHandler(t, f)
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/admin/collections/c1/sync", "", bearer(adminToken)), TypeValidationFailed)
+	if strings.Contains(p.Detail, catalogsvc.ErrLibraryCollectionSyncUnsupported.Error()) {
+		t.Fatalf("leaked service diagnostic: %s", p.Detail)
+	}
+}
+
 // The per-entry reason explains a skipped or failed template; v1 returns it and
 // v2 must reach the wire with it too.
 func TestAdminCollectionTemplateApplyKeepsEntryReason(t *testing.T) {
@@ -290,5 +313,34 @@ func TestAdminCollectionTemplateApplyKeepsEntryReason(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("missing %s in %s", want, rec.Body)
 		}
+	}
+}
+
+func TestAdminCollectionErrorRendersInvalidArtworkAsValidationProblem(t *testing.T) {
+	p := adminCollectionError(&handlers.APIError{
+		Status:  http.StatusBadRequest,
+		Code:    "bad_request",
+		Message: "The file is not a supported image.",
+	})
+	if p.Status != http.StatusUnprocessableEntity || p.Type != TypeValidationFailed.URI() {
+		t.Fatalf("problem = %#v", p)
+	}
+	if len(p.Errors) != 1 || p.Errors[0].Detail != "The file is not a supported image." {
+		t.Fatalf("problem errors = %#v", p.Errors)
+	}
+}
+
+// The personal poster operation renders artwork errors through collectionProblem.
+func TestCollectionProblemRendersInvalidArtworkAsValidationProblem(t *testing.T) {
+	p := collectionProblem(&handlers.APIError{
+		Status:  http.StatusBadRequest,
+		Code:    "bad_request",
+		Message: "The image source did not return an image.",
+	})
+	if p.Status != http.StatusUnprocessableEntity || p.Type != TypeValidationFailed.URI() {
+		t.Fatalf("problem = %#v", p)
+	}
+	if len(p.Errors) != 1 || p.Errors[0].Detail != "The image source did not return an image." {
+		t.Fatalf("problem errors = %#v", p.Errors)
 	}
 }

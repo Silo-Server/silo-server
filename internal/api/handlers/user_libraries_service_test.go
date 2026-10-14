@@ -46,7 +46,7 @@ func TestUserLibrarySharedPolicyProjection(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := access.SetScope(t.Context(), tc.scope)
-			views, err := h.ListUserLibraries(ctx, 1)
+			views, err := h.ListUserLibraries(ctx, 1, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,5 +67,31 @@ func TestUserLibrarySharedPolicyProjection(t *testing.T) {
 				t.Fatal(rec.Code, rec.Body.String())
 			}
 		})
+	}
+
+	// A restricted profile that hid library 2 gets it back only when the
+	// caller asks for hidden libraries; the frozen v1 bridge never does.
+	ctx := access.SetScope(t.Context(), access.Scope{LibrariesRestricted: true, AllowedLibraryIDs: []int{1}, HiddenLibraryIDs: []int{2}})
+	for _, tc := range []struct {
+		includeHidden bool
+		ids           []int
+	}{{false, []int{1}}, {true, []int{2, 1}}} {
+		views, err := h.ListUserLibraries(ctx, 1, tc.includeHidden)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]int, 0, len(views))
+		for _, v := range views {
+			ids = append(ids, v.ID)
+		}
+		if !reflect.DeepEqual(ids, tc.ids) {
+			t.Fatalf("includeHidden=%t ids = %v, want %v", tc.includeHidden, ids, tc.ids)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.HandleListUserLibraries(rec, httptest.NewRequest("GET", "/user/libraries", nil).WithContext(ctx))
+	var bridge []UserLibraryView
+	if err := json.Unmarshal(rec.Body.Bytes(), &bridge); err != nil || len(bridge) != 1 || bridge[0].ID != 1 {
+		t.Fatal("v1 bridge listed a hidden library:", rec.Body.String())
 	}
 }
