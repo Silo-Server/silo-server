@@ -6,7 +6,8 @@
 #
 #   SILO_URL    server base URL, without /api/v2
 #   SILO_TOKEN  session token or API key of the account under test
-#   OUT_DIR     where the JSON goes; default recs-probe-<UTC time>
+#   OUT_DIR     where the JSON goes; default .local/recs-probe/<UTC time>,
+#               which git ignores: the capture holds a profile's viewing
 #   PREV_DIR    an earlier capture of the same profiles, for day-over-day lines
 #
 # With no profile IDs it captures every profile of the account that has no
@@ -35,7 +36,7 @@ for tool in curl jq; do
 done
 
 base=${SILO_URL%/}
-out=${OUT_DIR:-recs-probe-$(date -u +%Y%m%dT%H%M%SZ)}
+out=${OUT_DIR:-.local/recs-probe/$(date -u +%Y%m%dT%H%M%SZ)}
 prev=${PREV_DIR:-}
 mkdir -p "$out"
 
@@ -159,15 +160,15 @@ for pid in "${profiles[@]}"; do
 	# Card types in the personal rows (main, cluster and Similar Users rows).
 	jq -rs '"  personal card types: \([.[] | select(.surface != "home" and (.type == "cluster" or .type == "similar_users_liked")) | .card.type] | group_by(.) | map("\(.[0])=\(length)") | join(", "))"' "$dir/cards.jsonl"
 
-	# Genre shares: the served main row against the captured history and
-	# favorites, each item counted once. amplification is the served share of
+	# Genre shares: the served main row against the captured completed
+	# history and favorites, each item counted once. amplification is the served share of
 	# the row's top genre minus that genre's history share.
 	jq -rn --slurpfile m "$dir/main.json" --slurpfile h "$dir/history.json" --slurpfile f "$dir/favorites.json" '
 		def shares(items): (items | length) as $n
 			| if $n == 0 then [] else [items[].genres // [] | unique[]] | group_by(.) | map({g: .[0], s: (length / $n)}) | sort_by(-.s, .g) end;
 		def fmt(xs): [xs[:3][] | "\(.g)=\(.s * 100 | round)%"] | join(", ");
 		shares($m[0].items) as $served
-		| shares([$h[0].items[], $f[0].items[]] | unique_by(.content_id)) as $hist
+		| shares([($h[0].items[] | select(.watch.completed == true)), $f[0].items[]] | unique_by(.content_id)) as $hist
 		| ($served[0].g // null) as $top
 		| "  genres: served[\(fmt($served))] history[\(fmt($hist))]"
 		+ (if $top then " amplification(\($top))=\((($served[0].s) - ([$hist[] | select(.g == $top) | .s][0] // 0)) * 100 | round)pp" else "" end)'
