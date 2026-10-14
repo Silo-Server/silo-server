@@ -101,8 +101,9 @@ type ProcessResult struct {
 	IsNew     bool // True if this was an initial match (new item created)
 	Updated   bool // True if any fields were changed
 	Decision  *MatchDecision
-	// Pinned reports that automatic matching skipped an item an admin split
-	// left unmatched on purpose. It is a completed outcome, not a failure.
+	// Pinned reports that automatic matching skipped an item an admin left
+	// unmatched on purpose, by ignoring it or by splitting it off unmatched.
+	// It is a completed outcome, not a failure.
 	Pinned bool
 }
 

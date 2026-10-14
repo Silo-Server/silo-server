@@ -627,7 +627,9 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 }
 
 // writeItem inserts item and, when update is set, overwrites every mutable
-// field of an existing row. It reports whether a row was written.
+// field of an existing row. It reports whether a row was written. An update
+// that leaves the item matched also clears match_ignored_at, since an
+// admin's ignore only means something while the item is unmatched.
 func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item *models.MediaItem, update bool) (bool, error) {
 	if item.ContentID == "" {
 		return false, fmt.Errorf("refusing to write media item with empty content_id")
@@ -719,6 +721,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			episode_metadata_incomplete = EXCLUDED.episode_metadata_incomplete,
 			episode_metadata_last_checked_at = EXCLUDED.episode_metadata_last_checked_at,
 			status = EXCLUDED.status,
+			match_ignored_at = CASE WHEN lower(trim(EXCLUDED.status)) = 'matched' THEN NULL ELSE media_items.match_ignored_at END,
 			content_rating_age = EXCLUDED.content_rating_age,
 			advisory_age = EXCLUDED.advisory_age,
 			advisory_source = EXCLUDED.advisory_source,
@@ -2085,7 +2088,9 @@ func (r *ItemRepository) buildFuzzySearchCursorSQL(parsed parsedSearchQuery, ite
 // ListUnmatchedByFolderAndPathPrefix returns content IDs for unmatched-style
 // items that are linked to at least one present file within the given folder
 // subtree. This intentionally includes ambiguous items so a library scan can
-// revisit legacy scanner ambiguities after inference heuristics improve.
+// revisit legacy scanner ambiguities after inference heuristics improve. It
+// leaves out items an admin ignored: the matcher would skip them anyway, and
+// the scan would report each one as still unmatched.
 func (r *ItemRepository) buildListUnmatchedByFolderAndPathPrefixSQL(folderID int, pathPrefix string, limit int) (string, []any) {
 	query := `
 		SELECT mi.content_id
@@ -2100,6 +2105,7 @@ func (r *ItemRepository) buildListUnmatchedByFolderAndPathPrefixSQL(folderID int
 		WHERE mil.media_folder_id = $1
 		  AND folders.enabled = true
 		  AND mi.status IN ('unmatched', 'pending', 'ambiguous')
+		  AND mi.match_ignored_at IS NULL
 		  -- Manga chapters stay status='pending' by design: provider metadata
 		  -- lives on the type='manga' series item, so chapters are never
 		  -- matchable and must not feed the matcher's retry loop (mirrors the
@@ -2465,6 +2471,10 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	addString("air_time", upd.AirTime)
 	addNullableString("air_timezone", upd.AirTimezone)
 	addString("status", upd.Status)
+	if upd.Status != nil && strings.EqualFold(strings.TrimSpace(*upd.Status), "matched") {
+		// An admin's ignore only means something while the item is unmatched.
+		setClauses = append(setClauses, "match_ignored_at = NULL")
+	}
 	addString("show_status", upd.ShowStatus)
 	addString("imdb_id", upd.ImdbID)
 	addString("tmdb_id", upd.TmdbID)

@@ -250,3 +250,12 @@
 ./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
 ./migrations TestLibraryDeleteRacingAccessWritePostgres
 ./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
+
+# An unmatched item an admin ignored stays off the unmatched and scan-retry
+# lists, the matcher queues and library refreshes across a rescan, the matcher
+# and item refreshes skip it, and a match clears the mark.
+./internal/api/handlers TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB
+./internal/metadata TestProcessLeavesIgnoredItemUnmatchedDB
+./internal/metadata TestMatchQueuesSkipIgnoredItemsDB
+./internal/metadata TestRefreshLeavesIgnoredItemAloneDB
+./internal/adminjob TestLibraryRefreshSkipsIgnoredItemsDB

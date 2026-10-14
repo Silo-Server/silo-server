@@ -679,7 +679,7 @@ func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*Pro
 	}
 
 	if req.Mode != ModeIdentify {
-		pinned, err := s.pinnedUnmatchedBySplit(ctx, req.ContentID)
+		pinned, err := s.pinnedUnmatched(ctx, req.ContentID)
 		if err != nil {
 			return nil, err
 		}
@@ -3272,6 +3272,11 @@ func (s *MetadataService) refreshItemTarget(ctx context.Context, contentID strin
 		s.recordRefreshFailure(ctx, contentID, err, incrementDebtAttempt)
 		return err
 	}
+	if result != nil && result.Pinned {
+		// An admin left the item unmatched on purpose: there is nothing to
+		// refresh, and that is not a failure.
+		return nil
+	}
 	if result == nil || !result.Updated {
 		s.recordRefreshFailure(ctx, contentID, ErrMetadataNotFound, incrementDebtAttempt)
 		return ErrMetadataNotFound
@@ -4342,6 +4347,13 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		return err
 	}
 	if !strings.EqualFold(strings.TrimSpace(series.Type), "series") {
+		return ErrMetadataNotFound
+	}
+	// A season or episode refresh searches providers for the series too, so
+	// it must not run for a series an admin ignored.
+	if ignored, err := s.matchIgnored(ctx, seriesID); err != nil {
+		return err
+	} else if ignored {
 		return ErrMetadataNotFound
 	}
 

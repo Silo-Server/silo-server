@@ -845,8 +845,9 @@ func (h *LibraryHandler) RematchStaleID(ctx context.Context, contentID string) e
 
 // ListUnmatchedItems pages the items awaiting a metadata match, optionally
 // filtered by a case-insensitive search over title, type, status and
-// library name, plus the unpaged total.
-func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, limit, offset int) ([]UnmatchedItemView, int, error) {
+// library name, plus the unpaged total. Items an admin ignored are left out;
+// with ignored set it pages only those instead.
+func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, ignored bool, limit, offset int) ([]UnmatchedItemView, int, error) {
 	if h.pool == nil {
 		return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Database not configured")
 	}
@@ -869,12 +870,15 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 		)`
 	}
 
-	mangaChapterGuard := ` AND ` + catalog.MangaChapterExclusionWhere("mi")
+	guards := ` AND ` + catalog.MangaChapterExclusionWhere("mi") + ` AND mi.match_ignored_at IS NULL`
+	if ignored {
+		guards = ` AND ` + catalog.MangaChapterExclusionWhere("mi") + ` AND mi.match_ignored_at IS NOT NULL`
+	}
 
 	countSQL := `
 		SELECT COUNT(*)
 		FROM media_items mi
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')` + mangaChapterGuard
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')` + guards
 	countSQL += filter
 
 	var total int
@@ -887,7 +891,8 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 	listSQL := fmt.Sprintf(`
 		SELECT mi.content_id, mi.title, mi.year, mi.type, mi.status,
 		       COALESCE(lib.folder_id, 0),
-		       COALESCE(lib.folder_name, '')
+		       COALESCE(lib.folder_name, ''),
+		       mi.match_ignored_at
 		FROM media_items mi
 		LEFT JOIN LATERAL (
 			SELECT mil.media_folder_id AS folder_id, f.name AS folder_name
@@ -899,7 +904,7 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s%s
 		ORDER BY mi.title ASC, mi.content_id ASC
 		LIMIT $%d OFFSET $%d
-	`, mangaChapterGuard, filter, len(filterArgs)+1, len(filterArgs)+2)
+	`, guards, filter, len(filterArgs)+1, len(filterArgs)+2)
 
 	rows, err := h.pool.Query(ctx, listSQL, listArgs...)
 	if err != nil {
@@ -911,7 +916,7 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 	items := make([]UnmatchedItemView, 0)
 	for rows.Next() {
 		var item UnmatchedItemView
-		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &item.ContentType, &item.Status, &item.LibraryID, &item.LibraryName); err != nil {
+		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &item.ContentType, &item.Status, &item.LibraryID, &item.LibraryName, &item.IgnoredAt); err != nil {
 			slog.ErrorContext(ctx, "scanning unmatched item", "component", "api", "error", err)
 			return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to scan item")
 		}
@@ -922,6 +927,111 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 		return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to iterate items")
 	}
 	return items, total, nil
+}
+
+// SetUnmatchedItemIgnored marks an unmatched, pending or ambiguous movie or
+// series as intentionally unmatched, or clears that mark. Books keep their
+// own enrichment paths and cannot be ignored. An ignored item leaves the
+// unmatched list and the matcher queues, and automatic matching leaves it
+// alone until the mark is cleared, which queues it for matching again;
+// Identify still works and clears it. Ignoring keeps the first time it was
+// set and clearing an unmarked item changes nothing.
+func (h *LibraryHandler) SetUnmatchedItemIgnored(ctx context.Context, contentID string, ignored bool) error {
+	if h.pool == nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Database not configured")
+	}
+	contentID = strings.TrimSpace(contentID)
+	if contentID == "" {
+		return apiError(http.StatusBadRequest, "bad_request", "Missing content ID")
+	}
+	tag, err := h.pool.Exec(ctx, `
+		UPDATE media_items
+		SET match_ignored_at = CASE WHEN $2 THEN COALESCE(match_ignored_at, NOW()) END
+		WHERE content_id = $1
+		  AND (NOT $2 OR (
+			lower(trim(status)) IN ('pending', 'unmatched', 'ambiguous')
+			AND type IN ('movie', 'series')
+		  ))
+	`, contentID, ignored)
+	if err != nil {
+		slog.ErrorContext(ctx, "setting media item match ignore", "component", "api", "content_id", contentID, "ignored", ignored, "error", err)
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to update item")
+	}
+	if tag.RowsAffected() > 0 {
+		h.requeueItemMatchWork(ctx, contentID)
+		return nil
+	}
+	var exists bool
+	if err := h.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1)`, contentID).Scan(&exists); err != nil {
+		slog.ErrorContext(ctx, "checking media item for match ignore", "component", "api", "content_id", contentID, "error", err)
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to update item")
+	}
+	if !exists {
+		return apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	return apiError(http.StatusConflict, "conflict", "Only an unmatched movie or series can be ignored")
+}
+
+// requeueItemMatchWork re-evaluates the matcher queue rows of the item's
+// present files, so an ignored item leaves the matcher backlog at once and a
+// restored one is queued for another match attempt. A failure is only
+// logged: the next scan's queue sync reaches the same rows.
+func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID string) {
+	if h.MovieMatchQueueRepo == nil && h.SeriesMatchQueueRepo == nil {
+		return
+	}
+	rows, err := h.pool.Query(ctx, `
+		SELECT id, media_folder_id, observed_root_path
+		FROM media_files
+		WHERE content_id = $1 AND missing_since IS NULL
+		ORDER BY id
+	`, contentID)
+	if err != nil {
+		slog.WarnContext(ctx, "listing item files to requeue match work", "component", "api", "content_id", contentID, "error", err)
+		return
+	}
+	type seriesRoot struct {
+		folderID int
+		path     string
+	}
+	var fileIDs []int
+	var roots []seriesRoot
+	seen := map[seriesRoot]bool{}
+	for rows.Next() {
+		var fileID int
+		var root seriesRoot
+		if err := rows.Scan(&fileID, &root.folderID, &root.path); err != nil {
+			rows.Close()
+			slog.WarnContext(ctx, "scanning item file to requeue match work", "component", "api", "content_id", contentID, "error", err)
+			return
+		}
+		fileIDs = append(fileIDs, fileID)
+		if root.path != "" && !seen[root] {
+			seen[root] = true
+			roots = append(roots, root)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		slog.WarnContext(ctx, "listing item files to requeue match work", "component", "api", "content_id", contentID, "error", err)
+		return
+	}
+	// Each enqueue checks the library type itself, so a movie queue call on
+	// a series file (or the reverse) changes nothing.
+	if h.MovieMatchQueueRepo != nil {
+		for _, fileID := range fileIDs {
+			if err := h.MovieMatchQueueRepo.EnqueueMovieFile(ctx, fileID); err != nil {
+				slog.WarnContext(ctx, "requeueing movie match work", "component", "api", "content_id", contentID, "file_id", fileID, "error", err)
+			}
+		}
+	}
+	if h.SeriesMatchQueueRepo != nil {
+		for _, root := range roots {
+			if err := h.SeriesMatchQueueRepo.EnqueueSeriesRoot(ctx, root.folderID, root.path); err != nil {
+				slog.WarnContext(ctx, "requeueing series match work", "component", "api", "content_id", contentID, "library_id", root.folderID, "error", err)
+			}
+		}
+	}
 }
 
 // ConfirmEmptyRootCleanup lets the next scan of the library clean up an

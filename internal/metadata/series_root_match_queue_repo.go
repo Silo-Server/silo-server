@@ -54,6 +54,11 @@ func (r *SeriesRootMatchQueueRepository) CleanupLegacySeriesGroupQueue(ctx conte
 	return int(tag.RowsAffected()), nil
 }
 
+// EnqueueSeriesRoot queues the root for matching while any present file under
+// it still needs a match, and drops its queue row otherwise. Every eligibility
+// check in this file leaves out files of an item an admin ignored
+// (media_items.match_ignored_at), so their roots leave the queue and are never
+// claimed, even for a requested rerun.
 func (r *SeriesRootMatchQueueRepository) EnqueueSeriesRoot(ctx context.Context, folderID int, observedRootPath string) error {
 	if err := r.requireConfigured(); err != nil {
 		return err
@@ -90,6 +95,7 @@ func (r *SeriesRootMatchQueueRepository) EnqueueSeriesRoot(ctx context.Context, 
 			  )
 			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path <> ''
+			  AND mi.match_ignored_at IS NULL
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
 				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
@@ -150,6 +156,7 @@ func (r *SeriesRootMatchQueueRepository) EnqueueSeriesRoot(ctx context.Context, 
 			  )
 			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path <> ''
+			  AND mi.match_ignored_at IS NULL
 			  AND (q.rerun_requested OR q.lease_forced_rerun OR (
 				mf.content_id IS NULL OR mf.content_id = '' OR
 				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
@@ -197,6 +204,7 @@ func (r *SeriesRootMatchQueueRepository) SyncForFolder(ctx context.Context, fold
 			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path IS NOT NULL
 			  AND mf.observed_root_path <> ''
+			  AND mi.match_ignored_at IS NULL
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
 				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
@@ -256,6 +264,7 @@ func (r *SeriesRootMatchQueueRepository) SyncForFolder(ctx context.Context, fold
 			  )
 			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path <> ''
+			  AND mi.match_ignored_at IS NULL
 			  AND (q.rerun_requested OR q.lease_forced_rerun OR (
 				mf.content_id IS NULL OR mf.content_id = '' OR
 				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
@@ -312,6 +321,7 @@ func (r *SeriesRootMatchQueueRepository) SyncInScope(ctx context.Context, folder
 				mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\' OR
 				mf.observed_root_path = $2 OR mf.observed_root_path LIKE $3 ESCAPE '\'
 			  )
+			  AND mi.match_ignored_at IS NULL
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
 				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
@@ -385,6 +395,7 @@ func (r *SeriesRootMatchQueueRepository) SyncInScope(ctx context.Context, folder
 			  )
 			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path <> ''
+			  AND mi.match_ignored_at IS NULL
 			  AND (q.rerun_requested OR q.lease_forced_rerun OR (
 				mf.content_id IS NULL OR mf.content_id = '' OR
 				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
@@ -431,6 +442,7 @@ func (r *SeriesRootMatchQueueRepository) Claim(ctx context.Context, limit int) (
 				  )
 				  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 				  AND mf.observed_root_path <> ''
+				  AND mi.match_ignored_at IS NULL
 				  AND (q.rerun_requested OR q.lease_forced_rerun OR (
 					mf.content_id IS NULL OR mf.content_id = '' OR
 					lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
@@ -548,6 +560,7 @@ func (r *SeriesRootMatchQueueRepository) ClaimByFolderAndPathPrefix(
 				  )
 				  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 				  AND mf.observed_root_path <> ''
+				  AND mi.match_ignored_at IS NULL
 				  AND (q.rerun_requested OR q.lease_forced_rerun OR (
 					mf.content_id IS NULL OR mf.content_id = '' OR
 					lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
