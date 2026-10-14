@@ -296,15 +296,21 @@ func TestSeriesExtrasFoldersBelongToTheirShow(t *testing.T) {
 		"Glimmer Harbor/Extras/Behind The Scenes/clip.mkv":                {extra: true, kind: models.ExtraKindBehindTheScenes},
 		"Glimmer Harbor/Trailers/1080p/Glimmer Harbor S00E05.mkv":         {extra: true, kind: models.ExtraKindTrailer},
 		"Glimmer Harbor/Season 01/Trailers/Preview.mkv":                   {extra: true, kind: models.ExtraKindTrailer},
-		// Directly under the show's or a season's Extras/, an episode code
-		// keeps its documented meaning.
+		// Directly under the show's own Extras/, an episode code keeps its
+		// documented meaning. Under a season's Extras/ it doesn't, so a deleted
+		// scene never becomes a second version of the real episode.
 		"Glimmer Harbor/Extras/Glimmer Harbor S00E03.mkv":                   {root: "Glimmer Harbor"},
-		"Glimmer Harbor/Season 01/Extras/Glimmer Harbor S01E05 Deleted.mkv": {root: "Glimmer Harbor"},
-		// Episodes deeper than a season folder still make the show.
+		"Glimmer Harbor/Season 01/Glimmer Harbor - S01E05.mkv":              {root: "Glimmer Harbor"},
+		"Glimmer Harbor/Season 01/Extras/Glimmer Harbor S01E05 Deleted.mkv": {extra: true, kind: models.ExtraKindOther},
+		// Episodes deeper than a season folder still make the show, and the
+		// season folder owns its extras too.
 		"Ironvale/Season 01/Disc 1/Ironvale - S01E01.mkv": {root: "Ironvale"},
+		"Ironvale/Season 01/Trailers/Preview.mkv":         {extra: true, kind: models.ExtraKindTrailer},
 		"Ironvale/other/Behind the camera.mkv":            {extra: true, kind: models.ExtraKindOther},
-		// A show with no episodes yet, named with its year.
-		"Emberfall (2021)/trailers/Emberfall trailer.mkv": {extra: true, kind: models.ExtraKindTrailer},
+		// A show with no episodes yet has nothing to own its trailers/. It
+		// stays a series of its own until the first episode arrives, when a
+		// scan turns the file into an extra.
+		"Emberfall (2021)/trailers/Emberfall trailer.mkv": {root: "Emberfall (2021)/trailers"},
 		// A bare Season folder (#1660) and its Specials stay with the show.
 		"Quillmere/Season/Quillmere S01E01.mkv":          {root: "Quillmere"},
 		"Quillmere/Season/Specials/Quillmere S00E01.mkv": {root: "Quillmere"},
@@ -320,6 +326,13 @@ func TestSeriesExtrasFoldersBelongToTheirShow(t *testing.T) {
 		"Documentaries/Interviews/S01E02.mkv":                {root: "Documentaries/Interviews"},
 		"Documentaries/Interviews/The.Interviews.S01E03.mkv": {root: "Documentaries/Interviews"},
 		"other/Flat Show/pilot.mkv":                          {root: "other/Flat Show"},
+		// A category's own Extras/ folder doesn't make it a show, and neither
+		// does a year in its name.
+		"Cartoons/Extras/Peppa S01E01.mkv":                          {root: "Cartoons"},
+		"Cartoons/Shorts/Season 01/S01E01.mkv":                      {root: "Cartoons/Shorts"},
+		"Cartoons/Clips/Clip S01E02.mkv":                            {root: "Cartoons/Clips"},
+		"Christmas (2023)/Shorts/Snowfall/E01.mkv":                  {root: "Christmas (2023)/Shorts/Snowfall"},
+		"Christmas (2023)/Elf Tales/Season 01/Elf Tales S01E01.mkv": {root: "Christmas (2023)/Elf Tales"},
 		// Shows titled like extras folders or with a number.
 		"Comedy/Extras/Season 01/Extras S01E01.mkv": {root: "Comedy/Extras"},
 		"Comedy/Extras/Specials/Extras S00E01.mkv":  {root: "Comedy/Extras"},
