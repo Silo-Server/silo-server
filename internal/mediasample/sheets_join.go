@@ -63,6 +63,17 @@ import (
 // has stopped keeping up at all.
 const maxQueuedFrameBytes = 64 << 20
 
+// keyframeMatchSeconds absorbs the rounding between a keyframe packet's
+// time and its decoded frame's, which keyframes seconds apart never reach.
+const keyframeMatchSeconds = 0.01
+
+// maxDroppedKeyframeShare replaces maxFilledShare for a window whose
+// decoder dropped keyframes over skipped pictures (see droppedKeyframe):
+// such a file is whole, and a sample showing the keyframe a few seconds
+// before its own is a usable preview. A list keeps maxFilledShare, so too
+// many drops still send it to the window.
+const maxDroppedKeyframeShare = 0.15
+
 // sheetFramePattern matches the frame line of the sheets metadata filter:
 // "frame:12   pts:1550   pts_time:1.55". pts_time is "NOPTS" for a frame
 // without a time.
@@ -128,6 +139,15 @@ type sheetAssembler struct {
 	// dtsTiming lets a packet without a PTS count by its DTS; see
 	// packetLine.
 	dtsTiming bool
+	// A window whose decoder dropped keyframes (see droppedKeyframe) gives
+	// the samples after each dropped keyframe an earlier one. The times of
+	// the frames decoded and of the keyframe packets read find those
+	// samples, which then count as filled. A keyframe packet without a time
+	// leaves them unknown (untimedKey).
+	droppedKeyframes bool
+	untimedKey       bool
+	frameTimes       []float64
+	keyTimes         []float64
 
 	open      map[int]*sheetCanvas
 	finalized int
@@ -207,6 +227,12 @@ func (a *sheetAssembler) Write(p []byte) (int, error) {
 // line takes one log line, keeping the input header and the lines of the
 // sheets metadata filter.
 func (a *sheetAssembler) line(line string) {
+	if droppedKeyframe(line) {
+		a.mu.Lock()
+		a.droppedKeyframes = true
+		a.mu.Unlock()
+		return
+	}
 	message, ok := filterMessage(line, a.logContext)
 	if !ok {
 		if a.sampled {
@@ -318,6 +344,51 @@ func (a *sheetAssembler) packetLine(line string) {
 			a.hasPacketTime = true
 		}
 	}
+	if packetIsKey(fields[5]) {
+		if at := a.offset + float64(pts)*a.packetTimeBase; hasPTS && finite(at) {
+			a.keyTimes = append(a.keyTimes, at)
+		} else {
+			a.untimedKey = true
+		}
+	}
+}
+
+// packetIsKey reads the flags framecrc appends after the checksum. It
+// prints them only when they differ from a plain keyframe's.
+func packetIsKey(rest string) bool {
+	_, raw, ok := strings.Cut(rest, "F=0x")
+	if !ok {
+		return true
+	}
+	// Side data, when the packet has any, follows the flags.
+	raw, _, _ = strings.Cut(raw, ",")
+	flags, err := strconv.ParseUint(strings.TrimSpace(raw), 16, 64)
+	return err == nil && flags&1 != 0
+}
+
+// staleSamples counts the samples that hold a frame but not their own
+// keyframe, the last keyframe packet at or before the sample. A sample
+// without any frame is counted when its sheet is finalized.
+func (a *sheetAssembler) staleSamples() int {
+	keys := slices.Clone(a.keyTimes)
+	slices.Sort(keys)
+	frames := slices.Clone(a.frameTimes)
+	slices.Sort(frames)
+	stale, next := 0, 0
+	for cell, at := range a.times {
+		for next < len(keys) && keys[next] <= at+sampleMatchSeconds {
+			next++
+		}
+		if next == 0 || !a.placed(cell) {
+			continue
+		}
+		key := keys[next-1]
+		i, _ := slices.BinarySearch(frames, key-keyframeMatchSeconds)
+		if i == len(frames) || frames[i] > key+keyframeMatchSeconds {
+			stale++
+		}
+	}
+	return stale
 }
 
 // packetTimestamp parses a framecrc DTS or PTS field. framecrc prints
@@ -362,6 +433,7 @@ func (a *sheetAssembler) place(meta sheetFrameMeta, frame []byte) {
 		return
 	}
 	at := a.offset + meta.seconds
+	a.frameTimes = append(a.frameTimes, at)
 	a.assignWindow(at - sampleMatchSeconds)
 	a.recycle(a.prev)
 	a.prev = frame
@@ -479,6 +551,9 @@ func (a *sheetAssembler) close() *AttemptError {
 			return fail(ReasonOutput, errors.New("ffmpeg reported no usable packet timing for the sampled window"))
 		}
 		a.assignWindow(a.packetEnd + sampleMatchSeconds)
+		if a.droppedKeyframes {
+			a.filled += a.staleSamples()
+		}
 	}
 	return nil
 }
@@ -493,12 +568,19 @@ func (a *sheetAssembler) finish() ([]Sheet, SheetFrames, *AttemptError) {
 	if a.decoded == 0 {
 		return fail(ReasonEmpty, errors.New("ffmpeg decoded no frame for any sample"))
 	}
+	if a.droppedKeyframes && a.untimedKey && !a.sampled {
+		return fail(ReasonEmpty, errors.New("ffmpeg dropped keyframes in a window with an untimed keyframe packet"))
+	}
 	sheets := (len(a.times) + a.perSheet - 1) / a.perSheet
 	a.finalizeThrough(sheets)
 	if a.err != nil {
 		return fail(ReasonOutput, a.err)
 	}
-	if limit := max(1, int(maxFilledShare*float64(len(a.times)))); a.filled > limit {
+	share := maxFilledShare
+	if a.droppedKeyframes && !a.sampled {
+		share = maxDroppedKeyframeShare
+	}
+	if limit := max(1, int(share*float64(len(a.times)))); a.filled > limit {
 		return fail(ReasonEmpty, fmt.Errorf("ffmpeg decoded frames for only %d of %d samples", len(a.times)-a.filled, len(a.times)))
 	}
 	return a.sheets, SheetFrames{Decoded: len(a.times) - a.filled, Filled: a.filled, Refined: a.refined}, nil

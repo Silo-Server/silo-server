@@ -335,11 +335,11 @@ func TestRunSheetsWithRealFFmpeg(t *testing.T) {
 // After each jump through a list the decoder computes the previous
 // keyframe's count again and drops the keyframe as a duplicate. With a
 // keyframe every 64 frames, the repair that lists the lost samples again
-// decodes every keyframe, and every sample must show its scene. With a
-// keyframe every 256 frames the keyframes collide in the repair and in the
-// window that reads the samples again too, since skipped pictures do not
-// advance the count, and the run must fail rather than repeat the first
-// scene.
+// decodes every keyframe. With a keyframe every 256 frames the keyframes
+// collide in the repair and in the keyframes-only window that reads the
+// samples again too, since skipped pictures do not advance the count, and
+// the window that decodes every reference picture finds them all. Either
+// way every sample must show its own scene, never an earlier one.
 func TestRunSheetsOpenGOPHEVCWithRealFFmpeg(t *testing.T) {
 	ffmpeg, caps := realFFmpeg(t)
 	grays := []int{20, 60, 100, 140, 180, 220}
@@ -371,19 +371,19 @@ func TestRunSheetsOpenGOPHEVCWithRealFFmpeg(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
 			result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Trickplay}.Run(ctx, req)
-			if keyint == 256 {
-				if failure, ok := errors.AsType[*Error](err); !ok || failure.Reason != ReasonEmpty {
-					t.Fatalf("got frames %+v, error %v; want the run to fail as empty", result.SheetFrames, err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}
-			// The list loses the keyframes after its first jump, and the
-			// repair, which lists them again, finds every one.
-			if len(result.Sheets) != 1 || result.SheetFrames != (SheetFrames{Decoded: 6, Refined: 5}) {
-				t.Fatalf("got %d sheets, frames %+v; want 1 sheet of 6 decoded samples, 5 of them repaired", len(result.Sheets), result.SheetFrames)
+			// With 64-frame GOPs the list loses the keyframes after its
+			// first jump, and the repair, which lists them again, finds
+			// every one. With 256-frame GOPs the reference-picture window
+			// decodes every sample's keyframe, so nothing is repaired.
+			want := SheetFrames{Decoded: 6, Refined: 5}
+			if keyint == 256 {
+				want = SheetFrames{Decoded: 6}
+			}
+			if len(result.Sheets) != 1 || result.SheetFrames != want {
+				t.Fatalf("got %d sheets, frames %+v; want 1 sheet, frames %+v", len(result.Sheets), result.SheetFrames, want)
 			}
 			img, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG))
 			if err != nil {
