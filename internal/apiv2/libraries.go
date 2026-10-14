@@ -1473,7 +1473,7 @@ func (reg *Registry) listUnmatchedItems(ctx context.Context, cursors *Cursors, i
 	if in.Ignored {
 		// Encoded, so no search text can spell this filter; the default keeps
 		// its original form so cursors issued before ignoring existed still work.
-		filter = url.Values{"q": {search}, "ignored": {"true"}}.Encode()
+		filter = url.Values{"q": {search}, "ignored": {strconv.FormatBool(in.Ignored)}}.Encode()
 	}
 	scope := CursorScope{
 		OperationID: opListUnmatchedItems,
