@@ -279,8 +279,9 @@ func TestBackfillMarksProfilesStaleForStoredItems(t *testing.T) {
 	}
 
 	// With signals in a user store outside Postgres, the item-based mark
-	// cannot see them, so the run marks every profile instead.
-	outside := newFakeEmbeddingStore(testIDs("item-", 25)...)
+	// cannot see them, so the run marks every profile instead, once at its
+	// end however many batches it stored.
+	outside := newFakeEmbeddingStore(testIDs("item-", 2*signalsStaleBatch+25)...)
 	b = newTestBackfill(outside, vectorsOf(768, &calls), nil)
 	b.signalsOutsidePostgres = true
 	if err := b.run(context.Background(), true); err != nil {

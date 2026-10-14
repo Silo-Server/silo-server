@@ -283,7 +283,8 @@ type embedBackfill struct {
 	// so they are counted as failures and not remembered as refused.
 	unconfirmed []string
 	// stored lists the items stored since profiles with signals on them were
-	// last marked stale.
+	// last marked stale. With signalsOutsidePostgres it keeps only the first,
+	// since the mark covers every profile whatever was stored.
 	stored []string
 }
 
@@ -432,7 +433,10 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if len(b.stored) >= signalsStaleBatch {
+		// Marking every profile each batch would keep them all stale, and
+		// rebuilt by the sweep, for the whole run, so that mark waits for
+		// the run's end.
+		if len(b.stored) >= signalsStaleBatch && !b.signalsOutsidePostgres {
 			b.markSignalsStale(ctx)
 		}
 		end := min(start+embeddingBackfillBatchSize, len(items))
@@ -468,8 +472,8 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 // vectors left them out of the taste vector, and an embeddings reset leaves
 // every profile without one; the stale sweep rebuilds them. With signals in a
 // user store outside Postgres, which a single small installation uses, it
-// marks every profile. A failure is logged: the nightly taste run rebuilds
-// every profile anyway.
+// marks every profile, once when the run ends. A failure is logged: the
+// nightly taste run rebuilds every profile anyway.
 func (b *embedBackfill) markSignalsStale(ctx context.Context) {
 	if len(b.stored) == 0 {
 		return
@@ -637,7 +641,9 @@ func (b *embedBackfill) save(ctx context.Context, item *models.MediaItem, vector
 		return false, nil
 	}
 	b.counts.Embedded++
-	b.stored = append(b.stored, item.ContentID)
+	if !b.signalsOutsidePostgres || len(b.stored) == 0 {
+		b.stored = append(b.stored, item.ContentID)
+	}
 	b.unconfirmed = nil
 	return true, nil
 }
