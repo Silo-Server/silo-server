@@ -37,6 +37,9 @@ const MAX_COMPOSITION_PIXELS = 4096 * 4096;
 // damaged or crafted, and keeping all of it could exhaust the browser, so the
 // excess is dropped and the screen before it stays up.
 const MAX_COMPOSITIONS_PER_WINDOW = 20_000;
+// A Blu-ray screen places at most two objects; FFmpeg's decoder clamps to the
+// same, and the rest of a crafted list would only cost memory.
+const MAX_OBJECTS_PER_COMPOSITION = 2;
 const MAX_EPOCH_OBJECT_BYTES = 16 * 1024 * 1024;
 const ODS_FIRST_IN_SEQUENCE = 0x80;
 const ODS_LAST_IN_SEQUENCE = 0x40;
@@ -75,7 +78,6 @@ export interface PGSComposition {
 }
 
 interface PendingObject {
-  id: number;
   width: number;
   height: number;
   expectedBytes: number;
@@ -201,7 +203,10 @@ export class PGSStreamParser {
   private buffer = new Uint8Array(0);
   private palettes = new Map<number, Uint32Array>();
   private objects = new Map<number, ObjectDefinition>();
-  private pendingObject: PendingObject | null = null;
+  // Objects whose fragments are still arriving, by ID: one object's fragments
+  // may be interleaved with another's. Their bytes share the epoch's budget.
+  private pendingObjects = new Map<number, PendingObject>();
+  private pendingBytes = 0;
   private presentation: PresentationSegment | null = null;
   private received = -Infinity;
   private objectBytes = 0;
@@ -222,7 +227,7 @@ export class PGSStreamParser {
    */
   resetBuffer(): void {
     this.buffer = new Uint8Array(0);
-    this.pendingObject = null;
+    this.clearPending();
     this.presentation = null;
     this.windowCompositions = 0;
   }
@@ -297,11 +302,12 @@ export class PGSStreamParser {
       this.palettes.clear();
       this.objects.clear();
       this.objectBytes = 0;
-      this.pendingObject = null;
+      this.clearPending();
     }
     const objects: CompositionReference[] = [];
     let offset = 11;
-    for (let n = 0; n < count && offset + 8 <= body.byteLength; n++) {
+    const placed = Math.min(count, MAX_OBJECTS_PER_COMPOSITION);
+    for (let n = 0; n < placed && offset + 8 <= body.byteLength; n++) {
       const objectId = view.getUint16(offset);
       const flags = body[offset + 3]!;
       const x = view.getUint16(offset + 4);
@@ -347,34 +353,36 @@ export class PGSStreamParser {
     const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
     const id = view.getUint16(0);
     const sequence = body[3]!;
+    let pending: PendingObject | undefined;
     let data: Uint8Array;
     if (sequence & ODS_FIRST_IN_SEQUENCE) {
       if (body.byteLength < 11) return;
       // The 24-bit length counts the width and height fields that follow it.
       const expectedBytes = Math.max(0, ((body[4]! << 16) | (body[5]! << 8) | body[6]!) - 4);
-      this.pendingObject = {
-        id,
+      this.dropPending(id);
+      pending = {
         width: view.getUint16(7),
         height: view.getUint16(9),
         expectedBytes,
         chunks: [],
         receivedBytes: 0,
       };
+      this.pendingObjects.set(id, pending);
       data = body.subarray(11);
     } else {
-      if (!this.pendingObject || this.pendingObject.id !== id) return;
+      pending = this.pendingObjects.get(id);
+      if (!pending) return;
       data = body.subarray(4);
     }
-    const pending = this.pendingObject;
-    if (!pending) return;
     pending.chunks.push(data);
     pending.receivedBytes += data.byteLength;
-    if (pending.receivedBytes > MAX_EPOCH_OBJECT_BYTES) {
-      this.pendingObject = null;
+    this.pendingBytes += data.byteLength;
+    if (this.pendingBytes > MAX_EPOCH_OBJECT_BYTES) {
+      this.dropPending(id);
       return;
     }
     if (sequence & ODS_LAST_IN_SEQUENCE || pending.receivedBytes >= pending.expectedBytes) {
-      this.pendingObject = null;
+      this.dropPending(id);
       const total = Math.min(pending.receivedBytes, pending.expectedBytes || pending.receivedBytes);
       // A redefinition replaces the old object, so its bytes stop counting.
       // Past the limit the old one is dropped too rather than drawn stale.
@@ -388,6 +396,18 @@ export class PGSStreamParser {
       });
       this.objectBytes += total;
     }
+  }
+
+  private dropPending(id: number): void {
+    const pending = this.pendingObjects.get(id);
+    if (!pending) return;
+    this.pendingBytes -= pending.receivedBytes;
+    this.pendingObjects.delete(id);
+  }
+
+  private clearPending(): void {
+    this.pendingObjects.clear();
+    this.pendingBytes = 0;
   }
 
   private finishDisplaySet(): PGSComposition | null {

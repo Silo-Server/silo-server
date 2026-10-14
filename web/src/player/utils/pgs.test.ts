@@ -247,6 +247,50 @@ describe("PGSStreamParser", () => {
     expect(compositions.map((c) => c.start)).toEqual([1, 2]);
   });
 
+  it("assembles objects whose fragments are interleaved", () => {
+    const parser = new PGSStreamParser();
+    const length = RLE_4X2.length + 4;
+    const fragment = (id: number, flags: number, data: number[], first: boolean) =>
+      segment(0x15, 1, [
+        ...u16(id),
+        0,
+        flags,
+        ...(first ? [0, 0, length, ...u16(4), ...u16(2)] : []),
+        ...data,
+      ]);
+    const [composition] = parser.push(
+      new Uint8Array([
+        ...pcs(1, {
+          objects: [
+            { id: 0, x: 0, y: 0 },
+            { id: 1, x: 0, y: 900 },
+          ],
+        }),
+        ...pds(1, 0, [WHITE, RED_HALF]),
+        // Object 0's first half, all of object 1, then object 0's second half.
+        ...fragment(0, 0x80, RLE_4X2.slice(0, 6), true),
+        ...ods(1, 1, 4, 2, RLE_4X2),
+        ...fragment(0, 0x40, RLE_4X2.slice(6), false),
+        ...end(1),
+      ]),
+    );
+    expect(composition?.objects).toHaveLength(2);
+    expect(Array.from(composition!.objects[0]!.rle)).toEqual(RLE_4X2);
+  });
+
+  it("places at most two objects on one screen", () => {
+    const parser = new PGSStreamParser();
+    const [composition] = parser.push(
+      new Uint8Array([
+        ...pcs(1, { objects: [0, 0, 0].map((id) => ({ id, x: 0, y: 0 })) }),
+        ...pds(1, 0, [WHITE]),
+        ...ods(1, 0, 4, 2, RLE_4X2),
+        ...end(1),
+      ]),
+    );
+    expect(composition?.objects).toHaveLength(2);
+  });
+
   it("keeps an earlier screen's colors after a palette-only update", () => {
     const parser = new PGSStreamParser();
     const [first, second] = parser.push(
