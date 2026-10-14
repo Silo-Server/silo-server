@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -3153,6 +3154,16 @@ func TestPrepareTransportV3RejectsNodeMissingRequiredTransformation(t *testing.T
 
 // TestPrepareTransportV3RequiresRemoteManifestReadiness verifies remote startup waits for playable output.
 func TestPrepareTransportV3RequiresRemoteManifestReadiness(t *testing.T) {
+	var playbackJob string
+	nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
+		return themeRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodPost && r.URL.Path == "/transcode/start" {
+				playbackJob = nodehttp.PlaybackJob(r.Context())
+			}
+			return base.RoundTrip(r)
+		})
+	})
+	t.Cleanup(func() { nodehttp.Configure(nil) })
 	var startRequest transcodenode.TranscodeStartRequest
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -3193,6 +3204,9 @@ func TestPrepareTransportV3RequiresRemoteManifestReadiness(t *testing.T) {
 	defer transport.rollback()
 	if !startRequest.RequireReady {
 		t.Fatal("protocol-v3 remote start did not require manifest readiness")
+	}
+	if playbackJob != "session-ready" {
+		t.Fatalf("native remote start lost server-owned playback job: %q", playbackJob)
 	}
 	if transport.hwAccel != "qsv" || transport.toneMapMode != "" {
 		t.Fatalf("remote execution facts = hw %q tone_map %q, want qsv and empty", transport.hwAccel, transport.toneMapMode)

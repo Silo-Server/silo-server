@@ -171,7 +171,8 @@ func (r *Runtime) Handler() http.Handler {
 		}
 		ctx := request.Context()
 		if work := outputPathWork(request.URL.Path); work != "" {
-			ctx = transcodenode.WithJobIdentity(ctx, work)
+			scope, _ := ctx.Value(outputRequestKey{}).(outputRequestAuthority)
+			ctx = transcodenode.WithJobIdentity(ctx, executionJobIdentity(work, scope.jobID))
 			ctx = context.WithValue(ctx, workContextKey{}, work)
 		}
 		if request.Header.Get(workeridentity.HeaderDomain) == workeridentity.DomainCoreCommand {
@@ -343,7 +344,7 @@ func (r *Runtime) verifyCommand(request *http.Request) error {
 			return errors.New("proxy output generation changed")
 		}
 		ctx := context.WithValue(request.Context(), generationContextKey{}, grant.Generation)
-		ctx = context.WithValue(ctx, outputRequestKey{}, outputRequestAuthority{work: grant.WorkID, generation: grant.Generation, epoch: body.Epoch, authorityID: body.AuthorityID, expires: claims.ExpiresAt.Time})
+		ctx = context.WithValue(ctx, outputRequestKey{}, outputRequestAuthority{work: grant.WorkID, jobID: body.JobID, generation: grant.Generation, epoch: body.Epoch, authorityID: body.AuthorityID, expires: claims.ExpiresAt.Time})
 		ctx = context.WithValue(ctx, commandContextKey{}, r)
 		*request = *request.WithContext(ctx)
 		return nil
@@ -388,7 +389,7 @@ func (r *Runtime) execute(w http.ResponseWriter, request *http.Request) {
 	var assignment workerwire.Assignment
 	decoder := json.NewDecoder(http.MaxBytesReader(w, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&assignment); err != nil || assignment.Version != 1 || assignment.NodeID != r.options.Binding.NodeID || assignment.WorkID == "" || assignment.Generation == 0 || !strings.HasPrefix(assignment.Path, "/") || strings.Contains(assignment.Path, "?") || assignment.Path == "/worker/execute" {
+	if err := decoder.Decode(&assignment); err != nil || assignment.Version != 1 || assignment.NodeID != r.options.Binding.NodeID || !workerwire.ValidExecutionID(assignment.WorkID) || assignment.JobID != "" && !workerwire.ValidExecutionID(assignment.JobID) || assignment.Generation == 0 || !strings.HasPrefix(assignment.Path, "/") || strings.Contains(assignment.Path, "?") || assignment.Path == "/worker/execute" {
 		http.Error(w, "invalid assignment", http.StatusBadRequest)
 		return
 	}
@@ -419,7 +420,7 @@ func (r *Runtime) execute(w http.ResponseWriter, request *http.Request) {
 		http.Error(w, "invalid assigned inputs", http.StatusBadRequest)
 		return
 	}
-	jobCtx := transcodenode.WithJobIdentity(request.Context(), assignment.WorkID)
+	jobCtx := transcodenode.WithJobIdentity(request.Context(), executionJobIdentity(assignment.WorkID, assignment.JobID))
 	jobCtx = context.WithValue(jobCtx, workContextKey{}, assignment.WorkID)
 	jobCtx = context.WithValue(jobCtx, generationContextKey{}, assignment.Generation)
 	local, err := http.NewRequestWithContext(workerinput.WithContext(context.WithValue(jobCtx, commandContextKey{}, r), r.inputs), assignment.Method, assignment.Path, bytes.NewReader(body))

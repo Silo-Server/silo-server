@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
@@ -223,7 +224,11 @@ func (s *Service) admit(ctx context.Context, node Node, work, path string, body 
 			}
 		}
 	}
-	a, err = s.begin(ctx, workerwire.Assignment{Version: 1, NodeID: node.ID, WorkID: work, Method: http.MethodPost, Path: path, Body: rewritten})
+	jobID := ""
+	if path == transcodeStartPath {
+		jobID = nodehttp.PlaybackJob(ctx)
+	}
+	a, err = s.begin(ctx, workerwire.Assignment{Version: 1, NodeID: node.ID, WorkID: work, JobID: jobID, Method: http.MethodPost, Path: path, Body: rewritten})
 	if err != nil {
 		return a, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/workerwire"
@@ -13,6 +14,7 @@ type recoveryKey struct{}
 type recipeSourceKindKey struct{}
 
 func recipeAdmissionContext(ctx context.Context, card playback.RecipeCard) context.Context {
+	ctx = nodehttp.WithPlaybackJob(ctx, card.SessionID)
 	if card.PlayMethod == streamtoken.PlayMethodThemeAAC || card.PlayMethod == streamtoken.PlayMethodThemeDirect {
 		return context.WithValue(ctx, recipeSourceKindKey{}, sourceTheme)
 	}

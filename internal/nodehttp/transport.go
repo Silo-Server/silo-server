@@ -10,6 +10,18 @@ import (
 )
 
 type artifactStatContextKey struct{}
+type playbackJobContextKey struct{}
+
+// WithPlaybackJob carries a server-owned playback identity to an enrolled
+// worker's exact transcode-start admission. It is never read from HTTP headers.
+func WithPlaybackJob(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, playbackJobContextKey{}, id)
+}
+
+func PlaybackJob(ctx context.Context) string {
+	id, _ := ctx.Value(playbackJobContextKey{}).(string)
+	return id
+}
 
 // WithArtifactStat marks the core preparer's metadata-only artifact probe.
 // Worker output selection limits this exception to exact artifact HEAD routes.

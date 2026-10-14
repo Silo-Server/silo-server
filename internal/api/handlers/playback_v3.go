@@ -4057,7 +4057,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		req.ToneMapDVRPUPresent = sourceMetadata.ToneMapDVRPUPresent
 	}
 	remoteStartAt := time.Now()
-	nodeResp, status, err := h.startRemotePlaybackTransport(r.Context(), node.URL, req)
+	nodeResp, status, err := h.startRemotePlaybackTransport(nodehttp.WithPlaybackJob(r.Context(), session.ID), node.URL, req)
 	remoteOutcome := transportStartupReadyV3
 	if err != nil || status != http.StatusAccepted {
 		remoteOutcome = playbackRemoteOutcomeFailedV3

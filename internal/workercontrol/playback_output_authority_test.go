@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -50,10 +51,11 @@ func TestOrdinaryPlaybackRequiresCurrentViewerOnCachedAndFreshRequests(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	jobID := "parent-play"
 	mint := func(authority string) string {
 		t.Helper()
 		inner, _ := json.Marshal(claims)
-		grant.Body, _ = json.Marshal(workeridentity.OutputAuthority{ProxyPublicKey: proxyKey.Public().(ed25519.PublicKey), Claims: inner, Epoch: epoch, AuthorityID: authority})
+		grant.Body, _ = json.Marshal(workeridentity.OutputAuthority{ProxyPublicKey: proxyKey.Public().(ed25519.PublicKey), Claims: inner, Epoch: epoch, AuthorityID: authority, JobID: jobID})
 		encoded, err := workeridentity.EncodeGrant(grant, coreKey)
 		if err != nil {
 			t.Fatal(err)
@@ -73,6 +75,22 @@ func TestOrdinaryPlaybackRequiresCurrentViewerOnCachedAndFreshRequests(t *testin
 	initial := request(token)
 	if err := runtime.verifyCommand(initial); err != nil {
 		t.Fatal(err)
+	}
+	if scope, ok := initial.Context().Value(outputRequestKey{}).(outputRequestAuthority); !ok || scope.jobID != jobID {
+		t.Fatal("verified output accounting identity was not installed before routing")
+	}
+	for _, invalid := range []string{"../bad", "bad\x00id", strings.Repeat("x", 161)} {
+		jobID = invalid
+		if _, _, _, err := runtime.decodeOutput(mint(viewer)); err == nil {
+			t.Fatalf("invalid core-signed accounting identity %q accepted", invalid)
+		}
+	}
+	jobID = "parent-play"
+	parts := strings.Split(token, ".")
+	payload, _ := base64.RawURLEncoding.DecodeString(parts[0])
+	payload = []byte(strings.Replace(string(payload), `"job_id":"parent-play"`, `"job_id":"other-play"`, 1))
+	if _, _, _, err := runtime.decodeOutput(base64.RawURLEncoding.EncodeToString(payload) + "." + parts[1]); err == nil {
+		t.Fatal("tampered accounting identity retained a valid output grant")
 	}
 	// This is the entry left by a successful recipe-backed token verification.
 	runtime.tokens[token] = tokenEntry{claims: &claims, workID: work, generation: 1, expires: time.Now().Add(time.Minute), epoch: epoch, authorityID: viewer}

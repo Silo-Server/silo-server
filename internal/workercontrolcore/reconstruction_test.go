@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workeridentity"
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -54,6 +57,72 @@ func TestStoppedAssignmentCannotReconstructFromSurvivingRecipe(t *testing.T) {
 	// Simulate interruption after the durable fence but before deleting the card.
 	if _, err = service.EnsureRecipeAssignment(t.Context(), 7, "work"); err == nil {
 		t.Fatal("stopped work resurrected from surviving card")
+	}
+}
+
+func TestRecipeJobIdentityKeepsParentAndLegacyIdentityAcrossRecovery(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprint(legacy), func(t *testing.T) {
+			public, key, _ := ed25519.GenerateKey(rand.Reader)
+			store := NewMemoryStore()
+			node := Node{ID: 7, URL: "https://worker.example", PublicKey: public, Enabled: true}
+			card := &playback.RecipeCard{SessionID: "logical-parent", TranscodeTransportID: "transport-plan", InputPath: "/private/approved.mp4", TranscodeNodeURL: node.URL, OriginCredential: streamtoken.OriginCredential{OriginLoginSessionID: "login"}}
+			sources := &expiringSources{testSources: &testSources{store: store}}
+			const secret = "job-identity-output-test"
+			service, err := New(Options{Origin: "https://core.example", PrivateKey: key, Nodes: testNodes{[]Node{node}}, Store: store, RecipeStore: &testRecipes{card: card}, Sources: sources, OutputAuthorities: NewMemoryOutputAuthorities(), VerifyToken: func(_ context.Context, token string) (*streamtoken.Claims, error) {
+				return streamtoken.Verify(token, secret)
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if legacy {
+				body, _ := json.Marshal(card)
+				a, err := service.admit(t.Context(), node, "transport-plan", transcodeStartPath, body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := store.Activate(t.Context(), 7, a.WorkID, a.Generation); err != nil {
+					t.Fatal(err)
+				}
+			}
+			first, err := service.EnsureRecipeAssignment(t.Context(), 7, "transport-plan")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "logical-parent"
+			if legacy {
+				want = ""
+			}
+			if first.JobID != want {
+				t.Fatalf("initial JobID=%q want=%q", first.JobID, want)
+			}
+			sources.expired = true
+			next, err := service.EnsureRecipeAssignment(t.Context(), 7, "transport-plan")
+			if err != nil || next.JobID != want || next.Generation <= first.Generation {
+				t.Fatalf("recovery changed accounting identity: %+v %v", next, err)
+			}
+			sources.expired = false
+			claims := card.ToClaims()
+			token, err := streamtoken.Sign(claims, secret, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply, err := service.IssueOutputGrant(t.Context(), token, node.URL, secret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant, err := workeridentity.DecodeGrant(reply.Grant, workeridentity.DomainProxyOutputGrant, node.URL, public, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var authority workeridentity.OutputAuthority
+			if err := json.Unmarshal(grant.Body, &authority); err != nil {
+				t.Fatal(err)
+			}
+			if authority.JobID != want {
+				t.Fatalf("output grant replaced exact assignment identity: got=%q want=%q", authority.JobID, want)
+			}
+		})
 	}
 }
 

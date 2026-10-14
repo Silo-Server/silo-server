@@ -22,14 +22,31 @@ type Source struct {
 }
 
 type Assignment struct {
-	Version    int               `json:"version"`
-	NodeID     int               `json:"node_id"`
-	WorkID     string            `json:"work_id"`
+	Version int    `json:"version"`
+	NodeID  int    `json:"node_id"`
+	WorkID  string `json:"work_id"`
+	// JobID groups transport replacements for accounting only. WorkID and
+	// Generation continue to fence every command, source and output.
+	JobID      string            `json:"job_id,omitempty"`
 	Generation uint64            `json:"generation"`
 	Method     string            `json:"method"`
 	Path       string            `json:"path"`
 	Body       json.RawMessage   `json:"body"`
 	Sources    map[string]Source `json:"sources"`
+}
+
+// ValidExecutionID bounds work and accounting identities to their shared alphabet.
+func ValidExecutionID(id string) bool {
+	if len(id) == 0 || len(id) > 160 || id == "." || id == ".." {
+		return false
+	}
+	for _, c := range id {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == ':' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 type Snapshot struct {

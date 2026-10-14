@@ -34,6 +34,7 @@ func (s *RedisStore) keys(node int) []string {
 }
 
 var beginScript = redis.NewScript(`
+if (redis.call('HGET',KEYS[3],ARGV[1]) or '')~=ARGV[4] or (redis.call('HGET',KEYS[2],ARGV[1]) or '')~=ARGV[5] then return -3 end
 if ARGV[3]~='' then
  local live=redis.call('HGET',KEYS[3],ARGV[1])
  if redis.call('HEXISTS',KEYS[2],ARGV[1])==1 then return -2 end
@@ -50,6 +51,7 @@ redis.call('HSET',KEYS[2],ARGV[1],nextString..'\npending\n'..ARGV[2])
 return next`)
 var completeScript = redis.NewScript(`
 local current=redis.call('HGET',KEYS[2],ARGV[1])
+if (current or '')~=ARGV[4] then return -3 end
 local generation=redis.call('HGET',KEYS[1],ARGV[1])
 if not current or generation~=ARGV[2] or string.sub(current,1,string.len(ARGV[2])+1)~=ARGV[2]..'\n' then return 0 end
 redis.call('HSET',KEYS[2],ARGV[1],ARGV[2]..'\nready\n'..ARGV[3])
@@ -72,6 +74,25 @@ local current=redis.call('HGET',KEYS[2],ARGV[1])
 if not current or string.sub(current,1,string.len(ARGV[2])+1)~=ARGV[2]..'\n' then return 0 end
 redis.call('HDEL',KEYS[4],ARGV[1]..'\31'..ARGV[2]);redis.call('HDEL',KEYS[5],ARGV[1]..'\31'..ARGV[2]);redis.call('HDEL',KEYS[2],ARGV[1]);return 1`)
 
+const assignmentCASAttempts = 64
+
+// Compare the exact observed records in Lua, without decoding recipe JSON or
+// routing its nanosecond timestamps through Lua's floating-point numbers.
+func (s *RedisStore) observedRecords(ctx context.Context, node int, work string) (string, string, error) {
+	pipe := s.client.Pipeline()
+	live := pipe.HGet(ctx, s.keys(node)[2], work)
+	candidate := pipe.HGet(ctx, s.keys(node)[1], work)
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return "", "", err
+	}
+	for _, result := range []*redis.StringCmd{live, candidate} {
+		if err := result.Err(); err != nil && !errors.Is(err, redis.Nil) {
+			return "", "", err
+		}
+	}
+	return live.Val(), candidate.Val(), nil
+}
+
 func (s *RedisStore) Begin(ctx context.Context, a workerwire.Assignment) (workerwire.Assignment, error) {
 	if s.client == nil {
 		return a, ErrUnavailable
@@ -79,26 +100,52 @@ func (s *RedisStore) Begin(ctx context.Context, a workerwire.Assignment) (worker
 	if !validAssignment(a) {
 		return a, ErrDenied
 	}
-	encoded, err := json.Marshal(a)
-	if err != nil {
-		return a, err
-	}
 	expected := ""
 	if value, ok := ctx.Value(recoveryKey{}).(uint64); ok {
 		expected = strconv.FormatUint(value, 10)
 	}
-	generation, err := beginScript.Run(ctx, s.client, s.keys(a.NodeID), a.WorkID, string(encoded), expected).Int64()
-	if err != nil {
-		return a, err
+	requestedJob := a.JobID
+	for range assignmentCASAttempts {
+		if err := ctx.Err(); err != nil {
+			return a, err
+		}
+		live, candidate, err := s.observedRecords(ctx, a.NodeID, a.WorkID)
+		if err != nil {
+			return a, err
+		}
+		a.JobID = requestedJob
+		previous := live
+		if previous == "" {
+			previous = candidate
+		}
+		if previous != "" {
+			record, err := decodeRecord(previous)
+			if err != nil {
+				return a, err
+			}
+			a.JobID = record.assignment.JobID
+		}
+		encoded, err := json.Marshal(a)
+		if err != nil {
+			return a, err
+		}
+		generation, err := beginScript.Run(ctx, s.client, s.keys(a.NodeID), a.WorkID, string(encoded), expected, live, candidate).Int64()
+		if err != nil {
+			return a, err
+		}
+		if generation == -3 {
+			continue
+		}
+		if generation == -2 {
+			return a, ErrFenced
+		}
+		if generation <= 0 {
+			return a, ErrUnavailable
+		}
+		a.Generation = uint64(generation)
+		return copyAssignment(a), nil
 	}
-	if generation == -2 {
-		return a, ErrFenced
-	}
-	if generation <= 0 {
-		return a, ErrUnavailable
-	}
-	a.Generation = uint64(generation)
-	return copyAssignment(a), nil
+	return a, ErrFenced
 }
 func (s *RedisStore) Complete(ctx context.Context, a workerwire.Assignment) error {
 	if s.client == nil {
@@ -107,18 +154,42 @@ func (s *RedisStore) Complete(ctx context.Context, a workerwire.Assignment) erro
 	if !validAssignment(a) || a.Generation == 0 {
 		return ErrDenied
 	}
-	encoded, err := json.Marshal(a)
-	if err != nil {
-		return err
+	for range assignmentCASAttempts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, candidate, err := s.observedRecords(ctx, a.NodeID, a.WorkID)
+		if err != nil {
+			return err
+		}
+		if candidate == "" {
+			return ErrFenced
+		}
+		record, err := decodeRecord(candidate)
+		if err != nil {
+			return err
+		}
+		if record.assignment.Generation != a.Generation {
+			return ErrFenced
+		}
+		a.JobID = record.assignment.JobID
+		encoded, err := json.Marshal(a)
+		if err != nil {
+			return err
+		}
+		ok, err := completeScript.Run(ctx, s.client, s.keys(a.NodeID), a.WorkID, strconv.FormatUint(a.Generation, 10), string(encoded), candidate).Int()
+		if err != nil {
+			return err
+		}
+		if ok == -3 {
+			continue
+		}
+		if ok != 1 {
+			return ErrFenced
+		}
+		return nil
 	}
-	ok, err := completeScript.Run(ctx, s.client, s.keys(a.NodeID), a.WorkID, strconv.FormatUint(a.Generation, 10), string(encoded)).Int()
-	if err != nil {
-		return err
-	}
-	if ok != 1 {
-		return ErrFenced
-	}
-	return nil
+	return ErrFenced
 }
 func (s *RedisStore) Activate(ctx context.Context, node int, work string, generation uint64) error {
 	if s.client == nil {

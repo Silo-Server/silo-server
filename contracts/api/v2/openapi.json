@@ -222534,6 +222534,9 @@
             "minimum": 0,
             "type": "integer"
           },
+          "job_id": {
+            "type": "string"
+          },
           "method": {
             "type": "string"
           },

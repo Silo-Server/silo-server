@@ -24,6 +24,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 
@@ -1769,7 +1770,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		if err != nil {
 			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("marshal transcode request: %w", err)
 		}
-		requestCtx, cancel := context.WithTimeout(ctx, h.remoteTranscodeStartTimeout(request, nodeProbeTimeoutMillis))
+		requestCtx, cancel := context.WithTimeout(nodehttp.WithPlaybackJob(ctx, upstreamSessionID), h.remoteTranscodeStartTimeout(request, nodeProbeTimeoutMillis))
 		defer cancel()
 		httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, nodepool.NodeEndpoint(transcodeNodeURL, "/transcode/start"), strings.NewReader(string(body)))
 		if err != nil {

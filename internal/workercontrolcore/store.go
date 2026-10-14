@@ -15,7 +15,7 @@ var workPattern = regexp.MustCompile(`^[a-zA-Z0-9._:-]{1,160}$`)
 
 func validWork(work string) bool { return workPattern.MatchString(work) && work != "." && work != ".." }
 func validAssignment(a workerwire.Assignment) bool {
-	return a.Version == 1 && a.NodeID > 0 && validWork(a.WorkID) && len(a.Body) <= 512<<10 && (len(a.Body) == 0 || json.Valid(a.Body))
+	return a.Version == 1 && a.NodeID > 0 && validWork(a.WorkID) && (a.JobID == "" || workerwire.ValidExecutionID(a.JobID)) && len(a.Body) <= 512<<10 && (len(a.Body) == 0 || json.Valid(a.Body))
 }
 func copyAssignment(a workerwire.Assignment) workerwire.Assignment {
 	a.Body = append(json.RawMessage(nil), a.Body...)
@@ -62,6 +62,11 @@ func (s *MemoryStore) Begin(ctx context.Context, a workerwire.Assignment) (worke
 }
 func (s *MemoryStore) beginLocked(a workerwire.Assignment) (workerwire.Assignment, error) {
 	k := workKey{a.NodeID, a.WorkID}
+	if previous, ok := s.live[k]; ok {
+		a.JobID = previous.assignment.JobID
+	} else if previous, ok := s.candidates[k]; ok {
+		a.JobID = previous.assignment.JobID
+	}
 	if s.versions[k] >= 1<<53-1 {
 		return workerwire.Assignment{}, ErrUnavailable
 	}
@@ -85,6 +90,7 @@ func (s *MemoryStore) Complete(ctx context.Context, a workerwire.Assignment) err
 	if !ok || r.assignment.Generation != a.Generation || s.versions[k] != a.Generation {
 		return ErrFenced
 	}
+	a.JobID = r.assignment.JobID
 	s.candidates[k] = record{assignment: copyAssignment(a), ready: true, bindings: r.bindings, lease: r.lease}
 	return nil
 }

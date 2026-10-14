@@ -21,7 +21,7 @@ func TestProxyOutputGrantBindsPreparedReceiptNodeAndLiveGeneration(t *testing.T)
 	corePub, coreKey, _ := ed25519.GenerateKey(rand.Reader)
 	node := Node{ID: 7, URL: "https://worker.example", PublicKey: nodePub, Enabled: true}
 	store := NewMemoryStore()
-	a, err := store.Begin(t.Context(), workerwire.Assignment{Version: 1, NodeID: 7, WorkID: "artifact", Path: preparePath})
+	a, err := store.Begin(t.Context(), workerwire.Assignment{Version: 1, NodeID: 7, WorkID: "artifact", JobID: "authoritative-prepared-job", Path: preparePath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +63,9 @@ func TestProxyOutputGrantBindsPreparedReceiptNodeAndLiveGeneration(t *testing.T)
 	var authority workeridentity.OutputAuthority
 	if err := json.Unmarshal(grant.Body, &authority); err != nil {
 		t.Fatal(err)
+	}
+	if authority.JobID != a.JobID {
+		t.Fatal("prepared output grant replaced the authoritative accounting identity")
 	}
 	expected, err := workeridentity.OutputPrivateKey(secret, grant)
 	if err != nil {

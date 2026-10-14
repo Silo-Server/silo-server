@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
+	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
 func outputPathWork(path string) string {
@@ -53,10 +54,10 @@ func outputRouteAllowed(request *http.Request, work string) bool {
 func (r *Runtime) decodeOutput(encoded string) (workeridentity.Grant, workeridentity.OutputAuthority, *streamtoken.Claims, error) {
 	var body workeridentity.OutputAuthority
 	grant, err := workeridentity.DecodeGrant(encoded, workeridentity.DomainProxyOutputGrant, r.options.Binding.NodeURL, r.options.Binding.CorePublicKey, time.Now())
-	if err != nil || grant.NodeID != r.options.Binding.NodeID || grant.WorkID == "" || grant.Generation == 0 {
+	if err != nil || grant.NodeID != r.options.Binding.NodeID || !workerwire.ValidExecutionID(grant.WorkID) || grant.Generation == 0 {
 		return grant, body, nil, errors.New("invalid delegated output grant")
 	}
-	if err = json.Unmarshal(grant.Body, &body); err != nil || len(body.ProxyPublicKey) != ed25519.PublicKeySize {
+	if err = json.Unmarshal(grant.Body, &body); err != nil || len(body.ProxyPublicKey) != ed25519.PublicKeySize || body.JobID != "" && !workerwire.ValidExecutionID(body.JobID) {
 		return grant, body, nil, errors.New("invalid proxy public authority")
 	}
 	if epoch := r.config.OutputAuthorizationEpoch(); epoch == "" || body.Epoch != epoch {

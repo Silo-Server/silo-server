@@ -20,6 +20,7 @@ type OutputAuthority struct {
 	Claims              json.RawMessage   `json:"claims"`
 	Epoch               string            `json:"epoch"`
 	AuthorityID         string            `json:"authority_id,omitempty"`
+	JobID               string            `json:"job_id,omitempty"`
 	ArtifactFingerprint string            `json:"artifact_fingerprint,omitempty"`
 	ClientFingerprint   string            `json:"client_fingerprint,omitempty"`
 }

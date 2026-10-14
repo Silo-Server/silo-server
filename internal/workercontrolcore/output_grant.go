@@ -47,6 +47,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 	copied.OutputSubdir = ""
 	copied.OriginCredential = streamtoken.OriginCredential{}
 	var generation uint64
+	var jobID string
 	var artifactFingerprint, clientFingerprint string
 	if claims.DownloadArtifactID != "" {
 		a, ok, e := s.options.Store.Get(ctx, node.ID, work)
@@ -54,6 +55,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 			return GrantReply{}, ErrDenied
 		}
 		generation = a.Generation
+		jobID = a.JobID
 		copied.MediaPath = ""
 		binder, ok := s.options.Store.(InputBinder)
 		if !ok {
@@ -79,6 +81,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 			return GrantReply{}, ErrDenied
 		}
 		generation = reply.Assignment.Generation
+		jobID = reply.Assignment.JobID
 		copied.MediaPath = card.InputPath
 	}
 	expires := time.Now().Add(5 * time.Minute)
@@ -105,7 +108,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 	if err != nil {
 		return GrantReply{}, err
 	}
-	grant.Body, err = json.Marshal(workeridentity.OutputAuthority{AuthorityID: authorityID, ProxyPublicKey: public, Claims: inner, Epoch: workeridentity.OutputEpoch(proxySecret), ArtifactFingerprint: artifactFingerprint, ClientFingerprint: clientFingerprint})
+	grant.Body, err = json.Marshal(workeridentity.OutputAuthority{AuthorityID: authorityID, JobID: jobID, ProxyPublicKey: public, Claims: inner, Epoch: workeridentity.OutputEpoch(proxySecret), ArtifactFingerprint: artifactFingerprint, ClientFingerprint: clientFingerprint})
 	if err != nil {
 		return GrantReply{}, err
 	}

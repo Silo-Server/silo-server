@@ -17,6 +17,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -73,6 +74,15 @@ func TestStartRemoteTranscodeRequiresDurableNodeRecipe(t *testing.T) {
 }
 
 func TestStartRemoteTranscodeCarriesThrottlePolicyIntoReconstructionRecipe(t *testing.T) {
+	var playbackJob string
+	nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
+		return playbackJobRoundTripper{base: base, observe: func(r *http.Request) {
+			if r.Method == http.MethodPost && r.URL.Path == "/transcode/start" {
+				playbackJob = nodehttp.PlaybackJob(r.Context())
+			}
+		}}
+	})
+	t.Cleanup(func() { nodehttp.Configure(nil) })
 	var received transcodenode.TranscodeStartRequest
 	recipeStore := &stubRecipeNodeStore{}
 	node := fakeTranscodeNode(t, &received)
@@ -88,6 +98,9 @@ func TestStartRemoteTranscodeCarriesThrottlePolicyIntoReconstructionRecipe(t *te
 	}
 	if received.ThrottleSeconds != 180 {
 		t.Fatalf("remote throttle seconds = %d, want 180", received.ThrottleSeconds)
+	}
+	if playbackJob != "upstream-1" {
+		t.Fatalf("compat remote start lost server-owned playback job: %q", playbackJob)
 	}
 	card, ok := recipeStore.Get("upstream-1")
 	if !ok {

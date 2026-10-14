@@ -9,10 +9,18 @@ import (
 type outputRequestKey struct{}
 type outputRequestAuthority struct {
 	work        string
+	jobID       string
 	generation  uint64
 	epoch       string
 	authorityID string
 	expires     time.Time
+}
+
+func executionJobIdentity(work, jobID string) string {
+	if jobID != "" {
+		return "playback:" + jobID
+	}
+	return "work:" + work
 }
 
 // Output reads may last longer than a grant's request-admission window. Check
