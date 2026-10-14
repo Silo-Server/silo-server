@@ -136,3 +136,9 @@
 ./internal/transcodenode TestPreparedDownloadTrackingOwnsExactCleanup
 ./internal/transcodenode TestPreparedProgressiveTrackingOwnsExactCleanup
 ./internal/transcodenode TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack
+
+# Admitted HTTP Matroska thumbnail keyframes and source retirement.
+./internal/mediasample TestRegisteredRemoteSharedKeyframeSheetsMatchLocal
+./internal/mediasample TestRegisteredSheetKeyframesRequireCurrentSource
+./internal/mediasample TestRegisteredSheetKeyframeLookupCancellationReleasesReaders
+./internal/mediasample TestRegisteredSheetKeyframeRetirementCannotReadURLNamedFile
