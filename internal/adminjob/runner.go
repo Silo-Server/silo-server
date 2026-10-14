@@ -728,9 +728,11 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 	finishCtx, finishCancel := r.finalizeContext()
 	defer finishCancel()
 	cause := context.Cause(ctx)
-	if err == nil && cause == nil {
-		// Complete would record a cancellation that arrived after the last
-		// prefix as canceled with an empty result; keep the totals instead.
+	if (err == nil && cause == nil) || errors.Is(cause, context.DeadlineExceeded) {
+		// A cancellation seen only after the last prefix would be recorded by
+		// Complete as canceled with an empty result, and one that arrived
+		// after the slice deadline would be requeued until the next claim.
+		// End the job here with its totals instead.
 		if cancelRequested, _, getErr := r.repo.CancelState(finishCtx, job.ID); getErr == nil && cancelRequested {
 			cause = errImageCacheCleanupCancelRequested
 		}

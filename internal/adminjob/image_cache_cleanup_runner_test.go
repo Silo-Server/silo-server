@@ -443,6 +443,39 @@ func TestImageCacheCleanupCanceledBeforeRegisterDeletesNothing(t *testing.T) {
 	}
 }
 
+// A cancellation that commits after the slice deadline, while the slice is
+// finishing, ends the job with its totals instead of requeueing it with the
+// flag set to wait for the next claim.
+func TestImageCacheCleanupCanceledAtSliceDeadlineDoesNotYield(t *testing.T) {
+	r := lifecycleRepo(t)
+	job := queueImageCacheCleanupJob(t, r, cleanupPrefixes(6))
+	store := &cleanupStore{deleteFn: func(ctx context.Context, call int, _ string) (int, error) {
+		if call == 2 {
+			<-ctx.Done()
+			if _, err := r.RequestCancellation(context.Background(), job.ID); err != nil {
+				t.Errorf("request cancellation: %v", err)
+			}
+			return 0, ctx.Err()
+		}
+		return 1, nil
+	}}
+	runner := imageCacheCleanupRunner(r, store, 300*time.Millisecond)
+	runner.heartbeatInterval = time.Hour
+
+	runner.runNext()
+
+	canceled, err := r.GetByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled.Status != StatusCancelled || canceled.ProgressCurrent != 2 || canceled.ProgressTotal != 6 {
+		t.Fatalf("status=%s progress=%d/%d, want canceled 2/6", canceled.Status, canceled.ProgressCurrent, canceled.ProgressTotal)
+	}
+	if got := imageCacheCleanupResultOf(t, canceled); got.DeletedPrefixes != 2 || got.DeletedS3Objects != 2 {
+		t.Fatalf("canceled result %+v, want the 2 prefixes deleted before the deadline", got)
+	}
+}
+
 // A cancellation that arrives during the last prefix, and is only seen after
 // it, still ends canceled, but keeps the deletion totals rather than the empty
 // result Complete would write, and does not claim that undeleted images remain.
