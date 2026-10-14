@@ -13,7 +13,7 @@ import (
 func TestV2ImageProvenancePreservesFalse(t *testing.T) {
 	card := catalogItemOfSection(handlers.SectionItemView{Type: "episode", PosterIsEpisodeStill: new(false), BackdropIsEpisodeStill: new(true)}, ratingsources.Selection{})
 	listing := catalogItemOfListing(handlers.CollectionItemView{Type: "episode", PosterIsEpisodeStill: new(false), BackdropIsEpisodeStill: new(false)}, ratingsources.Selection{})
-	rows := episodesOf([]handlers.EpisodeView{{StillIsEpisodeStill: new(false)}}, ratingsources.Selection{})
+	rows := episodesOf([]handlers.EpisodeView{{StillIsEpisodeStill: new(false)}})
 	for _, tc := range []struct {
 		view any
 		want []string

@@ -13,7 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 // fakeCatalog backs the catalog-items operations: it records the request
@@ -832,7 +831,7 @@ func TestEpisodesOfStatesRatings(t *testing.T) {
 		{ContentID: "episode:1", RatingIMDB: new(8.7), RatingTMDB: new(8.25)},
 		{ContentID: "episode:2", RatingIMDB: new(0.0), RatingTMDB: new(42.0)},
 		{ContentID: "episode:3"},
-	}, ratingsources.Selection{})
+	})
 	want := []CatalogRating{
 		{Source: "imdb", Name: "IMDb", Score: 87, Display: "8.7"},
 		{Source: "tmdb", Name: "TMDB", Score: 82.5, Display: "8.3"},

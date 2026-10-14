@@ -1257,7 +1257,7 @@ func (reg *Registry) listCatalogItemEpisodes(ctx context.Context, in *CatalogIte
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &EpisodeCollectionOutput{Body: EpisodeCollection{Collection: NewCollection(episodesOf(episodes, reg.ratingSelection(ctx)))}}, nil
+	return &EpisodeCollectionOutput{Body: EpisodeCollection{Collection: NewCollection(episodesOf(episodes))}}, nil
 }
 
 func (reg *Registry) listSeriesSeasons(ctx context.Context, in *CatalogSeasonsInput) (*SeasonCollectionOutput, error) {
@@ -1309,7 +1309,7 @@ func (reg *Registry) listSeasonEpisodes(ctx context.Context, in *CatalogSeasonIn
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &EpisodeCollectionOutput{Body: EpisodeCollection{Collection: NewCollection(episodesOf(episodes, reg.ratingSelection(ctx)))}}, nil
+	return &EpisodeCollectionOutput{Body: EpisodeCollection{Collection: NewCollection(episodesOf(episodes))}}, nil
 }
 
 // --- renderers ---
@@ -1450,12 +1450,14 @@ func datePtr(s string) *string {
 	return &s
 }
 
-func episodesOf(views []handlers.EpisodeView, sel ratingsources.Selection) []Episode {
+// episodesOf renders episode rows. An episode's ratings come from its IMDb and
+// TMDB columns only, which every selection shows, so it needs no rating policy.
+func episodesOf(views []handlers.EpisodeView) []Episode {
 	out := make([]Episode, 0, len(views))
 	for _, e := range views {
 		ep := Episode{ContentID: e.ContentID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Title: e.Title, Overview: e.Overview,
 			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillIsEpisodeStill: e.StillIsEpisodeStill, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
-			Ratings:  builtRatingsOf(ratingsources.Item{IMDB: e.RatingIMDB, TMDB: e.RatingTMDB}, sel),
+			Ratings:  builtRatingsOf(ratingsources.Item{IMDB: e.RatingIMDB, TMDB: e.RatingTMDB}, ratingsources.Selection{}),
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
