@@ -2,14 +2,11 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,75 +39,6 @@ func (a coreSourceAdapter) Renew(ctx context.Context, node int, work string, gen
 	return a.authority.Renew(ctx, node, work, generation, grant)
 }
 
-// URL identity is cached outside segment delivery. Proof, disable and snapshot
-// checks still read the authoritative node identity by primary key.
-type coreWorkerRegistry struct {
-	repo  *workerregistration.Repository
-	pool  *pgxpool.Pool
-	mu    sync.RWMutex
-	nodes map[string]workercontrolcore.Node
-}
-
-func (r *coreWorkerRegistry) refresh(ctx context.Context) error {
-	rows, err := r.pool.Query(ctx, "SELECT n.id,n.url,n.enabled,w.public_key,w.allow_http FROM stream_nodes n JOIN worker_http_nodes w ON w.node_id=n.id WHERE n.type='transcode'")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	nodes := make(map[string]workercontrolcore.Node)
-	for rows.Next() {
-		var node workercontrolcore.Node
-		var key []byte
-		if err := rows.Scan(&node.ID, &node.URL, &node.Enabled, &key, &node.AllowHTTP); err != nil {
-			return err
-		}
-		node.PublicKey = ed25519.PublicKey(key)
-		if canonical, err := workeridentity.ValidateOrigin(node.URL, node.AllowHTTP); err == nil {
-			node.URL = canonical
-		}
-		nodes[workerRegistryOrigin(node.URL)] = node
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	r.nodes = nodes
-	r.mu.Unlock()
-	return nil
-}
-func (r *coreWorkerRegistry) ByURL(ctx context.Context, url string) (workercontrolcore.Node, bool, error) {
-	r.mu.RLock()
-	node, ok := r.nodes[workerRegistryOrigin(url)]
-	r.mu.RUnlock()
-	if ok {
-		return node, true, nil
-	}
-	// Enrollment may happen after startup; a miss cannot silently dispatch the
-	// registered standalone node through the legacy source-path protocol.
-	node, ok, err := r.repo.ByURL(ctx, url)
-	if err == nil && ok {
-		r.mu.Lock()
-		r.nodes[workerRegistryOrigin(url)] = node
-		r.mu.Unlock()
-	}
-	return node, ok, err
-}
-
-func workerRegistryOrigin(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" {
-		return strings.TrimRight(raw, "/")
-	}
-	origin := parsed.Scheme + "://" + parsed.Host
-	if canonical, err := workeridentity.ValidateOrigin(origin, true); err == nil {
-		return canonical
-	}
-	return origin
-}
-func (r *coreWorkerRegistry) ByID(ctx context.Context, id int) (workercontrolcore.Node, bool, error) {
-	return r.repo.ByID(ctx, id)
-}
-
 func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, rdb *redis.Client, cfg *config.Config, contentAuthority *workerContentAuthority, live ...func() *config.Config) (http.Handler, error) {
 	liveConfig := func() *config.Config { return cfg }
 	if len(live) > 0 && live[0] != nil {
@@ -139,7 +67,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	if err != nil {
 		return nil, err
 	}
-	registry := &coreWorkerRegistry{repo: repo, pool: pool}
+	registry := &coreWorkerRegistry{repo: repo}
 	if err := registry.refresh(ctx); err != nil {
 		return nil, err
 	}
@@ -278,7 +206,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 }
 
 func initializeHTTPWorkerProxy(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, cfg *config.Config, live func() *config.Config) error {
-	registry := &coreWorkerRegistry{repo: workerregistration.New(pool, cipher), pool: pool}
+	registry := &coreWorkerRegistry{repo: workerregistration.New(pool, cipher)}
 	if err := registry.refresh(ctx); err != nil {
 		return err
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
@@ -105,18 +106,33 @@ func (r *Repository) ByURL(ctx context.Context, rawURL string) (workercontrolcor
 		pattern += ":0*" + port
 	}
 	pattern += "(?:[/?#]|$)"
-	var id int
 	// Keep an enrolled node classified even if its editable URL acquires an
 	// unsupported path/query. The caller then rejects its origin rather than
-	// falling back to legacy requests containing library paths.
-	err = r.pool.QueryRow(ctx, "SELECT n.id FROM stream_nodes n JOIN worker_http_nodes w ON w.node_id=n.id WHERE n.url ~* $1 AND n.type='transcode'", pattern).Scan(&id)
+	// falling back to legacy requests containing library paths. Read membership
+	// and retired history in one SQL snapshot: a separate ByID lookup could lose
+	// the row after classification and incorrectly return a legacy miss.
+	var node workercontrolcore.Node
+	var key []byte
+	err = r.pool.QueryRow(ctx, `
+SELECT id,url,enabled,public_key,allow_http FROM (
+    SELECT n.id,n.url,n.enabled,w.public_key,w.allow_http,0 AS priority
+    FROM stream_nodes n JOIN worker_http_nodes w ON w.node_id=n.id
+    WHERE n.url ~* $1 AND n.type='transcode'
+    UNION ALL
+    SELECT 0,$2,FALSE,''::bytea,FALSE,1
+    WHERE EXISTS (SELECT 1 FROM worker_http_origin_history WHERE raw_url ~* $1)
+) classified ORDER BY priority LIMIT 1`, pattern, canonical).Scan(&node.ID, &node.URL, &node.Enabled, &key, &node.AllowHTTP)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return workercontrolcore.Node{}, false, nil
 	}
 	if err != nil {
 		return workercontrolcore.Node{}, false, err
 	}
-	return r.ByID(ctx, id)
+	node.PublicKey = ed25519.PublicKey(key)
+	if normalized, normalizeErr := workeridentity.ValidateOrigin(node.URL, node.AllowHTTP); normalizeErr == nil {
+		node.URL = normalized
+	}
+	return node, true, nil
 }
 
 type Enrollment struct {
@@ -173,6 +189,9 @@ func (r *Repository) Redeem(ctx context.Context, enrollment Enrollment, key ed25
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err = nodepool.LockConfiguration(ctx, tx); err != nil {
+		return err
+	}
 	var nodeID int
 	err = tx.QueryRow(ctx, "UPDATE worker_http_enrollments SET consumed_at=now() WHERE ticket_hash=$1 AND consumed_at IS NULL AND expires_at>now() RETURNING node_id", digest[:]).Scan(&nodeID)
 	if err != nil || nodeID != enrollment.NodeID {

@@ -15,15 +15,18 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 )
 
 func registrationDB(t *testing.T) *Repository {
+	return registrationDBWithRegistryFence(t, true)
+}
+
+func registrationDBWithRegistryFence(t *testing.T, withFence bool) *Repository {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -63,13 +66,18 @@ func registrationDB(t *testing.T) *Repository {
 	if _, err = pool.Exec(t.Context(), "CREATE TABLE stream_nodes(id INTEGER PRIMARY KEY,url TEXT NOT NULL,type TEXT NOT NULL,enabled BOOLEAN NOT NULL); CREATE TABLE download_artifacts(id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../migrations/sql/20261013183440_standalone_http_workers.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, _ := strings.Cut(string(migration), "-- +goose Down")
-	if _, err = pool.Exec(t.Context(), up); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"20261013183440_standalone_http_workers.sql", "20261014164751_worker_registry_classification_fence.sql"} {
+		if !withFence && name == "20261014164751_worker_registry_classification_fence.sql" {
+			continue
+		}
+		migration, readErr := os.ReadFile("../../migrations/sql/" + name)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		up, _, _ := strings.Cut(string(migration), "-- +goose Down")
+		if _, err = pool.Exec(t.Context(), up); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err = pool.Exec(t.Context(), "INSERT INTO stream_nodes(id,url,type,enabled) VALUES(17,'https://worker.example.test','transcode',TRUE),(18,'https://other-worker.example.test','transcode',TRUE)"); err != nil {
 		t.Fatal(err)

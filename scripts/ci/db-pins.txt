@@ -13,6 +13,11 @@
 # Add a pin in the same change that sets its budget or adds the test. It must
 # pass on a freshly migrated database without skipping.
 
+# Warm legacy worker classification performs no per-request SQL, including
+# actual command and output requests through the installed transports.
+./cmd/silo TestWorkerRegistryLegacyLookupsUseSnapshot
+./cmd/silo TestWorkerRegistryWarmLegacyHTTPUsesSnapshot
+
 # Seek preview jobs preserve bigint IDs, fence attempts, and protect issued URLs.
 ./internal/trickplay TestTrickplayQueuesBigintMediaFileIDsDB
 ./internal/trickplay TestExpiredLeaseRejectsCompletionBeforeReconcileDB

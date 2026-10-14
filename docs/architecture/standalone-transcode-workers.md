@@ -27,6 +27,31 @@ An enrolled node remains classified as a standalone worker if its stored URL
 is later edited into an invalid origin; dispatch rejects it before transmitting
 a legacy request containing a source path or client token.
 
+Core and proxy processes classify origins from complete local snapshots,
+refreshed once per second. A snapshot's two-second certificate starts while its
+database transaction holds the shared configuration lock, before reading rows.
+Publication preserves that exact deadline and checks both monotonic and wall
+time. Warm legacy segment requests therefore need no classification SQL.
+An expired snapshot requires a bounded, coalesced database refresh; a failed
+refresh cannot permit legacy fallback.
+
+Database triggers take the exclusive configuration lock and drain older
+certificates for three seconds before a real enrollment, enrolled-node URL or
+type change, or membership removal can commit. The drain runs once per
+transaction; health and unchanged writes do not drain. New admissions may wait
+or fail closed during that transition. After commit, a new classification cannot
+use an earlier negative snapshot. Requests admitted before the change may
+complete, including long response bodies. Current proof and work-authority
+checks continue reading node identity by primary key.
+
+An append-only database history retains previously enrolled raw URLs across URL
+changes, type changes, membership removal and node deletion. Every snapshot
+canonicalizes those origins too. A retired origin remains denied even after a
+process restart; it cannot become eligible for legacy requests carrying source
+paths or client JWTs. Ordinary history removal and registry truncation are
+refused. The same database fence covers direct SQL changes and does not depend
+on Redis invalidation delivery.
+
 Core commands, worker control calls and source reads use separate signature
 domains. Signatures bind the destination, method, escaped path, query, body
 digest, timestamp and nonce, plus byte-range, source identity and output scope

@@ -56,7 +56,7 @@ func TestWorkerRegistryCanonicalOrigins(t *testing.T) {
 			if _, err := pool.Exec(t.Context(), "INSERT INTO worker_http_nodes(node_id,public_key,allow_http) VALUES($1,$2,TRUE)", id, []byte(public)); err != nil {
 				t.Fatal(err)
 			}
-			registry := &coreWorkerRegistry{repo: workerregistration.New(pool, nil), pool: pool}
+			registry := &coreWorkerRegistry{repo: workerregistration.New(pool, nil)}
 			if err := registry.refresh(t.Context()); err != nil {
 				t.Fatal(err)
 			}

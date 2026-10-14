@@ -41,7 +41,7 @@ func TestWorkerRecipeClassificationUsesSQLRegistrationAndFailsClosed(t *testing.
 					t.Fatal(err)
 				}
 			}
-			registry := &coreWorkerRegistry{repo: workerregistration.New(pool, nil), pool: pool}
+			registry := &coreWorkerRegistry{repo: workerregistration.New(pool, nil)}
 			service, err := workercontrolcore.New(workercontrolcore.Options{Origin: "https://core.example", PrivateKey: private, Nodes: registry, Store: workercontrolcore.NewMemoryStore()})
 			if err != nil {
 				t.Fatal(err)
