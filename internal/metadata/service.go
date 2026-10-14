@@ -4969,8 +4969,9 @@ func buildItemLocalizationRecord(
 		*loc = *existing
 		loc.ContentID = contentID
 		loc.Language = language
-		dropAIText(&loc.Overview, loc.OverviewSource)
-		dropAIText(&loc.Tagline, loc.TaglineSource)
+		// AI text is not dropped here, unlike seasons and episodes: a refresh
+		// in a non-canonical language passes the canonical-language result as
+		// accumulator, so a dropped field would fill with canonical text.
 	}
 
 	mergeScalar(&loc.Title, accumulator.Title, mergeMode)

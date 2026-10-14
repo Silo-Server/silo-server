@@ -1116,14 +1116,6 @@ func TestPersonRefreshWithProviders_RefreshesWhenAttemptWriteFails(t *testing.T)
 // and source; provider text replaces AI text in either merge mode.
 func TestBuildLocalizationRecordsDoNotCarryAITextForward(t *testing.T) {
 	for _, mode := range []MergeMode{MergeFillEmpty, MergeReplaceUnlocked} {
-		item := buildItemLocalizationRecord(&models.MediaItemLocalization{
-			Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
-			Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
-		}, "series-1", "fr", "series", &MetadataResult{Overview: "Apercu fournisseur"}, nil, mode, "fr", false)
-		if item.Overview != "Apercu fournisseur" || item.Tagline != "" {
-			t.Errorf("mode %v: item overview/tagline = %q/%q, want provider overview and empty tagline", mode, item.Overview, item.Tagline)
-		}
-
 		season := buildSeasonLocalizationRecord(&models.SeasonLocalization{
 			Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
 		}, "season-1", "fr", SeasonResult{}, mode)
@@ -1144,5 +1136,18 @@ func TestBuildLocalizationRecordsDoNotCarryAITextForward(t *testing.T) {
 		if kept.Overview != "Saisi" {
 			t.Errorf("mode %v: manual overview = %q, want it carried forward", mode, kept.Overview)
 		}
+	}
+}
+
+// A refresh in a non-canonical language hands the item builder the
+// canonical-language result, so a scheduled refresh must keep the stored AI
+// translation rather than fill it with canonical text.
+func TestBuildItemLocalizationRecordKeepsAITextOnFillEmptyRefresh(t *testing.T) {
+	item := buildItemLocalizationRecord(&models.MediaItemLocalization{
+		Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
+		Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
+	}, "series-1", "fr", "series", &MetadataResult{Overview: "English overview", Tagline: "English tagline"}, nil, MergeFillEmpty, "fr", false)
+	if item.Overview != "Apercu IA" || item.Tagline != "Phrase IA" {
+		t.Fatalf("overview/tagline = %q/%q, want the AI translation kept", item.Overview, item.Tagline)
 	}
 }
