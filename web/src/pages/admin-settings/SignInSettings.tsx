@@ -18,7 +18,6 @@ import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import {
   activeSignInInstallation,
-  authPluginInstallations,
   BREAK_GLASS_REQUIRED_TEXT,
   primarySignInInstallations,
 } from "@/lib/externalSignInAdmin";
@@ -32,56 +31,23 @@ import { useSignInProviderDrafts } from "./useSignInProviderDrafts";
 
 export const LOCAL_LOGIN_KEY = "auth.local_password_login";
 export const EMAIL_MATCH_KEY = "auth.email_auto_match";
-export const RECHECK_INTERVAL_KEY = "auth.provider_recheck_interval";
-export const OUTAGE_POLICY_KEY = "auth.provider_recheck_outage_policy";
-const RECHECK_KEYS = [RECHECK_INTERVAL_KEY, OUTAGE_POLICY_KEY];
 // Both only work for Silo-password accounts: the server refuses a signup while
 // password sign-in is off, and a reset needs a local password to replace.
 const PASSWORD_ACCOUNT_KEYS = ["signup.enabled", "password_reset.self_service_enabled"];
-// Token lifetimes apply to every sign-in, provider or password alike.
-const SESSION_KEYS = ["auth.access_token_expiry", "auth.refresh_token_expiry"];
-const ACCOUNT_KEYS = [...SESSION_KEYS, EMAIL_MATCH_KEY, ...RECHECK_KEYS];
+// Hidden tier: still saved and readable through the settings API, deliberately
+// without a control here because the defaults suit every deployment we
+// support — auth.access_token_expiry, auth.refresh_token_expiry,
+// auth.provider_recheck_interval, auth.provider_recheck_outage_policy.
 // server.public_url is read, not edited: OpenID Connect needs it.
-const KEYS = [LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS, ...ACCOUNT_KEYS, "server.public_url"];
-
-const RECHECK_INTERVALS = [
-  { value: "15m", label: "15 minutes" },
-  { value: "1h", label: "1 hour" },
-  { value: "6h", label: "6 hours" },
-  { value: "12h", label: "12 hours (default)" },
-  { value: "1d", label: "1 day" },
-  { value: "7d", label: "7 days" },
-];
-
-const OUTAGE_POLICIES = [
-  { value: "fail_open", label: "Keep people signed in (default)" },
-  { value: "fail_closed", label: "Stop sessions from renewing" },
-];
-
-// What each provider-only field holds when nobody has set it; an empty value
-// reads as the same default.
-const PROVIDER_FIELD_DEFAULTS: Record<string, string> = {
-  [EMAIL_MATCH_KEY]: "false",
-  [RECHECK_INTERVAL_KEY]: "12h",
-  [OUTAGE_POLICY_KEY]: "fail_open",
-};
-
-/** The recheck interval options, plus a stored value none of them names. */
-function intervalOptions(current: string) {
-  const value = current.trim();
-  if (!value || RECHECK_INTERVALS.some((option) => option.value === value)) {
-    return RECHECK_INTERVALS;
-  }
-  return [...RECHECK_INTERVALS, { value, label: value }];
-}
+const KEYS = [LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS, EMAIL_MATCH_KEY, "server.public_url"];
 
 /**
- * Settings → Sign-in: the server's one external sign-in provider (OIDC or
- * LDAP) as guided setup, whether Silo passwords still sign in, public signups
- * and self-service password reset, how long anyone stays signed in, how first
- * sign-ins match accounts, and how often Silo asks the provider again. Every
- * edit, the provider's configuration included, saves through the save bar;
- * only turning a provider on or off applies at once. The rules are in
+ * Settings → Sign-in: whether Silo passwords still sign in, with public
+ * signups and self-service password reset; the server's one external sign-in
+ * provider (OIDC or LDAP) as guided setup, with how its first sign-ins match
+ * existing accounts; and network sign-in. Every edit, the provider's
+ * configuration included, saves through the save bar; only turning a provider
+ * on or off applies at once. The rules are in
  * docs/architecture/external-sign-in.md.
  */
 export default function SignInSettings() {
@@ -112,14 +78,11 @@ export default function SignInSettings() {
     return active?.enabled === true;
   }, [installations.data]);
   const providerKnown = installations.data !== undefined;
-  // Email matching and the access re-check only act on accounts a sign-in
-  // plugin signs in: matching needs OIDC or LDAP (a network sign-in never
-  // matches by email), and the re-check also covers network sign-in. Without
-  // one installed they are noise, but a field stays while the installations
-  // are unknown or while it holds a value other than its default, saved or
+  // Email matching only acts on accounts OIDC or LDAP signs in (a network
+  // sign-in never matches by email). Without one installed it is noise, but it
+  // stays while the installations are unknown or while it is on, saved or
   // staged, so nothing set is ever out of reach.
   const primaryInstalled = primarySignInInstallations(installations.data).length > 0;
-  const anySignInInstalled = authPluginInstallations(installations.data).length > 0;
 
   function showLocalError(text: string) {
     setLocalError(text);
@@ -180,15 +143,11 @@ export default function SignInSettings() {
   const localLoginOn = form.getValue(LOCAL_LOGIN_KEY) !== "false";
   const emailMatchOn = form.getValue(EMAIL_MATCH_KEY) === "true";
   const publicUrlSet = form.getPersistedValue("server.public_url").trim() !== "";
-  const holdsSetting = (key: string) => {
-    const fallback = PROVIDER_FIELD_DEFAULTS[key];
-    const isSet = (value: string) => value.trim() !== "" && value.trim() !== fallback;
-    return form.isDirty(key) || isSet(form.getValue(key)) || isSet(form.getPersistedValue(key));
-  };
-  const showEmailMatch = !providerKnown || primaryInstalled || holdsSetting(EMAIL_MATCH_KEY);
-  const showRecheck = !providerKnown || anySignInInstalled || RECHECK_KEYS.some(holdsSetting);
-  const providerVerbs = [showEmailMatch && "matched", showRecheck && "re-checked"].filter(Boolean);
-  const sessionAdvancedKeys = [...SESSION_KEYS, ...(showRecheck ? RECHECK_KEYS : [])];
+  const emailMatchSet =
+    form.isDirty(EMAIL_MATCH_KEY) ||
+    emailMatchOn ||
+    form.getPersistedValue(EMAIL_MATCH_KEY).trim() === "true";
+  const showEmailMatch = !providerKnown || primaryInstalled || emailMatchSet;
 
   return (
     <div className="flex h-full flex-col">
@@ -200,27 +159,6 @@ export default function SignInSettings() {
             External sign-in isn't available on this server, so only Silo passwords sign in.
           </p>
         ) : null}
-
-        <FieldGroup
-          label="Single sign-on"
-          description="Let people sign in with your identity provider. A server uses one provider at a time."
-          dirty={drafts.changeCount > 0}
-        >
-          <div className="settings-field-note">
-            <FeedbackLine feedback={providerFeedback} focusRef={providerFeedbackRef} />
-            <SignInProviderSlot
-              installations={installations.data}
-              loading={installations.isLoading}
-              failed={installations.isError}
-              drafts={drafts}
-              localLoginOn={form.getPersistedValue(LOCAL_LOGIN_KEY) !== "false"}
-              publicUrlSet={publicUrlSet}
-              connectionTestServed={caps?.connection_test === true}
-            />
-          </div>
-        </FieldGroup>
-
-        <NetworkSignInSection installations={installations.data} />
 
         <FieldGroup
           label="Silo passwords"
@@ -301,14 +239,22 @@ export default function SignInSettings() {
         </FieldGroup>
 
         <FieldGroup
-          label="Accounts and sessions"
-          description={
-            providerVerbs.length > 0
-              ? `How long anyone stays signed in, and how a sign-in provider's accounts are ${providerVerbs.join(" and ")}.`
-              : "How long anyone stays signed in."
-          }
-          dirty={ACCOUNT_KEYS.some((key) => form.isDirty(key))}
+          label="Single sign-on"
+          description="Let people sign in with your identity provider. A server uses one provider at a time."
+          dirty={drafts.changeCount > 0 || form.isDirty(EMAIL_MATCH_KEY)}
         >
+          <div className="settings-field-note">
+            <FeedbackLine feedback={providerFeedback} focusRef={providerFeedbackRef} />
+            <SignInProviderSlot
+              installations={installations.data}
+              loading={installations.isLoading}
+              failed={installations.isError}
+              drafts={drafts}
+              localLoginOn={form.getPersistedValue(LOCAL_LOGIN_KEY) !== "false"}
+              publicUrlSet={publicUrlSet}
+              connectionTestServed={caps?.connection_test === true}
+            />
+          </div>
           {showEmailMatch ? (
             <SettingField
               label="Match existing accounts by email"
@@ -329,61 +275,9 @@ export default function SignInSettings() {
               }
             />
           ) : null}
-          <AdvancedSection
-            id="sign-in.sessions"
-            count={sessionAdvancedKeys.length}
-            forceOpen={sessionAdvancedKeys.some((key) => form.isDirty(key))}
-          >
-            <SettingField
-              label="Access token expiry"
-              settingKey="auth.access_token_expiry"
-              dirty={form.isDirty("auth.access_token_expiry")}
-              type="duration"
-              description="How long before an app silently renews, e.g. 30m."
-              value={form.getValue("auth.access_token_expiry")}
-              onChange={(v) => form.setValue("auth.access_token_expiry", v)}
-              restartRequired={restartKeys.has("auth.access_token_expiry")}
-            />
-            <SettingField
-              label="Refresh token expiry"
-              settingKey="auth.refresh_token_expiry"
-              dirty={form.isDirty("auth.refresh_token_expiry")}
-              type="duration"
-              description="How long someone stays signed in, e.g. 30d. Also how long an account whose sign-in provider can't re-check it keeps its API keys and Audiobookshelf sessions without signing in through the provider."
-              value={form.getValue("auth.refresh_token_expiry")}
-              onChange={(v) => form.setValue("auth.refresh_token_expiry", v)}
-              restartRequired={restartKeys.has("auth.refresh_token_expiry")}
-            />
-            {showRecheck ? (
-              <>
-                <SettingField
-                  label="Re-check access every"
-                  settingKey={RECHECK_INTERVAL_KEY}
-                  dirty={form.isDirty(RECHECK_INTERVAL_KEY)}
-                  type="select"
-                  description="Silo asks the provider again whether each person may still sign in, so someone removed there is signed out of Silo at the next check."
-                  value={form.getValue(RECHECK_INTERVAL_KEY) || "12h"}
-                  onChange={(value) => form.setValue(RECHECK_INTERVAL_KEY, value)}
-                  options={intervalOptions(form.getValue(RECHECK_INTERVAL_KEY))}
-                />
-                <SettingField
-                  label="If the provider is unreachable"
-                  settingKey={OUTAGE_POLICY_KEY}
-                  dirty={form.isDirty(OUTAGE_POLICY_KEY)}
-                  type="select"
-                  description={
-                    form.getValue(OUTAGE_POLICY_KEY) === "fail_closed"
-                      ? "A session due for a check can't renew until the provider answers, so apps stop working during an outage and carry on once it's over."
-                      : "Sessions keep renewing and Silo asks again at the next renewal, so an outage doesn't sign anyone out."
-                  }
-                  value={form.getValue(OUTAGE_POLICY_KEY) || "fail_open"}
-                  onChange={(value) => form.setValue(OUTAGE_POLICY_KEY, value)}
-                  options={OUTAGE_POLICIES}
-                />
-              </>
-            ) : null}
-          </AdvancedSection>
         </FieldGroup>
+
+        <NetworkSignInSection installations={installations.data} />
       </div>
 
       <SaveBar

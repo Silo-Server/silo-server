@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import InfrastructureSettings from "./InfrastructureSettings";
+import StorageSettings from "./StorageSettings";
 
 window.HTMLElement.prototype.hasPointerCapture ??= () => false;
 window.HTMLElement.prototype.setPointerCapture ??= () => {};
@@ -36,11 +36,11 @@ vi.mock("@/hooks/useSettingsForm", async (importOriginal) => {
   };
 });
 
-// Mirrors the server registry's restart prefixes: every artwork/s3/redis/database/
-// userdb key restarts; nothing else on this page does. Tests that need a
+// Mirrors the server registry's restart prefixes: every artwork/s3 key restarts;
+// metadata.cache_images hot-reloads. Tests that need a
 // different registry override the mock.
 const restartKeysMock = vi.fn(() => ({
-  has: (key: string) => /^(artwork|s3|redis|database|userdb)\./.test(key),
+  has: (key: string) => /^(artwork|s3)\./.test(key),
 }));
 
 vi.mock("@/hooks/useRestartKeys", () => ({
@@ -147,7 +147,7 @@ function mockForm(overrides: FormOverrides = {}) {
   return form;
 }
 
-describe("InfrastructureSettings", () => {
+describe("StorageSettings", () => {
   afterEach(() => {
     // Disclosures remember being opened; start every case collapsed.
     localStorage.clear();
@@ -191,7 +191,7 @@ describe("InfrastructureSettings", () => {
             : "",
     });
 
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Bucket")).not.toBeInTheDocument();
@@ -205,7 +205,7 @@ describe("InfrastructureSettings", () => {
   it("keeps the backend editable until artwork has been stored", () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
     mockForm();
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
     expect(screen.getByRole("combobox", { name: "Backend" })).toBeEnabled();
     expect(screen.queryByText(/Locked to/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Local storage path")).toBeEnabled();
@@ -214,7 +214,7 @@ describe("InfrastructureSettings", () => {
   it("opens the managed transition when a locked S3 backend changes", async () => {
     serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
     mockForm({ getValue: (key: string) => (key === "artwork.storage_backend" ? "auto" : "") });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
     const backend = screen.getByRole("combobox", { name: "Backend" });
     expect(backend).toBeEnabled();
     expect(backend).toHaveTextContent("S3");
@@ -244,7 +244,7 @@ describe("InfrastructureSettings", () => {
     const form = mockForm({
       getValue: (key: string) => (key === "artwork.storage_backend" ? "s3" : ""),
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Local disk" }));
@@ -266,7 +266,7 @@ describe("InfrastructureSettings", () => {
             : "",
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-1" } });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Local disk" }));
@@ -319,7 +319,7 @@ describe("InfrastructureSettings", () => {
             ? "/srv/silo/artwork"
             : "",
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Local disk" }));
@@ -341,21 +341,20 @@ describe("InfrastructureSettings", () => {
     serverStatus.current = undefined;
   });
 
-  it("manages the merged database and storage keys in one form", () => {
+  it("manages the storage keys and provider artwork caching in one form", () => {
     mockForm();
 
-    renderToStaticMarkup(<InfrastructureSettings />);
+    renderToStaticMarkup(<StorageSettings />);
 
     const calls = settingsFormMock.mock.calls as [{ keys: string[] }][];
     const keys = calls[calls.length - 1]?.[0].keys ?? [];
     expect(keys).toEqual(
-      expect.arrayContaining(["redis.url", "redis.db", "database.max_connections"]),
+      expect.arrayContaining(["s3.public_bucket", "s3.private_bucket", "metadata.cache_images"]),
     );
-    expect(keys).toEqual(expect.arrayContaining(["s3.public_bucket", "s3.private_bucket"]));
+    // Redis and the Postgres pool moved to General, which saves those keys itself.
+    expect(keys.filter((key) => /^(redis|database)\./.test(key))).toEqual([]);
     // Log retention moved to the Logging page, which saves those keys itself.
     expect(keys.filter((key) => /^(opslog|policy)\./.test(key))).toEqual([]);
-    // Provider caching remains on Library & Metadata. This page selects storage.
-    expect(keys).not.toContain("metadata.cache_images");
     // The disabled Litestream storage tab is gone; its keys keep working through the API.
     expect(keys.filter((key) => key.startsWith("s3.user_db_"))).toEqual([]);
     // The per-user database backend and its SQLite tuning are Hidden: one usable
@@ -363,56 +362,80 @@ describe("InfrastructureSettings", () => {
     expect(keys.filter((key) => key.startsWith("userdb."))).toEqual([]);
   });
 
-  it("keeps only the Postgres connection limit behind the Database disclosure", async () => {
-    mockForm();
-    render(<InfrastructureSettings />);
+  it("shows provider artwork caching in the Storage group and stages edits", async () => {
+    const form = mockForm({
+      getValue: (key: string) =>
+        key === "metadata.cache_images" ? "true" : key === "s3.public_url_auth" ? "presigned" : "",
+    });
+    render(<StorageSettings />);
 
-    const database = within(screen.getByRole("group", { name: "Database" }));
-    expect(database.queryByLabelText("Maximum Postgres connections")).not.toBeInTheDocument();
-    await userEvent.click(database.getByRole("button", { name: "Advanced · 1 setting" }));
-    expect(database.getByLabelText("Maximum Postgres connections")).toBeVisible();
-    expect(database.queryByText("Where per-user data is stored")).not.toBeInTheDocument();
+    const storage = within(screen.getByRole("group", { name: "Storage" }));
+    const toggle = storage.getByRole("switch", { name: "Save provider artwork to storage" });
+    expect(toggle).toBeChecked();
+    // It hot-reloads, so the group no longer claims a restart for every row.
+    expect(storage.queryByText("Changes apply after a restart")).not.toBeInTheDocument();
+    expect(storage.getAllByLabelText("Takes effect after a server restart")).toHaveLength(2);
+    await userEvent.click(toggle);
+    expect(form.setValue).toHaveBeenCalledWith("metadata.cache_images", "false");
   });
 
+  it("saves provider artwork caching directly on a locked install", async () => {
+    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
+    const form = mockForm({
+      dirtyCount: 1,
+      dirtyKeys: ["metadata.cache_images"],
+      isDirty: (key: string) => key === "metadata.cache_images",
+      getValue: (key: string) =>
+        key === "artwork.storage_backend"
+          ? "local"
+          : key === "metadata.cache_images"
+            ? "false"
+            : key === "s3.public_url_auth"
+              ? "presigned"
+              : "",
+      getPersistedValue: (key: string) =>
+        key === "artwork.storage_backend" ? "local" : key === "metadata.cache_images" ? "true" : "",
+    });
+    render(<StorageSettings />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(form.save).toHaveBeenCalledWith(undefined);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    serverStatus.current = undefined;
+  });
+
+  // Both bucket groups show on every backend, so an admin on local disk can
+  // fill in a bucket before choosing S3 opens the transition review.
   it.each([
-    ["Local disk", "local", "", "", false],
-    ["Automatic without a bucket", "", "", "", false],
-    ["Automatic without a bucket, saved as auto", "auto", "", "", false],
-    ["Local disk with a leftover bucket", "local", "artwork", "", false],
-    ["S3", "s3", "", "", true],
-    ["Automatic with a saved bucket", "auto", "artwork", "", true],
-    ["Automatic with a staged bucket", "auto", "", "artwork", true],
-  ])("shows public storage for %s: %s", (_, backend, savedBucket, stagedBucket, shown) => {
+    ["Local disk", "local", ""],
+    ["Automatic without a bucket", "", ""],
+    ["Automatic without a bucket, saved as auto", "auto", ""],
+    ["Local disk with a leftover bucket", "local", "artwork"],
+    ["S3", "s3", ""],
+    ["Automatic with a saved bucket", "auto", "artwork"],
+  ])("shows public and private storage for %s", (_, backend, savedBucket) => {
     mockForm({
-      isDirty: (key: string) => stagedBucket !== "" && key === "s3.public_bucket",
-      dirtyCount: stagedBucket ? 1 : 0,
       getPersistedValue: (key: string) =>
         key === "artwork.storage_backend" ? backend : key === "s3.public_bucket" ? savedBucket : "",
       getValue: (key: string) =>
         key === "artwork.storage_backend"
           ? backend
           : key === "s3.public_bucket"
-            ? stagedBucket || savedBucket
+            ? savedBucket
             : key === "s3.public_url_auth"
               ? "presigned"
               : "",
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
-    const group = screen.queryByRole("group", { name: "Public storage" });
-    if (shown) {
-      expect(group).toBeInTheDocument();
-      expect(within(group!).getByLabelText("Bucket")).toBeVisible();
-    } else {
-      expect(group).not.toBeInTheDocument();
-    }
-    // The private bucket stays reachable: on local disk it is where avatars could move.
-    expect(
-      screen.getByRole("group", { name: shown ? "Private storage" : "S3 storage" }),
-    ).toBeInTheDocument();
+    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+    expect(publicStorage.getByLabelText("Bucket")).toBeVisible();
+    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
+    expect(privateStorage.getByLabelText("Bucket")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "S3 storage" })).not.toBeInTheDocument();
   });
 
-  it("keeps a staged public edit in view after the backend goes back to Local disk", () => {
+  it("shows a staged public endpoint after the backend goes back to Local disk", () => {
     mockForm({
       dirtyCount: 2,
       isDirty: (key: string) => key === "artwork.storage_backend" || key === "s3.public_endpoint",
@@ -425,14 +448,14 @@ describe("InfrastructureSettings", () => {
               ? "presigned"
               : "",
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(
       within(screen.getByRole("group", { name: "Public storage" })).getByLabelText("Endpoint"),
     ).toHaveValue("https://s3.example");
   });
 
-  it("reveals the public storage fields after S3 is picked on a locked local install", async () => {
+  it("keeps the public bucket fields in view while S3 is reviewed on a locked local install", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
     const form = mockForm({
       getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
@@ -443,8 +466,10 @@ describe("InfrastructureSettings", () => {
             ? "presigned"
             : "",
     });
-    render(<InfrastructureSettings />);
-    expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
+    render(<StorageSettings />);
+    expect(
+      within(screen.getByRole("group", { name: "Public storage" })).getByLabelText("Bucket"),
+    ).toBeEnabled();
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "S3" }));
@@ -452,7 +477,7 @@ describe("InfrastructureSettings", () => {
     expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
       "Public bucket: not set",
     );
-    // The review stages nothing, but the bucket it needs is now on the page.
+    // The review stages nothing; the bucket it needs stays on the page.
     expect(form.setValue).not.toHaveBeenCalledWith("artwork.storage_backend", "s3");
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
@@ -461,19 +486,12 @@ describe("InfrastructureSettings", () => {
     serverStatus.current = undefined;
   });
 
-  it("folds S3 into one optional group on Local disk", async () => {
+  it("shows every private storage field without a disclosure", () => {
     mockForm();
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
-    expect(screen.queryByRole("group", { name: "Private storage" })).not.toBeInTheDocument();
-    const privateStorage = within(screen.getByRole("group", { name: "S3 storage" }));
-    expect(privateStorage.getByText(/^Optional\./)).toBeInTheDocument();
-    expect(privateStorage.queryByLabelText("Endpoint")).not.toBeInTheDocument();
-    expect(privateStorage.queryByLabelText("Access Key")).not.toBeInTheDocument();
-
-    await userEvent.click(
-      privateStorage.getByRole("button", { name: "Private bucket · 7 settings" }),
-    );
+    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
+    expect(privateStorage.getByText(/Optional on local disk/)).toBeInTheDocument();
     for (const label of [
       "Endpoint",
       "Bucket",
@@ -486,214 +504,95 @@ describe("InfrastructureSettings", () => {
       expect(privateStorage.getByLabelText(label)).toBeVisible();
     }
     expect(privateStorage.getByRole("button", { name: "Check Connection" })).toBeVisible();
+    expect(privateStorage.queryByRole("button", { name: /Advanced/ })).not.toBeInTheDocument();
   });
 
-  it("keeps public and private storage as separate groups on the S3 backend", () => {
+  it("shows the public bucket connection and link mode with no disclosure for signed links", () => {
+    mockForm();
+    render(<StorageSettings />);
+
+    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+    for (const label of [
+      "Endpoint",
+      "Bucket",
+      "Region",
+      "Access Key",
+      "Secret Key",
+      "Put the bucket name in the URL path",
+      "Folder inside the bucket",
+      "How asset links are authorized",
+    ]) {
+      expect(publicStorage.getByLabelText(label)).toBeVisible();
+    }
+    expect(publicStorage.getByRole("button", { name: "Check Connection" })).toBeVisible();
+    // Signed links need neither a CDN address nor a token.
+    expect(publicStorage.queryByRole("button", { name: /Advanced/ })).not.toBeInTheDocument();
+    expect(publicStorage.queryByLabelText("Address clients download from")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["public", 1, ["Address clients download from"]],
+    [
+      "cloudflare_token",
+      4,
+      ["Address clients download from", "Token Secret", "Token query parameter", "Link lifetime"],
+    ],
+  ])(
+    "keeps the %s link settings behind public storage's Advanced disclosure",
+    async (urlAuth, count, labels) => {
+      mockForm({
+        getValue: (key: string) => (key === "s3.public_url_auth" ? urlAuth : ""),
+      });
+      render(<StorageSettings />);
+
+      const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+      for (const label of labels) {
+        expect(publicStorage.queryByLabelText(label)).not.toBeInTheDocument();
+      }
+      await userEvent.click(
+        publicStorage.getByRole("button", {
+          name: `Advanced · ${count} setting${count === 1 ? "" : "s"}`,
+        }),
+      );
+      for (const label of labels) {
+        expect(publicStorage.getByLabelText(label)).toBeVisible();
+      }
+    },
+  );
+
+  it("opens public storage's Advanced disclosure while one of its fields is unsaved", () => {
     mockForm({
+      dirtyCount: 1,
+      dirtyKeys: ["s3.public_read_endpoint"],
+      isDirty: (key: string) => key === "s3.public_read_endpoint",
       getValue: (key: string) =>
-        key === "artwork.storage_backend" ? "s3" : key === "s3.public_url_auth" ? "presigned" : "",
+        key === "s3.public_url_auth"
+          ? "public"
+          : key === "s3.public_read_endpoint"
+            ? "https://cdn.example"
+            : "",
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
-    expect(screen.getByRole("group", { name: "Public storage" })).toBeInTheDocument();
-    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
-    expect(privateStorage.getByRole("button", { name: "Advanced · 7 settings" })).toBeVisible();
-    expect(screen.queryByRole("group", { name: "S3 storage" })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("group", { name: "Public storage" })).getByLabelText(
+        "Address clients download from",
+      ),
+    ).toHaveValue("https://cdn.example");
   });
 
-  it("opens private storage while one of its fields is unsaved", () => {
+  it("warns about a staged private bucket", () => {
     mockForm({
       dirtyCount: 1,
       dirtyKeys: ["s3.private_bucket"],
       isDirty: (key: string) => key === "s3.private_bucket",
       getValue: (key: string) => (key === "s3.private_bucket" ? "private-new" : ""),
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
-    const privateStorage = within(screen.getByRole("group", { name: "S3 storage" }));
+    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
     expect(privateStorage.getByLabelText("Bucket")).toHaveValue("private-new");
     expect(privateStorage.getByText("Storage location change")).toBeVisible();
-  });
-
-  it("keeps the Redis connection check available when REDIS_URL comes from the environment", () => {
-    mockForm({
-      sensitiveConfigured: ["redis.url"],
-      sensitiveManagedByEnv: ["redis.url"],
-    });
-
-    render(<InfrastructureSettings />);
-
-    const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-    // The value stays read-only — only writes are refused for env-managed keys —
-    // but the check runs against the value the server merged from REDIS_URL.
-    expect(redisGroup.getByLabelText("Connection URL")).toBeDisabled();
-    expect(redisGroup.getByRole("button", { name: "Check Connection" })).toBeEnabled();
-  });
-
-  it("shows the Redis database number in use and stages an edit to it", () => {
-    const form = mockForm({
-      getValue: (key: string) => (key === "redis.db" ? "3" : ""),
-      sensitiveConfigured: ["redis.url"],
-    });
-
-    render(<InfrastructureSettings />);
-
-    const field = within(screen.getByRole("group", { name: "Redis" })).getByLabelText(
-      "Database number",
-    );
-    expect(field).toHaveValue(3);
-    expect(field).toBeEnabled();
-    fireEvent.change(field, { target: { value: "5" } });
-    expect(form.setValue).toHaveBeenCalledWith("redis.db", "5");
-  });
-
-  it("makes the Redis database number read-only when REDIS_URL comes from the environment", () => {
-    mockForm({
-      getValue: (key: string) => (key === "redis.db" ? "1" : ""),
-      sensitiveConfigured: ["redis.url"],
-      sensitiveManagedByEnv: ["redis.url", "redis.db"],
-    });
-
-    render(<InfrastructureSettings />);
-
-    const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-    // The server reports the number in REDIS_URL; it cannot be saved here.
-    expect(redisGroup.getByLabelText("Database number")).toHaveValue(1);
-    expect(redisGroup.getByLabelText("Database number")).toBeDisabled();
-  });
-
-  it("checks the Redis connection with the database number", async () => {
-    const mutateAsync = vi.fn().mockResolvedValue({ success: true, message: "ok" });
-    useCheckAdminSettingsConnectionMock.mockReturnValue({ isPending: false, mutateAsync });
-    const request = { values: { "redis.url": "", "redis.db": "5" }, dirty_keys: ["redis.db"] };
-    const form = mockForm({
-      sensitiveConfigured: ["redis.url"],
-      buildConnectionCheckRequest: vi.fn(() => request),
-    });
-
-    render(<InfrastructureSettings />);
-    fireEvent.click(
-      within(screen.getByRole("group", { name: "Redis" })).getByRole("button", {
-        name: "Check Connection",
-      }),
-    );
-
-    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ kind: "redis", body: request }));
-    expect(form.buildConnectionCheckRequest).toHaveBeenCalledWith(["redis.url", "redis.db"]);
-  });
-
-  it("marks the Redis database number for a restart on its own", () => {
-    // A registry where only the number needs a restart: the group cannot say
-    // so for every field, which leaves the chip to this one.
-    restartKeysMock.mockReturnValueOnce({ has: (key: string) => key === "redis.db" });
-    mockForm({ sensitiveConfigured: ["redis.url"] });
-
-    render(<InfrastructureSettings />);
-
-    const badges = within(screen.getByRole("group", { name: "Redis" })).getAllByLabelText(
-      "Takes effect after a server restart",
-    );
-    expect(badges).toHaveLength(1);
-    expect(badges[0]?.parentElement).toHaveTextContent("Database number");
-  });
-
-  describe("editing the Redis connection", () => {
-    const newUrl = "redis://new.example.invalid:6379/7";
-
-    beforeEach(() => {
-      realForm.enabled = true;
-      // No redis.db is saved: the server reports the 3 in the saved URL.
-      serverSettings.current = { "s3.public_url_auth": "presigned", "redis.db": "3" };
-      sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
-      updateSettingsMock.mockReset();
-      updateSettingsMock.mockResolvedValue({ values: {}, restart_required: false });
-    });
-
-    afterEach(() => {
-      realForm.enabled = false;
-    });
-
-    it("saves the number on screen with a new URL", async () => {
-      render(<InfrastructureSettings />);
-      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-
-      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
-
-      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
-      await waitFor(() =>
-        expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.url": newUrl, "redis.db": "3" }),
-      );
-    });
-
-    it("checks a new URL with the number on screen", async () => {
-      const mutateAsync = vi.fn().mockResolvedValue({ success: true, message: "ok" });
-      useCheckAdminSettingsConnectionMock.mockReturnValue({ isPending: false, mutateAsync });
-      render(<InfrastructureSettings />);
-      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-
-      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
-      await userEvent.click(redisGroup.getByRole("button", { name: "Check Connection" }));
-
-      await waitFor(() =>
-        expect(mutateAsync).toHaveBeenCalledWith({
-          kind: "redis",
-          body: {
-            values: { "redis.url": newUrl, "redis.db": "3" },
-            dirty_keys: ["redis.url", "redis.db"],
-          },
-        }),
-      );
-    });
-
-    it("stages nothing once the new URL is taken back", async () => {
-      render(<InfrastructureSettings />);
-      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-
-      await userEvent.type(redisGroup.getByLabelText("Connection URL"), newUrl);
-      expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
-      await userEvent.clear(redisGroup.getByLabelText("Connection URL"));
-
-      expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
-      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
-    });
-
-    it("drops a URL keystroke that arrives while a save is in flight", async () => {
-      updateSettingsMock.mockReturnValue(new Promise(() => {}));
-      render(<InfrastructureSettings />);
-      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-      fireEvent.change(redisGroup.getByLabelText("Database number"), { target: { value: "5" } });
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
-      await waitFor(() => expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.db": "5" }));
-
-      fireEvent.change(redisGroup.getByLabelText("Connection URL"), { target: { value: "r" } });
-
-      expect(redisGroup.getByLabelText("Connection URL")).toHaveValue("");
-    });
-
-    it("sends the number with the empty URL when Redis is switched off", async () => {
-      // The server stores no number without a URL, so this removes a saved one.
-      render(<InfrastructureSettings />);
-
-      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-      await waitFor(() =>
-        expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.url": "", "redis.db": "3" }),
-      );
-    });
-
-    it("stages nothing once Redis is switched back on", async () => {
-      render(<InfrastructureSettings />);
-
-      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
-      expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
-
-      expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
-      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-      expect(redisGroup.getByLabelText("Database number")).toHaveValue(3);
-    });
   });
 
   it("saves unrelated edits before opening an S3 location transition", async () => {
@@ -711,7 +610,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -742,7 +641,7 @@ describe("InfrastructureSettings", () => {
           return "";
         },
       });
-      render(<InfrastructureSettings />);
+      render(<StorageSettings />);
 
       await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -770,7 +669,7 @@ describe("InfrastructureSettings", () => {
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-s3" } });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -814,7 +713,7 @@ describe("InfrastructureSettings", () => {
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-local-path" } });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByLabelText("Local storage path")).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -851,7 +750,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -891,7 +790,7 @@ describe("InfrastructureSettings", () => {
         getValue: (key: string) =>
           key === "artwork.local_path" ? path : key === "artwork.storage_backend" ? "local" : "",
       });
-      render(<InfrastructureSettings />);
+      render(<StorageSettings />);
 
       expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
       expect(screen.queryByRole("button", { name: "Review transition" })).not.toBeInTheDocument();
@@ -909,28 +808,25 @@ describe("InfrastructureSettings", () => {
     serverStatus.isError = isError;
     const form = mockForm({
       dirtyCount: 2,
-      dirtyKeys: ["artwork.local_path", "database.max_connections"],
-      isDirty: (key: string) => key === "artwork.local_path" || key === "database.max_connections",
+      dirtyKeys: ["artwork.local_path", "metadata.cache_images"],
+      isDirty: (key: string) => key === "artwork.local_path" || key === "metadata.cache_images",
       getPersistedValue: (key: string) =>
         key === "artwork.local_path" ? "/srv/silo/artwork-old" : "",
       getValue: (key: string) => (key === "artwork.local_path" ? "/srv/silo/artwork-new" : ""),
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByRole("alert")).toHaveTextContent("Storage lock status is unavailable");
-    expect(screen.getByRole("group", { name: "Database" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Maximum Postgres connections")).toBeVisible();
-    expect(screen.getByRole("group", { name: "Redis" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Save provider artwork to storage" })).toBeEnabled();
     expect(screen.getByRole("combobox", { name: "Backend" })).toBeDisabled();
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();
-    // Local disk shows no public bucket; private storage is behind its disclosure.
-    expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
-    const privateStorage = within(screen.getByRole("group", { name: "S3 storage" }));
-    await userEvent.click(privateStorage.getByRole("button", { name: /^Private bucket/ }));
-    expect(privateStorage.getByLabelText("Endpoint")).toBeDisabled();
-    expect(privateStorage.getByLabelText("Bucket")).toBeDisabled();
+    for (const name of ["Public storage", "Private storage"]) {
+      const group = within(screen.getByRole("group", { name }));
+      expect(group.getByLabelText("Endpoint")).toBeDisabled();
+      expect(group.getByLabelText("Bucket")).toBeDisabled();
+    }
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(form.save).toHaveBeenCalledWith(["database.max_connections"]);
+    expect(form.save).toHaveBeenCalledWith(["metadata.cache_images"]);
     expect(createStorageTransitionMock).not.toHaveBeenCalled();
   });
 
@@ -943,7 +839,7 @@ describe("InfrastructureSettings", () => {
       getValue: (key: string) =>
         key === "artwork.storage_backend" ? "s3" : key === "s3.public_url_auth" ? "presigned" : "",
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
     expect(publicStorage.getByLabelText("Endpoint")).toBeDisabled();
@@ -962,7 +858,7 @@ describe("InfrastructureSettings", () => {
       isDirty: (key: string) => key === "artwork.local_path",
       getValue: (key: string) => (key === "artwork.local_path" ? "/srv/silo/artwork-new" : ""),
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(form.save).not.toHaveBeenCalled();
@@ -999,7 +895,7 @@ describe("InfrastructureSettings", () => {
       getPersistedValue: (key: string) => saved[key] ?? "",
       getValue: (key: string) => (key === "s3.public_access_key" ? "NEWKEY" : (saved[key] ?? "")),
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(form.save).toHaveBeenCalled();
@@ -1024,7 +920,7 @@ describe("InfrastructureSettings", () => {
       getPersistedValue: (key: string) => saved[key] ?? "",
       getValue: (key: string) => (key === "s3.public_access_key" ? "NEWKEY" : (saved[key] ?? "")),
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
     expect(form.save).not.toHaveBeenCalled();
@@ -1039,7 +935,7 @@ describe("InfrastructureSettings", () => {
       "s3.public_bucket",
       "s3.public_access_key",
       "s3.public_secret_key",
-      "database.max_connections",
+      "metadata.cache_images",
     ];
     const form = mockForm({
       dirtyCount: edited.length,
@@ -1048,10 +944,10 @@ describe("InfrastructureSettings", () => {
       getPersistedValue: (key: string) => (key === "s3.public_bucket" ? "artwork-old" : ""),
       getValue: (key: string) => (key === "s3.public_bucket" ? "artwork-new" : ""),
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(form.save).toHaveBeenCalledWith(["database.max_connections"]);
+    expect(form.save).toHaveBeenCalledWith(["metadata.cache_images"]);
   });
 
   it("routes an Automatic local backend to S3 when a public bucket is added", async () => {
@@ -1070,7 +966,7 @@ describe("InfrastructureSettings", () => {
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-auto-s3" } });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(
       screen.getByText(/Saving this bucket opens a managed transition from local storage/),
@@ -1109,7 +1005,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Automatic" }));
@@ -1138,7 +1034,7 @@ describe("InfrastructureSettings", () => {
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-auto-local" } });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
     const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
@@ -1165,7 +1061,7 @@ describe("InfrastructureSettings", () => {
       getValue: (key: string) =>
         key === "artwork.storage_backend" ? "s3" : key === "s3.public_bucket" ? "artwork" : "",
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Automatic" }));
@@ -1187,8 +1083,8 @@ describe("InfrastructureSettings", () => {
     );
     mockForm({
       dirtyCount: 2,
-      dirtyKeys: ["artwork.local_path", "database.max_connections"],
-      isDirty: (key: string) => key === "artwork.local_path" || key === "database.max_connections",
+      dirtyKeys: ["artwork.local_path", "metadata.cache_images"],
+      isDirty: (key: string) => key === "artwork.local_path" || key === "metadata.cache_images",
       getPersistedValue: (key: string) =>
         key === "artwork.local_path" ? "/srv/silo/artwork-old" : "",
       getValue: (key: string) => {
@@ -1199,13 +1095,12 @@ describe("InfrastructureSettings", () => {
       },
       save,
     });
-    render(<InfrastructureSettings />);
-    const privateStorage = within(screen.getByRole("group", { name: "S3 storage" }));
-    await userEvent.click(privateStorage.getByRole("button", { name: /^Private bucket/ }));
+    render(<StorageSettings />);
+    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
     expect(privateStorage.getByLabelText("Endpoint")).toBeEnabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
-    expect(save).toHaveBeenCalledWith(["database.max_connections"]);
+    expect(save).toHaveBeenCalledWith(["metadata.cache_images"]);
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();
     expect(privateStorage.getByLabelText("Endpoint")).toBeDisabled();
     expect(privateStorage.getByLabelText("Bucket")).toBeDisabled();
@@ -1229,7 +1124,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Review transition" })).not.toBeInTheDocument();
@@ -1254,7 +1149,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
     expect(screen.getByRole("dialog", { name: "Change artwork storage" })).toBeVisible();
@@ -1281,7 +1176,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
     expect(screen.getByRole("dialog", { name: "Change private storage" })).toBeVisible();
@@ -1298,7 +1193,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "S3" }));
@@ -1322,7 +1217,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -1346,7 +1241,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -1384,7 +1279,7 @@ describe("InfrastructureSettings", () => {
           return "";
         },
       });
-      const view = render(<InfrastructureSettings />);
+      const view = render(<StorageSettings />);
       await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
       const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
       expect(dialog).toBeVisible();
@@ -1417,7 +1312,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "S3" }));
@@ -1447,7 +1342,7 @@ describe("InfrastructureSettings", () => {
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-private" } });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -1488,7 +1383,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -1509,7 +1404,7 @@ describe("InfrastructureSettings", () => {
       getPersistedValue: (key: string) => (key === "s3.private_bucket" ? "private" : ""),
       getValue: (key: string) => (key === "s3.private_bucket" ? "private " : ""),
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Review transition" })).not.toBeInTheDocument();
@@ -1533,7 +1428,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -1559,7 +1454,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
@@ -1582,7 +1477,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Local disk" }));
@@ -1612,7 +1507,7 @@ describe("InfrastructureSettings", () => {
       getPersistedValue: (key: string) => persisted[key] ?? "",
       getValue: (key: string) => edited[key] ?? "",
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
   });
@@ -1625,7 +1520,7 @@ describe("InfrastructureSettings", () => {
       getPersistedValue: (key: string) => (key === "s3.private_key_prefix" ? "ops" : ""),
       getValue: () => "",
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
   });
@@ -1651,7 +1546,7 @@ describe("InfrastructureSettings", () => {
         return "";
       },
     });
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByLabelText("Local storage path")).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -1666,7 +1561,7 @@ describe("InfrastructureSettings", () => {
     });
     mockForm();
 
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.queryByText(/Storage transition:/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
@@ -1692,7 +1587,7 @@ describe("InfrastructureSettings", () => {
     });
     mockForm();
 
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByText("Storage transition failed")).toBeVisible();
     expect(screen.getByText(/Target storage could not be verified/)).toBeVisible();
@@ -1719,7 +1614,7 @@ describe("InfrastructureSettings", () => {
     });
     mockForm();
 
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByText("Manual restart required")).toBeVisible();
     expect(screen.getByText(/Restart the server to activate the new storage safely/)).toBeVisible();
@@ -1741,7 +1636,7 @@ describe("InfrastructureSettings", () => {
       refetch: vi.fn(),
     });
     mockForm();
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
     expect(screen.queryByText("Manual restart required")).not.toBeInTheDocument();
   });
 
@@ -1766,7 +1661,7 @@ describe("InfrastructureSettings", () => {
       refetch: vi.fn(),
     });
     mockForm();
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
     expect(sourceHealthMock).toHaveBeenCalledWith(false, true);
     expect(sourceHealthMock).toHaveBeenCalledWith(true, false);
     expect(screen.getByText("Storage recovery: waiting to retry")).toBeVisible();
@@ -1793,7 +1688,7 @@ describe("InfrastructureSettings", () => {
     });
     mockForm();
 
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByText("Storage transition: running")).toBeInTheDocument();
     expect(screen.getByText("Copying storage objects")).toBeVisible();
@@ -1814,7 +1709,7 @@ describe("InfrastructureSettings", () => {
       getValue: (key: string) => values[key] ?? "",
     });
 
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     // No Replace step: the saved credential is a masked, always-editable input.
     const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
@@ -1836,10 +1731,9 @@ describe("InfrastructureSettings", () => {
       save: vi.fn().mockRejectedValue(new Error("save failed")),
     });
 
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
-    const privateGroup = within(screen.getByRole("group", { name: "S3 storage" }));
-    await userEvent.click(privateGroup.getByRole("button", { name: /^Private bucket/ }));
+    const privateGroup = within(screen.getByRole("group", { name: "Private storage" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
@@ -1850,7 +1744,7 @@ describe("InfrastructureSettings", () => {
   it("fails closed when protected credential status cannot be loaded", () => {
     mockForm({ sensitiveStatusReady: false, sensitiveStatusError: true });
 
-    render(<InfrastructureSettings />);
+    render(<StorageSettings />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Protected credential status is unavailable",
@@ -1875,15 +1769,13 @@ describe("InfrastructureSettings", () => {
       realForm.enabled = false;
     });
 
-    it("shows the public bucket fields before the backend is saved", async () => {
-      render(<InfrastructureSettings />);
-      expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
+    it("saves a public bucket typed before S3 is picked", async () => {
+      render(<StorageSettings />);
+      const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+      await userEvent.type(publicStorage.getByLabelText("Bucket"), "artwork");
 
       await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
       await userEvent.click(screen.getByRole("option", { name: "S3" }));
-
-      const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
-      await userEvent.type(publicStorage.getByLabelText("Bucket"), "artwork");
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() =>
@@ -1912,7 +1804,7 @@ describe("InfrastructureSettings", () => {
     });
 
     it("stages the clear in the save bar and saves it as an empty value", async () => {
-      render(<InfrastructureSettings />);
+      render(<StorageSettings />);
 
       const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
       await userEvent.click(publicGroup.getByRole("button", { name: "Clear saved value" }));
@@ -1927,7 +1819,7 @@ describe("InfrastructureSettings", () => {
     });
 
     it("takes the clear back out of the save bar when the saved value is kept", async () => {
-      render(<InfrastructureSettings />);
+      render(<StorageSettings />);
 
       const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
       await userEvent.click(publicGroup.getByRole("button", { name: "Clear saved value" }));
@@ -1938,22 +1830,6 @@ describe("InfrastructureSettings", () => {
         "placeholder",
         "••••••••••••",
       );
-    });
-
-    it("leaves an env-managed credential without a clear action", async () => {
-      serverSettings.current = { "redis.url": "" };
-      sensitiveStatus.current = {
-        configured: ["redis.url"],
-        managed_by_env: ["redis.url"],
-      };
-
-      render(<InfrastructureSettings />);
-
-      const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-      expect(redisGroup.getByLabelText("Connection URL")).toBeDisabled();
-      expect(
-        redisGroup.queryByRole("button", { name: "Clear saved value" }),
-      ).not.toBeInTheDocument();
     });
   });
 });

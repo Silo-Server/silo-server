@@ -6,6 +6,7 @@ import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useHWAccelDetection } from "@/hooks/queries/admin/system";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
 import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
+import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import { useAdminTrickplayLibraries } from "@/hooks/queries/admin/trickplay";
 import {
   AlertDialog,
@@ -25,6 +26,7 @@ import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
 import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
+import { MarkerTasksCard } from "./MarkerTasksCard";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
   IMAGE_EXECUTION_DEFAULT,
@@ -39,31 +41,36 @@ import {
   toggleHWDevice,
 } from "./playbackSettings.utils";
 
-// Shown without a disclosure: the handful of controls a household admin
-// actually touches.
+// Shown without a disclosure: the controls a household admin actually
+// touches, including the HDR tone mapping switches, throttling and where
+// segments are written.
 const TRANSCODING_ESSENTIAL_KEYS = [
   "playback.transcode_enabled",
   "playback.hw_accel",
   "allow_4k_transcode",
-];
-
-const TRANSCODING_ADVANCED_KEYS = [
   "playback.allow_hevc_encoding",
-  "playback.ffmpeg_path",
-  "playback.transcode_dir",
-  "playback.segment_retention_seconds",
-  "playback.copy_keyframe_playlist",
-  "playback.hw_device",
   "playback.transcode_hardware_tone_map_enabled",
   "playback.transcode_software_tone_map_enabled",
   "enable_transcode_throttle",
   "transcode_throttle_seconds",
+  "playback.transcode_dir",
+];
+
+const TRANSCODING_ADVANCED_KEYS = [
+  "playback.ffmpeg_path",
+  "playback.hw_device",
+  "playback.segment_retention_seconds",
+  "playback.copy_keyframe_playlist",
 ];
 
 // Chapter thumbnails and seek previews are images cut from the video, not part
-// of a transcode, so they get their own group. Width and interval are the
-// quality knobs an admin looks for and show without a disclosure.
-const PREVIEW_SHOWN_KEYS = ["playback.preview_image_width", "playback.trickplay_interval_seconds"];
+// of a transcode, so they get their own group. Width, interval and the chapter
+// thumbnail worker count show without a disclosure.
+const PREVIEW_SHOWN_KEYS = [
+  "playback.preview_image_width",
+  "playback.trickplay_interval_seconds",
+  "playback.chapter_thumbnail_workers",
+];
 
 // Where the images are made is only a real choice once a transcode node could
 // take the work, so these sit beside width and interval then and in Advanced
@@ -74,7 +81,6 @@ const PREVIEW_PLACEMENT_KEYS = [
 ];
 
 const PREVIEW_ADVANCED_KEYS = [
-  "playback.chapter_thumbnail_workers",
   "playback.trickplay_workers",
   "playback.chapter_thumbnail_hdr_policy",
   "playback.chapter_thumbnail_software_tone_map_enabled",
@@ -112,6 +118,15 @@ function remakeDescription(widthChanged: boolean, previews: number | null): stri
 
 const WATCH_KEYS = ["playback.watched_threshold", "playback.min_resume_threshold"];
 
+const MARKER_KEYS = [
+  "markers.mode",
+  "markers.detect_intros",
+  "markers.detect_credits",
+  "markers.online_storage",
+  "markers.lazy_playback",
+  "markers.detection_workers",
+];
+
 // `playback.chapter_thumbnail_node_capacity` is deliberately absent from the
 // UI (hidden tier): it is still saved and read through the settings API, but
 // the per-node budget is derived from the node pool rather than typed in.
@@ -119,10 +134,11 @@ const WATCH_KEYS = ["playback.watched_threshold", "playback.min_resume_threshold
 // The `download.*` family is its own page (DownloadsSettings), so it is not
 // loaded or saved here.
 const KEYS = [
+  ...WATCH_KEYS,
   ...TRANSCODING_ESSENTIAL_KEYS,
   ...TRANSCODING_ADVANCED_KEYS,
   ...PREVIEW_IMAGE_KEYS,
-  ...WATCH_KEYS,
+  ...MARKER_KEYS,
 ];
 
 export default function PlaybackSettings() {
@@ -196,10 +212,20 @@ export default function PlaybackSettings() {
   const allRestart = (keys: readonly string[]) => keys.every((key) => restartKeys.has(key));
 
   const throttleOn = form.getValue("enable_transcode_throttle") === "true";
-  // Every advanced transcoding key has one row, except the device picker and
-  // buffer ahead, which render only when they apply.
-  const transcodingAdvancedCount =
-    TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1) - (throttleOn ? 0 : 1);
+  // Every advanced transcoding key has one row, except the device picker,
+  // which renders only when it applies.
+  const transcodingAdvancedCount = TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1);
+
+  // An older API node saves the detection kind switches but ignores them, so
+  // they are offered only where the server says it honors them.
+  const { data: markerCapabilities } = useAdminMarkerCapabilities();
+  const detectionKindSettings = markerCapabilities?.detection_kind_settings === true;
+  const markerMode = form.getValue("markers.mode") || "both";
+  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
+  const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
+  const localMarkersEnabled = markerMode === "local" || markerMode === "both";
+  const showLazyPlayback =
+    markerMode !== "off" && (!onlineMarkersEnabled || onlineMarkerStorage === "stored");
 
   const detection = hwAccel === "none" ? undefined : hwDetection.data;
   const detectedLabel = describeDetection(detection);
@@ -274,6 +300,26 @@ export default function PlaybackSettings() {
       <SettingsPageHeader title="Playback" />
 
       <div className="flex-1 space-y-5">
+        <FieldGroup label="Watch behavior" restartAll={allRestart(WATCH_KEYS)}>
+          <SettingField
+            label="Mark watched at"
+            type="number"
+            unit="%"
+            value={form.getValue("playback.watched_threshold")}
+            onChange={(v) => form.setValue("playback.watched_threshold", v)}
+            restartRequired={restartKeys.has("playback.watched_threshold")}
+          />
+          <SettingField
+            label="Show in Continue Watching after"
+            type="number"
+            unit="%"
+            description="Progress below this is ignored."
+            value={form.getValue("playback.min_resume_threshold")}
+            onChange={(v) => form.setValue("playback.min_resume_threshold", v)}
+            restartRequired={restartKeys.has("playback.min_resume_threshold")}
+          />
+        </FieldGroup>
+
         <FieldGroup
           label="Transcoding"
           restartAll={allRestart([...TRANSCODING_ESSENTIAL_KEYS, ...TRANSCODING_ADVANCED_KEYS])}
@@ -304,19 +350,61 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("allow_4k_transcode", v)}
             restartRequired={restartKeys.has("allow_4k_transcode")}
           />
+          <SettingField
+            label="Allow HEVC encoding"
+            type="toggle"
+            description="Use HEVC for clients that support HEVC over HLS. Other clients keep H.264."
+            value={form.getValue("playback.allow_hevc_encoding")}
+            onChange={(v) => form.setValue("playback.allow_hevc_encoding", v)}
+          />
+          <SettingField
+            label="Enable Hardware HDR Tone Mapping"
+            type="toggle"
+            hint="Allows validated local or remote GPU executors to convert HDR video to SDR when transcoding."
+            value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
+            onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
+            restartRequired={restartKeys.has("playback.transcode_hardware_tone_map_enabled")}
+          />
+          <SettingField
+            label="Enable Software HDR Tone Mapping"
+            type="toggle"
+            hint="Allows the CPU to convert HDR video to SDR when transcoding. This can be very CPU-intensive."
+            value={form.getValue("playback.transcode_software_tone_map_enabled")}
+            onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
+            restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
+          />
+          <SettingField
+            label="Throttle transcoding"
+            type="toggle"
+            description="Pause encoding once the client is far enough ahead."
+            value={form.getValue("enable_transcode_throttle")}
+            onChange={(v) => form.setValue("enable_transcode_throttle", v)}
+            restartRequired={restartKeys.has("enable_transcode_throttle")}
+          />
+          {throttleOn && (
+            <SettingField
+              label="Buffer ahead"
+              type="number"
+              unit="seconds"
+              value={form.getValue("transcode_throttle_seconds")}
+              onChange={(v) => form.setValue("transcode_throttle_seconds", v)}
+              restartRequired={restartKeys.has("transcode_throttle_seconds")}
+            />
+          )}
+          <PathSettingField
+            label="Transcode directory"
+            defaultValue={DEFAULT_TRANSCODE_DIR}
+            description={`Use fast local storage with room to spare. Leave blank to use ${DEFAULT_TRANSCODE_DIR}.`}
+            value={form.getValue("playback.transcode_dir")}
+            onChange={(v) => form.setValue("playback.transcode_dir", v)}
+            restartRequired={restartKeys.has("playback.transcode_dir")}
+          />
 
           <AdvancedSection
             id="playback.transcoding"
             count={transcodingAdvancedCount}
             forceOpen={anyDirty(TRANSCODING_ADVANCED_KEYS)}
           >
-            <SettingField
-              label="Allow HEVC encoding"
-              type="toggle"
-              description="Use HEVC for clients that support HEVC over HLS. Other clients keep H.264."
-              value={form.getValue("playback.allow_hevc_encoding")}
-              onChange={(v) => form.setValue("playback.allow_hevc_encoding", v)}
-            />
             <PathSettingField
               label="FFmpeg path"
               defaultValue={DEFAULT_FFMPEG_PATH}
@@ -324,14 +412,6 @@ export default function PlaybackSettings() {
               value={form.getValue("playback.ffmpeg_path")}
               onChange={(v) => form.setValue("playback.ffmpeg_path", v)}
               restartRequired={restartKeys.has("playback.ffmpeg_path")}
-            />
-            <PathSettingField
-              label="Transcode directory"
-              defaultValue={DEFAULT_TRANSCODE_DIR}
-              description={`Use fast local storage with room to spare. Leave blank to use ${DEFAULT_TRANSCODE_DIR}.`}
-              value={form.getValue("playback.transcode_dir")}
-              onChange={(v) => form.setValue("playback.transcode_dir", v)}
-              restartRequired={restartKeys.has("playback.transcode_dir")}
             />
             {showDevicePicker && (
               <div>
@@ -400,20 +480,13 @@ export default function PlaybackSettings() {
               </div>
             )}
             <SettingField
-              label="Enable Hardware HDR Tone Mapping"
-              type="toggle"
-              hint="Allows validated local or remote GPU executors to convert HDR video to SDR when transcoding."
-              value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
-              onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
-              restartRequired={restartKeys.has("playback.transcode_hardware_tone_map_enabled")}
-            />
-            <SettingField
-              label="Enable Software HDR Tone Mapping"
-              type="toggle"
-              hint="Allows the CPU to convert HDR video to SDR when transcoding. This can be very CPU-intensive."
-              value={form.getValue("playback.transcode_software_tone_map_enabled")}
-              onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
-              restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
+              label="Transcode back buffer"
+              type="number"
+              unit="seconds"
+              hint="Keeps this much already-downloaded media for instant backward seeking, then reclaims older transcode segments. Use 0 to disable cleanup; enabled values must be at least 120 seconds. Pair with transcode throttling to bound both behind- and ahead-of-client disk usage."
+              value={form.getValue("playback.segment_retention_seconds")}
+              onChange={(v) => form.setValue("playback.segment_retention_seconds", v)}
+              restartRequired={restartKeys.has("playback.segment_retention_seconds")}
             />
             <SettingField
               label="Complete playlists for copied video"
@@ -422,33 +495,6 @@ export default function PlaybackSettings() {
               value={form.getValue("playback.copy_keyframe_playlist") || "false"}
               onChange={(v) => form.setValue("playback.copy_keyframe_playlist", v)}
               restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}
-            />
-            <SettingField
-              label="Throttle transcoding"
-              type="toggle"
-              description="Pause encoding once the client is far enough ahead."
-              value={form.getValue("enable_transcode_throttle")}
-              onChange={(v) => form.setValue("enable_transcode_throttle", v)}
-              restartRequired={restartKeys.has("enable_transcode_throttle")}
-            />
-            {throttleOn && (
-              <SettingField
-                label="Buffer ahead"
-                type="number"
-                unit="seconds"
-                value={form.getValue("transcode_throttle_seconds")}
-                onChange={(v) => form.setValue("transcode_throttle_seconds", v)}
-                restartRequired={restartKeys.has("transcode_throttle_seconds")}
-              />
-            )}
-            <SettingField
-              label="Transcode back buffer"
-              type="number"
-              unit="seconds"
-              hint="Keeps this much already-downloaded media for instant backward seeking, then reclaims older transcode segments. Use 0 to disable cleanup; enabled values must be at least 120 seconds. Pair with transcode throttling to bound both behind- and ahead-of-client disk usage."
-              value={form.getValue("playback.segment_retention_seconds")}
-              onChange={(v) => form.setValue("playback.segment_retention_seconds", v)}
-              restartRequired={restartKeys.has("playback.segment_retention_seconds")}
             />
           </AdvancedSection>
         </FieldGroup>
@@ -495,6 +541,14 @@ export default function PlaybackSettings() {
               />
             </>
           )}
+          <SettingField
+            label="Chapter thumbnail workers"
+            type="number"
+            description="How many files Silo extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue."
+            value={form.getValue("playback.chapter_thumbnail_workers")}
+            onChange={(v) => form.setValue("playback.chapter_thumbnail_workers", v)}
+            restartRequired={restartKeys.has("playback.chapter_thumbnail_workers")}
+          />
           {showPreviewPlacement && (
             <>
               {chapterExecutionField}
@@ -513,14 +567,6 @@ export default function PlaybackSettings() {
               (!trickplayNodeAvailable && trickplayExecution === "transcode_nodes_only")
             }
           >
-            <SettingField
-              label="Chapter thumbnail workers"
-              type="number"
-              description="How many files Silo extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue."
-              value={form.getValue("playback.chapter_thumbnail_workers")}
-              onChange={(v) => form.setValue("playback.chapter_thumbnail_workers", v)}
-              restartRequired={restartKeys.has("playback.chapter_thumbnail_workers")}
-            />
             {!showPreviewPlacement && chapterExecutionField}
             {supportsTrickplay && (
               <SettingField
@@ -569,24 +615,115 @@ export default function PlaybackSettings() {
           </AdvancedSection>
         </FieldGroup>
 
-        <FieldGroup label="Watch behavior" restartAll={allRestart(WATCH_KEYS)}>
+        {/*
+          Detection behavior lives here; which online providers answer a lookup,
+          and on what terms, is provider configuration and lives with the other
+          providers.
+        */}
+        <FieldGroup
+          label="Skip markers"
+          description="Markers identify intros, credits, recaps, and previews so players can offer skip controls."
+          restartAll={allRestart(MARKER_KEYS)}
+          actions={
+            <Link
+              to="/admin/settings/providers"
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+            >
+              Marker providers
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          }
+        >
           <SettingField
-            label="Mark watched at"
-            type="number"
-            unit="%"
-            value={form.getValue("playback.watched_threshold")}
-            onChange={(v) => form.setValue("playback.watched_threshold", v)}
-            restartRequired={restartKeys.has("playback.watched_threshold")}
+            label="Marker source"
+            type="select"
+            description="Online markers take priority. Silo skips local detection of an intro or credits when an online one is saved in your library. Local detection uses CPU."
+            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
+            options={[
+              { value: "off", label: "Off" },
+              { value: "local", label: "Detect on this server" },
+              { value: "both", label: "Online preferred + server detection" },
+              { value: "online", label: "Online providers only" },
+            ]}
+            value={markerMode}
+            onChange={(value) => form.setValue("markers.mode", value)}
+            restartRequired={restartKeys.has("markers.mode")}
           />
-          <SettingField
-            label="Show in Continue Watching after"
-            type="number"
-            unit="%"
-            description="Progress below this is ignored."
-            value={form.getValue("playback.min_resume_threshold")}
-            onChange={(v) => form.setValue("playback.min_resume_threshold", v)}
-            restartRequired={restartKeys.has("playback.min_resume_threshold")}
-          />
+
+          {localMarkersEnabled && detectionKindSettings && (
+            <>
+              <SettingField
+                label="Detect intros"
+                type="toggle"
+                description="Finds each episode's opening from embedded chapters, or by comparing the start of episodes in a season."
+                value={form.getValue("markers.detect_intros") || "true"}
+                onChange={(value) => form.setValue("markers.detect_intros", value)}
+                restartRequired={restartKeys.has("markers.detect_intros")}
+              />
+              <SettingField
+                label="Detect credits"
+                type="toggle"
+                description="Finds end credits from embedded chapters, or by reading the end of each episode and movie. Uses more CPU than intro detection."
+                value={form.getValue("markers.detect_credits") || "true"}
+                onChange={(value) => form.setValue("markers.detect_credits", value)}
+                restartRequired={restartKeys.has("markers.detect_credits")}
+              />
+            </>
+          )}
+
+          {onlineMarkersEnabled && (
+            <SettingField
+              label="Save online markers"
+              type="select"
+              description={
+                onlineMarkerStorage === "stored"
+                  ? "Silo saves markers from enabled providers such as TheIntroDB. The Sync online markers task fetches missing markers and refreshes saved markers daily at 03:00 (server time) by default."
+                  : "Fetch markers when needed without saving them to your library. Scheduled online sync is disabled."
+              }
+              options={[
+                { value: "stored", label: "Save to library" },
+                { value: "on_demand", label: "Fetch when needed" },
+              ]}
+              value={onlineMarkerStorage}
+              onChange={(value) => {
+                form.setValue("markers.online_storage", value);
+                if (value === "on_demand") form.setValue("markers.lazy_playback", "true");
+              }}
+              restartRequired={restartKeys.has("markers.online_storage")}
+            />
+          )}
+
+          {showLazyPlayback && (
+            <SettingField
+              label="Find markers on playback"
+              type="toggle"
+              description={
+                onlineMarkersEnabled
+                  ? markerMode === "both"
+                    ? "Check online first when playback starts. Silo detects only the intro or credits online providers don't have, using this server's CPU."
+                    : "Check online for missing or outdated markers when playback starts."
+                  : "Detect missing markers when playback starts. Local analysis uses CPU."
+              }
+              value={form.getValue("markers.lazy_playback") || "true"}
+              onChange={(value) => form.setValue("markers.lazy_playback", value)}
+              restartRequired={restartKeys.has("markers.lazy_playback")}
+            />
+          )}
+
+          {localMarkersEnabled && (
+            <SettingField
+              label="Detection workers"
+              type="number"
+              description="How many seasons or movies Silo analyzes at once, each with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              value={form.getValue("markers.detection_workers")}
+              onChange={(value) => form.setValue("markers.detection_workers", value)}
+              restartRequired={restartKeys.has("markers.detection_workers")}
+            />
+          )}
+
+          <div className="py-3.5">
+            <MarkerTasksCard />
+          </div>
         </FieldGroup>
       </div>
 

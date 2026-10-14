@@ -24,6 +24,9 @@ const useHWAccelDetectionMock = vi.fn();
 const useAdminNodesMock = vi.fn();
 const useAdminTrickplayLibrariesMock = vi.fn();
 const useLibraryCapabilitiesMock = vi.fn();
+const markerCapabilitiesMock = vi.fn<() => { data?: Record<string, boolean> }>(() => ({
+  data: { detection_kind_settings: true },
+}));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -49,7 +52,21 @@ vi.mock("@/hooks/queries/admin/trickplay", () => ({
   useAdminTrickplayLibraries: () => useAdminTrickplayLibrariesMock(),
 }));
 
-// The Preview images group links to Libraries, so the page renders in a router.
+vi.mock("@/hooks/queries/admin/markers", () => ({
+  useAdminMarkerCapabilities: () => markerCapabilitiesMock(),
+}));
+
+vi.mock("@/hooks/queries/admin/tasks", () => ({
+  useTasks: () => ({ data: [] }),
+  useRunTask: () => ({ mutateAsync: vi.fn() }),
+}));
+
+vi.mock("@/components/realtimeEventsContext", () => ({
+  useEventChannel: () => undefined,
+}));
+
+// Preview images links to Libraries and Skip markers to its providers, so the
+// page renders in a router.
 function Page() {
   return (
     <MemoryRouter>
@@ -130,6 +147,7 @@ beforeEach(() => {
   useAdminNodesMock.mockReturnValue({ data: [transcodeNode()], isSuccess: true });
   useAdminTrickplayLibrariesMock.mockReset();
   useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined, isSuccess: false });
+  markerCapabilitiesMock.mockReturnValue({ data: { detection_kind_settings: true } });
 });
 
 describe("PlaybackSettings layout", () => {
@@ -143,6 +161,16 @@ describe("PlaybackSettings layout", () => {
     expect(keys).toContain("playback.allow_hevc_encoding");
     expect(keys).toContain("playback.watched_threshold");
     expect(keys).toContain("playback.copy_keyframe_playlist");
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "markers.mode",
+        "markers.detect_intros",
+        "markers.detect_credits",
+        "markers.online_storage",
+        "markers.lazy_playback",
+        "markers.detection_workers",
+      ]),
+    );
     expect(keys.some((key) => key.startsWith("download."))).toBe(false);
     // Node routing and subtitle sync have their own pages and forms.
     expect(keys.some((key) => key.startsWith("playback.routing."))).toBe(false);
@@ -151,16 +179,18 @@ describe("PlaybackSettings layout", () => {
     expect(keys).not.toContain("playback.chapter_thumbnail_node_capacity");
   });
 
-  it("orders the groups with preview images between transcoding and watch behavior", () => {
+  it("orders the groups with watch behavior first and skip markers last", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
 
     const container = parse(renderToStaticMarkup(<Page />));
 
-    expect(Array.from(container.querySelectorAll("h3"), (h) => h.textContent)).toEqual([
-      "Transcoding",
-      "Preview images",
-      "Watch behavior",
-    ]);
+    // Group headings only: the marker task cards carry their own h3s.
+    expect(
+      Array.from(
+        container.querySelectorAll("section[role=group]"),
+        (group) => group.querySelector("h3")?.textContent,
+      ),
+    ).toEqual(["Watch behavior", "Transcoding", "Preview images", "Skip markers"]);
   });
 
   it("counts each group's advanced settings in its own disclosure", () => {
@@ -168,65 +198,80 @@ describe("PlaybackSettings layout", () => {
 
     render(<Page />);
 
-    // Without a device picker or throttling: HEVC, two paths, two
-    // tone-mapping switches, throttle and back buffer.
+    // Without a device picker: the FFmpeg path, the back buffer and complete
+    // playlists for copied video.
     expect(
       within(screen.getByRole("group", { name: "Transcoding" })).getByRole("button", {
-        name: "Advanced · 7 settings",
+        name: "Advanced · 3 settings",
       }),
     ).toBeInTheDocument();
-    // With a transcode node the placement selects sit outside: two worker
-    // counts and the two chapter-thumbnail HDR fields stay.
+    // With a transcode node the placement selects sit outside: the seek
+    // preview worker count and the two chapter-thumbnail HDR fields stay.
     expect(
       within(screen.getByRole("group", { name: "Preview images" })).getByRole("button", {
-        name: "Advanced · 4 settings",
+        name: "Advanced · 3 settings",
       }),
     ).toBeInTheDocument();
+    // Every Skip markers setting is shown, so it has no disclosure.
+    expect(
+      within(screen.getByRole("group", { name: "Skip markers" })).queryByRole("button", {
+        name: /^Advanced/,
+      }),
+    ).toBeNull();
   });
 
-  it("counts buffer ahead only while throttling is on", () => {
-    expandAdvanced();
+  it("shows buffer ahead beside throttling, only while throttling is on", () => {
+    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
+    const off = render(<Page />);
+    expect(
+      within(screen.getByRole("group", { name: "Transcoding" })).queryByText("Buffer ahead"),
+    ).toBeNull();
+    off.unmount();
+
     useSettingsFormMock.mockReturnValue(
       makeForm({ "playback.hw_accel": "none", enable_transcode_throttle: "true" }),
     );
-
     render(<Page />);
     const transcoding = within(screen.getByRole("group", { name: "Transcoding" }));
 
-    expect(transcoding.getByRole("button", { name: "Advanced · 8 settings" })).toBeInTheDocument();
     expect(transcoding.getByText("Buffer ahead")).toBeInTheDocument();
+    expect(transcoding.getByRole("button", { name: "Advanced · 3 settings" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
-  it("keeps HEVC encoding inside the Transcoding disclosure", () => {
+  it("shows HEVC, tone mapping, throttling and the transcode directory without the disclosure", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
 
-    const view = render(<Page />);
+    render(<Page />);
     const transcoding = within(screen.getByRole("group", { name: "Transcoding" }));
 
-    expect(transcoding.getByRole("switch", { name: "Video transcoding" })).toBeInTheDocument();
-    expect(transcoding.getByRole("switch", { name: "Allow 4K transcoding" })).toBeInTheDocument();
-    expect(transcoding.queryByRole("switch", { name: "Allow HEVC encoding" })).toBeNull();
-    view.unmount();
-
-    expandAdvanced();
-    render(<Page />);
-    expect(
-      within(screen.getByRole("group", { name: "Transcoding" })).getByRole("switch", {
-        name: "Allow HEVC encoding",
-      }),
-    ).toBeInTheDocument();
+    for (const name of [
+      "Video transcoding",
+      "Allow 4K transcoding",
+      "Allow HEVC encoding",
+      "Enable Hardware HDR Tone Mapping",
+      "Enable Software HDR Tone Mapping",
+      "Throttle transcoding",
+    ]) {
+      expect(transcoding.getByRole("switch", { name })).toBeInTheDocument();
+    }
+    expect(transcoding.getByLabelText("Transcode directory")).toBeInTheDocument();
+    expect(transcoding.queryByText("FFmpeg path")).toBeNull();
+    expect(transcoding.queryByText("Transcode back buffer")).toBeNull();
   });
 
-  it("opens the Transcoding disclosure for a dirty HEVC switch", () => {
+  it("opens the Transcoding disclosure for a dirty FFmpeg path", () => {
     useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none", "playback.allow_hevc_encoding": "true" }, [
-        "playback.allow_hevc_encoding",
+      makeForm({ "playback.hw_accel": "none", "playback.ffmpeg_path": "/opt/ffmpeg" }, [
+        "playback.ffmpeg_path",
       ]),
     );
 
     render(<Page />);
 
-    expect(screen.getByRole("switch", { name: "Allow HEVC encoding" })).toBeChecked();
+    expect(screen.getByLabelText("FFmpeg path")).toHaveValue("/opt/ffmpeg");
   });
 
   it("describes how a blank FFmpeg path is resolved", () => {
@@ -305,7 +350,7 @@ describe("PlaybackSettings preview images tiering", () => {
     );
   });
 
-  it("shows width and interval without opening the disclosure", () => {
+  it("shows width, interval and chapter thumbnail workers without opening the disclosure", () => {
     useSettingsFormMock.mockReturnValue(
       makeForm({
         "playback.hw_accel": "none",
@@ -323,12 +368,8 @@ describe("PlaybackSettings preview images tiering", () => {
     );
     expect(group.getByLabelText("Preview image width")).toHaveValue(300);
     expect(group.getByLabelText("Seek preview interval")).toHaveValue(10);
-    for (const label of [
-      "Chapter thumbnail workers",
-      "Seek preview workers",
-      "HDR handling",
-      TONE_MAP_LABEL,
-    ]) {
+    expect(group.getByLabelText("Chapter thumbnail workers")).toBeInTheDocument();
+    for (const label of ["Seek preview workers", "HDR handling", TONE_MAP_LABEL]) {
       expect(group.queryByText(label)).toBeNull();
     }
   });
@@ -352,8 +393,8 @@ describe("PlaybackSettings preview images tiering", () => {
       group = within(screen.getByRole("group", { name: "Preview images" }));
       expect(group.queryByText("Generate chapter thumbnails on")).toBeNull();
       expect(group.queryByText("Generate seek previews on")).toBeNull();
-      // Both selects join the two worker counts and the two HDR fields.
-      expect(group.getByRole("button", { name: "Advanced · 6 settings" })).toBeInTheDocument();
+      // Both selects join the seek preview worker count and the two HDR fields.
+      expect(group.getByRole("button", { name: "Advanced · 5 settings" })).toBeInTheDocument();
       collapsed.unmount();
     }
   });
@@ -435,8 +476,6 @@ describe("PlaybackSettings CPU tone mapping", () => {
 });
 
 describe("PlaybackSettings transcode tone mapping", () => {
-  beforeEach(expandAdvanced);
-
   it("registers independent hardware and software settings disabled by default", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "auto" }));
 
@@ -674,12 +713,101 @@ describe("PlaybackSettings seek-preview node capability", () => {
 
 describe("HEVC encoding policy", () => {
   it("saves the HEVC switch through the playback settings form", () => {
-    expandAdvanced();
     const form = makeForm({ "playback.hw_accel": "none", "playback.allow_hevc_encoding": "false" });
     useSettingsFormMock.mockReturnValue(form);
     render(<Page />);
     fireEvent.click(screen.getByRole("switch", { name: "Allow HEVC encoding" }));
     expect(form.setValue).toHaveBeenCalledWith("playback.allow_hevc_encoding", "true");
+  });
+});
+
+describe("PlaybackSettings skip markers", () => {
+  function markersGroup(values: Record<string, string>, dirty: string[] = []): HTMLElement {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({ "playback.hw_accel": "none", ...values }, dirty),
+    );
+    return groupNamed(parse(renderToStaticMarkup(<Page />)), "Skip markers");
+  }
+
+  it("links to the marker providers", () => {
+    const link = markersGroup({}).querySelector("a[href='/admin/settings/providers']");
+    expect(link?.textContent).toBe("Marker providers");
+  });
+
+  it("shows the settings that apply to each marker source, without a disclosure", () => {
+    const cases: Array<[string, string[], string[]]> = [
+      [
+        "both",
+        [
+          "Detect intros",
+          "Detect credits",
+          "Save online markers",
+          "Find markers on playback",
+          "Detection workers",
+        ],
+        [],
+      ],
+      [
+        "local",
+        ["Detect intros", "Detect credits", "Find markers on playback", "Detection workers"],
+        ["Save online markers"],
+      ],
+      [
+        "online",
+        ["Save online markers", "Find markers on playback"],
+        ["Detect intros", "Detect credits", "Detection workers"],
+      ],
+      [
+        "off",
+        [],
+        [
+          "Detect intros",
+          "Detect credits",
+          "Save online markers",
+          "Find markers on playback",
+          "Detection workers",
+        ],
+      ],
+    ];
+    for (const [mode, shown, hidden] of cases) {
+      const group = markersGroup({ "markers.mode": mode });
+      expect(group.textContent).toContain("Marker source");
+      for (const label of shown) expect(group.textContent).toContain(label);
+      for (const label of hidden) expect(group.textContent).not.toContain(label);
+      expect(group.querySelector("button[aria-label^=Advanced]")).toBeNull();
+    }
+  });
+
+  it("leaves out playback lookups while online markers are fetched when needed", () => {
+    const group = markersGroup({ "markers.mode": "online", "markers.online_storage": "on_demand" });
+
+    expect(group.textContent).toContain("Save online markers");
+    expect(group.textContent).not.toContain("Find markers on playback");
+  });
+
+  it("hides the detection switches unless the server honors them", () => {
+    const cases: Array<{ data?: Record<string, boolean> }> = [
+      {},
+      { data: { redetect_markers: true } },
+      { data: { detection_kind_settings: false } },
+    ];
+    for (const capabilities of cases) {
+      markerCapabilitiesMock.mockReturnValue(capabilities);
+      const group = markersGroup({ "markers.mode": "local" });
+      expect(group.textContent).not.toContain("Detect intros");
+      expect(group.textContent).not.toContain("Detect credits");
+      expect(group.textContent).toContain("Detection workers");
+    }
+  });
+
+  it("shows each detection switch's saved state and defaults both on", () => {
+    const defaults = markersGroup({ "markers.mode": "both" });
+    expect(labelled(defaults, "Detect intros")).toHaveAttribute("aria-checked", "true");
+    expect(labelled(defaults, "Detect credits")).toHaveAttribute("aria-checked", "true");
+
+    const introsOnly = markersGroup({ "markers.mode": "local", "markers.detect_credits": "false" });
+    expect(labelled(introsOnly, "Detect intros")).toHaveAttribute("aria-checked", "true");
+    expect(labelled(introsOnly, "Detect credits")).toHaveAttribute("aria-checked", "false");
   });
 });
 
@@ -836,9 +964,10 @@ it("hides unsupported seek preview settings and leaves their keys out", () => {
   expect(screen.queryByLabelText("Preview image width")).toBeNull();
   expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).not.toContain("playback.trickplay_workers");
   // The chapter thumbnail half of the group stays, and the count follows it:
-  // workers and the two HDR fields, with placement outside beside a node.
+  // the two HDR fields, with workers shown and placement outside beside a node.
   const group = within(screen.getByRole("group", { name: "Preview images" }));
-  expect(group.getByRole("button", { name: "Advanced · 3 settings" })).toBeInTheDocument();
+  expect(group.getByRole("button", { name: "Advanced · 2 settings" })).toBeInTheDocument();
+  expect(group.getByText("Chapter thumbnail workers")).toBeInTheDocument();
   expect(group.getByText("Generate chapter thumbnails on")).toBeInTheDocument();
   expect(group.queryByText("Generate seek previews on")).toBeNull();
   expect(group.queryByText("Seek preview workers")).toBeNull();

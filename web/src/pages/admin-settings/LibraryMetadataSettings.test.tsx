@@ -8,14 +8,6 @@ import LibraryMetadataSettings from "./LibraryMetadataSettings";
 
 const useSettingsFormMock = vi.fn();
 const useRestartKeysMock = vi.fn(() => new Set<string>());
-const storageAvailableMock = vi.fn(() => true);
-const markerCapabilitiesMock = vi.fn<() => { data?: Record<string, boolean> }>(() => ({
-  data: { detection_kind_settings: true },
-}));
-
-vi.mock("@/hooks/useBranding", () => ({
-  useBranding: () => ({ storageAvailable: storageAvailableMock() }),
-}));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -28,15 +20,6 @@ vi.mock("@/hooks/useSettingsForm", () => ({
 
 vi.mock("@/hooks/useRestartKeys", () => ({
   useRestartKeys: () => useRestartKeysMock(),
-}));
-
-vi.mock("@/hooks/queries/admin/settings", () => ({
-  useCheckAdminSettingsConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useCatalogSearchStatus: () => ({ data: undefined, isLoading: true }),
-}));
-
-vi.mock("@/hooks/queries/admin/markers", () => ({
-  useAdminMarkerCapabilities: () => markerCapabilitiesMock(),
 }));
 
 /** A transcode node subtitle sync could run on. */
@@ -84,15 +67,6 @@ vi.mock("@/hooks/queries/admin/ratingSources", () => ({
   useAdminRatingSources: () => ratingSourcesMock(),
 }));
 
-vi.mock("@/hooks/queries/admin/tasks", () => ({
-  useTasks: () => ({ data: [] }),
-  useRunTask: () => ({ mutateAsync: vi.fn() }),
-}));
-
-vi.mock("@/components/realtimeEventsContext", () => ({
-  useEventChannel: () => undefined,
-}));
-
 function makeForm(values: Record<string, string>, dirty: string[] = []) {
   const dirtySet = new Set(dirty);
   return {
@@ -100,16 +74,12 @@ function makeForm(values: Record<string, string>, dirty: string[] = []) {
     getValue: (key: string) => values[key] ?? "",
     getPersistedValue: (key: string) => values[key] ?? "",
     setValue: vi.fn(),
-    resetValue: vi.fn(),
     isDirty: (key: string) => dirtySet.has(key),
-    isClearStaged: (key: string) => dirtySet.has(key) && (values[key] ?? "") === "",
     dirtyCount: dirtySet.size,
     save: vi.fn(),
     discard: vi.fn(),
     isSaving: false,
     restartRequired: false,
-    sensitiveConfigured: [] as string[],
-    buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
   };
 }
 
@@ -152,19 +122,7 @@ function text(markup: string): string {
 }
 
 // The toggle is a Radix switch, so reach it through the label association
-// SettingField sets up rather than by scanning the markup for "disabled".
-function toggleDisabled(markup: string, label: string): boolean {
-  const container = document.createElement("div");
-  container.innerHTML = markup;
-  const labelEl = Array.from(container.querySelectorAll("label")).find(
-    (el) => el.textContent?.trim() === label,
-  );
-  if (!labelEl?.htmlFor) throw new Error(`no label found for ${label}`);
-  const control = container.querySelector(`[id="${labelEl.htmlFor}"]`);
-  if (!control) throw new Error(`no control found for ${label}`);
-  return control.hasAttribute("disabled");
-}
-
+// SettingField sets up rather than by scanning the markup.
 function toggleChecked(markup: string, label: string): boolean {
   const container = document.createElement("div");
   container.innerHTML = markup;
@@ -181,36 +139,31 @@ describe("LibraryMetadataSettings", () => {
   beforeEach(() => {
     localStorage.clear();
     useRestartKeysMock.mockReturnValue(new Set<string>());
-    storageAvailableMock.mockReturnValue(true);
-    markerCapabilitiesMock.mockReturnValue({ data: { detection_kind_settings: true } });
     useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
   });
 
-  it("orders the groups with scanning and artwork first", () => {
+  it("orders the groups with the general switch first", () => {
     const container = document.createElement("div");
     container.innerHTML = render({});
 
-    // Group headings only: the marker task cards carry their own h3s.
     const headings = Array.from(
       container.querySelectorAll("section[role=group]"),
       (group) => group.querySelector("h3")?.textContent,
     );
     expect(headings).toEqual([
+      "General",
       "Scanning",
-      "Artwork and versions",
       "Maturity limits",
       "Ratings",
-      "Skip markers",
       "Subtitle sync",
-      "Search",
     ]);
   });
 
-  it("shows artwork caching and the versions switch without a disclosure", () => {
-    const group = groupNamed(render({}), "Artwork and versions");
+  it("shows the versions switch alone in General, without a disclosure", () => {
+    const group = groupNamed(render({}), "General");
     expect(disclosures(group)).toEqual([]);
-    expect(group.textContent).toContain("Save provider artwork to storage");
     expect(group.textContent).toContain("Show all library versions on detail page");
+    expect(group.textContent).not.toContain("Save provider artwork to storage");
   });
 
   it("shows the versions switch as the opposite of the stored scope key", () => {
@@ -225,7 +178,7 @@ describe("LibraryMetadataSettings", () => {
   });
 
   it("shows the three worker counts and keeps the rest of scanning behind Advanced", () => {
-    const rendered = render({ "catalog.search.provider": "postgres" });
+    const rendered = render({});
     const scanning = groupNamed(rendered, "Scanning");
 
     for (const label of ["Scanner workers", "Matcher workers", "Image encoding workers"]) {
@@ -241,29 +194,18 @@ describe("LibraryMetadataSettings", () => {
     const keys: string[] = calls[calls.length - 1]?.[0]?.keys ?? [];
     expect(keys).toEqual(
       expect.arrayContaining([
-        "metadata.cache_images",
         "catalog.scope_versions_to_library",
         "scanner.workers",
         "matcher.workers",
         "matcher.batch_size",
         "metadata.image_workers",
         "metadata.person_refresh_per_minute",
-        "markers.mode",
-        "markers.lazy_playback",
-        "markers.online_storage",
-        "markers.detection_workers",
-        "markers.detect_intros",
-        "markers.detect_credits",
-        "catalog.search.provider",
-        "catalog.search.meilisearch.url",
-        "catalog.search.meilisearch.api_key",
-        "catalog.search.meilisearch.semantic_ratio",
       ]),
     );
-    // Hidden tier: still saved through the API, no control on this page.
-    expect(keys).not.toContain("catalog.search.meilisearch.embedder");
-    expect(keys).not.toContain("catalog.search.meilisearch.binary_quantized");
-    expect(keys).not.toContain("catalog.search.meilisearch.rebuild_batch_size");
+    // Moved to Storage, Playback and Search, which load and save them.
+    expect(keys).not.toContain("metadata.cache_images");
+    expect(keys.some((key) => key.startsWith("markers."))).toBe(false);
+    expect(keys.some((key) => key.startsWith("catalog.search."))).toBe(false);
     expect(keys).toContain("scanner.realtime_monitoring");
   });
 
@@ -280,161 +222,12 @@ describe("LibraryMetadataSettings", () => {
 
   it("offers the background person lookup rate in the advanced scanning settings", () => {
     // The Advanced section opens on its own when one of its fields is edited.
-    const rendered = render({ "catalog.search.provider": "postgres" }, [
-      "metadata.person_refresh_per_minute",
-    ]);
+    const rendered = render({}, ["metadata.person_refresh_per_minute"]);
 
     expect(text(rendered)).toContain("Person lookups per minute");
     expect(text(rendered)).toContain(
       "How many cast and crew members each server looks up per minute in the background.",
     );
-  });
-
-  it("hides Meilisearch connection fields until that engine is selected", () => {
-    expand("library.search");
-    expect(text(render({ "catalog.search.provider": "postgres" }))).not.toContain(
-      "Meilisearch URL",
-    );
-
-    expect(text(render({ "catalog.search.provider": "meilisearch" }))).toContain("Meilisearch URL");
-  });
-
-  it("shows the search engine and keeps Meilisearch and search status in one disclosure", () => {
-    const postgres = groupNamed(render({ "catalog.search.provider": "postgres" }), "Search");
-    expect(postgres.textContent).toContain(
-      "Built-in Postgres search needs no setup. Meilisearch is optional.",
-    );
-    expect(postgres.textContent).toContain("Search engine");
-    // Only the status panel is behind it, and that is not a setting.
-    expect(disclosures(postgres)).toEqual(["Advanced"]);
-
-    const meili = groupNamed(render({ "catalog.search.provider": "meilisearch" }), "Search");
-    // URL, API key and the six tuning fields.
-    expect(disclosures(meili)).toEqual(["Advanced · 8 settings"]);
-    expect(meili.textContent).not.toContain("Meilisearch URL");
-
-    expand("library.search");
-    const open = groupNamed(render({ "catalog.search.provider": "meilisearch" }), "Search");
-    for (const label of [
-      "Meilisearch URL",
-      "Meilisearch API key",
-      "Index name prefix",
-      "Match by meaning as well as words",
-    ]) {
-      expect(open.textContent).toContain(label);
-    }
-    expect(open.querySelector("h4")?.textContent).toBe("Search status");
-  });
-
-  it("opens the search disclosure for an unsaved Meilisearch change", () => {
-    const group = groupNamed(
-      render({ "catalog.search.provider": "meilisearch" }, ["catalog.search.meilisearch.url"]),
-      "Search",
-    );
-
-    expect(group.textContent).toContain("Meilisearch URL");
-  });
-
-  it("allows caching provider artwork without an S3 bucket", () => {
-    storageAvailableMock.mockReturnValue(false);
-    const rendered = render({});
-    expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Save provider artwork to storage")).toBe(false);
-  });
-
-  it("offers separate intro and credits detection while this server detects markers", () => {
-    expand("library.markers");
-    for (const mode of ["local", "both"]) {
-      const rendered = text(render({ "markers.mode": mode }));
-      expect(rendered).toContain("Detection workers");
-      expect(rendered).toContain("Detect intros");
-      expect(rendered).toContain("Detect credits");
-      expect(rendered).toContain("reading the end of each episode and movie");
-    }
-    for (const mode of ["online", "off"]) {
-      const rendered = text(render({ "markers.mode": mode }));
-      expect(rendered).not.toContain("Detection workers");
-      expect(rendered).not.toContain("Detect intros");
-      expect(rendered).not.toContain("Detect credits");
-    }
-  });
-
-  it("hides the detection switches unless the server honors them", () => {
-    expand("library.markers");
-    const cases: Array<[string, { data?: Record<string, boolean> }]> = [
-      ["capabilities not loaded", {}],
-      ["a server without detection_kind_settings", { data: { redetect_markers: true } }],
-      ["a server with detection_kind_settings off", { data: { detection_kind_settings: false } }],
-    ];
-    for (const [, capabilities] of cases) {
-      markerCapabilitiesMock.mockReturnValue(capabilities);
-      const rendered = text(render({ "markers.mode": "local" }));
-      expect(rendered).not.toContain("Detect intros");
-      expect(rendered).not.toContain("Detect credits");
-      expect(rendered).toContain("Detection workers");
-    }
-  });
-
-  it("keeps marker tuning behind the Skip markers disclosure, counting what applies", () => {
-    const cases: Array<[Record<string, string>, string[], string[]]> = [
-      [
-        { "markers.mode": "both" },
-        ["Advanced · 3 settings"],
-        ["Save online markers", "Find markers on playback", "Detection workers"],
-      ],
-      [
-        { "markers.mode": "local" },
-        ["Advanced · 2 settings"],
-        ["Find markers on playback", "Detection workers"],
-      ],
-      [
-        { "markers.mode": "online" },
-        ["Advanced · 2 settings"],
-        ["Save online markers", "Find markers on playback"],
-      ],
-      [
-        { "markers.mode": "online", "markers.online_storage": "on_demand" },
-        ["Advanced · 1 setting"],
-        ["Save online markers"],
-      ],
-      [{ "markers.mode": "off" }, [], []],
-    ];
-    for (const [values, expected, labels] of cases) {
-      localStorage.clear();
-      const collapsed = groupNamed(render(values), "Skip markers");
-      expect(disclosures(collapsed)).toEqual(expected);
-      expect(collapsed.textContent).toContain("Marker source");
-      for (const label of labels) expect(collapsed.textContent).not.toContain(label);
-
-      expand("library.markers");
-      const open = groupNamed(render(values), "Skip markers");
-      for (const label of labels) expect(open.textContent).toContain(label);
-    }
-  });
-
-  it("opens the Skip markers disclosure for an unsaved tuning edit", () => {
-    const group = groupNamed(
-      render({ "markers.mode": "both", "markers.detection_workers": "2" }, [
-        "markers.detection_workers",
-      ]),
-      "Skip markers",
-    );
-
-    expect(group.textContent).toContain("Detection workers");
-  });
-
-  it("shows each detection switch's saved state and defaults both on", () => {
-    const defaults = render({ "markers.mode": "both" });
-    expect(toggleChecked(defaults, "Detect intros")).toBe(true);
-    expect(toggleChecked(defaults, "Detect credits")).toBe(true);
-
-    const introsOnly = render({ "markers.mode": "local", "markers.detect_credits": "false" });
-    expect(toggleChecked(introsOnly, "Detect intros")).toBe(true);
-    expect(toggleChecked(introsOnly, "Detect credits")).toBe(false);
-
-    const creditsOnly = render({ "markers.mode": "local", "markers.detect_intros": "false" });
-    expect(toggleChecked(creditsOnly, "Detect intros")).toBe(false);
-    expect(toggleChecked(creditsOnly, "Detect credits")).toBe(true);
   });
 
   it("lists the ratings plugins declare, grouped by plugin, but not IMDb and TMDB", () => {
@@ -473,7 +266,6 @@ describe("LibraryMetadataSettings subtitle sync", () => {
   beforeEach(() => {
     localStorage.clear();
     useRestartKeysMock.mockReturnValue(new Set<string>());
-    markerCapabilitiesMock.mockReturnValue({ data: { detection_kind_settings: true } });
     useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
   });
 

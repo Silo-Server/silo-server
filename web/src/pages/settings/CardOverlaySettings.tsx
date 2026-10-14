@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { Check, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { Check, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -39,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { ChoiceButtons } from "./ChoiceButtons";
+import { ResetButton } from "./ResetButton";
 
 type ShortcutChoice = "off" | EnabledCardQuickActionMode;
 
@@ -290,24 +291,32 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
     overlaysEnabled,
     setOverlaysEnabled,
     resetPrefs,
-    hasOverride,
+    hasBadgeOverride,
+    hasQuickActionOverride,
     isResetting,
     isLoading,
     isOverlaySupported,
   } = useOverlayPrefs();
-  const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
+  const [confirmBadgeResetOpen, setConfirmBadgeResetOpen] = useState(false);
   const badgesSwitchId = useId();
 
-  // Removing the profile document is what puts this profile back on the
-  // server defaults for good: a copy of today's server values would freeze
-  // this profile at them and ignore every later change the admin makes.
-  const handleRestoreServerDefaults = async () => {
+  // Removing the profile's stored values is what puts it back on the server
+  // defaults for good: a copy of today's server values would freeze this
+  // profile at them and ignore every later change the admin makes.
+  const resetShortcuts = async () => {
     try {
-      await resetPrefs();
-      setConfirmRestoreOpen(false);
-      toast.success("Back to your server's defaults");
+      await resetPrefs("quickActions");
     } catch {
-      toast.error("Couldn't restore your server's defaults");
+      toast.error("Couldn't reset shortcuts");
+    }
+  };
+
+  const resetBadges = async () => {
+    try {
+      await resetPrefs("badges");
+      setConfirmBadgeResetOpen(false);
+    } catch {
+      toast.error("Couldn't reset badges");
     }
   };
 
@@ -329,6 +338,15 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
       <SettingsGroup
         title="Shortcuts"
         description="Buttons on a poster that mark it watched or add it to your favorites, without opening it."
+        actions={
+          hasQuickActionOverride ? (
+            <ResetButton
+              label="Reset shortcuts"
+              disabled={isResetting}
+              onClick={() => void resetShortcuts()}
+            />
+          ) : null
+        }
       >
         <ChoiceButtons
           label="Shortcut buttons"
@@ -342,6 +360,15 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
       <SettingsGroup
         title="Badges"
         description="Small labels on posters, such as 4K, Dolby Vision, or a rating."
+        actions={
+          hasBadgeOverride ? (
+            <ResetButton
+              label="Reset badges"
+              disabled={isResetting}
+              onClick={() => setConfirmBadgeResetOpen(true)}
+            />
+          ) : null
+        }
       >
         <div className="flex items-center justify-between gap-3">
           <Label htmlFor={badgesSwitchId} className="text-sm font-medium">
@@ -400,37 +427,18 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
             </Accordion>
           </>
         ) : null}
-
-        <div className="border-border/50 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-          <p className="text-muted-foreground text-[13px]">
-            {hasOverride
-              ? "You've changed shortcuts or badges from your server's defaults."
-              : "Shortcuts and badges follow your server's defaults."}
-          </p>
-          {hasOverride ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setConfirmRestoreOpen(true)}
-            >
-              <RotateCcw className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              Use server defaults
-            </Button>
-          ) : null}
-        </div>
       </SettingsGroup>
 
       <ConfirmDialog
-        open={confirmRestoreOpen}
-        onOpenChange={setConfirmRestoreOpen}
-        title="Use your server's defaults?"
-        description="Your shortcut and badge choices are cleared, and from now on this profile follows whatever your server administrator sets."
-        confirmLabel="Use server defaults"
+        open={confirmBadgeResetOpen}
+        onOpenChange={setConfirmBadgeResetOpen}
+        title="Reset badges?"
+        description="Your badge choices are cleared, and this profile follows your server's badge settings from then on."
+        confirmLabel="Reset badges"
         variant="destructive"
         isPending={isResetting}
         onConfirm={() => {
-          void handleRestoreServerDefaults();
+          void resetBadges();
         }}
       />
     </>

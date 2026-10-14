@@ -21,12 +21,12 @@ import PlaybackSettings from "./PlaybackSettings";
 import DownloadsSettings from "./DownloadsSettings";
 import RequestsSettings from "./RequestsSettings";
 import ProvidersSettings from "./ProvidersSettings";
-import WatchSyncSettings from "./WatchSyncSettings";
 import AISettings from "./AISettings";
 import NotificationsAdminSettings from "./NotificationsAdminSettings";
 import CompatibilityProxiesSettings from "./CompatibilityProxiesSettings";
 import NetworkAccessSettings from "./NetworkAccessSettings";
-import InfrastructureSettings from "./InfrastructureSettings";
+import StorageSettings from "./StorageSettings";
+import SearchSettings from "./SearchSettings";
 import LoggingSettings from "./LoggingSettings";
 import EmailSettings from "./EmailSettings";
 import "@/styles/admin-settings.css";
@@ -46,12 +46,12 @@ const SETTINGS_COMPONENTS: Record<string, ComponentType> = {
   downloads: DownloadsSettings,
   requests: RequestsSettings,
   providers: ProvidersSettings,
-  "watch-sync": WatchSyncSettings,
   ai: AISettings,
   notifications: NotificationsAdminSettings,
   compatibility: CompatibilityProxiesSettings,
   "network-access": NetworkAccessSettings,
-  infrastructure: InfrastructureSettings,
+  storage: StorageSettings,
+  search: SearchSettings,
   logging: LoggingSettings,
   email: EmailSettings,
 };

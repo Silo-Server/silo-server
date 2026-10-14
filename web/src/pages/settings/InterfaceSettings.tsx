@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, RotateCcw, X } from "lucide-react";
+import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/page/PageHeader";
@@ -29,6 +29,7 @@ import {
 import { CardOverlaySettings } from "./CardOverlaySettings";
 import { ChoiceButtons } from "./ChoiceButtons";
 import { PosterCardPreview } from "./PosterCardPreview";
+import { ResetButton } from "./ResetButton";
 
 const CLIENT_SCOPE = { scope: "profile_client" } as const;
 const DEVICE_SCOPE = { scope: "profile_device" } as const;
@@ -130,31 +131,6 @@ function OverrideNotice({
         {action}
       </Button>
     </div>
-  );
-}
-
-/** The small Reset beside a section title, shown only when there is something to reset. */
-function ResetButton({
-  label,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      disabled={disabled}
-      aria-label={label}
-      onClick={onClick}
-    >
-      <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-      Reset
-    </Button>
   );
 }
 

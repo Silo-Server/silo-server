@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CardOverlaySettings } from "./CardOverlaySettings";
@@ -12,7 +12,9 @@ vi.mock("@/hooks/queries/ratingsCapability", () => ({
 const mocks = vi.hoisted(() => ({
   overlaysEnabled: true,
   quickActionsEnabled: false,
-  hasOverride: false,
+  hasBadgeOverride: false,
+  hasQuickActionOverride: false,
+  resetPrefs: vi.fn(),
   setPrefs: vi.fn(),
   setOverlaysEnabled: vi.fn(),
   setQuickActionsEnabled: vi.fn(),
@@ -29,8 +31,9 @@ vi.mock("@/hooks/useOverlayPrefs", () => ({
     setQuickActionsEnabled: mocks.setQuickActionsEnabled,
     overlaysEnabled: mocks.overlaysEnabled,
     setOverlaysEnabled: mocks.setOverlaysEnabled,
-    resetPrefs: vi.fn(),
-    hasOverride: mocks.hasOverride,
+    resetPrefs: mocks.resetPrefs,
+    hasBadgeOverride: mocks.hasBadgeOverride,
+    hasQuickActionOverride: mocks.hasQuickActionOverride,
     isResetting: false,
     isOverlaySupported: () => true,
     isLoading: false,
@@ -43,7 +46,9 @@ describe("CardOverlaySettings", () => {
   beforeEach(() => {
     mocks.overlaysEnabled = true;
     mocks.quickActionsEnabled = false;
-    mocks.hasOverride = false;
+    mocks.hasBadgeOverride = false;
+    mocks.hasQuickActionOverride = false;
+    mocks.resetPrefs.mockReset().mockResolvedValue(undefined);
     for (const fn of [
       mocks.setPrefs,
       mocks.setOverlaysEnabled,
@@ -115,13 +120,30 @@ describe("CardOverlaySettings", () => {
     );
   });
 
-  it("offers server defaults only once something has been changed", () => {
+  it("resets shortcuts on their own once they differ from the server's", () => {
     const { rerender } = render(<CardOverlaySettings />);
-    expect(screen.getByText("Shortcuts and badges follow your server's defaults.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Reset shortcuts" })).toBeNull();
+
+    mocks.hasQuickActionOverride = true;
+    rerender(<CardOverlaySettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Reset shortcuts" }));
+
+    expect(mocks.resetPrefs).toHaveBeenCalledWith("quickActions");
+    // Badges are a separate choice and keep their own Reset.
+    expect(screen.queryByRole("button", { name: "Reset badges" })).toBeNull();
+  });
+
+  it("asks before resetting badges, then resets only badges", async () => {
+    mocks.hasBadgeOverride = true;
+    render(<CardOverlaySettings />);
     expect(screen.queryByRole("button", { name: "Use server defaults" })).toBeNull();
 
-    mocks.hasOverride = true;
-    rerender(<CardOverlaySettings />);
-    expect(screen.getByRole("button", { name: "Use server defaults" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Reset badges" }));
+    expect(mocks.resetPrefs).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset badges" }));
+
+    await waitFor(() => expect(mocks.resetPrefs).toHaveBeenCalledWith("badges"));
+    expect(mocks.resetPrefs).toHaveBeenCalledTimes(1);
   });
 });

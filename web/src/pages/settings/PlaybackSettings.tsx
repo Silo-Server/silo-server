@@ -2,8 +2,6 @@ import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
-import { LanguageSelect } from "@/components/settings/LanguageSelect";
-import { MetadataLanguageSetting } from "@/components/settings/MetadataLanguageSetting";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -14,11 +12,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { optionsFor } from "@/lib/settingsDisplay";
-import { namedLanguageOptionsFor } from "@/lib/languageOptions";
-import {
-  normalizeMetadataLanguageOverrides,
-  type MetadataLanguageOverrides,
-} from "@/lib/metadataLanguagePreferences";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import {
@@ -47,12 +40,9 @@ import { toast } from "sonner";
  * surfaces cannot land on different scopes.
  */
 const BASE_PLAYBACK_KEYS: SettingKey[] = [
-  SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
   SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
-  SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
-  SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
 ];
 
 const INTRO_SKIP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]);
@@ -436,11 +426,7 @@ export default function PlaybackSettings() {
     [supportsIntroSkipMode],
   );
   const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
-  const {
-    save: saveProfileDefault,
-    reset: resetProfileDefault,
-    isSaving,
-  } = useProfileDefaultWriter(effective);
+  const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
 
   // The effective endpoint resolves an unset key to the contract default, so
   // every control below reads its value from the same answer rather than from
@@ -455,30 +441,7 @@ export default function PlaybackSettings() {
     saveProfileDefault(key, value).catch(() => toast.error("Failed to save playback setting"));
   };
 
-  const audioLanguage = read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
-  const metadataLanguage = read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
-  const audioLanguageOptions = namedLanguageOptionsFor(
-    SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
-    audioLanguage,
-    effective?.[SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE]?.suggested_values,
-  );
-  const metadataLanguageOptions = namedLanguageOptionsFor(
-    SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
-    metadataLanguage,
-    effective?.[SETTING_KEYS.CATALOG_METADATA_LANGUAGE]?.suggested_values,
-  );
   const pending = isSaving;
-
-  const saveMetadataOverrides = (overrides: MetadataLanguageOverrides) => {
-    const request =
-      Object.keys(overrides).length === 0
-        ? resetProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES)
-        : saveProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES, overrides);
-    return request.catch((error) => {
-      toast.error("Failed to save metadata language exceptions");
-      throw error;
-    });
-  };
 
   return (
     <div className="space-y-6">
@@ -492,45 +455,6 @@ export default function PlaybackSettings() {
         description="Each of your devices can override these, and a household manager can cap them for this profile."
       >
         <QualitySetting />
-      </SettingsGroup>
-
-      <SettingsGroup title="Language">
-        <SettingRow
-          label="Spoken language"
-          description="Prefer a spoken language for this profile when multiple tracks are available."
-          control={(id) => (
-            <div className="w-full sm:w-[220px]">
-              <LanguageSelect
-                id={id}
-                value={audioLanguage ?? "none"}
-                options={audioLanguageOptions}
-                disabled={pending}
-                placeholder="No preference"
-                className="w-full"
-                onValueChange={(value) =>
-                  // The contract spells "no preference" as null, where the
-                  // legacy profile column spelled it as the empty string.
-                  saveValue(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, value === "none" ? null : value)
-                }
-              >
-                <SelectItem value="none">No preference</SelectItem>
-              </LanguageSelect>
-            </div>
-          )}
-        />
-
-        <MetadataLanguageSetting
-          fallback={metadataLanguage}
-          overrides={normalizeMetadataLanguageOverrides(
-            read<unknown>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES),
-          )}
-          languageOptions={metadataLanguageOptions}
-          disabled={pending}
-          onFallbackChange={(language) =>
-            saveValue(SETTING_KEYS.CATALOG_METADATA_LANGUAGE, language)
-          }
-          onOverridesChange={saveMetadataOverrides}
-        />
       </SettingsGroup>
 
       <SettingsGroup title="Skipping">
@@ -597,21 +521,6 @@ export default function PlaybackSettings() {
         )}
 
         <SettingRow
-          label="Auto-skip credits"
-          description="Move through end credits automatically when a skip is available."
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS, checked)
-              }
-            />
-          )}
-        />
-
-        <SettingRow
           label="Auto-skip recaps"
           description="Skip 'previously on…' recaps automatically when Silo can detect them."
           control={(id) => (
@@ -621,6 +530,21 @@ export default function PlaybackSettings() {
               disabled={pending}
               onCheckedChange={(checked) =>
                 saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP, checked)
+              }
+            />
+          )}
+        />
+
+        <SettingRow
+          label="Auto-skip credits"
+          description="Move through end credits automatically when a skip is available."
+          control={(id) => (
+            <Switch
+              id={id}
+              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS)}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS, checked)
               }
             />
           )}

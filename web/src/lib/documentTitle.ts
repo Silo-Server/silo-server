@@ -37,7 +37,7 @@ const SETTINGS_TITLES: Record<string, string> = {
   "history-import": "History Import Settings",
   "plex-webhooks": "Webhook Sync Settings",
   "webhook-sync": "Webhook Sync Settings",
-  "subtitle-appearance": "Subtitle Settings",
+  "subtitle-appearance": "Language & Subtitle Settings",
   "home-screen": "Home Screen Settings",
   "title-pages": "Title Page Settings",
   "connect-apps": "Connect Apps Settings",

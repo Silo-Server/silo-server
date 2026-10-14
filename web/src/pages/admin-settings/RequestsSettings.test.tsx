@@ -117,6 +117,16 @@ describe("Requests settings: general", () => {
     });
   });
 
+  // The cross-links to access groups, users, notifications and Autoscan are
+  // Hidden tier: none of them is a request setting.
+  it("shows no Related links group", async () => {
+    serve({});
+    mount();
+    await screen.findByLabelText("Request limit");
+    expect(screen.queryByRole("group", { name: "Related" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Notifications" })).not.toBeInTheDocument();
+  });
+
   it("saves a request limit of 0 and refuses a negative or empty one", async () => {
     serve({
       handlers: {

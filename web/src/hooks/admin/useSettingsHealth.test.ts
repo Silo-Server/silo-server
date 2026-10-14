@@ -68,7 +68,7 @@ describe("buildSettingsHealth", () => {
     expect(storage.state).toBe("warn");
     expect(storage.stateText).toBe("Restart pending");
     expect(storage.detail).toBe("S3 · silo-art · applies after a restart");
-    expect(storage.action).toEqual({ label: "Fix", page: "infrastructure" });
+    expect(storage.action).toEqual({ label: "Fix", page: "storage" });
   });
 
   it("still calls storage unconfigured when no bucket is saved", () => {
@@ -88,7 +88,7 @@ describe("buildSettingsHealth", () => {
 
     expect(storage.state).toBe("off");
     expect(storage.stateText).toBe("Not set up");
-    expect(storage.action).toEqual({ label: "Set up", page: "infrastructure" });
+    expect(storage.action).toEqual({ label: "Set up", page: "storage" });
   });
 
   it("does not read a restart another subsystem asked for as pending storage", () => {
@@ -238,7 +238,7 @@ describe("buildSettingsHealth", () => {
 
     expect(search.state).toBe("warn");
     expect(search.detail).toBe("Search index rebuild required; using Meilisearch keyword search");
-    expect(search.action).toEqual({ label: "Fix", page: "library" });
+    expect(search.action).toEqual({ label: "Fix", page: "search" });
   });
 
   it("only calls email ready when it is on with a host and a sender address", () => {

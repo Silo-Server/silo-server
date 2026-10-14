@@ -5,8 +5,8 @@ import { filterSettingsSearchEntries } from "@/components/settings/settingsSearc
 import { ADMIN_SETTINGS_NAV } from "./adminSettingsSearch";
 
 describe("adminSettingsSearch", () => {
-  it("finds the Redis database number on the Storage & Database page", () => {
-    const page = ADMIN_SETTINGS_NAV.find((item) => item.id === "infrastructure");
+  it("finds the Redis database number on the General page", () => {
+    const page = ADMIN_SETTINGS_NAV.find((item) => item.id === "general");
 
     expect(filterSettingsSearchEntries(page?.settings, "database number")).toEqual([
       { label: "Database number" },

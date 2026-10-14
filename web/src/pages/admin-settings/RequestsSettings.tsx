@@ -23,9 +23,8 @@ import { FieldGroup } from "./FieldGroup";
 import { RequestRoutingGroup } from "./RequestRouting";
 import { RequestServersGroup } from "./RequestServers";
 import { requestRouterInstallations } from "./requestServerModel";
-import { SETTINGS_BUTTON, SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
+import { SettingField, SettingFieldStatus } from "./SettingField";
 import { useStagedDraft } from "./useStagedDraft";
-import { AUTOSCAN_SOURCES_HREF } from "@/pages/autoscanSearchParams";
 
 interface GeneralDraft {
   requests_enabled: boolean;
@@ -330,36 +329,6 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
             forceDual={general.base?.force_dual_quality ?? false}
           />
         ) : null}
-
-        <FieldGroup label="Related">
-          <SettingFieldRow
-            label="Group and account limits"
-            description="Give an access group or one account its own approval and limit. An account's own setting wins, then its group's, then the defaults above."
-          >
-            <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-              <Link to="/admin/access-groups">Access groups</Link>
-            </Button>
-            <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-              <Link to="/admin/users">Users</Link>
-            </Button>
-          </SettingFieldRow>
-          <SettingFieldRow
-            label="Request notifications"
-            description="Announce submitted, approved, declined, and fulfilled requests on Discord or a webhook."
-          >
-            <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-              <Link to="/admin/settings/notifications">Notifications</Link>
-            </Button>
-          </SettingFieldRow>
-          <SettingFieldRow
-            label="Autoscan"
-            description="Autoscan can reuse these servers to import downloads as soon as they finish."
-          >
-            <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-              <Link to={AUTOSCAN_SOURCES_HREF}>Autoscan</Link>
-            </Button>
-          </SettingFieldRow>
-        </FieldGroup>
       </div>
 
       <SaveBar

@@ -66,14 +66,12 @@ describe("AdminSectionCommandDialog", () => {
     const searchBox = await openDialog();
     await userEvent.type(searchBox, "maximum postgres connections");
 
-    expect(screen.getByRole("option", { name: /Storage & Database/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^General/ })).toBeInTheDocument();
     expect(screen.getByText("Maximum Postgres connections")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("option", { name: /Storage & Database/ }));
+    await userEvent.click(screen.getByRole("option", { name: /^General/ }));
 
-    expect(screen.getByLabelText("Current path")).toHaveTextContent(
-      "/admin/settings/infrastructure",
-    );
+    expect(screen.getByLabelText("Current path")).toHaveTextContent("/admin/settings/general");
     expect(screen.queryByRole("searchbox", { name: "Search admin sections" })).toBeNull();
   });
 

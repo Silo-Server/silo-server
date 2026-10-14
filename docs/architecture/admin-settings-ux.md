@@ -10,14 +10,14 @@ appears in it exactly once.
 - **Monitor**: Dashboard, Activity, Logs (Server Log, Client Diagnostics,
   Settings)
 - **Manage**: Libraries (Libraries, Collections, Home Sections, Subtitle
-  Files, Skip Markers, Settings), Autoscan (Activity, Sources, Settings),
-  Requests (Queue, Settings), Users (Users, Access Groups, Devices, History
-  Import), Playback (Nodes, History, Settings), Downloads (Prepared Files,
+  Files, Settings), Autoscan (Activity, Sources, Settings), Requests (Queue,
+  Settings), Users (Users, Access Groups, Devices, History Import), Playback
+  (History, Skip Markers, Nodes, Settings), Downloads (Prepared Files,
   Settings)
-- **Configure**: Server (General, Appearance, Storage & Database, Scheduled
-  Tasks, Maintenance), Sign-in & Security (Sign-in, Security, Network Access,
-  API Keys, Policy), Integrations (Plugins, Providers, Watch Providers, AI
-  Services, Recommendations, Email, Notifications, Compatibility)
+- **Configure**: Server (General, Appearance, Storage, Search, Network
+  Access, Scheduled Tasks, Maintenance), Sign-in & Security (Sign-in,
+  Security, API Keys, Policy), Integrations (Plugins, Providers, Email,
+  Notifications, AI Services, Recommendations, Compatibility)
 
 A topic that holds both tools and settings lists its own settings page last,
 as plain "Settings"; the topic already says whose. A topic's heading only
@@ -37,13 +37,19 @@ under its topic, and it finds every indexed setting.
 
 A setting lives on the page whose name covers it. Public signups and
 self-service password reset only work with Silo passwords, so they sit with
-password sign-in on Sign-in, as do the token lifetimes that the provider
-re-check depends on. Logging holds every log setting, the server log and the
-activity log retention alike. Trusted proxies sit beside the public URL on
-General, as the setup wizard presents them. Subtitle sync is automatic audio
-analysis of library media, like skip-marker detection, so it is on Libraries ›
-Settings. Autoscan's polling defaults and saved server connections are its
-own Settings page; they are not `server_settings` rows, so that page keeps its
+password sign-in on Sign-in. Logging holds every log setting, the server log
+and the activity log retention alike. General holds what the whole server runs
+on: its name and address, the trusted proxies beside the public URL (as the
+setup wizard presents them), the database pool, and Redis. Storage holds where
+files go, including whether provider artwork is copied there; its public and
+private bucket sections show whatever the backend, because a local install
+that already holds artwork goes straight to the transition review when S3 is
+picked, so the buckets have to be filled in first. Search has its own page
+because the engine serves every library and client, not one library's
+metadata. Skip markers are a playback feature, so their detection settings
+are on Playback › Settings and the marker history is Playback › Skip Markers;
+subtitle sync stays on Libraries › Settings. Autoscan's polling defaults and
+saved server connections are its own Settings page; they are not `server_settings` rows, so that page keeps its
 own draft but saves through the same `SaveBar` and unsaved-changes prompt,
 while the switch that turns Autoscan on and Run now stay on Sources beside the
 sources they act on. The mail server has its own Email page, because invitations and
@@ -112,11 +118,12 @@ group needs a restart, the group says so once (`FieldGroup restartAll`) and
 the fields inside drop their chips. Provider credentials are `ProviderTile` rows
 that expand in place to Test before saving; the state is a dot plus a word
 beside the provider's button. Provider setup lives on
-a provider page (Providers, Watch Providers), not on the page that owns the
-feature: Library & Metadata decides *whether* Silo looks for intro and
+the Providers page, not on the page that owns the
+feature: Playback decides *whether* Silo looks for intro and
 credits markers, while *which provider answers, in what order, and on what
 terms* is a row beside the subtitle and list providers, with a cross-link
-each way. A provider only reads "Connected" when the provider could actually serve
+each way. Watch providers (Trakt, Simkl) open the Providers page, since each
+profile connects its own account to them. A provider only reads "Connected" when the provider could actually serve
 a request — its configuration saved and the provider switched on — so an
 installed plugin whose API key was never entered reads "Needs setup". Request
 servers (Sonarr, Radarr) are the exception to the provider-page rule: they are

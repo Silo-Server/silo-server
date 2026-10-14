@@ -40,16 +40,8 @@ import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
 import { cleanPath } from "./settingsPathDefaults";
-import { keepSavedRedisUrl, stageRedisUrl } from "./redisDraft";
 
 type SettingsForm = ReturnType<typeof useSettingsForm>;
-
-const REDIS_KEYS = ["redis.url", "redis.db"];
-
-// userdb.backend, userdb.pool_max_open and userdb.idle_timeout are Hidden on
-// purpose: PostgreSQL is the only usable per-user store, and the two SQLite
-// tuning fields could never show. They stay ordinary settings through the API.
-const DATABASE_KEYS = ["database.max_connections"];
 
 const PUBLIC_S3_KEYS = [
   "s3.public_endpoint",
@@ -61,6 +53,15 @@ const PUBLIC_S3_KEYS = [
   "s3.public_secret_key",
   "s3.public_read_endpoint",
   "s3.public_url_auth",
+  "s3.public_token_secret",
+  "s3.public_token_param",
+  "s3.public_token_ttl",
+];
+
+// Shown only for the link modes that use them, behind public storage's
+// Advanced disclosure.
+const PUBLIC_S3_ADVANCED_KEYS = [
+  "s3.public_read_endpoint",
   "s3.public_token_secret",
   "s3.public_token_param",
   "s3.public_token_ttl",
@@ -99,14 +100,14 @@ const STORAGE_TRANSITION_KEYS = new Set([
   ...PRIVATE_S3_KEYS,
 ]);
 
-const KEYS = [
-  "artwork.storage_backend",
-  "artwork.local_path",
-  ...REDIS_KEYS,
-  ...DATABASE_KEYS,
-  ...PUBLIC_S3_KEYS,
-  ...PRIVATE_S3_KEYS,
-];
+// Whether provider artwork is copied into storage at all. It hot-reloads and
+// names no location, so it saves like any other setting, never through a
+// transition.
+const CACHE_IMAGES_KEY = "metadata.cache_images";
+
+const STORAGE_GROUP_KEYS = ["artwork.storage_backend", "artwork.local_path", CACHE_IMAGES_KEY];
+
+const KEYS = [...STORAGE_GROUP_KEYS, ...PUBLIC_S3_KEYS, ...PRIVATE_S3_KEYS];
 
 function countDirty(form: SettingsForm, keys: string[]): number {
   return keys.filter((key) => form.isDirty(key)).length;
@@ -205,123 +206,6 @@ interface SecretEditors {
   disabled: boolean;
 }
 
-function RedisGroup({
-  form,
-  restartKeys,
-  secrets,
-}: {
-  form: SettingsForm;
-  restartKeys: RestartKeyMatcher;
-  secrets: SecretEditors;
-}) {
-  const checkConnection = useCheckAdminSettingsConnection();
-  const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
-  const redisUrl = form.getValue("redis.url");
-  const managedByEnv = form.sensitiveManagedByEnv.includes("redis.url");
-  const configured = form.sensitiveConfigured.includes("redis.url");
-  const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null);
-  // Saving or discarding clears the toggle override so it follows the stored
-  // URL again. Adjusting during render (rather than in an effect) keeps the
-  // override alive while the admin is still editing.
-  const [lastDirtyCount, setLastDirtyCount] = useState(form.dirtyCount);
-  if (lastDirtyCount !== form.dirtyCount) {
-    setLastDirtyCount(form.dirtyCount);
-    if (form.dirtyCount === 0) setEnabledOverride(null);
-  }
-  const enabled = enabledOverride ?? (redisUrl.trim() !== "" || configured);
-  // URL edits go through the page's secret editors, which drop a keystroke
-  // that arrives while a save is in flight.
-  const urlDraft = { ...form, setValue: secrets.setSecret, resetValue: secrets.keepSaved };
-
-  async function handleCheckConnection() {
-    try {
-      setConnectionResult(
-        await checkConnection.mutateAsync({
-          kind: "redis",
-          body: form.buildConnectionCheckRequest(REDIS_KEYS),
-        }),
-      );
-    } catch (error) {
-      setConnectionResult({
-        success: false,
-        message: error instanceof Error ? error.message : "Connection check failed.",
-      });
-    }
-  }
-
-  return (
-    <FieldGroup label="Redis" restartAll={allRestart(restartKeys, REDIS_KEYS)}>
-      <SettingField
-        label="Use Redis"
-        type="toggle"
-        description={
-          managedByEnv ? "Set by REDIS_URL" : "Needed when running more than one server."
-        }
-        value={enabled ? "true" : "false"}
-        onChange={(value) => {
-          if (value === "true") {
-            setEnabledOverride(true);
-            // Takes back a staged switch-off, which cleared the number too.
-            form.resetValue("redis.url");
-            form.resetValue("redis.db");
-            return;
-          }
-          setEnabledOverride(false);
-          stageRedisUrl(form, "");
-        }}
-        disabled={managedByEnv}
-        restartRequired={restartKeys.has("redis.url")}
-      />
-      {enabled && (
-        <>
-          {/*
-            No `onClear` here: the Use Redis switch above already stages the
-            empty URL, and one clear per surface is the rule.
-          */}
-          <SecretField
-            label="Connection URL"
-            value={redisUrl}
-            configured={configured}
-            onKeep={() => keepSavedRedisUrl(urlDraft)}
-            onChange={(v) => stageRedisUrl(urlDraft, v)}
-            hint={managedByEnv ? "Value supplied by REDIS_URL" : "redis://host:6379"}
-            disabled={managedByEnv || secrets.disabled}
-            restartRequired={restartKeys.has("redis.url")}
-          />
-          {/*
-            The server reports the number in use here while none is saved: the
-            one in the URL, or in REDIS_URL when the environment supplies it.
-          */}
-          <SettingField
-            label="Database number"
-            type="number"
-            description={
-              managedByEnv
-                ? "Set by REDIS_URL"
-                : "Replaces the number in the URL. Installs sharing one Redis each need their own."
-            }
-            value={form.getValue("redis.db")}
-            onChange={(v) => form.setValue("redis.db", v)}
-            disabled={managedByEnv}
-            restartRequired={restartKeys.has("redis.db")}
-          />
-          {/*
-            Env-managed URLs stay checkable: the field is read-only so nothing
-            is dirty, and the server checks the effective value it merged from
-            REDIS_URL. Only writes are refused for env-managed keys.
-          */}
-          <ConnectionCheckAction
-            onClick={handleCheckConnection}
-            result={connectionResult}
-            isPending={checkConnection.isPending}
-            disabled={form.isSaving}
-          />
-        </>
-      )}
-    </FieldGroup>
-  );
-}
-
 // normalizeLocationValue compares storage location fields the way the server
 // names stores: endpoint scheme and host and the bucket are case-insensitive,
 // and a key prefix ignores its slashes. Preserve explicit ports and endpoint
@@ -359,7 +243,6 @@ function S3Group({
   artworkLockedBackend,
   publicBackendChangePending = false,
   locationFieldsDisabled = false,
-  disclosureTitle,
 }: {
   form: SettingsForm;
   restartKeys: RestartKeyMatcher;
@@ -371,7 +254,6 @@ function S3Group({
   artworkLockedBackend?: string;
   publicBackendChangePending?: boolean;
   locationFieldsDisabled?: boolean;
-  disclosureTitle?: string;
 }) {
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
@@ -379,26 +261,14 @@ function S3Group({
   const key = (suffix: string) => `s3.${scope}_${suffix}`;
   const urlAuth = form.getValue("s3.public_url_auth") || "presigned";
 
-  // Private storage is optional: without it those files stay on local disk.
-  // So that whole group sits behind its disclosure, while public storage keeps
-  // its connection in view and only the tuning behind it.
-  const allAdvanced = scope === "private";
-  const advancedKeys = allAdvanced
-    ? keys
-    : [
-        "s3.public_region",
-        "s3.public_path_style",
-        "s3.public_key_prefix",
-        "s3.public_url_auth",
-        "s3.public_read_endpoint",
-        "s3.public_token_secret",
-        "s3.public_token_param",
-        "s3.public_token_ttl",
-      ];
-  const advancedCount = allAdvanced
-    ? keys.length
-    : 4 + (urlAuth !== "presigned" ? 1 : 0) + (urlAuth === "cloudflare_token" ? 3 : 0);
-  const advancedChanged = countDirty(form, advancedKeys);
+  // Everything that reaches the bucket is shown. Only public storage has an
+  // Advanced tier: the CDN address and the Cloudflare token settings, which
+  // exist only for the link modes that use them.
+  const advancedCount =
+    scope === "public"
+      ? (urlAuth !== "presigned" ? 1 : 0) + (urlAuth === "cloudflare_token" ? 3 : 0)
+      : 0;
+  const advancedChanged = countDirty(form, PUBLIC_S3_ADVANCED_KEYS);
 
   async function handleCheckConnection() {
     try {
@@ -416,8 +286,8 @@ function S3Group({
     }
   }
 
-  const connectionFields = (
-    <>
+  return (
+    <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
       <SettingField
         label="Endpoint"
         hint="https://s3.us-east-1.amazonaws.com"
@@ -432,6 +302,14 @@ function S3Group({
         onChange={(v) => form.setValue(key("bucket"), v)}
         disabled={secrets.disabled || locationFieldsDisabled}
         restartRequired={restartKeys.has(key("bucket"))}
+      />
+      <SettingField
+        label="Folder inside the bucket"
+        description="Leave blank to use the bucket root."
+        value={form.getValue(key("key_prefix"))}
+        onChange={(v) => form.setValue(key("key_prefix"), v)}
+        disabled={secrets.disabled || locationFieldsDisabled}
+        restartRequired={restartKeys.has(key("key_prefix"))}
       />
       {(scope === "public" ? PUBLIC_S3_IDENTITY_KEYS : PRIVATE_S3_IDENTITY_KEYS).some((k) =>
         form.isDirty(k),
@@ -460,6 +338,21 @@ function S3Group({
           </div>
         </div>
       )}
+      <SettingField
+        label="Region"
+        description="Leave blank unless your provider requires one."
+        value={form.getValue(key("region"))}
+        onChange={(v) => form.setValue(key("region"), v)}
+        restartRequired={restartKeys.has(key("region"))}
+      />
+      <SettingField
+        label="Put the bucket name in the URL path"
+        type="toggle"
+        description="Needed by MinIO and some self-hosted storage."
+        value={form.getValue(key("path_style"))}
+        onChange={(v) => form.setValue(key("path_style"), v)}
+        restartRequired={restartKeys.has(key("path_style"))}
+      />
       {/*
         The access and secret keys must stay configured together, so clearing
         one alone is refused at save time. Both carry the action, which is what
@@ -494,34 +387,6 @@ function S3Group({
         isPending={checkConnection.isPending}
         disabled={form.isSaving}
       />
-    </>
-  );
-
-  const advancedFields = (
-    <>
-      <SettingField
-        label="Region"
-        description="Leave blank unless your provider requires one."
-        value={form.getValue(key("region"))}
-        onChange={(v) => form.setValue(key("region"), v)}
-        restartRequired={restartKeys.has(key("region"))}
-      />
-      <SettingField
-        label="Put the bucket name in the URL path"
-        type="toggle"
-        description="Needed by MinIO and some self-hosted storage."
-        value={form.getValue(key("path_style"))}
-        onChange={(v) => form.setValue(key("path_style"), v)}
-        restartRequired={restartKeys.has(key("path_style"))}
-      />
-      <SettingField
-        label="Folder inside the bucket"
-        description="Leave blank to use the bucket root."
-        value={form.getValue(key("key_prefix"))}
-        onChange={(v) => form.setValue(key("key_prefix"), v)}
-        disabled={secrets.disabled || locationFieldsDisabled}
-        restartRequired={restartKeys.has(key("key_prefix"))}
-      />
       {scope === "public" && (
         <>
           <SettingField
@@ -537,100 +402,64 @@ function S3Group({
             ]}
             restartRequired={restartKeys.has("s3.public_url_auth")}
           />
-          {urlAuth !== "presigned" && (
-            <SettingField
-              label="Address clients download from"
-              hint="https://cdn.example.com"
-              value={form.getValue("s3.public_read_endpoint")}
-              onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
-              restartRequired={restartKeys.has("s3.public_read_endpoint")}
-            />
-          )}
-          {urlAuth === "cloudflare_token" && (
-            <>
-              {/*
-                  Cloudflare token auth requires this secret, so a clear only
-                  saves alongside a switch back to another mode — the one order
-                  that works, since the field is hidden in those modes.
-                */}
-              <SecretField
-                label="Token Secret"
-                value={form.getValue("s3.public_token_secret")}
-                configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
-                onKeep={() => secrets.keepSaved("s3.public_token_secret")}
-                onClear={() => secrets.clearSaved("s3.public_token_secret")}
-                cleared={form.isClearStaged("s3.public_token_secret")}
-                onChange={(v) => secrets.setSecret("s3.public_token_secret", v)}
-                hint="Signing key configured in Cloudflare"
-                disabled={secrets.disabled}
-                restartRequired={restartKeys.has("s3.public_token_secret")}
-              />
+          {advancedCount > 0 && (
+            <AdvancedSection
+              id="storage.s3.public"
+              count={advancedCount}
+              forceOpen={advancedChanged > 0}
+            >
               <SettingField
-                label="Token query parameter"
-                description="Usually verify."
-                value={form.getValue("s3.public_token_param") || "verify"}
-                onChange={(v) => form.setValue("s3.public_token_param", v)}
-                restartRequired={restartKeys.has("s3.public_token_param")}
+                label="Address clients download from"
+                hint="https://cdn.example.com"
+                value={form.getValue("s3.public_read_endpoint")}
+                onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
+                restartRequired={restartKeys.has("s3.public_read_endpoint")}
               />
-              <SettingField
-                label="Link lifetime"
-                type="number"
-                unit="seconds"
-                value={form.getValue("s3.public_token_ttl") || "10800"}
-                onChange={(v) => form.setValue("s3.public_token_ttl", v)}
-                restartRequired={restartKeys.has("s3.public_token_ttl")}
-              />
-            </>
+              {urlAuth === "cloudflare_token" && (
+                <>
+                  {/*
+                    Cloudflare token auth requires this secret, so a clear only
+                    saves alongside a switch back to another mode — the one
+                    order that works, since the field is hidden in those modes.
+                  */}
+                  <SecretField
+                    label="Token Secret"
+                    value={form.getValue("s3.public_token_secret")}
+                    configured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+                    onKeep={() => secrets.keepSaved("s3.public_token_secret")}
+                    onClear={() => secrets.clearSaved("s3.public_token_secret")}
+                    cleared={form.isClearStaged("s3.public_token_secret")}
+                    onChange={(v) => secrets.setSecret("s3.public_token_secret", v)}
+                    hint="Signing key configured in Cloudflare"
+                    disabled={secrets.disabled}
+                    restartRequired={restartKeys.has("s3.public_token_secret")}
+                  />
+                  <SettingField
+                    label="Token query parameter"
+                    description="Usually verify."
+                    value={form.getValue("s3.public_token_param") || "verify"}
+                    onChange={(v) => form.setValue("s3.public_token_param", v)}
+                    restartRequired={restartKeys.has("s3.public_token_param")}
+                  />
+                  <SettingField
+                    label="Link lifetime"
+                    type="number"
+                    unit="seconds"
+                    value={form.getValue("s3.public_token_ttl") || "10800"}
+                    onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+                    restartRequired={restartKeys.has("s3.public_token_ttl")}
+                  />
+                </>
+              )}
+            </AdvancedSection>
           )}
         </>
       )}
-    </>
-  );
-
-  return (
-    <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
-      {allAdvanced ? null : connectionFields}
-      <AdvancedSection
-        id={`infrastructure.s3.${scope}`}
-        title={disclosureTitle}
-        count={advancedCount}
-        forceOpen={advancedChanged > 0}
-      >
-        {allAdvanced ? connectionFields : null}
-        {advancedFields}
-      </AdvancedSection>
     </FieldGroup>
   );
 }
 
-function DatabaseGroup({
-  form,
-  restartKeys,
-}: {
-  form: SettingsForm;
-  restartKeys: RestartKeyMatcher;
-}) {
-  return (
-    <FieldGroup label="Database" restartAll={allRestart(restartKeys, DATABASE_KEYS)}>
-      <AdvancedSection
-        id="infrastructure.database"
-        count={DATABASE_KEYS.length}
-        forceOpen={countDirty(form, DATABASE_KEYS) > 0}
-      >
-        <SettingField
-          label="Maximum Postgres connections"
-          type="number"
-          description="Raise only if the logs show connection-pool waits."
-          value={form.getValue("database.max_connections")}
-          onChange={(v) => form.setValue("database.max_connections", v)}
-          restartRequired={restartKeys.has("database.max_connections")}
-        />
-      </AdvancedSection>
-    </FieldGroup>
-  );
-}
-
-export default function InfrastructureSettings() {
+export default function StorageSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
   const serverStatus = useAdminServerStatus();
@@ -655,9 +484,6 @@ export default function InfrastructureSettings() {
     form.getValue("artwork.local_path"),
   );
   const [dismissedTransitionId, setDismissedTransitionId] = useState<string>();
-  // Picking S3 on a locked local install opens the transition review without
-  // staging the backend, so remember it to bring up the bucket fields.
-  const [s3Requested, setS3Requested] = useState(false);
   const createTransition = useCreateStorageTransition();
   const transitionCapabilities = useStorageTransitionCapabilities();
   const managedTransitionsAvailable =
@@ -673,19 +499,6 @@ export default function InfrastructureSettings() {
     form.getValue("artwork.storage_backend"),
     form.getValue("s3.public_bucket"),
   );
-  // On local disk the public bucket fields are noise. They show for the S3
-  // backend, for Automatic once a public bucket (saved or staged) makes it S3,
-  // after S3 was picked for a transition, and while any of them holds an
-  // unsaved edit, so a staged value is never out of sight.
-  const backendChoice = form.getValue("artwork.storage_backend").trim().toLowerCase() || "auto";
-  const publicBucketSet =
-    form.getValue("s3.public_bucket").trim() !== "" ||
-    form.getPersistedValue("s3.public_bucket").trim() !== "";
-  const showPublicStorage =
-    backendChoice === "s3" ||
-    (backendChoice === "auto" && publicBucketSet) ||
-    s3Requested ||
-    PUBLIC_S3_KEYS.some((key) => form.isDirty(key));
   // The lock compares edits with the recorded location. That is the running
   // backend, except after a committed transition and before the restart, when
   // the saved settings already name the committed location.
@@ -866,7 +679,6 @@ export default function InfrastructureSettings() {
 
   function handleDiscard() {
     if (saveInProgressRef.current) return;
-    setS3Requested(false);
     form.discard();
   }
 
@@ -924,11 +736,9 @@ export default function InfrastructureSettings() {
       }
       setTransitionBackend(requestedBackend);
       setTransitionLocalPath(form.getValue("artwork.local_path"));
-      setS3Requested(requestedBackend === "s3");
       setTransitionOpen(true);
       return;
     }
-    setS3Requested(false);
     form.setValue("artwork.storage_backend", value);
   }
 
@@ -942,7 +752,7 @@ export default function InfrastructureSettings() {
         <div>
           <p className="text-sm font-medium">Protected credential status is unavailable</p>
           <p className="text-muted-foreground mt-1 text-xs">
-            Reload this page before editing infrastructure settings.
+            Reload this page before editing storage settings.
           </p>
         </div>
       </div>
@@ -959,7 +769,7 @@ export default function InfrastructureSettings() {
         <div>
           <p className="text-sm font-medium">Storage lock status is unavailable</p>
           <p className="text-muted-foreground mt-1 text-xs">
-            Reload this page before editing infrastructure settings.
+            Reload this page before editing storage settings.
           </p>
         </div>
       </div>
@@ -984,7 +794,7 @@ export default function InfrastructureSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Storage & Database" />
+      <SettingsPageHeader title="Storage" />
 
       <div className="flex-1 space-y-5">
         {!storageStatusKnown ? (
@@ -1009,7 +819,7 @@ export default function InfrastructureSettings() {
             </Button>
           </div>
         ) : null}
-        <FieldGroup label="Storage" restartAll={restartKeys.has("artwork.storage_backend")}>
+        <FieldGroup label="Storage" restartAll={allRestart(restartKeys, STORAGE_GROUP_KEYS)}>
           <SettingField
             label="Backend"
             type="select"
@@ -1029,7 +839,7 @@ export default function InfrastructureSettings() {
               artworkLocked
                 ? artworkStorage?.backend === "s3"
                   ? "Choose Automatic or Local disk to review a managed transition from S3."
-                  : "Edit the local path or choose S3 to review a managed transition."
+                  : "Edit the local path, or fill in Public storage and choose S3 to review a managed transition."
                 : "Where Silo keeps artwork, subtitles, and other library assets."
             }
             restartRequired={restartKeys.has("artwork.storage_backend")}
@@ -1053,6 +863,14 @@ export default function InfrastructureSettings() {
                 : "Absolute path on the server. Mount a volume here in Docker."
             }
             restartRequired={restartKeys.has("artwork.local_path")}
+          />
+          <SettingField
+            label="Save provider artwork to storage"
+            type="toggle"
+            description="When off, clients load provider artwork straight from the providers. Artwork stored next to your media is copied either way."
+            value={form.getValue(CACHE_IMAGES_KEY)}
+            onChange={(value) => form.setValue(CACHE_IMAGES_KEY, value)}
+            restartRequired={restartKeys.has(CACHE_IMAGES_KEY)}
           />
         </FieldGroup>
         {activeTransition ? (
@@ -1442,40 +1260,32 @@ export default function InfrastructureSettings() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <RedisGroup form={form} restartKeys={restartKeys} secrets={secrets} />
-        {showPublicStorage ? (
-          <S3Group
-            form={form}
-            restartKeys={restartKeys}
-            secrets={secrets}
-            scope="public"
-            label="Public storage"
-            description="Files clients download directly: cached artwork, uploaded posters, and branding images."
-            checkKind="s3_public"
-            artworkLockedBackend={artworkLocked ? artworkStorage?.backend : undefined}
-            publicBackendChangePending={publicBackendChangePending}
-            locationFieldsDisabled={!storageStatusKnown}
-          />
-        ) : null}
-        {/* On Local disk the public bucket is hidden and the private one is
-            optional, so S3 shrinks to a single folded group. */}
+        {/* Both bucket groups show on every backend. On a local install that
+            already holds artwork, choosing S3 opens the transition review at
+            once, so the buckets have to be filled in before Backend changes. */}
+        <S3Group
+          form={form}
+          restartKeys={restartKeys}
+          secrets={secrets}
+          scope="public"
+          label="Public storage"
+          description="Files clients download directly: cached artwork, uploaded posters, and branding images. Used once Backend is S3, or Automatic with a bucket set here."
+          checkKind="s3_public"
+          artworkLockedBackend={artworkLocked ? artworkStorage?.backend : undefined}
+          publicBackendChangePending={publicBackendChangePending}
+          locationFieldsDisabled={!storageStatusKnown}
+        />
         <S3Group
           form={form}
           restartKeys={restartKeys}
           secrets={secrets}
           scope="private"
-          label={showPublicStorage ? "Private storage" : "S3 storage"}
-          description={
-            showPublicStorage
-              ? "Files only the server reads: profile avatars, diagnostics bundles, and catalog seed artifacts. Without a private bucket they stay on local disk; S3 storage needs one for them."
-              : "Optional. A private bucket can hold files only the server reads, such as profile avatars and diagnostics bundles; without one they stay on local disk."
-          }
-          disclosureTitle={showPublicStorage ? undefined : "Private bucket"}
+          label="Private storage"
+          description="Files only the server reads: profile avatars, diagnostics bundles, and catalog seed artifacts. Optional on local disk, where they stay without one; S3 storage needs one for them."
           checkKind="s3_private"
           artworkLockedBackend={privateLocked ? artworkStorage?.backend : undefined}
           locationFieldsDisabled={!storageStatusKnown}
         />
-        <DatabaseGroup form={form} restartKeys={restartKeys} />
       </div>
 
       <SaveBar

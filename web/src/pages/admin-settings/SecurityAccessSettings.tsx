@@ -6,8 +6,8 @@ import type {
   RateLimitConfig,
   RateLimitTierConfig,
 } from "@/api/types";
-import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
+import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -276,21 +276,6 @@ export default function SecurityAccessSettings() {
   // itself to the unsaved-changes registry on its own — otherwise the
   // navigation guard and the reload prompt only know about the batched keys.
   useReportUnsavedChanges(rateLimitsDirty);
-  // Everything except the on/off switch lives in three disclosures; each one
-  // forces itself open while a value inside it differs from the saved config.
-  const limitsDirty =
-    config.backend !== hydratedConfig.backend ||
-    config.global_requests_per_second !== hydratedConfig.global_requests_per_second ||
-    config.ip_requests_per_second !== hydratedConfig.ip_requests_per_second ||
-    config.ip_requests_per_minute !== hydratedConfig.ip_requests_per_minute ||
-    config.ip_burst !== hydratedConfig.ip_burst;
-  const tiersDirty = JSON.stringify(config.tiers) !== JSON.stringify(hydratedConfig.tiers);
-  const endpointsDirty =
-    JSON.stringify(config.auth_endpoints) !== JSON.stringify(hydratedConfig.auth_endpoints);
-  // Backend and whole-server limit, then the per-address triad.
-  const limitsCount = 2 + 3;
-  const tiersCount = Object.keys(TIER_LABELS).length * 3;
-  const endpointsCount = Object.keys(AUTH_ENDPOINT_LABELS).length * 2;
 
   /**
    * One Save, two writers — and they are ordered, not concurrent. The
@@ -387,159 +372,134 @@ export default function SecurityAccessSettings() {
             }
           />
 
-          <AdvancedSection
-            id="security.rate-limits"
-            title="Server and client limits"
-            count={limitsCount}
-            forceOpen={limitsDirty}
+          <SettingFieldRow
+            label="Where counters are kept"
+            htmlFor="rate-limit-backend"
+            description={
+              redisSelectable
+                ? "Redis shares counters across servers, after a restart."
+                : "Redis shares counters across servers, after a restart. Set up Redis on the General page first."
+            }
+            status={
+              runningBackendDiffers ? (
+                <SettingFieldStatus tone="warn">
+                  The running limiter is using {backendNoun(runningBackend)} counters, not the saved{" "}
+                  {backendNoun(savedBackend)} backend. If a restart does not fix it, check that the
+                  saved backend is reachable.
+                </SettingFieldStatus>
+              ) : undefined
+            }
           >
-            <SettingFieldRow
-              label="Where counters are kept"
-              htmlFor="rate-limit-backend"
-              description={
-                redisSelectable
-                  ? "Redis shares counters across servers, after a restart."
-                  : "Redis shares counters across servers, after a restart. Configure Redis under Storage & Database first."
-              }
-              status={
-                runningBackendDiffers ? (
-                  <SettingFieldStatus tone="warn">
-                    The running limiter is using {backendNoun(runningBackend)} counters, not the
-                    saved {backendNoun(savedBackend)} backend. If a restart does not fix it, check
-                    that the saved backend is reachable.
-                  </SettingFieldStatus>
-                ) : undefined
-              }
-            >
-              <Select
-                value={config.backend}
-                onValueChange={(value) =>
-                  updateConfigState((prev) => ({ ...prev, backend: value }))
-                }
-                disabled={savingRateLimits}
-              >
-                <SelectTrigger id="rate-limit-backend" className={SETTINGS_CONTROL_WIDTH}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="memory">This server only</SelectItem>
-                  <SelectItem value="redis" disabled={!redisSelectable}>
-                    Shared via Redis
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </SettingFieldRow>
-
-            <SettingFieldRow
-              label="Whole-server limit"
-              htmlFor="global-rps"
-              description="Ceiling across every rate-limited route."
-              // The row's unit slot rather than a span beside the input: the
-              // triad rows below have no unit, and an inline one here would
-              // push this box off the column they share.
-              unit="per second"
-            >
-              <Input
-                id="global-rps"
-                type="number"
-                min={1}
-                value={config.global_requests_per_second}
-                onChange={(e) =>
-                  setNumber((num) =>
-                    updateConfigState((prev) => ({ ...prev, global_requests_per_second: num })),
-                  )(e.target.value)
-                }
-                disabled={savingRateLimits}
-                className={cn("text-right tabular-nums", SETTINGS_NUMBER_WIDTH)}
-              />
-            </SettingFieldRow>
-
-            <RateTriadRow
-              label="Per client address"
-              description="Budget one IP address gets."
+            <Select
+              value={config.backend}
+              onValueChange={(value) => updateConfigState((prev) => ({ ...prev, backend: value }))}
               disabled={savingRateLimits}
-              perSecond={{
-                value: config.ip_requests_per_second,
-                onChange: setNumber((num) =>
-                  updateConfigState((prev) => ({ ...prev, ip_requests_per_second: num })),
-                ),
-              }}
-              perMinute={{
-                value: config.ip_requests_per_minute,
-                onChange: setNumber((num) =>
-                  updateConfigState((prev) => ({ ...prev, ip_requests_per_minute: num })),
-                ),
-              }}
-              burst={{
-                value: config.ip_burst,
-                onChange: setNumber((num) =>
-                  updateConfigState((prev) => ({ ...prev, ip_burst: num })),
-                ),
-              }}
+            >
+              <SelectTrigger id="rate-limit-backend" className={SETTINGS_CONTROL_WIDTH}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="memory">This server only</SelectItem>
+                <SelectItem value="redis" disabled={!redisSelectable}>
+                  Shared via Redis
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingFieldRow>
+
+          <SettingFieldRow
+            label="Whole-server limit"
+            htmlFor="global-rps"
+            description="Ceiling across every rate-limited route."
+            // The row's unit slot rather than a span beside the input: the
+            // triad rows below have no unit, and an inline one here would
+            // push this box off the column they share.
+            unit="per second"
+          >
+            <Input
+              id="global-rps"
+              type="number"
+              min={1}
+              value={config.global_requests_per_second}
+              onChange={(e) =>
+                setNumber((num) =>
+                  updateConfigState((prev) => ({ ...prev, global_requests_per_second: num })),
+                )(e.target.value)
+              }
+              disabled={savingRateLimits}
+              className={cn("text-right tabular-nums", SETTINGS_NUMBER_WIDTH)}
             />
-          </AdvancedSection>
+          </SettingFieldRow>
 
-          <AdvancedSection
-            id="security.rate-limits.api-keys"
-            title="API key tiers"
-            count={tiersCount}
-            forceOpen={tiersDirty}
-          >
-            {Object.keys(TIER_LABELS).map((tier) => {
-              const tierConfig = config.tiers[tier] ?? DEFAULT_TIER;
-              return (
-                <RateTriadRow
-                  key={tier}
-                  label={TIER_LABELS[tier]!}
-                  disabled={savingRateLimits}
-                  perSecond={{
-                    value: tierConfig.requests_per_second,
-                    onChange: setNumber((num) =>
-                      handleTierChange(tier, "requests_per_second", num),
-                    ),
-                  }}
-                  perMinute={{
-                    value: tierConfig.requests_per_minute,
-                    onChange: setNumber((num) =>
-                      handleTierChange(tier, "requests_per_minute", num),
-                    ),
-                  }}
-                  burst={{
-                    value: tierConfig.burst,
-                    onChange: setNumber((num) => handleTierChange(tier, "burst", num)),
-                  }}
-                />
-              );
-            })}
-          </AdvancedSection>
+          <RateTriadRow
+            label="Per client address"
+            description="Budget one IP address gets."
+            disabled={savingRateLimits}
+            perSecond={{
+              value: config.ip_requests_per_second,
+              onChange: setNumber((num) =>
+                updateConfigState((prev) => ({ ...prev, ip_requests_per_second: num })),
+              ),
+            }}
+            perMinute={{
+              value: config.ip_requests_per_minute,
+              onChange: setNumber((num) =>
+                updateConfigState((prev) => ({ ...prev, ip_requests_per_minute: num })),
+              ),
+            }}
+            burst={{
+              value: config.ip_burst,
+              onChange: setNumber((num) =>
+                updateConfigState((prev) => ({ ...prev, ip_burst: num })),
+              ),
+            }}
+          />
 
-          <AdvancedSection
-            id="security.rate-limits.endpoints"
-            title="Sign-in and webhook endpoints"
-            count={endpointsCount}
-            forceOpen={endpointsDirty}
-          >
-            {Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => {
-              const epConfig = config.auth_endpoints[endpoint] ?? DEFAULT_AUTH_ENDPOINT;
-              return (
-                <RateTriadRow
-                  key={endpoint}
-                  label={AUTH_ENDPOINT_LABELS[endpoint]!}
-                  disabled={savingRateLimits}
-                  perMinute={{
-                    value: epConfig.requests_per_minute,
-                    onChange: setNumber((num) =>
-                      handleAuthEndpointChange(endpoint, "requests_per_minute", num),
-                    ),
-                  }}
-                  burst={{
-                    value: epConfig.burst,
-                    onChange: setNumber((num) => handleAuthEndpointChange(endpoint, "burst", num)),
-                  }}
-                />
-              );
-            })}
-          </AdvancedSection>
+          <SettingsSubheading>API key tiers</SettingsSubheading>
+          {Object.keys(TIER_LABELS).map((tier) => {
+            const tierConfig = config.tiers[tier] ?? DEFAULT_TIER;
+            return (
+              <RateTriadRow
+                key={tier}
+                label={TIER_LABELS[tier]!}
+                disabled={savingRateLimits}
+                perSecond={{
+                  value: tierConfig.requests_per_second,
+                  onChange: setNumber((num) => handleTierChange(tier, "requests_per_second", num)),
+                }}
+                perMinute={{
+                  value: tierConfig.requests_per_minute,
+                  onChange: setNumber((num) => handleTierChange(tier, "requests_per_minute", num)),
+                }}
+                burst={{
+                  value: tierConfig.burst,
+                  onChange: setNumber((num) => handleTierChange(tier, "burst", num)),
+                }}
+              />
+            );
+          })}
+
+          <SettingsSubheading>Sign-in and webhook endpoints</SettingsSubheading>
+          {Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => {
+            const epConfig = config.auth_endpoints[endpoint] ?? DEFAULT_AUTH_ENDPOINT;
+            return (
+              <RateTriadRow
+                key={endpoint}
+                label={AUTH_ENDPOINT_LABELS[endpoint]!}
+                disabled={savingRateLimits}
+                perMinute={{
+                  value: epConfig.requests_per_minute,
+                  onChange: setNumber((num) =>
+                    handleAuthEndpointChange(endpoint, "requests_per_minute", num),
+                  ),
+                }}
+                burst={{
+                  value: epConfig.burst,
+                  onChange: setNumber((num) => handleAuthEndpointChange(endpoint, "burst", num)),
+                }}
+              />
+            );
+          })}
         </FieldGroup>
       </div>
 

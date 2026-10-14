@@ -258,7 +258,7 @@ export default function ConnectAppsSettings() {
     isError: connectInfoFailed,
   } = useCompatConnectInfo();
 
-  const [kind, setKind] = useState<AppKind>("jellyfin");
+  const [kind, setKind] = useState<AppKind>("silo");
   const [selectedProfileID, setSelectedProfileID] = useState<string | null>(null);
 
   // Default to the profile the user is already using — the one they're most

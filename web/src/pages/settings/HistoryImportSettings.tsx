@@ -450,7 +450,7 @@ export default function HistoryImportSettings() {
                 {sourcesLoading ? (
                   <div className="text-muted-foreground text-sm">Loading saved servers\u2026</div>
                 ) : embySources.length === 0 ? (
-                  <EmptyNotice>No admin-defined Emby servers are available yet.</EmptyNotice>
+                  <EmptyNotice>No server-defined Emby servers are available yet.</EmptyNotice>
                 ) : (
                   <>
                     <div className="space-y-2">
@@ -568,7 +568,7 @@ export default function HistoryImportSettings() {
                 {sourcesLoading ? (
                   <div className="text-muted-foreground text-sm">Loading saved servers\u2026</div>
                 ) : plexSources.length === 0 ? (
-                  <EmptyNotice>No admin-defined Plex servers are available yet.</EmptyNotice>
+                  <EmptyNotice>No server-defined Plex servers are available yet.</EmptyNotice>
                 ) : (
                   <>
                     <div className="space-y-2">

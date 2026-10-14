@@ -132,8 +132,9 @@ describe("PlaybackSettings", () => {
   it("reads its values in one batch rather than one request per control", () => {
     render(<PlaybackSettings />);
 
-    expect(screen.getByText("Spoken language")).toBeTruthy();
     expect(screen.getByText("Auto-play next episode")).toBeTruthy();
+    // Languages live on the Language & Subtitles page now.
+    expect(screen.queryByText("Spoken language")).toBeNull();
 
     const batched = mocks.useEffectiveSettings.mock.calls.find(
       ([options]) => (options?.keys?.length ?? 0) > 2,
@@ -141,8 +142,18 @@ describe("PlaybackSettings", () => {
     expect(batched?.[0].keys).toContain(SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE);
     expect(batched?.[0].keys).not.toContain(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO);
     expect(batched?.[0].keys).not.toContain(SETTING_KEYS.UI_NEXT_UP_MODE);
-    expect(batched?.[0].keys).toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
-    expect(batched?.[0].keys).toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES);
+    expect(batched?.[0].keys).not.toContain(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
+    expect(batched?.[0].keys).not.toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
+  });
+
+  it("lists the skipping switches as intros, recaps, then credits", () => {
+    render(<PlaybackSettings />);
+
+    const skipping = screen.getByRole("group", { name: "Skipping" });
+    const labels = within(skipping)
+      .getAllByText(/^(Skip intros|Auto-skip recaps|Auto-skip credits)$/)
+      .map((node) => node.textContent);
+    expect(labels).toEqual(["Skip intros", "Auto-skip recaps", "Auto-skip credits"]);
   });
 
   it("saves the selected intro mode as typed JSON at profile scope", async () => {

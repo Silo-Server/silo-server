@@ -1,13 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
-import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SettingField } from "./SettingField";
 import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
+import { RedisGroup, type RedisUrlEditors } from "./RedisGroup";
+import { REDIS_KEYS } from "./redisDraft";
 
 // Identity (server name, login subtitle) used to live on the Branding tab; it is
 // a plain server-wide value an admin looks for under General, so it saves with
@@ -20,7 +22,15 @@ const IDENTITY_KEYS = ["branding.server_name", "branding.login_subtitle"];
 // them: both are what an install behind a reverse proxy needs to get right.
 const TRUSTED_PROXIES_KEY = "clientip.trusted_proxies";
 const NETWORK_KEYS = ["server.public_url", "server.lan_discovery", TRUSTED_PROXIES_KEY];
-const KEYS = [...NETWORK_KEYS, ...IDENTITY_KEYS];
+
+// Redis and the Postgres pool are server-wide plumbing, not storage, so they
+// moved here from the Storage page. userdb.backend, userdb.pool_max_open and
+// userdb.idle_timeout are Hidden on purpose: PostgreSQL is the only usable
+// per-user store, and the two SQLite tuning fields could never show. They stay
+// ordinary settings through the API.
+const DATABASE_KEYS = ["database.max_connections"];
+
+const KEYS = [...NETWORK_KEYS, ...IDENTITY_KEYS, ...DATABASE_KEYS, ...REDIS_KEYS];
 
 export default function GeneralSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
@@ -29,8 +39,43 @@ export default function GeneralSettings() {
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const trustedProxiesManaged = form.sensitiveManagedByEnv.includes(TRUSTED_PROXIES_KEY);
+  const [saveInProgress, setSaveInProgress] = useState(false);
+  const saveInProgressRef = useRef(false);
 
-  if (form.isLoading)
+  // The Redis URL is a credential: its editors are frozen while a save is in
+  // flight so a late keystroke cannot ride along with it.
+  const redisUrlEditors: RedisUrlEditors = {
+    keepSaved: (key) => {
+      if (saveInProgressRef.current) return;
+      form.resetValue(key);
+    },
+    setSecret: (key, value) => {
+      if (saveInProgressRef.current) return;
+      form.setValue(key, value);
+    },
+    disabled: form.isSaving || saveInProgress,
+  };
+
+  async function handleSave() {
+    if (saveInProgressRef.current) return;
+    saveInProgressRef.current = true;
+    setSaveInProgress(true);
+    try {
+      await form.save();
+    } finally {
+      saveInProgressRef.current = false;
+      setSaveInProgress(false);
+    }
+  }
+
+  function handleDiscard() {
+    if (saveInProgressRef.current) return;
+    form.discard();
+  }
+
+  // Redis reads whether a URL is saved from the protected-credential status,
+  // so the page waits for it; if it fails, only the Redis group is held.
+  if (form.isLoading || (!form.sensitiveStatusReady && !form.sensitiveStatusError))
     return (
       <div className="space-y-6" role="status" aria-label="Loading settings">
         <Skeleton className="h-8 w-48" />
@@ -102,36 +147,63 @@ export default function GeneralSettings() {
             onChange={(v) => form.setValue("server.lan_discovery", v)}
             restartRequired={restartKeys.has("server.lan_discovery")}
           />
-          <AdvancedSection
-            id="general.reverse-proxy"
-            title="Behind a reverse proxy?"
-            count={1}
-            forceOpen={form.isDirty(TRUSTED_PROXIES_KEY)}
-          >
-            <SettingField
-              label="Trusted proxies"
-              settingKey={TRUSTED_PROXIES_KEY}
-              dirty={form.isDirty(TRUSTED_PROXIES_KEY)}
-              description={
-                trustedProxiesManaged
-                  ? "Managed by SILO_TRUSTED_PROXIES."
-                  : "Comma-separated proxy ranges; empty keeps the private defaults."
-              }
-              hint="172.16.0.0/12, 203.0.113.7/32"
-              value={form.getValue(TRUSTED_PROXIES_KEY)}
-              onChange={(v) => form.setValue(TRUSTED_PROXIES_KEY, v)}
-              disabled={trustedProxiesManaged}
-              restartRequired={restartKeys.has(TRUSTED_PROXIES_KEY)}
-            />
-          </AdvancedSection>
+          <SettingField
+            label="Trusted proxies"
+            settingKey={TRUSTED_PROXIES_KEY}
+            dirty={form.isDirty(TRUSTED_PROXIES_KEY)}
+            description={
+              trustedProxiesManaged
+                ? "Managed by SILO_TRUSTED_PROXIES."
+                : "Comma-separated proxy ranges; empty keeps the private defaults."
+            }
+            hint="172.16.0.0/12, 203.0.113.7/32"
+            value={form.getValue(TRUSTED_PROXIES_KEY)}
+            onChange={(v) => form.setValue(TRUSTED_PROXIES_KEY, v)}
+            disabled={trustedProxiesManaged}
+            restartRequired={restartKeys.has(TRUSTED_PROXIES_KEY)}
+          />
         </FieldGroup>
+
+        <FieldGroup
+          label="Database"
+          restartAll={allRestart(DATABASE_KEYS)}
+          dirty={anyDirty(DATABASE_KEYS)}
+        >
+          <SettingField
+            label="Maximum Postgres connections"
+            settingKey="database.max_connections"
+            dirty={form.isDirty("database.max_connections")}
+            type="number"
+            description="Raise only if the logs show connection-pool waits."
+            value={form.getValue("database.max_connections")}
+            onChange={(v) => form.setValue("database.max_connections", v)}
+            restartRequired={restartKeys.has("database.max_connections")}
+          />
+        </FieldGroup>
+
+        {form.sensitiveStatusError ? (
+          <div
+            className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4"
+            role="alert"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+            <div>
+              <p className="text-sm font-medium">Redis settings are unavailable</p>
+              <p className="text-muted-foreground mt-1 text-[13px]">
+                Protected credential status could not be loaded. Reload this page to edit Redis.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <RedisGroup form={form} restartKeys={restartKeys} secrets={redisUrlEditors} />
+        )}
       </div>
 
       <SaveBar
         dirtyCount={form.dirtyCount}
-        onSave={form.save}
-        onDiscard={form.discard}
-        isSaving={form.isSaving}
+        onSave={handleSave}
+        onDiscard={handleDiscard}
+        isSaving={form.isSaving || saveInProgress}
       />
     </div>
   );

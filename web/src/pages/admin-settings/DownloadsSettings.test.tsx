@@ -69,17 +69,17 @@ describe("DownloadsSettings staged edits", () => {
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
       "download.enabled",
       "download.transcode_enabled",
+      "download.max_concurrent_prepares",
+      "download.artifact_dir",
+      "download.artifact_max_bytes",
+      "download.artifact_disk_ceiling_percent",
+      "download.server_bandwidth_mbps",
       "download.user_bandwidth_mbps",
       "download.max_concurrent_per_user",
       "download.max_per_period",
       "download.period_duration",
-      "download.server_bandwidth_mbps",
       "download.local_transcode_fallback",
-      "download.artifact_dir",
-      "download.max_concurrent_prepares",
-      "download.artifact_max_bytes",
       "download.artifact_cache_hours",
-      "download.artifact_disk_ceiling_percent",
     ]);
 
     fireEvent.click(screen.getByRole("switch", { name: /Allow downloads/i }));
@@ -111,8 +111,7 @@ describe("DownloadsSettings staged edits", () => {
     expect(lastForm().setValue).toHaveBeenCalledWith("download.user_bandwidth_mbps", "25");
   });
 
-  it("stages an advanced text field", () => {
-    expandAdvanced();
+  it("stages the prepared file directory without opening the disclosure", () => {
     renderSettings();
 
     fireEvent.change(screen.getByLabelText("Prepared file directory"), {
@@ -127,16 +126,29 @@ describe("DownloadsSettings staged edits", () => {
 });
 
 describe("DownloadsSettings tiers", () => {
-  it("shows only the two switches until Advanced is opened", () => {
+  it("shows the switches and server-wide storage until Advanced is opened", () => {
     renderSettings();
-    const group = within(screen.getByRole("group", { name: "Downloads" }));
+    const group = screen.getByRole("group", { name: "Downloads" });
+    // Row labels before the disclosure; each limit's "Unlimited" switch label
+    // is not a row.
+    const labels = Array.from(group.querySelectorAll("label"), (el) => el.textContent).filter(
+      (label) => label !== "Unlimited",
+    );
 
-    expect(group.getByRole("switch", { name: /Allow downloads/ })).toBeInTheDocument();
+    expect(labels).toEqual([
+      "Allow downloads",
+      "Prepare device-friendly copies",
+      "Files prepared at once",
+      "Prepared file directory",
+      "Default storage budget per location",
+      "Disk ceiling (%)",
+      "Server bandwidth",
+    ]);
     expect(
-      group.getByRole("switch", { name: /Prepare device-friendly copies/ }),
+      within(group).getByRole("button", { name: "Advanced · 6 settings" }),
     ).toBeInTheDocument();
-    expect(group.getByRole("button", { name: "Advanced · 11 settings" })).toBeInTheDocument();
-    expect(group.queryByLabelText("Per-user bandwidth")).toBeNull();
+    expect(within(group).queryByLabelText("Per-user bandwidth")).toBeNull();
+    expect(within(group).queryByText("Keep cached files for")).toBeNull();
   });
 
   it("lists the bandwidth cap first among the per-user limits", () => {
@@ -169,8 +181,6 @@ describe("DownloadsSettings tiers", () => {
 });
 
 describe("DownloadsSettings prepared file storage budget", () => {
-  beforeEach(expandAdvanced);
-
   it("writes bytes back when a GB budget is typed", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "download.artifact_max_bytes": "53687091200" }));
     renderSettings();
@@ -209,8 +219,6 @@ describe("DownloadsSettings prepared file storage budget", () => {
 });
 
 describe("DownloadsSettings prepared file directory", () => {
-  beforeEach(expandAdvanced);
-
   const RESET = { name: "Reset Prepared file directory to default" };
 
   it("stages an empty value when an overridden directory is reset", () => {

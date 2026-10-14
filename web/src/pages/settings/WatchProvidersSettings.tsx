@@ -489,7 +489,7 @@ function WatchProviderCard({
       const username = connection.provider_username || displayName;
       return `${username} · ${formatLastSync(connection, latestRun)}`;
     }
-    if (!connection.credentials_configured) return "Server credentials required.";
+    if (!connection.credentials_configured) return "Server setup required.";
     if (usesAPIKey)
       return `Connect with your ${displayName} API key to import watch history and scrobble playback.`;
     return "Connect to start importing watch history and scrobbling playback.";

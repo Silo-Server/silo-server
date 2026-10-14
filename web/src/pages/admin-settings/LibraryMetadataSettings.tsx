@@ -1,30 +1,18 @@
-import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, RotateCcw } from "lucide-react";
-import { Link } from "react-router";
+import { RotateCcw } from "lucide-react";
 
-import type { ConnectionCheckResponse } from "@/api/types";
-import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
-import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
-import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
 import {
   useAdminRatingSourceCapabilities,
   useAdminRatingSources,
 } from "@/hooks/queries/admin/ratingSources";
-import {
-  useCatalogSearchStatus,
-  useCheckAdminSettingsConnection,
-} from "@/hooks/queries/admin/settings";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
-import { MarkerTasksCard } from "./MarkerTasksCard";
 import {
   EXTRA_RATING_SOURCES_KEY,
   groupRatingSourcesByPlugin,
@@ -40,11 +28,12 @@ import {
   isNodeBackedExecution,
   subtitleSyncExecutionOptions,
 } from "./playbackSettings.utils";
-import { SearchStatusPanel, SearchStatusSummary } from "./SearchStatusPanel";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDefaults";
 
-const ARTWORK_VERSION_KEYS = ["metadata.cache_images", "catalog.scope_versions_to_library"];
+// Skip markers are on Playback, search on its own Search page, and saving
+// provider artwork on Storage; none of their keys are loaded here.
+const GENERAL_KEYS = ["catalog.scope_versions_to_library"];
 
 // Not a browsing preference: a rule about what a profile with a maximum
 // content rating may see at all.
@@ -71,21 +60,6 @@ const REALTIME_MONITORING_KEY = "scanner.realtime_monitoring";
 
 const SCANNING_GROUP_KEYS = [REALTIME_MONITORING_KEY, ...SCANNER_KEYS];
 
-// Which markers to find is shown; how many to analyze at once, whether to keep
-// online ones, and the playback-time lookup are tuning behind Advanced.
-const MARKER_ADVANCED_KEYS = [
-  "markers.lazy_playback",
-  "markers.online_storage",
-  "markers.detection_workers",
-];
-
-const MARKER_KEYS = [
-  "markers.mode",
-  "markers.detect_intros",
-  "markers.detect_credits",
-  ...MARKER_ADVANCED_KEYS,
-];
-
 // Subtitle sync aligns a subtitle file that is already there, so it sits with
 // the other per-file analysis here rather than with the subtitle providers that
 // supply the files. Where the audio is decoded is placement, behind Advanced.
@@ -93,48 +67,17 @@ const SUBTITLE_SYNC_ADVANCED_KEYS = ["subtitles.sync_execution", "subtitles.sync
 
 const SUBTITLE_SYNC_KEYS = ["subtitles.auto_sync", ...SUBTITLE_SYNC_ADVANCED_KEYS];
 
-const MEILI_URL_KEY = "catalog.search.meilisearch.url";
-const MEILI_API_KEY = "catalog.search.meilisearch.api_key";
-
-const MEILI_KEYS = [
-  MEILI_URL_KEY,
-  MEILI_API_KEY,
-  "catalog.search.meilisearch.index",
-  "catalog.search.meilisearch.timeout_ms",
-  "catalog.search.meilisearch.matching_strategy",
-  "catalog.search.meilisearch.sync_batch_size",
-  "catalog.search.meilisearch.semantic_enabled",
-  "catalog.search.meilisearch.semantic_ratio",
-];
-
-const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
-
-// Hidden tier: still saved and readable through the settings API, deliberately
-// without a control here because the defaults are right for every deployment we
-// support — catalog.search.meilisearch.{rebuild_batch_size,
-// rebuild_task_queue_depth,index_types,embedder,binary_quantized}.
 const KEYS = [
+  ...GENERAL_KEYS,
   ...SCANNING_GROUP_KEYS,
-  ...ARTWORK_VERSION_KEYS,
   ...MATURITY_KEYS,
   ...RATINGS_KEYS,
-  ...MARKER_KEYS,
   ...SUBTITLE_SYNC_KEYS,
-  ...SEARCH_KEYS,
 ];
 
 export default function LibraryMetadataSettings() {
   const form = useSettingsForm({ keys: KEYS });
   const restartKeys = useRestartKeys();
-  const checkConnection = useCheckAdminSettingsConnection();
-  const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
-
-  const provider = form.getValue("catalog.search.provider") || "postgres";
-  const meiliEnabled = provider === "meilisearch";
-  const { data: searchStatus } = useCatalogSearchStatus(meiliEnabled);
-  // An older API node saves the detection kind switches but ignores them, so
-  // they are offered only where the server says it honors them.
-  const { data: markerCapabilities } = useAdminMarkerCapabilities();
   // An older API node has no rating source list, so the Ratings group shows
   // only where the server says it has one.
   const { data: ratingSourceCapabilities } = useAdminRatingSourceCapabilities();
@@ -144,7 +87,6 @@ export default function LibraryMetadataSettings() {
 
   // A saved rating choice also refreshes cached title pages and cards.
   const handleSave = () => saveAndRefreshRatings(form, queryClient);
-  const detectionKindSettings = markerCapabilities?.detection_kind_settings === true;
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   // Restoring stages every worker value at once; the save bar still confirms
@@ -157,29 +99,6 @@ export default function LibraryMetadataSettings() {
   function restoreWorkerDefaults() {
     for (const [key, fallback] of Object.entries(WORKER_SETTING_DEFAULTS)) {
       if (form.getValue(key) !== fallback) form.setValue(key, fallback);
-    }
-  }
-  // Staged Meilisearch edits stay reachable after switching the provider back,
-  // so the save bar can never count a change the admin cannot see.
-  const showMeili = meiliEnabled || anyDirty(MEILI_KEYS);
-  const enablingSemanticSearch =
-    form.isDirty("catalog.search.meilisearch.semantic_enabled") &&
-    form.getPersistedValue("catalog.search.meilisearch.semantic_enabled") !== "true" &&
-    form.getValue("catalog.search.meilisearch.semantic_enabled") === "true";
-
-  async function handleCheckConnection() {
-    try {
-      setConnectionResult(
-        await checkConnection.mutateAsync({
-          kind: "meilisearch",
-          body: form.buildConnectionCheckRequest(MEILI_KEYS),
-        }),
-      );
-    } catch (error) {
-      setConnectionResult({
-        success: false,
-        message: error instanceof Error ? error.message : "Connection check failed.",
-      });
     }
   }
 
@@ -201,14 +120,6 @@ export default function LibraryMetadataSettings() {
       EXTRA_RATING_SOURCES_KEY,
       toggleRatingSource(form.getValue(EXTRA_RATING_SOURCES_KEY), source, on),
     );
-  const markerMode = form.getValue("markers.mode") || "both";
-  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
-  const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
-  const localMarkersEnabled = markerMode === "local" || markerMode === "both";
-  const showLazyPlayback =
-    markerMode !== "off" && (!onlineMarkersEnabled || onlineMarkerStorage === "stored");
-  const markerAdvancedCount =
-    Number(onlineMarkersEnabled) + Number(showLazyPlayback) + Number(localMarkersEnabled);
 
   // Gate the node-backed sync modes only on a node list we actually have:
   // while the query is in flight or after it failed, leave every option
@@ -221,11 +132,6 @@ export default function LibraryMetadataSettings() {
   // An unsaved capacity stays in view after placement moves off the nodes, so
   // the save bar never counts a change the admin cannot see.
   const showSyncCapacity = syncOnNodes || form.isDirty("subtitles.sync_node_capacity");
-
-  // The Meilisearch connection and tuning share one disclosure with the index
-  // status; the status panel is not a setting, so not counted, and with
-  // Postgres the disclosure holds nothing else.
-  const searchAdvancedCount = showMeili ? MEILI_KEYS.length : undefined;
 
   if (form.isLoading) {
     return (
@@ -244,6 +150,28 @@ export default function LibraryMetadataSettings() {
       <SettingsPageHeader title="Library & Metadata" />
 
       <div className="flex-1 space-y-5">
+        <FieldGroup
+          label="General"
+          restartAll={allRestart(GENERAL_KEYS)}
+          dirty={anyDirty(GENERAL_KEYS)}
+        >
+          {/* Shown as the opposite of the stored key: on is the default, where
+              catalog.scope_versions_to_library is false. */}
+          <SettingField
+            label="Show all library versions on detail page"
+            type="toggle"
+            description="When a title is in several libraries, its detail page lists every version the viewer can access, wherever they opened it. Off, it lists only the files in the library they opened it from. Playback always sees every version."
+            value={form.getValue("catalog.scope_versions_to_library") === "true" ? "false" : "true"}
+            onChange={(value) =>
+              form.setValue(
+                "catalog.scope_versions_to_library",
+                value === "true" ? "false" : "true",
+              )
+            }
+            restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
+          />
+        </FieldGroup>
+
         <FieldGroup
           label="Scanning"
           restartAll={allRestart(SCANNING_GROUP_KEYS)}
@@ -322,37 +250,6 @@ export default function LibraryMetadataSettings() {
         </FieldGroup>
 
         <FieldGroup
-          label="Artwork and versions"
-          description="Whether provider artwork is copied into your storage, and which versions a title's detail page lists."
-          restartAll={allRestart(ARTWORK_VERSION_KEYS)}
-          dirty={anyDirty(ARTWORK_VERSION_KEYS)}
-        >
-          <SettingField
-            label="Save provider artwork to storage"
-            type="toggle"
-            description="When off, clients load provider artwork straight from the providers. Artwork stored next to your media is copied either way."
-            value={form.getValue("metadata.cache_images")}
-            onChange={(value) => form.setValue("metadata.cache_images", value)}
-            restartRequired={restartKeys.has("metadata.cache_images")}
-          />
-          {/* Shown as the opposite of the stored key: on is the default, where
-              catalog.scope_versions_to_library is false. */}
-          <SettingField
-            label="Show all library versions on detail page"
-            type="toggle"
-            description="When a title is in several libraries, its detail page lists every version the viewer can access, wherever they opened it. Off, it lists only the files in the library they opened it from. Playback always sees every version."
-            value={form.getValue("catalog.scope_versions_to_library") === "true" ? "false" : "true"}
-            onChange={(value) =>
-              form.setValue(
-                "catalog.scope_versions_to_library",
-                value === "true" ? "false" : "true",
-              )
-            }
-            restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
-          />
-        </FieldGroup>
-
-        <FieldGroup
           label="Maturity limits"
           description="For profiles with a maximum content rating, which is set on each profile."
           restartAll={allRestart(MATURITY_KEYS)}
@@ -426,125 +323,6 @@ export default function LibraryMetadataSettings() {
           </FieldGroup>
         )}
 
-        {/*
-          Detection behavior lives here; which online providers answer a lookup,
-          and on what terms, is provider configuration and lives with the other
-          providers.
-        */}
-        <FieldGroup
-          label="Skip markers"
-          description="Markers identify intros, credits, recaps, and previews so players can offer skip controls."
-          restartAll={allRestart(MARKER_KEYS)}
-          actions={
-            <Link
-              to="/admin/settings/providers"
-              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
-            >
-              Marker providers
-              <ArrowRight className="h-3 w-3" aria-hidden="true" />
-            </Link>
-          }
-        >
-          <SettingField
-            label="Marker source"
-            type="select"
-            description="Online markers take priority. Silo skips local detection of an intro or credits when an online one is saved in your library. Local detection uses CPU."
-            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
-            options={[
-              { value: "off", label: "Off" },
-              { value: "local", label: "Detect on this server" },
-              { value: "both", label: "Online preferred + server detection" },
-              { value: "online", label: "Online providers only" },
-            ]}
-            value={markerMode}
-            onChange={(value) => form.setValue("markers.mode", value)}
-            restartRequired={restartKeys.has("markers.mode")}
-          />
-
-          {localMarkersEnabled && detectionKindSettings && (
-            <>
-              <SettingField
-                label="Detect intros"
-                type="toggle"
-                description="Finds each episode's opening from embedded chapters, or by comparing the start of episodes in a season."
-                value={form.getValue("markers.detect_intros") || "true"}
-                onChange={(value) => form.setValue("markers.detect_intros", value)}
-                restartRequired={restartKeys.has("markers.detect_intros")}
-              />
-              <SettingField
-                label="Detect credits"
-                type="toggle"
-                description="Finds end credits from embedded chapters, or by reading the end of each episode and movie. Uses more CPU than intro detection."
-                value={form.getValue("markers.detect_credits") || "true"}
-                onChange={(value) => form.setValue("markers.detect_credits", value)}
-                restartRequired={restartKeys.has("markers.detect_credits")}
-              />
-            </>
-          )}
-
-          <div className="py-3.5">
-            <MarkerTasksCard />
-          </div>
-
-          {markerAdvancedCount > 0 && (
-            <AdvancedSection
-              id="library.markers"
-              count={markerAdvancedCount}
-              forceOpen={anyDirty(MARKER_ADVANCED_KEYS)}
-            >
-              {onlineMarkersEnabled && (
-                <SettingField
-                  label="Save online markers"
-                  type="select"
-                  description={
-                    onlineMarkerStorage === "stored"
-                      ? "Silo saves markers from enabled providers such as TheIntroDB. The Sync online markers task fetches missing markers and refreshes saved markers daily at 03:00 (server time) by default."
-                      : "Fetch markers when needed without saving them to your library. Scheduled online sync is disabled."
-                  }
-                  options={[
-                    { value: "stored", label: "Save to library" },
-                    { value: "on_demand", label: "Fetch when needed" },
-                  ]}
-                  value={onlineMarkerStorage}
-                  onChange={(value) => {
-                    form.setValue("markers.online_storage", value);
-                    if (value === "on_demand") form.setValue("markers.lazy_playback", "true");
-                  }}
-                  restartRequired={restartKeys.has("markers.online_storage")}
-                />
-              )}
-
-              {showLazyPlayback && (
-                <SettingField
-                  label="Find markers on playback"
-                  type="toggle"
-                  description={
-                    onlineMarkersEnabled
-                      ? markerMode === "both"
-                        ? "Check online first when playback starts. Silo detects only the intro or credits online providers don't have, using this server's CPU."
-                        : "Check online for missing or outdated markers when playback starts."
-                      : "Detect missing markers when playback starts. Local analysis uses CPU."
-                  }
-                  value={form.getValue("markers.lazy_playback") || "true"}
-                  onChange={(value) => form.setValue("markers.lazy_playback", value)}
-                  restartRequired={restartKeys.has("markers.lazy_playback")}
-                />
-              )}
-
-              {localMarkersEnabled && (
-                <SettingField
-                  label="Detection workers"
-                  type="number"
-                  description="How many seasons or movies Silo analyzes at once, each with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
-                  value={form.getValue("markers.detection_workers")}
-                  onChange={(value) => form.setValue("markers.detection_workers", value)}
-                  restartRequired={restartKeys.has("markers.detection_workers")}
-                />
-              )}
-            </AdvancedSection>
-          )}
-        </FieldGroup>
-
         <FieldGroup
           label="Subtitle sync"
           description="Shifts subtitle timing to match the video's audio."
@@ -598,167 +376,6 @@ export default function LibraryMetadataSettings() {
                 restartRequired={restartKeys.has("subtitles.sync_node_capacity")}
               />
             )}
-          </AdvancedSection>
-        </FieldGroup>
-
-        <FieldGroup
-          label="Search"
-          description="Built-in Postgres search needs no setup. Meilisearch is optional."
-          restartAll={allRestart(SEARCH_KEYS)}
-        >
-          <SettingField
-            label="Search engine"
-            type="select"
-            description="Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically."
-            value={provider}
-            onChange={(value) => form.setValue("catalog.search.provider", value)}
-            options={[
-              { value: "postgres", label: "Built-in (Postgres)" },
-              { value: "meilisearch", label: "Meilisearch" },
-            ]}
-            status={meiliEnabled && !searchStatus?.degraded ? <SearchStatusSummary /> : undefined}
-            restartRequired={restartKeys.has("catalog.search.provider")}
-          />
-          {meiliEnabled && searchStatus?.degraded && (
-            <div className="py-3.5">
-              <SettingFieldStatus tone="warn">
-                <span>
-                  {searchStatus.degraded_reason ?? "Search is running in a degraded mode."}
-                  {searchStatus.index.rebuild_required && (
-                    <>
-                      {" "}
-                      Automatic search maintenance rebuilds the index in the background and retries
-                      if needed.{" "}
-                      <Link
-                        className="font-medium underline underline-offset-2"
-                        to="/admin/tasks/sync_catalog_search_index"
-                      >
-                        Open maintenance task
-                      </Link>
-                      .
-                    </>
-                  )}
-                </span>
-              </SettingFieldStatus>
-            </div>
-          )}
-
-          <AdvancedSection
-            id="library.search"
-            count={searchAdvancedCount}
-            forceOpen={anyDirty(MEILI_KEYS)}
-          >
-            {showMeili && (
-              <>
-                <SettingField
-                  label="Meilisearch URL"
-                  value={form.getValue(MEILI_URL_KEY)}
-                  onChange={(value) => form.setValue(MEILI_URL_KEY, value)}
-                  hint="http://localhost:7700"
-                  disabled={!meiliEnabled}
-                  restartRequired={restartKeys.has(MEILI_URL_KEY)}
-                />
-                <SecretField
-                  label="Meilisearch API key"
-                  value={form.getValue(MEILI_API_KEY)}
-                  configured={form.sensitiveConfigured.includes(MEILI_API_KEY)}
-                  onChange={(value) => form.setValue(MEILI_API_KEY, value)}
-                  onKeep={() => form.resetValue(MEILI_API_KEY)}
-                  // Nothing else on this page can empty the stored key, and a
-                  // Meilisearch instance without a master key needs it empty.
-                  onClear={() => form.setValue(MEILI_API_KEY, "")}
-                  cleared={form.isClearStaged(MEILI_API_KEY)}
-                  hint="Master key, or one that can read and write the index."
-                  disabled={!meiliEnabled}
-                  restartRequired={restartKeys.has(MEILI_API_KEY)}
-                />
-                <ConnectionCheckAction
-                  onClick={handleCheckConnection}
-                  result={connectionResult}
-                  isPending={checkConnection.isPending}
-                  disabled={!meiliEnabled}
-                />
-                <SettingField
-                  label="Index name prefix"
-                  value={form.getValue("catalog.search.meilisearch.index") || "silo_media_items"}
-                  onChange={(value) => form.setValue("catalog.search.meilisearch.index", value)}
-                  description="Only needed when Silo servers share one Meilisearch."
-                  disabled={!meiliEnabled}
-                  restartRequired={restartKeys.has("catalog.search.meilisearch.index")}
-                />
-                <SettingField
-                  label="Query timeout"
-                  type="number"
-                  unit="ms"
-                  value={form.getValue("catalog.search.meilisearch.timeout_ms") || "800"}
-                  onChange={(value) =>
-                    form.setValue("catalog.search.meilisearch.timeout_ms", value)
-                  }
-                  description="Searches that take longer fall back to the built-in engine."
-                  disabled={!meiliEnabled}
-                  restartRequired={restartKeys.has("catalog.search.meilisearch.timeout_ms")}
-                />
-                <SettingField
-                  label="When a search has several words"
-                  type="select"
-                  value={form.getValue("catalog.search.meilisearch.matching_strategy") || "last"}
-                  onChange={(value) =>
-                    form.setValue("catalog.search.meilisearch.matching_strategy", value)
-                  }
-                  options={[
-                    { value: "last", label: "Drop trailing words until something matches" },
-                    { value: "all", label: "Require every word" },
-                  ]}
-                  disabled={!meiliEnabled}
-                  restartRequired={restartKeys.has("catalog.search.meilisearch.matching_strategy")}
-                />
-                <SettingField
-                  label="Items sent to the index per batch"
-                  type="number"
-                  value={form.getValue("catalog.search.meilisearch.sync_batch_size") || "500"}
-                  onChange={(value) =>
-                    form.setValue("catalog.search.meilisearch.sync_batch_size", value)
-                  }
-                  description="Larger batches index faster and use more memory."
-                  disabled={!meiliEnabled}
-                  restartRequired={restartKeys.has("catalog.search.meilisearch.sync_batch_size")}
-                />
-                <SettingField
-                  label="Match by meaning as well as words"
-                  type="toggle"
-                  value={form.getValue("catalog.search.meilisearch.semantic_enabled") || "false"}
-                  onChange={(value) =>
-                    form.setValue("catalog.search.meilisearch.semantic_enabled", value)
-                  }
-                  description="Also matches items whose description means something similar."
-                  status={
-                    enablingSemanticSearch ? (
-                      <SettingFieldStatus tone="warn">
-                        Enabling this changes the index format. After you save and restart, Silo
-                        rebuilds the index automatically. Keyword search stays available while it
-                        rebuilds.
-                      </SettingFieldStatus>
-                    ) : undefined
-                  }
-                  disabled={!meiliEnabled}
-                  restartRequired={restartKeys.has("catalog.search.meilisearch.semantic_enabled")}
-                />
-                <SettingField
-                  label="Meaning-based share of results"
-                  type="number"
-                  value={form.getValue("catalog.search.meilisearch.semantic_ratio") || "0.50"}
-                  onChange={(value) =>
-                    form.setValue("catalog.search.meilisearch.semantic_ratio", value)
-                  }
-                  description="0 ranks by words, 1 by meaning."
-                  disabled={!meiliEnabled}
-                  restartRequired={restartKeys.has("catalog.search.meilisearch.semantic_ratio")}
-                />
-              </>
-            )}
-
-            <SettingsSubheading>Search status</SettingsSubheading>
-            <SearchStatusPanel />
           </AdvancedSection>
         </FieldGroup>
       </div>

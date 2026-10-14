@@ -17,7 +17,8 @@ import {
  */
 export const ADMIN_SETTINGS_PAGE_IDS = [
   "general",
-  "infrastructure",
+  "storage",
+  "search",
   "logging",
   "appearance",
   "security",
@@ -28,7 +29,6 @@ export const ADMIN_SETTINGS_PAGE_IDS = [
   "downloads",
   "requests",
   "providers",
-  "watch-sync",
   "ai",
   "email",
   "notifications",
@@ -260,7 +260,7 @@ export function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthI
         : storageRestartPending
           ? `${bucketDetail} · applies after a restart`
           : "Artwork and uploads have nowhere to go",
-      action: tileAction(storageState, "infrastructure"),
+      action: tileAction(storageState, "storage"),
     },
     {
       id: "database",
@@ -302,7 +302,7 @@ export function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthI
           : meiliConfigured
             ? "Meilisearch configured but not active"
             : "Meilisearch not connected",
-      action: tileAction(searchState, "library"),
+      action: tileAction(searchState, "search"),
     },
     {
       id: "public-url",

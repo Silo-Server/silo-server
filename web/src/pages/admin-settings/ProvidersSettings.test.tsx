@@ -44,7 +44,9 @@ function markerProvider(overrides: Partial<MarkerProviderConfig> = {}): MarkerPr
 }
 
 let markerProviders: MarkerProviderConfig[] = [];
-let pluginInstallations: Partial<PluginInstallation>[] = [];
+let pluginInstallations: Partial<PluginInstallation>[] | undefined = [];
+let installationsError = false;
+const refetchInstallations = vi.fn();
 
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useMarkerProviders: () => ({ data: { providers: markerProviders }, isLoading: false }),
@@ -53,7 +55,12 @@ vi.mock("@/hooks/queries/admin/markers", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/plugins", () => ({
-  useAdminPluginInstallations: () => ({ data: pluginInstallations }),
+  useAdminPluginInstallations: () => ({
+    data: pluginInstallations,
+    isLoading: false,
+    isError: installationsError,
+    refetch: refetchInstallations,
+  }),
 }));
 
 let sensitiveConfigured: string[] = ["mdblist.api_key"];
@@ -169,6 +176,8 @@ describe("ProvidersSettings", () => {
     setValueMock.mockReset();
     markerProviders = [];
     pluginInstallations = [];
+    installationsError = false;
+    refetchInstallations.mockReset();
     for (const mock of Object.values(mocks)) mock.mockReset();
   });
 
@@ -179,9 +188,9 @@ describe("ProvidersSettings", () => {
     expect(useSettingsFormMock).toHaveBeenLastCalledWith({ keys: ["mdblist.api_key"] });
     expect(screen.queryByRole("group", { name: "Subtitle sync" })).not.toBeInTheDocument();
     expect(screen.queryByText("Sync subtitles automatically")).not.toBeInTheDocument();
-    expect(Array.from(document.querySelectorAll("h3"), (h) => h.textContent)).toEqual(
-      expect.arrayContaining(["Subtitle providers", "Lists", "Marker providers"]),
-    );
+    const groups = ["Watch providers", "Lists", "Subtitle providers", "Marker providers"];
+    const headings = Array.from(document.querySelectorAll("h3"), (h) => h.textContent ?? "");
+    expect(headings.filter((heading) => groups.includes(heading))).toEqual(groups);
     expect(setValueMock).not.toHaveBeenCalled();
   });
 
@@ -620,5 +629,56 @@ describe("ProvidersSettings", () => {
       expect.any(Object),
     );
     expect(tile.getByRole("status")).toHaveTextContent("Tested");
+  });
+
+  it("reports a failed watch provider load instead of claiming nothing is installed", async () => {
+    pluginInstallations = undefined;
+    installationsError = true;
+    render(<ProvidersSettings />);
+
+    const watch = screen.getByRole("group", { name: "Watch providers" });
+    expect(within(watch).getByRole("alert")).toHaveTextContent(
+      "Couldn't load the installed watch provider plugins.",
+    );
+    expect(screen.queryByText("No watch provider plugins are installed.")).not.toBeInTheDocument();
+    await userEvent.setup().click(within(watch).getByRole("button", { name: "Retry" }));
+    expect(refetchInstallations).toHaveBeenCalled();
+  });
+
+  it("does not label an enabled watch plugin as connected until its required config is set", () => {
+    const schema = [{ key: "account", title: "Account", json_schema: "{}", required: true }];
+    pluginInstallations = [
+      {
+        id: 7,
+        plugin_id: "silo-plugin-watchsync-anilist",
+        enabled: true,
+        capabilities: [{ type: "watch_sync_provider.v1", id: "anilist", display_name: "AniList" }],
+        global_config_schema: schema,
+        global_configs: [],
+      },
+      {
+        id: 9,
+        plugin_id: "silo-plugin-watchsync-serializd",
+        enabled: true,
+        capabilities: [
+          { type: "watch_sync_provider.v1", id: "serializd", display_name: "Serializd" },
+        ],
+        global_config_schema: schema,
+        global_configs: [{ key: "account", value: {}, configured_secrets: ["api_key"] }],
+      },
+    ];
+
+    render(<ProvidersSettings />);
+
+    // Enabled but keyless: the plugin cannot serve a request, so the tile must
+    // not read as set up.
+    const watch = screen.getByRole("group", { name: "Watch providers" });
+    const anilist = within(watch).getByRole("group", { name: "AniList" });
+    expect(anilist).toHaveAttribute("data-state", "not_connected");
+    expect(within(anilist).getByText("Needs setup")).toBeInTheDocument();
+
+    const serializd = within(watch).getByRole("group", { name: "Serializd" });
+    expect(serializd).toHaveAttribute("data-state", "connected");
+    expect(within(serializd).getByText("Enabled")).toBeInTheDocument();
   });
 });

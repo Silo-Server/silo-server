@@ -51,11 +51,13 @@ import { sortSubtitleProviders } from "@/lib/subtitleProviders";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerProviderTiles } from "./MarkerProviderTiles";
 import { SettingField } from "./SettingField";
+import { WatchProviderTiles } from "./WatchProviderTiles";
 
 /**
  * MDBList is the only provider on this page whose credential is a server
- * setting; the subtitle and marker providers have their own endpoints. Every
- * tile saves itself, so the page has no save bar: the form only reports which
+ * setting; the subtitle and marker providers have their own endpoints, and
+ * watch providers are configured on their plugin pages. Every tile saves
+ * itself, so the page has no save bar: the form only reports which
  * secrets are configured and reads the marker detection mode.
  */
 const KEYS = ["mdblist.api_key"];
@@ -601,8 +603,8 @@ export default function ProvidersSettings() {
   }
 
   // Marker tiles can be perfectly set up and still never run: the detection
-  // mode on Library & Metadata decides whether Silo looks online at all. The
-  // key is read, not staged — this page never saves it.
+  // mode on Playback decides whether Silo looks online at all. The key is
+  // read, not staged — this page never saves it.
   const markerMode = form.getValue("markers.mode") || "both";
   const onlineMarkerLookupEnabled = markerMode === "online" || markerMode === "both";
 
@@ -623,6 +625,33 @@ export default function ProvidersSettings() {
   return (
     <div className="space-y-5">
       <SettingsPageHeader title="Providers" />
+
+      <FieldGroup label="Watch providers">
+        <div className="py-3.5">
+          <WatchProviderTiles />
+        </div>
+      </FieldGroup>
+
+      {/*
+        The server's MDBList key only powers list search and browse in
+        collection imports; MDBList ratings come from its metadata plugin,
+        configured under Plugins like TMDB and TheTVDB.
+      */}
+      <FieldGroup label="Lists">
+        <div className="py-3.5">
+          <ProviderTileGrid>
+            <MDBListTile
+              sensitiveConfigured={form.sensitiveConfigured}
+              restartKeys={restartKeys}
+              expanded={expandedTile === "mdblist"}
+              onExpand={() => setExpandedTile("mdblist")}
+              onCollapse={() => setExpandedTile(null)}
+              test={tests.mdblist}
+              onTested={(test) => recordTest("mdblist", test)}
+            />
+          </ProviderTileGrid>
+        </div>
+      </FieldGroup>
 
       <FieldGroup label="Subtitle providers">
         <div className="py-3.5">
@@ -648,30 +677,9 @@ export default function ProvidersSettings() {
       </FieldGroup>
 
       {/*
-        The server's MDBList key only powers list search and browse in
-        collection imports; MDBList ratings come from its metadata plugin,
-        configured under Plugins like TMDB and TheTVDB.
-      */}
-      <FieldGroup label="Lists">
-        <div className="py-3.5">
-          <ProviderTileGrid>
-            <MDBListTile
-              sensitiveConfigured={form.sensitiveConfigured}
-              restartKeys={restartKeys}
-              expanded={expandedTile === "mdblist"}
-              onExpand={() => setExpandedTile("mdblist")}
-              onCollapse={() => setExpandedTile(null)}
-              test={tests.mdblist}
-              onTested={(test) => recordTest("mdblist", test)}
-            />
-          </ProviderTileGrid>
-        </div>
-      </FieldGroup>
-
-      {/*
         Marker providers are the online half of "Marker source". The
-        detection mode itself stays on Library & Metadata; what each provider
-        does — lookup order, whether this server contributes back — is provider
+        detection mode itself stays on Playback; what each provider does —
+        lookup order, whether this server contributes back — is provider
         configuration and belongs beside the other providers.
       */}
       <FieldGroup label="Marker providers">
@@ -685,7 +693,7 @@ export default function ProvidersSettings() {
             Online marker lookup is {onlineMarkerLookupEnabled ? "enabled" : "disabled"}. Change
             this under{" "}
             <Link
-              to="/admin/settings/library"
+              to="/admin/settings/playback"
               className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
             >
               Marker source
