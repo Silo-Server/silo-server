@@ -52,13 +52,15 @@ The scanner files most of a show's extras folders (`naming.ExtrasDirKind`: `othe
 `Featurettes`, ...) as extras, but some files in them stay primary content: an episode-numbered
 file, or a file the scanner can't tie to a show folder that already holds episodes. For those,
 `deriveSeriesRoot` steps over the extras folder, so the file belongs to the show above it and
-never founds a series named `other` or `Trailers`. A `Specials` or `Extras` folder inside a
-season folder belongs to that season's show. The step-over needs a configured library folder,
-and it skips a folder that sits directly in the library folder or that the file name names before
-its episode code or air date (`Documentaries/Interviews/Interviews S01E01.mkv`,
-`Kids/Shorts/Shorts.2024-10-01.mkv`). A chain of extras folders (`other/Extras/`) is stepped
-over as a whole. In those places the word is a
-show title or an organizational folder. `TestSeriesExtrasFolderBelongsToShow` and
+never founds a series named `other` or `Trailers`. A chain of extras folders (`other/Extras/`) is
+stepped over as a whole. The step-over needs a configured library folder, and it skips a folder
+that sits directly in the library folder or that the file name names before its episode code or
+air date (`Documentaries/Interviews/Interviews S01E01.mkv`, `Kids/Shorts/Shorts.2024-10-01.mkv`).
+In those places the word is a show title or an organizational folder.
+
+A `Specials` or `Extras` folder inside a season folder belongs to that season's show. A bare number
+or a `Specials`/`Extras` label above it (`Drama/1883/Specials/`, `Extras/Specials/`) is the show's
+title, not a season. `TestSeriesExtrasFolderBelongsToShow` and
 `TestSeriesExtrasFolderNeverBecomesASeries` hold these cases.
 
 ## Episode numbers

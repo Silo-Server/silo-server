@@ -76,6 +76,12 @@ func TestSeriesExtrasFolderBelongsToShow(t *testing.T) {
 		{"/tv/Documentaries/Interviews/Interviews E02.mkv", "/tv/Documentaries/Interviews", "Interviews", 0, 0},
 		{"/tv/Kids/Shorts/Shorts.2024-10-01.mkv", "/tv/Kids/Shorts", "Shorts", 0, 0},
 		{"/tv/Kids/Clips/Clips.2024-10-01.mkv", "/tv/Kids/Clips", "Clips", 0, 0},
+		// The folder holding Specials/ or Extras/ is the show when its name is
+		// a bare number or a Specials/Extras label: those are show titles.
+		{"/tv/Drama/1883/Specials/1883 S00E01.mkv", "/tv/Drama/1883", "1883", 0, 1},
+		{"/tv/Drama/24/Extras/24 S00E02.mkv", "/tv/Drama/24", "24", 0, 2},
+		{"/tv/Extras/Specials/Extras S00E01.mkv", "/tv/Extras", "Extras", 0, 1},
+		{"/tv/Comedy/Extras/Specials/Extras S00E01.mkv", "/tv/Comedy/Extras", "Extras", 0, 1},
 	}
 	for _, tc := range cases {
 		ctx := ResolvePathContext(tc.path, "series", "/tv")
