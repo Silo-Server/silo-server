@@ -29,8 +29,8 @@ func (brandingAssets) Stat(context.Context, string) (blobstore.ObjectInfo, error
 	return blobstore.ObjectInfo{}, nil
 }
 func brandingHandler() http.Handler {
-	settings := brandingSettings{branding.KeyServerName: "Synthetic Server", "branding.favicon_ref": "abc.svg", "ui.admin_theme_vars": `{"--primary":"red"}`, "ui.admin_custom_css": "body { color: red; }"}
-	return NewHandler(Dependencies{Branding: branding.NewService(settings, brandingAssets{}), ThemeOverrides: handlers.NewThemeHandler(settings)})
+	settings := brandingSettings{branding.KeyServerName: "Synthetic Server", "branding.favicon_ref": "abc.svg", branding.KeyAccentColor: "#5bc39d"}
+	return NewHandler(Dependencies{Branding: branding.NewService(settings, brandingAssets{})})
 }
 func TestBrandingPublicDiscovery(t *testing.T) {
 	h := brandingHandler()
@@ -42,10 +42,11 @@ func TestBrandingPublicDiscovery(t *testing.T) {
 	if got.Code != 200 || body.ServerName != "Synthetic Server" || body.FaviconURL != Prefix+"/branding/assets/favicon?v=abc.svg" || !body.StorageAvailable {
 		t.Fatal(got.Code, got.Body.String())
 	}
-	css := do(t, h, "GET", Prefix+"/theme/admin-css", "", nil)
-	if css.Code != 200 || !strings.Contains(css.Body.String(), "body { color: red; }") {
-		t.Fatal(css.Code, css.Body.String())
+	if body.AccentColor != "#5bc39d" {
+		t.Fatal(got.Body.String())
 	}
+	// v2 has no theme overrides.
+	requireProblem(t, do(t, h, "GET", Prefix+"/theme/admin-css", "", nil), TypeNotFound)
 	fallback := do(t, NewHandler(Dependencies{}), "GET", Prefix+"/theme/branding", "", nil)
 	if err := json.Unmarshal(fallback.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)

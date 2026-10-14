@@ -109,7 +109,6 @@ function serverRoutes() {
     "GET /api/v2/auth/signup": { body: { enabled: false } },
     "GET /api/v2/capabilities/password-reset": { body: { revision: "r", state: "disabled" } },
     "GET /api/v2/theme/branding": { body: {} },
-    "GET /api/v2/theme/admin-css": { body: {} },
     "GET /api/v2/account/me": { body: getCurrentUserOk },
     "GET /api/v2/profiles": { body: listProfilesOk },
     "GET /api/v2/settings/contract/capabilities": { body: getSettingsContractCapabilitiesOk },
@@ -194,12 +193,12 @@ describe("app boot request budget", () => {
     const log = describeRequests(server.requests);
     expect(screen.getByTestId("home"), log).toHaveTextContent("2 sections");
     expect(measureBoot(server.requests), log).toEqual({
-      requestsBeforeHomeLayout: 5,
+      requestsBeforeHomeLayout: 4,
       wavesBeforeHomeLayout: 1,
       unauthorized: 0,
       refreshes: 1,
       duplicateGets: 0,
-      total: 14,
+      total: 13,
     });
     // Home starts loading as soon as the token is back, beside the account read.
     const waveOf = (operation: string) =>
@@ -241,7 +240,7 @@ describe("app boot request budget", () => {
       duplicateGets: 0,
       // Includes the login page's public signup-status and password-reset
       // capability reads.
-      total: 7,
+      total: 6,
     });
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
   });
@@ -430,7 +429,7 @@ describe("app boot request budget", () => {
       duplicateGets: 0,
       // Includes the login page's public signup-status and password-reset
       // capability reads.
-      total: 6,
+      total: 5,
     });
   });
 });

@@ -2523,7 +2523,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
-		v2deps.ThemeOverrides = themeHandler
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService

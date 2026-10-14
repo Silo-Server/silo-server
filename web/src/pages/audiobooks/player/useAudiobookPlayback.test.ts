@@ -794,6 +794,44 @@ describe("useAudiobookPlayback", () => {
     expect(onStopRequested).toHaveBeenCalled();
   });
 
+  it("rejects a realtime resume the audio element refuses to play", async () => {
+    const { result } = renderAudiobookPlayback();
+    const audio = makeAudio();
+    audio.play = vi.fn().mockRejectedValue(new Error("NotAllowedError"));
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+
+    await flushAsyncWork();
+
+    await act(async () => {
+      await expect(realtimeOptions.current?.onCommand(realtimeCommand("unpause"))).rejects.toThrow(
+        "NotAllowedError",
+      );
+    });
+  });
+
+  it("reports the player paused when a deferred play is refused", async () => {
+    const { result } = renderAudiobookPlayback({ autoPlay: true });
+    const audio = makeAudio();
+    audio.play = vi.fn().mockRejectedValue(new Error("NotAllowedError"));
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+    vi.mocked(fetch).mockClear();
+
+    act(() => audio.dispatchEvent(new Event("loadedmetadata")));
+    await flushAsyncWork();
+
+    expect(audio.play).toHaveBeenCalled();
+    const progressCalls = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).includes("/progress"));
+    expect(progressCalls).toHaveLength(1);
+    expect(JSON.parse(String(progressCalls[0]?.[1]?.body))).toMatchObject({ is_paused: true });
+  });
+
   it("seekTo clamps to [0, duration]", () => {
     const { result } = renderAudiobookPlayback();
     const audio = makeAudio();

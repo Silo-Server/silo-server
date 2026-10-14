@@ -352,7 +352,6 @@ export const downloadKeys = {
 
 export const themeKeys = {
   all: ["theme"] as const,
-  adminCss: () => ["theme", "admin-css"] as const,
   branding: () => ["theme", "branding"] as const,
 };
 
