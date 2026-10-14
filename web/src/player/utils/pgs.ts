@@ -32,6 +32,12 @@ const COMPOSITION_ACQUISITION_POINT = 0x40;
 // objects fit inside it, so a composition past this is damaged or crafted
 // data, and decoding it could exhaust the browser's memory.
 const MAX_COMPOSITION_PIXELS = 4096 * 4096;
+// A real track shows at most a few dozen screens a second, and a Blu-ray
+// decoder holds 4 MiB of object data per epoch. Past these limits a stream is
+// damaged or crafted, and keeping all of it could exhaust the browser, so the
+// excess is dropped and the screen before it stays up.
+const MAX_COMPOSITIONS_PER_WINDOW = 20_000;
+const MAX_EPOCH_OBJECT_BYTES = 16 * 1024 * 1024;
 const ODS_FIRST_IN_SEQUENCE = 0x80;
 const ODS_LAST_IN_SEQUENCE = 0x40;
 const OBJECT_CROPPED = 0x80;
@@ -198,6 +204,8 @@ export class PGSStreamParser {
   private pendingObject: PendingObject | null = null;
   private presentation: PresentationSegment | null = null;
   private received = -Infinity;
+  private objectBytes = 0;
+  private windowCompositions = 0;
 
   /**
    * Source time, in seconds, of the latest complete segment read. Segments
@@ -216,6 +224,7 @@ export class PGSStreamParser {
     this.buffer = new Uint8Array(0);
     this.pendingObject = null;
     this.presentation = null;
+    this.windowCompositions = 0;
   }
 
   push(chunk: Uint8Array): PGSComposition[] {
@@ -287,6 +296,7 @@ export class PGSStreamParser {
     if (state & (COMPOSITION_EPOCH_START | COMPOSITION_ACQUISITION_POINT)) {
       this.palettes.clear();
       this.objects.clear();
+      this.objectBytes = 0;
       this.pendingObject = null;
     }
     const objects: CompositionReference[] = [];
@@ -359,14 +369,24 @@ export class PGSStreamParser {
     if (!pending) return;
     pending.chunks.push(data);
     pending.receivedBytes += data.byteLength;
+    if (pending.receivedBytes > MAX_EPOCH_OBJECT_BYTES) {
+      this.pendingObject = null;
+      return;
+    }
     if (sequence & ODS_LAST_IN_SEQUENCE || pending.receivedBytes >= pending.expectedBytes) {
+      this.pendingObject = null;
       const total = Math.min(pending.receivedBytes, pending.expectedBytes || pending.receivedBytes);
+      // A redefinition replaces the old object, so its bytes stop counting.
+      // Past the limit the old one is dropped too rather than drawn stale.
+      this.objectBytes -= this.objects.get(id)?.rle.byteLength ?? 0;
+      this.objects.delete(id);
+      if (this.objectBytes + total > MAX_EPOCH_OBJECT_BYTES) return;
       this.objects.set(id, {
         width: pending.width,
         height: pending.height,
         rle: concat(pending.chunks, total),
       });
-      this.pendingObject = null;
+      this.objectBytes += total;
     }
   }
 
@@ -397,6 +417,8 @@ export class PGSStreamParser {
         palette: palette!,
       });
     }
+    if (this.windowCompositions >= MAX_COMPOSITIONS_PER_WINDOW) return null;
+    this.windowCompositions += 1;
     return {
       start: presentation.pts / PGS_TIMESCALE,
       width: presentation.width,

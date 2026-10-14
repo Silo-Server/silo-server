@@ -192,6 +192,61 @@ describe("PGSStreamParser", () => {
     expect(compositions).toEqual([]);
   });
 
+  it("keeps at most 20,000 screens from one window", () => {
+    const parser = new PGSStreamParser();
+    const clears: number[] = [];
+    for (let n = 0; n < 20_001; n++) clears.push(...pcs(n / 100, { state: 0 }), ...end(n / 100));
+    expect(parser.push(new Uint8Array(clears))).toHaveLength(20_000);
+    // The next window starts its own count.
+    parser.resetBuffer();
+    expect(parser.push(new Uint8Array([...pcs(300, { state: 0 }), ...end(300)]))).toHaveLength(1);
+  });
+
+  it("drops objects past 16 MiB of object data in one epoch", () => {
+    // An object of `bytes` RLE bytes, split into segments of at most 65,000.
+    const bigObject = (pts: number, id: number, bytes: number): number[] => {
+      const out: number[] = [];
+      const data = new Array<number>(bytes).fill(0);
+      for (let offset = 0; offset < bytes; offset += 65_000) {
+        const piece = data.slice(offset, offset + 65_000);
+        const first = offset === 0;
+        const last = offset + 65_000 >= bytes;
+        const flags = (first ? 0x80 : 0) | (last ? 0x40 : 0);
+        const length = bytes + 4;
+        const header = first
+          ? [
+              ...u16(id),
+              0,
+              flags,
+              (length >> 16) & 0xff,
+              (length >> 8) & 0xff,
+              length & 0xff,
+              ...u16(4096),
+              ...u16(2),
+            ]
+          : [...u16(id), 0, flags];
+        out.push(...segment(0x15, pts, [...header, ...piece]));
+      }
+      return out;
+    };
+    const parser = new PGSStreamParser();
+    const compositions = parser.push(
+      new Uint8Array([
+        ...pcs(1),
+        ...pds(1, 0, [WHITE]),
+        ...bigObject(1, 0, 9_000_000),
+        ...bigObject(1, 1, 9_000_000),
+        ...end(1),
+        ...pcs(2, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] }),
+        ...end(2),
+        // Object 1 went past the limit, so a screen placing it is dropped.
+        ...pcs(3, { state: 0, objects: [{ id: 1, x: 0, y: 0 }] }),
+        ...end(3),
+      ]),
+    );
+    expect(compositions.map((c) => c.start)).toEqual([1, 2]);
+  });
+
   it("keeps an earlier screen's colors after a palette-only update", () => {
     const parser = new PGSStreamParser();
     const [first, second] = parser.push(
