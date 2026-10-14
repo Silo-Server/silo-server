@@ -11,6 +11,8 @@ These observations support HTTP/HTTPS source transport for the
 [standalone worker](standalone-transcode-workers.md). They measure direct packaged FFmpeg execution, not a
 complete standalone Silo worker or its control plane. The retained worker
 contracts are described in [worker-http-protocol.md](worker-http-protocol.md).
+The implemented worker's HLS/lifecycle checks and separate full-runtime GPU
+timings are in [standalone-worker-runtime-evidence.md](standalone-worker-runtime-evidence.md).
 
 ## Readiness
 
@@ -126,9 +128,9 @@ and elapsed samples are in milliseconds; producer progress entries are
 `[elapsed_seconds, frame]`. Readers can recompute medians, nearest-rank p95,
 within-round differences and producer slopes directly from these fields.
 
-The local-file baseline is synthetic host tmpfs. NFS/SMB storage, real WAN,
+The local-file baseline is synthetic host tmpfs. This experiment excludes NFS/SMB storage, real WAN,
 cold-cache behavior, HDR, real-library workloads, the Go adapter,
 full Silo boot/auth/control/reconstruction/output-grant behavior and maximum
-sustained capacity remain unmeasured. The findings support source-transport
-feasibility and provide a comparison for the eventual implementation; they
+sustained capacity. The findings support source-transport
+feasibility and provide a comparison for the implemented worker; they
 are not a complete runtime performance acceptance result.
