@@ -251,6 +251,15 @@ uses local telemetry storage rather than Redis.
 
 The public route inventory and the worker protocol extension describe the
 standalone execution and core control surfaces alongside the retained worker
-operations. [Source transport measurements](transcode-source-transport-evidence.md)
-describe the accepted direct-FFmpeg timing evidence and its limits. Operator
-setup documentation belongs in the separate user manual.
+operations. Operator setup documentation belongs in the separate user manual.
+
+## Measured transport cost
+
+Direct FFmpeg runs on a LAN added a median of about 6 ms (HTTP) and 12 ms
+(verified HTTPS) to producer readiness at startup and 10 to 16 ms to a fresh
+seek, and kept 97 to 99 percent of local-file throughput. A full-runtime pilot
+against legacy shared-storage playback added a median of about 300 ms to
+startup and 370 to 410 ms to seek, with gateways that closed each connection
+after its response. These figures do not cover WAN links, cold caches, p95
+latency or sustained capacity. The measurement reports are linked from pull
+request #2408.
