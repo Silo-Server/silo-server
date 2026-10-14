@@ -2446,7 +2446,11 @@ type watchedLeafTarget struct {
 	DurationSeconds float64
 }
 
-func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
+// resolveWatchedTargets checks access to contentID and resolves the leaf
+// targets a watched mark writes. Unwatching a series or season returns no
+// targets: the caller expands it with watchstate.ParentUnwatchTargets, which
+// also reaches watched episodes that no longer have a file.
+func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, played bool, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
 	item, err := h.itemRepo.GetByID(ctx, contentID)
 	switch {
 	case err == nil:
@@ -2466,6 +2470,9 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 		case "series":
 			if h.episodeRepo == nil {
 				return "", nil, catalog.ErrItemNotFound
+			}
+			if !played {
+				return "series", nil, nil
 			}
 			episodes, err := h.episodeRepo.ListBySeries(ctx, item.ContentID)
 			if err != nil {
@@ -2488,6 +2495,9 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 			}
 			if h.episodeRepo == nil {
 				return "", nil, catalog.ErrItemNotFound
+			}
+			if !played {
+				return "season", nil, nil
 			}
 			episodes, err := h.episodeRepo.ListBySeasonID(ctx, season.ContentID)
 			if err != nil {

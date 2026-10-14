@@ -366,11 +366,12 @@ func deriveSeriesRoot(filePath, fileTitle string, hasEpisodePattern bool, forceP
 		}
 		if isSeason {
 			rootPath := path.Dir(current)
-			// Specials or Extras inside a bare "Season" folder belong to the
-			// same show as the episodes beside them.
-			if current == parentDir && specialsDirRe.MatchString(strings.TrimSpace(segment)) &&
-				(hasEpisodePattern || forceParent) && (libraryRoot == "" || filepath.Clean(path.Dir(rootPath)) != libraryRoot) &&
-				isBareSeasonFolder(path.Base(rootPath), fileTitle) {
+			// Specials or Extras inside a season folder belong to the same show
+			// as the episodes beside them.
+			if specialsDirRe.MatchString(strings.TrimSpace(segment)) &&
+				(libraryRoot == "" || filepath.Clean(path.Dir(rootPath)) != libraryRoot) &&
+				specialsInSeasonFolder(path.Base(rootPath), path.Base(path.Dir(rootPath)), fileTitle,
+					current == parentDir && (hasEpisodePattern || forceParent)) {
 				rootPath = path.Dir(rootPath)
 			}
 			if rootPath == "." || rootPath == "/" || rootPath == "" {
@@ -404,6 +405,37 @@ func deriveSeriesRoot(filePath, fileTitle string, hasEpisodePattern bool, forceP
 	}
 
 	return nil, false
+}
+
+// specialsInSeasonFolder reports whether segment, the folder that holds a
+// Specials/ or Extras/ folder, is a season folder. Only a plain season name
+// counts: a bare number, another Specials/Extras label, provider IDs, a season
+// word followed by more title ("Series 7 Documentary"), or the title the file
+// itself carries is the show's own name (24, Extras), not a season. A bare
+// number counts when the file's title names the folder above it instead. A bare
+// "Season" folder counts only when bareAllowed: the Specials/Extras folder
+// holds the file directly and the file carries an episode code (or the
+// library is a series library).
+func specialsInSeasonFolder(segment, parent, fileTitle string, bareAllowed bool) bool {
+	if specialsDirRe.MatchString(strings.TrimSpace(segment)) || ParseFolderIDs(segment) != nil {
+		return false
+	}
+	// A file whose own title is the folder name marks that folder as the show.
+	if fileTitle != "" && normalizeComparableTitle(fileTitle) == normalizeComparableTitle(segment) {
+		return false
+	}
+	if _, ok := seasonDirectoryNumber(segment, parent, false, true); ok {
+		return true
+	}
+	// A bare number is a season when the file's own title names the show
+	// folder above it (Show/02/Specials/Show S00E01.mkv).
+	if fileTitle != "" && numericSeasonDirRe.MatchString(strings.TrimSpace(segment)) {
+		parentTitle, _ := parseTitleYearCandidate(parent)
+		if normalizeComparableTitle(fileTitle) == normalizeComparableTitle(parentTitle) {
+			return true
+		}
+	}
+	return bareAllowed && isBareSeasonFolder(segment, fileTitle)
 }
 
 func deriveMovieRoot(filePath, libraryRoot string) (*CanonicalRoot, bool) {

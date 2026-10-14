@@ -190,6 +190,38 @@ func TestBareSeasonFolderJoinsParentShow(t *testing.T) {
 	}
 }
 
+func TestSpecialsInsideASeasonFolderJoinTheShow(t *testing.T) {
+	for _, tc := range []struct {
+		path, root, title string
+		season, episode   int
+	}{
+		{"/tv/Show/Season 01/Extras/Show S01E05 Deleted.mkv", "/tv/Show", "Show", 1, 5},
+		{"/tv/Show/Season 01/Specials/Show S00E05.mkv", "/tv/Show", "Show", 0, 5},
+		{"/tv/Show/S01/Extras/Show S01E06.mkv", "/tv/Show", "Show", 1, 6},
+		{"/tv/Drama/24/Season 01/Specials/24 S00E01.mkv", "/tv/Drama/24", "24", 0, 1},
+		// A bare number or a Specials/Extras label holding the folder is the
+		// show's own title, not a season.
+		{"/tv/Drama/1883/Specials/1883 S00E01.mkv", "/tv/Drama/1883", "1883", 0, 1},
+		{"/tv/Drama/24/Extras/24 S00E02.mkv", "/tv/Drama/24", "24", 0, 2},
+		{"/tv/Extras/Specials/Extras S00E01.mkv", "/tv/Extras", "Extras", 0, 1},
+		{"/tv/Comedy/Extras/Specials/Extras S00E01.mkv", "/tv/Comedy/Extras", "Extras", 0, 1},
+		// A show whose name starts like a season keeps its specials.
+		{"/tv/Documentaries/Series 7 Documentary (2024) {tvdb-123456}/Specials/Series 7 Documentary S00E01.mkv", "/tv/Documentaries/Series 7 Documentary (2024) {tvdb-123456}", "Series 7 Documentary", 0, 1},
+		{"/tv/Documentaries/Series 7 Documentary/Specials/Series 7 Documentary S00E01.mkv", "/tv/Documentaries/Series 7 Documentary", "Series 7 Documentary", 0, 1},
+		{"/tv/Drama/Season 2/Specials/Season 2 S00E01.mkv", "/tv/Drama/Season 2", "Season 2", 0, 1},
+		{"/tv/Show/02/Specials/Show S00E01.mkv", "/tv/Show", "Show", 0, 1},
+		{"/tv/Show (2020)/02/Specials/Show S00E02.mkv", "/tv/Show (2020)", "Show", 0, 2},
+		// A season folder directly in the library folder is not lifted to it.
+		{"/tv/Season 01/Specials/Show S00E01.mkv", "/tv/Season 01", "Season 01", 0, 1},
+	} {
+		ctx := ResolvePathContext(tc.path, "series", "/tv")
+		if ctx.RootPath != tc.root || ctx.Title != tc.title || ctx.SeasonNum != tc.season || ctx.EpisodeNum != tc.episode {
+			t.Errorf("ResolvePathContext(%q) = root %q title %q S%02dE%02d, want root %q title %q S%02dE%02d",
+				tc.path, ctx.RootPath, ctx.Title, ctx.SeasonNum, ctx.EpisodeNum, tc.root, tc.title, tc.season, tc.episode)
+		}
+	}
+}
+
 func TestBareSeasonLabelsExcludeCategoryFolders(t *testing.T) {
 	for _, name := range []string{"Season", "season", "Staffel", "Temporada"} {
 		if !isBareSeasonDirectory(name) {

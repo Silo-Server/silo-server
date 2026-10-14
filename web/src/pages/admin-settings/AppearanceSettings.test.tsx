@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const useSettingsFormMock = vi.fn();
+const brandingState = { storageAvailable: true };
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -15,7 +16,7 @@ vi.mock("@/hooks/useRestartKeys", () => ({
 
 vi.mock("@/hooks/useBranding", () => ({
   useBranding: () => ({
-    storageAvailable: true,
+    storageAvailable: brandingState.storageAvailable,
     wordmarkUrl: null,
     markUrl: null,
     faviconUrl: null,
@@ -76,9 +77,20 @@ let form: ReturnType<typeof makeForm>;
 describe("AppearanceSettings", () => {
   beforeEach(() => {
     localStorage.clear();
+    brandingState.storageAvailable = true;
     form = makeForm();
     useSettingsFormMock.mockReset();
     useSettingsFormMock.mockImplementation(() => form);
+  });
+
+  it("points unavailable uploads at artwork storage, not an S3 bucket", () => {
+    brandingState.storageAvailable = false;
+    render(<AppearanceSettings />);
+
+    expect(
+      screen.getByText(/Image uploads need artwork storage \(local disk or S3\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/public S3 bucket/)).not.toBeInTheDocument();
   });
 
   // The accent is the only color an admin picks: it is staged as the one
