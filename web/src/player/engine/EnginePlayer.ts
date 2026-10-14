@@ -371,12 +371,7 @@ export class EnginePlayer {
     // Runs until the position is playable, not just until the first picture:
     // audio that never arrives would otherwise hold playback with no failure.
     this.armReadinessDeadline(() =>
-      this.fail(
-        ENGINE_PAGE_FAILURES.startup,
-        this.ready < 2
-          ? "The browser engine showed no picture in time."
-          : "The browser engine had no audio to play in time.",
-      ),
+      this.fail(ENGINE_PAGE_FAILURES.startup, this.startupTimeoutMessage()),
     );
     this.post({ type: "open", source: this.source });
   }
@@ -829,6 +824,7 @@ export class EnginePlayer {
       }
     }
     if (this.ready >= 4) return;
+    if (!this.videoAhead()) return;
     const audioReady = !this.audio || this.audioBuffered || this.audioEnded || this.videoEnded;
     if (!audioReady) return;
     this.ready = 4;
@@ -841,6 +837,22 @@ export class EnginePlayer {
     this.dispatch("canplay");
     this.dispatch("canplaythrough");
     if (!this.pausedValue) this.startFlow();
+  }
+
+  /**
+   * A picture after the one on screen, or the end of the video: what a media
+   * element needs for HAVE_FUTURE_DATA, so playback never starts the clock
+   * over a first frame whose successors are still being read or decoded.
+   */
+  private videoAhead(): boolean {
+    return this.queue.length > 0 || this.videoEnded;
+  }
+
+  /** What a start that never became playable was still waiting for. */
+  private startupTimeoutMessage(): string {
+    if (this.ready < 2) return "The browser engine showed no picture in time.";
+    if (!this.videoAhead()) return "The browser engine decoded no picture after the first in time.";
+    return "The browser engine had no audio to play in time.";
   }
 
   private startFlow(): void {

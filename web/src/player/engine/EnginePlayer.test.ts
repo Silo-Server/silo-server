@@ -178,6 +178,7 @@ describe("EnginePlayer", () => {
     expect(player.videoWidth).toBe(1920);
 
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
     await settle();
     expect(events).toEqual([
       "loadstart",
@@ -231,6 +232,7 @@ describe("EnginePlayer", () => {
     await open(worker);
     const before = worker.generation;
     worker.emit({ type: "frame", generation: before, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: before, frame: fakeFrame(0.04) });
     await settle();
 
     player.seek(5);
@@ -242,6 +244,7 @@ describe("EnginePlayer", () => {
     expect(stale.close).toHaveBeenCalled();
 
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(5) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(5.04) });
     await settle();
     expect(player.seeking).toBe(false);
     expect(events).toContain("seeked");
@@ -253,11 +256,13 @@ describe("EnginePlayer", () => {
     const { player, worker } = start(onFailure);
     await open(worker);
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
     await settle();
 
     // A seek that completes clears the deadline.
     player.seek(5);
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(5) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(5.04) });
     await settle();
     await vi.advanceTimersByTimeAsync(20_001);
     expect(onFailure).not.toHaveBeenCalled();
@@ -309,6 +314,7 @@ describe("EnginePlayer", () => {
     const { player, worker } = start(onFailure);
     await open(worker);
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
     await settle();
     await player.play();
     // No more frames arrive, so playback waits; a short wait is not a failure.
@@ -330,6 +336,7 @@ describe("EnginePlayer", () => {
     const { player, worker } = start(onFailure);
     await open(worker, true);
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
     worker.emit({ type: "audio-buffered", generation: worker.generation });
     await settle();
     await player.play();
@@ -439,6 +446,7 @@ describe("EnginePlayer", () => {
     const { player, worker } = start();
     await open(worker);
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
     await settle();
     Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
     try {
@@ -487,6 +495,7 @@ describe("EnginePlayer", () => {
     await open(worker, true);
     expect(worker.posted.some((m) => m.type === "audio-output")).toBe(true);
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
     await settle();
     expect(player.readyState).toBe(2);
     expect(events).not.toContain("canplay");
@@ -494,6 +503,52 @@ describe("EnginePlayer", () => {
     await settle();
     expect(player.readyState).toBe(4);
     expect(events).toContain("canplay");
+    player.destroy();
+  });
+
+  it("waits for a picture after the first before it starts the clock", async () => {
+    audioOutput.resumes = true;
+    audioOutput.state = "suspended";
+    const { player, worker } = start();
+    await open(worker, true);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "audio-buffered", generation: worker.generation });
+    await settle();
+    await player.play();
+    // The first picture is up and audio is queued, but nothing follows it yet.
+    expect(player.readyState).toBe(2);
+    expect(events).not.toContain("canplay");
+    expect(events).not.toContain("playing");
+
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
+    await settle();
+    expect(player.readyState).toBe(4);
+    expect(events.slice(-2)).toEqual(["canplay", "playing"]);
+    player.destroy();
+  });
+
+  it("plays a video of a single picture once decoding has ended", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0, 2) });
+    worker.emit({ type: "video-ended", generation: worker.generation });
+    await settle();
+    expect(player.readyState).toBe(4);
+    player.destroy();
+  });
+
+  it("reports a start that never decodes past its first picture", async () => {
+    const onFailure = vi.fn();
+    const { player, worker } = start(onFailure);
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await vi.advanceTimersByTimeAsync(20_001);
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        classification: "browser_engine_startup_timeout",
+        message: "The browser engine decoded no picture after the first in time.",
+      }),
+    );
     player.destroy();
   });
 
