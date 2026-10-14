@@ -63,7 +63,6 @@ export default function EmailSettings() {
         >
           <SettingField
             label="Send email from this server"
-            settingKey="email.enabled"
             dirty={form.isDirty("email.enabled")}
             type="toggle"
             value={form.getValue("email.enabled")}
@@ -72,7 +71,6 @@ export default function EmailSettings() {
           />
           <SettingField
             label="From address"
-            settingKey="email.from_address"
             dirty={form.isDirty("email.from_address")}
             hint="silo@example.com"
             value={form.getValue("email.from_address")}
@@ -81,7 +79,6 @@ export default function EmailSettings() {
           />
           <SettingField
             label="Mail server address"
-            settingKey="email.smtp_host"
             dirty={form.isDirty("email.smtp_host")}
             hint="smtp.example.com"
             value={form.getValue("email.smtp_host")}
@@ -90,7 +87,6 @@ export default function EmailSettings() {
           />
           <SettingField
             label="Port"
-            settingKey="email.smtp_port"
             dirty={form.isDirty("email.smtp_port")}
             description="587 for STARTTLS (typical), 465 for implicit TLS"
             type="number"
@@ -100,7 +96,6 @@ export default function EmailSettings() {
           />
           <SettingField
             label="Encryption"
-            settingKey="email.smtp_security"
             dirty={form.isDirty("email.smtp_security")}
             description="Use whatever your mail provider documents."
             type="select"
@@ -115,7 +110,6 @@ export default function EmailSettings() {
           />
           <SettingField
             label="Username"
-            settingKey="email.smtp_username"
             dirty={form.isDirty("email.smtp_username")}
             description="Leave empty if the mail server needs no sign-in."
             value={form.getValue("email.smtp_username")}
@@ -142,7 +136,6 @@ export default function EmailSettings() {
           >
             <SettingField
               label="From name"
-              settingKey="email.from_name"
               dirty={form.isDirty("email.from_name")}
               hint="Silo"
               value={form.getValue("email.from_name")}

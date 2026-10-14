@@ -115,7 +115,6 @@ export function RedisGroup({
           */}
           <SettingField
             label="Database number"
-            settingKey="redis.db"
             dirty={form.isDirty("redis.db")}
             type="number"
             description={

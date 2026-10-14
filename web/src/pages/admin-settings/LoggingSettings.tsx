@@ -78,7 +78,6 @@ export default function LoggingSettings() {
         >
           <SettingField
             label="Log level"
-            settingKey="server.log_level"
             dirty={form.isDirty("server.log_level")}
             type="select"
             description="Sets the container log's level; Debug is loud, so keep it for chasing a problem. The Server Log page records Info and above either way."
@@ -99,7 +98,6 @@ export default function LoggingSettings() {
           >
             <SettingField
               label="Quiet log prefixes"
-              settingKey="server.log_quiet"
               dirty={form.isDirty("server.log_quiet")}
               hint="metadata, scanner"
               description="Drops log lines starting with any of these words."
@@ -118,7 +116,6 @@ export default function LoggingSettings() {
         >
           <SettingField
             label="Delete log entries older than"
-            settingKey={OPSLOG_RETENTION_DAYS_KEY}
             dirty={form.isDirty(OPSLOG_RETENTION_DAYS_KEY)}
             type="number"
             unit="days"
@@ -128,7 +125,6 @@ export default function LoggingSettings() {
           />
           <SettingField
             label="Maximum log size"
-            settingKey={OPSLOG_MAX_SIZE_MB_KEY}
             dirty={form.isDirty(OPSLOG_MAX_SIZE_MB_KEY)}
             type="number"
             unit="MB"
@@ -144,7 +140,6 @@ export default function LoggingSettings() {
           >
             <SettingField
               label="Maximum log entries"
-              settingKey={OPSLOG_MAX_ROWS_KEY}
               dirty={form.isDirty(OPSLOG_MAX_ROWS_KEY)}
               type="number"
               value={form.getValue(OPSLOG_MAX_ROWS_KEY)}
@@ -155,7 +150,6 @@ export default function LoggingSettings() {
             <SettingsSubheading>Permission checks</SettingsSubheading>
             <SettingField
               label="Delete permission records older than"
-              settingKey="policy.decision_log_retention_days"
               dirty={form.isDirty("policy.decision_log_retention_days")}
               type="number"
               unit="days"
@@ -165,7 +159,6 @@ export default function LoggingSettings() {
             />
             <SettingField
               label="How much to record"
-              settingKey="policy.decision_log_verbosity"
               dirty={form.isDirty("policy.decision_log_verbosity")}
               type="select"
               description="Full also stores a sample of each request."

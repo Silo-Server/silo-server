@@ -71,12 +71,6 @@ export interface SettingFieldRowProps {
   label: ReactNode;
   /** Ties the label to the control; omit for rows whose control has no id. */
   htmlFor?: string;
-  /**
-   * The `server_settings` key behind the row, e.g. `branding.server_name`.
-   * Rendered as a small mono caption under the label so an admin can match
-   * what they see to the API, environment overrides, and support answers.
-   */
-  settingKey?: string;
   /** The row has an unsaved edit; shows the violet dot before the label. */
   dirty?: boolean;
   /** Description under the label. One short sentence, or nothing at all. */
@@ -107,7 +101,6 @@ export interface SettingFieldRowProps {
 export function SettingFieldRow({
   label,
   htmlFor,
-  settingKey,
   dirty,
   description,
   descriptionId,
@@ -142,9 +135,6 @@ export function SettingFieldRow({
           </Label>
           {restartRequired && !groupSaysRestart && <RestartBadge />}
         </div>
-        {settingKey ? (
-          <span className="text-muted-foreground mt-0.5 block font-mono text-xs">{settingKey}</span>
-        ) : null}
         {description ? (
           <p id={descriptionId} className="text-muted-foreground mt-1 text-[13px] leading-relaxed">
             {description}
@@ -182,8 +172,6 @@ export function SettingFieldRow({
 
 interface SettingFieldProps {
   label: string;
-  /** The `server_settings` key, shown as a mono caption under the label. */
-  settingKey?: string;
   /** The field has an unsaved edit; drive it from `form.isDirty(key)`. */
   dirty?: boolean;
   type?: "text" | "number" | "password" | "toggle" | "duration" | "select";
@@ -210,7 +198,6 @@ interface SettingFieldProps {
 
 export function SettingField({
   label,
-  settingKey,
   dirty,
   type = "text",
   hint,
@@ -238,7 +225,6 @@ export function SettingField({
     <SettingFieldRow
       label={label}
       htmlFor={controlId}
-      settingKey={settingKey}
       dirty={dirty}
       description={rowDescription}
       descriptionId={hintId}

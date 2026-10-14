@@ -108,11 +108,10 @@ never per field. Sections are not cards: they sit on the page, divided by a
 hairline, and once the column is wide enough a section's title and
 description move into a left column beside its rows. Lists inside a section
 (providers, delivery channels) are rows too, not tiles. The Advanced tier
-stays inline as one disclosure row per group. A row can carry its
-`server_settings` key as a mono caption under the
-label (`SettingField`'s `settingKey`) so an admin can match the UI to the
-API and environment overrides, and a violet dot marks unsaved edits on the
-row and on the group heading (`dirty`, driven from `form.isDirty`). A
+stays inline as one disclosure row per group. Rows do not show their
+`server_settings` keys; the label and search identify a setting. A violet
+dot marks unsaved edits on the row and on the group heading (`dirty`,
+driven from `form.isDirty`). A
 description under a field label is the exception, not the rule: one short
 sentence, and only when the label alone is ambiguous. Units live beside the
 control (`SettingField`'s `unit`), not in the label. When every field in a

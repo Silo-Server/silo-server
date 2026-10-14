@@ -175,7 +175,6 @@ export default function SignInSettings() {
         >
           <SettingField
             label="Allow password sign-in"
-            settingKey={LOCAL_LOGIN_KEY}
             dirty={form.isDirty(LOCAL_LOGIN_KEY)}
             type="toggle"
             description="Off: everyone signs in with the provider, except break-glass admins. Needs at least one break-glass admin; the server owner is one by default."
@@ -210,7 +209,6 @@ export default function SignInSettings() {
           ) : null}
           <SettingField
             label="Public signups"
-            settingKey="signup.enabled"
             dirty={form.isDirty("signup.enabled")}
             type="toggle"
             description="Anyone with a valid invite code can create an account."
@@ -220,7 +218,6 @@ export default function SignInSettings() {
           />
           <SettingField
             label="Self-service password reset"
-            settingKey="password_reset.self_service_enabled"
             dirty={form.isDirty("password_reset.self_service_enabled")}
             type="toggle"
             description="Adds “Forgot password?” to the sign-in page, so people can get a reset link by email. Needs email and the public URL."
@@ -258,7 +255,6 @@ export default function SignInSettings() {
           {showEmailMatch ? (
             <SettingField
               label="Match existing accounts by email"
-              settingKey={EMAIL_MATCH_KEY}
               dirty={form.isDirty(EMAIL_MATCH_KEY)}
               type="toggle"
               description="A first sign-in connects to the regular Silo account with the same email, when the provider says the email is verified. Admin, owner and break-glass accounts are never matched."

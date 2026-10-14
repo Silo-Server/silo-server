@@ -103,7 +103,6 @@ export default function GeneralSettings() {
         >
           <SettingField
             label="Server name"
-            settingKey="branding.server_name"
             dirty={form.isDirty("branding.server_name")}
             hint="Silo"
             value={form.getValue("branding.server_name")}
@@ -112,7 +111,6 @@ export default function GeneralSettings() {
           />
           <SettingField
             label="Login subtitle"
-            settingKey="branding.login_subtitle"
             dirty={form.isDirty("branding.login_subtitle")}
             hint="Sign in with an existing account."
             description="Shown under the server name on the sign-in page."
@@ -129,7 +127,6 @@ export default function GeneralSettings() {
         >
           <SettingField
             label="Silo public URL"
-            settingKey="server.public_url"
             dirty={form.isDirty("server.public_url")}
             description="The HTTPS address users open. Used for websocket origins and links in email notifications."
             hint="https://silo.example.com"
@@ -139,7 +136,6 @@ export default function GeneralSettings() {
           />
           <SettingField
             label="Show on the local network"
-            settingKey="server.lan_discovery"
             dirty={form.isDirty("server.lan_discovery")}
             type="toggle"
             description="Silo apps on the same network list this server when adding one, so nobody has to type its address. Needs a network that passes multicast (Docker host networking, not the default bridge)."
@@ -149,7 +145,6 @@ export default function GeneralSettings() {
           />
           <SettingField
             label="Trusted proxies"
-            settingKey={TRUSTED_PROXIES_KEY}
             dirty={form.isDirty(TRUSTED_PROXIES_KEY)}
             description={
               trustedProxiesManaged
@@ -171,7 +166,6 @@ export default function GeneralSettings() {
         >
           <SettingField
             label="Maximum Postgres connections"
-            settingKey="database.max_connections"
             dirty={form.isDirty("database.max_connections")}
             type="number"
             description="Raise only if the logs show connection-pool waits."
