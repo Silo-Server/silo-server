@@ -22,6 +22,9 @@ type directUserDataService struct {
 	profileRefreshRequester profileRefreshRequester
 	// events announces watched-state changes to other surfaces and replicas.
 	events UserStateEvents
+	// episodes expands a series or season unplayed mark to its episodes,
+	// including watched ones that no longer have a file.
+	episodes watchstate.EpisodePartitioner
 }
 
 func newDirectUserDataService(
@@ -35,7 +38,7 @@ func newDirectUserDataService(
 	requester profileRefreshRequester,
 	completionObserver watchstate.CompletionObserver,
 ) *directUserDataService {
-	return &directUserDataService{
+	svc := &directUserDataService{
 		storeProvider: storeProvider,
 		itemRepo:      itemRepo,
 		detailSvc:     detailSvc,
@@ -46,6 +49,10 @@ func newDirectUserDataService(
 		profileStaler:           staler,
 		profileRefreshRequester: requester,
 	}
+	if episodeRepo != nil {
+		svc.episodes = episodeRepo
+	}
+	return svc
 }
 
 func (s *directUserDataService) ListFavorites(ctx context.Context, session *Session, limit, offset int) ([]upstreamListItem, error) {
@@ -329,6 +336,16 @@ func (s *directUserDataService) MarkUnplayed(ctx context.Context, session *Sessi
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
 	publishWatchedChange(ctx, s.events, session, []string{contentID}, false)
 	return nil
+}
+
+// ParentUnplayedTargets returns the episodes a series or season unplayed mark
+// must clear, including watched episodes whose file is gone; see
+// watchstate.Service.ParentUnwatchTargets.
+func (s *directUserDataService) ParentUnplayedTargets(ctx context.Context, session *Session, parentKind, parentID string) ([]string, error) {
+	if s.watchState == nil || s.episodes == nil {
+		return nil, nil
+	}
+	return s.watchState.ParentUnwatchTargets(ctx, session.StreamAppUserID, session.ProfileID, s.episodes, parentKind, parentID)
 }
 
 func (s *directUserDataService) MarkUnplayedBatch(ctx context.Context, session *Session, contentIDs []string) error {
