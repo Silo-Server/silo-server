@@ -65,12 +65,17 @@ func TestSeriesExtrasFolderBelongsToShow(t *testing.T) {
 		{"/tv/Show/Season 01/Extras/Show S01E05 Deleted.mkv", "/tv/Show", "Show", 0, 5},
 		{"/tv/Show/Season 01/Specials/Show S00E05.mkv", "/tv/Show", "Show", 0, 5},
 		{"/tv/Show/Specials/Show S00E06.mkv", "/tv/Show", "Show", 0, 6},
+		{"/tv/Show/other/Extras/Show.S00E01.mkv", "/tv/Show", "Show", 0, 1},
+		{"/tv/Show/other/Specials/Show.S00E02.mkv", "/tv/Show", "Show", 0, 2},
 		// Extras words directly in the library folder, or named by the file's
 		// own episode title, name a show or an organizational folder.
 		{"/tv/Other/Other - S01E01.mkv", "/tv/Other", "Other", 0, 1},
 		{"/tv/Trailers/Season 01/Trailers - S01E01.mkv", "/tv/Trailers", "Trailers", 0, 1},
 		{"/tv/other/Flat Show/pilot.mkv", "/tv/other/Flat Show", "Flat Show", 0, 0},
 		{"/tv/Documentaries/Interviews/Interviews S01E01.mkv", "/tv/Documentaries/Interviews", "Interviews", 0, 1},
+		{"/tv/Documentaries/Interviews/Interviews E02.mkv", "/tv/Documentaries/Interviews", "Interviews", 0, 0},
+		{"/tv/Kids/Shorts/Shorts.2024-10-01.mkv", "/tv/Kids/Shorts", "Shorts", 0, 0},
+		{"/tv/Kids/Clips/Clips.2024-10-01.mkv", "/tv/Kids/Clips", "Clips", 0, 0},
 	}
 	for _, tc := range cases {
 		ctx := ResolvePathContext(tc.path, "series", "/tv")

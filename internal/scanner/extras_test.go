@@ -278,7 +278,7 @@ func TestMovieSupplementalDirsNoLongerSkipExtras(t *testing.T) {
 // stay primary content: an episode-numbered file, a show whose episodes sit
 // below the depth the classifier inspects, and a show folder with no episodes
 // yet. Each file still belongs to its show, never to a series named after the
-// extras folder.
+// extras folder, while shows named like extras folders keep their own root.
 func TestSeriesExtrasFolderNeverBecomesASeries(t *testing.T) {
 	root := "/tv"
 	paths := []string{
@@ -287,6 +287,9 @@ func TestSeriesExtrasFolderNeverBecomesASeries(t *testing.T) {
 		"/tv/Ironvale/Season 01/Disc 1/Ironvale - S01E01.mkv",
 		"/tv/Ironvale/other/Behind the camera.mkv",
 		"/tv/Emberfall (2021)/trailers/Emberfall trailer.mkv",
+		"/tv/Glimmer Harbor/other/Extras/Glimmer Harbor.S00E02.mkv",
+		"/tv/Kids/Shorts/Shorts.2024-10-01.mkv",
+		"/tv/Kids/Clips/Clips.2024-10-01.mkv",
 	}
 	primary, _ := partitionExtraPaths(paths, "series", []string{root}, []string{root})
 	result := inferRootAssignments(primary, "series", 1, nil, root)
@@ -298,6 +301,8 @@ func TestSeriesExtrasFolderNeverBecomesASeries(t *testing.T) {
 		"/tv/Glimmer Harbor":   "Glimmer Harbor",
 		"/tv/Ironvale":         "Ironvale",
 		"/tv/Emberfall (2021)": "Emberfall",
+		"/tv/Kids/Shorts":      "Shorts",
+		"/tv/Kids/Clips":       "Clips",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("series roots = %v, want %v", got, want)
