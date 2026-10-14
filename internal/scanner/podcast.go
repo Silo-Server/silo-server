@@ -51,13 +51,16 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 
 	show := &parsedPodcastShow{}
 	for idx, path := range audioFiles {
-		probed, err := ProbeFile(ctx, ffprobePath, path)
-		if err != nil {
-			return nil, fmt.Errorf("probe podcast file %s: %w", path, err)
-		}
+		// Stat before probing, as the video scanner does: a file replaced
+		// while ffprobe reads it is then recorded with the size and mtime of
+		// the file that was probed, so a later check sees it changed.
 		info, err := os.Stat(path)
 		if err != nil {
 			return nil, fmt.Errorf("stat podcast file %s: %w", path, err)
+		}
+		probed, err := ProbeFile(ctx, ffprobePath, path)
+		if err != nil {
+			return nil, fmt.Errorf("probe podcast file %s: %w", path, err)
 		}
 		tags := probed.FormatTags
 		if show.Title == "" {

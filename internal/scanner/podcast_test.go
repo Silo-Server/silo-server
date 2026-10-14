@@ -98,6 +98,44 @@ func TestScanPodcastFolderReturnsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestParsePodcastShowRecordsTheFileAsProbed(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	// Prints the probe stored in the file, then grows the file, as a
+	// replacement written while ffprobe reads it would.
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\nprintf ' ' >> \"$last\"\n")
+	showDir := filepath.Join(dir, "Show")
+	if err := os.Mkdir(showDir, 0o755); err != nil {
+		t.Fatalf("mkdir show: %v", err)
+	}
+	probe := `{"format":{"format_name":"mp3","duration":"61","tags":{"album":"Show","title":"One","track":"1"}},` +
+		`"streams":[{"index":0,"codec_type":"audio","codec_name":"mp3"}]}`
+	path := filepath.Join(showDir, "01.mp3")
+	if err := os.WriteFile(path, []byte(probe), 0o644); err != nil {
+		t.Fatalf("write episode: %v", err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat episode: %v", err)
+	}
+
+	got, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
+	if err != nil {
+		t.Fatalf("parsePodcastShow: %v", err)
+	}
+	if len(got.Episodes) != 1 {
+		t.Fatalf("got %d episodes, want 1", len(got.Episodes))
+	}
+	ep := got.Episodes[0]
+	if ep.Probe == nil || ep.Probe.Duration != 61 {
+		t.Fatalf("probe = %+v, want the probed 61-second episode", ep.Probe)
+	}
+	if ep.Size != before.Size() || !ep.ModTime.Equal(normalizeFileModifiedAt(before.ModTime())) {
+		t.Fatalf("recorded size %d mtime %v, want the probed file's %d %v",
+			ep.Size, ep.ModTime, before.Size(), normalizeFileModifiedAt(before.ModTime()))
+	}
+}
+
 func TestPodcastShowFolder(t *testing.T) {
 	roots := []string{"/media/podcasts", "/media/more-podcasts", "/media/more-podcasts/nested"}
 	tests := []struct {
