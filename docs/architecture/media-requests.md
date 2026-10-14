@@ -407,7 +407,8 @@ typed again when the server's URL changes to another address; a server saved
 without a key has none to protect, so its URL can change without one. The save
 checks this again under the row lock, so a key saved, or an address changed,
 by another admin in the meantime is never paired with a different address. A
-blank URL in a test or save of a saved server stands for its saved address,
+connection test of a saved server that leaves the URL out tests its saved
+address. A blank URL in a test or save stands for the saved address too,
 unless the plugin declares `base_url_optional`; then it is tested and saved
 blank, so an admin can clear it. Clearing it counts as changing the address: a
 saved key has to be typed again, and the test goes without it.

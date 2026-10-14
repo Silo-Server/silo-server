@@ -1679,7 +1679,7 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 			if integration.InstallationID == nil {
 				integration.InstallationID = stored.InstallationID
 			}
-			if submittedBaseURL == "" && s.blankURLMeansSaved(ctx, integration) {
+			if submittedBaseURL == "" && (!integration.BaseURLCleared || s.blankURLMeansSaved(ctx, integration)) {
 				integration.BaseURL = stored.BaseURL
 			}
 			// The saved key goes only to the address it was saved for, so a

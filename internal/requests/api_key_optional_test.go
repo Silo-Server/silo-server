@@ -309,7 +309,8 @@ func TestUpdateIntegrationAddressChangeNeedsKeyOnlyWhenOneIsSaved(t *testing.T) 
 
 // A blank URL sent for a saved server is tested and validated as blank when
 // its router declares base_url_optional, since that is what the save stores.
-// For any other router it still stands for the saved address.
+// For any other router it still stands for the saved address, and so does a
+// URL a connection test leaves out.
 func TestClearedURLIsTestedAndValidatedAsBlankForURLOptionalRouter(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -328,10 +329,16 @@ func TestClearedURLIsTestedAndValidatedAsBlankForURLOptionalRouter(t *testing.T)
 			admin := Viewer{UserID: 1, IsAdmin: true}
 
 			if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1"}); err != nil {
-				t.Fatalf("LoadIntegrationOptions: %v", err)
+				t.Fatalf("LoadIntegrationOptions without a URL: %v", err)
+			}
+			if router.gotOptionsConn.BaseURL != "http://router-1.local" {
+				t.Fatalf("probed address without a URL = %q, want the saved one", router.gotOptionsConn.BaseURL)
+			}
+			if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1", BaseURLCleared: true}); err != nil {
+				t.Fatalf("LoadIntegrationOptions with a cleared URL: %v", err)
 			}
 			if router.gotOptionsConn.BaseURL != tc.want {
-				t.Fatalf("probed address = %q, want %q", router.gotOptionsConn.BaseURL, tc.want)
+				t.Fatalf("probed address with a cleared URL = %q, want %q", router.gotOptionsConn.BaseURL, tc.want)
 			}
 			install := 1
 			if _, err := service.UpdateIntegration(context.Background(), admin, Integration{
@@ -356,11 +363,18 @@ func TestClearingURLOfServerWithSavedKeyNeedsTheKeyAgain(t *testing.T) {
 	service.SetRouterProvider(router)
 	admin := Viewer{UserID: 1, IsAdmin: true}
 
-	if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1"}); err != nil {
+	if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1", BaseURLCleared: true}); err != nil {
 		t.Fatalf("LoadIntegrationOptions: %v", err)
 	}
 	if router.gotOptionsConn.BaseURL != "" || router.gotOptionsConn.APIKey != "" {
 		t.Fatalf("probe conn = %+v, want no address and no saved key", router.gotOptionsConn)
+	}
+	// Leaving the URL out tests the saved connection, key and all.
+	if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1"}); err != nil {
+		t.Fatalf("LoadIntegrationOptions: %v", err)
+	}
+	if router.gotOptionsConn.BaseURL != "http://router-1.local" || router.gotOptionsConn.APIKey != "key-router-1" {
+		t.Fatalf("probe conn = %+v, want the saved address and key", router.gotOptionsConn)
 	}
 	install := 1
 	cleared := Integration{ID: "router-1", Name: "router-1", Enabled: true, CapabilityID: "arr", InstallationID: &install}
