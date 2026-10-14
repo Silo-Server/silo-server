@@ -27,6 +27,11 @@ type RouteRequest struct {
 	NeedsProxy           bool
 	TranscodeEligible    func(*Node) bool
 	ProxyEligible        func(*Node) bool
+	// Unreachable holds the URLs of nodes the caller found not answering
+	// during this request. They count as unhealthy, so they are never selected
+	// and they degrade their co-location group just as a failed health check
+	// would, without waiting for the next sweep.
+	Unreachable map[string]struct{}
 }
 
 // RoutePlanner selects and provisionally reserves exactly the nodes requested
@@ -352,6 +357,21 @@ func (p *Planner) PlanRoute(request RouteRequest) Plan {
 	// eligibility restricts what may be selected, not co-location semantics.
 	// Shared-GPU load is summed over the same full pool, for the same reason.
 	groupHealthy := groupHealth(proxies, pooledTranscodes)
+	if len(request.Unreachable) > 0 {
+		for _, nodes := range [][]*Node{proxies, pooledTranscodes} {
+			for _, n := range nodes {
+				if _, down := request.Unreachable[n.URL]; down && n.Group != nil {
+					groupHealthy[*n.Group] = false
+				}
+			}
+		}
+		reachable := func(n *Node) bool {
+			_, down := request.Unreachable[n.URL]
+			return !down
+		}
+		proxies = filterNodes(proxies, reachable)
+		transcodes = filterNodes(transcodes, reachable)
+	}
 
 	var plan Plan
 	if request.TranscodeEligible != nil {

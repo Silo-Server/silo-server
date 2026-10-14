@@ -1387,3 +1387,126 @@ func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
 		t.Fatalf("RemuxDVMode after route-set update = %q, want cleared", got.RemuxDVMode)
 	}
 }
+
+func TestSessionManagerSetPausedReportsChanges(t *testing.T) {
+	m := playback.NewSessionManager(0, 0)
+	s, err := m.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.UpdateProgress(s.ID, 42, false); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := m.SetPaused(s.ID, true, 0, nil); err != nil || !changed {
+		t.Fatalf("pause = %v, %v", changed, err)
+	}
+	if changed, err := m.SetPaused(s.ID, true, 0, nil); err != nil || changed {
+		t.Fatalf("repeat pause = %v, %v", changed, err)
+	}
+	current, err := m.GetSession(s.ID)
+	if err != nil || !current.IsPaused || current.Position != 42 {
+		t.Fatalf("session = %+v, %v", current, err)
+	}
+	if _, err := m.SetPaused("missing", true, 0, nil); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("missing session err = %v", err)
+	}
+}
+
+func TestSessionManagerConfirmedPauseFencesOnlyAcceptedSamples(t *testing.T) {
+	m := playback.NewSessionManager(0, 0)
+	s, err := m.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SetPaused(s.ID, true, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Even a confirmation of the same state advances the fence.
+	if changed, err := m.SetPaused(s.ID, true, 2, nil); err != nil || changed {
+		t.Fatalf("same-state confirmation = %v, %v", changed, err)
+	}
+	if err := m.UpdateProgressSample(s.ID, playback.ProgressSampleV3{Sequence: 2, Position: 42}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := m.GetSession(s.ID)
+	if err != nil || !current.IsPaused || current.Position != 42 {
+		t.Fatalf("accepted sample replay = %+v, %v", current, err)
+	}
+	if err := m.UpdateProgressSample(s.ID, playback.ProgressSampleV3{Sequence: 3, Position: 43}); err != nil {
+		t.Fatal(err)
+	}
+	// An older/default sequence cannot weaken the earlier fence.
+	if _, err := m.SetPaused(s.ID, false, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.UpdateProgressSample(s.ID, playback.ProgressSampleV3{Sequence: 2, Position: 44, IsPaused: true}); err != nil {
+		t.Fatal(err)
+	}
+	current, err = m.GetSession(s.ID)
+	if err != nil || current.IsPaused || current.Position != 44 {
+		t.Fatalf("newer progress and retained fence = %+v, %v", current, err)
+	}
+}
+
+// A seek planned after accepted progress supersedes it: a confirmation that
+// offers that same sample must not move the live position back.
+func TestSessionManagerConfirmedPauseKeepsLaterSeekPosition(t *testing.T) {
+	m := playback.NewSessionManager(0, 0)
+	s, err := m.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.UpdateProgressSample(s.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+		t.Fatal(err)
+	}
+	// Another replica accepted sequence 2; the seek was planned after it.
+	seek := 321.0
+	rollback, err := m.ApplyReplacement(s.ID, playback.SessionReplacement{EffectiveMediaFileID: 100, PositionSeconds: &seek, PositionSequence: 2, PreservePaused: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SetPaused(s.ID, true, 2, &playback.ProgressSampleV3{Sequence: 2, Position: 31}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := m.GetSession(s.ID)
+	if err != nil || !current.IsPaused || current.Position != 321 {
+		t.Fatalf("after superseded sample = %+v, %v; want paused at seek position 321", current, err)
+	}
+	if err := m.RollbackReplacement(s.ID, rollback); !errors.Is(err, playback.ErrSessionReplacementSuperseded) {
+		t.Fatalf("rollback after confirmation err = %v, want superseded", err)
+	}
+	if _, err := m.SetPaused(s.ID, false, 3, &playback.ProgressSampleV3{Sequence: 3, Position: 325}); err != nil {
+		t.Fatal(err)
+	}
+	current, err = m.GetSession(s.ID)
+	if err != nil || current.IsPaused || current.Position != 325 {
+		t.Fatalf("after newer sample = %+v, %v; want playing at 325", current, err)
+	}
+}
+
+func TestSessionManagerReplacementRollbackRestoresPositionSequence(t *testing.T) {
+	m := playback.NewSessionManager(0, 0)
+	s, err := m.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.UpdateProgressSample(s.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+		t.Fatal(err)
+	}
+	seek := 321.0
+	rollback, err := m.ApplyReplacement(s.ID, playback.SessionReplacement{EffectiveMediaFileID: 100, PositionSeconds: &seek, PositionSequence: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RollbackReplacement(s.ID, rollback); err != nil {
+		t.Fatal(err)
+	}
+	// With the seek rolled back, sequence 2 is newer than the live position.
+	if _, err := m.SetPaused(s.ID, true, 2, &playback.ProgressSampleV3{Sequence: 2, Position: 31}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := m.GetSession(s.ID)
+	if err != nil || current.Position != 31 {
+		t.Fatalf("after rollback = %+v, %v; want replica position 31", current, err)
+	}
+}

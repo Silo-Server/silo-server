@@ -433,10 +433,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 /* ================================================================
    § 3  THEME DEFINITIONS
    ================================================================
-   Silo ships one base theme, Cinema Dark, which sets ALL semantic
+   Silo ships one theme, Cinema Dark, which sets ALL semantic
    tokens. It is activated by the static data-theme attribute on
-   <html> (index.html); the admin's token overrides and custom CSS
-   layer on top of it (contexts/CustomThemeProvider.tsx).
+   <html> (index.html).
 
    Token naming conventions:
      --background       Page background (darkest main surface)
@@ -608,8 +607,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
   /* Every token here pushes toward --contrast-boost, never toward white
      directly. Hard-coded white raises contrast on a dark page and destroys it
-     on a light one, which admin CSS can still produce; mixing toward the boost
-     keeps high contrast readable either way. */
+     on a light one; mixing toward the boost keeps high contrast readable
+     either way. The brand accent restores this --ring after its own
+     (contexts/BrandingProvider.tsx). */
   html[data-high-contrast="true"] {
     --foreground: var(--contrast-boost);
     --ring: var(--contrast-boost);

@@ -491,7 +491,6 @@ export const v2Operations = {
   "GET /api/v2/system/identity": "getServerIdentity",
   "GET /api/v2/system/info": "getSystemInfo",
   "GET /api/v2/system/setup": "getSetupStatus",
-  "GET /api/v2/theme/admin-css": "getThemeOverrides",
   "GET /api/v2/theme/branding": "getBranding",
   "GET /api/v2/theme/capabilities": "getBrandingCapabilities",
   "GET /api/v2/user/libraries": "listUserLibraries",

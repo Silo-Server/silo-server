@@ -203,3 +203,37 @@ it("reports a filter change as connecting until the new selection's snapshot arr
   expect(result.current.rows).toEqual([]);
   expect(result.current.isConnecting).toBe(false);
 });
+
+it("keeps debouncing filter changes after an explicit reconnect", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("WebSocket", FakeWebSocket);
+  mint.mockResolvedValue({ ticket: "test-ticket" });
+  const { result, rerender } = renderHook(
+    ({ method }) => {
+      const params = useMemo(() => ({ method }), [method]);
+      return useAdminLogStream("audit", params, true);
+    },
+    { initialProps: { method: "PUT" } },
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(250));
+  expect(mint).toHaveBeenCalledTimes(1);
+
+  act(() => result.current.reconnect());
+  await act(async () => vi.advanceTimersByTimeAsync(0));
+  expect(mint).toHaveBeenCalledTimes(2);
+
+  for (const method of ["PO", "POS", "POST"]) {
+    rerender({ method });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+  }
+  expect(mint).toHaveBeenCalledTimes(2);
+
+  await act(async () => vi.advanceTimersByTimeAsync(249));
+  expect(mint).toHaveBeenCalledTimes(2);
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(mint).toHaveBeenCalledTimes(3);
+
+  act(() => result.current.reconnect());
+  await act(async () => vi.advanceTimersByTimeAsync(0));
+  expect(mint).toHaveBeenCalledTimes(4);
+});
