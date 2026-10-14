@@ -654,7 +654,7 @@ func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth in
 	}
 	filter := VAAPIFilter(kind)
 	if backend == BackendQSV {
-		filter = QSVFilter(kind) + "," + QSVInteropFilter()
+		filter = QSVFilter(kind, 0) + "," + QSVInteropFilter()
 	}
 	return filter + "," + HDRMetadataRemovalFilter()
 }

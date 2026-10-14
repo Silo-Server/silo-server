@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"cmp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -652,17 +653,34 @@ func VAAPIFilter(kind SourceKind) string {
 	return SourceParameters(kind) + "," + vaapiToneMapFilter()
 }
 
-// QSVFilter builds the Intel HDR-to-SDR conversion graph. Intel's VAAPI/VPP
-// tone mapper can severely crush midtones on otherwise valid PQ sources, so
-// HDR frames take Jellyfin FFmpeg's GPU OpenCL path and return to the VAAPI
-// surface family before the existing QSV encoder interop. SDR base layers only
-// need color conversion and retain the cheaper VAAPI path.
-func QSVFilter(kind SourceKind) string {
+// QSVFilter builds the Intel HDR-to-SDR conversion graph, scaled to height
+// (0 keeps the source size). Intel's VAAPI/VPP tone mapper can severely crush
+// midtones on otherwise valid PQ sources, so HDR frames take Jellyfin FFmpeg's
+// GPU OpenCL path and return to the VAAPI surface family before the existing
+// QSV encoder interop. SDR base layers only need color conversion and retain
+// the cheaper VAAPI path.
+//
+// HDR frames are scaled before tone mapping, never after. A VAAPI filter that
+// reads the OpenCL output releases the surface back to the tone mapper's pool
+// without waiting for the GPU, and on Intel Arrow Lake (iHD 26.3, jellyfin-ffmpeg
+// 8.1.3) the scaled frames then came out with blocks of the next frame during
+// motion, although the OpenCL interop should order that access itself. Passing
+// the surface straight to the encoder, which holds it until the encode
+// completes, avoids it.
+func QSVFilter(kind SourceKind, height int) string {
 	if IsSDRSource(kind) {
-		return VAAPIFilter(kind)
+		filter := VAAPIFilter(kind)
+		if height > 0 {
+			filter += ",scale_vaapi=w=-2:h=" + strconv.Itoa(height) + ":format=nv12"
+		}
+		return filter
+	}
+	size := ""
+	if height > 0 {
+		size = "w=-2:h=" + strconv.Itoa(height) + ":"
 	}
 	return SourceParameters(kind) +
-		",scale_vaapi=format=p010" +
+		",scale_vaapi=" + size + "format=p010" +
 		",hwmap=derive_device=opencl:mode=read" +
 		"," + openCLToneMapFilter(kind) +
 		",hwmap=derive_device=vaapi:mode=write:reverse=1:extra_hw_frames=16,format=vaapi"
@@ -736,6 +754,9 @@ func videoToolboxSurfacePixelFormat(sourceVideoBitDepth int) string {
 // QSV encoder surface. The extra scale_vaapi stage is required by Intel's
 // driver for real decoded HEVC frames even when tonemap_vaapi already emitted
 // NV12; omitting it leaves FFmpeg trying an unsupported software auto-scale.
+// After the OpenCL tone mapper its scale_vaapi must stay a passthrough, with
+// no size or color options, so no VAAPI filter reads the OpenCL output (see
+// QSVFilter).
 func QSVInteropFilter() string {
 	return "scale_vaapi=format=nv12,hwmap=derive_device=qsv:mode=read+write,format=qsv"
 }

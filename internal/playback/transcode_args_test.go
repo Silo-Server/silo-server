@@ -241,6 +241,34 @@ func TestHardwareToneMapRemovesMetadataAfterHardwareFormatConversion(t *testing.
 	}
 }
 
+// TestQSVToneMapScalesBeforeOpenCL keeps every VAAPI resize ahead of the
+// OpenCL tone mapper on the subtitle-free graph, for hardware and software
+// decode. Only the passthrough interop may follow the tone mapper; a
+// scale_vaapi that reads the tone-mapped surface corrupts frames.
+func TestQSVToneMapScalesBeforeOpenCL(t *testing.T) {
+	for _, kind := range []tonemap.SourceKind{tonemap.SourcePQ, tonemap.SourceHLG, tonemap.SourceDolbyVision} {
+		for _, softwareDecode := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s software decode %t", kind, softwareDecode), func(t *testing.T) {
+				graph := strings.Join(buildFFmpegArgs(TranscodeOpts{
+					InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+					TargetResolution: "1080p", HWAccel: transcodeHWQSV, SoftwareVideoDecode: softwareDecode, SourceVideoBitDepth: 10,
+					ToneMapPolicy: tonemap.PolicyHardwareOnly, ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: kind,
+					ToneMapFilter: tonemap.HardwareFilterOpenCL, ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+				}), " ")
+				resize := strings.Index(graph, "scale_vaapi=w=-2:h=1080:format=p010")
+				toneMap := strings.Index(graph, tonemap.HardwareFilterOpenCL)
+				if resize < 0 || toneMap < resize {
+					t.Fatalf("QSV graph does not resize before tone mapping: %s", graph)
+				}
+				tail := "reverse=1:extra_hw_frames=16,format=vaapi," + tonemap.QSVInteropFilter() + ",sidedata="
+				if !strings.Contains(graph[toneMap:], tail) || strings.Contains(graph[toneMap:], "scale_vaapi=w=") {
+					t.Fatalf("QSV graph processes the tone-mapped surface before the encoder: %s", graph)
+				}
+			})
+		}
+	}
+}
+
 // TestToneMapGraphOrdersTextAndBitmapSubtitles verifies subtitle composition follows color conversion.
 func TestToneMapGraphOrdersTextAndBitmapSubtitles(t *testing.T) {
 	base := TranscodeOpts{
