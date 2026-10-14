@@ -135,52 +135,13 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	if !cfg.Ready() {
 		return nil, ErrNotConfigured
 	}
-	if req.TargetKind == "" {
-		req.TargetKind = TargetItem
-	}
-	switch req.TargetKind {
-	case TargetItem, TargetSeason, TargetEpisode:
-	default:
-		return nil, fmt.Errorf("%w: unsupported target kind %q", ErrInvalidRequest, req.TargetKind)
-	}
-	if strings.TrimSpace(req.ContentID) == "" {
-		return nil, fmt.Errorf("%w: content id is required", ErrInvalidRequest)
-	}
-	target, err := subtitles.NormalizeLanguageCode(req.TargetLanguage)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid target language %q", ErrInvalidRequest, req.TargetLanguage)
-	}
-	req.TargetLanguage = target
-
 	model := cfg.ChatModel
-	if req.TargetKind == TargetEpisode {
-		// An episode has no children.
-		req.IncludeChildren = false
-	}
-	if req.TargetKind == TargetItem && req.IncludeChildren {
-		// Only a series has children; normalizing keeps a movie request
-		// with and without the flag on one job.
-		item, err := s.content.ItemText(ctx, req.ContentID)
-		if err != nil {
-			return nil, err
-		}
-		if item != nil && item.Type != "series" {
-			req.IncludeChildren = false
-		}
-	}
-	// A job a previous release queued carries the old key format; reuse it
-	// when its stored flags cover this request.
-	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, legacyIdempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, model)); err != nil {
+	req, existing, err := s.coveringJob(ctx, req, model)
+	if err != nil {
 		return nil, err
-	} else if existing != nil && existing.covers(req) {
-		return existing, nil
 	}
-	for _, covering := range coveringKeys(req.TargetKind, req.ContentID, req.TargetLanguage, model, req.IncludeChildren, req.Force) {
-		if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, covering); err != nil {
-			return nil, err
-		} else if existing != nil {
-			return existing, nil
-		}
+	if existing != nil {
+		return existing, nil
 	}
 	key := idempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, model, req.IncludeChildren, req.Force)
 
@@ -250,6 +211,59 @@ func (s *Service) OnViewMode(ctx context.Context) string {
 	return cfg.OnViewMode()
 }
 
+// coveringJob normalizes req and returns it with the pending or running job
+// that already does at least its work (same target and language, same or
+// wider scope, and forced whenever req is), or nil when none does.
+func (s *Service) coveringJob(ctx context.Context, req JobRequest, model string) (JobRequest, *Job, error) {
+	if req.TargetKind == "" {
+		req.TargetKind = TargetItem
+	}
+	switch req.TargetKind {
+	case TargetItem, TargetSeason, TargetEpisode:
+	default:
+		return req, nil, fmt.Errorf("%w: unsupported target kind %q", ErrInvalidRequest, req.TargetKind)
+	}
+	if strings.TrimSpace(req.ContentID) == "" {
+		return req, nil, fmt.Errorf("%w: content id is required", ErrInvalidRequest)
+	}
+	target, err := subtitles.NormalizeLanguageCode(req.TargetLanguage)
+	if err != nil {
+		return req, nil, fmt.Errorf("%w: invalid target language %q", ErrInvalidRequest, req.TargetLanguage)
+	}
+	req.TargetLanguage = target
+
+	if req.TargetKind == TargetEpisode {
+		// An episode has no children.
+		req.IncludeChildren = false
+	}
+	if req.TargetKind == TargetItem && req.IncludeChildren {
+		// Only a series has children; normalizing keeps a movie request
+		// with and without the flag on one job.
+		item, err := s.content.ItemText(ctx, req.ContentID)
+		if err != nil {
+			return req, nil, err
+		}
+		if item != nil && item.Type != "series" {
+			req.IncludeChildren = false
+		}
+	}
+	// A job a previous release queued carries the old key format; reuse it
+	// when its stored flags cover this request.
+	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, legacyIdempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, model)); err != nil {
+		return req, nil, err
+	} else if existing != nil && existing.covers(req) {
+		return req, existing, nil
+	}
+	for _, covering := range coveringKeys(req.TargetKind, req.ContentID, req.TargetLanguage, model, req.IncludeChildren, req.Force) {
+		if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, covering); err != nil {
+			return req, nil, err
+		} else if existing != nil {
+			return req, existing, nil
+		}
+	}
+	return req, nil, nil
+}
+
 // RequestOnView is the viewer-triggered enqueue path (detail-page button or
 // auto-on-view). On top of the normal pipeline it suppresses retries for a
 // cooldown window after a failed job for the same target+language: ordinary
@@ -290,17 +304,35 @@ func (s *Service) RequestOnView(ctx context.Context, targetKind TargetKind, cont
 		break // most recent job for this language decides; older history is irrelevant
 	}
 
-	// A view translates what that page shows: a movie or series its own
-	// description, a season its overview and its episode list, an episode
-	// itself. A series page therefore never translates a whole long-running
-	// show; each season is translated when someone opens it.
-	return s.Enqueue(ctx, JobRequest{
+	return s.Enqueue(ctx, onViewRequest(targetKind, contentID, target, requestedBy))
+}
+
+// onViewRequest is the job a viewer-triggered request asks for. A view
+// translates what that page shows: a movie or series its own description, a
+// season its overview and its episode list, an episode itself. A series page
+// therefore never translates a whole long-running show; each season is
+// translated when someone opens it.
+func onViewRequest(targetKind TargetKind, contentID, targetLanguage string, requestedBy *int) JobRequest {
+	return JobRequest{
 		TargetKind:      targetKind,
 		ContentID:       contentID,
-		TargetLanguage:  target,
+		TargetLanguage:  targetLanguage,
 		IncludeChildren: targetKind == TargetSeason,
 		RequestedBy:     requestedBy,
-	})
+	}
+}
+
+// ActiveOnViewJob returns the pending or running job RequestOnView would
+// join for the target and language, or nil when there is none. A caller
+// retrying after a lost response gets that job back even after its first
+// batch has filled the text the request was for.
+func (s *Service) ActiveOnViewJob(ctx context.Context, targetKind TargetKind, contentID, targetLanguage string) (*Job, error) {
+	if targetKind == "" {
+		targetKind = TargetItem
+	}
+	cfg, _ := s.translationConfig(ctx)
+	_, existing, err := s.coveringJob(ctx, onViewRequest(targetKind, contentID, targetLanguage, nil), cfg.ChatModel)
+	return existing, err
 }
 
 // GetJob returns a job by ID.

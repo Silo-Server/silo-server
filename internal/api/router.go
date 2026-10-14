@@ -3904,6 +3904,19 @@ func newChiRouter(deps Dependencies) chi.Router {
 						metadataAIHandler.ItemAccess = itemRepo
 						metadataAIHandler.SeasonLookup = seasonRepo
 						metadataAIHandler.EpisodeLookup = episodeRepo
+						if detailSvc != nil {
+							metadataAIHandler.Pending = detailSvc
+						}
+						metadataAIHandler.ItemLibraries = itemRepo
+						// The budget caps provider spend, so like the profile
+						// PIN limiter it counts in Redis whenever Redis is
+						// configured, whatever ratelimit.backend says, and per
+						// node only without Redis.
+						if deps.RedisClient != nil {
+							metadataAIHandler.Limiter = ratelimit.NewRedisLimiter(deps.RedisClient)
+						} else {
+							metadataAIHandler.Limiter = ratelimit.NewMemoryLimiter()
+						}
 						r.With(householdProfileGate).Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
 					}
 				} else {

@@ -1098,6 +1098,16 @@ func (s *DetailService) seriesOriginalLanguage(ctx context.Context, seriesID str
 	return series.OriginalLanguage
 }
 
+// seriesOriginalLanguageChecked is seriesOriginalLanguage with its read
+// error, for the checked pending paths; a missing series has none.
+func (s *DetailService) seriesOriginalLanguageChecked(ctx context.Context, seriesID string, filter AccessFilter) (string, error) {
+	originalBySeries, err := s.seriesOriginalLanguages(ctx, []string{seriesID}, filter)
+	if err != nil {
+		return "", err
+	}
+	return originalBySeries[strings.TrimSpace(seriesID)], nil
+}
+
 // seriesOriginalLanguages is the batch equivalent of seriesOriginalLanguage.
 // A season or episode page usually contains many children of one series; load
 // each distinct parent once so original-language preferences do not introduce
@@ -1149,20 +1159,28 @@ func (s *DetailService) seriesOriginalLanguages(
 // the item's base metadata language, the base overview has text, and no
 // localized overview exists yet. Clients use it to offer (or auto-run)
 // on-view AI translation; it is pure data, independent of whether the AI
-// feature is enabled.
+// feature is enabled. A failed read reports nothing missing.
 func (s *DetailService) PendingTranslationLanguage(ctx context.Context, item *models.MediaItem, filter AccessFilter) string {
+	language, _ := s.PendingTranslationLanguageChecked(ctx, item, filter)
+	return language
+}
+
+// PendingTranslationLanguageChecked is PendingTranslationLanguage with its
+// read errors, for callers that must not mistake a failed read for nothing
+// missing. A presentation library that no longer exists is nothing missing.
+func (s *DetailService) PendingTranslationLanguageChecked(ctx context.Context, item *models.MediaItem, filter AccessFilter) (string, error) {
 	if item == nil || strings.TrimSpace(item.Overview) == "" || s.itemLocRepo == nil {
-		return ""
+		return "", nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter, item.OriginalLanguage)
+	language, err := s.pendingPresentationLanguage(ctx, filter, item.OriginalLanguage)
 	if err != nil || language == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) {
-		return ""
+		return "", err
 	}
 	loc, err := s.itemLocRepo.Get(ctx, item.ContentID, language)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return pendingTranslationLanguageWith(item, language, loc)
+	return pendingTranslationLanguageWith(item, language, loc), nil
 }
 
 // pendingTranslationLanguageWith is the shared core of PendingTranslationLanguage:
@@ -1185,48 +1203,68 @@ func pendingTranslationLanguageWith(item *models.MediaItem, language string, loc
 // language is pending while the season overview or any of its episodes'
 // overviews lacks a localization.
 func (s *DetailService) PendingSeasonTranslationLanguage(ctx context.Context, season *models.Season, filter AccessFilter) string {
-	return s.pendingSeasonTranslationLanguage(ctx, season, filter, nil)
+	language, _ := s.PendingSeasonTranslationLanguageChecked(ctx, season, filter)
+	return language
+}
+
+// PendingSeasonTranslationLanguageChecked is PendingSeasonTranslationLanguage
+// with its read errors.
+func (s *DetailService) PendingSeasonTranslationLanguageChecked(ctx context.Context, season *models.Season, filter AccessFilter) (string, error) {
+	return s.pendingSeasonTranslationLanguageChecked(ctx, season, filter, nil)
 }
 
 // pendingSeasonTranslationLanguage takes the season's episodes when the
-// caller already listed them; nil lists them here.
+// caller already listed them; nil lists them here. A failed read reports
+// nothing missing.
 func (s *DetailService) pendingSeasonTranslationLanguage(ctx context.Context, season *models.Season, filter AccessFilter, episodes []*models.Episode) string {
+	language, _ := s.pendingSeasonTranslationLanguageChecked(ctx, season, filter, episodes)
+	return language
+}
+
+// pendingSeasonTranslationLanguageChecked is pendingSeasonTranslationLanguage
+// with its read errors.
+func (s *DetailService) pendingSeasonTranslationLanguageChecked(ctx context.Context, season *models.Season, filter AccessFilter, episodes []*models.Episode) (string, error) {
 	if season == nil || s.seasonLocRepo == nil {
-		return ""
+		return "", nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter, s.seriesOriginalLanguage(ctx, season.SeriesID, filter))
+	original, err := s.seriesOriginalLanguageChecked(ctx, season.SeriesID, filter)
+	if err != nil {
+		return "", err
+	}
+	language, err := s.pendingPresentationLanguage(ctx, filter, original)
 	if err != nil || language == "" {
-		return ""
+		return "", err
 	}
 	if strings.TrimSpace(season.Overview) != "" && !sameMetadataLanguage(season.DefaultMetadataLanguage, language) {
 		loc, err := s.seasonLocRepo.Get(ctx, season.ContentID, language)
 		if err != nil {
-			return ""
+			return "", err
 		}
 		if loc == nil || loc.Overview == "" {
-			return language
+			return language, nil
 		}
 	}
 	if episodes == nil {
 		if s.episodeRepo == nil {
-			return ""
+			return "", nil
 		}
 		episodes, err = s.episodeRepo.ListBySeasonID(ctx, season.ContentID)
 		if err != nil {
-			return ""
+			return "", err
 		}
 	}
-	if s.episodesMissingLanguage(ctx, episodes, language) {
-		return language
+	missing, err := s.episodesMissingLanguage(ctx, episodes, language)
+	if err != nil || !missing {
+		return "", err
 	}
-	return ""
+	return language, nil
 }
 
 // episodesMissingLanguage reports whether any episode has a description in
 // another language and no localized description for language.
-func (s *DetailService) episodesMissingLanguage(ctx context.Context, episodes []*models.Episode, language string) bool {
+func (s *DetailService) episodesMissingLanguage(ctx context.Context, episodes []*models.Episode, language string) (bool, error) {
 	if s.episodeLocRepo == nil {
-		return false
+		return false, nil
 	}
 	ids := make([]string, 0, len(episodes))
 	for _, episode := range episodes {
@@ -1235,35 +1273,57 @@ func (s *DetailService) episodesMissingLanguage(ctx context.Context, episodes []
 		}
 	}
 	if len(ids) == 0 {
-		return false
+		return false, nil
 	}
 	locs, err := s.episodeLocRepo.GetByEpisodeIDs(ctx, ids, language)
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, id := range ids {
 		if loc := locs[id]; loc == nil || loc.Overview == "" {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // PendingEpisodeTranslationLanguage is the episode-row equivalent of
 // PendingTranslationLanguage.
 func (s *DetailService) PendingEpisodeTranslationLanguage(ctx context.Context, episode *models.Episode, filter AccessFilter) string {
+	language, _ := s.PendingEpisodeTranslationLanguageChecked(ctx, episode, filter)
+	return language
+}
+
+// PendingEpisodeTranslationLanguageChecked is
+// PendingEpisodeTranslationLanguage with its read errors.
+func (s *DetailService) PendingEpisodeTranslationLanguageChecked(ctx context.Context, episode *models.Episode, filter AccessFilter) (string, error) {
 	if episode == nil || strings.TrimSpace(episode.Overview) == "" || s.episodeLocRepo == nil {
-		return ""
+		return "", nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter, s.seriesOriginalLanguage(ctx, episode.SeriesID, filter))
+	original, err := s.seriesOriginalLanguageChecked(ctx, episode.SeriesID, filter)
+	if err != nil {
+		return "", err
+	}
+	language, err := s.pendingPresentationLanguage(ctx, filter, original)
 	if err != nil || language == "" || sameMetadataLanguage(episode.DefaultMetadataLanguage, language) {
-		return ""
+		return "", err
 	}
 	loc, err := s.episodeLocRepo.Get(ctx, episode.ContentID, language)
 	if err != nil || (loc != nil && loc.Overview != "") {
-		return ""
+		return "", err
 	}
-	return language
+	return language, nil
+}
+
+// pendingPresentationLanguage resolves the presentation language for the
+// pending checks, where a presentation library that no longer exists means
+// nothing is missing rather than a failed read.
+func (s *DetailService) pendingPresentationLanguage(ctx context.Context, filter AccessFilter, originalLanguage string) (string, error) {
+	language, err := s.resolvePresentationLanguage(ctx, filter, originalLanguage)
+	if errors.Is(err, ErrItemNotFound) {
+		return "", nil
+	}
+	return language, err
 }
 
 func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentID string) error {

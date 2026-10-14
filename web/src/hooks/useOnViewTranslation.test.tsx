@@ -121,4 +121,52 @@ describe("useOnViewTranslation", () => {
     expect(invalidate.mock.calls.length).toBeGreaterThan(afterWait);
     expect(mocks.v2).toHaveBeenCalledTimes(1);
   });
+  // Another tab or profile can finish the translation first, and the server
+  // then refuses the request: the page re-reads its detail.
+  it("re-reads the detail after a refused request", async () => {
+    mocks.v2.mockImplementationOnce(() => Promise.reject(new Error("nothing to translate")));
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(
+      () => useOnViewTranslation({ content_id: "movie-1", pending_translation_language: "de" }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+    await act(async () => {});
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["catalog", "items", "movie-1"] });
+    expect(result.current.translating).toBe(false);
+  });
+
+  it("lets the button try again after a failed request", async () => {
+    mocks.mode = "button";
+    mocks.v2.mockImplementationOnce(() => Promise.reject(new Error("rate limited")));
+    const { result } = renderHook(
+      () => useOnViewTranslation({ content_id: "movie-1", pending_translation_language: "de" }),
+      { wrapper },
+    );
+    await act(async () => result.current.onTranslate?.());
+    expect(result.current.translating).toBe(false);
+    act(() => result.current.onTranslate?.());
+    expect(mocks.v2).toHaveBeenCalledTimes(2);
+  });
+
+  // Auto mode fires once per view; after a failure such as a 429 it offers
+  // the translate action so the viewer can try again without a reload.
+  it("offers the translate action after a failed auto run", async () => {
+    mocks.v2.mockImplementationOnce(() => Promise.reject(new Error("rate limited")));
+    const { result } = renderHook(
+      () => useOnViewTranslation({ content_id: "movie-1", pending_translation_language: "de" }),
+      { wrapper },
+    );
+    expect(result.current.onTranslate).toBeUndefined();
+    await act(async () => {});
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
+    expect(result.current.onTranslate).toBeTypeOf("function");
+    act(() => result.current.onTranslate?.());
+    expect(mocks.v2).toHaveBeenCalledTimes(2);
+    expect(result.current.onTranslate).toBeUndefined();
+  });
 });

@@ -45,35 +45,15 @@ export function useOnViewTranslation(item: OnViewTranslationTarget | undefined) 
 
   const [translating, setTranslating] = useState(false);
   const [settling, setSettling] = useState(false);
+  // The last request failed (refused, rate limited, or unreachable). Auto mode
+  // fires once per view, so it then offers the translate action instead.
+  const [failed, setFailed] = useState(false);
   // Tracks which item+language we already fired for, so auto mode triggers
   // once per view rather than re-firing on every refetch while polling.
   const firedForRef = useRef("");
   // Counts requests, so a late failure of one that a retry replaced cannot
   // end the retry's wait.
   const attemptRef = useRef(0);
-
-  const trigger = useCallback(() => {
-    if (!contentId || !pendingLanguage) return;
-    const key = `${contentId}:${pendingLanguage}`;
-    if (firedForRef.current === key) return;
-    firedForRef.current = key;
-    const attempt = ++attemptRef.current;
-    setSettling(false);
-    setTranslating(true);
-    v2("POST /api/v2/catalog/items/{id}/translate-description", {
-      path: { id: contentId },
-      body: { target_language: pendingLanguage },
-    }).catch(() => {
-      if (attempt !== attemptRef.current) return;
-      firedForRef.current = "";
-      setTranslating(false);
-    });
-  }, [contentId, pendingLanguage]);
-
-  // Auto mode: translate on view.
-  useEffect(() => {
-    if (mode === "auto" && pendingLanguage) trigger();
-  }, [mode, pendingLanguage, trigger]);
 
   const refresh = useCallback(() => {
     // Prefix invalidation covers the per-library detail key variants
@@ -85,6 +65,35 @@ export function useOnViewTranslation(item: OnViewTranslationTarget | undefined) 
       });
     }
   }, [queryClient, contentId, seriesId, seasonNumber]);
+
+  const trigger = useCallback(() => {
+    if (!contentId || !pendingLanguage) return;
+    const key = `${contentId}:${pendingLanguage}`;
+    if (firedForRef.current === key) return;
+    firedForRef.current = key;
+    const attempt = ++attemptRef.current;
+    setSettling(false);
+    setFailed(false);
+    setTranslating(true);
+    v2("POST /api/v2/catalog/items/{id}/translate-description", {
+      path: { id: contentId },
+      body: { target_language: pendingLanguage },
+    }).catch(() => {
+      if (attempt !== attemptRef.current) return;
+      // The server refuses a language the page no longer reports missing,
+      // which happens when another tab or profile finished the translation
+      // first. Re-read the page, and let the translate action try again.
+      firedForRef.current = "";
+      setTranslating(false);
+      setFailed(true);
+      refresh();
+    });
+  }, [contentId, pendingLanguage, refresh]);
+
+  // Auto mode: translate on view.
+  useEffect(() => {
+    if (mode === "auto" && pendingLanguage) trigger();
+  }, [mode, pendingLanguage, trigger]);
 
   // While translating, poll the detail; the localized overview replaces the
   // text and clears the pending flag, which ends the shimmer below.
@@ -130,7 +139,10 @@ export function useOnViewTranslation(item: OnViewTranslationTarget | undefined) 
   return {
     /** Pulse the description text. */
     translating,
-    /** Render the explicit translate chip (button mode only). */
-    onTranslate: mode === "button" && pendingLanguage && !translating ? trigger : undefined,
+    /** Render the explicit translate chip: in button mode, or after a failed auto run. */
+    onTranslate:
+      (mode === "button" || (mode === "auto" && failed)) && pendingLanguage && !translating
+        ? trigger
+        : undefined,
   };
 }

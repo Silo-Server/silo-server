@@ -2884,3 +2884,28 @@ func (r *ItemRepository) LookupExternalIDs(
 func pathPrefixLike(pathPrefix string) string {
 	return pathscope.PrefixLike(pathPrefix)
 }
+
+// LibraryIDsForItem returns the libraries a media item or episode belongs to,
+// in ID order. It reads the same memberships as GetItemsInLibrary, so every
+// library it lists is one where a library-scoped detail page of contentID
+// resolves.
+func (r *ItemRepository) LibraryIDsForItem(ctx context.Context, contentID string) ([]int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT media_folder_id FROM media_item_libraries WHERE content_id = $1
+		UNION
+		SELECT media_folder_id FROM episode_libraries WHERE episode_id = $1
+		ORDER BY media_folder_id`, contentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing item libraries: %w", err)
+	}
+	defer rows.Close()
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning item library: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -81,5 +82,43 @@ func TestPendingSeasonTranslationIncludesItsEpisodes(t *testing.T) {
 		if episode.PendingTranslationLanguage != "" {
 			t.Fatalf("LocalizeEpisodeModels mutated its input: %+v", episode)
 		}
+	}
+}
+
+// A failed parent-series read is an error for the checked pending variants,
+// which the on-view guard relies on, not "nothing missing". The advisory
+// methods the detail pages use still report nothing.
+func TestCheckedPendingTranslationReportsAFailedSeriesRead(t *testing.T) {
+	svc := pendingTranslationFixture(t)
+	config, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TEMP TABLE media_items (LIKE public.media_items INCLUDING DEFAULTS);
+		ALTER TABLE pg_temp.media_items RENAME COLUMN content_id TO unavailable_content_id;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	svc.itemRepo = NewItemRepository(pool)
+	original := AccessFilter{ProfilePreferredLanguage: access.OriginalMetadataLanguage}
+	season := &models.Season{ContentID: "season-1", SeriesID: "show", SeasonNumber: 1, Overview: "Season.", DefaultMetadataLanguage: "en"}
+	episode := &models.Episode{ContentID: "ep-2", SeriesID: "show", SeasonID: "season-1", SeasonNumber: 1, EpisodeNumber: 2,
+		Overview: "Source text.", DefaultMetadataLanguage: "en"}
+
+	if _, err := svc.PendingSeasonTranslationLanguageChecked(t.Context(), season, original); err == nil {
+		t.Fatal("season: checked pending language hid a failed series read")
+	}
+	if _, err := svc.PendingEpisodeTranslationLanguageChecked(t.Context(), episode, original); err == nil {
+		t.Fatal("episode: checked pending language hid a failed series read")
+	}
+	if got := svc.PendingSeasonTranslationLanguage(t.Context(), season, original); got != "" {
+		t.Fatalf("advisory season pending language = %q, want none on a failed read", got)
 	}
 }
