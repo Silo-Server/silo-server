@@ -59,13 +59,40 @@ const (
 	minTransportLead     = 350 * time.Millisecond
 	// maxTransportLead bounds how far in the future transport commands may be
 	// scheduled, so a single member with a huge (or bogus) measured latency
-	// cannot stall the whole room.
-	maxTransportLead = 5 * time.Second
+	// cannot stall the whole room. A member whose round trip exceeds it
+	// receives commands late; clients project a late command forward to the
+	// room's position, so it still lands in sync.
+	maxTransportLead = 2 * time.Second
+	// pingSmoothingWeight is the weight of a slower round-trip sample in a
+	// member's latency. One slow sample (the read loop is sequential, so a slow
+	// transaction delays the pong) must not move every command's lead.
+	pingSmoothingWeight = 0.25
 	// guestCorrectionRetryInterval prevents repeated state reports from
 	// rebuilding a guest's stream while the previous correction is still being
-	// applied. A later report retries the correction if the guest remains out of
-	// sync after this bounded interval.
-	guestCorrectionRetryInterval = 5 * time.Second
+	// applied. Clients converge small drift by playback rate over tens of
+	// seconds, so a correction that is still converging is not resent sooner.
+	guestCorrectionRetryInterval = 10 * time.Second
+	// guestCorrectionDriftSeconds is how far a member's reported position may
+	// sit from the room before the server corrects it. Clients nudge smaller
+	// drift themselves by playback rate against the last command they applied;
+	// the server only steps in when that has not held.
+	guestCorrectionDriftSeconds = 2.0
+	// guestCorrectionStrikes is how many consecutive reports must exceed
+	// guestCorrectionDriftSeconds before a correction is sent, so one late or
+	// noisy report never moves a member.
+	guestCorrectionStrikes = 2
+	// commandSettleWindow is how long after a command's execute_at a member's
+	// reports may still describe the state before it. A report in that window
+	// is neither corrected nor, from the host, taken as a room decision.
+	commandSettleWindow = 1500 * time.Millisecond
+	// stallSeekToleranceSeconds is how close a stalled guest must land to the
+	// waiting room's position before it counts as ready, when its ready names
+	// the seek it ran. A rebuilt stream lands on a segment boundary, often
+	// short of the target; clients close anything inside their 5 s hard-seek
+	// band by playback rate once the room resumes, so a short landing must not
+	// cost the guest the barrier. A ready without the command ID could come
+	// from before the seek, so it keeps readySeekToleranceSeconds.
+	stallSeekToleranceSeconds = 5.0
 	// maxBufferingAnchorDriftSeconds bounds how far a buffering member's
 	// reported position may move the shared room anchor.
 	maxBufferingAnchorDriftSeconds = 5.0
@@ -99,10 +126,12 @@ const (
 	// acknowledged with ready; the hold bounds a client that never does.
 	bufferingCorrectionHold = 30 * time.Second
 	// hostAuthorityDriftSeconds is how far the host's passive position may
-	// drift before it moves the room anchor. Smaller drift, such as a short
-	// local stall, is corrected on the host like any viewer's instead of
-	// pulling every other viewer back.
-	hostAuthorityDriftSeconds = 2.0
+	// drift before it moves the room anchor. Every client sends its seeks as
+	// transport requests, so passive drift is almost always the host's stream
+	// falling behind, not a decision; it is corrected on the host like any
+	// viewer's instead of pulling every other viewer to it. Only a jump far
+	// beyond what a correction would fix is taken as the host's choice.
+	hostAuthorityDriftSeconds = 10.0
 	// roomIdleTTL is how long a room may go without any playback-anchor
 	// activity before the janitor closes it.
 	roomIdleTTL = 24 * time.Hour
@@ -247,7 +276,16 @@ type memberState struct {
 	// session, and it is cleared whenever what the room is about to play
 	// changes: staging a different item, starting, or switching modes.
 	lobbyReady bool
+	// lastPingMS is the member's smoothed round-trip time.
 	lastPingMS int64
+	// driftStrikes counts consecutive state reports beyond
+	// guestCorrectionDriftSeconds. It is local to this server's connection.
+	driftStrikes int
+	// settleUntil is commandSettleWindow past the execute_at of the last
+	// command sent to this member. Reports before it may predate the command,
+	// unless they name lastSentCommandID as the command they last applied.
+	settleUntil       time.Time
+	lastSentCommandID string
 }
 
 // resetForSelection drops everything bound to the previous playback epoch.
@@ -263,6 +301,9 @@ func (m *memberState) resetForSelection() {
 	m.lastCommandID = ""
 	m.syncingToRoom = false
 	m.lobbyReady = false
+	m.driftStrikes = 0
+	m.settleUntil = time.Time{}
+	m.lastSentCommandID = ""
 }
 
 type liveRoom struct {
@@ -707,18 +748,26 @@ func (s *Service) handleTransportRequestForConnection(
 	// any pending sync to the room's position.
 	member.syncingToRoom = false
 
-	position := live.room.AnchorPositionSeconds
+	// Every command carries the room's position at its execute_at, and the
+	// anchor is taken there too, so the room's model and the members it
+	// schedules agree. Anchoring at now while members start at now plus the
+	// lead left every member that lead behind the model.
+	now := s.now()
+	executeAt := now.Add(s.highestPingLocked(live))
+	position := expectedPosition(live.room, executeAt)
 	if request.PositionSeconds != nil {
 		position = math.Max(0, *request.PositionSeconds)
-	} else if !live.room.IsPaused {
-		position = s.expectedPositionLocked(live)
+		// A play or pause carries where the requester was when it pressed;
+		// a playing room runs on until the command executes. A seek target
+		// is absolute.
+		if request.Action != TransportActionSeek && !live.room.IsPaused {
+			position += executeAt.Sub(now).Seconds()
+		}
 	}
 
-	now := s.now()
 	live.room.AnchorPositionSeconds = position
-	live.room.AnchorUpdatedAt = now
+	live.room.AnchorUpdatedAt = executeAt
 	var commandDispatches []commandDispatch
-	executeAt := now.Add(s.highestPingLocked(live))
 	switch request.Action {
 	case TransportActionPlay:
 		live.room.ResumeOnReady = true
@@ -861,10 +910,25 @@ func (s *Service) handleStateReportForConnection(
 	// A stalled stream cannot apply a target; recovery is acknowledged with
 	// ready, which sends a fresh one.
 	holdCorrection := member.isBuffering && now.Sub(member.lastStallAt) < bufferingCorrectionHold
+	// A report sent before this member's latest command executed, or just
+	// after, can still describe the state that command replaces: neither a
+	// drift to correct nor, from the host, a decision.
+	settling := s.commandSettlingLocked(live, member, report.CommandID, now)
+	if settling {
+		isHost = false
+	}
 
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
 	if isHost {
-		live.room.AnchorPositionSeconds = math.Max(0, report.PositionSeconds)
+		member.driftStrikes = 0
+		// The host's report becomes the room command, which members run at
+		// executeAt; a playing host is that much further on by then.
+		executeAt := now.Add(s.highestPingLocked(live))
+		position := math.Max(0, report.PositionSeconds)
+		if !report.IsPaused {
+			position += executeAt.Sub(now).Seconds()
+		}
+		live.room.AnchorPositionSeconds = position
 		live.room.IsPaused = report.IsPaused
 		// A host that pauses or resumes from the system controls reports the
 		// change instead of requesting it. Corrections, re-attaches, and
@@ -878,7 +942,7 @@ func (s *Service) handleStateReportForConnection(
 				live.room.PlaybackState = RoomPlaybackStatePaused
 			}
 		}
-		live.room.AnchorUpdatedAt = s.now()
+		live.room.AnchorUpdatedAt = executeAt
 		conflict, updateErr := s.persistAnchorLocked(ctx, live)
 		if updateErr != nil {
 			s.mu.Unlock()
@@ -904,13 +968,20 @@ func (s *Service) handleStateReportForConnection(
 				live,
 				action,
 				live.room.AnchorPositionSeconds,
-				now.Add(s.highestPingLocked(live)),
+				executeAt,
 			)
 		}
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
 	} else if holdCorrection {
+		member.driftStrikes = 0
 		member.correctionCommand = nil
-	} else if pauseMismatch || drift > 1.0 {
+	} else if settling {
+		// Keep the pending correction, so its retry spacing still holds.
+	} else if !pauseMismatch && drift <= guestCorrectionDriftSeconds {
+		member.driftStrikes = 0
+		member.correctionCommand = nil
+	} else if member.driftStrikes++; pauseMismatch || member.driftStrikes >= guestCorrectionStrikes {
+		executeAt := now.Add(s.highestPingLocked(live))
 		command := TransportCommand{
 			CommandID:         uuid.NewString(),
 			SessionID:         report.SessionID,
@@ -921,8 +992,9 @@ func (s *Service) handleStateReportForConnection(
 				}
 				return TransportActionPause
 			}(),
-			PositionSeconds: math.Max(0, expected),
-			ExecuteAt:       now.Add(s.highestPingLocked(live)).UTC().Format(time.RFC3339Nano),
+			// The room's position when the member runs it, as for every command.
+			PositionSeconds: math.Max(0, expectedPosition(live.room, executeAt)),
+			ExecuteAt:       executeAt.UTC().Format(time.RFC3339Nano),
 			IssuedAt:        now.UTC().Format(time.RFC3339Nano),
 			PlaybackState:   live.room.PlaybackState,
 		}
@@ -930,8 +1002,6 @@ func (s *Service) handleStateReportForConnection(
 			member.correctionCommand = &command
 			correctionDispatches = s.targetedCommandDispatchesLocked(live, report.SessionID, command)
 		}
-	} else {
-		member.correctionCommand = nil
 	}
 	if caughtUp && dispatches == nil {
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
@@ -1081,6 +1151,11 @@ func (s *Service) acceptReadyLocked(
 	delta := math.Abs(report.PositionSeconds - command.PositionSeconds)
 	isHost := userID == live.room.HostUserID && profileID == live.room.HostProfileID
 	if !isHost {
+		// The member's own seek after a stall (moveStalledMemberLocked), which
+		// its client confirms it ran by naming it.
+		if live.command != nil && command.CommandID != live.command.CommandID && report.CommandID == command.CommandID {
+			return delta <= stallSeekToleranceSeconds
+		}
 		return delta <= readySeekToleranceSeconds
 	}
 	if delta > hostReadySeekToleranceSeconds {
@@ -1212,17 +1287,33 @@ func (s *Service) handleBufferingForConnection(
 			s.sendDispatches(ctx, dispatches)
 			return snapshot, nil
 		}
-		// Bound how far a single member's report can move the shared anchor.
-		position := math.Max(0, report.PositionSeconds)
-		expected := math.Max(0, s.expectedPositionLocked(live))
-		if math.Abs(position-expected) > maxBufferingAnchorDriftSeconds {
-			position = expected
+		// Everyone else pauses where the room is when the command runs and
+		// waits there; only a stalled guest moves, forward to that point.
+		// Rewinding the room to the stalled guest replayed up to
+		// maxBufferingAnchorDriftSeconds for every other viewer.
+		executeAt := now.Add(s.highestPingLocked(live))
+		position := math.Max(0, expectedPosition(live.room, executeAt))
+		// The room resumes from where the stalled viewer is, within a bound,
+		// when nobody else is watching, so it skips nothing they have not
+		// seen, and when the host stalls: the host's ready re-anchors the
+		// room wherever its reloaded stream lands, so moving the host forward
+		// would only rewind everyone else afterwards.
+		isHost := userID == live.room.HostUserID && profileID == live.room.HostProfileID
+		resumeFromStall := alone || isHost
+		if resumeFromStall {
+			if reported := math.Max(0, report.PositionSeconds); math.Abs(reported-position) <= maxBufferingAnchorDriftSeconds {
+				position = reported
+			}
 		}
 		commandDispatches, _ = s.enterWaitingLocked(
 			live,
 			position,
 			live.room.PlaybackState == RoomPlaybackStatePlaying || live.room.ResumeOnReady,
+			executeAt,
 		)
+		if !resumeFromStall {
+			commandDispatches = s.moveStalledMemberLocked(live, reg.memberKey, commandDispatches, now, executeAt)
+		}
 		conflict, updateErr := s.persistAnchorLocked(ctx, live)
 		if updateErr != nil {
 			s.mu.Unlock()
@@ -1245,6 +1336,62 @@ func (s *Service) handleBufferingForConnection(
 	s.sendDispatches(ctx, dispatches)
 	s.sendCommandDispatches(ctx, commandDispatches)
 	return snapshot, nil
+}
+
+// moveStalledMemberLocked replaces the stalled member's room pause with a seek
+// to the room's waiting position, so the barrier waits for it to arrive there
+// (acceptReadyLocked holds a seek to its tolerance) while everyone else stays
+// put. Must be called with s.mu held.
+func (s *Service) moveStalledMemberLocked(
+	live *liveRoom,
+	memberKey string,
+	dispatches []commandDispatch,
+	now, executeAt time.Time,
+) []commandDispatch {
+	member := live.members[memberKey]
+	if member == nil || member.sessionID == "" {
+		return dispatches
+	}
+	kept := dispatches[:0]
+	for _, dispatch := range dispatches {
+		if dispatch.memberKey != memberKey {
+			kept = append(kept, dispatch)
+		}
+	}
+	issuedAt := now.UTC().Format(time.RFC3339Nano)
+	if live.command != nil {
+		// Shares the wait's issue time, which marks it as this wait's command
+		// for the member (see waitingCommandForLocked).
+		issuedAt = live.command.IssuedAt
+	}
+	return append(kept, s.targetedCommandDispatchesLocked(live, member.sessionID, TransportCommand{
+		CommandID:         uuid.NewString(),
+		SelectionRevision: live.room.SelectionRevision,
+		Action:            TransportActionSeek,
+		PositionSeconds:   live.room.AnchorPositionSeconds,
+		ExecuteAt:         executeAt.UTC().Format(time.RFC3339Nano),
+		IssuedAt:          issuedAt,
+		PlaybackState:     RoomPlaybackStateWaiting,
+	})...)
+}
+
+// waitingCommandForLocked returns the command a member must finish before the
+// waiting room resumes: the room's, or the seek a stalled member was sent for
+// this same wait. Must be called with s.mu held.
+func (s *Service) waitingCommandForLocked(live *liveRoom, sessionID string) *TransportCommand {
+	if live.command == nil {
+		return nil
+	}
+	for _, member := range live.members {
+		if member == nil || member.sessionID != sessionID {
+			continue
+		}
+		if own := member.waitingCommand; own != nil && own.Action == TransportActionSeek &&
+			own.SelectionRevision == live.command.SelectionRevision && own.IssuedAt == live.command.IssuedAt {
+			return own
+		}
+	}
+	return live.command
 }
 
 // bufferingMayPauseRoomLocked reports whether a member's stall while the room
@@ -1328,6 +1475,12 @@ func (s *Service) HandlePingForConnection(
 	if pingMS > 0 {
 		if maxMS := maxTransportLead.Milliseconds(); pingMS > maxMS {
 			pingMS = maxMS
+		}
+		// Queueing only ever adds delay, so a faster round trip is the better
+		// measurement and is taken at once; a slower one moves the estimate
+		// gradually.
+		if member.lastPingMS > 0 && pingMS > member.lastPingMS {
+			pingMS = int64(math.Round(float64(member.lastPingMS)*(1-pingSmoothingWeight) + float64(pingMS)*pingSmoothingWeight))
 		}
 		member.lastPingMS = pingMS
 	}
@@ -1854,8 +2007,10 @@ func (s *Service) maybeResumeFromWaitingLocked(
 	}
 
 	saved := live.room
+	// The room resumes when members run the command, not when it is sent.
+	executeAt := s.now().Add(s.highestPingLocked(live))
 	live.room.AnchorPositionSeconds = math.Max(0, live.room.AnchorPositionSeconds)
-	live.room.AnchorUpdatedAt = s.now()
+	live.room.AnchorUpdatedAt = executeAt
 	action := TransportActionPause
 	if live.room.ResumeOnReady {
 		live.room.IsPaused = false
@@ -1888,7 +2043,7 @@ func (s *Service) maybeResumeFromWaitingLocked(
 		live,
 		action,
 		live.room.AnchorPositionSeconds,
-		s.now().Add(s.highestPingLocked(live)),
+		executeAt,
 	)
 	return s.prepareSnapshotDispatchesLocked(live), commandDispatches
 }
@@ -2244,6 +2399,7 @@ func (s *Service) targetedCommandDispatchesLocked(
 		if payload.PlaybackState == RoomPlaybackStateWaiting {
 			member.waitingCommand = &payload
 		}
+		noteCommandSentLocked(member, payload)
 		dispatches = append(dispatches, commandDispatch{
 			conn:      member.connection,
 			memberKey: memberKey,
@@ -2282,6 +2438,7 @@ func (s *Service) transportCommandDispatchesLocked(
 		}
 		if member.connection != nil {
 			member.lastCommandID = command.CommandID
+			noteCommandSentLocked(member, payload)
 			dispatches = append(dispatches, commandDispatch{conn: member.connection, memberKey: memberKey,
 				payload: map[string]any{clusterMessageTypeKey: transportMessageType, commandPayloadKey: payload}})
 		}
@@ -2306,6 +2463,39 @@ func memberCommandLogAttrs(roomID string, userID int, dispatch commandDispatch) 
 		"component", "watchtogether", "room_id", roomID, "user_id", userID,
 		"session_id", command.SessionID, "command_id", command.CommandID, "action", command.Action,
 		"playback_state", command.PlaybackState, "target_position_seconds", command.PositionSeconds,
+	}
+}
+
+// commandSettlingLocked reports whether a state report at now may predate the
+// latest command this member was sent or the room's latest command. A report
+// naming that command as the last one its client applied describes the state
+// after it, so it settles at once.
+func (s *Service) commandSettlingLocked(live *liveRoom, member *memberState, appliedCommandID string, now time.Time) bool {
+	if appliedCommandID != "" && appliedCommandID == member.lastSentCommandID {
+		return false
+	}
+	if now.Before(member.settleUntil) {
+		return true
+	}
+	if live.command == nil || live.command.SelectionRevision != live.room.SelectionRevision {
+		return false
+	}
+	executeAt, err := time.Parse(time.RFC3339Nano, live.command.ExecuteAt)
+	return err == nil && now.Before(executeAt.Add(commandSettleWindow))
+}
+
+// noteCommandSentLocked starts the member's settle window for a command. Drift
+// measured before the command is not evidence about the state after it, so the
+// member's strikes start over.
+func noteCommandSentLocked(member *memberState, command TransportCommand) {
+	member.driftStrikes = 0
+	member.lastSentCommandID = command.CommandID
+	executeAt, err := time.Parse(time.RFC3339Nano, command.ExecuteAt)
+	if err != nil {
+		return
+	}
+	if until := executeAt.Add(commandSettleWindow); until.After(member.settleUntil) {
+		member.settleUntil = until
 	}
 }
 
@@ -2343,7 +2533,14 @@ func (s *Service) runCommandDispatches(dispatches []commandDispatch) {
 	}
 }
 
-func (s *Service) enterWaitingLocked(live *liveRoom, positionSeconds float64, resumeOnReady bool) ([]commandDispatch, bool) {
+// enterWaitingLocked pauses the room at positionSeconds, its position at
+// executeAt, and waits for every participant to be ready there.
+func (s *Service) enterWaitingLocked(
+	live *liveRoom,
+	positionSeconds float64,
+	resumeOnReady bool,
+	executeAt time.Time,
+) ([]commandDispatch, bool) {
 	if live.room.Phase != RoomPhasePlaying {
 		return nil, false
 	}
@@ -2351,14 +2548,13 @@ func (s *Service) enterWaitingLocked(live *liveRoom, positionSeconds float64, re
 	live.room.IsPaused = true
 	live.room.PlaybackState = RoomPlaybackStateWaiting
 	live.room.ResumeOnReady = resumeOnReady
-	live.room.AnchorUpdatedAt = s.now()
+	live.room.AnchorUpdatedAt = executeAt
 	s.resetMemberReadinessLocked(live, false)
 
 	if s.activeParticipantCountLocked(live) == 0 {
 		return nil, false
 	}
 	s.armWaitingDeadlineLocked(live)
-	executeAt := s.now().Add(s.highestPingLocked(live))
 	return s.transportCommandDispatchesLocked(
 		live,
 		TransportActionPause,
@@ -2372,10 +2568,12 @@ func (s *Service) syncMemberToRoomLocked(live *liveRoom, sessionID string) []com
 		return nil
 	}
 	var dispatches []commandDispatch
-	if live.room.PlaybackState == RoomPlaybackStateWaiting && live.command != nil && live.command.SelectionRevision == live.room.SelectionRevision {
-		dispatches = s.targetedCommandDispatchesLocked(live, sessionID, *live.command)
+	waiting := s.waitingCommandForLocked(live, sessionID)
+	if live.room.PlaybackState == RoomPlaybackStateWaiting && waiting != nil && waiting.SelectionRevision == live.room.SelectionRevision {
+		dispatches = s.targetedCommandDispatchesLocked(live, sessionID, *waiting)
 	} else {
-		position := expectedPosition(live.room, s.now())
+		executeAt := s.now().Add(s.highestPingLocked(live))
+		position := expectedPosition(live.room, executeAt)
 		action := TransportActionPause
 		if live.room.PlaybackState == RoomPlaybackStatePlaying {
 			action = TransportActionPlay
@@ -2385,7 +2583,7 @@ func (s *Service) syncMemberToRoomLocked(live *liveRoom, sessionID string) []com
 			SelectionRevision: live.room.SelectionRevision,
 			Action:            action,
 			PositionSeconds:   math.Max(0, position),
-			ExecuteAt:         s.now().Add(s.highestPingLocked(live)).UTC().Format(time.RFC3339Nano),
+			ExecuteAt:         executeAt.UTC().Format(time.RFC3339Nano),
 			IssuedAt:          s.now().UTC().Format(time.RFC3339Nano),
 			PlaybackState:     live.room.PlaybackState,
 		})

@@ -328,6 +328,15 @@ function roomConnection(
 
 const reconnectingMessage = "Reconnecting to room. Controls are temporarily unavailable.";
 
+/** Makes jsdom's element report playback with data ahead of the playhead. */
+function markPlaying(video: HTMLVideoElement) {
+  Object.defineProperty(video, "paused", { configurable: true, value: false });
+  Object.defineProperty(video, "readyState", {
+    configurable: true,
+    value: HTMLMediaElement.HAVE_FUTURE_DATA,
+  });
+}
+
 describe("VideoPlayer room catch-up", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1790,9 +1799,12 @@ describe("VideoPlayer room catch-up", () => {
       await act(() => vi.advanceTimersByTimeAsync(1_500));
       expect(messages).not.toHaveBeenCalledWith(expect.objectContaining({ is_ready: true }));
       expect(messages).not.toHaveBeenCalledWith(expect.objectContaining({ type: "ready" }));
+      // A routine report names the command it reflects, so the server can
+      // take it without waiting out that command's settle window.
       expect(messages).toHaveBeenCalledWith({
         type: "state_report",
         session_id: "session-1",
+        command_id: command.command_id,
         position_seconds: 100,
         is_paused: true,
       });
@@ -1857,7 +1869,8 @@ describe("VideoPlayer room catch-up", () => {
   });
 
   it("acknowledges a buffering pause at the actual media position and retries a failed send", async () => {
-    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(80);
+    // Within the hard-seek bound a pause does not rebuild the stream.
+    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(96);
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
     vi.mocked(connection.sendRoomMessage).mockReturnValueOnce({ ok: false });
     rerenderPlayer({
@@ -1878,7 +1891,7 @@ describe("VideoPlayer room catch-up", () => {
       type: "ready",
       session_id: "session-1",
       command_id: command.command_id,
-      position_seconds: 80,
+      position_seconds: 96,
       is_paused: true,
     });
   });
@@ -1912,6 +1925,7 @@ describe("VideoPlayer room catch-up", () => {
         100.5,
         timelineOffset,
       );
+      markPlaying(video);
       command.execute_at = new Date(Date.now() - 1_000).toISOString();
       rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
       await act(() => vi.advanceTimersByTimeAsync(0));
@@ -1921,23 +1935,45 @@ describe("VideoPlayer room catch-up", () => {
       expect(onReanchorSeek).not.toHaveBeenCalled();
       expect(playerSeek).not.toHaveBeenCalled();
 
-      vi.setSystemTime(Date.now() + 3_000);
-      video.currentTime = 103.8 - timelineOffset;
-      fireEvent.timeUpdate(video);
+      // The room is at 103 two seconds later; still behind it, the nudge continues.
+      video.currentTime = 102.5 - timelineOffset;
+      await act(() => vi.advanceTimersByTimeAsync(2_000));
+      expect(video.playbackRate).toBeGreaterThan(1);
+      // Within the settle bound of the room (103.5 now) it ends.
+      video.currentTime = 103.45 - timelineOffset;
+      await act(() => vi.advanceTimersByTimeAsync(500));
       expect(video.playbackRate).toBe(1);
     },
   );
 
-  it("reanchors to the advancing play position when delayed beyond the catch-up band", async () => {
-    const { connection, command, rerenderPlayer, onReanchorSeek } = setup(99);
-    command.execute_at = new Date(Date.now() - 4_000).toISOString();
-    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
-    await act(() => vi.advanceTimersByTimeAsync(0));
+  it.each([true, false])(
+    "reanchors to the advancing play position beyond the hard-seek bound (playing: %s)",
+    async (playing) => {
+      const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(99);
+      if (playing) markPlaying(video);
+      command.execute_at = new Date(Date.now() - 6_000).toISOString();
+      rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+      await act(() => vi.advanceTimersByTimeAsync(0));
 
-    expect(onReanchorSeek).toHaveBeenCalledWith(104);
-  });
+      expect(onReanchorSeek).toHaveBeenCalledWith(106);
+      expect(video.playbackRate).toBe(1);
+    },
+  );
 
-  it.each([2000, 5000])(
+  it.each([4, 1.5])(
+    "joins a stopped viewer %ss off an unseekable target at 1x without a rebuild",
+    async (drift) => {
+      const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(100 - drift);
+      rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(video.playbackRate).toBe(1);
+    },
+  );
+
+  it.each([2000, 7000])(
     "recalculates catch-up after autoplay is blocked for %sms",
     async (delayMs) => {
       const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(101);
@@ -1951,12 +1987,12 @@ describe("VideoPlayer room catch-up", () => {
       vi.setSystemTime(Date.now() + delayMs);
       await act(async () => fireEvent.click(screen.getByRole("button", { name: "Join playback" })));
 
+      // The viewer starts at 1x either way; residual drift is the drift loop's.
+      expect(video.playbackRate).toBe(1);
       if (delayMs === 2000) {
-        expect(video.playbackRate).toBeGreaterThan(1);
         expect(onReanchorSeek).not.toHaveBeenCalled();
       } else {
-        expect(onReanchorSeek).toHaveBeenCalledWith(105);
-        expect(video.playbackRate).toBe(1);
+        expect(onReanchorSeek).toHaveBeenCalledWith(107);
       }
     },
   );
@@ -2040,7 +2076,7 @@ describe("VideoPlayer room catch-up", () => {
   it.each(["play", "pause", "seek"] as const)(
     "keeps a seekable late %s command in the current stream",
     async (action) => {
-      const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(99, 80);
+      const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(98.5, 80);
       Object.defineProperty(video, "seekable", {
         configurable: true,
         value: { length: 1, start: () => 0, end: () => 30 },
@@ -2051,12 +2087,15 @@ describe("VideoPlayer room catch-up", () => {
           transportCommand: {
             ...command,
             action,
+            playback_state:
+              action === "play" ? "playing" : action === "pause" ? "paused" : "waiting",
             execute_at: new Date(Date.now() - 1_000).toISOString(),
           },
         },
       });
       await act(() => vi.advanceTimersByTimeAsync(0));
 
+      // Only a playing room advances past the command's position.
       expect(playerSeek).toHaveBeenCalledWith(action === "play" ? 21 : 20);
       expect(onReanchorSeek).not.toHaveBeenCalled();
       expect(video.playbackRate).toBe(1);
@@ -2065,6 +2104,7 @@ describe("VideoPlayer room catch-up", () => {
 
   it("resets an active catch-up when the connection ends", async () => {
     const { connection, video, command, rerenderPlayer } = setup(99);
+    markPlaying(video);
     const commandedConnection = { ...connection, transportCommand: command };
     rerenderPlayer({ watchTogetherConnection: commandedConnection });
     await act(() => vi.advanceTimersByTimeAsync(0));
@@ -2159,11 +2199,392 @@ describe("VideoPlayer room catch-up", () => {
 
   it("ends catch-up when playback pauses outside a room transport command", async () => {
     const { connection, video, command, rerenderPlayer } = setup(101);
+    markPlaying(video);
     rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
     await act(() => vi.advanceTimersByTimeAsync(0));
     expect(video.playbackRate).toBeLessThan(1);
 
     fireEvent.pause(video);
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it("nudges a playing viewer toward a buffered target instead of seeking", async () => {
+    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(98, 80);
+    markPlaying(video);
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 30 },
+    });
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 30 },
+    });
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(video.playbackRate).toBe(1.04);
+    expect(playerSeek).not.toHaveBeenCalled();
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+  });
+
+  it("corrects drift that builds after a command by rate alone", async () => {
+    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(100);
+    markPlaying(video);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(video.playbackRate).toBe(1);
+
+    // The element stalls in place while the room advances. Right after the
+    // command the loop leaves playback alone.
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(video.playbackRate).toBe(1);
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(video.playbackRate).toBe(1.04);
+
+    // Far beyond the hard-seek bound the loop still only nudges; seeking is
+    // left to the server's correction command.
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(video.playbackRate).toBe(1.04);
+    expect(playerSeek).not.toHaveBeenCalled();
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+  });
+
+  it("leaves a viewer within the deadband at 1x", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    markPlaying(video);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    video.currentTime = 100.65;
+    // The first loop check sees the room at 101: 0.35 s behind it is not worth a nudge.
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it.each(["stalls", "seeks", "the room pauses"])(
+    "returns a loop nudge to 1x without resuming when playback %s",
+    async (change) => {
+      const { connection, video, command, rerenderPlayer } = setup(100);
+      markPlaying(video);
+      const commandedConnection = { ...connection, transportCommand: command };
+      rerenderPlayer({ watchTogetherConnection: commandedConnection });
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+      expect(video.playbackRate).toBe(1.04);
+      const plays = vi.mocked(video.play).mock.calls.length;
+
+      if (change === "stalls") {
+        Object.defineProperty(video, "readyState", {
+          configurable: true,
+          value: HTMLMediaElement.HAVE_CURRENT_DATA,
+        });
+      } else if (change === "seeks") {
+        Object.defineProperty(video, "seeking", { configurable: true, value: true });
+      } else {
+        rerenderPlayer({
+          watchTogetherConnection: {
+            ...commandedConnection,
+            room: { ...commandedConnection.room!, playback_state: "paused", is_paused: true },
+          },
+        });
+      }
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(video.playbackRate).toBe(1);
+      expect(video.play).toHaveBeenCalledTimes(plays);
+    },
+  );
+
+  it("names the last applied command in routine state reports", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    markPlaying(video);
+    const reports = () =>
+      vi
+        .mocked(connection.sendRoomMessage)
+        .mock.calls.map(([message]) => message)
+        .filter((message) => message.type === "state_report");
+    await act(() => vi.advanceTimersByTimeAsync(1_500));
+    expect(reports().at(-1)).not.toHaveProperty("command_id");
+
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(1_500));
+    expect(reports().at(-1)).toMatchObject({ command_id: command.command_id });
+  });
+
+  it("keeps the rate until a received command executes", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(98);
+    markPlaying(video);
+    const commandedConnection = { ...connection, transportCommand: command };
+    rerenderPlayer({ watchTogetherConnection: commandedConnection });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(video.playbackRate).toBe(1.04);
+
+    // Like the server, the snapshot announcing the pause arrives with it.
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...commandedConnection,
+        room: { ...commandedConnection.room!, playback_state: "paused", is_paused: true },
+        transportCommand: {
+          ...command,
+          command_id: "room-command-2",
+          action: "pause",
+          playback_state: "paused",
+          position_seconds: 103,
+          execute_at: new Date(Date.now() + 2_000).toISOString(),
+        },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(1_999));
+    expect(video.playbackRate).toBe(1.04);
+    expect(video.pause).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(video.pause).toHaveBeenCalledOnce();
+    expect(video.playbackRate).toBe(1);
+  });
+});
+
+describe("VideoPlayer room correction reloads", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+    playerSeek.mockClear();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  const ranges = (start: number, end: number) => ({
+    length: 1,
+    start: () => start,
+    end: () => end,
+  });
+
+  function setup(localPosition: number) {
+    const connection = roomConnection();
+    const onReanchorSeek = vi.fn(() => true);
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, timeline_offset_seconds: 0, can_seek_anywhere: false },
+      }),
+      shouldAutoPlay: false,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: connection,
+      onReanchorSeek,
+    });
+    const video = rendered.container.querySelector("video")!;
+    video.currentTime = localPosition;
+    fireFrameTimeUpdate(video);
+    const command = (id: string, overrides: Record<string, unknown> = {}) => ({
+      command_id: id,
+      session_id: "session-1",
+      selection_revision: 1,
+      action: "play" as const,
+      position_seconds: 100,
+      execute_at: new Date().toISOString(),
+      issued_at: new Date().toISOString(),
+      playback_state: "playing" as const,
+      ...overrides,
+    });
+    return { ...rendered, connection, video, command, onReanchorSeek };
+  }
+
+  /** Starts a correction reload to 100 in the current stream that never lands. */
+  async function startUnlandedReload() {
+    const rendered = setup(90);
+    const { connection, video, command, rerenderPlayer } = rendered;
+    markPlaying(video);
+    Object.defineProperty(video, "seekable", { configurable: true, value: ranges(0, 200) });
+    Object.defineProperty(video, "buffered", { configurable: true, value: ranges(85, 95) });
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command("c1") } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(playerSeek).toHaveBeenCalledExactlyOnceWith(100);
+    // The seek settles short of the reload's landing window.
+    video.currentTime = 99.2;
+    fireFrameTimeUpdate(video);
+    expect(video.playbackRate).toBe(1);
+    return rendered;
+  }
+
+  it("waits for a reload, then resumes drift correction once it goes stale", async () => {
+    const { video } = await startUnlandedReload();
+    await act(() => vi.advanceTimersByTimeAsync(29_500));
+    // The room has moved on, but the loop waits for the reload to land.
+    expect(video.playbackRate).toBe(1);
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(video.playbackRate).toBe(1.04);
+    expect(playerSeek).toHaveBeenCalledOnce();
+  });
+
+  it("drops a reload that a room pause replaces", async () => {
+    const { connection, video, command, rerenderPlayer } = await startUnlandedReload();
+    const paused = { ...connection.room!, playback_state: "paused" as const, is_paused: true };
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        room: paused,
+        transportCommand: command("c2", {
+          action: "pause",
+          playback_state: "paused",
+          position_seconds: 99.5,
+        }),
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: command("c3", { position_seconds: 99.2 }),
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(video.playbackRate).toBe(1);
+    // The room plays on from 99.2 while this element stays put. With the old
+    // reload forgotten, the loop corrects it after its usual settle.
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(video.playbackRate).toBe(1.04);
+  });
+
+  it("does not rebuild again for a pause that lands on a rebuild still loading", async () => {
+    const { connection, command, rerenderPlayer, onReanchorSeek } = setup(90);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command("c1") } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(100);
+
+    const paused = { ...connection.room!, playback_state: "paused" as const, is_paused: true };
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        room: paused,
+        transportCommand: command("c2", {
+          action: "pause",
+          playback_state: "paused",
+          position_seconds: 100.5,
+        }),
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(onReanchorSeek).toHaveBeenCalledOnce();
+
+    // A pause somewhere else still moves there.
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        room: paused,
+        transportCommand: command("c3", {
+          action: "pause",
+          playback_state: "paused",
+          position_seconds: 300,
+        }),
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(onReanchorSeek).toHaveBeenLastCalledWith(300);
+  });
+});
+
+describe("VideoPlayer room sync without pitch-kept rate changes", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+    playerSeek.mockClear();
+    attachBrowserEngine.mockClear();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    engineRoute.chosen = true;
+  });
+
+  afterEach(() => {
+    engineRoute.chosen = false;
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function setup(localPosition: number) {
+    const connection = roomConnection();
+    const rendered = renderPlayer({
+      shouldAutoPlay: false,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: connection,
+      browserEngine: {
+        containers: ["mkv"],
+        videoCodecs: ["h264"],
+        audioCodecs: ["aac"],
+        hdr: false,
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(attachBrowserEngine).toHaveBeenCalled();
+    const video = rendered.container.querySelector("video")!;
+    markPlaying(video);
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 3_000 },
+    });
+    video.currentTime = localPosition;
+    const command = {
+      command_id: "room-command-1",
+      session_id: "session-1",
+      selection_revision: 1,
+      action: "play" as const,
+      position_seconds: 100,
+      execute_at: new Date().toISOString(),
+      issued_at: new Date().toISOString(),
+      playback_state: "playing" as const,
+    };
+    return { ...rendered, connection, video, command };
+  }
+
+  it("seeks a play correction in place instead of nudging", async () => {
+    const { connection, video, command, rerenderPlayer } = await setup(98);
+    // Reachable in place but not buffered: still a direct seek.
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      value: { length: 1, start: () => 90, end: () => 99 },
+    });
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(playerSeek).toHaveBeenCalledExactlyOnceWith(100);
+    expect(video.playbackRate).toBe(1);
+
+    // Another correction right away is not held back by reload pacing.
+    video.currentTime = 98;
+    fireFrameTimeUpdate(video);
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: { ...command, command_id: "room-command-2", position_seconds: 103 },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(playerSeek).toHaveBeenLastCalledWith(103);
+  });
+
+  it("leaves drift up to a second alone, then seeks from the loop at most once per settle", async () => {
+    const { connection, video, command, rerenderPlayer } = await setup(99.2);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(playerSeek).not.toHaveBeenCalled();
+
+    // One second later the room is at 101 and the element has not moved.
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(playerSeek).toHaveBeenCalledExactlyOnceWith(101);
+    expect(video.playbackRate).toBe(1);
+    // The seek lands, and the element falls behind again at once.
+    video.currentTime = 101;
+    fireFrameTimeUpdate(video);
+    video.currentTime = 99;
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(playerSeek).toHaveBeenCalledOnce();
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(playerSeek).toHaveBeenCalledTimes(2);
+    expect(playerSeek).toHaveBeenLastCalledWith(102);
     expect(video.playbackRate).toBe(1);
   });
 });
@@ -2209,6 +2630,24 @@ describe("VideoPlayer playback speed", () => {
     expect(controls.current!.onPlaybackSpeedChange).toBeUndefined();
     expect(video.playbackRate).toBe(1);
     expect(video.defaultPlaybackRate).toBe(1);
+  });
+
+  it("restores the viewer's speed after leaving a Watch Party", () => {
+    const { container, rerenderPlayer } = renderPlayer({ shouldAutoPlay: false });
+    const video = container.querySelector("video")!;
+    act(() => controls.current!.onPlaybackSpeedChange!(1.5));
+
+    const connection = roomConnection();
+    rerenderPlayer({ watchTogetherRoomId: "room-1", watchTogetherConnection: connection });
+    expect(controls.current!.onPlaybackSpeedChange).toBeUndefined();
+    expect(video.playbackRate).toBe(1);
+
+    rerenderPlayer({
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: { ...connection, closedReason: "ended" },
+    });
+    expect(controls.current!.onPlaybackSpeedChange).toBeDefined();
+    expect(video.playbackRate).toBe(1.5);
   });
 });
 

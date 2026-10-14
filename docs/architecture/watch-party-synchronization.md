@@ -62,19 +62,63 @@ recover. Other viewers' broadcasts do not wait for its write deadline. Each
 broadcast builds and sorts the common roster once, then adds each viewer's own
 permissions and identity flags.
 
+## Drift correction
+
+Every transport command carries the room's position at its `execute_at`, and
+the room anchor is taken at that moment too. While the room plays, its position
+at server time `t` is `position_seconds + max(0, t - execute_at)` at 1x.
+Commands used to carry the position at issue time while members started one
+scheduling lead later, so every member trailed the server's model by that lead.
+A slow member raised the lead for everyone, and in a large or long-distance room
+the server then corrected members that were in sync, or let the host's reports
+re-anchor the whole room.
+
+The lead is the highest smoothed round trip among attached members, from 500
+milliseconds up to 2 seconds. A member with a longer round trip runs the command
+late and projects it forward to the room's position.
+
+Web, Apple, and Android clients converge on the room the same way:
+
+| Situation | Behavior |
+|---|---|
+| Clock offset | Ping on connect, every 2 seconds until 4 samples, then every 15 seconds. Use the offset of the fastest of the last 8 round trips. |
+| Drift up to 0.4 s | No correction. |
+| Drift 0.4–5 s, playing | Pitch-preserved playback rate of `1 ± clamp(drift / 25, 0.01, 0.04)` in 0.5 percent steps, until within 0.1 s. |
+| Drift over 5 s, playing | Seek to buffered media, or a budgeted load (see below). |
+| Not playing when a play or pause runs | Seek first only for drift over 5 s, or over 1 s when the target is reachable without rebuilding the stream. |
+
+Each client keeps the last command it ran as its room reference and measures
+drift against it about twice a second. That loop only changes the rate; it
+never seeks. Rate and play state change when a command executes, never when it
+arrives, and users cannot change playback speed in a room.
+
+The server corrects a member only when two consecutive reports are more than 2
+seconds from the room, or its pause state differs, and repeats a correction at
+most every 10 seconds. Reports within 1.5 seconds after a command's
+`execute_at` can describe the state before it, so they are neither corrected nor
+taken as the host's decision, unless the report's `command_id` names that
+command as the last one its client applied. A command sent to a member starts
+its count of out-of-sync reports over.
+
 ## Buffering policy
 
 The room waits for a viewer once, then lets them catch up. One slow connection
 must not pause everyone repeatedly, and one short hiccup must not make a viewer
 miss the scene.
 
-- Stalls shorter than 2 seconds stay local. The web player reports buffering
-  only after 2 seconds without playable media, and the viewer converges on the
-  room by playback rate. It sends no position reports while its element is
+- Stalls shorter than 2 seconds stay local. Clients report buffering only
+  after 2 seconds without playable media, and the viewer converges on the room
+  by playback rate. It sends no position reports while its element is
   stalled, or while its media is unplayable and a readiness acknowledgement is
   pending, because a stalled position is not a decision.
 - A longer stall pauses the room for at most the 10-second waiting deadline,
-  and the overlay names who everyone is waiting for.
+  and the overlay names who everyone is waiting for. When a guest stalls, the
+  room pauses where it is; only that guest is sent a seek to that point, and
+  the barrier waits for it to arrive within 5 seconds (1 second unless its
+  `ready` names that seek). Other viewers do not rewind to the guest's
+  position. When the host stalls, the room pauses at the host's position, as
+  it does for a viewer with nobody else watching, because the host's `ready`
+  re-anchors the room wherever its reloaded stream lands.
 - A viewer who missed the deadline, or who stalls again within 5 minutes of
   their last stall, catches up on their own: the room keeps playing and their
   stalls no longer pause it. Buffering also cannot pause the room within 1
@@ -96,23 +140,24 @@ miss the scene.
   matches the room also marks the member ready, which covers late joiners and
   clients that never send `ready`.
 - The host follows the same rules. While the host is buffering or catching up,
-  and whenever the host has drifted by 2 seconds or less, the host is corrected
-  like any viewer instead of moving the room anchor. A larger jump or a pause
-  mismatch still moves the room.
+  and whenever the host has drifted by 10 seconds or less, the host is corrected
+  like any viewer instead of moving the room anchor. Every client sends its
+  seeks as requests, so passive drift is the host falling behind, not a
+  decision. A larger jump or a pause mismatch still moves the room.
 
 Stall times and the last buffering pause live in the room runtime, so every API
 server applies the same limits and a reconnect through another server does not
 reset them.
 
-Catching up is bounded on the web player. A small drift converges by playback
-rate, and a correction to media that is already buffered seeks at once. A
-correction that has to load new media, by a range request or a stream rebuild,
+Catching up is bounded on every client. Drift up to 5 seconds converges by
+playback rate, and a larger correction to media that is already buffered seeks
+at once. A correction that has to load new media, by a range request or a stream rebuild,
 lands late by its load time; chasing the advancing room with a fresh load on
 every correction never converges. Only one such load runs at a time. The next
 waits 10 seconds after the previous one started playing, doubling to 60 seconds
 until the viewer converges, and aims ahead of the room by the load time the
 previous one took, up to 10 seconds. After two sustained stalls within 5
-minutes, the player offers a lower quality for the same source file. Explicit
+minutes, the web player offers a lower quality for the same source file. Explicit
 room seeks are never delayed by this budget.
 
 Pausing cancels pending browser reports, and the server ignores delayed
@@ -192,9 +237,8 @@ means these guarantees and status fields are unsupported; an omitted false statu
 on a supported server means false.
 
 The additive member status fields are optional in v2 socket frames and HTTP v2
-snapshots. Apple has no active Watch
-Party implementation; Android's surface remains disabled. Jellyfin compatibility
-does not use these room sockets.
+snapshots. The web, Apple, and Android clients implement Watch Party with the
+drift correction above. Jellyfin compatibility does not use these room sockets.
 
 The Postgres tests run independent service instances against the same room and
 exercise readiness, notification loss, connection replacement, expiration, and

@@ -252,6 +252,7 @@ func (s *Service) adoptRuntimeLocked(ctx context.Context, live *liveRoom, room R
 			if m.connection != nil {
 				m.remoteConnected = false
 				m.lastPingMS = old.lastPingMS
+				m.driftStrikes, m.settleUntil, m.lastSentCommandID = old.driftStrikes, old.settleUntil, old.lastSentCommandID
 				if m.leaseUntil.Sub(now) <= connectionLease-leaseRefreshInterval {
 					m.leaseUntil = now.Add(connectionLease)
 				}
@@ -378,7 +379,9 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 				if member.connection == nil || member.sessionID == "" || member.lastCommandID == command.CommandID {
 					continue
 				}
-				commands = append(commands, s.targetedCommandDispatchesLocked(live, member.sessionID, *command)...)
+				// A stalled member's own seek for this wait, not the room's
+				// pause, which would let it ready up where it stalled.
+				commands = append(commands, s.targetedCommandDispatchesLocked(live, member.sessionID, *s.waitingCommandForLocked(live, member.sessionID))...)
 				member.lastCommandID = command.CommandID
 			}
 		}

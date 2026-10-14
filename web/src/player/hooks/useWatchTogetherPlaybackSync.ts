@@ -503,9 +503,13 @@ export function useWatchTogetherPlaybackSync({
           return;
         }
 
+        // Naming the latest command this viewer applied lets the server take
+        // the report at once instead of waiting out that command's settle window.
+        const appliedCommandId = appliedCommandIdRef.current;
         sendRoomMessage({
           type: "state_report",
           session_id: sessionId,
+          ...(appliedCommandId ? { command_id: appliedCommandId } : {}),
           position_seconds: toMediaTime(video.currentTime, streamOriginRef.current),
           is_paused: video.paused,
         });
@@ -518,6 +522,7 @@ export function useWatchTogetherPlaybackSync({
     };
   }, [
     advanceThroughPreroll,
+    appliedCommandIdRef,
     attachedSessionId,
     catchingUp,
     checkReady,
