@@ -1077,9 +1077,11 @@ function WatchPlaybackHostContent() {
     return <PlaybackPreparingScreen />;
   }
 
-  if (error && isForeground) {
-    return <PlaybackUnavailableScreen error={error} onBack={() => navigate(-1)} />;
-  }
+  // The player has its title's detail from here on, and `error` may still be
+  // set: a refetch of that detail failed (a catalog event landing in a server
+  // restart, say), or, outside the foreground, a newer request's first read
+  // did. Neither ends the title that plays; its stream carries its own
+  // authorization.
 
   const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]
     ?.value as string | undefined;
