@@ -1558,6 +1558,7 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 // scale_opencl, overlay_opencl's eof_action and YUVA overlays, and a shared
 // OpenCL device for both hwupload and hwmap come from Jellyfin FFmpeg, which
 // the QSV tone-map path already requires for tonemap_opencl's bt2390 curve.
+// The QSV probe's listing gate checks that both filters exist.
 func qsvOpenCLBitmapSubtitleGraph(opts TranscodeOpts, subInput string) string {
 	scale := ""
 	if height, ok := scaleTargetHeight(opts.TargetResolution); ok {
