@@ -328,31 +328,24 @@ describe("admin section captured snapshots", () => {
       "Restored the default rows on Home and 1 library page.",
     );
   });
-  it("restores the pages the dialog named even if the page changes while it is open", async () => {
+  it("closes the restore dialog when the page changes while it is open", async () => {
     await setup();
     await chooseMoreAction("Restore defaults…");
     const dialog = await screen.findByRole("dialog", { name: "Restore Home to the default rows?" });
     fireEvent.click(
       within(dialog).getByRole("switch", { name: "Also restore every library page" }),
     );
-    // Back or Forward moves ?page= while the dialog stays open.
+    // Back or Forward moves ?page= while the dialog is open.
     fireEvent.click(screen.getByRole("button", { name: "Movies", hidden: true }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Movies", hidden: true })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      ),
-    );
-    expect(dialog).toHaveAccessibleName("Restore Home and every library page to the default rows?");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Restore defaults" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(writes.map(({ args }) => args.query)).toEqual([
-      { scope: "home", library_id: undefined },
-      { scope: "library", library_id: "7" },
-    ]);
-    expect(mocks.success).toHaveBeenCalledWith(
-      "Restored the default rows on Home and 1 library page.",
-    );
+    expect(writes).toEqual([]);
+    // Opening it again on the new page starts with the switches off.
+    await screen.findByRole("button", { name: "Movies", pressed: true });
+    await chooseMoreAction("Restore defaults…");
+    const again = await screen.findByRole("dialog", {
+      name: "Restore the Movies page to the default rows?",
+    });
+    expect(within(again).queryByRole("switch", { checked: true })).not.toBeInTheDocument();
   });
   it("leaves the library pages alone when this page changed since the dialog opened", async () => {
     await setup();
@@ -390,7 +383,7 @@ describe("admin section captured snapshots", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(writes.map(({ args }) => args.query?.library_id)).toEqual([undefined, "7", "8"]);
       expect(mocks.warning).toHaveBeenCalledWith(
-        "Restored the default rows on Home and 1 of 2 library pages.",
+        "Restored the default rows on Home and 1 library page. 1 library page kept its rows.",
         { description: "Movies: Database unavailable" },
       );
     } finally {
@@ -415,7 +408,7 @@ describe("admin section captured snapshots", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Restore defaults" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(mocks.warning).toHaveBeenCalledWith(
-      "Restored the default rows on Home and 0 of 1 library page.",
+      "Restored the default rows on Home. 1 library page may have been restored.",
       {
         description:
           "Movies: the server didn't answer, so it may have been restored. Reload it to check.",

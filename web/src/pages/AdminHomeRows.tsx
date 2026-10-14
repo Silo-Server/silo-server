@@ -67,8 +67,9 @@ function reportShownBatch({ changedIds, failures }: ShownBatchResult, shown: boo
 }
 
 /**
- * Reports a restore, naming every other library page that kept its rows or
- * whose restore got no answer.
+ * Reports a restore: the library pages confirmed restored in the title, then
+ * those that kept their rows and those whose restore got no answer, each named
+ * with the reason.
  */
 function reportRestore(
   page: PageRef,
@@ -76,17 +77,23 @@ function reportRestore(
   alsoPages: LibraryPage[],
   failures: LibraryRestoreFailure[],
 ) {
-  if (alsoPages.length === 0) {
-    toast.success(`Restored the default rows on ${pageLabel}.`);
-    return;
-  }
-  const restored = alsoPages.length - failures.length;
   const noun = page.kind === "home" ? "library page" : "other library page";
   const pages = (count: number) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+  const restored = alsoPages.length - failures.length;
+  const title =
+    restored > 0
+      ? `Restored the default rows on ${pageLabel} and ${pages(restored)}.`
+      : `Restored the default rows on ${pageLabel}.`;
   if (failures.length === 0) {
-    toast.success(`Restored the default rows on ${pageLabel} and ${pages(restored)}.`);
+    toast.success(title);
     return;
   }
+  const failed = failures.filter((failure) => failure.outcome === "failed").length;
+  const unknown = failures.length - failed;
+  const outcomes = [
+    failed > 0 ? `${pages(failed)} kept ${failed === 1 ? "its" : "their"} rows.` : null,
+    unknown > 0 ? `${pages(unknown)} may have been restored.` : null,
+  ].filter(Boolean);
   const description = failures
     .map(({ libraryId, error, outcome }) => {
       const label =
@@ -96,10 +103,7 @@ function reportRestore(
       return `${label}: ${adminSectionMutationMessage(error, "Could not restore the default rows")}`;
     })
     .join(" ");
-  toast.warning(
-    `Restored the default rows on ${pageLabel} and ${restored} of ${pages(alsoPages.length)}.`,
-    { description },
-  );
+  toast.warning([title, ...outcomes].join(" "), { description });
 }
 
 export default function AdminHomeRows() {
@@ -127,15 +131,10 @@ export default function AdminHomeRows() {
   >([]);
   // The page's rows and version as Restore read them: the dialog names what
   // this version holds, and the restore is checked against the same version.
-  // The page and the other library pages are fixed too, so Back or Forward
-  // while the dialog is open can't change what it restores.
   const [restoreSnapshot, setRestoreSnapshot] = useState<
     | (Awaited<ReturnType<typeof fetchAdminSections>> & {
         scope: typeof scope;
         libraryId: number | undefined;
-        page: PageRef;
-        pageLabel: string;
-        otherPages: LibraryPage[];
       })
     | null
   >(null);
@@ -173,7 +172,10 @@ export default function AdminHomeRows() {
   const deleteMutation = useDeleteSection();
   const deleteSectionsMutation = useDeleteSections();
   const restoreDefaultsMutation = useRestoreDefaultSections();
-  const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
+  // The page the Restore dialog was opened on. Back or Forward to another page
+  // closes it, so it never describes one page while restoring another.
+  const [restorePage, setRestorePage] = useState<string | null>(null);
+  if (restorePage !== null && restorePage !== currentPageKey) setRestorePage(null);
   const [resetProfiles, setResetProfiles] = useState(false);
   const [restoreAll, setRestoreAll] = useState(false);
   // The Add row / Edit row dialog: open with no session to add a row.
@@ -329,33 +331,27 @@ export default function AdminHomeRows() {
 
   function openRestore() {
     const request = ++snapshotRequest.current;
-    const target = {
-      scope,
-      libraryId: activeLibraryId ?? undefined,
-      page: adapter.page,
-      pageLabel: currentPageLabel,
-      otherPages: otherLibraryPages,
-    };
     void prepareSnapshot(async () => {
-      const snapshot = await fetchAdminSections(target.scope, target.libraryId);
+      const libraryId = activeLibraryId ?? undefined;
+      const snapshot = await fetchAdminSections(scope, libraryId);
       if (request !== snapshotRequest.current) return;
-      setRestoreSnapshot({ ...snapshot, ...target });
+      setRestoreSnapshot({ ...snapshot, scope, libraryId });
       setRestoreConflict(false);
-      setConfirmRestoreOpen(true);
+      // A new dialog starts with both switches off.
+      setResetProfiles(false);
+      setRestoreAll(false);
+      setRestorePage(currentPageKey);
     });
   }
 
   function closeRestore() {
     snapshotRequest.current++;
-    setConfirmRestoreOpen(false);
-    setResetProfiles(false);
-    setRestoreAll(false);
+    setRestorePage(null);
   }
 
   function confirmRestore() {
     if (!restoreSnapshot) return;
-    const { page, pageLabel, otherPages } = restoreSnapshot;
-    const alsoPages = restoreAll ? otherPages : [];
+    const alsoPages = restoreAll ? otherLibraryPages : [];
     restoreDefaultsMutation.mutate(
       {
         scope: restoreSnapshot.scope,
@@ -366,10 +362,8 @@ export default function AdminHomeRows() {
       },
       {
         onSuccess: (failures) => {
-          reportRestore(page, pageLabel, alsoPages, failures);
-          setConfirmRestoreOpen(false);
-          setResetProfiles(false);
-          setRestoreAll(false);
+          reportRestore(adapter.page, currentPageLabel, alsoPages, failures);
+          setRestorePage(null);
         },
         onError: (error) => {
           const stale = error instanceof V2ProblemError && error.status === 412;
@@ -552,12 +546,10 @@ export default function AdminHomeRows() {
           }}
         />
         <RestoreDialog
-          open={confirmRestoreOpen}
-          page={restoreSnapshot?.page ?? adapter.page}
-          pageLabel={restoreSnapshot?.pageLabel ?? currentPageLabel}
-          otherLibraryLabels={(restoreSnapshot?.otherPages ?? otherLibraryPages).map(
-            (page) => page.label,
-          )}
+          open={restorePage !== null}
+          page={adapter.page}
+          pageLabel={currentPageLabel}
+          otherLibraryLabels={otherLibraryPages.map((page) => page.label)}
           rowCount={restoreSections.length}
           collectionRowTitles={restoreCollectionTitles}
           restoreAll={restoreAll}
