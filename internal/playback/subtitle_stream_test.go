@@ -235,9 +235,9 @@ func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	if strings.Contains(joined, "0:s:3") {
 		t.Fatalf("original container track ordinal must not leak into sup input mapping: %s", joined)
 	}
-	// The seek starts a millisecond early so a display set whose segments
-	// sit exactly at the window start is read whole; the end is unchanged.
-	if !strings.Contains(joined, "-ss 1199.999") || !strings.Contains(joined, "-to 4800.000") {
+	// The seek starts early so a display set at the window start is read
+	// whole; the end is unchanged.
+	if !strings.Contains(joined, "-ss 1198.000") || !strings.Contains(joined, "-to 4800.000") {
 		t.Fatalf("cached sup extract must still window the input: %s", joined)
 	}
 	ssIdx := slices.Index(args, "-ss")
@@ -402,7 +402,7 @@ func TestWindowFromCachedSup(t *testing.T) {
 
 func TestReadSupFirstCue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "track.sup")
-	if err := os.WriteFile(path, testSupStream([]float64{91.88, 100}), 0o600); err != nil {
+	if err := os.WriteFile(path, testSupStream([]float64{91.88, 100}, 0), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := readSupFirstCue(path)

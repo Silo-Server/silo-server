@@ -138,8 +138,12 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 }
 
 // cachedSupSeekSlack is how far before a window's start an extract from a
-// cached .sup seeks, so a display set at the start is read whole.
-const cachedSupSeekSlack = 0.001
+// cached .sup seeks, so a display set at the start is read whole. Its
+// segments are separate packets, and in a cache made from a Blu-ray transport
+// stream they keep their own timestamps, decoded ahead of the time the set
+// shows (a full-plane object decodes in about 0.13 s). The extra lead-in only
+// adds earlier screens, or part of one, which a PGS decoder merges or drops.
+const cachedSupSeekSlack = 2.0
 
 // windowFromCachedSup adapts a windowed extract whose input is a cached .sup
 // whose first cue is at firstCue seconds. ffmpeg cannot seek to a point
@@ -199,11 +203,6 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	if seekApplied {
 		seek := opts.SeekSeconds
 		if opts.InputIsExtractedSup {
-			// Each segment of a display set is its own .sup packet, all at
-			// the set's timestamp, and a seek exactly onto that timestamp can
-			// land after the first of them. Seeking a millisecond early reads
-			// the whole set; at most a stray segment of the set before comes
-			// along, which a decoder ignores.
 			seek = max(0, seek-cachedSupSeekSlack)
 		}
 		args = append(args, "-ss", strconv.FormatFloat(seek, 'f', 3, 64))
