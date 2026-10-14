@@ -222,7 +222,8 @@ func TestSoftwareAndQSVToneMapsPinTheSourcePeak(t *testing.T) {
 			"software": SoftwareFilter(kind, SoftwareFilterBT2390),
 			"qsv":      QSVFilter(kind),
 		} {
-			if !strings.Contains(filter, ":peak=100") {
+			options := strings.FieldsFunc(filter, func(r rune) bool { return r == ',' || r == ':' })
+			if !slices.Contains(options, "peak=100") {
 				t.Errorf("%s %s filter %q does not pin the source peak", name, kind, filter)
 			}
 		}
