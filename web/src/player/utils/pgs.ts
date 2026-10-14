@@ -41,6 +41,9 @@ const MAX_COMPOSITIONS_PER_WINDOW = 20_000;
 // same, and the rest of a crafted list would only cost memory.
 const MAX_OBJECTS_PER_COMPOSITION = 2;
 const MAX_EPOCH_OBJECT_BYTES = 16 * 1024 * 1024;
+// The screens of one window keep their objects' data even after a later
+// definition replaces them; a real window holds a few megabytes of it.
+const MAX_WINDOW_OBJECT_BYTES = 32 * 1024 * 1024;
 const ODS_FIRST_IN_SEQUENCE = 0x80;
 const ODS_LAST_IN_SEQUENCE = 0x40;
 const OBJECT_CROPPED = 0x80;
@@ -213,6 +216,10 @@ export class PGSStreamParser {
   private received = -Infinity;
   private objectBytes = 0;
   private windowCompositions = 0;
+  private windowObjectBytes = 0;
+  // Object data already counted against a window, so a screen placed again
+  // doesn't count it twice.
+  private countedObjects = new WeakSet<Uint8Array>();
 
   /**
    * Source time, in seconds, of the latest complete segment read. Segments
@@ -232,6 +239,7 @@ export class PGSStreamParser {
     this.clearPending();
     this.presentation = null;
     this.windowCompositions = 0;
+    this.windowObjectBytes = 0;
   }
 
   push(chunk: Uint8Array): PGSComposition[] {
@@ -443,6 +451,11 @@ export class PGSStreamParser {
       });
     }
     if (this.windowCompositions >= MAX_COMPOSITIONS_PER_WINDOW) return null;
+    const newObjects = objects.filter((object) => !this.countedObjects.has(object.rle));
+    const newBytes = newObjects.reduce((sum, object) => sum + object.rle.byteLength, 0);
+    if (this.windowObjectBytes + newBytes > MAX_WINDOW_OBJECT_BYTES) return null;
+    for (const object of newObjects) this.countedObjects.add(object.rle);
+    this.windowObjectBytes += newBytes;
     this.windowCompositions += 1;
     if (palette) this.shownPalettes.add(palette);
     return {
