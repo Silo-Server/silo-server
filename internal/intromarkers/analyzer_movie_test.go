@@ -196,7 +196,7 @@ func TestAnalyzeMovieSilenceTimeoutLeavesTheMovieUnsettled(t *testing.T) {
 		t.Fatalf("AnalyzeMovie: %v", err)
 	}
 	credits := creditsPatches(repo)
-	if summary.MovieCreditsMarkersWritten != 1 || len(credits) != 1 || credits[0].Start != 6600 {
+	if summary.MovieCreditsMarkersWritten != 1 || summary.CreditsTailScanErrors != 1 || len(credits) != 1 || credits[0].Start != 6600 {
 		t.Fatalf("summary %+v, credits %+v; want the video start written", summary, credits)
 	}
 	artifact := repo.artifact(10, ArtifactKindCreditsTail)

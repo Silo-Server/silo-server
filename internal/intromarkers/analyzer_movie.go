@@ -247,6 +247,7 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 	// movie is analyzed again after its backoff instead of keeping the
 	// unrefined start for good.
 	if sampled && mediasample.Classify(silenceErr) == mediasample.ReasonTimeout {
+		summary.CreditsTailScanErrors++
 		spec := movieTailSpec(candidate)
 		if err := a.repo.RecordArtifactFailure(ctx, mediaartifact.Failure{
 			MediaFileID: candidate.FileID,
@@ -256,7 +257,7 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 			Error:       silenceErr.Error(),
 			At:          time.Now().UTC(),
 		}); err != nil {
-			a.logger.WarnContext(ctx, "movie credits silence failure record failed", "file_id", candidate.FileID, "error", err)
+			summary.Errors = append(summary.Errors, err.Error())
 		}
 		return summary
 	}
