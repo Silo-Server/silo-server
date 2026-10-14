@@ -284,6 +284,10 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	writeJSON(w, http.StatusOK, result)
 }
 
+// clusterRowType is the type of a taste-cluster row on the recommendations
+// page.
+const clusterRowType = "cluster"
+
 // categoryRows returns the rows a Jellyfin category can describe truthfully,
 // in Jellyfin's order: Because You Watched rows first, each naming its
 // anchor, then the taste-cluster rows that carry a genre subject. It reads a
@@ -306,7 +310,7 @@ func (h *RecommendationsHandler) categoryRows(ctx context.Context, session *Sess
 		}
 	}
 	for _, row := range page {
-		if row.Type == "cluster" && row.Subject != "" {
+		if row.Type == clusterRowType && row.Subject != "" {
 			rows = append(rows, row)
 		}
 	}

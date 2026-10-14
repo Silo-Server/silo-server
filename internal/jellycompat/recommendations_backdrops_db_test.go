@@ -30,7 +30,7 @@ func TestRecommendationsListEveryBackdropDB(t *testing.T) {
 	itemRepo := catalog.NewItemRepository(pool)
 	codec := NewResourceIDCodec()
 	h := NewRecommendationsHandler(
-		&fakeRowReader{rows: []recommendations.ForYouRow{{Type: "cluster", Subject: "Drama", ClusterIndex: 1, Items: []recommendations.ScoredItem{{MediaItemID: movie}}}}},
+		&fakeRowReader{rows: []recommendations.ForYouRow{{Type: clusterRowType, Subject: "Drama", ClusterIndex: 1, Items: []recommendations.ScoredItem{{MediaItemID: movie}}}}},
 		itemRepo,
 		catalog.NewDetailService(itemRepo, catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool), catalog.NewPersonRepository(pool), nil),
 		&mockUserDataService{}, codec, &config.Config{}, nil,
