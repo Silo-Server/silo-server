@@ -3,11 +3,13 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -380,26 +382,45 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 }
 
 // membershipInsertHook runs a callback once, right before the first query that
-// inserts a podcast show's library membership.
+// inserts a podcast show's library membership, with that query's arguments.
 type membershipInsertHook struct {
 	once sync.Once
-	run  func()
+	run  func(args []any)
 }
 
 func (h *membershipInsertHook) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	if strings.Contains(data.SQL, "INSERT INTO media_item_libraries") && strings.Contains(data.SQL, "VALUES ($1, $2, NOW())") {
-		h.once.Do(h.run)
+		h.once.Do(func() { h.run(data.Args) })
 	}
 	return ctx
 }
 
 func (*membershipInsertHook) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
+// scannerOnOwnPool returns a scanner on its own connection pool, named so the
+// test can find its sessions, with an optional query tracer. It stands in for
+// another scan of the same library, on this node or another.
+func (f *podcastSubtreeFixture) scannerOnOwnPool(t *testing.T, name string, tracer pgx.QueryTracer) *Scanner {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("parse database URL: %v", err)
+	}
+	cfg.ConnConfig.RuntimeParams["application_name"] = name
+	cfg.ConnConfig.Tracer = tracer
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("connect %s pool: %v", name, err)
+	}
+	t.Cleanup(pool.Close)
+	return NewScanner(NewFileRepository(pool), f.ffprobePath, nil, 2, false, 0)
+}
+
 // TestPodcastShowSurvivesConcurrentMembershipSweep covers two scans of one
-// podcast library running side by side, which the ingest executor allows for
-// subtree scans of different shows. While one scan writes a new show, the
-// other's folder-wide membership sweep runs. The sweep must not find the new
-// show's files without their membership and delete the show.
+// podcast library running side by side, as subtree scans of different shows
+// do. While one scan writes a new show, the other's folder-wide membership
+// sweep runs. The sweep must not find the new show's files without their
+// membership and delete the show.
 func TestPodcastShowSurvivesConcurrentMembershipSweep(t *testing.T) {
 	f := newPodcastSubtreeFixture(t)
 	ctx := context.Background()
@@ -407,24 +428,12 @@ func TestPodcastShowSurvivesConcurrentMembershipSweep(t *testing.T) {
 	f.scanFolder(t)
 	pilot := f.addEpisode(t, "Show B", "Episode 1.mp3", "Show B", "Pilot", "1")
 
-	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
-	if err != nil {
-		t.Fatalf("parse database URL: %v", err)
-	}
 	var sweepRan bool
 	var sweepErr error
-	hook := &membershipInsertHook{run: func() {
+	scanning := f.scannerOnOwnPool(t, "podcast-sweep-race", &membershipInsertHook{run: func([]any) {
 		sweepRan = true
 		_, _, _, sweepErr = f.scanner.sweepMissingAndReconcile(ctx, f.folder, false)
-	}}
-	cfg.ConnConfig.Tracer = hook
-	traced, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		t.Fatalf("connect traced pool: %v", err)
-	}
-	t.Cleanup(traced.Close)
-
-	scanning := NewScanner(NewFileRepository(traced), f.ffprobePath, nil, 2, false, 0)
+	}})
 	if _, err := scanning.ScanSubtree(ctx, f.folder, filepath.Join(f.root, "Show B")); err != nil {
 		t.Fatalf("ScanSubtree(Show B) with a concurrent sweep: %v", err)
 	}
@@ -436,5 +445,85 @@ func TestPodcastShowSurvivesConcurrentMembershipSweep(t *testing.T) {
 	}
 	row := f.requireEpisodeOf(t, pilot, filepath.Join(f.root, "Show B"), "Show B")
 	f.requireListed(t, row.contentID)
+	f.requireOnlyPodcastItems(t)
+}
+
+// TestConcurrentScansOfANewPodcastShowCreateOneShow covers two scans indexing
+// the same new show at once, such as a show folder scan next to a full scan,
+// on one node or two. The second scan must wait for the first and reuse the
+// show it created, not create a show of its own and take the files over.
+func TestConcurrentScansOfANewPodcastShowCreateOneShow(t *testing.T) {
+	f := newPodcastSubtreeFixture(t)
+	ctx := context.Background()
+	f.addEpisode(t, "Show A", "Episode 1.mp3", "Show A", "Episode One", "1")
+	f.scanFolder(t)
+	pilot := f.addEpisode(t, "Show B", "Episode 1.mp3", "Show B", "Pilot", "1")
+	showB := filepath.Join(f.root, "Show B")
+
+	second := f.scannerOnOwnPool(t, "podcast-second-scan", nil)
+	secondFinished := make(chan struct{})
+	var secondErr error
+	var firstShowID string
+	first := f.scannerOnOwnPool(t, "podcast-first-scan", &membershipInsertHook{run: func(args []any) {
+		firstShowID = fmt.Sprint(args[0])
+		go func() {
+			defer close(secondFinished)
+			_, secondErr = second.ScanSubtree(ctx, f.folder, showB)
+		}()
+		// Hold the first scan inside its write until the second scan is
+		// blocked behind it, or has finished without waiting.
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			select {
+			case <-secondFinished:
+				return
+			default:
+			}
+			var blocked bool
+			if err := f.pool.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM pg_stat_activity
+					WHERE application_name = 'podcast-second-scan' AND wait_event_type = 'Lock'
+				)`).Scan(&blocked); err != nil {
+				t.Errorf("read the second scan's state: %v", err)
+				return
+			}
+			if blocked {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Error("the second scan neither blocked nor finished")
+	}})
+	if _, err := first.ScanSubtree(ctx, f.folder, showB); err != nil {
+		t.Fatalf("first ScanSubtree(Show B): %v", err)
+	}
+	select {
+	case <-secondFinished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second scan did not finish")
+	}
+	if secondErr != nil {
+		t.Fatalf("second ScanSubtree(Show B): %v", secondErr)
+	}
+	if firstShowID == "" {
+		t.Fatal("the first scan's membership insert was not traced")
+	}
+
+	row := f.requireEpisodeOf(t, pilot, showB, "Show B")
+	if row.contentID != firstShowID {
+		t.Fatalf("Show B ended up as %s, want the show the first scan created, %s", row.contentID, firstShowID)
+	}
+	var shows int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM media_items
+		WHERE type = 'podcast' AND title = 'Show B' AND content_id IN (
+			SELECT content_id FROM media_item_libraries WHERE media_folder_id = $1
+		)`, f.folder.ID).Scan(&shows); err != nil {
+		t.Fatalf("count Show B items: %v", err)
+	}
+	if shows != 1 {
+		t.Fatalf("library holds %d Show B items, want 1", shows)
+	}
 	f.requireOnlyPodcastItems(t)
 }

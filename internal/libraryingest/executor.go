@@ -83,11 +83,6 @@ type scopeClaim struct {
 	folderID int
 	mode     scopeMode
 	path     string
-	// wholeFolder makes the claim conflict with every other claim on its
-	// folder, whatever the paths. Podcast scans need it: the scanner finds a
-	// show by its folder and creates the show when none is found, so two
-	// scans indexing the same new show at once would each create one.
-	wholeFolder bool
 }
 
 const scopedDrainInterval = 2 * time.Second
@@ -190,10 +185,9 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	defer cancel()
 
 	claim := scopeClaim{
-		folderID:    folder.ID,
-		mode:        mode,
-		path:        cleanScopePath(rawPath),
-		wholeFolder: librarykind.IsPodcast(folder.Type),
+		folderID: folder.ID,
+		mode:     mode,
+		path:     cleanScopePath(rawPath),
 	}
 	matchScopes := scopeMatchPaths(folder, mode, claim.path)
 	entry, err := e.begin(scanCtx, claim, cancel)
@@ -808,9 +802,6 @@ func (e *Executor) CancelLibrary(folderID int) int {
 func conflicts(a, b scopeClaim) bool {
 	if a.folderID != b.folderID {
 		return false
-	}
-	if a.wholeFolder || b.wholeFolder {
-		return true
 	}
 	// Two library scans on the same folder still conflict.
 	if a.mode == scopeModeLibrary && b.mode == scopeModeLibrary {

@@ -45,10 +45,12 @@
 
 # A subtree scan in a podcast library indexes the show folder with the podcast
 # scanner, keeps the show's content ID, and reconciles only that show; a show
-# being written survives another scan's membership sweep.
+# being written survives another scan's membership sweep, and two scans of the
+# same new show create it once.
 ./internal/scanner TestScanSubtreeIndexesPodcastShowFolders
 ./internal/scanner TestScanSubtreeReconcilesOnlyTheScannedPodcastShow
 ./internal/scanner TestPodcastShowSurvivesConcurrentMembershipSweep
+./internal/scanner TestConcurrentScansOfANewPodcastShowCreateOneShow
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB

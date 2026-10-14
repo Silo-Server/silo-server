@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
@@ -216,12 +218,37 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 		return nil, fmt.Errorf("parse podcast show %s: %w", folderPath, err)
 	}
 
+	if s.fileRepo == nil {
+		return nil, fmt.Errorf("fileRepo not configured on Scanner")
+	}
+	// Scans of one library run side by side, on this node or another: a
+	// show folder scan next to a full scan, or scans of two folders inside
+	// one show. Each finds the show by its folder and creates it when none is
+	// found, so a scan holds this show's lock from that lookup until its files
+	// and membership commit. A second scan of the show waits, then finds the
+	// show the first one wrote instead of creating another.
+	tx, err := s.fileRepo.Pool().Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin podcast show transaction: %w", err)
+	}
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelCleanup()
+	defer func() { _ = tx.Rollback(cleanupCtx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		fmt.Sprintf("podcast-show:%d:%s", folder.ID, folderPath),
+	); err != nil {
+		return nil, fmt.Errorf("lock podcast show %s: %w", folderPath, err)
+	}
+
 	showContentID, err := s.upsertPodcastMediaItem(ctx, folder.ID, folderPath, parsed)
 	if err != nil {
 		return nil, fmt.Errorf("upsert podcast item: %w", err)
 	}
-	if err := s.upsertPodcastEpisodesAndFiles(ctx, folder, showContentID, folderPath, parsed); err != nil {
+	if err := s.upsertPodcastEpisodesAndFiles(ctx, tx, folder, showContentID, folderPath, parsed); err != nil {
 		return nil, fmt.Errorf("upsert podcast episodes+files: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit podcast show transaction: %w", err)
 	}
 
 	slog.InfoContext(ctx, "podcast scan: indexed", "component", "scanner",
@@ -398,15 +425,16 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 // episode's content_id is linked back through media_files.episode_id so
 // playback and library queries can resolve it.
 //
-// The files and the membership commit together. Scans of the same library run
-// side by side (a subtree scan of one show next to another, or next to a full
-// scan), and each one's membership sweep deletes any item whose files have no
-// membership; a show committed file by file would be deleted mid-write.
+// The files and the membership go in the caller's transaction so they commit
+// together. Every scan of a library ends with a membership sweep that deletes
+// any item whose files have no membership, so a show committed file by file
+// could be deleted by another scan's sweep mid-write.
 //
 // Podcast episodes use season_number=0 (no season concept) and
 // episode_number=track.
 func (s *Scanner) upsertPodcastEpisodesAndFiles(
 	ctx context.Context,
+	tx pgx.Tx,
 	folder *models.MediaFolder,
 	showContentID string,
 	folderPath string,
@@ -463,13 +491,6 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 		files = append(files, mf)
 	}
 
-	tx, err := s.fileRepo.Pool().Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin podcast show transaction: %w", err)
-	}
-	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancelCleanup()
-	defer func() { _ = tx.Rollback(cleanupCtx) }()
 	if err := s.fileRepo.UpsertBatchTx(ctx, tx, files); err != nil {
 		return fmt.Errorf("upsert media files for %s: %w", folderPath, err)
 	}
@@ -479,9 +500,6 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 		ON CONFLICT (content_id, media_folder_id) DO NOTHING
 	`, showContentID, folder.ID); err != nil {
 		return fmt.Errorf("upsert podcast library membership: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit podcast show transaction: %w", err)
 	}
 	return nil
 }
