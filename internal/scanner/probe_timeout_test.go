@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,6 +14,17 @@ import (
 // ffprobe reaches its deadline in a second, long after the fake has started
 // its sleep.
 var shortProbeLimits = probeLimits{probe: time.Second, packetsMinimum: time.Second, packetsBytesPerSecond: 1e12, waitDelay: 200 * time.Millisecond}
+
+// escapedSleep is a shell command that sleeps in a session of its own, so
+// killing the fake's process group leaves it running and holding the fake's
+// output, which only WaitDelay or a pipe close can then let go of.
+func escapedSleep(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("perl"); err != nil {
+		t.Skip("perl is needed to start a sleep outside the process group")
+	}
+	return `perl -e 'use POSIX; POSIX::setsid(); exec "sleep", "20"'`
+}
 
 // probeFinishes runs probeFileWithin in the background and fails the test if
 // it is still running long after its deadlines: without them it waits out
@@ -41,9 +53,8 @@ func probeFinishes(t *testing.T, ffprobePath, filePath string, limits probeLimit
 // minutes. A stalled probe is now killed at its deadline, and the timeout
 // is neither a rejection, which would mark the file unreadable until it
 // changes, nor a context error, which scan loops take for the end of the
-// whole scan. The sleep runs as a child of the shell, as under a wrapper
-// script, so it holds ffprobe's output open after the kill until WaitDelay
-// closes it.
+// whole scan. The sleep runs outside the fake's process group, so it holds
+// ffprobe's output open after the kill until WaitDelay closes it.
 func TestProbeFileKillsStalledFFprobeAtItsDeadline(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -52,7 +63,7 @@ func TestProbeFileKillsStalledFFprobeAtItsDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	ffprobePath := filepath.Join(t.TempDir(), "ffprobe")
-	writeFakeTool(t, ffprobePath, "#!/bin/sh\nsleep 20\nexit 0\n")
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\n"+escapedSleep(t)+"\nexit 0\n")
 
 	_, err := probeFinishes(t, ffprobePath, media, shortProbeLimits)
 	if !errors.Is(err, errProbeTimeout) {
@@ -68,8 +79,8 @@ func TestProbeFileKillsStalledFFprobeAtItsDeadline(t *testing.T) {
 
 // A packet scan that stalls is killed at its own deadline, and the probe
 // keeps the metadata that already parsed, as after any failed packet scan.
-// The stalled scan writes nothing, so its read waits on a pipe the sleep
-// holds open.
+// The stalled scan writes nothing, so its read waits on a pipe the sleep,
+// outside the fake's process group, holds open.
 func TestProbeFileKillsStalledPacketScanAtItsDeadline(t *testing.T) {
 	t.Parallel()
 	ffprobePath := filepath.Join(t.TempDir(), "ffprobe")
@@ -79,7 +90,7 @@ case " $* " in
     printf '%s\n' '{"format":{"duration":"4298357.248000","size":"1258000000"},"streams":[{"codec_type":"video","codec_name":"h264","avg_frame_rate":"30/1"}]}'
     ;;
   *)
-    sleep 20
+    `+escapedSleep(t)+`
     exit 0
     ;;
 esac

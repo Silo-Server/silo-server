@@ -127,6 +127,7 @@ func probeFileWithin(ctx context.Context, ffprobePath string, filePath string, l
 		"-show_chapters",
 		filePath,
 	)
+	killProcessGroupOnCancel(cmd)
 	cmd.WaitDelay = limits.waitDelay
 
 	output, err := cmd.Output()
@@ -728,6 +729,7 @@ func probeVideoPacketDuration(
 		"-of", "csv=p=0",
 		filePath,
 	)
+	killProcessGroupOnCancel(cmd)
 	cmd.WaitDelay = waitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -745,10 +747,12 @@ func probeVideoPacketDuration(
 	stopClose()
 	waitErr := cmd.Wait()
 	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, packetCtx.Err())
+	// A deadline that closed the pipe may have cut the read short, so its
+	// estimate is not trusted even when ffprobe itself exited cleanly.
+	if probeTimedOut(ctx, packetCtx) {
+		return 0, fmt.Errorf("%w: packet scan of %s did not finish within %s", errProbeTimeout, filePath, timeout)
+	}
 	if err := waitErr; err != nil {
-		if probeTimedOut(ctx, packetCtx) {
-			return 0, fmt.Errorf("%w: packet scan of %s did not finish within %s", errProbeTimeout, filePath, timeout)
-		}
 		return 0, fmt.Errorf("ffprobe packet scan failed for %s: %w", filePath, err)
 	}
 	return duration, nil
