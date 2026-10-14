@@ -173,14 +173,20 @@ func (f *stopFixture) start(t *testing.T, work string, previousPID int) (uint64,
 			if raw, err := os.ReadFile(pidPath); err == nil {
 				pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
 				if err == nil && pid > 0 && pid != previousPID && syscall.Kill(pid, 0) == nil {
-					return a.Generation, pid, input
+					// HTTP 202 and a live PID precede asynchronous tracking.
+					// Begin stop assertions only after this generation is visible.
+					for _, tracked := range f.runtime.tracker.scopedSnapshot() {
+						if tracked.WorkID == work && tracked.Generation == a.Generation && tracked.Info.SessionID == work {
+							return a.Generation, pid, input
+						}
+					}
 				}
 			}
 		}
 		select {
 		case <-ticker.C:
 		case <-deadline.C:
-			t.Fatal("encoder did not become live")
+			t.Fatal("encoder did not become live and tracked")
 		}
 	}
 }
