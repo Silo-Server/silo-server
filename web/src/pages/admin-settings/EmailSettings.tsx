@@ -1,6 +1,5 @@
 import { TestEmailRow } from "@/components/admin/EmailTestRow";
 import { SaveBar } from "@/components/SaveBar";
-import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,17 +9,15 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
 
-const EMAIL_ADVANCED_KEYS = ["email.from_name"];
-
 const EMAIL_KEYS = [
   "email.enabled",
   "email.from_address",
+  "email.from_name",
   "email.smtp_host",
   "email.smtp_port",
   "email.smtp_security",
   "email.smtp_username",
   "email.smtp_password",
-  ...EMAIL_ADVANCED_KEYS,
 ];
 
 /**
@@ -33,8 +30,8 @@ export default function EmailSettings() {
   const form = useSettingsForm({ keys: EMAIL_KEYS });
   const restartKeys = useRestartKeys();
 
-  const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
-  const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
+  const allRestart = EMAIL_KEYS.every((key) => restartKeys.has(key));
+  const anyDirty = EMAIL_KEYS.some((key) => form.isDirty(key));
 
   if (form.isLoading)
     return (
@@ -58,8 +55,8 @@ export default function EmailSettings() {
         <FieldGroup
           label="Mail server"
           description="Silo sends invitations, password resets, and notification emails through it."
-          restartAll={allRestart(EMAIL_KEYS)}
-          dirty={anyDirty(EMAIL_KEYS)}
+          restartAll={allRestart}
+          dirty={anyDirty}
         >
           <SettingField
             label="Send email from this server"
@@ -76,6 +73,14 @@ export default function EmailSettings() {
             value={form.getValue("email.from_address")}
             onChange={(v) => form.setValue("email.from_address", v)}
             restartRequired={restartKeys.has("email.from_address")}
+          />
+          <SettingField
+            label="From name"
+            dirty={form.isDirty("email.from_name")}
+            hint="Silo"
+            value={form.getValue("email.from_name")}
+            onChange={(v) => form.setValue("email.from_name", v)}
+            restartRequired={restartKeys.has("email.from_name")}
           />
           <SettingField
             label="Mail server address"
@@ -129,20 +134,6 @@ export default function EmailSettings() {
             restartRequired={restartKeys.has("email.smtp_password")}
           />
           <TestEmailRow />
-          <AdvancedSection
-            id="email.server"
-            count={EMAIL_ADVANCED_KEYS.length}
-            forceOpen={anyDirty(EMAIL_ADVANCED_KEYS)}
-          >
-            <SettingField
-              label="From name"
-              dirty={form.isDirty("email.from_name")}
-              hint="Silo"
-              value={form.getValue("email.from_name")}
-              onChange={(v) => form.setValue("email.from_name", v)}
-              restartRequired={restartKeys.has("email.from_name")}
-            />
-          </AdvancedSection>
         </FieldGroup>
       </div>
 

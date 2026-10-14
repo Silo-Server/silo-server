@@ -111,20 +111,12 @@ describe("EmailSettings", () => {
     expect(within(group).getByLabelText("Test email recipient")).toBeInTheDocument();
   });
 
-  it("keeps the sender name under Advanced", async () => {
+  it("shows the sender name beside the from address with no Advanced disclosure", () => {
     useSettingsFormMock.mockReturnValue(makeForm());
     renderPage();
 
-    expect(screen.queryByLabelText("From name")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Advanced · 1 setting" }));
     expect(screen.getByLabelText("From name")).toHaveValue("Silo");
-  });
-
-  it("opens Advanced for a staged sender name", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ dirty: ["email.from_name"] }));
-    renderPage();
-
-    expect(screen.getByLabelText("From name")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Advanced/ })).not.toBeInTheDocument();
   });
 
   it("stages the mail server through the page's own save bar", async () => {
