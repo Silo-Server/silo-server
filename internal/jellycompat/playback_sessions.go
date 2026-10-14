@@ -366,7 +366,13 @@ func (s *PlaybackSessionStore) Get(id string) (*PlaybackSession, bool) {
 		return nil, false
 	}
 	if !session.ExpiresAt.After(s.now()) {
-		s.Delete(id)
+		// A live replacement can win after this read or while eviction waits
+		// for a recipe mutation. Only evict the row that is expired now.
+		release := s.lockSessionMap(id)
+		defer release()
+		if current, exists := s.sessions[id]; exists && !current.ExpiresAt.After(s.now()) {
+			delete(s.sessions, id)
+		}
 		return nil, false
 	}
 	if session.Terminal {

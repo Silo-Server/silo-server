@@ -123,3 +123,6 @@
 ./internal/jellycompat TestMemoryRecipeAcknowledgementOutageKeepsAcceptedReceipt
 ./internal/jellycompat TestMemoryRecipeBlockedRedisCommandAllowsUnrelatedSession
 ./internal/jellycompat TestMemorySessionPendingScanCancellationKeepsRows
+
+# An expired lookup must preserve a concurrent live replacement.
+./internal/jellycompat TestMemorySessionExpiredGetPreservesConcurrentReplacement
