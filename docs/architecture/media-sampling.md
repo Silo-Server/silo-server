@@ -410,28 +410,43 @@ must use the returned height and reject chunks whose geometry differs.
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,
   which sends a hardware attempt on to software.
-- A list run that fails as `empty` after the HEVC decoder logged "Duplicate
-  POC in a sequence" is read again, in the same attempt, as the
-  keyframes-only window that other containers use. One decoder serves every
-  list entry and nothing resets it between them, so an HEVC CRA keyframe
-  (open GOP) after a jump takes a picture order count derived from the
-  previous sample's. When that count matches a picture still in the
-  decoder's buffer, the decoder drops the keyframe ("Duplicate POC in a
-  sequence", then "Skipping invalid undecodable NALU: 21"), and such a file
-  can lose nearly every sample on every run. A window decodes keyframes in
-  order and keeps the counts consistent, at the cost of reading the whole
-  span. A list that is empty without that message, such as a truncated or
-  damaged file's, still fails without the extra read: damaged pictures log
-  only "Skipping invalid undecodable NALU", and a window would give their
-  samples the last good keyframe instead of failing.
+- A list run that fails as `empty` after the decoder logged a dropped
+  keyframe is read again, in the same attempt, as a window. Two messages
+  mark a dropped keyframe. One decoder serves every list entry and nothing
+  resets it between them, so an HEVC CRA keyframe (open GOP) after a jump
+  takes a picture order count derived from the previous sample's. When that
+  count matches a picture still in the decoder's buffer, the decoder drops
+  the keyframe ("Duplicate POC in a sequence", then "Skipping invalid
+  undecodable NALU: 21"). An H.264 keyframe whose reference marking names
+  pictures a keyframes-only read skipped is discarded too ("illegal short
+  term buffer state"). Either way such a file can lose nearly every sample
+  on every run. An HEVC list goes to the keyframes-only window that other
+  containers use, which decodes keyframes in order and keeps the counts
+  consistent, at the cost of reading the whole span. An H.264 list that
+  logged its message goes straight to the reference-picture window below,
+  since a keyframes-only window discards the same keyframes. A list that is
+  empty without either message, such as a truncated or damaged file's,
+  still fails without the extra read: damaged pictures log only "Skipping
+  invalid undecodable NALU", and a window would give their samples the last
+  good keyframe instead of failing.
 - Skipped pictures do not advance the decoder's count, so keyframes a whole
-  count cycle apart (256 pictures with the common 8-bit count) collide in the
-  window too. A window that logs "Duplicate POC in a sequence" after a list
-  fallback fails as `empty` rather than give later samples the last keyframe
-  it kept; such files fail as they did without the fallback. If the window
-  fails for any reason, the attempt reports the window's failure, whose
-  reason and log describe the latest read, and its error names the list
-  run's.
+  count cycle apart (256 pictures with the common 8-bit count) collide in a
+  keyframes-only window too, and H.264 windows discard keyframes as lists
+  do. A window that logged a dropped keyframe finds, for each sample that
+  holds a frame, the last keyframe packet at or before it in the timing
+  file; a sample whose own keyframe was not decoded shows an earlier one and
+  counts as filled. Such a window may fill up to 15 % of its cells instead
+  of 10 %, since the file is whole and a preview a keyframe early is still
+  usable; a list keeps 10 %, so too many drops still send it to the window.
+  A window that fills more, or that logged a drop and has a keyframe packet
+  without a time, which leaves the stale samples unknown, is read once more
+  with `-skip_frame:v noref` and `select=key` ahead of the sheets chain:
+  the decoder sees every reference picture, so its state stays whole, and
+  the chain still gets only the keyframes. That read costs several
+  keyframes-only reads and runs only for files that fail without it. If the
+  window fails for any reason, the attempt reports the window's failure,
+  whose reason and log describe the latest read, and after a list fallback
+  its error names the list run's.
 - Sheets are JPEG-encoded in-process (`image/jpeg`, `Quality`) once the run
   and its repairs are done, since a repair may replace any cell. A run holds
   its tiles until then, so a request whose sheets exceed 64 million tile
@@ -486,12 +501,14 @@ at the sample's keyframe and reads only it and the entry's span
   default 8-bit count) the derived counts run backwards: the decoder passes
   on keyframes out of list order with rewritten times, or drops them as
   duplicates. As soon as a frame comes from an earlier entry than the frame
-  before it, or the decoder logs "Duplicate POC in a sequence", the attempt
+  before it, or the decoder logs a dropped keyframe ("Duplicate POC in a
+  sequence", or H.264's "illegal short term buffer state"), the attempt
   stops ffmpeg and reads the samples from their own times, exactly as a
-  file without Cues. An abandoned read is never published: if the attempt's
-  time ran out meanwhile, it fails as `timeout`. A duplicate in the abandoned read does not count
-  toward the window fallback above. Closed-GOP keyframes start their counts
-  afresh and keep their keyframe entries.
+  file without Cues. An abandoned read is never published: if the
+  attempt's time ran out meanwhile, it fails as `timeout`. A drop in the
+  abandoned read does not count toward the window fallbacks above.
+  Closed-GOP keyframes start their counts afresh and keep their keyframe
+  entries.
 - MP4 and every other container keep sample-time entries: an MP4 entry that
   starts exactly at its keyframe's time often seeks past it (45 of 80
   samples of one H.264 episode decoded nothing). Stats lists and repairs

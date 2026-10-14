@@ -468,6 +468,8 @@ type episodeResponse struct {
 	RatingTMDB *float64 `json:"-"`
 	// MachineTranslatedFields reaches the v2 episode row only; v1 is frozen.
 	MachineTranslatedFields []string `json:"-"`
+	// PendingTranslationLanguage reaches the v2 episode row only; v1 is frozen.
+	PendingTranslationLanguage string `json:"-"`
 }
 
 type episodeImageFallback struct {
@@ -1273,7 +1275,8 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 		RatingTMDB:          ep.RatingTMDB,
 		StillThumbhash:      stillThumbhash,
 
-		MachineTranslatedFields: ep.MachineTranslatedFields,
+		MachineTranslatedFields:    ep.MachineTranslatedFields,
+		PendingTranslationLanguage: ep.PendingTranslationLanguage,
 	}
 
 	if ep.AirDate != nil {

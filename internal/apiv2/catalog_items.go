@@ -371,7 +371,7 @@ type CatalogItemDetail struct {
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
 	Tagline                         string                               `json:"tagline,omitempty"`
-	PendingTranslationLanguage      string                               `json:"pending_translation_language,omitempty" doc:"The profile's metadata language when the overview has no translation in it yet; request one with translate-description"`
+	PendingTranslationLanguage      string                               `json:"pending_translation_language,omitempty" doc:"This profile's metadata language when the page's descriptions are not available in it yet: the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription."`
 	MachineTranslatedFields         []string                             `json:"machine_translated_fields,omitempty" enum:"overview,tagline" doc:"Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were"`
 	ImdbID                          string                               `json:"imdb_id,omitempty"`
 	TmdbID                          string                               `json:"tmdb_id,omitempty"`
@@ -529,24 +529,25 @@ type EpisodeFile struct {
 
 // Episode is one episode row of a season listing.
 type Episode struct {
-	ContentID               string              `json:"content_id" example:"episode:severance-s01e01"`
-	SeasonNumber            int                 `json:"season_number"`
-	EpisodeNumber           int                 `json:"episode_number"`
-	Title                   string              `json:"title"`
-	Overview                string              `json:"overview,omitempty"`
-	AirDate                 *string             `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	Runtime                 int                 `json:"runtime" doc:"Minutes"`
-	ImdbID                  string              `json:"imdb_id,omitempty"`
-	TmdbID                  string              `json:"tmdb_id,omitempty"`
-	TvdbID                  string              `json:"tvdb_id,omitempty"`
-	Ratings                 []CatalogRating     `json:"ratings,omitempty" doc:"The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating."`
-	StillIsEpisodeStill     *bool               `json:"still_is_episode_still,omitempty" doc:"Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable."`
-	StillURL                string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
-	StillThumbhash          string              `json:"still_thumbhash,omitempty"`
-	UserData                *WatchRollup        `json:"user_data,omitempty"`
-	Files                   []EpisodeFile       `json:"files,omitempty"`
-	OverlaySummary          *CatalogItemOverlay `json:"overlay_summary,omitempty"`
-	MachineTranslatedFields []string            `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
+	ContentID                  string              `json:"content_id" example:"episode:severance-s01e01"`
+	SeasonNumber               int                 `json:"season_number"`
+	EpisodeNumber              int                 `json:"episode_number"`
+	Title                      string              `json:"title"`
+	Overview                   string              `json:"overview,omitempty"`
+	AirDate                    *string             `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	Runtime                    int                 `json:"runtime" doc:"Minutes"`
+	ImdbID                     string              `json:"imdb_id,omitempty"`
+	TmdbID                     string              `json:"tmdb_id,omitempty"`
+	TvdbID                     string              `json:"tvdb_id,omitempty"`
+	Ratings                    []CatalogRating     `json:"ratings,omitempty" doc:"The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating."`
+	StillIsEpisodeStill        *bool               `json:"still_is_episode_still,omitempty" doc:"Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable."`
+	StillURL                   string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
+	StillThumbhash             string              `json:"still_thumbhash,omitempty"`
+	UserData                   *WatchRollup        `json:"user_data,omitempty"`
+	Files                      []EpisodeFile       `json:"files,omitempty"`
+	OverlaySummary             *CatalogItemOverlay `json:"overlay_summary,omitempty"`
+	MachineTranslatedFields    []string            `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
+	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"This profile's metadata language when the episode's description is not available in it yet; translating the episode's season fills it"`
 }
 
 // EpisodeCollection is the episodes of one season.
@@ -1462,7 +1463,7 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 		ep := Episode{ContentID: e.ContentID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Title: e.Title, Overview: e.Overview,
 			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillIsEpisodeStill: e.StillIsEpisodeStill, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
 			Ratings:  builtRatingsOf(ratingsources.Item{IMDB: e.RatingIMDB, TMDB: e.RatingTMDB}, ratingsources.Selection{}),
-			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary), MachineTranslatedFields: e.MachineTranslatedFields}
+			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary), MachineTranslatedFields: e.MachineTranslatedFields, PendingTranslationLanguage: e.PendingTranslationLanguage}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
 				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize, Unreadable: f.Unreadable})

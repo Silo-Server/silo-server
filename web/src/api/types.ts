@@ -1322,6 +1322,8 @@ export interface EpisodeListItem {
   overlay_summary?: OverlaySummary | null;
   /** Localized fields whose text was machine-translated by AI. */
   machine_translated_fields?: string[];
+  /** This profile's language when the episode's description is not in it yet. */
+  pending_translation_language?: string;
 }
 
 export interface EpisodesResponse {

@@ -248,6 +248,10 @@ type attemptRun struct {
 // still fails.
 func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 	var listFailure *AttemptError
+	// illegalShortTerm records an H.264 list that discarded keyframes over
+	// skipped reference pictures. A keyframes-only window discards the same
+	// keyframes, so such a list goes straight to the reference-picture read.
+	illegalShortTerm := false
 	// Sheets always probe: the codec decides how keyframes are read (see
 	// keyframeSkipFor), even for a read-through window.
 	if !req.Samples.ReadThrough || req.Sheets != nil {
@@ -277,7 +281,7 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 				return a.decode(req, header.info.StartSeconds)
 			}
 			duplicates := false
-			result, failure := a.sheets(req, req.Samples.Seconds, header.info.StartSeconds, &duplicates)
+			result, failure := a.sheets(req, req.Samples.Seconds, header.info.StartSeconds, watchDuplicatePOC(&duplicates), watchIllegalShortTerm(&illegalShortTerm))
 			if failure == nil || failure.Reason != ReasonEmpty || !duplicates {
 				return result, failure
 			}
@@ -289,17 +293,31 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 	windowReq.Samples = nil
 	windowReq.Window = &window
 	if req.Sheets != nil {
+		if listFailure != nil && illegalShortTerm {
+			referenceWindow := window
+			referenceWindow.referencePictures = true
+			windowReq.Window = &referenceWindow
+		}
 		duplicates := false
-		result, failure := a.sheets(windowReq, req.Samples.Seconds, 0, &duplicates)
+		result, failure := a.sheets(windowReq, req.Samples.Seconds, 0, watchDuplicatePOC(&duplicates))
+		// Keyframes a whole picture order count cycle apart collide in a
+		// window too, since skipped pictures do not advance the count, and
+		// H.264 keyframes that mark skipped pictures are discarded. Each
+		// sample after a dropped keyframe shows the keyframe before it and
+		// counts as filled, so a window that dropped a few still publishes,
+		// as a sequential keyframe read would. One that dropped more than
+		// maxDroppedKeyframeShare allows is read once more decoding every
+		// reference picture, which keeps the decoder's state whole at
+		// several times the cost.
+		if failure != nil && failure.Reason == ReasonEmpty && duplicates && !windowReq.Window.referencePictures {
+			referenceReq := windowReq
+			referenceWindow := window
+			referenceWindow.referencePictures = true
+			referenceReq.Window = &referenceWindow
+			result, failure = a.sheets(referenceReq, req.Samples.Seconds, 0)
+		}
 		if listFailure == nil {
 			return result, failure
-		}
-		// Keyframes a whole picture order count cycle apart collide in a
-		// window too, since skipped pictures do not advance the count. The
-		// window would then give later samples the last keyframe it kept and
-		// count them as decoded, so it fails instead.
-		if failure == nil && duplicates {
-			result, failure = Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonEmpty, Err: errors.New("ffmpeg dropped keyframes as duplicates in the window too")}
 		}
 		// A window that fails too reports its own failure, whose reason and
 		// log describe the latest read, and names the list's in its error.
@@ -375,37 +393,60 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 // "Skipping invalid undecodable NALU" and do not send a list to the window.
 const duplicatePOCMessage = "Duplicate POC in a sequence"
 
+// illegalShortTermMessage is what ffmpeg's H.264 decoder logs when a
+// keyframe's reference marking names pictures a keyframes-only read skipped,
+// and it discards the keyframe. A keyframes-only window fails the same way;
+// decoding the reference pictures too keeps the marking whole.
+const illegalShortTermMessage = "illegal short term buffer state"
+
+// droppedKeyframe reports whether line is a decoder dropping a keyframe
+// over state a keyframes-only read did not keep: duplicatePOCMessage or
+// illegalShortTermMessage.
+func droppedKeyframe(line string) bool {
+	return strings.Contains(line, duplicatePOCMessage) || strings.Contains(line, illegalShortTermMessage)
+}
+
+// watchIllegalShortTerm returns a log handler that sets *seen once ffmpeg
+// logs illegalShortTermMessage.
+func watchIllegalShortTerm(seen *bool) func(string) {
+	return func(line string) {
+		*seen = *seen || strings.Contains(line, illegalShortTermMessage)
+	}
+}
+
 // watchDuplicatePOC returns a log handler that sets *seen once ffmpeg logs
-// duplicatePOCMessage.
+// a dropped keyframe (see droppedKeyframe).
 func watchDuplicatePOC(seen *bool) func(string) {
 	return func(line string) {
-		*seen = *seen || strings.Contains(line, duplicatePOCMessage)
+		*seen = *seen || droppedKeyframe(line)
 	}
 }
 
 // sheets runs a Sheets request for the sample times, reading req's list
 // (with inpoints offset by inputStart) or window, repairs a list's weak cells
-// (see sheet_repair.go), and tiles the frames. It sets *duplicates when the
-// read whose result it returns logged duplicatePOCMessage.
-func (a attemptRun) sheets(req Request, times []float64, inputStart float64, duplicates *bool) (Result, *AttemptError) {
+// (see sheet_repair.go), and tiles the frames. logHandlers also read
+// ffmpeg's log, except what an abandoned keyframe list logs from the line
+// that abandons it on (see keyframeSheets).
+func (a attemptRun) sheets(req Request, times []float64, inputStart float64, logHandlers ...func(string)) (Result, *AttemptError) {
 	if req.Samples == nil {
-		return a.readSheets(req, times, listPlan{}, nil, watchDuplicatePOC(duplicates))
+		return a.readSheets(req, times, listPlan{}, nil, logHandlers...)
 	}
 	if len(a.keyframes) > 0 {
-		if result, failure, ok := a.keyframeSheets(req, times, inputStart); ok {
+		if result, failure, ok := a.keyframeSheets(req, times, inputStart, logHandlers); ok {
 			return result, failure
 		}
 	}
-	return a.readSheets(req, times, samplePlan(times, inputStart), nil, watchDuplicatePOC(duplicates))
+	return a.readSheets(req, times, samplePlan(times, inputStart), nil, logHandlers...)
 }
 
 // keyframeSheets reads req's list with entries starting at keyframes (see
 // keyframes.go). It stops ffmpeg and reports false, for the caller to read
 // the samples from their own times, as soon as the decoder passes on a frame
-// from an earlier entry than the frame before it or logs
-// duplicatePOCMessage. An abandoned read never counts: when the attempt has
-// ended by then, it fails as timed out or canceled.
-func (a attemptRun) keyframeSheets(req Request, times []float64, inputStart float64) (Result, *AttemptError, bool) {
+// from an earlier entry than the frame before it or drops a keyframe (see
+// droppedKeyframe); logHandlers see none of the log from then on. An
+// abandoned read never counts: when the attempt has ended by then, it fails
+// as timed out or canceled.
+func (a attemptRun) keyframeSheets(req Request, times []float64, inputStart float64, logHandlers []func(string)) (Result, *AttemptError, bool) {
 	ctx, cancel := context.WithCancel(a.attemptCtx)
 	defer cancel()
 	var abandoned atomic.Bool
@@ -416,8 +457,14 @@ func (a attemptRun) keyframeSheets(req Request, times []float64, inputStart floa
 	run := a
 	run.attemptCtx = ctx
 	result, failure := run.readSheets(req, times, keyframePlan(times, inputStart, a.keyframes), abandon, func(line string) {
-		if strings.Contains(line, duplicatePOCMessage) {
+		if droppedKeyframe(line) {
 			abandon()
+		}
+		if abandoned.Load() {
+			return
+		}
+		for _, handler := range logHandlers {
+			handler(line)
 		}
 	})
 	if !abandoned.Load() {

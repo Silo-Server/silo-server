@@ -373,6 +373,7 @@ export function episodeFromV2(episode: EpisodeV2): EpisodeListItem {
     files: (episode.files ?? []).map(episodeFileFromV2),
     overlay_summary: episode.overlay_summary,
     machine_translated_fields: episode.machine_translated_fields,
+    pending_translation_language: episode.pending_translation_language,
   };
 }
 

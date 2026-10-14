@@ -1125,3 +1125,10 @@ ordinary localized fields; these members describe it:
   `GET /api/v2/capabilities/metadata-ai` says when a client sends that
   request: as soon as it shows such an item (`auto`), when the viewer asks
   for it (`button`), or never (`off`).
+- On-view translation covers what the page shows: a movie or series its own
+  overview and tagline, a season its overview and its episodes' overviews, an
+  episode itself. A season's `pending_translation_language` is therefore also
+  set while any of its episodes lacks the language, and v2 episode rows carry
+  their own `pending_translation_language`, so a client that lists episodes
+  inline (a single-season series) can translate that season. Children whose
+  source text is already in the target language are skipped.

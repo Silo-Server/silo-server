@@ -810,6 +810,10 @@ type Episode struct {
 	UpdatedAt               time.Time
 	// MachineTranslatedFields is transient; see MediaItem.
 	MachineTranslatedFields []string `json:"-"`
+	// PendingTranslationLanguage is transient presentation metadata set by
+	// batch localization: the viewer's language this episode's description is
+	// missing, so an episode list can start on-view translation.
+	PendingTranslationLanguage string `json:"-"`
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.

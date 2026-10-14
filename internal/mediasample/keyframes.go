@@ -37,9 +37,10 @@ import (
 // keyframes out of list order with rewritten times, or drops them as
 // duplicates. Sample-time entries leave shorter gaps and fare better, so a
 // keyframe list is abandoned, ffmpeg stopped, as soon as a frame comes from
-// an earlier entry than the one before it or the decoder reports a
-// duplicate, and the samples are read again from their own times (see
-// keyframeSheets). Closed-GOP keyframes start their counts afresh and never
+// an earlier entry than the one before it or the decoder drops a keyframe
+// (droppedKeyframe, which also covers H.264 keyframes whose reference
+// marking names skipped pictures), and the samples are read again from their
+// own times (see keyframeSheets). Closed-GOP keyframes start their counts afresh and never
 // trip it.
 //
 // Samples before the first keyframe, and every sample of an input without

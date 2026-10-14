@@ -258,13 +258,17 @@ func TestRunSheetsStartsMatroskaEntriesAtKeyframes(t *testing.T) {
 }
 
 // TestRunSheetsAbandonsAKeyframeList stops a keyframe list whose decoder
-// passes on a frame from an earlier entry, or reports a duplicate picture
-// order count, and reads the samples from their own times instead.
+// passes on a frame from an earlier entry, or drops a keyframe (HEVC's
+// duplicate picture order count, H.264's illegal short term buffer state),
+// and reads the samples from their own times instead.
 func TestRunSheetsAbandonsAKeyframeList(t *testing.T) {
 	for name, keyframeRun := range map[string]*fakeSheets{
 		"out of order": {format: "matroska,webm", frames: []fakeSheetFrame{at(30, 25, "1"), at(10, 5, "1.5"), at(20, 15, "2")}},
 		"duplicate": {format: "matroska,webm", frames: []fakeSheetFrame{at(10, 5, "0")}, editLog: func(log []string) []string {
 			return append([]string{"[hevc @ 0x55d0] Duplicate POC in a sequence: 256."}, log...)
+		}},
+		"illegal short term": {format: "matroska,webm", frames: []fakeSheetFrame{at(10, 5, "0")}, editLog: func(log []string) []string {
+			return append([]string{"[h264 @ 0x55d0] illegal short term buffer state detected"}, log...)
 		}},
 	} {
 		t.Run(name, func(t *testing.T) {

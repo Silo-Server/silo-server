@@ -269,7 +269,7 @@ func registerCatalogActions(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/metadata-ai", "getMetadataAICapability", "catalog",
 		"Whether AI metadata translation is configured and how the viewer-facing on-view translation behaves.")), reg.getMetadataAICapability)
 	translate := humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/translate-description", "translateCatalogItemDescription", "catalog",
-		"Queue a translation of the item's descriptions into the language the detail document reported missing; answers 202 with the job.")
+		"Queue a translation of the descriptions a page shows into the language its detail document reported missing: a movie's or series' own overview and tagline, a season's overview and its episodes' overviews, or one episode. Answers 202 with the job.")
 	translate.DefaultStatus = http.StatusAccepted
 	translate.Errors = []int{http.StatusConflict}
 	translateOperation := viewerOperation(translate)
