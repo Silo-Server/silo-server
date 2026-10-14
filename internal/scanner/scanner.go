@@ -349,7 +349,8 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 }
 
 // ScanSubtree walks a single subtree within a media folder and reconciles only
-// files that live beneath that subtree.
+// files that live beneath that subtree. A podcast library scans the whole show
+// folder that holds the subtree (see scanPodcastSubtree).
 func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*ScanResult, error) {
 	cleanSubtree := filepath.Clean(subtreePath)
 	// A subtree scan under a skipped library root would walk nothing and
@@ -371,6 +372,15 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 			return nil, err
 		}
 		if err := s.scanAudiobookPaths(watchCtx, folder, []string{scanRoot}, false, true); err != nil {
+			return nil, err
+		}
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+	if librarykind.IsPodcast(folder.Type) {
+		if err := s.scanPodcastSubtree(watchCtx, folder, cleanSubtree); err != nil {
 			return nil, err
 		}
 		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {

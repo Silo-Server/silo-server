@@ -98,6 +98,34 @@ func TestScanPodcastFolderReturnsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestPodcastShowFolder(t *testing.T) {
+	roots := []string{"/media/podcasts", "/media/more-podcasts", "/media/more-podcasts/nested"}
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "show folder", path: "/media/podcasts/Show A", want: "/media/podcasts/Show A"},
+		{name: "episode file", path: "/media/podcasts/Show A/Episode 2.mp3", want: "/media/podcasts/Show A"},
+		{name: "folder inside a show", path: "/media/podcasts/Show A/extras/bonus", want: "/media/podcasts/Show A"},
+		{name: "unclean path", path: "/media/podcasts//Show A/./extras/", want: "/media/podcasts/Show A"},
+		{name: "second root", path: "/media/more-podcasts/Show B/Episode 1.mp3", want: "/media/more-podcasts/Show B"},
+		{name: "most specific nested root", path: "/media/more-podcasts/nested/Show C", want: "/media/more-podcasts/nested/Show C"},
+		{name: "nested library root", path: "/media/more-podcasts/nested", want: ""},
+		{name: "library root", path: "/media/podcasts", want: ""},
+		{name: "library root with trailing slash", path: "/media/podcasts/", want: ""},
+		{name: "sibling with a root's name as prefix", path: "/media/podcasts-old/Show A", want: ""},
+		{name: "outside every root", path: "/srv/Show A", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := podcastShowFolder(tt.path, roots); got != tt.want {
+				t.Fatalf("podcastShowFolder(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestListPodcastShowAudioFilesReturnsSortedAudioPaths(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "02.mp3"), []byte("audio"), 0o644); err != nil {
