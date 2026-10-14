@@ -26,13 +26,17 @@ type authorityKey struct {
 	workKey
 	generation uint64
 }
+type authorityCheck struct {
+	revision uint64
+	users    int
+}
 type Service struct {
-	options    Options
-	mu         sync.Mutex
-	admissions map[workKey]admission
-	authority  map[authorityKey]authorityResult
-	epoch      uint64
-	transports workeridentity.TransportPool
+	options         Options
+	mu              sync.Mutex
+	admissions      map[workKey]admission
+	authority       map[authorityKey]authorityResult
+	authorityChecks map[authorityKey]*authorityCheck
+	transports      workeridentity.TransportPool
 }
 
 func New(o Options) (*Service, error) {
@@ -45,7 +49,10 @@ func New(o Options) (*Service, error) {
 	}
 	o.Origin = origin
 	o.PrivateKey = append(ed25519.PrivateKey(nil), o.PrivateKey...)
-	return &Service{options: o, admissions: map[workKey]admission{}, authority: map[authorityKey]authorityResult{}}, nil
+	return &Service{
+		options: o, admissions: map[workKey]admission{},
+		authority: map[authorityKey]authorityResult{}, authorityChecks: map[authorityKey]*authorityCheck{},
+	}, nil
 }
 func (s *Service) SignRequest(r *http.Request) error {
 	out, err := s.PrepareRequest(r)

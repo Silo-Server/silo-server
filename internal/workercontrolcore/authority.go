@@ -96,10 +96,14 @@ func (s *Service) invalidateThrough(node int, work string, generation uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := workKey{node, work}
-	s.epoch++
 	for key := range s.authority {
 		if key.workKey == k && key.generation <= generation {
 			delete(s.authority, key)
+		}
+	}
+	for key, check := range s.authorityChecks {
+		if key.workKey == k && key.generation <= generation {
+			check.revision++
 		}
 	}
 	if v, ok := s.admissions[k]; ok && v.generation <= generation {
@@ -115,10 +119,14 @@ func (s *Service) invalidateCached(node int, work string) {
 	s.expireAuthorityLocked(workKey{node, work})
 }
 func (s *Service) expireAuthorityLocked(work workKey) {
-	s.epoch++
 	for key := range s.authority {
 		if key.workKey == work {
 			delete(s.authority, key)
+		}
+	}
+	for key, check := range s.authorityChecks {
+		if key.workKey == work {
+			check.revision++
 		}
 	}
 }
@@ -163,21 +171,67 @@ func (s *Service) executionActive(ctx context.Context, node Node, a workerwire.A
 	return s.options.ExecutionActive == nil || s.options.ExecutionActive(ctx, node, a)
 }
 
-// WorkActive bounds shared-store/registry checks to four per second per active
-// work. Begin/Stop invalidate this core's cache immediately; other core changes
-// are observed within 250ms, below the two-second worker authority horizon.
+// WorkActive caches shared-store/registry checks for 250ms per authority.
+// Begin/Stop invalidate this core's cache immediately; other core changes are
+// observed within 250ms, below the two-second worker authority horizon.
 func (s *Service) WorkActive(ctx context.Context, nodeID int, work string, generation uint64) bool {
 	if ctx.Err() != nil || generation == 0 {
 		return false
 	}
 	k := authorityKey{workKey: workKey{nodeID, work}, generation: generation}
-	s.mu.Lock()
-	cached, ok := s.authority[k]
-	epoch := s.epoch
-	s.mu.Unlock()
-	if ok && cached.generation == generation && time.Now().Before(cached.until) {
-		return cached.active
+	for range authorityCheckAttempts {
+		if ctx.Err() != nil {
+			return false
+		}
+		s.mu.Lock()
+		if cached, ok := s.authority[k]; ok && time.Now().Before(cached.until) {
+			s.mu.Unlock()
+			return cached.active && ctx.Err() == nil
+		}
+		check, ok := s.authorityChecks[k]
+		if !ok {
+			if len(s.authorityChecks) >= authorityCacheLimit {
+				s.mu.Unlock()
+				return false
+			}
+			check = &authorityCheck{}
+			s.authorityChecks[k] = check
+		}
+		check.users++
+		revision := check.revision
+		s.mu.Unlock()
+
+		active := s.lookupWorkActive(ctx, nodeID, work, generation)
+
+		s.mu.Lock()
+		check.users--
+		if check.users == 0 {
+			delete(s.authorityChecks, k)
+		}
+		if ctx.Err() != nil {
+			s.mu.Unlock()
+			return false
+		}
+		if revision != check.revision {
+			// Only a change to this exact authority invalidates its lookup.
+			// Recheck current state: admission completion need not revoke it.
+			s.mu.Unlock()
+			continue
+		}
+		if len(s.authority) >= authorityCacheLimit {
+			clear(s.authority)
+		}
+		s.authority[k] = authorityResult{active: active, generation: generation, until: time.Now().Add(250 * time.Millisecond)}
+		s.mu.Unlock()
+		return active
 	}
+	return false
+}
+
+const authorityCacheLimit = 10000
+const authorityCheckAttempts = 3
+
+func (s *Service) lookupWorkActive(ctx context.Context, nodeID int, work string, generation uint64) bool {
 	node, found, err := s.options.Nodes.ByID(ctx, nodeID)
 	active := err == nil && found && node.Enabled
 	if active {
@@ -195,15 +249,5 @@ func (s *Service) WorkActive(ctx context.Context, nodeID int, work string, gener
 			active = e == nil && ready && a.Generation == generation && s.executionActive(ctx, node, a)
 		}
 	}
-	s.mu.Lock()
-	if len(s.authority) >= 10000 {
-		clear(s.authority)
-	}
-	if epoch == s.epoch {
-		s.authority[k] = authorityResult{active: active, generation: generation, until: time.Now().Add(250 * time.Millisecond)}
-	} else {
-		active = false
-	}
-	s.mu.Unlock()
 	return active
 }
