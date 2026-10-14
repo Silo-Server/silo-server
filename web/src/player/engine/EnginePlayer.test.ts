@@ -415,6 +415,31 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("stops its animation frames and hidden-tab ticks once it fails", async () => {
+    const frames = vi.fn((callback: FrameRequestCallback) =>
+      setTimeout(() => callback(performance.now()), 16),
+    );
+    vi.stubGlobal("requestAnimationFrame", frames);
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    try {
+      document.dispatchEvent(new Event("visibilitychange"));
+      worker.emit({ type: "error", generation: null, classification: "x_failed", message: "boom" });
+      // Past the worker's terminate grace, nothing is left scheduled.
+      await vi.advanceTimersByTimeAsync(1_100);
+      const scheduled = frames.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(frames.mock.calls.length).toBe(scheduled);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      delete (document as { hidden?: boolean }).hidden;
+    }
+    player.destroy();
+  });
+
   it("reports when no picture arrives in time", async () => {
     const onFailure = vi.fn();
     const { player } = start(onFailure);

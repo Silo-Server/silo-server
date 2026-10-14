@@ -372,8 +372,7 @@ export class EnginePlayer {
   destroy(): void {
     if (this.disposed) return;
     this.disposed = true;
-    cancelAnimationFrame(this.frameRequest);
-    if (this.hiddenTimer !== null) clearInterval(this.hiddenTimer);
+    this.stopPresentationTimers();
     this.clearReadinessDeadline();
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.resizeObserver.disconnect();
@@ -432,6 +431,7 @@ export class EnginePlayer {
     // This engine is done even if no other route takes over: stop reading and
     // decoding, free queued pictures and audio, and let the screen sleep. The
     // last picture stays up until the player replaces or destroys the engine.
+    this.stopPresentationTimers();
     this.clearReadinessDeadline();
     for (const picture of this.queue) this.release(picture);
     this.queue = [];
@@ -699,10 +699,17 @@ export class EnginePlayer {
   }
 
   private readonly tick = (): void => {
-    if (this.disposed) return;
+    if (this.stopped) return;
     this.advance(true);
-    this.frameRequest = requestAnimationFrame(this.tick);
+    // advance() fails the engine on a stall; a failed engine draws no more frames.
+    if (!this.stopped) this.frameRequest = requestAnimationFrame(this.tick);
   };
+
+  private stopPresentationTimers(): void {
+    cancelAnimationFrame(this.frameRequest);
+    if (this.hiddenTimer !== null) clearInterval(this.hiddenTimer);
+    this.hiddenTimer = null;
+  }
 
   /** One presentation step; `draw` is false while the tab is hidden. */
   private advance(draw: boolean): void {
@@ -900,7 +907,7 @@ export class EnginePlayer {
   }
 
   private readonly onVisibilityChange = (): void => {
-    if (this.disposed) return;
+    if (this.stopped) return;
     if (document.hidden) {
       if (this.hiddenTimer === null) {
         this.hiddenTimer = setInterval(() => this.advance(false), HIDDEN_TICK_MS);
