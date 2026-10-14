@@ -2,6 +2,7 @@ package workerwire
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -32,11 +33,7 @@ func SanitizeLogMessage(message string) string {
 		}
 		return r
 	}, message)
-	message = logQuotedLocation.ReplaceAllString(message, "[location]")
-	message = logURL.ReplaceAllString(message, "[location]")
-	message = logPath.ReplaceAllString(message, " [location]")
-	message = logCredential.ReplaceAllString(message, "[credential]")
-	message = logBearer.ReplaceAllString(message, "[credential]")
+	message = redactLogMatches(message)
 	message = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return ' '
@@ -48,4 +45,35 @@ func SanitizeLogMessage(message string) string {
 		message = strings.ToValidUTF8(message[:MaxLogMessageBytes], "")
 	}
 	return message
+}
+
+// Match against the same original text: removing a location can hide a nested
+// credential's name, and removing a credential can hide a location's closing
+// quote. Merging their spans preserves every match without depending on order.
+func redactLogMatches(message string) string {
+	var spans [][2]int
+	for _, pattern := range []*regexp.Regexp{logCredential, logBearer, logQuotedLocation, logURL, logPath} {
+		for _, match := range pattern.FindAllStringIndex(message, -1) {
+			spans = append(spans, [2]int{match[0], match[1]})
+		}
+	}
+	if len(spans) == 0 {
+		return message
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+	var redacted strings.Builder
+	previous := 0
+	for i := 0; i < len(spans); {
+		start, end := spans[i][0], spans[i][1]
+		i++
+		for i < len(spans) && spans[i][0] <= end {
+			end = max(end, spans[i][1])
+			i++
+		}
+		redacted.WriteString(message[previous:start])
+		redacted.WriteString("[redacted]")
+		previous = end
+	}
+	redacted.WriteString(message[previous:])
+	return redacted.String()
 }
