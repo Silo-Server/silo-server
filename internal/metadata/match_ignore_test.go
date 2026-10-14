@@ -209,6 +209,7 @@ func TestRefreshLeavesIgnoredItemAloneDB(t *testing.T) {
 	movieID := fmt.Sprintf("local-refresh-ignore-movie-%d", suffix)
 	seriesID := fmt.Sprintf("local-refresh-ignore-series-%d", suffix)
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM metadata_refresh_debt WHERE content_id = ANY($1)`, []string{movieID, seriesID})
 		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{movieID, seriesID})
 	})
 	for _, row := range []struct{ id, typ string }{{movieID, "movie"}, {seriesID, "series"}} {
@@ -219,11 +220,20 @@ func TestRefreshLeavesIgnoredItemAloneDB(t *testing.T) {
 			t.Fatalf("seed item: %v", err)
 		}
 	}
+	// A scheduled refresh claimed the movie's debt row: the pinned refresh
+	// must settle it, or the row is claimed again once its lease lapses.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO metadata_refresh_debt (target_type, content_id, next_refresh_at, claimed_at, lease_expires_at, attempt_count)
+		VALUES ('item', $1, NOW() - interval '1 minute', NOW(), NOW() + interval '15 minutes', 1)
+	`, movieID); err != nil {
+		t.Fatalf("seed refresh debt: %v", err)
+	}
 	svc := &MetadataService{
-		dbPool:      pool,
-		itemRepo:    catalog.NewItemRepository(pool),
-		seasonRepo:  catalog.NewSeasonRepository(pool),
-		episodeRepo: catalog.NewEpisodeRepository(pool),
+		dbPool:          pool,
+		itemRepo:        catalog.NewItemRepository(pool),
+		seasonRepo:      catalog.NewSeasonRepository(pool),
+		episodeRepo:     catalog.NewEpisodeRepository(pool),
+		refreshDebtRepo: NewRefreshDebtRepository(pool),
 	}
 
 	if err := svc.refreshItemTarget(ctx, movieID, 0, ModeManualRefresh, false); err != nil {
@@ -235,6 +245,13 @@ func TestRefreshLeavesIgnoredItemAloneDB(t *testing.T) {
 	}
 	if failures != 0 {
 		t.Fatalf("refresh of an ignored movie recorded %d failures, want 0", failures)
+	}
+	var debtRows int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM metadata_refresh_debt WHERE content_id = $1`, movieID).Scan(&debtRows); err != nil {
+		t.Fatalf("read refresh debt: %v", err)
+	}
+	if debtRows != 0 {
+		t.Fatalf("refresh of an ignored movie left %d refresh debt rows, want the claimed row settled", debtRows)
 	}
 
 	if err := svc.refreshSeriesChildTarget(ctx, seriesID, 1, 1, 0, ModeManualRefresh); !errors.Is(err, ErrMetadataNotFound) {

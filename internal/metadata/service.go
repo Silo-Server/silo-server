@@ -3274,7 +3274,13 @@ func (s *MetadataService) refreshItemTarget(ctx context.Context, contentID strin
 	}
 	if result != nil && result.Pinned {
 		// An admin left the item unmatched on purpose: there is nothing to
-		// refresh, and that is not a failure.
+		// refresh, and that is not a failure. Settle its debt row as a
+		// successful refresh would, or a claimed row keeps coming back.
+		if syncErr := s.syncRefreshDebtForItem(ctx, contentID); syncErr != nil {
+			slog.WarnContext(ctx, "metadata: failed to sync refresh debt after a pinned item refresh", "component", "metadata",
+				"content_id", contentID,
+				"error", syncErr)
+		}
 		return nil
 	}
 	if result == nil || !result.Updated {
