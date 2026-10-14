@@ -2446,37 +2446,33 @@ type watchedLeafTarget struct {
 	DurationSeconds float64
 }
 
-func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
+// watchedTarget is a watched-state target that exists and that the viewer
+// may see, before a season or series is expanded into its episodes.
+type watchedTarget struct {
+	Type    string
+	Item    *models.MediaItem
+	Season  *models.Season
+	Episode *models.Episode
+}
+
+// lookupWatchedTarget finds a movie, ebook, series, season or episode and
+// checks the viewer's access without loading a season's or series' episodes.
+// Any other item type is not found.
+func (h *ItemsHandler) lookupWatchedTarget(ctx context.Context, contentID string, filter catalog.AccessFilter) (watchedTarget, error) {
 	item, err := h.itemRepo.GetByID(ctx, contentID)
 	switch {
 	case err == nil:
 		if err := h.itemRepo.EnsureAccessible(ctx, contentID, filter); err != nil {
-			return "", nil, err
+			return watchedTarget{}, err
 		}
 		switch item.Type {
-		case "movie":
-			return "movie", []watchedLeafTarget{{
-				ContentID:       item.ContentID,
-				DurationSeconds: h.contentDurationSeconds(ctx, item.ContentID, "", item.Runtime),
-			}}, nil
-		case "ebook":
-			// Ebooks have no playback duration; read state is keyed off
-			// ebook_reader_progress, so the leaf target only carries the ID.
-			return "ebook", []watchedLeafTarget{{ContentID: item.ContentID}}, nil
-		case "series":
-			if h.episodeRepo == nil {
-				return "", nil, catalog.ErrItemNotFound
-			}
-			episodes, err := h.episodeRepo.ListBySeries(ctx, item.ContentID)
-			if err != nil {
-				return "", nil, err
-			}
-			return "series", h.episodeTargets(ctx, episodes), nil
+		case "movie", "ebook", "series":
+			return watchedTarget{Type: item.Type, Item: item}, nil
 		default:
-			return "", nil, catalog.ErrItemNotFound
+			return watchedTarget{}, catalog.ErrItemNotFound
 		}
 	case !errors.Is(err, catalog.ErrItemNotFound):
-		return "", nil, err
+		return watchedTarget{}, err
 	}
 
 	if h.seasonRepo != nil {
@@ -2484,37 +2480,67 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 		switch {
 		case err == nil:
 			if err := h.itemRepo.EnsureAccessible(ctx, season.SeriesID, filter); err != nil {
-				return "", nil, err
+				return watchedTarget{}, err
 			}
-			if h.episodeRepo == nil {
-				return "", nil, catalog.ErrItemNotFound
-			}
-			episodes, err := h.episodeRepo.ListBySeasonID(ctx, season.ContentID)
-			if err != nil {
-				return "", nil, err
-			}
-			return "season", h.episodeTargets(ctx, episodes), nil
+			return watchedTarget{Type: "season", Season: season}, nil
 		case !errors.Is(err, catalog.ErrSeasonNotFound):
-			return "", nil, err
+			return watchedTarget{}, err
 		}
 	}
 
 	if h.episodeRepo == nil {
-		return "", nil, catalog.ErrItemNotFound
+		return watchedTarget{}, catalog.ErrItemNotFound
 	}
 
 	episode, err := h.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
-		return "", nil, err
+		return watchedTarget{}, err
 	}
 	if err := h.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
+		return watchedTarget{}, err
+	}
+	return watchedTarget{Type: "episode", Episode: episode}, nil
+}
+
+func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
+	target, err := h.lookupWatchedTarget(ctx, contentID, filter)
+	if err != nil {
 		return "", nil, err
 	}
-
-	return "episode", []watchedLeafTarget{{
-		ContentID:       episode.ContentID,
-		DurationSeconds: h.contentDurationSeconds(ctx, "", episode.ContentID, episode.Runtime),
-	}}, nil
+	switch target.Type {
+	case "movie":
+		return "movie", []watchedLeafTarget{{
+			ContentID:       target.Item.ContentID,
+			DurationSeconds: h.contentDurationSeconds(ctx, target.Item.ContentID, "", target.Item.Runtime),
+		}}, nil
+	case "ebook":
+		// Ebooks have no playback duration; read state is keyed off
+		// ebook_reader_progress, so the leaf target only carries the ID.
+		return "ebook", []watchedLeafTarget{{ContentID: target.Item.ContentID}}, nil
+	case "series":
+		if h.episodeRepo == nil {
+			return "", nil, catalog.ErrItemNotFound
+		}
+		episodes, err := h.episodeRepo.ListBySeries(ctx, target.Item.ContentID)
+		if err != nil {
+			return "", nil, err
+		}
+		return "series", h.episodeTargets(ctx, episodes), nil
+	case "season":
+		if h.episodeRepo == nil {
+			return "", nil, catalog.ErrItemNotFound
+		}
+		episodes, err := h.episodeRepo.ListBySeasonID(ctx, target.Season.ContentID)
+		if err != nil {
+			return "", nil, err
+		}
+		return "season", h.episodeTargets(ctx, episodes), nil
+	default:
+		return "episode", []watchedLeafTarget{{
+			ContentID:       target.Episode.ContentID,
+			DurationSeconds: h.contentDurationSeconds(ctx, "", target.Episode.ContentID, target.Episode.Runtime),
+		}}, nil
+	}
 }
 
 // episodeTargets resolves the watched leaf targets for a season or series.

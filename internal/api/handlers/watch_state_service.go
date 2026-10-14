@@ -153,20 +153,22 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 // audiobook.
 // It is the command behind the v2 operation; the frozen v1 API has none.
 func (h *ItemsHandler) ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalog.AccessFilter) error {
-	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, filter)
+	// Only the target's type is needed: a season or series is rejected
+	// without loading its episodes.
+	target, err := h.lookupWatchedTarget(ctx, contentID, filter)
 	if err != nil {
 		if isNotFound(err) {
 			return apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear resume position")
 	}
-	if targetType != itemTypeMovie && targetType != itemTypeEpisode {
+	if target.Type != itemTypeMovie && target.Type != itemTypeEpisode {
 		return apiError(http.StatusBadRequest, "invalid_watch_target", "Only a movie or an episode has a resume position")
 	}
 	if h.watchState == nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	cleared, err := h.watchState.ClearResumePosition(ctx, userID, profileID, targets[0].ContentID)
+	cleared, err := h.watchState.ClearResumePosition(ctx, userID, profileID, contentID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear resume position")
 	}

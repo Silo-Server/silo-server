@@ -64,7 +64,6 @@ import {
   sectionKeys,
 } from "@/hooks/queries/keys";
 import {
-  removeInactiveWatchDetail,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
@@ -403,12 +402,6 @@ function handleUserStateEvent(
     });
   }
 
-  // Progress or watched state changed elsewhere, so a cached watch detail
-  // would start the next play at a resume point that no longer exists.
-  if (payload.content_id && (payload.change === "progress" || payload.change === "watched")) {
-    removeInactiveWatchDetail(queryClient, payload.content_id);
-  }
-
   // The patch above only carries played/favourite/watchlist, which is the whole
   // of what a favorite or watchlist event changes. Every other change — progress
   // above all, which arrives with no state at all — also moves fields the patch
@@ -422,6 +415,9 @@ function handleUserStateEvent(
           itemId: payload.content_id,
           skipItemDetail: detailFullyPatched,
           skipSimilarItems: true,
+          // A closed player's cached detail would resume at a position that
+          // no longer exists.
+          dropInactiveWatchDetail: payload.change === "progress" || payload.change === "watched",
         }
       : { skipSimilarItems: true },
   );

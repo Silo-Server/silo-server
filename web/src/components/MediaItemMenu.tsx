@@ -133,6 +133,11 @@ interface BuildMediaItemMenuModelOptions {
   mediaType: MediaItemType;
   userState?: MediaItemUserState;
   hasPartialProgress?: boolean;
+  /**
+   * Whether the item has a resume position to clear, rewatches included.
+   * Defaults to hasPartialProgress.
+   */
+  hasResumePosition?: boolean;
   isAdmin: boolean;
   canCurateMetadata?: boolean;
   showCollectionActions?: boolean;
@@ -151,6 +156,11 @@ interface MediaItemMenuProps {
   showFavoriteShortcut?: boolean;
   dismissAction?: DismissHomeItemVariables;
   hasPartialProgress?: boolean;
+  /**
+   * Whether the item has a resume position to clear, rewatches included, for
+   * lists that hide a watched item's progress. Defaults to hasPartialProgress.
+   */
+  hasResumePosition?: boolean;
   /** Enables the watched shortcut on wide cards such as Continue Watching. */
   showWatchedShortcut?: boolean;
   /** Uses smaller poster controls on narrow catalog cards. */
@@ -167,6 +177,7 @@ export function buildMediaItemMenuModel({
   mediaType,
   userState,
   hasPartialProgress = false,
+  hasResumePosition = hasPartialProgress,
   isAdmin,
   canCurateMetadata = isAdmin,
   showCollectionActions = true,
@@ -193,7 +204,7 @@ export function buildMediaItemMenuModel({
   }
 
   // Clears the resume point without passing through watched (issue #2134).
-  if ((mediaType === "movie" || mediaType === "episode") && hasPartialProgress) {
+  if ((mediaType === "movie" || mediaType === "episode") && hasResumePosition) {
     entries.push({ kind: "action", key: "resetProgress", label: "Reset Progress" });
   }
 
@@ -1164,6 +1175,7 @@ export default function MediaItemMenu({
   showFavoriteShortcut = true,
   dismissAction,
   hasPartialProgress = false,
+  hasResumePosition = hasPartialProgress,
   showWatchedShortcut = false,
   narrowPosterActions = false,
   quickActionMode = "none",
@@ -1228,6 +1240,7 @@ export default function MediaItemMenu({
     mediaType,
     userState: currentUserState,
     hasPartialProgress,
+    hasResumePosition,
     isAdmin,
     canCurateMetadata,
     showCollectionActions,

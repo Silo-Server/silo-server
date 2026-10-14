@@ -35,6 +35,11 @@ interface InvalidateMediaSurfaceOptions {
    */
   skipItemQueries?: boolean;
   skipSimilarItems?: boolean;
+  // The item's resume position changed, so a closed player's cached watch
+  // detail would start the next play at a stale point. It is dropped once the
+  // related items are known: that detail may be the only link from an
+  // episode to its series.
+  dropInactiveWatchDetail?: boolean;
   // The item may be one this client has never seen, such as an episode a
   // scan just added. Only catalog events can say so; progress, favorite and
   // watchlist events are about items that already exist.
@@ -96,9 +101,8 @@ export function cancelItemDetailQueries(queryClient: QueryClient, itemId: string
 }
 
 // The player starts from a cached watch detail's resume position while it
-// refetches, so a detail whose position changed elsewhere is dropped. An open
-// player's query is active and keeps its data.
-export function removeInactiveWatchDetail(queryClient: QueryClient, itemId: string) {
+// refetches. An open player's query is active and keeps its data.
+function removeInactiveWatchDetail(queryClient: QueryClient, itemId: string) {
   queryClient.removeQueries({
     queryKey: [...itemKeys.all, "watchDetail", itemId],
     type: "inactive",
@@ -422,6 +426,9 @@ export async function invalidateMediaSurfaceQueries(
   // that predates the mutation satisfy the invalidation and land in the cache
   // as fresh.
   const relatedIds = options.itemId ? relatedItemIds(queryClient, options.itemId) : undefined;
+  if (options.dropInactiveWatchDetail && options.itemId) {
+    removeInactiveWatchDetail(queryClient, options.itemId);
+  }
   // A new item nothing in the cache knows about, such as an episode a scan
   // just added, can't be traced to the season or series lists that should now
   // show it, so its event refreshes every such list. Other items' detail
@@ -519,6 +526,9 @@ export function scheduleMediaSurfaceInvalidation(
     skipSimilarItems: existing
       ? Boolean(existing.options.skipSimilarItems && options.skipSimilarItems)
       : options.skipSimilarItems,
+    dropInactiveWatchDetail: Boolean(
+      existing?.options.dropInactiveWatchDetail || options.dropInactiveWatchDetail,
+    ),
     watchedKeys: [...(existing?.options.watchedKeys ?? []), ...(options.watchedKeys ?? [])],
   };
   const now = Date.now();

@@ -913,6 +913,11 @@ describe("RealtimeEventsProvider", () => {
       });
     });
 
+    // Dropped by the coalesced surface refresh, after it has used the detail
+    // to find the episode's series.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
     expect(queryClient.getQueryData(watchKey)).toBeUndefined();
     expect(queryClient.getQueryData(otherKey)).toBeDefined();
   });

@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   fetchCatalogItemDetail: vi.fn(),
   v2: vi.fn(),
   removeItemFromHomeSectionCaches: vi.fn(),
-  removeInactiveWatchDetail: vi.fn(),
   cancelItemDetailQueries: vi.fn(),
   updateCatalogItemDetail: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
@@ -40,7 +39,6 @@ vi.mock("./catalogRead", () => ({
 vi.mock("./mediaSurfaceRefresh", () => ({
   removeItemFromHomeSectionCaches: (...args: unknown[]) =>
     mocks.removeItemFromHomeSectionCaches(...args),
-  removeInactiveWatchDetail: (...args: unknown[]) => mocks.removeInactiveWatchDetail(...args),
   cancelItemDetailQueries: (...args: unknown[]) => mocks.cancelItemDetailQueries(...args),
   updateCatalogItemDetail: (...args: unknown[]) => mocks.updateCatalogItemDetail(...args),
   invalidateMediaSurfaceQueries: (...args: unknown[]) =>
@@ -196,7 +194,6 @@ describe("useClearResumePosition", () => {
     mocks.v2.mockReset();
     mocks.v2.mockResolvedValue(undefined);
     mocks.removeItemFromHomeSectionCaches.mockReset();
-    mocks.removeInactiveWatchDetail.mockReset();
     mocks.cancelItemDetailQueries.mockReset();
     mocks.cancelItemDetailQueries.mockResolvedValue(undefined);
     mocks.updateCatalogItemDetail.mockReset();
@@ -231,16 +228,13 @@ describe("useClearResumePosition", () => {
       "movie-8f2c1a",
       "continue_watching",
     );
+    // The invalidation drops a closed player's cached watch detail once it
+    // has followed it to the series.
     expect(mocks.invalidateMediaSurfaceQueries).toHaveBeenCalledWith(queryClient, {
       itemId: "movie-8f2c1a",
       skipSimilarItems: true,
+      dropInactiveWatchDetail: true,
     });
-    // The invalidation reads the cached watch detail to find the series, so
-    // the detail is dropped only after it has started.
-    expect(mocks.removeInactiveWatchDetail).toHaveBeenCalledWith(queryClient, "movie-8f2c1a");
-    expect(mocks.invalidateMediaSurfaceQueries.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.removeInactiveWatchDetail.mock.invocationCallOrder[0]!,
-    );
     // Once at once from the patched cache, once after the server refresh.
     expect(mocks.bumpHomeRefreshSignal).toHaveBeenCalledTimes(2);
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Progress reset");

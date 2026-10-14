@@ -268,6 +268,19 @@ describe("buildMediaItemMenuModel", () => {
     expect(labels).toEqual(["Play from Beginning", "Mark Unwatched", "Reset Progress"]);
   });
 
+  it("offers reset progress for a rewatched episode in a list that hides its progress bar", () => {
+    const model = buildMediaItemMenuModel({
+      mediaType: "episode",
+      hasPartialProgress: false,
+      hasResumePosition: true,
+      userState: { played: true, is_favorite: false, in_watchlist: false },
+      isAdmin: false,
+      showCollectionActions: false,
+    });
+
+    expect(model.some((item) => item.kind === "action" && item.key === "resetProgress")).toBe(true);
+  });
+
   it("offers reset progress only when a movie or episode has a resume position", () => {
     const cases = [
       { mediaType: "movie", hasPartialProgress: false, played: true },

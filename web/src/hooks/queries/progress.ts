@@ -9,7 +9,6 @@ import { fetchCatalogItemDetail } from "./catalogRead";
 import {
   cancelItemDetailQueries,
   invalidateMediaSurfaceQueries,
-  removeInactiveWatchDetail,
   removeItemFromHomeSectionCaches,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
@@ -158,14 +157,11 @@ export function useClearResumePosition() {
       removeItemFromHomeSectionCaches(queryClient, contentId, "continue_watching");
       bumpHomeRefreshSignal(queryClient);
       toast.success("Progress reset");
-      // The invalidation finds the series and season to refresh through the
-      // cached watch detail, so it starts before that detail is dropped.
-      const invalidation = invalidateMediaSurfaceQueries(queryClient, {
+      await invalidateMediaSurfaceQueries(queryClient, {
         itemId: contentId,
         skipSimilarItems: true,
+        dropInactiveWatchDetail: true,
       });
-      removeInactiveWatchDetail(queryClient, contentId);
-      await invalidation;
       bumpHomeRefreshSignal(queryClient);
     },
   });

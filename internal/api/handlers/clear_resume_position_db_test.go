@@ -141,6 +141,19 @@ func TestClearResumePositionTargetsDB(t *testing.T) {
 		t.Fatalf("clear missing = %v, want 404", err)
 	}
 
+	// Mark watched shares the lookup and still expands a season or series
+	// into its episodes; the reset above rejected them before that.
+	for _, want := range []struct{ id, kind string }{{movie, "movie"}, {series, "series"}, {season, "season"}, {episode, "episode"}} {
+		kind, targets, err := h.resolveWatchedTargets(ctx, want.id, catalog.AccessFilter{})
+		leaf := episode
+		if want.id == movie {
+			leaf = movie
+		}
+		if err != nil || kind != want.kind || len(targets) != 1 || targets[0].ContentID != leaf {
+			t.Fatalf("resolveWatchedTargets(%s) = %q, %+v, %v; want %s with leaf %s", want.id, kind, targets, err, want.kind, leaf)
+		}
+	}
+
 	// Nothing left to clear: no write and no event.
 	if err := h.ClearResumePosition(ctx, userID, profileID, movie, catalog.AccessFilter{}); err != nil {
 		t.Fatal(err)
