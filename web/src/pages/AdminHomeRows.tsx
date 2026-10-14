@@ -23,6 +23,7 @@ import {
   fetchAdminSectionSnapshot,
   fetchAdminSectionDeleteTargets,
   fetchAdminSections,
+  type LibraryRestoreFailure,
 } from "@/api/adminSections";
 import { V2ProblemError } from "@/api/v2/request";
 import { HomeRowsPage, type SharedRowMenuItems } from "@/components/homeRows/HomeRowsPage";
@@ -38,8 +39,8 @@ import type { ActionMenuItem } from "@/components/calm/ActionMenu";
 import { useNewRowHighlight } from "@/components/homeRows/useNewRowHighlight";
 import { useRowFocus } from "@/components/homeRows/useRowFocus";
 import { useRowDialog, useRowLinks } from "@/components/homeRows/useRowLinks";
-import { libraryPagesOf, pageLabel, pageParam, samePage } from "@/lib/homeRows/pages";
-import type { HomeRow } from "@/lib/homeRows/types";
+import { libraryPagesOf, pageLabel, pageParam } from "@/lib/homeRows/pages";
+import type { HomeRow, LibraryPage, PageRef } from "@/lib/homeRows/types";
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
 
 function rowCount(count: number) {
@@ -63,6 +64,37 @@ function reportShownBatch({ changedIds, failures }: ShownBatchResult, shown: boo
     toast.warning(`${verb} ${changedIds.length} of ${rowCount(attempted)}.`, { description });
   else
     toast.error(`Could not turn ${shown ? "on" : "off"} ${rowCount(attempted)}.`, { description });
+}
+
+/** Reports a restore, naming every other library page that kept its rows. */
+function reportRestore(
+  page: PageRef,
+  pageLabel: string,
+  alsoPages: LibraryPage[],
+  failures: LibraryRestoreFailure[],
+) {
+  if (alsoPages.length === 0) {
+    toast.success(`Restored the default rows on ${pageLabel}.`);
+    return;
+  }
+  const restored = alsoPages.length - failures.length;
+  const noun = page.kind === "home" ? "library page" : "other library page";
+  const pages = (count: number) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+  if (failures.length === 0) {
+    toast.success(`Restored the default rows on ${pageLabel} and ${pages(restored)}.`);
+    return;
+  }
+  const description = failures
+    .map(({ libraryId, error }) => {
+      const label =
+        alsoPages.find((page) => page.id === libraryId)?.label ?? `Library ${libraryId}`;
+      return `${label}: ${adminSectionMutationMessage(error, "Could not restore the default rows")}`;
+    })
+    .join(" ");
+  toast.warning(
+    `Restored the default rows on ${pageLabel} and ${restored} of ${pages(alsoPages.length)}.`,
+    { description },
+  );
 }
 
 export default function AdminHomeRows() {
@@ -133,12 +165,14 @@ export default function AdminHomeRows() {
   const restoreDefaultsMutation = useRestoreDefaultSections();
   const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
   const [resetProfiles, setResetProfiles] = useState(false);
+  const [restoreAll, setRestoreAll] = useState(false);
   // The Add row / Edit row dialog: open with no session to add a row.
   const [rowDialog, setRowDialog] = useRowDialog();
   const [highlightId, setHighlightId] = useNewRowHighlight();
   // ⋯ Add to other libraries…: the row being copied.
   const [copyRow, setCopyRow] = useState<HomeRow | null>(null);
   const libraryPages = useMemo(() => libraryPagesOf(adapter.pages), [adapter.pages]);
+  const otherLibraryPages = libraryPages.filter((page) => page.id !== activeLibraryId);
   /** The library pages a row on this page fits, this page included. */
   const copyPagesFor = (row: HomeRow) =>
     activeLibraryId === null ? [] : copyTargetPages(row, libraryPages, activeLibraryId);
@@ -299,22 +333,26 @@ export default function AdminHomeRows() {
     snapshotRequest.current++;
     setConfirmRestoreOpen(false);
     setResetProfiles(false);
+    setRestoreAll(false);
   }
 
   function confirmRestore() {
     if (!restoreSnapshot) return;
+    const alsoPages = restoreAll ? otherLibraryPages : [];
     restoreDefaultsMutation.mutate(
       {
         scope: restoreSnapshot.scope,
         library_id: restoreSnapshot.libraryId,
         etag: restoreSnapshot.etag,
         reset_profiles: Boolean(capabilities?.reset_profiles && resetProfiles),
+        alsoLibraryIds: alsoPages.map((page) => page.id),
       },
       {
-        onSuccess: () => {
-          toast.success(`Restored the default rows on ${currentPageLabel}.`);
+        onSuccess: (failures) => {
+          reportRestore(adapter.page, currentPageLabel, alsoPages, failures);
           setConfirmRestoreOpen(false);
           setResetProfiles(false);
+          setRestoreAll(false);
         },
         onError: (error) => {
           const stale = error instanceof V2ProblemError && error.status === 412;
@@ -500,13 +538,11 @@ export default function AdminHomeRows() {
           open={confirmRestoreOpen}
           page={adapter.page}
           pageLabel={currentPageLabel}
-          otherLibraryLabels={adapter.pages
-            .filter(
-              (option) => option.ref.kind === "library" && !samePage(option.ref, adapter.page),
-            )
-            .map((option) => option.label)}
+          otherLibraryLabels={otherLibraryPages.map((page) => page.label)}
           rowCount={restoreSections.length}
           collectionRowTitles={restoreCollectionTitles}
+          restoreAll={restoreAll}
+          onRestoreAllChange={setRestoreAll}
           resetSupported={Boolean(capabilities?.reset_profiles)}
           resetProfiles={resetProfiles}
           onResetProfilesChange={setResetProfiles}

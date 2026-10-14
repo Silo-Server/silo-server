@@ -10,6 +10,7 @@ import AdminHomeRows from "./AdminHomeRows";
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
+  success: vi.fn(),
   error: vi.fn(),
   warning: vi.fn(),
 }));
@@ -18,7 +19,7 @@ vi.mock("@/api/v2/request", async () => ({
   v2: mocks.request,
 }));
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: mocks.error, warning: mocks.warning },
+  toast: { success: mocks.success, error: mocks.error, warning: mocks.warning },
 }));
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useAdminLibraries: () => ({ data: libraries }),
@@ -261,7 +262,9 @@ describe("admin section captured snapshots", () => {
     await setup();
     await chooseMoreAction("Restore defaults…");
     const dialog = await screen.findByRole("dialog", { name: "Restore Home to the default rows?" });
-    expect(within(dialog).getByRole("switch")).toBeDisabled();
+    expect(
+      within(dialog).getByRole("switch", { name: "Also reset every profile's Home" }),
+    ).toBeDisabled();
     expect(
       within(dialog).getByText("Resetting profiles isn't available on this server."),
     ).toBeVisible();
@@ -299,6 +302,74 @@ describe("admin section captured snapshots", () => {
       expect.objectContaining({ operation: "PUT /api/v2/admin/sections/defaults" }),
     ]);
     expect(writes[0]!.args.body?.reset_profiles).toBe(true);
+  });
+  it("also restores every library page, each over its current version", async () => {
+    resetSupported = true;
+    await setup();
+    await chooseMoreAction("Restore defaults…");
+    const dialog = await screen.findByRole("dialog", { name: "Restore Home to the default rows?" });
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: "Also restore every library page" }),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("switch", {
+        name: "Also reset every profile's Home and library pages",
+      }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore defaults" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(
+      writes.map(({ operation, args }) => [operation, args.query, args.body?.reset_profiles]),
+    ).toEqual([
+      ["PUT /api/v2/admin/sections/defaults", { scope: "home", library_id: undefined }, true],
+      ["PUT /api/v2/admin/sections/defaults", { scope: "library", library_id: "7" }, true],
+    ]);
+    expect(mocks.success).toHaveBeenCalledWith(
+      "Restored the default rows on Home and 1 library page.",
+    );
+  });
+  it("leaves the library pages alone when this page changed since the dialog opened", async () => {
+    await setup();
+    await chooseMoreAction("Restore defaults…");
+    const dialog = await screen.findByRole("dialog", { name: "Restore Home to the default rows?" });
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: "Also restore every library page" }),
+    );
+    revision = 2;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore defaults" }));
+    await within(dialog).findByText(/These rows changed since you opened this/);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.args.query?.scope).toBe("home");
+  });
+  it("names the library pages that kept their rows", async () => {
+    libraries.push({ id: 8, name: "TV Shows", type: "tv" });
+    const implementation = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation((operation: string, args: Args = {}) => {
+      if (operation === "PUT /api/v2/admin/sections/defaults" && args.query?.library_id === "7") {
+        writes.push({ operation, args });
+        return Promise.reject(v2Problem(500, "internal_error", "Database unavailable"));
+      }
+      return implementation(operation, args);
+    });
+    try {
+      await setup();
+      await chooseMoreAction("Restore defaults…");
+      const dialog = await screen.findByRole("dialog", {
+        name: "Restore Home to the default rows?",
+      });
+      fireEvent.click(
+        within(dialog).getByRole("switch", { name: "Also restore every library page" }),
+      );
+      fireEvent.click(within(dialog).getByRole("button", { name: "Restore defaults" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(writes.map(({ args }) => args.query?.library_id)).toEqual([undefined, "7", "8"]);
+      expect(mocks.warning).toHaveBeenCalledWith(
+        "Restored the default rows on Home and 1 of 2 library pages.",
+        { description: "Movies: Database unavailable" },
+      );
+    } finally {
+      libraries.pop();
+    }
   });
   it("names the collection rows as of the version Restore replaces", async () => {
     await setup();

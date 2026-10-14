@@ -172,3 +172,31 @@ export function restoreAdminSections({
     body: { reset_profiles },
   });
 }
+export interface LibraryRestoreFailure {
+  libraryId: number;
+  error: unknown;
+}
+/**
+ * Restores each library page over the version it has when its turn comes, one
+ * page at a time. A page that fails doesn't stop the rest; the failures are returned.
+ */
+export async function restoreLibraryPages(
+  libraryIds: readonly number[],
+  resetProfiles: boolean | undefined,
+): Promise<LibraryRestoreFailure[]> {
+  const failures: LibraryRestoreFailure[] = [];
+  for (const libraryId of libraryIds) {
+    try {
+      const { etag } = await fetchAdminSectionOrderSnapshot("library", libraryId);
+      await restoreAdminSections({
+        scope: "library",
+        library_id: libraryId,
+        etag,
+        reset_profiles: resetProfiles,
+      });
+    } catch (error) {
+      failures.push({ libraryId, error });
+    }
+  }
+  return failures;
+}
