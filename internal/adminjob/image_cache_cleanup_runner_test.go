@@ -476,6 +476,37 @@ func TestImageCacheCleanupCanceledAtSliceDeadlineDoesNotYield(t *testing.T) {
 	}
 }
 
+// Yield and a cancel request race on the same row. Whichever commits first,
+// the cleanup ends canceled with its totals: a flag set before Yield makes
+// Yield cancel the row itself, and a flag set after it finds the job queued.
+func TestImageCacheCleanupYieldCancelsAFlaggedRow(t *testing.T) {
+	r := lifecycleRepo(t)
+	job := queueImageCacheCleanupJob(t, r, cleanupPrefixes(6))
+	claimed, err := r.ClaimNextQueued(t.Context(), JobTypeImageCacheCleanup)
+	if err != nil || claimed == nil || claimed.ID != job.ID {
+		t.Fatalf("claim: %+v %v", claimed, err)
+	}
+	if _, err := r.RequestCancellation(t.Context(), job.ID); err != nil {
+		t.Fatalf("request cancellation: %v", err)
+	}
+	result := ImageCacheCleanupResult{DeletedPrefixes: 2, DeletedS3Objects: 5}
+	message := imageCacheCleanupCanceledMessage(2, 6)
+	if err := r.withClaim(claimed).Yield(t.Context(), job.ID, 2, 6, "Cleaning cached images 2/6", result, message, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("yield: %v", err)
+	}
+
+	canceled, err := r.GetByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled.Status != StatusCancelled || canceled.Message != message || canceled.ProgressCurrent != 2 || canceled.CompletedAt == nil || canceled.ExpiresAt == nil {
+		t.Fatalf("status=%s message=%q progress=%d completed=%v expires=%v, want canceled at 2/6", canceled.Status, canceled.Message, canceled.ProgressCurrent, canceled.CompletedAt, canceled.ExpiresAt)
+	}
+	if got := imageCacheCleanupResultOf(t, canceled); got.DeletedPrefixes != 2 || got.DeletedS3Objects != 5 {
+		t.Fatalf("canceled result %+v, want the totals passed to Yield", got)
+	}
+}
+
 // A cancellation that arrives during the last prefix, and is only seen after
 // it, still ends canceled, but keeps the deletion totals rather than the empty
 // result Complete would write, and does not claim that undeleted images remain.

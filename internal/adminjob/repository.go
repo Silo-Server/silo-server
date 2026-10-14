@@ -733,23 +733,30 @@ func (r *Repository) CancelQueued(ctx context.Context, id, message string, expir
 // next claim reads both back and resumes from them. requested_at is kept: the
 // admin job list sorts and pages by it, and among queued jobs of one type the
 // oldest still finishes first.
-func (r *Repository) Yield(ctx context.Context, id string, current, total int, message string, result any) error {
+// Yield returns a running job to the queue with its progress and result.
+// When canceledMessage is set and a cancellation was requested before this
+// write, the same write ends the job as canceled with that message instead,
+// so a cancel cannot slip in between a separate check and the requeue.
+func (r *Repository) Yield(ctx context.Context, id string, current, total int, message string, result any, canceledMessage string, expiresAt time.Time) error {
 	payload, err := marshalPayload(result)
 	if err != nil {
 		return fmt.Errorf("marshaling admin job result payload: %w", err)
 	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
-		SET status = $2,
+		SET status = CASE WHEN cancel_requested AND $9 <> '' THEN $10 ELSE $2 END,
 			progress_current = $3,
 			progress_total = $4,
-			message = $5,
+			message = CASE WHEN cancel_requested AND $9 <> '' THEN $9 ELSE $5 END,
 			result_payload = $6,
-			started_at = NULL,
-			heartbeat_at = NULL,
+			started_at = CASE WHEN cancel_requested AND $9 <> '' THEN started_at ELSE NULL END,
+			completed_at = CASE WHEN cancel_requested AND $9 <> '' THEN NOW() ELSE completed_at END,
+			heartbeat_at = CASE WHEN cancel_requested AND $9 <> '' THEN NOW() ELSE NULL END,
+			expires_at = CASE WHEN cancel_requested AND $9 <> '' THEN GREATEST($11, NOW() + INTERVAL '24 hours') ELSE expires_at END,
 			updated_at = NOW()
 		WHERE id = $1 AND status = $7 AND ($8::bigint IS NULL OR claim_generation = $8)`,
 		id, StatusQueued, current, total, message, payload, StatusRunning, r.claim,
+		canceledMessage, StatusCancelled, expiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("yielding admin job: %w", err)

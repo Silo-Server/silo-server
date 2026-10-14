@@ -786,7 +786,10 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 				"prefix_index", next, "stalled_claims", result.StalledClaims)
 		}
 		message := fmt.Sprintf("Cleaning cached images %d/%d", next, total)
-		if err := r.repo.Yield(finishCtx, job.ID, next, total, message, result); err != nil {
+		// A cancel that commits after the check above still ends the job here:
+		// Yield cancels a flagged row in the same write instead of requeueing it.
+		if err := r.repo.Yield(finishCtx, job.ID, next, total, message, result,
+			imageCacheCleanupCanceledMessage(next, total), time.Now().UTC().Add(r.retention)); err != nil {
 			slog.Warn("admin jobs: failed to yield image cache cleanup", "job_id", job.ID, "error", err)
 			return
 		}
