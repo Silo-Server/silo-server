@@ -14,7 +14,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+var errControlUnavailable = errors.New("worker control temporarily unavailable")
+
 const sourceRenewInterval = 45 * time.Second
+const sourceRenewRetryInterval = time.Second
 const sourceRenewTimeout = 2 * time.Second
 const sourceRenewParallelism = 8
 const maxSourceRenewals = 128
@@ -199,7 +202,20 @@ func (s *sourceRenewals) renewDue(ctx context.Context, now time.Time) {
 			requestCtx, cancel := context.WithTimeout(ctx, sourceRenewTimeout)
 			defer cancel()
 			if err := s.runtime.renewSource(requestCtx, entry.source); err != nil {
-				if ctx.Err() == nil {
+				if ctx.Err() != nil {
+					return
+				}
+				if errors.Is(err, errControlUnavailable) {
+					if !s.runtime.workAllowed(entry.source.WorkID, entry.source.Generation) {
+						s.remove(entry)
+						return
+					}
+					s.mu.Lock()
+					if current := s.entries[entry.handle]; current == entry {
+						current.next = now.Add(sourceRenewRetryInterval)
+					}
+					s.mu.Unlock()
+				} else {
 					s.fail(entry)
 				}
 				return

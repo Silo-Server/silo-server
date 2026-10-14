@@ -145,15 +145,22 @@ func TestReaderAtCancellationReleasesBlockedNetworkRead(t *testing.T) {
 		t.Fatalf("caller cancellation revoked source: %v", err)
 	}
 }
-func TestReaderAtRejectsWrongRangesAndShortBodies(t *testing.T) {
+func TestReaderAtRejectsWrongRangesAndRetainsShortBodyAuthority(t *testing.T) {
 	for _, test := range []struct{ name, etag, contentRange, body string }{{"etag", `"wrong"`, "bytes 0-9/10", "0123456789"}, {"range", `"r"`, "bytes 1-9/10", "0123456789"}, {"shortbody", `"r"`, "bytes 0-9/10", "abc"}} {
 		t.Run(test.name, func(t *testing.T) {
 			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("ETag", test.etag)
-				w.Header().Set("Content-Range", test.contentRange)
-				w.Header().Set("Content-Length", "10")
+				contentRange, body, length := test.contentRange, test.body, int64(10)
+				if test.name == "shortbody" {
+					start, end, _ := requestedRange(r.Header.Get("Range"), 10)
+					contentRange = fmt.Sprintf("bytes %d-%d/10", start, end)
+					length = end - start + 1
+					body = strings.Repeat("x", int(min(3, length-1)))
+				}
+				w.Header().Set("Content-Range", contentRange)
+				w.Header().Set("Content-Length", fmt.Sprint(length))
 				w.WriteHeader(206)
-				_, _ = io.WriteString(w, test.body)
+				_, _ = io.WriteString(w, body)
 			}))
 			defer origin.Close()
 			adapter, err := New(Options{Origins: []string{origin.URL}, AllowHTTP: true, Allowed: func(string, uint64) bool { return true }})
@@ -174,7 +181,11 @@ func TestReaderAtRejectsWrongRangesAndShortBodies(t *testing.T) {
 			if n, err := reader.ReadAt(b[:], 0); n != 0 || err == nil {
 				t.Fatalf("bad source returned bytes n=%d err=%v", n, err)
 			}
-			if handle.Validate(t.Context()) == nil {
+			if test.name == "shortbody" {
+				if handle.Validate(t.Context()) != nil {
+					t.Fatal("truncated operation revoked shared source")
+				}
+			} else if handle.Validate(t.Context()) == nil {
 				t.Fatal("corrupt source remained admitted")
 			}
 		})

@@ -280,8 +280,8 @@ func TestSourceRenewalCancellationAndUnavailableDeadline(t *testing.T) {
 	case <-time.After(sourceRenewTimeout + time.Second):
 		t.Fatal("unavailable renewal exceeded bounded timeout")
 	}
-	if !r.renewals.blocked("work", 4) {
-		t.Fatal("unavailable renewal did not fence work")
+	if r.renewals.blocked("work", 4) {
+		t.Fatal("unavailable renewal permanently fenced healthy signed work")
 	}
 	select {
 	case err := <-snapshotErrors:

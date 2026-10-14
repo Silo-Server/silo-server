@@ -115,13 +115,20 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 			return workersource.ErrDenied
 		}
 		return nil
-	}, Active: func(ctx context.Context, node int, work string, generation uint64) bool {
-		return service != nil && service.WorkActive(ctx, node, work, generation)
+	}, ActiveStatus: func(ctx context.Context, node int, work string, generation uint64) (bool, error) {
+		if service == nil {
+			return false, workersource.ErrUnavailable
+		}
+		return service.WorkActiveStatus(ctx, node, work, generation)
 	}, VerifyRequest: func(request *http.Request, node int) error {
 		if service == nil {
 			return workersource.ErrUnavailable
 		}
-		return service.VerifyRequest(request, node, workeridentity.DomainSourceRequest)
+		err := service.VerifyRequest(request, node, workeridentity.DomainSourceRequest)
+		if errors.Is(err, workercontrolcore.ErrUnavailable) {
+			return errors.Join(workersource.ErrUnavailable, err)
+		}
+		return err
 	}})
 	if err != nil {
 		return nil, err

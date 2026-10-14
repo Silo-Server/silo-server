@@ -29,3 +29,27 @@
 ./internal/playback TestStreamDenyStatusReadsLiveNegativeAndPreservesUnknown
 ./cmd/silo TestWorkerReportOverlappingTransportsUseCommittedRoute
 ./internal/api/handlers TestPlaybackV3PersistsCurrentReportTransport
+
+# Source recovery must preserve exact bytes and current signed authority.
+# The trusted integration job provisions FFmpeg; dbpins rejects a missing
+# binary because TestFFmpegSourceTransferFaultParity would otherwise skip.
+./internal/workersource TestTransientOpenMustRetainGrant
+./internal/workersource TestEqualSizeRestoredMtimeStillChanged
+./internal/workersource TestTransientAuthorityChecksWithholdWithoutDeletingGrant
+./internal/workersource TestRenewUnavailableOpenDoesNotExtendOrDeleteGrant
+./internal/workersource TestConfirmedMutationRemainsDefinitiveWhenCleanupUnavailable
+./internal/workerinput TestTransientIndexMustNotCloseSharedHandle
+./internal/workerinput TestTruncatedFFmpegBodyMustNotRetireHandle
+./internal/workerinput TestSourceTransferResumesExactRemainingRange
+./internal/workerinput TestSourceTransferRetryCancellationReleasesReader
+./internal/workerinput TestSourceTransferRetriesStopAtOriginalSignedExpiry
+./internal/workerinput TestSourceTransferDefinitiveLossDuringRetryRetiresHandle
+./internal/workerinput TestSourceTransferTransientExhaustionRetainsHandle
+./internal/workerinput TestFFmpegSourceTransferFaultParity
+./internal/workercontrol TestTransientRenewalMustNotFenceUnexpiredGeneration
+./internal/workercontrol TestStageSourcesReplacesClosedHandleMaps
+./internal/workercontrol TestSourceRenewalBodyFailureRecovery
+./internal/workercontrol TestSourceRenewalPartial200Timeout
+./internal/workercontrolcore TestWorkerProofDependencyErrorRemainsUnavailable
+./internal/workercontrolcore TestWorkActiveStatusUnknownDoesNotCacheDenial
+./internal/workercontrolcore TestSourceHTTPAndRenewClassifyUnavailableVersusStopped

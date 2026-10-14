@@ -81,9 +81,16 @@ the same admission check.
 Core source delivery supports HEAD, conditional reads and single byte ranges.
 Every read checks its grant, strong file identity and continuing authority.
 The adapter checks status, ETag, size and returned range before forwarding
-bytes. File replacement, truncated responses, stale grants and cancellation
-fail the operation. Streaming uses fixed 64 KiB buffers; it does not stage the
-whole source file or scale memory with source size.
+bytes. A normal transfer uses one sequential upstream response. Transport
+errors, 429/5xx responses and short bodies permit up to four total attempts
+under the original request context and current signed work authority. An
+interrupted response resumes only its undelivered suffix, with the same grant
+and ETag; every resumed response is validated before forwarding bytes. Retry
+exhaustion fails the operation while retaining the handle for recovery.
+Confirmed 403/410/412 responses or an invalid successful representation retire
+the handle. Cancellation stops the request. Streaming uses fixed 64 KiB
+buffers; it does not stage the whole source file or scale memory with source
+size.
 An authorized reader can pause without losing its stream. A bounded authority
 watcher renews the write deadline while access remains valid and interrupts a
 blocked write when access is revoked. Adapter cancellation also interrupts
@@ -108,8 +115,11 @@ every source.
 
 The default source grant lasts 120 seconds. Workers renew active handles every
 45 seconds, using at most eight concurrent requests with two-second deadlines.
-Renewal must return the same complete descriptor. A failed renewal fences that
-generation and stops its producers without cancelling a newer replacement.
+Renewal must return the same complete descriptor. Temporary network or
+dependency failures, including response-body transport errors, retry once a
+second while the existing signed work authority remains valid. Failed checks
+never extend authority. Definitive refusal or an invalid signed reply fences
+that generation and stops its producers without cancelling a newer replacement.
 Source and reader quotas, cancellation and expiry bound resources at both ends.
 
 Selected embedded text subtitles may be extracted to bounded local ASS files

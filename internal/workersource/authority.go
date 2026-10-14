@@ -42,6 +42,7 @@ type Options struct {
 	Origin        string
 	PathApprover  func(context.Context, string, string) error
 	Active        func(context.Context, int, string, uint64) bool
+	ActiveStatus  func(context.Context, int, string, uint64) (bool, error)
 	VerifyRequest func(*http.Request, int) error
 	Limits        Limits
 	Now           func() time.Time
@@ -72,7 +73,7 @@ type Authority struct {
 }
 
 func New(o Options) (*Authority, error) {
-	if o.Store == nil || o.PathApprover == nil || o.Active == nil || o.VerifyRequest == nil {
+	if o.Store == nil || o.PathApprover == nil || o.Active == nil && o.ActiveStatus == nil || o.VerifyRequest == nil {
 		return nil, ErrDenied
 	}
 	u, err := url.Parse(o.Origin)
@@ -112,6 +113,31 @@ func validKind(kind string) bool {
 	return false
 }
 
+func (a *Authority) checkActive(ctx context.Context, node int, work string, generation uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if a.options.ActiveStatus != nil {
+		active, err := a.options.ActiveStatus(ctx, node, work, generation)
+		if err != nil {
+			return err
+		}
+		if active {
+			return nil
+		}
+	} else if a.options.Active(ctx, node, work, generation) {
+		return nil
+	}
+	return ErrInactive
+}
+
+func (a *Authority) invalidateChanged(ctx context.Context, grant string, err error) error {
+	if errors.Is(err, ErrChanged) || errors.Is(err, ErrDenied) {
+		return a.invalidate(ctx, grant, err)
+	}
+	return err
+}
+
 // Acquire is called by admitted core work, never by a viewer-facing request.
 func (a *Authority) Acquire(ctx context.Context, node int, work string, generation uint64, path, kind string) (workerwire.Source, error) {
 	if err := ctx.Err(); err != nil {
@@ -120,11 +146,11 @@ func (a *Authority) Acquire(ctx context.Context, node int, work string, generati
 	if !validWork(node, work, generation) || !validKind(kind) || !filepath.IsAbs(path) {
 		return workerwire.Source{}, ErrDenied
 	}
-	if !a.options.Active(ctx, node, work, generation) {
-		return workerwire.Source{}, ErrInactive
+	if err := a.checkActive(ctx, node, work, generation); err != nil {
+		return workerwire.Source{}, err
 	}
 	if err := a.options.PathApprover(ctx, path, kind); err != nil {
-		return workerwire.Source{}, ErrDenied
+		return workerwire.Source{}, err
 	}
 	f, identity, err := openPin(path)
 	if err != nil {
@@ -132,7 +158,7 @@ func (a *Authority) Acquire(ctx context.Context, node int, work string, generati
 	}
 	defer func() { _ = f.Close() }()
 	if err := a.options.PathApprover(ctx, path, kind); err != nil {
-		return workerwire.Source{}, ErrDenied
+		return workerwire.Source{}, err
 	}
 	idBytes, _ := json.Marshal([]string{a.options.Origin, path, kind})
 	id := sha256.Sum256(idBytes)
@@ -152,9 +178,11 @@ func (a *Authority) Acquire(ctx context.Context, node int, work string, generati
 	if err := a.options.Store.Create(ctx, record, a.options.Limits); err != nil {
 		return workerwire.Source{}, err
 	}
-	if !a.options.Active(ctx, node, work, generation) {
-		_ = a.options.Store.Delete(ctx, grant)
-		return workerwire.Source{}, ErrInactive
+	if err := a.checkActive(ctx, node, work, generation); err != nil {
+		if errors.Is(err, ErrInactive) {
+			_ = a.options.Store.Delete(ctx, grant)
+		}
+		return workerwire.Source{}, err
 	}
 	return source, nil
 }
@@ -174,29 +202,29 @@ func (a *Authority) scoped(ctx context.Context, node int, work string, generatio
 }
 
 func (a *Authority) Renew(ctx context.Context, node int, work string, generation uint64, grant string) (workerwire.Source, error) {
-	if !a.options.Active(ctx, node, work, generation) {
-		return workerwire.Source{}, ErrInactive
+	if err := a.checkActive(ctx, node, work, generation); err != nil {
+		return workerwire.Source{}, err
 	}
 	r, err := a.scoped(ctx, node, work, generation, grant)
 	if err != nil {
 		return workerwire.Source{}, err
 	}
 	if err := a.options.PathApprover(ctx, r.Path, r.Source.Ref.Kind); err != nil {
-		return workerwire.Source{}, ErrDenied
+		return workerwire.Source{}, err
 	}
 	f, identity, err := openPin(r.Path)
 	if err != nil {
-		return workerwire.Source{}, a.invalidate(ctx, grant, err)
+		return workerwire.Source{}, a.invalidateChanged(ctx, grant, err)
 	}
 	defer func() { _ = f.Close() }()
 	if identity != r.Identity {
 		return workerwire.Source{}, a.invalidate(ctx, grant, ErrChanged)
 	}
 	if err := validatePin(f, r.Path, r.Identity); err != nil {
-		return workerwire.Source{}, a.invalidate(ctx, grant, err)
+		return workerwire.Source{}, a.invalidateChanged(ctx, grant, err)
 	}
-	if !a.options.Active(ctx, node, work, generation) {
-		return workerwire.Source{}, ErrInactive
+	if err := a.checkActive(ctx, node, work, generation); err != nil {
+		return workerwire.Source{}, err
 	}
 	if err := a.options.Store.Extend(ctx, grant, a.options.Now().Add(DefaultTTL)); err != nil {
 		return workerwire.Source{}, err
@@ -225,7 +253,7 @@ func (a *Authority) RevokeWork(ctx context.Context, node int, work string, gener
 }
 func (a *Authority) invalidate(ctx context.Context, grant string, cause error) error {
 	if err := a.options.Store.Delete(ctx, grant); err != nil {
-		return ErrUnavailable
+		return errors.Join(cause, ErrUnavailable)
 	}
 	return cause
 }

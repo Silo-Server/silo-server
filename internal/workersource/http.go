@@ -48,7 +48,11 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.options.VerifyRequest(r, node); err != nil {
-		sourceError(w, r, 401)
+		status := http.StatusUnauthorized
+		if errors.Is(err, ErrUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusServiceUnavailable
+		}
+		sourceError(w, r, status)
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Silo-Source-Grant")), []byte(parts[2])) != 1 {
@@ -72,12 +76,12 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		sourceError(w, r, 410)
 		return
 	}
-	if !a.options.Active(r.Context(), node, record.Source.WorkID, record.Source.Generation) {
-		sourceError(w, r, 403)
+	if err := a.checkActive(r.Context(), node, record.Source.WorkID, record.Source.Generation); err != nil {
+		sourceError(w, r, HTTPStatus(err))
 		return
 	}
 	if err := a.options.PathApprover(r.Context(), record.Path, record.Source.Ref.Kind); err != nil {
-		sourceError(w, r, 403)
+		sourceError(w, r, HTTPStatus(err))
 		return
 	}
 	match := r.Header.Get("If-Match")
@@ -94,9 +98,12 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f, identity, err := openPin(record.Path)
-	if err != nil || identity != record.Identity {
-		_ = a.invalidate(r.Context(), record.Source.Grant, ErrChanged)
-		sourceError(w, r, 410)
+	if err == nil && identity != record.Identity {
+		err = ErrChanged
+	}
+	if err != nil {
+		err = a.invalidateChanged(r.Context(), record.Source.Grant, err)
+		sourceError(w, r, HTTPStatus(err))
 		if f != nil {
 			_ = f.Close()
 		}
@@ -153,13 +160,13 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		unexpired := a.options.Now().Before(record.ExpiresAt)
 		authorityMu.Unlock()
-		return unexpired && a.options.Active(checkCtx, node, record.Source.WorkID, record.Source.Generation) && checkCtx.Err() == nil
+		return unexpired && a.checkActive(checkCtx, node, record.Source.WorkID, record.Source.Generation) == nil && checkCtx.Err() == nil
 	}
 	invalidate := func(err error) {
 		if streamCtx.Err() == nil {
 			ctx, cancel := context.WithTimeout(streamCtx, sourceCheckTimeout)
 			defer cancel()
-			_ = a.invalidate(ctx, record.Source.Grant, err)
+			_ = a.invalidateChanged(ctx, record.Source.Grant, err)
 		}
 	}
 	controller := http.NewResponseController(w)
@@ -226,7 +233,11 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if readErr != nil || int64(n) != count {
-			invalidate(ErrChanged)
+			// Failed storage reads do not establish a new representation. A
+			// successful unequal stat remains a definitive mutation fence.
+			if err := validatePin(f, record.Path, record.Identity); err != nil {
+				invalidate(err)
+			}
 			return
 		}
 		if err := validatePin(f, record.Path, record.Identity); err != nil {
@@ -249,6 +260,11 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func sourceStatus(err error) int {
+	return HTTPStatus(err)
+}
+
+// HTTPStatus keeps dependency failure distinct from definite authority loss.
+func HTTPStatus(err error) int {
 	switch {
 	case errors.Is(err, ErrNotFound), errors.Is(err, ErrExpired), errors.Is(err, ErrChanged):
 		return 410
@@ -261,6 +277,9 @@ func sourceStatus(err error) int {
 	}
 }
 func sourceError(w http.ResponseWriter, r *http.Request, status int) {
+	if status == http.StatusServiceUnavailable || status == http.StatusTooManyRequests {
+		w.Header().Set("Retry-After", "1")
+	}
 	if r.Method == http.MethodHead {
 		w.WriteHeader(status)
 		return

@@ -2,6 +2,7 @@ package workerinput
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -105,11 +106,22 @@ func TestCanceledClientReadPreservesRegisteredSourceForSeek(t *testing.T) {
 	}
 }
 
-func TestGenuineUpstreamShortBodyRetiresRegisteredSource(t *testing.T) {
+// A truncated HTTP response is an interrupted operation, not proof that the
+// immutable source changed. Exhausting bounded retries retains the shared handle.
+func TestGenuineUpstreamShortBodyRetainsRegisteredSource(t *testing.T) {
 	var calls atomic.Int32
-	transport := cancellationTransport(func(*http.Request) (*http.Response, error) {
+	transport := cancellationTransport(func(r *http.Request) (*http.Response, error) {
 		calls.Add(1)
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Etag": {`"revision"`}}, ContentLength: 10, Body: io.NopCloser(strings.NewReader("abc"))}, nil
+		start, end := int64(0), int64(9)
+		status := http.StatusOK
+		header := http.Header{"Etag": {`"revision"`}}
+		if value := r.Header.Get("Range"); value != "" {
+			start, end, _ = requestedRange(value, 10)
+			status = http.StatusPartialContent
+			header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/10", start, end))
+		}
+		body := strings.Repeat("a", int(min(3, end-start)))
+		return &http.Response{StatusCode: status, Header: header, ContentLength: end - start + 1, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
 	adapter, err := New(Options{Origins: []string{"https://core.example"}, Allowed: func(string, uint64) bool { return true }, Transport: transport})
 	if err != nil {
@@ -120,24 +132,20 @@ func TestGenuineUpstreamShortBodyRetiresRegisteredSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := http.Get(handle.URL())
-	if err == nil {
-		_, err = io.ReadAll(response.Body)
-		_ = response.Body.Close()
-	}
-	if err == nil {
-		t.Fatal("short upstream body returned success")
-	}
-	if adapter.Allowed(handle.URL()) {
-		t.Fatal("genuine truncated representation retained authority")
-	}
-	next, err := http.Get(handle.URL())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = next.Body.Close() }()
-	body, err := io.ReadAll(next.Body)
-	if err != nil || calls.Load() != 1 || len(body) == 0 || next.StatusCode == http.StatusOK {
-		t.Fatalf("retired source still fetched bytes: calls=%d status=%d body=%q err=%v", calls.Load(), next.StatusCode, body, err)
+	for attempt := 1; attempt <= 2; attempt++ {
+		response, err := http.Get(handle.URL())
+		if err == nil {
+			_, err = io.ReadAll(response.Body)
+			_ = response.Body.Close()
+		}
+		if err == nil {
+			t.Fatal("short source operation returned success")
+		}
+		if !adapter.Allowed(handle.URL()) {
+			t.Fatal("transient exhaustion retired shared handle")
+		}
+		if calls.Load() != int32(attempt*sourceTransferAttempts) {
+			t.Fatalf("retry bound calls=%d", calls.Load())
+		}
 	}
 }

@@ -292,17 +292,26 @@ func (r *Runtime) callGrant(ctx context.Context, method, path string, body any, 
 	}
 	response, err := r.client.Do(request)
 	if err != nil {
-		return errors.New("worker control unavailable")
+		return errControlUnavailable
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 && response.StatusCode <= 599 {
+			return fmt.Errorf("%w: HTTP%d", errControlUnavailable, response.StatusCode)
+		}
 		return fmt.Errorf("worker control returned %d", response.StatusCode)
 	}
 	var envelope struct {
 		Grant string `json:"grant"`
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&envelope); err != nil {
+	// Complete the bounded HTTP read before decoding: a transport interruption
+	// is retryable, while malformed JSON in a completed response is definitive.
+	reply, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("%w: %w", errControlUnavailable, err)
+	}
+	if err := json.Unmarshal(reply, &envelope); err != nil {
 		return err
 	}
 	grant, err := workeridentity.DecodeGrant(envelope.Grant, domain, r.options.Binding.NodeURL, r.options.Binding.CorePublicKey, time.Now())
@@ -448,16 +457,26 @@ func (r *Runtime) stageSources(assignment workerwire.Assignment) (map[string]*wo
 		return nil, errors.New("worker source lease fenced")
 	}
 	r.mu.Lock()
-	if r.generations[assignment.WorkID] == assignment.Generation && r.handles[assignment.WorkID] != nil {
-		result := r.handles[assignment.WorkID]
-		r.mu.Unlock()
-		return result, nil
-	}
-	if existing := r.staged[assignment.WorkID][assignment.Generation]; existing != nil {
+	if existing := r.handles[assignment.WorkID]; r.generations[assignment.WorkID] == assignment.Generation && liveSourceHandles(existing) {
 		r.mu.Unlock()
 		return existing, nil
 	}
+	if existing := r.staged[assignment.WorkID][assignment.Generation]; liveSourceHandles(existing) {
+		r.mu.Unlock()
+		return existing, nil
+	}
+	var retired []map[string]*workerinput.Handle
+	if r.generations[assignment.WorkID] == assignment.Generation {
+		retired = append(retired, r.handles[assignment.WorkID])
+		delete(r.handles, assignment.WorkID)
+	}
+	if existing := r.takeStagedLocked(assignment.WorkID, assignment.Generation); existing != nil {
+		retired = append(retired, existing)
+	}
 	r.mu.Unlock()
+	for _, handles := range retired {
+		closeHandles(handles)
+	}
 	opened := make(map[string]*workerinput.Handle)
 	for name, source := range assignment.Sources {
 		if name != "source:"+source.Ref.ID || source.NodeID != assignment.NodeID || source.WorkID != assignment.WorkID || source.Generation != assignment.Generation {
@@ -478,7 +497,7 @@ func (r *Runtime) stageSources(assignment workerwire.Assignment) (map[string]*wo
 	r.mu.Lock()
 	// Another reconstruction may have published this generation while its
 	// redundant handles were opening. Keep the input already used by callers.
-	if r.generations[assignment.WorkID] == assignment.Generation && r.handles[assignment.WorkID] != nil {
+	if r.generations[assignment.WorkID] == assignment.Generation && liveSourceHandles(r.handles[assignment.WorkID]) {
 		result := r.handles[assignment.WorkID]
 		r.mu.Unlock()
 		closeHandles(opened)
@@ -487,13 +506,15 @@ func (r *Runtime) stageSources(assignment workerwire.Assignment) (map[string]*wo
 	if r.staged[assignment.WorkID] == nil {
 		r.staged[assignment.WorkID] = make(map[uint64]map[string]*workerinput.Handle)
 	}
-	if existing := r.staged[assignment.WorkID][assignment.Generation]; existing != nil {
+	if existing := r.staged[assignment.WorkID][assignment.Generation]; liveSourceHandles(existing) {
 		r.mu.Unlock()
 		closeHandles(opened)
 		return existing, nil
 	}
+	old := r.staged[assignment.WorkID][assignment.Generation]
 	r.staged[assignment.WorkID][assignment.Generation] = opened
 	r.mu.Unlock()
+	closeHandles(old)
 	return opened, nil
 }
 
@@ -537,6 +558,18 @@ func (r *Runtime) openSources(assignment workerwire.Assignment) (map[string]*wor
 	}
 	return handles, err
 }
+func liveSourceHandles(handles map[string]*workerinput.Handle) bool {
+	if handles == nil {
+		return false
+	}
+	for _, h := range handles {
+		if h == nil || h.Context().Err() != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func closeHandles(handles map[string]*workerinput.Handle) {
 	for _, h := range handles {
 		_ = h.Close()

@@ -25,6 +25,7 @@ type authorityResult struct {
 type authorityKey struct {
 	workKey
 	generation uint64
+	typed      bool
 }
 type authorityCheck struct {
 	revision uint64

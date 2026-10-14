@@ -3,6 +3,7 @@ package workercontrolcore
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"net/http"
 	"time"
 
@@ -18,7 +19,10 @@ type NonceStore interface {
 
 func (s *Service) VerifyRequest(r *http.Request, nodeID int, domain string) error {
 	node, ok, err := s.options.Nodes.ByID(r.Context(), nodeID)
-	if err != nil || !ok || !node.Enabled {
+	if err != nil {
+		return errors.Join(ErrUnavailable, err)
+	}
+	if !ok || !node.Enabled {
 		return ErrDenied
 	}
 	verifier := workeridentity.Verifier{Origin: s.options.Origin, Domain: domain, AllowHTTP: s.options.AllowHTTP, ResolveKey: func(id int) (ed25519.PublicKey, error) {
@@ -28,7 +32,7 @@ func (s *Service) VerifyRequest(r *http.Request, nodeID int, domain string) erro
 		return node.PublicKey, nil
 	}}
 	if err = verifier.Verify(r, nodeID); err != nil {
-		return err
+		return errors.Join(ErrDenied, err)
 	}
 	receipts, ok := s.options.Store.(NonceStore)
 	if !ok {
@@ -36,7 +40,11 @@ func (s *Service) VerifyRequest(r *http.Request, nodeID int, domain string) erro
 	}
 	// Proof timestamps can be up to 30s in the future. Keep the receipt for the
 	// full remaining 60s acceptance envelope rather than only 30s from arrival.
-	return receipts.ClaimNonce(r.Context(), nodeID, r.Header.Get(workeridentity.HeaderNonce), time.Now().Add(time.Minute))
+	err = receipts.ClaimNonce(r.Context(), nodeID, r.Header.Get(workeridentity.HeaderNonce), time.Now().Add(time.Minute))
+	if err != nil && !errors.Is(err, ErrDenied) {
+		return errors.Join(ErrUnavailable, err)
+	}
+	return err
 }
 
 func (s *Service) startAdmission(ctx context.Context, a workerwire.Assignment) error {
@@ -175,24 +183,38 @@ func (s *Service) executionActive(ctx context.Context, node Node, a workerwire.A
 // Begin/Stop invalidate this core's cache immediately; other core changes are
 // observed within 250ms, below the two-second worker authority horizon.
 func (s *Service) WorkActive(ctx context.Context, nodeID int, work string, generation uint64) bool {
-	if ctx.Err() != nil || generation == 0 {
-		return false
+	active, _ := s.workActive(ctx, nodeID, work, generation, false)
+	return active
+}
+
+// WorkActiveStatus distinguishes dependency failure from a confirmed inactive
+// scope. Its entries cannot reuse a compatibility bool reader's false result.
+func (s *Service) WorkActiveStatus(ctx context.Context, nodeID int, work string, generation uint64) (bool, error) {
+	return s.workActive(ctx, nodeID, work, generation, true)
+}
+
+func (s *Service) workActive(ctx context.Context, nodeID int, work string, generation uint64, typed bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
-	k := authorityKey{workKey: workKey{nodeID, work}, generation: generation}
+	if generation == 0 {
+		return false, nil
+	}
+	k := authorityKey{workKey: workKey{nodeID, work}, generation: generation, typed: typed}
 	for range authorityCheckAttempts {
 		if ctx.Err() != nil {
-			return false
+			return false, ctx.Err()
 		}
 		s.mu.Lock()
 		if cached, ok := s.authority[k]; ok && time.Now().Before(cached.until) {
 			s.mu.Unlock()
-			return cached.active && ctx.Err() == nil
+			return cached.active && ctx.Err() == nil, ctx.Err()
 		}
 		check, ok := s.authorityChecks[k]
 		if !ok {
 			if len(s.authorityChecks) >= authorityCacheLimit {
 				s.mu.Unlock()
-				return false
+				return false, ErrUnavailable
 			}
 			check = &authorityCheck{}
 			s.authorityChecks[k] = check
@@ -201,7 +223,13 @@ func (s *Service) WorkActive(ctx context.Context, nodeID int, work string, gener
 		revision := check.revision
 		s.mu.Unlock()
 
-		active := s.lookupWorkActive(ctx, nodeID, work, generation)
+		var active bool
+		var lookupErr error
+		if typed {
+			active, lookupErr = s.lookupWorkActiveStatus(ctx, nodeID, work, generation)
+		} else {
+			active = s.lookupWorkActive(ctx, nodeID, work, generation)
+		}
 
 		s.mu.Lock()
 		check.users--
@@ -210,7 +238,7 @@ func (s *Service) WorkActive(ctx context.Context, nodeID int, work string, gener
 		}
 		if ctx.Err() != nil {
 			s.mu.Unlock()
-			return false
+			return false, ctx.Err()
 		}
 		if revision != check.revision {
 			// Only a change to this exact authority invalidates its lookup.
@@ -218,14 +246,18 @@ func (s *Service) WorkActive(ctx context.Context, nodeID int, work string, gener
 			s.mu.Unlock()
 			continue
 		}
+		if lookupErr != nil {
+			s.mu.Unlock()
+			return false, lookupErr
+		}
 		if len(s.authority) >= authorityCacheLimit {
 			clear(s.authority)
 		}
 		s.authority[k] = authorityResult{active: active, generation: generation, until: time.Now().Add(250 * time.Millisecond)}
 		s.mu.Unlock()
-		return active
+		return active, nil
 	}
-	return false
+	return false, ErrUnavailable
 }
 
 const authorityCacheLimit = 10000
@@ -250,4 +282,30 @@ func (s *Service) lookupWorkActive(ctx context.Context, nodeID int, work string,
 		}
 	}
 	return active
+}
+
+func (s *Service) lookupWorkActiveStatus(ctx context.Context, nodeID int, work string, generation uint64) (bool, error) {
+	node, found, err := s.options.Nodes.ByID(ctx, nodeID)
+	if err != nil || !found || !node.Enabled {
+		return false, err
+	}
+	active, err := s.options.Store.IsActive(ctx, nodeID, work, generation)
+	if err != nil || !active {
+		return false, err
+	}
+	candidate, pending, err := s.options.Store.Candidate(ctx, nodeID, work)
+	if err != nil {
+		return false, err
+	}
+	if pending && candidate.Generation == generation {
+		return s.pendingSnapshotStatus(ctx, nodeID, work, generation)
+	}
+	a, ready, err := s.options.Store.Get(ctx, nodeID, work)
+	if err != nil || !ready || a.Generation != generation {
+		return false, err
+	}
+	if s.options.ExecutionStatus != nil {
+		return s.options.ExecutionStatus(ctx, node, a)
+	}
+	return s.executionActive(ctx, node, a), ctx.Err()
 }

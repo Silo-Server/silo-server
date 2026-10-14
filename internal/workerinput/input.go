@@ -209,6 +209,7 @@ func (a *Adapter) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	cancelDone := make(chan struct{})
+	handleDetached := false
 	stop := context.AfterFunc(h.ctx, func() { cancel(); close(cancelDone) })
 	writeDone := make(chan struct{})
 	stopWrite := context.AfterFunc(ctx, func() {
@@ -218,7 +219,7 @@ func (a *Adapter) serve(w http.ResponseWriter, r *http.Request) {
 		close(writeDone)
 	})
 	defer func() {
-		if !stop() {
+		if !handleDetached && !stop() {
 			<-cancelDone
 		}
 		if !stopWrite() {
@@ -226,90 +227,49 @@ func (a *Adapter) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		cancel()
 	}()
-	request, err := http.NewRequestWithContext(ctx, r.Method, h.source.URL, nil)
-	if err != nil {
-		http.Error(w, "invalid source", http.StatusBadGateway)
+	byteRange := ""
+	if r.Method != http.MethodHead {
+		byteRange = r.Header.Get("Range")
+	}
+	started := false
+	err := h.transfer(ctx, r.Method, byteRange, w, func(response *http.Response, length int64) {
+		w.Header().Set("ETag", h.source.ETag)
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+		if value := response.Header.Get("Content-Range"); value != "" {
+			w.Header().Set("Content-Range", value)
+		}
+		w.WriteHeader(response.StatusCode)
+		started = true
+	}, nil)
+	if err == nil || r.Context().Err() != nil {
 		return
 	}
-	request.Header.Set("X-Silo-Source-Grant", h.source.Grant)
-	request.Header.Set("Accept-Encoding", "identity")
-	request.Header.Set("If-Match", h.source.ETag)
-	if value := r.Header.Get("Range"); value != "" && r.Method != http.MethodHead {
-		request.Header.Set("Range", value)
-	}
-	if a.options.Sign != nil {
-		if err := a.options.Sign(request); err != nil {
-			http.Error(w, "source proof unavailable", http.StatusBadGateway)
-			return
+	status := http.StatusServiceUnavailable
+	var sourceErr *sourceResponseError
+	if errors.As(err, &sourceErr) {
+		status = sourceErr.status
+		if sourceErr.retire {
+			// Retire every source read, while allowing this request to finish
+			// its denial response under the original client context.
+			if !stop() {
+				<-cancelDone
+			}
+			handleDetached = true
+			_ = h.Close()
 		}
 	}
-	response, err := a.client.Do(request)
-	if err != nil {
-		http.Error(w, "source unavailable", http.StatusBadGateway)
-		return
+	if started {
+		panic(http.ErrAbortHandler)
 	}
-	defer func() { _ = response.Body.Close() }()
-	if !a.authorized(h) {
-		w.WriteHeader(http.StatusForbidden)
-		return
-	}
-	if response.StatusCode == http.StatusPreconditionFailed || response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusGone {
-		_ = h.Close()
-		w.WriteHeader(response.StatusCode)
-		return
-	}
-	if response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+	if status == http.StatusRequestedRangeNotSatisfiable {
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", h.source.Size))
-		w.WriteHeader(response.StatusCode)
-		return
 	}
-	length, err := validateResponse(request, response, h.source)
-	if err != nil {
-		http.Error(w, "invalid source representation", http.StatusBadGateway)
-		return
+	if status == http.StatusServiceUnavailable {
+		w.Header().Set("Retry-After", "1")
 	}
-	w.Header().Set("ETag", h.source.ETag)
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
-	if value := response.Header.Get("Content-Range"); value != "" {
-		w.Header().Set("Content-Range", value)
-	}
-	w.WriteHeader(response.StatusCode)
-	if r.Method == http.MethodHead {
-		return
-	}
-	// A small fixed transfer buffer bounds memory without breaking sequential
-	// reads into latency-sensitive fixed upstream range requests.
-	buffer := make([]byte, 64<<10)
-	remaining := length
-	for remaining > 0 {
-		if !a.authorized(h) {
-			panic(http.ErrAbortHandler)
-		}
-		n, readErr := response.Body.Read(buffer[:min(int64(len(buffer)), remaining)])
-		if n > 0 {
-			if !a.authorized(h) {
-				panic(http.ErrAbortHandler)
-			}
-			if _, err := w.Write(buffer[:n]); err != nil {
-				return
-			}
-			remaining -= int64(n)
-		}
-		if readErr != nil {
-			if remaining != 0 {
-				// A seek or canceled downstream request cancels this upstream
-				// read. It does not revoke the admitted source representation.
-				if r.Context().Err() != nil {
-					return
-				}
-				_ = h.Close()
-				panic(http.ErrAbortHandler)
-			}
-			break
-		}
-	}
+	http.Error(w, http.StatusText(status), status)
 }
 
 func (a *Adapter) authorized(h *Handle) bool {

@@ -75,10 +75,13 @@ func validatePin(f *os.File, path string, pin FileIdentity) error {
 	for _, get := range []func() (os.FileInfo, error){f.Stat, func() (os.FileInfo, error) { return os.Stat(path) }} {
 		info, err := get()
 		if err != nil {
-			return ErrChanged
+			return ErrUnavailable
 		}
 		identity, err := identityOf(info)
-		if err != nil || identity != pin {
+		if err != nil {
+			return err
+		}
+		if identity != pin {
 			return ErrChanged
 		}
 	}

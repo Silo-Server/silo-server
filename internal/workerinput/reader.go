@@ -1,13 +1,13 @@
 package workerinput
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"net/http"
 	"sync"
 	"time"
 )
@@ -195,11 +195,6 @@ func (r *RangeReader) cache(offset int64, data []byte) {
 	}
 }
 func (r *RangeReader) fetch(off, length int64) ([]byte, error) {
-	if r.requests >= r.limits.MaxRequests || length > r.limits.MaxBytes-r.fetched {
-		return nil, sourceReadError(ErrReaderLimit)
-	}
-	r.requests++
-	r.fetched += length
 	a := r.handle.adapter
 	select {
 	case a.reads <- struct{}{}:
@@ -207,51 +202,22 @@ func (r *RangeReader) fetch(off, length int64) ([]byte, error) {
 	case <-r.ctx.Done():
 		return nil, sourceReadError(r.ctx.Err())
 	}
-	if err := r.handle.Validate(r.ctx); err != nil {
+	data := bytes.NewBuffer(make([]byte, 0, length))
+	budget := func(requested int64) error {
+		if r.requests >= r.limits.MaxRequests || requested > r.limits.MaxBytes-r.fetched {
+			return ErrReaderLimit
+		}
+		r.requests++
+		r.fetched += requested
+		return nil
+	}
+	err := r.handle.transfer(r.ctx, "GET", fmt.Sprintf("bytes=%d-%d", off, off+length-1), data, nil, budget)
+	if err != nil {
+		var sourceErr *sourceResponseError
+		if errors.As(err, &sourceErr) && sourceErr.retire {
+			_ = r.handle.Close()
+		}
 		return nil, sourceReadError(err)
 	}
-	req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, r.handle.source.URL, nil)
-	if err != nil {
-		return nil, sourceReadError(errors.New("invalid source request"))
-	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", off, off+length-1))
-	req.Header.Set("X-Silo-Source-Grant", r.handle.source.Grant)
-	req.Header.Set("If-Match", r.handle.source.ETag)
-	req.Header.Set("Accept-Encoding", "identity")
-	if a.options.Sign != nil {
-		if err := a.options.Sign(req); err != nil {
-			return nil, sourceReadError(errors.New("source proof unavailable"))
-		}
-	}
-	response, err := a.client.Do(req)
-	if err != nil {
-		if r.ctx.Err() != nil {
-			return nil, sourceReadError(r.ctx.Err())
-		}
-		return nil, sourceReadError(errors.New("source request unavailable"))
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusGone || response.StatusCode == http.StatusPreconditionFailed {
-		_ = r.handle.Close()
-		return nil, sourceReadError(errors.New("source authority changed"))
-	}
-	if response.StatusCode == http.StatusServiceUnavailable || response.StatusCode == http.StatusTooManyRequests {
-		return nil, sourceReadError(errors.New("source temporarily unavailable"))
-	}
-	if _, err := validateResponse(req, response, r.handle.source); err != nil {
-		_ = r.handle.Close()
-		return nil, sourceReadError(errors.New("invalid source range representation"))
-	}
-	data := make([]byte, length)
-	if _, err := io.ReadFull(response.Body, data); err != nil {
-		if r.ctx.Err() != nil {
-			return nil, sourceReadError(r.ctx.Err())
-		}
-		_ = r.handle.Close()
-		return nil, sourceReadError(errors.New("incomplete source range representation"))
-	}
-	if err := r.handle.Validate(r.ctx); err != nil {
-		return nil, sourceReadError(err)
-	}
-	return data, nil
+	return data.Bytes(), nil
 }

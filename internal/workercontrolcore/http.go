@@ -3,6 +3,7 @@ package workercontrolcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
+	"github.com/Silo-Server/silo-server/internal/workersource"
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
@@ -54,12 +56,26 @@ func workerPathValues(next http.Handler) http.Handler {
 }
 func (s *Service) authenticate(w http.ResponseWriter, r *http.Request) (Node, bool) {
 	id, err := strconv.Atoi(r.PathValue("node"))
-	if err != nil || id <= 0 || strconv.Itoa(id) != r.PathValue("node") || s.VerifyRequest(r, id, workeridentity.DomainNodeProof) != nil {
+	if err != nil || id <= 0 || strconv.Itoa(id) != r.PathValue("node") {
 		http.Error(w, "worker proof required", http.StatusUnauthorized)
 		return Node{}, false
 	}
+	if err := s.VerifyRequest(r, id, workeridentity.DomainNodeProof); err != nil {
+		status := http.StatusUnauthorized
+		if errors.Is(err, ErrUnavailable) {
+			status = http.StatusServiceUnavailable
+			w.Header().Set("Retry-After", "1")
+		}
+		http.Error(w, "worker proof unavailable", status)
+		return Node{}, false
+	}
 	node, ok, err := s.options.Nodes.ByID(r.Context(), id)
-	if err != nil || !ok || !node.Enabled {
+	if err != nil {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "worker authority unavailable", http.StatusServiceUnavailable)
+		return Node{}, false
+	}
+	if !ok || !node.Enabled {
 		http.Error(w, "worker authority unavailable", http.StatusUnauthorized)
 		return Node{}, false
 	}
@@ -300,7 +316,13 @@ func (s *Service) renew(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &input) {
 		return
 	}
-	if !s.WorkActive(r.Context(), node.ID, input.WorkID, input.Generation) {
+	active, err := s.WorkActiveStatus(r.Context(), node.ID, input.WorkID, input.Generation)
+	if err != nil {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "source authority unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !active {
 		http.Error(w, "source authority denied", http.StatusForbidden)
 		return
 	}
@@ -313,7 +335,11 @@ func (s *Service) renew(w http.ResponseWriter, r *http.Request) {
 	}
 	source, err := authority.Renew(r.Context(), node.ID, input.WorkID, input.Generation, grantID)
 	if err != nil {
-		http.Error(w, "source renewal denied", http.StatusForbidden)
+		status := workersource.HTTPStatus(err)
+		if status == http.StatusServiceUnavailable || status == http.StatusTooManyRequests {
+			w.Header().Set("Retry-After", "1")
+		}
+		http.Error(w, "source renewal unavailable", status)
 		return
 	}
 	s.reply(w, node, workeridentity.DomainSourceGrant, input.WorkID, input.Generation, source)
