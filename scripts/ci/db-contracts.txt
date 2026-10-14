@@ -33,6 +33,11 @@
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
+# A subtree scan in a podcast library indexes the show folder with the podcast
+# scanner, keeps the show's content ID, and reconciles only that show.
+./internal/scanner TestScanSubtreeIndexesPodcastShowFolders
+./internal/scanner TestScanSubtreeReconcilesOnlyTheScannedPodcastShow
+
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
