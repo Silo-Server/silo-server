@@ -55,9 +55,12 @@ import (
 const keyframeLookupTimeout = 10 * time.Second
 
 // keyframeLookups bounds the lookups in flight across the process, including
-// those left behind blocked. A run that finds every slot taken lists sample
-// times without reading the Cues.
-var keyframeLookups = make(chan struct{}, 16)
+// those left behind blocked, and so the memory parsing Cues takes: a few
+// times the Cues' size, which keyframes.ReadMatroska accepts up to 64 MiB. A
+// lookup takes milliseconds, so a few slots serve any number of trickplay
+// workers. A run that finds every slot taken lists sample times without
+// reading the Cues.
+var keyframeLookups = make(chan struct{}, 4)
 
 // lookupKeyframes returns the video keyframe times of the Matroska file at
 // path, stopping between reads once ctx ends; tests replace it.
