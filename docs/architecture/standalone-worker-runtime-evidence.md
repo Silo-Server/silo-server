@@ -24,3 +24,5 @@ The test gateways close upstream and downstream HTTP connections after each ordi
 Mode capability warmup and 2.25/17-second settling occur outside timing. Planner job caps are unlimited (SQL NULL, equivalent to API input 0) for this sequential pilot; the standalone operator limit is 2 and the legacy executor keeps its existing unlimited default. These samples provide medians and observed ranges, without p95 or capacity conclusions. Cache and shared-host scheduling are uncontrolled. NFS/SMB, WAN, HDR and maximum capacity are outside this evidence. The earlier raw-FFmpeg experiment uses a distinct 3600/4000/8000 kbps recipe; its n=30 and sustained-producer results remain separate. Sample, chapter, trickplay, subtitle, theme and prepared-download checks belong to a separate earlier feature cohort.
 
 [Machine-readable samples, output digests, CLI flags and source fingerprint definition](standalone-worker-runtime-evidence.json).
+
+[Later integration acceptance after the upstream merge and authority correction](standalone-worker-integration-evidence.md) records separate HTTP/HTTPS functional checks.
