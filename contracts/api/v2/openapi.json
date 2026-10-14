@@ -157687,12 +157687,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.",
+        "summary": "Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
       "get": {
@@ -157991,12 +157991,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated.",
+        "summary": "Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -209116,12 +209116,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's watchlist; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.",
+        "summary": "Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
       "get": {
@@ -209420,12 +209420,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's watchlist. Automatic retries are unsafe because provider and refresh effects are not change-gated.",
+        "summary": "Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },

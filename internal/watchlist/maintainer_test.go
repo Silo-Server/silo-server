@@ -19,14 +19,13 @@ func (f *fakeStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, e
 	return f.removeWatched, nil
 }
 
-func (f *fakeStore) InWatchlist(_ context.Context, _ string, mediaItemID string) (bool, error) {
-	return f.watchlist[mediaItemID], nil
-}
-
-func (f *fakeStore) RemoveFromWatchlist(_ context.Context, _ string, mediaItemID string) error {
+func (f *fakeStore) RemoveFromWatchlist(_ context.Context, _ string, mediaItemID string) (bool, error) {
+	if !f.watchlist[mediaItemID] {
+		return false, nil
+	}
 	delete(f.watchlist, mediaItemID)
 	f.removed = append(f.removed, mediaItemID)
-	return nil
+	return true, nil
 }
 
 type fakeItems map[string]*models.MediaItem

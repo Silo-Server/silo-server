@@ -67,7 +67,7 @@ func ResolvePathContext(filePath string, libraryType string, libraryRoots ...str
 	}
 
 	allowNumericSeasonDirs := ctx.HasEpisodePattern || normalizedLibraryType == "series"
-	ctx.HasSeasonStructure, _ = detectSeasonStructure(directories, nameNoExt, allowNumericSeasonDirs, libraryRoot != "")
+	ctx.HasSeasonStructure, _ = detectSeasonStructure(directories, nameNoExt, episode.seriesTitle, allowNumericSeasonDirs, libraryRoot != "")
 	ctx.HasMovieFolderEvidence = filepath.Clean(parentDir) != libraryRoot && detectInferMovieFolderEvidence(parentBase, nameNoExt, ctx.HasSeasonStructure)
 
 	switch normalizedLibraryType {
@@ -95,7 +95,7 @@ func ResolvePathContext(filePath string, libraryType string, libraryRoots ...str
 			ctx.HasAirDatePattern = true
 		}
 
-		if root, ok := deriveSeriesRoot(normalized, ctx.HasEpisodePattern, normalizedLibraryType == "series", libraryRoot); ok {
+		if root, ok := deriveSeriesRoot(normalized, episode.seriesTitle, ctx.HasEpisodePattern, normalizedLibraryType == "series", libraryRoot); ok {
 			ctx.RootPath = root.RootPath
 			if filepath.Clean(ctx.RootPath) != libraryRoot {
 				ctx.Title, ctx.Year, rootSeason, rootSeasonKnown = parseSeriesFolderIdentity(root.FolderName)
@@ -273,8 +273,21 @@ func parseAirDate(name string) (string, bool) {
 
 // detectSeasonStructure walks parts from the file upward. configuredRoot
 // reports that parts start directly in a configured library folder; fileStem
-// is the file name without extension.
-func detectSeasonStructure(parts []string, fileStem string, allowNumeric, configuredRoot bool) (bool, int) {
+// is the file name without extension and fileTitle the series title parsed
+// from it, if any.
+func detectSeasonStructure(parts []string, fileStem, fileTitle string, allowNumeric, configuredRoot bool) (bool, int) {
+	found, number, _ := scanSeasonStructure(parts, fileStem, fileTitle, allowNumeric, configuredRoot)
+	return found, number
+}
+
+// scanSeasonStructure is detectSeasonStructure that also reports whether the
+// match carries a season number. numbered is false when the match is a bare
+// season folder such as "Season": that folder counts as season structure but
+// has no number. A bare folder only counts as the file's immediate parent, the
+// same place deriveSeriesRoot accepts it, and a numbered season folder above
+// it takes precedence.
+func scanSeasonStructure(parts []string, fileStem, fileTitle string, allowNumeric, configuredRoot bool) (found bool, number int, numbered bool) {
+	bare := false
 	for i := len(parts) - 1; i >= 0; i-- {
 		parent := ""
 		if i > 0 {
@@ -283,15 +296,18 @@ func detectSeasonStructure(parts []string, fileStem string, allowNumeric, config
 		numericSeason := allowNumeric && (i != 0 || !configuredRoot)
 		topLevel := configuredRoot && i == 0 && mayBeShowFolder(parts[i], fileStem)
 		if number, ok := seasonDirectoryNumber(parts[i], parent, numericSeason, topLevel); ok {
-			return true, number
+			return true, number, true
+		}
+		if i == len(parts)-1 && numericSeason && i > 0 && isBareSeasonFolder(parts[i], fileTitle) {
+			bare = true
 		}
 	}
-	return false, 0
+	return bare, 0, false
 }
 
 func firstSeasonNumber(parts []string, fileStem string, allowNumeric, configuredRoot bool) (int, bool) {
-	found, seasonNum := detectSeasonStructure(parts, fileStem, allowNumeric, configuredRoot)
-	return seasonNum, found
+	_, seasonNum, numbered := scanSeasonStructure(parts, fileStem, "", allowNumeric, configuredRoot)
+	return seasonNum, numbered
 }
 
 func hasExplicitFolderIDs(name string) bool {
@@ -324,45 +340,69 @@ func collapseWhitespace(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-// deriveSeriesRoot finds the show folder above a file: the parent of the
-// nearest season folder or, failing that, the file's own folder. A Specials/
-// or Extras/ folder inside a season folder belongs to that season's show.
-// Other extras folders ("other/", "Trailers/", ...) below the show are stepped
-// over, so a file in Show/other/ belongs to Show instead of founding a series
-// named "other"; a chain such as other/Extras/ is stepped over as a whole. The
+// deriveSeriesRoot finds the show folder above filePath: the parent of the
+// nearest season folder or, failing that, the file's own folder. fileTitle is
+// the series title parsed from the file name, if any. A Specials/ or Extras/
+// folder inside a season folder belongs to that season's show. Other extras
+// folders ("other/", "Trailers/", ...) below the show are stepped over, so a
+// file in Show/other/ belongs to Show instead of founding a series named
+// "other"; a chain such as other/Extras/ is stepped over as a whole. The
 // step-over needs a known library folder and skips a folder that sits directly
 // in it or that the file name names (Documentaries/Interviews/Interviews
 // S01E01.mkv): there the extras word is a show's title or an organizational
 // folder.
-func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool, libraryRoot string) (*SeriesRoot, bool) {
+func deriveSeriesRoot(filePath, fileTitle string, hasEpisodePattern bool, forceParent bool, libraryRoot string) (*SeriesRoot, bool) {
 	parentDir := path.Dir(filePath)
 	ownerDir := parentDir
 	specialsOwner := ""
+	specialsHoldsFile := false
 	fileStem := strings.TrimSuffix(path.Base(filePath), path.Ext(filePath))
+	bareSeason := ""
 	for current := parentDir; current != "." && current != "/" && current != ""; current = path.Dir(current) {
 		if libraryRoot != "" && filepath.Clean(current) == libraryRoot {
 			break
 		}
 		segment := path.Base(current)
 		inLibraryFolder := libraryRoot != "" && filepath.Clean(path.Dir(current)) == libraryRoot
-		allowNumeric := (hasEpisodePattern || forceParent) && !inLibraryFolder
-		topLevel := inLibraryFolder && mayBeShowFolder(segment, fileStem)
-		if _, ok := seasonDirectoryNumber(segment, path.Base(path.Dir(current)), allowNumeric, topLevel); ok {
-			if specialsOwner == "" && specialsDirRe.MatchString(strings.TrimSpace(segment)) {
-				specialsOwner = path.Dir(current)
-				continue
-			}
-			return seriesRootAt(path.Dir(current))
-		}
 		stepOver := func() bool {
 			return libraryRoot != "" && !inLibraryFolder && IsExtrasDir(segment) && !fileNamesFolder(fileStem, segment)
 		}
 		if specialsOwner != "" {
-			if current != specialsOwner || !stepOver() {
+			// current holds the Specials/ or Extras/ folder. A season folder
+			// there puts the show one level up. A bare number or another
+			// Specials/Extras label is the show's own title (24, Extras), so it
+			// is not read as a season here.
+			if inLibraryFolder {
+				break
+			}
+			if specialsInSeasonFolder(segment, path.Base(path.Dir(current)), fileTitle, specialsHoldsFile && (hasEpisodePattern || forceParent)) {
+				return seriesRootAt(path.Dir(current))
+			}
+			if !stepOver() {
 				break
 			}
 			specialsOwner = path.Dir(current)
 			continue
+		}
+		allowNumeric := (hasEpisodePattern || forceParent) && !inLibraryFolder
+		topLevel := inLibraryFolder && mayBeShowFolder(segment, fileStem)
+		_, isSeason := seasonDirectoryNumber(segment, path.Base(path.Dir(current)), allowNumeric, topLevel)
+		// A bare "Season" folder only marks the season level when it holds the
+		// file directly. Higher up it is more likely a category folder or a
+		// show that happens to be named Season. A file whose own title is the
+		// folder name marks that folder as the show. Keep walking in case it sits
+		// inside a numbered season folder, which then decides the show root.
+		if !isSeason && allowNumeric && current == parentDir && isBareSeasonFolder(segment, fileTitle) {
+			bareSeason = current
+			continue
+		}
+		if isSeason {
+			if specialsDirRe.MatchString(strings.TrimSpace(segment)) {
+				specialsOwner = path.Dir(current)
+				specialsHoldsFile = current == parentDir
+				continue
+			}
+			return seriesRootAt(path.Dir(current))
 		}
 		if current == ownerDir && stepOver() {
 			ownerDir = path.Dir(current)
@@ -372,11 +412,30 @@ func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool,
 		return seriesRootAt(specialsOwner)
 	}
 
+	if bareSeason != "" {
+		return seriesRootAt(path.Dir(bareSeason))
+	}
+
 	if hasEpisodePattern || forceParent {
 		return seriesRootAt(ownerDir)
 	}
 
 	return nil, false
+}
+
+// specialsInSeasonFolder reports whether segment, the folder that holds a
+// Specials/ or Extras/ folder, is a season folder. Bare numbers and the
+// Specials/Extras labels don't count. A bare "Season" folder counts only when
+// bareAllowed: the Specials/Extras folder holds the file directly and the file
+// carries an episode code (or the library is a series library).
+func specialsInSeasonFolder(segment, parent, fileTitle string, bareAllowed bool) bool {
+	if specialsDirRe.MatchString(strings.TrimSpace(segment)) {
+		return false
+	}
+	if _, ok := seasonDirectoryNumber(segment, parent, false, false); ok {
+		return true
+	}
+	return bareAllowed && isBareSeasonFolder(segment, fileTitle)
 }
 
 func seriesRootAt(rootPath string) (*SeriesRoot, bool) {
