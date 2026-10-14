@@ -103,7 +103,7 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 			limit = n
 		}
 	}
-	resp, err := h.WatchTonightCards(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), mode, genres, excludeIDs, limit)
+	resp, err := h.watchTonightCards(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), mode, genres, excludeIDs, limit, true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -117,6 +117,13 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 // candidate source that fails degrades to a shorter page; a failed item
 // lookup is an error, since the page would look empty.
 func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) (WatchTonightCardsView, error) {
+	return h.watchTonightCards(ctx, userID, profileID, filter, mode, genres, excludeIDs, limit, false)
+}
+
+// watchTonightCards is WatchTonightCards. With emptyOnFetchError, a failed
+// lookup answers an empty page instead of an error, as the frozen v1 route
+// always has.
+func (h *RecommendationsHandler) watchTonightCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int, emptyOnFetchError bool) (WatchTonightCardsView, error) {
 	var merged []mergedItem
 	var isCold bool
 
@@ -126,6 +133,9 @@ func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID i
 		var err error
 		merged, isCold, err = h.buildDiscoverCards(ctx, userID, profileID, filter, genres, excludeIDs, limit)
 		if err != nil {
+			if emptyOnFetchError {
+				return swipeCardsPageResponse{Cards: []swipeCardResponse{}, IsCold: isCold}, nil
+			}
 			return WatchTonightCardsView{}, err
 		}
 	}
@@ -156,6 +166,9 @@ func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID i
 	enriched, err := h.enrichItems(ctx, userID, profileID, filter, contentIDs)
 	if err != nil {
 		slog.WarnContext(ctx, "WatchTonightCards: item details failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		if emptyOnFetchError {
+			return resp, nil
+		}
 		return WatchTonightCardsView{}, recommendationsUnavailable("Failed to fetch item details")
 	}
 

@@ -60,7 +60,7 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 			limit = n
 		}
 	}
-	resp, err := h.WatchTonight(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), limit)
+	resp, err := h.watchTonight(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), limit, true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -71,6 +71,13 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 // WatchTonight is the Watch Tonight seam: the merged, boosted and enriched
 // list the v1 and v2 handlers both answer. limit must already be validated.
 func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit int) (WatchTonightView, error) {
+	return h.watchTonight(ctx, userID, profileID, filter, limit, false)
+}
+
+// watchTonight is WatchTonight. With emptyOnFetchError, a failed item lookup
+// answers the list without items instead of an error, as the frozen v1 route
+// always has.
+func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit int, emptyOnFetchError bool) (WatchTonightView, error) {
 	// The reader and the filter below each leave out what the profile
 	// watched; read that once.
 	ctx = recommendations.WithWatchedSetMemo(ctx)
@@ -211,6 +218,9 @@ func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, p
 	enriched, err := h.enrichItems(ctx, userID, profileID, filter, contentIDs)
 	if err != nil {
 		slog.WarnContext(ctx, "WatchTonight: item details failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		if emptyOnFetchError {
+			return resp, nil
+		}
 		return WatchTonightView{}, recommendationsUnavailable("Failed to fetch item details")
 	}
 
