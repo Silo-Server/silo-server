@@ -980,12 +980,20 @@ func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID str
 	if h.MovieMatchQueueRepo == nil && h.SeriesMatchQueueRepo == nil {
 		return
 	}
-	// A movie's files go through the movie queue and a series' roots through
-	// the series queue; any other item has no matcher queue to reconcile.
+	// Each file goes to the queue whose eligibility it can meet, decided the
+	// way the queues decide it: by library type, and in a mixed library by
+	// the file's base type. A movie's files go through the movie queue and a
+	// series' roots through the series queue.
 	rows, err := h.pool.Query(ctx, `
-		SELECT mf.id, mf.media_folder_id, mf.observed_root_path, mi.type
+		SELECT mf.id, mf.media_folder_id, mf.observed_root_path,
+		       CASE
+				WHEN lower(trim(folders.type)) IN ('movie', 'movies') THEN 'movie'
+				WHEN lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') THEN 'series'
+				WHEN lower(trim(folders.type)) = 'mixed' THEN lower(trim(mf.base_type))
+				ELSE ''
+		       END
 		FROM media_files mf
-		JOIN media_items mi ON mi.content_id = mf.content_id
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.content_id = $1 AND mf.missing_since IS NULL
 		ORDER BY mf.id
 	`, contentID)
@@ -1003,13 +1011,13 @@ func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID str
 	for rows.Next() {
 		var fileID int
 		var root seriesRoot
-		var itemType string
-		if err := rows.Scan(&fileID, &root.folderID, &root.path, &itemType); err != nil {
+		var queueKind string
+		if err := rows.Scan(&fileID, &root.folderID, &root.path, &queueKind); err != nil {
 			rows.Close()
 			slog.WarnContext(ctx, "scanning item file to requeue match work", "component", "api", "content_id", contentID, "error", err)
 			return
 		}
-		switch strings.ToLower(strings.TrimSpace(itemType)) {
+		switch queueKind {
 		case itemTypeMovie:
 			movieFiles = append(movieFiles, fileID)
 		case itemTypeSeries:
