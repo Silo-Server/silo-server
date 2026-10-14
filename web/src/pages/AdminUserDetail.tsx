@@ -83,7 +83,7 @@ function AdminUserDetailPage() {
   const [disableOpen, setDisableOpen] = useState(false);
   const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
 
-  if (isLoading) return <div className="page-shell py-8">Loading user...</div>;
+  if (isLoading) return <div className="pb-8">Loading user...</div>;
   if (!user) {
     if (error && !isNotFoundProblem(error)) {
       return (
@@ -195,7 +195,7 @@ function AdminUserDetailPage() {
 
   return (
     <CardEditingProvider>
-      <div className="page-shell min-w-0 space-y-6 py-4 sm:py-6">
+      <div className="min-w-0 space-y-6 pb-4 sm:pb-6">
         {actionError && <p role="alert">{actionError}</p>}
         {!available && <p role="status">User administration is unavailable.</p>}
         {available && manageable && !editor && (

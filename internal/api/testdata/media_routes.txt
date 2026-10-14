@@ -558,13 +558,13 @@ PATCH /api/v2/downloads/subscriptions/{id}	non-media
 DELETE /api/v2/downloads/{id}	non-media
 PATCH /api/v2/downloads/{id}	non-media
 GET /api/v2/downloads/{id}/artwork/{kind}	non-media
-GET /api/v2/downloads/{id}/file	non-media
-HEAD /api/v2/downloads/{id}/file	non-media
-GET /api/v2/downloads/{id}/file-proxy	non-media
-HEAD /api/v2/downloads/{id}/file-proxy	non-media
+GET /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+GET /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
 GET /api/v2/downloads/{id}/manifest	non-media
 POST /api/v2/downloads/{id}/prepare	non-media
-GET /api/v2/downloads/{id}/subtitles/{ref}	non-media
+GET /api/v2/downloads/{id}/subtitles/{ref}	media	transfer	viewer_egress	false	true
 GET /api/v2/ebooks/{content_id}/annotations	non-media
 POST /api/v2/ebooks/{content_id}/annotations	non-media
 DELETE /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
@@ -1824,13 +1824,13 @@ PATCH /api/v2/downloads/subscriptions/{id}	non-media
 DELETE /api/v2/downloads/{id}	non-media
 PATCH /api/v2/downloads/{id}	non-media
 GET /api/v2/downloads/{id}/artwork/{kind}	non-media
-GET /api/v2/downloads/{id}/file	non-media
-HEAD /api/v2/downloads/{id}/file	non-media
-GET /api/v2/downloads/{id}/file-proxy	non-media
-HEAD /api/v2/downloads/{id}/file-proxy	non-media
+GET /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+GET /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
 GET /api/v2/downloads/{id}/manifest	non-media
 POST /api/v2/downloads/{id}/prepare	non-media
-GET /api/v2/downloads/{id}/subtitles/{ref}	non-media
+GET /api/v2/downloads/{id}/subtitles/{ref}	media	transfer	viewer_egress	false	true
 GET /api/v2/ebooks/{content_id}/annotations	non-media
 POST /api/v2/ebooks/{content_id}/annotations	non-media
 DELETE /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media

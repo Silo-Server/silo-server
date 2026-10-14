@@ -12,7 +12,11 @@ func viewerOperation(op huma.Operation) Operation {
 	return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true}
 }
 
+// viewerNoContentMutation registers a bodiless 204 favorites or watchlist
+// membership write for a verified profile. A repeated add or remove changes
+// no row and the shared seam notifies nobody for it, so the write is
+// naturally idempotent.
 func viewerNoContentMutation(op huma.Operation) Operation {
 	op.DefaultStatus = http.StatusNoContent
-	return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+	return Operation{Operation: op, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 }

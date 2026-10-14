@@ -172,3 +172,45 @@ export function restoreAdminSections({
     body: { reset_profiles },
   });
 }
+export interface LibraryRestoreFailure {
+  libraryId: number;
+  error: unknown;
+  /**
+   * "failed" when the page kept its rows: its version couldn't be read, or the
+   * server refused the restore with a 4xx before changing anything. "unknown"
+   * when the restore got a 5xx or no answer: the server reads the new order
+   * back after saving, so a 5xx can follow a restore that was applied.
+   */
+  outcome: "failed" | "unknown";
+}
+/**
+ * Restores each library page over the version it has when its turn comes, one
+ * page at a time. A page that fails doesn't stop the rest; the failures are returned.
+ */
+export async function restoreLibraryPages(
+  libraryIds: readonly number[],
+  resetProfiles: boolean | undefined,
+): Promise<LibraryRestoreFailure[]> {
+  const failures: LibraryRestoreFailure[] = [];
+  for (const libraryId of libraryIds) {
+    let etag: string;
+    try {
+      ({ etag } = await fetchAdminSectionOrderSnapshot("library", libraryId));
+    } catch (error) {
+      failures.push({ libraryId, error, outcome: "failed" });
+      continue;
+    }
+    try {
+      await restoreAdminSections({
+        scope: "library",
+        library_id: libraryId,
+        etag,
+        reset_profiles: resetProfiles,
+      });
+    } catch (error) {
+      const refused = error instanceof V2ProblemError && error.status < 500;
+      failures.push({ libraryId, error, outcome: refused ? "failed" : "unknown" });
+    }
+  }
+  return failures;
+}

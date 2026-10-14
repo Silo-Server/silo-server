@@ -14,7 +14,7 @@ import { SETTING_KEYS, type SettingKey } from "./settingsContract";
  * forced-subtitle control: the value it holds is the *resolved* one, which for
  * a viewer who never expressed a preference is the contract default. Writing
  * it back would pin that default at the top of the ladder and permanently
- * shadow the profile-scope toggle on the Subtitles settings screen. It stays
+ * shadow the profile-scope toggle on the Language & Subtitles settings screen. It stays
  * on the legacy composite row, which is not part of the canonical ladder.
  */
 export const SERIES_SUBTITLE_SETTING_KEYS = [

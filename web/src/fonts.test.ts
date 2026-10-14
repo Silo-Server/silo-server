@@ -49,9 +49,14 @@ function sortFaces(faces: Face[]): Face[] {
 }
 
 /** The families fonts.css self-hosts: only Cinema Dark's UI font. */
-const UI_FONTS = ["Outfit"];
+const UI_FONTS = ["Plus Jakarta Sans"];
 
 const localFaces = parseFaces(fontsCss);
+
+/** "Plus Jakarta Sans" is published as @fontsource-variable/plus-jakarta-sans. */
+function packageSlug(family: string): string {
+  return family.toLowerCase().replace(/ /g, "-");
+}
 
 describe("fonts.css", () => {
   it("declares exactly the UI fonts", () => {
@@ -66,7 +71,7 @@ describe("fonts.css", () => {
 
   it.each(UI_FONTS)("matches the @fontsource-variable package for %s", (family) => {
     const packageCss = readFileSync(
-      require.resolve(`@fontsource-variable/${family.toLowerCase()}/wght.css`),
+      require.resolve(`@fontsource-variable/${packageSlug(family)}/wght.css`),
       "utf8",
     );
     const packageFaces = parseFaces(packageCss).map((face) => ({
@@ -83,7 +88,9 @@ describe("fonts.css", () => {
     const sources = [...fontsCss.matchAll(/url\(\s*"([^"]+)"\s*\)/g)].map(([, src]) => src);
     expect(sources).toHaveLength(localFaces.length);
     for (const src of sources) {
-      expect(src).toMatch(/^@fontsource-variable\/([a-z]+)\/files\/\1-[a-z-]+-wght-normal\.woff2$/);
+      expect(src).toMatch(
+        /^@fontsource-variable\/([a-z]+(?:-[a-z]+)*)\/files\/\1-[a-z-]+-wght-normal\.woff2$/,
+      );
     }
   });
 });

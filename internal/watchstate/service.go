@@ -335,9 +335,11 @@ func (s *Service) SetFavorite(
 		return err
 	}
 	if favorite {
-		return store.AddFavorite(ctx, profileID, targetID)
+		_, err = store.AddFavorite(ctx, profileID, targetID)
+		return err
 	}
-	return store.RemoveFavorite(ctx, profileID, targetID)
+	_, err = store.RemoveFavorite(ctx, profileID, targetID)
+	return err
 }
 
 func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, targetID string) (bool, error) {
@@ -351,9 +353,11 @@ func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, tar
 	}
 	next := !current
 	if next {
-		return next, store.AddFavorite(ctx, profileID, targetID)
+		_, err = store.AddFavorite(ctx, profileID, targetID)
+	} else {
+		_, err = store.RemoveFavorite(ctx, profileID, targetID)
 	}
-	return next, store.RemoveFavorite(ctx, profileID, targetID)
+	return next, err
 }
 
 func (s *Service) RecordJellycompatMarkPlayed(ctx context.Context, userID int, profileID, targetID string, watchedAt time.Time) error {

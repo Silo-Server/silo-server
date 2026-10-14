@@ -308,8 +308,8 @@ metadata=mode=add:key=sample:value=-1,metadata@sheets=print
 
 `Sheets.UseInputAspect` derives the height from the input header instead,
 including a 90-degree display matrix, and returns the actual cell height in
-`Result.SheetTileHeight`. This reuses the sampling probe; a `ReadThrough`
-request also probes when this option is set. Callers publishing manifests
+`Result.SheetTileHeight`. This reuses the sampling probe, which every
+`Sheets` request runs, `ReadThrough` included. Callers publishing manifests
 must use the returned height and reject chunks whose geometry differs.
 
 - GPU surfaces (VAAPI, QSV, CUDA) are scaled on the GPU to four tiles' size,
@@ -373,12 +373,38 @@ must use the returned height and reject chunks whose geometry differs.
   half a second recovered all of them at no measurable cost. Stats keep the
   40 ms span their cached analyses were computed with. A window gives each
   sample the last frame at or before its time.
+- Sheets decode keyframes as the probed video codec needs. Interlaced MPEG-2
+  often codes a keyframe as an I field paired with a P field, which the
+  decoder reports as a P frame and `nokey` discards: a DVD-sourced episode
+  decoded 2 of 80 samples. MPEG-2 therefore decodes with
+  `-skip_frame:v noref`. The MPEG-1/2 decoder honors only `noref` and
+  `nokey` (`nointra` acts as `noref`), so this decodes every I and P
+  picture, about two and a half times the work of `nokey`. A list still
+  keeps each sample's first frame, its keyframe; a window gives each sample
+  the last I or P picture at or before its time. MPEG-1 has no field
+  pictures and keeps `nokey`.
+- MPEG-4 Part 2 (`mpeg4`, `msmpeg4*`) adds `-flags:v +low_delay`. Its
+  decoder otherwise holds each picture back for B-frames that a
+  keyframes-only read never sends, and releases it when the next keyframe
+  arrives; in AVI, whose packets carry no PTS, the frame then takes that
+  keyframe's time, and every cell showed the keyframe a GOP before its own.
+  Keyframes-only and reference-only reads decode no B-frames, so low delay
+  changes no picture. The repeat repair keeps its own `noref`.
 - A window also copies the same input's video packets to a `framecrc`
   timing file in a private temporary directory, separate from stderr and
   removed when the attempt ends. Their presentation times and durations
   bound the final keyframe's coverage without decoding extra frames or
   reading the file again. Samples beyond that observed extent remain missing, so
   premature EOF cannot turn every trailing cell into a decoded preview.
+- A packet without a PTS counts by its DTS only when the decoder runs in
+  low delay (MPEG-4 Part 2, above). A DTS never runs ahead of its PTS, so
+  the extent can only shrink, by the reorder delay. Without a PTS the decoder
+  stamps each frame with the DTS of the packet that released it, which is
+  the frame's own only when the decoder releases each keyframe as it
+  arrives. A reordering decoder does not: H.264 with B-frames in AVI
+  releases each keyframe two GOPs late in a keyframes-only read, and low
+  delay does not change that. Such windows fail with no usable packet timing
+  rather than publish every cell at an earlier keyframe.
 - A cell without a frame shows the previous cell's frame, and cells before
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,
@@ -426,7 +452,7 @@ the first run and before the sheets are encoded (`sheet_repair.go`):
   Matroska, whose I-frames only the decoder recognizes, lost a third of its
   samples to half-second entries), or the HEVC decoder dropped the keyframe
   as a duplicate picture order count. The repair lists them again,
-  keyframes only, each entry lasting until the next sample (the shortest gap
+  keyframes only (with the codec's options above), each entry lasting until the next sample (the shortest gap
   between the run's samples): the decoder starts afresh and finds the
   keyframe before the sample, or failing that the first one after it.
 - Repeated cells show the same moment as the cell before: their frames lie

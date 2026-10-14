@@ -4041,6 +4041,20 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 		return err
 	}
 	now := time.Now().UTC()
+	// A series row that keeps episode debt must wake when its episodes' recent
+	// window closes, like the season and episode rows that hold the same debt.
+	var actionable []*models.Episode
+	if hasRefreshDebtReason(reasonMask, RefreshDebtReasonEpisodeIncomplete) && s.episodeRepo != nil {
+		episodes, err := s.episodeRepo.ListBySeries(ctx, contentID)
+		if err != nil {
+			return err
+		}
+		for _, episode := range episodes {
+			if EpisodeHasActionableMetadataDebt(episode, now) {
+				actionable = append(actionable, episode)
+			}
+		}
+	}
 	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount,
 		refreshAttemptCounted(ctx, RefreshTargetItem, contentID))
 	return s.refreshDebtRepo.MarkSuccess(
@@ -4048,7 +4062,7 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 		contentID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, actionable...),
 	)
 }
 
@@ -4081,10 +4095,11 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 	}
 	reasonMask := int64(0)
 	now := time.Now().UTC()
+	var actionable []*models.Episode
 	for _, episode := range episodes {
 		if EpisodeHasActionableMetadataDebt(episode, now) {
 			reasonMask = RefreshDebtReasonEpisodeIncomplete
-			break
+			actionable = append(actionable, episode)
 		}
 	}
 	if reasonMask == 0 {
@@ -4102,7 +4117,7 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 		seasonID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, actionable...),
 	)
 }
 
@@ -4137,7 +4152,7 @@ func (s *MetadataService) syncRefreshDebtForEpisode(ctx context.Context, episode
 		episodeID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, episode),
 	)
 }
 
@@ -4924,6 +4939,17 @@ func flattenEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult) []Ep
 	return results
 }
 
+// dropAIText clears localized text an AI translation wrote before provider
+// text is merged in, so provider text replaces it in either merge mode. With
+// no provider text the field goes out empty, and the localization repository
+// keeps the stored AI text and its ai source; carrying it forward would label
+// it provider.
+func dropAIText(value *string, source string) {
+	if source == models.LocalizationSourceAI {
+		*value = ""
+	}
+}
+
 func buildItemLocalizationRecord(
 	existing *models.MediaItemLocalization,
 	contentID string,
@@ -4943,6 +4969,9 @@ func buildItemLocalizationRecord(
 		*loc = *existing
 		loc.ContentID = contentID
 		loc.Language = language
+		// AI text is not dropped here, unlike seasons and episodes: a refresh
+		// in a non-canonical language passes the canonical-language result as
+		// accumulator, so a dropped field would fill with canonical text.
 	}
 
 	mergeScalar(&loc.Title, accumulator.Title, mergeMode)
@@ -5006,6 +5035,7 @@ func buildSeasonLocalizationRecord(
 		*loc = *existing
 		loc.SeasonContentID = seasonContentID
 		loc.Language = language
+		dropAIText(&loc.Overview, loc.OverviewSource)
 	}
 
 	previousPosterPath := loc.PosterPath
@@ -5052,6 +5082,7 @@ func buildEpisodeLocalizationRecord(
 		*loc = *existing
 		loc.EpisodeContentID = episodeContentID
 		loc.Language = language
+		dropAIText(&loc.Overview, loc.OverviewSource)
 	}
 
 	mergeScalar(&loc.Title, episode.Title, mergeMode)
@@ -6821,7 +6852,7 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 		episode.ContentID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now.UTC()),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now.UTC(), episode),
 	)
 }
 

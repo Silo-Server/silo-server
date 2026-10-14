@@ -454,6 +454,68 @@ func TestRunSheetsRejectsPrematureEOFWithRealFFmpeg(t *testing.T) {
 	}
 }
 
+// TestRunSheetsAVIKeyframeTimesWithRealFFmpeg reads six ten-second gray
+// scenes from AVI files with B-frames, whose packets carry no PTS, sampled
+// three seconds into each scene. MPEG-4 Part 2 (XviD) decodes with low
+// delay, so every cell shows its own scene. H.264 releases each keyframe two
+// GOPs late in a keyframes-only read, and its cells would show the scene
+// before, so the run must fail rather than publish them.
+func TestRunSheetsAVIKeyframeTimesWithRealFFmpeg(t *testing.T) {
+	ffmpeg, _ := realFFmpeg(t)
+	grays := []int{20, 60, 100, 140, 180, 220}
+	var sources, inputs []string
+	for i, gray := range grays {
+		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=640x266:r=24:d=10", gray, gray, gray))
+		inputs = append(inputs, fmt.Sprintf("[%d:v]", i))
+	}
+	for name, encoder := range map[string][]string{
+		// AVI's default encoder is MPEG-4 Part 2.
+		"xvid": {"-vtag", "XVID", "-bf", "2", "-q:v", "3"},
+		"h264": {"-c:v", "libx264", "-bf", "3", "-sc_threshold", "0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clip := filepath.Join(t.TempDir(), "clip.avi")
+			args := append([]string{"-hide_banner", "-loglevel", "error"}, sources...)
+			args = append(args, "-filter_complex", strings.Join(inputs, "")+"concat=n=6:v=1:a=0,format=yuv420p[v]", "-map", "[v]",
+				"-g", "48", "-keyint_min", "48", "-threads", "1")
+			if output, err := exec.Command(ffmpeg, append(append(args, encoder...), clip)...).CombinedOutput(); err != nil {
+				t.Skipf("cannot generate the clip: %v: %s", err, output)
+			}
+			req := Request{
+				Input:   clip,
+				Samples: &Samples{Seconds: []float64{3, 13, 23, 33, 43, 53}, ReadThrough: true},
+				Sheets:  &SheetsOutput{TileWidth: 64, TileHeight: 26, Columns: 2, Rows: 2, Quality: 90},
+				Threads: 1,
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Thumbnail}.Run(ctx, req)
+			if name == "h264" {
+				if err == nil {
+					t.Fatalf("published frames %+v, want the run to fail", result.SheetFrames)
+				}
+				return
+			}
+			if err != nil || len(result.Sheets) != 2 || result.SheetFrames != (SheetFrames{Decoded: 6}) {
+				t.Fatalf("frames %+v, %d sheets, error %v; want 6 decoded samples on 2 sheets", result.SheetFrames, len(result.Sheets), err)
+			}
+			for i, sheet := range result.Sheets {
+				img, err := jpeg.Decode(bytes.NewReader(sheet.JPEG))
+				if err != nil {
+					t.Fatalf("sheet %d: %v", i, err)
+				}
+				ycc := img.(*image.YCbCr)
+				for slot := range min(4, len(grays)-i*4) {
+					x, y := (slot%2)*64+32, (slot/2)*26+13
+					if got, want := int(ycc.Y[ycc.YOffset(x, y)]), grays[i*4+slot]; got < want-4 || got > want+4 {
+						t.Fatalf("sheet %d cell %d luma %d, want %d", i, slot, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestRunSheetsToneMapsHDRWithRealFFmpeg tiles a generated 10-bit PQ clip
 // with software tone mapping; the sheet must come out, not black.
 func TestRunSheetsToneMapsHDRWithRealFFmpeg(t *testing.T) {

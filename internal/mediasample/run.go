@@ -234,7 +234,9 @@ type attemptRun struct {
 // samples runs a Samples request. Unless it reads through, it probes the
 // input first (see probe.go), then reads it through a concat list when its
 // container seeks to keyframes. Otherwise it reads one keyframes-only window
-// and picks the samples from its keyframes.
+// and picks the samples from its keyframes. Sheets always probe, since the
+// codec decides how their keyframes are decoded (see keyframeSkipFor and
+// keyframeLowDelayFor).
 //
 // Sheets read through a list that comes back empty because the decoder
 // dropped keyframes as duplicates are read again as that window. One decoder serves every
@@ -248,10 +250,16 @@ type attemptRun struct {
 // still fails.
 func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 	var listFailure *AttemptError
-	if !req.Samples.ReadThrough || (req.Sheets != nil && req.Sheets.UseInputAspect) {
+	// Sheets always probe: the codec decides how keyframes are read (see
+	// keyframeSkipFor), even for a read-through window.
+	if !req.Samples.ReadThrough || req.Sheets != nil {
 		header := &inputHeaderParser{}
 		if failure := a.exec(req, probeArgs(req.Input), nil, nil, header.line); failure != nil {
 			return Result{}, failure
+		}
+		if req.Sheets != nil {
+			req.skipFrame = keyframeSkipFor(header.info.VideoCodec)
+			req.lowDelay = keyframeLowDelayFor(header.info.VideoCodec)
 		}
 		if req.Sheets != nil && req.Sheets.UseInputAspect {
 			out := req.Sheets.forDisplayAspect(header.info.displayAspect())
@@ -401,6 +409,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 	}
 	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset, sampledSheetsList.span)
 	assembler.inputStart = inputStart
+	assembler.dtsTiming = req.lowDelay
 	if failure := a.exec(req, args, stdinBytes, assembler, append(logHandlers, assembler.line)...); failure != nil {
 		return Result{}, failure
 	}

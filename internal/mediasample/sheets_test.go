@@ -519,8 +519,9 @@ func TestRunSheetsReadsWindowsByTime(t *testing.T) {
 		if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{10, 10, 60, 70}) {
 			t.Fatalf("%s: cells %v", name, got[0])
 		}
+		// Both probe first: sheets pick their keyframe options from the codec.
 		runs := len(fake.calls)
-		if (name == "read through") != (runs == 1) || slices.Contains(fake.calls[runs-1], "concat") {
+		if runs != 2 || slices.Contains(fake.calls[runs-1], "concat") {
 			t.Fatalf("%s: runs %q", name, fake.calls)
 		}
 	}
@@ -561,17 +562,23 @@ func TestSheetPacketTimingKeepsPresentationExtent(t *testing.T) {
 		end     float64
 		hasTime bool
 		wantErr bool
+		// dts is the assembler's dtsTiming.
+		dts bool
 	}{
-		{"reordered PTS", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, 45000, 45000, 1, 0x0"}, 14.5, true, false},
-		{"missing numeric PTS", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0"}, 0, false, false},
-		{"missing text PTS", []string{"#tb 0: 1/1000", "0, 0, NOPTS, 1000, 1, 0x0"}, 0, false, false},
-		{"negative duration", []string{"#tb 0: 1/1000", "0, 0, 1000, -1, 1, 0x0"}, 0, false, false},
-		{"invalid time base", []string{"#tb 0: 1/0"}, 0, false, true},
-		{"packet before time base", []string{"0, 0, 1000, 1000, 1, 0x0"}, 0, false, true},
+		{"reordered PTS", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, 45000, 45000, 1, 0x0"}, 14.5, true, false, false},
+		{"missing numeric PTS uses DTS", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0"}, 13, true, false, true},
+		{"missing text PTS uses DTS", []string{"#tb 0: 1/1000", "0, 0, NOPTS, 1000, 1, 0x0"}, 13, true, false, true},
+		{"packed XviD without PTS", []string{"#tb 0: 1/25", "0, 0, -9223372036854775808, 1, 23436, 0x0", "0, 1, -9223372036854775808, 1, 11203, 0x0", "0, 2, -9223372036854775808, 1, 6, 0x0"}, 12.12, true, false, true},
+		{"DTS does not stretch PTS extent", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, NOPTS, 45000, 1, 0x0"}, 14.5, true, false, true},
+		{"missing PTS without low delay", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0", "0, 1000, NOPTS, 1000, 1, 0x0"}, 0, false, false, false},
+		{"missing PTS and DTS", []string{"#tb 0: 1/1000", "0, -9223372036854775808, -9223372036854775808, 1000, 1, 0x0"}, 0, false, false, true},
+		{"negative duration", []string{"#tb 0: 1/1000", "0, 0, 1000, -1, 1, 0x0"}, 0, false, false, false},
+		{"invalid time base", []string{"#tb 0: 1/0"}, 0, false, true, false},
+		{"packet before time base", []string{"0, 0, 1000, 1000, 1, 0x0"}, 0, false, true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := &sheetAssembler{offset: 12}
+			a := &sheetAssembler{offset: 12, dtsTiming: tt.dts}
 			for _, line := range tt.lines {
 				a.packetLine(line)
 			}
@@ -592,6 +599,10 @@ func TestRunSheetsRemovesPacketTimingAfterAttempt(t *testing.T) {
 			fake := &fakeSheets{frames: []fakeSheetFrame{timed(10, "0")}, packetEnd: 8}
 			var path string
 			runner := Runner{Exec: func(ctx context.Context, binary string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+				if !slices.Contains(args, "framecrc") {
+					// The probe that picks the codec's keyframe options.
+					return fake.exec(ctx, binary, args, stdin, stdout, stderr)
+				}
 				path = args[slices.Index(args, "framecrc")+1]
 				dir, err := os.Stat(filepath.Dir(path))
 				if err != nil || dir.Mode().Perm() != 0o700 {

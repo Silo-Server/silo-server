@@ -187,7 +187,7 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart
 			return nil, nil, err
 		}
 		args = append(args, decode...)
-		args = append(args, skipFrameOption, list.skip)
+		args = append(args, req.keyframeInputArgs(list.skip)...)
 		args = append(args, concatDemuxerArgs...)
 		args = append(args, "-i", concatListInput)
 		return append(args, sheetsOutputArgs(graph)...), concat, nil
@@ -195,7 +195,7 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart
 	// The window's duration bounds the input, not the output: an output -t
 	// drops frames after the filters logged them, and the log would no
 	// longer count the frames on stdout.
-	args = append(args, skipFrameOption, keyframeSkipFrame)
+	args = append(args, req.keyframeInputArgs(keyframeSkipFrame)...)
 	args = append(args, decode...)
 	args = append(args,
 		"-ss", formatSeconds(req.Window.StartSeconds),

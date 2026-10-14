@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -125,8 +126,10 @@ func (s *Service) translationConfig(ctx context.Context) (Config, *llm.Config) {
 // reaper that keeps doing so. Call once at startup.
 func (s *Service) Recover() { s.runner.Recover() }
 
-// Enqueue validates and queues a job, returning immediately. If an identical
-// job is already pending or running, that job is returned instead of a new one.
+// Enqueue validates and queues a job, returning immediately. If a pending or
+// running job already covers the request (same target and language, same or
+// wider scope, and forced whenever the request is), that job is returned
+// instead of a new one.
 func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	cfg, textConfig := s.translationConfig(ctx)
 	if !cfg.Ready() {
@@ -149,12 +152,37 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	}
 	req.TargetLanguage = target
 
-	key := idempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, cfg.ChatModel)
-	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, key); err != nil {
+	model := cfg.ChatModel
+	if req.TargetKind == TargetEpisode {
+		// An episode has no children.
+		req.IncludeChildren = false
+	}
+	if req.TargetKind == TargetItem && req.IncludeChildren {
+		// Only a series has children; normalizing keeps a movie request
+		// with and without the flag on one job.
+		item, err := s.content.ItemText(ctx, req.ContentID)
+		if err != nil {
+			return nil, err
+		}
+		if item != nil && item.Type != "series" {
+			req.IncludeChildren = false
+		}
+	}
+	// A job a previous release queued carries the old key format; reuse it
+	// when its stored flags cover this request.
+	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, legacyIdempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, model)); err != nil {
 		return nil, err
-	} else if existing != nil {
+	} else if existing != nil && existing.covers(req) {
 		return existing, nil
 	}
+	for _, covering := range coveringKeys(req.TargetKind, req.ContentID, req.TargetLanguage, model, req.IncludeChildren, req.Force) {
+		if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, covering); err != nil {
+			return nil, err
+		} else if existing != nil {
+			return existing, nil
+		}
+	}
+	key := idempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, model, req.IncludeChildren, req.Force)
 
 	job := &Job{
 		TargetKind:      req.TargetKind,
@@ -162,7 +190,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		IncludeChildren: req.IncludeChildren,
 		TargetLanguage:  req.TargetLanguage,
 		Engine:          "openai",
-		Model:           cfg.ChatModel,
+		Model:           model,
 		Status:          jobrunner.StatusPending,
 		ProgressMessage: "Queued",
 		Force:           req.Force,
@@ -262,11 +290,15 @@ func (s *Service) RequestOnView(ctx context.Context, targetKind TargetKind, cont
 		break // most recent job for this language decides; older history is irrelevant
 	}
 
+	// A view translates what that page shows: a movie or series its own
+	// description, a season its overview and its episode list, an episode
+	// itself. A series page therefore never translates a whole long-running
+	// show; each season is translated when someone opens it.
 	return s.Enqueue(ctx, JobRequest{
 		TargetKind:      targetKind,
 		ContentID:       contentID,
 		TargetLanguage:  target,
-		IncludeChildren: targetKind == TargetItem,
+		IncludeChildren: targetKind == TargetSeason,
 		RequestedBy:     requestedBy,
 	})
 }
@@ -437,13 +469,13 @@ func (s *Service) persistField(ctx context.Context, job *Job, f field, text stri
 	switch f.kind {
 	case TargetItem:
 		if f.isTagline {
-			return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, nil, &text, job.Force)
+			return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, nil, &text)
 		}
-		return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, &text, nil, job.Force)
+		return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, &text, nil)
 	case TargetSeason:
-		return s.locs.UpsertSeasonAI(ctx, f.contentID, job.TargetLanguage, text, job.Force)
+		return s.locs.UpsertSeasonAI(ctx, f.contentID, job.TargetLanguage, text)
 	case TargetEpisode:
-		return s.locs.UpsertEpisodeAI(ctx, f.contentID, job.TargetLanguage, text, job.Force)
+		return s.locs.UpsertEpisodeAI(ctx, f.contentID, job.TargetLanguage, text)
 	default:
 		return fmt.Errorf("unknown field kind %q", f.kind)
 	}
@@ -457,8 +489,8 @@ type jobMeta struct {
 }
 
 // collectFields expands the job target into translatable fields, dropping any
-// field whose localized value is already filled (unless force, which still
-// respects manual provenance).
+// field whose localized value is already filled, unless the job is forced and
+// an earlier AI translation wrote it (see translatableField).
 func (s *Service) collectFields(ctx context.Context, job *Job) ([]field, jobMeta, error) {
 	var meta jobMeta
 
@@ -503,7 +535,18 @@ func (s *Service) collectFields(ctx context.Context, job *Job) ([]field, jobMeta
 			return nil, meta, err
 		}
 		fields, err := s.filterSeasons(ctx, job, []ChildText{*season})
-		return fields, meta, err
+		if err != nil || !job.IncludeChildren {
+			return fields, meta, err
+		}
+		seasonEpisodes, err := s.content.SeasonEpisodeTexts(ctx, season.ContentID)
+		if err != nil {
+			return nil, meta, fmt.Errorf("load episodes: %w", err)
+		}
+		episodeFields, err := s.filterEpisodes(ctx, job, seasonEpisodes)
+		if err != nil {
+			return nil, meta, err
+		}
+		return append(fields, episodeFields...), meta, nil
 
 	case TargetEpisode:
 		episode, seriesID, err := s.content.EpisodeByID(ctx, job.ContentID)
@@ -538,22 +581,29 @@ func (s *Service) parentMeta(ctx context.Context, job *Job, seriesID string) (jo
 	return meta, nil
 }
 
+// sameLanguage reports whether text in language a already reads as language
+// b. It matches the catalog's pending check (case-insensitive, whole tag), so
+// a field the catalog reports as missing is never skipped here. An unknown
+// source language never matches.
+func sameLanguage(a, b string) bool {
+	a = strings.TrimSpace(a)
+	return a != "" && strings.EqualFold(a, strings.TrimSpace(b))
+}
+
 // translatableField reports whether a field with base text and an existing
 // localized value/source should be translated. Empty base text never
-// translates; filled localizations are skipped unless force; manual values
-// are skipped even with force (the SQL layer guards them too — skipping here
-// saves the model call).
+// translates, and a manual field never does, even when empty: the repository
+// keeps manual values, so the model call would be wasted. Otherwise an empty
+// localized value translates, and a filled one only when an earlier AI
+// translation wrote it and the job is forced.
 func translatableField(baseText, locValue, locSource string, force bool) bool {
-	if strings.TrimSpace(baseText) == "" {
+	if strings.TrimSpace(baseText) == "" || locSource == models.LocalizationSourceManual {
 		return false
 	}
-	if locSource == "manual" {
-		return false
+	if locValue == "" {
+		return true
 	}
-	if locValue != "" && !force {
-		return false
-	}
-	return true
+	return force && locSource == models.LocalizationSourceAI
 }
 
 func (s *Service) itemFields(ctx context.Context, job *Job, item *ItemText) ([]field, error) {
@@ -613,6 +663,9 @@ func (s *Service) filterSeasons(ctx context.Context, job *Job, seasons []ChildTe
 		if loc := locs[season.ContentID]; loc != nil {
 			locOverview, locSource = loc.Overview, loc.OverviewSource
 		}
+		if sameLanguage(season.DefaultLanguage, job.TargetLanguage) {
+			continue
+		}
 		if translatableField(season.Overview, locOverview, locSource, job.Force) {
 			fields = append(fields, field{kind: TargetSeason, contentID: season.ContentID, text: season.Overview})
 		}
@@ -634,6 +687,9 @@ func (s *Service) filterEpisodes(ctx context.Context, job *Job, episodes []Child
 		var locOverview, locSource string
 		if loc := locs[episode.ContentID]; loc != nil {
 			locOverview, locSource = loc.Overview, loc.OverviewSource
+		}
+		if sameLanguage(episode.DefaultLanguage, job.TargetLanguage) {
+			continue
 		}
 		if translatableField(episode.Overview, locOverview, locSource, job.Force) {
 			fields = append(fields, field{kind: TargetEpisode, contentID: episode.ContentID, text: episode.Overview})

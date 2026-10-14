@@ -832,11 +832,11 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 	{"delete source embeddings", `DELETE FROM media_item_embeddings WHERE media_item_id = $1`},
 	{"merge item localizations", `
 			INSERT INTO media_item_localizations (
-				content_id, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
-				backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
+				content_id, language, title, sort_title, overview, overview_source, tagline, tagline_source,
+				poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
 			)
-			SELECT $2, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
-			       backdrop_path, backdrop_thumbhash, logo_path, created_at, NOW()
+			SELECT $2, language, title, sort_title, overview, overview_source, tagline, tagline_source,
+			       poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path, created_at, NOW()
 			FROM media_item_localizations
 			WHERE content_id = $1
 			ON CONFLICT (content_id, language) DO NOTHING`},

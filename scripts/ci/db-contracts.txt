@@ -36,6 +36,7 @@
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
+./internal/api/handlers TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
@@ -207,6 +208,10 @@
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
 
+# Two library items with one provider key each keep a list sync row, and a key
+# stays on the provider while another item of the same kind still holds it.
+./internal/watchsync TestListItemsSharingProviderKeyDB
+
 # Plugin event deliveries: a claim takes at most its limit, never shares a row,
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
@@ -319,3 +324,6 @@
 ./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
 ./migrations TestLibraryDeleteRacingAccessWritePostgres
 ./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
+
+# AI metadata translations never replace provider or manual localized text.
+./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
