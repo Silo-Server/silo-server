@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -2475,6 +2476,13 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 // session. A transcode carries its full recipe in the compat store
 // (PlaybackSession.Recipe); direct/remux need only identity, rebuilt here from
 // the compat session and the negotiated source.
+func compatStreamOrigin(session *Session) streamtoken.OriginCredential {
+	if session == nil {
+		return streamtoken.OriginCredential{}
+	}
+	return streamtoken.OriginCredential{OriginLoginSessionID: session.LoginSessionID, OriginAPIKeyID: session.OriginAPIKeyID}
+}
+
 func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, source PlaybackMediaSource, method string) playback.RecipeCard {
 	var card playback.RecipeCard
 	if ps != nil && ps.Recipe != nil {
@@ -2487,6 +2495,7 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 	} else {
 		card = playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
 	}
+	card.OriginCredential = compatStreamOrigin(cs)
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
 	}
@@ -2652,6 +2661,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 
 	var session *playback.Session
 	var err error
+	ctx = playback.WithOriginCredential(ctx, compatStreamOrigin(compatSession))
 	if starter, ok := h.sessionMgr.(sessionStarterContext); ok {
 		session, err = starter.StartSessionWithContext(ctx, compatSession.StreamAppUserID, compatSession.ProfileID, source.FileID, playMethod, transcodeAudio)
 	} else {

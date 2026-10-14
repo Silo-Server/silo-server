@@ -75,8 +75,8 @@ func (r *Runtime) decodeOutput(encoded string) (workeridentity.Grant, workeriden
 	if work != grant.WorkID || claims.TranscodeNode != r.options.Binding.NodeURL || claims.RoutingExecutionNodeID != 0 && claims.RoutingExecutionNodeID != grant.NodeID || claims.ExpiresAt == nil || !time.Now().Before(claims.ExpiresAt.Time) {
 		return grant, body, nil, errors.New("output identity mismatch")
 	}
-	if claims.DownloadArtifactID != "" && body.AuthorityID == "" {
-		return grant, body, nil, errors.New("prepared output has no viewer authority")
+	if body.AuthorityID == "" {
+		return grant, body, nil, errors.New("output has no viewer authority")
 	}
 	return grant, body, &claims, nil
 }

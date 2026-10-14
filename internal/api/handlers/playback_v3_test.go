@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -1343,7 +1345,7 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	delivery.Transformations = []playback.TransformationV3{{Name: playback.ClientDV7ToDV81V3, Executor: playback.ExecutorClientV3, RecipeVersion: playback.ClientDVTransformVersionV3}}
 	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = delivery
 	startBody := marshalV3StartRequest(t, startRequest)
-	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(startBody)).WithContext(newAuthorizedPlaybackContext())
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(startBody)).WithContext(apimw.SetClaims(newAuthorizedPlaybackContext(), &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess, SessionID: "original-login"}))
 	startRR := httptest.NewRecorder()
 	handler.HandleStartPlayback(startRR, startReq)
 	if startRR.Code != http.StatusCreated {
@@ -1361,6 +1363,9 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 		t.Fatal(err)
 	}
 	originalClaims := streamClaimsFromPlanURL(t, started.PlaybackPlan.Stream.URL, handler.JWTSecret)
+	if originalClaims.OriginLoginSessionID != "original-login" {
+		t.Fatal("start token lost originating login")
+	}
 	if originalClaims.OriginalStartedAtUnixNano != originalSession.StartedAt.UnixNano() {
 		t.Fatalf("start ostn = %d, want %d", originalClaims.OriginalStartedAtUnixNano, originalSession.StartedAt.UnixNano())
 	}
@@ -1380,7 +1385,7 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	}
 
 	call := func() playback.DecisionResponseV3 {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(replanBody))).WithContext(newAuthorizedPlaybackContext())
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(replanBody))).WithContext(apimw.SetClaims(newAuthorizedPlaybackContext(), &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess, SessionID: "another-login"}))
 		req = withPlaybackRouteParam(req, "session_id", started.SessionID)
 		rr := httptest.NewRecorder()
 		handler.HandleReplanPlaybackV3(rr, req)
@@ -1399,6 +1404,9 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 		t.Fatalf("first=%#v second=%#v", first, second)
 	}
 	replanClaims := streamClaimsFromPlanURL(t, first.PlaybackPlan.Stream.URL, handler.JWTSecret)
+	if replanClaims.OriginCredential != originalClaims.OriginCredential {
+		t.Fatal("reissued playback token borrowed the replan caller login")
+	}
 	if replanClaims.OriginalStartedAtUnixNano != originalSession.StartedAt.UnixNano() {
 		t.Fatalf("replan ostn = %d, want original %d", replanClaims.OriginalStartedAtUnixNano, originalSession.StartedAt.UnixNano())
 	}

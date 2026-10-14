@@ -714,6 +714,7 @@ func TestManagedFileRedirectsAuthorizedArtifactToProxy(t *testing.T) {
 	h := NewDownloadHandler(svc)
 	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return secret })
 	req := withChiID(downloadTestRequest(http.MethodGet, "/downloads/dl1/file-proxy", nil, 7, "pA", "devA"), "dl1")
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, TokenType: auth.TokenTypeAccess, SessionID: "download-origin-login"}))
 	rec := httptest.NewRecorder()
 	h.HandleDownloadFileViaProxy(rec, req)
 
@@ -728,6 +729,14 @@ func TestManagedFileRedirectsAuthorizedArtifactToProxy(t *testing.T) {
 	claims, err := streamtoken.Verify(strings.TrimPrefix(location, prefix), secret)
 	if err != nil {
 		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(claims)
+	var origin map[string]any
+	if err := json.Unmarshal(encoded, &origin); err != nil {
+		t.Fatal(err)
+	}
+	if origin["olsid"] != "download-origin-login" {
+		t.Fatalf("download token lost login binding: %s", encoded)
 	}
 	if claims.PlayMethod != streamtoken.PlayMethodDownload || claims.MediaPath != "/artifacts/movie.mp4" || claims.UserID != 7 || claims.ProfileID != "pA" {
 		t.Fatalf("claims = %+v", claims)

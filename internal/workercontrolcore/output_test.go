@@ -42,7 +42,7 @@ func TestProxyOutputGrantBindsPreparedReceiptNodeAndLiveGeneration(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := streamtoken.Claims{SessionID: "download", DownloadArtifactID: "artifact", TranscodeNode: node.URL, RoutingExecutionNodeID: 7, PlayMethod: streamtoken.PlayMethodToneMapDownload, DownloadExecutionFingerprint: original, DownloadArtifactSize: 10, UserID: 5, ProfileID: "profile", MediaFileID: 9}
+	claims := streamtoken.Claims{OriginCredential: streamtoken.OriginCredential{OriginLoginSessionID: "customer-login-session"}, SessionID: "download", DownloadArtifactID: "artifact", TranscodeNode: node.URL, RoutingExecutionNodeID: 7, PlayMethod: streamtoken.PlayMethodToneMapDownload, DownloadExecutionFingerprint: original, DownloadArtifactSize: 10, UserID: 5, ProfileID: "profile", MediaFileID: 9}
 	claims.MediaPath = "/private/library/source.mkv"
 	claims.OutputSubdir = "/private/core/scratch/artifact"
 	token, err := streamtoken.Sign(claims, secret, time.Minute)
@@ -78,10 +78,13 @@ func TestProxyOutputGrantBindsPreparedReceiptNodeAndLiveGeneration(t *testing.T)
 	if err := json.Unmarshal(authority.Claims, &delegated); err != nil {
 		t.Fatal(err)
 	}
+	if delegated.Bound() || bytes.Contains(grant.Body, []byte(claims.OriginLoginSessionID)) {
+		t.Fatal("origin credential identity escaped output grant")
+	}
 	if delegated.MediaPath != "" || delegated.OutputSubdir != "" || bytes.Contains(grant.Body, []byte("/private/")) {
 		t.Fatal("core filesystem location escaped prepared output grant")
 	}
-	for name, modify := range map[string]func(*streamtoken.Claims){"node": func(c *streamtoken.Claims) { c.RoutingExecutionNodeID = 8 }, "url": func(c *streamtoken.Claims) { c.TranscodeNode = "https://other.example" }, "work": func(c *streamtoken.Claims) { c.DownloadArtifactID = "other" }, "receipt": func(c *streamtoken.Claims) { c.DownloadExecutionFingerprint = strings.Repeat("c", 64) }} {
+	for name, modify := range map[string]func(*streamtoken.Claims){"unbound": func(c *streamtoken.Claims) { c.OriginCredential = streamtoken.OriginCredential{} }, "ambiguous": func(c *streamtoken.Claims) { c.OriginAPIKeyID = 9 }, "node": func(c *streamtoken.Claims) { c.RoutingExecutionNodeID = 8 }, "url": func(c *streamtoken.Claims) { c.TranscodeNode = "https://other.example" }, "work": func(c *streamtoken.Claims) { c.DownloadArtifactID = "other" }, "receipt": func(c *streamtoken.Claims) { c.DownloadExecutionFingerprint = strings.Repeat("c", 64) }} {
 		t.Run(name, func(t *testing.T) {
 			bad := claims
 			modify(&bad)

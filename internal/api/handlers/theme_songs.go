@@ -50,7 +50,8 @@ func (h *ThemeSongsHandler) Authorize(ctx context.Context, identity themesongs.I
 	}
 	if h.Router != nil {
 		result, err := h.Router.Resolve(ctx, themedelivery.Request{
-			File: file, Delivery: delivery, Conversion: themesongs.ConversionFor(file),
+			OriginCredential: streamOriginCredential(ctx),
+			File:             file, Delivery: delivery, Conversion: themesongs.ConversionFor(file),
 			UserID: identity.UserID, ProfileID: identity.ProfileID,
 			AccessPath: netaccess.PathFromContext(ctx), ExpiresAt: expires,
 		})

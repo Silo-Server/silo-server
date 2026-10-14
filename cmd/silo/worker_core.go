@@ -177,15 +177,9 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 		return nil, err
 	}
 	reportSink := &workerReportSink{rdb: rdb, nodes: registry, recipes: recipes, assignments: store, service: func() *workercontrolcore.Service { return service }}
-	service, err = workercontrolcore.New(workercontrolcore.Options{Origin: origin, AllowHTTP: allowHTTP, PrivateKey: key, Nodes: registry, Store: store, OutputAuthorities: workercontrolcore.NewRedisOutputAuthorities(rdb, ""), Sources: coreSourceAdapter{sources}, SourceHandler: sources.Handler(), RecipeStore: recipes, VerifyToken: func(ctx context.Context, token string) (*streamtoken.Claims, error) {
-		claims, err := streamtoken.Verify(token, liveConfig().Auth.JWTSecret)
-		if err != nil {
-			return nil, err
-		}
-		if !contentAuthority.allowedClaims(ctx, claims) {
-			return nil, workercontrolcore.ErrDenied
-		}
-		return claims, nil
+	outputAuthorities := workercontrolcore.NewRedisOutputAuthorities(rdb, "")
+	service, err = workercontrolcore.New(workercontrolcore.Options{Origin: origin, AllowHTTP: allowHTTP, PrivateKey: key, Nodes: registry, Store: store, OutputAuthorities: outputAuthorities, Sources: coreSourceAdapter{sources}, SourceHandler: sources.Handler(), RecipeStore: recipes, VerifyToken: func(ctx context.Context, token string) (*streamtoken.Claims, error) {
+		return verifyWorkerOutputToken(ctx, pool, contentAuthority, token, liveConfig().Auth.JWTSecret)
 	}, Admit: func(ctx context.Context, node workercontrolcore.Node, a workerwire.Assignment) error {
 		return admitWorkerDownload(ctx, pool, node, a)
 	}, ExecutionConfig: func(ctx context.Context, nodeID int) (workerwire.ExecutionConfig, error) {
@@ -227,6 +221,8 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 		return nil, err
 	}
 	outputs.SecretValue = func() string { return liveConfig().Auth.JWTSecret }
+	relay := workerOutputRelay{pool: pool, recipes: recipes, authorities: outputAuthorities, assignments: store, secret: outputs.SecretValue}
+	outputs.ResolveOutput = relay.token
 	outputs.Grant = func(ctx context.Context, token, nodeURL string) (workercontrolcore.GrantReply, error) {
 		return service.IssueOutputGrant(ctx, token, nodeURL, liveConfig().Auth.JWTSecret)
 	}

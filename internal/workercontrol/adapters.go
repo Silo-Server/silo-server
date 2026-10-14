@@ -211,7 +211,7 @@ func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.C
 	r.mu.Lock()
 	entry, cached := r.tokens[token]
 	r.mu.Unlock()
-	if cached && entry.epoch == r.config.OutputAuthorizationEpoch() && time.Now().Before(entry.expires) && r.workAllowed(entry.workID, entry.generation) && (entry.claims.DownloadArtifactID == "" || r.authority.OutputAllowed(entry.authorityID)) {
+	if cached && entry.epoch == r.config.OutputAuthorizationEpoch() && time.Now().Before(entry.expires) && r.workAllowed(entry.workID, entry.generation) && r.authority.OutputAllowed(entry.authorityID) {
 		copy := *entry.claims
 		return &copy, nil
 	}
@@ -231,6 +231,9 @@ func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.C
 	if workID == "" || grant.WorkID != workID || grant.Generation == 0 {
 		return nil, errors.New("output grant has no matching work identity")
 	}
+	if authorityID == "" || !r.authority.OutputAllowed(authorityID) {
+		return nil, errors.New("viewer authority unavailable")
+	}
 	if claims.DownloadArtifactID == "" {
 		card, err := r.currentRecipe(ctx, workID)
 		if err != nil {
@@ -238,9 +241,6 @@ func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.C
 		}
 		claims.MediaPath = card.InputPath
 	} else {
-		if authorityID == "" || !r.authority.OutputAllowed(authorityID) {
-			return nil, errors.New("prepared viewer authority unavailable")
-		}
 		if !r.workAllowed(workID, grant.Generation) {
 			if err := r.refresh(ctx); err != nil {
 				return nil, err

@@ -28,7 +28,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 		return GrantReply{}, ErrDenied
 	}
 	claims, err := s.options.VerifyToken(ctx, token)
-	if err != nil || claims == nil {
+	if err != nil || claims == nil || !claims.Bound() {
 		return GrantReply{}, ErrDenied
 	}
 	node, found, err := s.options.Nodes.ByURL(ctx, nodeURL)
@@ -45,6 +45,7 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 	copied := *claims
 	copied.TranscodeNode = node.URL
 	copied.OutputSubdir = ""
+	copied.OriginCredential = streamtoken.OriginCredential{}
 	var generation uint64
 	var artifactFingerprint, clientFingerprint string
 	if claims.DownloadArtifactID != "" {
@@ -97,15 +98,12 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 		return GrantReply{}, err
 	}
 	public := ed25519.PublicKey(append([]byte(nil), private[ed25519.SeedSize:]...))
-	authorityID := ""
-	if claims.DownloadArtifactID != "" {
-		if s.options.OutputAuthorities == nil {
-			return GrantReply{}, ErrUnavailable
-		}
-		authorityID, err = s.options.OutputAuthorities.Register(ctx, OutputAuthorityRecord{Token: token, NodeID: node.ID, WorkID: work, Generation: generation, Epoch: workeridentity.OutputEpoch(proxySecret), ExpiresAt: claims.ExpiresAt.Unix()})
-		if err != nil {
-			return GrantReply{}, err
-		}
+	if s.options.OutputAuthorities == nil {
+		return GrantReply{}, ErrUnavailable
+	}
+	authorityID, err := s.registerOutputAuthority(ctx, node, OutputAuthorityRecord{Token: token, NodeID: node.ID, WorkID: work, Generation: generation, Epoch: workeridentity.OutputEpoch(proxySecret), ExpiresAt: claims.ExpiresAt.Unix()})
+	if err != nil {
+		return GrantReply{}, err
 	}
 	grant.Body, err = json.Marshal(workeridentity.OutputAuthority{AuthorityID: authorityID, ProxyPublicKey: public, Claims: inner, Epoch: workeridentity.OutputEpoch(proxySecret), ArtifactFingerprint: artifactFingerprint, ClientFingerprint: clientFingerprint})
 	if err != nil {

@@ -326,9 +326,9 @@ func (r *Runtime) verifyCommand(request *http.Request) error {
 		if err := r.proxyVerifier.VerifyKey(request, r.options.Binding.NodeID, body.ProxyPublicKey); err != nil {
 			return err
 		}
-		if claims.DownloadArtifactID != "" && !r.authority.OutputAllowed(body.AuthorityID) {
+		if !r.authority.OutputAllowed(body.AuthorityID) {
 			if err := r.refresh(request.Context()); err != nil || !r.authority.OutputAllowed(body.AuthorityID) {
-				return errors.New("prepared viewer authority unavailable")
+				return errors.New("viewer authority unavailable")
 			}
 		}
 		if !r.workAllowed(grant.WorkID, grant.Generation) {

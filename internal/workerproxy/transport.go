@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
 )
@@ -35,16 +36,34 @@ type Transport struct {
 	SecretValue    func() string
 	// Grant uses local core authority when the caller is the core itself.
 	// Proxies leave it nil and obtain the same grant through signed HTTP.
-	Grant      func(context.Context, string, string) (workercontrolcore.GrantReply, error)
-	Nodes      workercontrolcore.NodeRegistry
-	client     *http.Client
-	mu         sync.Mutex
-	cache      map[grantKey]entry
-	flights    singleflight.Group
-	transports workeridentity.TransportPool
+	Grant func(context.Context, string, string) (workercontrolcore.GrantReply, error)
+	// ResolveOutput is core-only: tokenless customer relays recover the
+	// original viewer from admitted recipes or the current download request.
+	ResolveOutput func(*http.Request, workercontrolcore.Node) (string, error)
+	Nodes         workercontrolcore.NodeRegistry
+	client        *http.Client
+	mu            sync.Mutex
+	cache         map[grantKey]entry
+	flights       singleflight.Group
+	transports    workeridentity.TransportPool
 }
 
 type tokenContextKey struct{}
+
+func customerOutputRequest(request *http.Request) bool {
+	parts := strings.Split(strings.TrimPrefix(request.URL.Path, "/"), "/")
+	read := request.Method == http.MethodGet || request.Method == http.MethodHead
+	if len(parts) >= 2 && (parts[0] == "transcode" || parts[0] == "remux") {
+		return read || request.Method == http.MethodPost && len(parts) == 5 && parts[2] == "segment" && parts[4] == "downloaded"
+	}
+	return read && len(parts) >= 3 && parts[0] == "downloads" && parts[1] == "artifacts"
+}
+
+func artifactStatRequest(request *http.Request) bool {
+	marked := nodehttp.IsArtifactStat(request.Context())
+	parts := strings.Split(strings.TrimPrefix(request.URL.Path, "/"), "/")
+	return marked && request.Method == http.MethodHead && len(parts) == 3 && parts[0] == "downloads" && parts[1] == "artifacts" && parts[2] != "" && parts[2] != "." && parts[2] != ".."
+}
 
 // WithToken preserves the verified output credential for post-response
 // acknowledgements, which have their own short request lifetime.
@@ -72,7 +91,7 @@ func New(origin, secret string, nodes workercontrolcore.NodeRegistry) (*Transpor
 
 func (t *Transport) Wrap(base http.RoundTripper) http.RoundTripper { return &hop{owner: t, base: base} }
 
-// WrapOutputs delegates token-carrying output traffic and uses commands for
+// WrapOutputs delegates customer output traffic and uses commands for
 // the core's administrative and execution requests. The two transports are
 // alternatives: their proof domains and prepared receipt bridges must not stack.
 func (t *Transport) WrapOutputs(base, commands http.RoundTripper) http.RoundTripper {
@@ -88,7 +107,7 @@ func (s *outputSelection) RoundTrip(request *http.Request) (*http.Response, erro
 	if token == "" {
 		token, _ = request.Context().Value(tokenContextKey{}).(string)
 	}
-	if token != "" {
+	if token != "" || customerOutputRequest(request) && !artifactStatRequest(request) {
 		return s.outputs.RoundTrip(request)
 	}
 	return s.commands.RoundTrip(request)
@@ -127,6 +146,12 @@ func (h *hop) RoundTrip(request *http.Request) (*http.Response, error) {
 	token := request.Header.Get("X-Silo-Stream-Token")
 	if token == "" {
 		token, _ = request.Context().Value(tokenContextKey{}).(string)
+	}
+	if token == "" && t.ResolveOutput != nil {
+		token, err = t.ResolveOutput(request, node)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if token == "" {
 		return nil, errors.New("standalone output requires authorized stream token")

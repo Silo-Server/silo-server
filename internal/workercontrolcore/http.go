@@ -137,7 +137,7 @@ func (s *Service) snapshot(w http.ResponseWriter, r *http.Request) {
 		}
 		executionConfig = &settings
 	}
-	outputs, err := s.preparedOutputs(r.Context(), node)
+	outputs, err := s.currentOutputs(r.Context(), node)
 	if err != nil {
 		http.Error(w, "worker output authorities unavailable", http.StatusServiceUnavailable)
 		return
@@ -228,6 +228,7 @@ func (s *Service) currentRecipe(r *http.Request, node Node, work string) (Recipe
 	card.TranscodeNodeURL = node.URL
 	card.RoutingExecutionNodeID = node.ID
 	// Core filesystem locations may also appear in output/environment fields.
+	card.OriginCredential = streamtoken.OriginCredential{}
 	card.OutputSubdir = ""
 	card.HWDevice = ""
 	card.ToneMapFilter = ""

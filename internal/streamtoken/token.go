@@ -34,6 +34,20 @@ const (
 	PlayMethodThemeAAC    = "theme_aac_v1"
 )
 
+// OriginCredential identifies the credential that authorized a stream. It is
+// rechecked only by the core and removed from delegated worker claims.
+// Login sessions and API keys are distinct from playback session identities.
+type OriginCredential struct {
+	OriginLoginSessionID string `json:"olsid,omitempty" hidden:"true"`
+	OriginAPIKeyID       int64  `json:"oakid,omitempty" hidden:"true"`
+}
+
+// Bound requires exactly one credential. Legacy transports may carry neither;
+// the standalone worker boundary refuses such unbound capabilities.
+func (o OriginCredential) Bound() bool {
+	return o.OriginLoginSessionID != "" && o.OriginAPIKeyID == 0 || o.OriginLoginSessionID == "" && o.OriginAPIKeyID > 0
+}
+
 // Claims holds everything a stateless proxy or transcode node needs
 // to serve a streaming session without database access.
 //
@@ -46,6 +60,7 @@ const (
 // (uid/pid/mfid) are lookup keys re-resolved against the authority on
 // reconstruct; they are never trusted on their own.
 type Claims struct {
+	OriginCredential
 	SessionID              string  `json:"sid"`
 	MediaPath              string  `json:"path"`
 	PlayMethod             string  `json:"method"`
@@ -179,7 +194,12 @@ func (c *Claims) StartedAt() (time.Time, StartedAtSource) {
 
 // Sign creates a signed JWT string from the given claims.
 func Sign(c Claims, secret string, ttl time.Duration) (string, error) {
-	now := time.Now()
+	return SignAt(c, secret, time.Now(), ttl)
+}
+
+// SignAt fixes the issue time so an unchanged internal relay recipe produces
+// the same token across segment requests and core replicas.
+func SignAt(c Claims, secret string, now time.Time, ttl time.Duration) (string, error) {
 	c.RegisteredClaims = jwt.RegisteredClaims{
 		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		IssuedAt:  jwt.NewNumericDate(now),

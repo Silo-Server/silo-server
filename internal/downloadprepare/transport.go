@@ -404,7 +404,7 @@ func (p HTTPPreparer) Stat(ctx context.Context, nodeURL, jwtSecret, artifactID s
 	if !ValidArtifactID(artifactID) {
 		return Result{}, fmt.Errorf("remote download artifact stat: invalid artifact id")
 	}
-	httpReq, err := p.request(ctx, http.MethodHead, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	httpReq, err := p.request(nodehttp.WithArtifactStat(ctx), http.MethodHead, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
 	if err != nil {
 		return Result{}, fmt.Errorf("remote download artifact stat: %w", err)
 	}

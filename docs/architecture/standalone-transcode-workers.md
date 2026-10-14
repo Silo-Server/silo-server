@@ -135,6 +135,15 @@ client JWT.
 The standalone verifier also rejects raw customer tokens without forwarding
 them to the core. Its engine accepts only the opaque, core-signed output grant.
 
+Core media relays use the same viewer grants, including tokenless UUID and
+header-authenticated playback URLs. The core recovers the original credential
+from the current recipe and reuses a stable internal token across segments;
+long-lived plays renew without replacing their originating credential. Prepared
+download relays bind the current caller to one unambiguous artifact row and reuse
+tokens only for the same credential, claims and work generation. These private
+tokens do not appear in public URLs. Only the preparer's marked, exact artifact
+HEAD probe retains core maintenance authority.
+
 Proxies sign each output request, including range and segment acknowledgement
 headers. The worker verifies it locally against the grant and its current
 authority snapshot. Grants are cached for at most five minutes, bounded by the
@@ -150,14 +159,30 @@ A successful preparation releases source handles while retaining authorized
 artifact output; reading a ready artifact does not require the original source
 to remain present.
 
-Ready artifacts can serve several viewers. The core retains each viewer's
-original token in a bounded output-authority registry and checks current access
-when refreshing the worker's short snapshot lease. Workers receive only opaque
-allowed authority IDs. Revoking one viewer denies their cached grant and stops
-their active response without stopping the shared artifact or another viewer.
-The response checks work generation, authorization epoch, viewer authority and
-the original token expiry while writing. The five-minute grant lifetime governs
-admission; it does not truncate an otherwise authorized long download.
+Every delegated output, including ordinary playback, has an independent viewer
+identity. Native and compatibility playback capture the originating login session
+or API-key ID when admitted and preserve it through recipes, reconstruction and
+replans. The standalone boundary refuses old tokens without that binding; legacy
+transports retain their existing token behavior. Source credential identities are
+removed from worker claims and recipe replies.
+
+The core retains each viewer's original token in a bounded output-authority
+registry. Each short snapshot rechecks the owning login's revocation, expiry and
+remote-playback profile limits, or the owning API key's existence and current
+scopes, alongside current content permission. Workers receive only opaque allowed
+authority IDs. A revoked login loses cached grants and open responses without
+stopping another login on the same account or a shared artifact. Output writes
+check work generation, authorization epoch, viewer authority and customer-token
+expiry. The five-minute grant lifetime governs admission; it does not truncate
+an otherwise authorized long download.
+
+Snapshot refreshes reclaim records only after an authoritative assignment lookup
+confirms stopped or superseded work, or credential verification confirms a revoked,
+expired or invalid source credential. Content and store errors withdraw snapshot
+permission while retaining the record for recovery. Cleanup compares the complete
+observed record and its registration revision, so an older core cannot delete a
+concurrent renewal. A full registry performs one bounded sweep before refusing a
+new viewer; active records remain subject to the record and byte limits.
 
 ## Configuration, capacity and observations
 
@@ -167,6 +192,13 @@ scratch paths and job ceiling stay operator-owned. The ceiling counts actual
 encoding and probe lifetimes, including shared probes that outlive a cancelled
 caller. Healthy and replacement generations of one work identity share one job
 slot. Source reads do not consume compute slots.
+
+Capability builders waiting on another builder hold no compute permit. A full
+worker may reuse its last complete capability report only for the same FFmpeg
+identity, acceleration backend and device. With spare capacity it rebuilds the
+report normally. An accepted reprobe invalidates that fallback until a new report
+completes successfully. Cold probes and new encoder work remain subject to the
+worker's compute limit.
 
 Draining refuses new work and permits the traffic of existing sessions. Health
 advertises `worker_protocol: http_only_v1`; capability warmup, snapshots and metrics

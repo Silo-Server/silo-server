@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -27,6 +28,29 @@ type contentFixture struct {
 	store              userstore.UserStore
 	gate               *workerContentAuthority
 	card               *playback.RecipeCard
+}
+
+func (f *contentFixture) preparedClaims(t *testing.T, resolution string) *streamtoken.Claims {
+	t.Helper()
+	artifact := uuid.NewString()
+	work := "prepared-" + artifact
+	origin := "http://" + f.content + ".example.test"
+	var node int
+	if err := f.pool.QueryRow(t.Context(), "INSERT INTO stream_nodes(name,url,type,enabled) VALUES($1,$2,'transcode',TRUE) RETURNING id", artifact, origin).Scan(&node); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), "DELETE FROM download_artifacts WHERE id=$1", artifact)
+		_, _ = f.pool.Exec(context.Background(), "DELETE FROM stream_nodes WHERE id=$1", node)
+	})
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO download_artifacts
+		(id,media_file_id,format,params_hash,status,resolution,origin_node_id,origin_node_url,origin_artifact_id)
+		VALUES($1,$2,'transcode',$1,'ready',$3,$4,$5,$6)`, artifact, f.file, resolution, node, origin, work); err != nil {
+		t.Fatal(err)
+	}
+	return &streamtoken.Claims{UserID: f.user, ProfileID: "viewer", MediaFileID: f.file,
+		DownloadArtifactID: work, DownloadArtifactRowID: artifact, DownloadExecutionFingerprint: artifact,
+		TranscodeNode: origin, RoutingExecutionNodeID: node, PlayMethod: streamtoken.PlayMethodDownload}
 }
 
 func newContentFixture(t *testing.T) *contentFixture {
@@ -143,13 +167,95 @@ func TestWorkerContentAuthorityRevokesAccountProfileLibraryAndMediaFolder(t *tes
 	allowed()
 	exec("UPDATE media_files SET missing_since=now() WHERE id=$1", f.file)
 	denied("source disappearance")
-	claims := streamtoken.Claims{UserID: f.user, ProfileID: "viewer", MediaFileID: f.file, DownloadArtifactID: "ready-artifact", PlayMethod: streamtoken.PlayMethodDownload}
-	if !f.gate.allowedClaims(ctx, &claims) {
+	claims := f.preparedClaims(t, "1080p")
+	if !f.gate.allowedClaims(ctx, claims) {
 		t.Fatal("ready artifact needlessly required original source bytes")
 	}
 	exec("UPDATE users SET download_allowed=FALSE WHERE id=$1", f.user)
-	if f.gate.allowedClaims(ctx, &claims) {
+	if f.gate.allowedClaims(ctx, claims) {
 		t.Fatal("prepared authority survived download permission revoke")
+	}
+}
+
+func TestWorkerPreparedOutputUsesAuthoritativeArtifactQuality(t *testing.T) {
+	f := newContentFixture(t)
+	ctx := t.Context()
+	if _, err := f.pool.Exec(ctx, "UPDATE media_files SET resolution='2160p' WHERE id=$1", f.file); err != nil {
+		t.Fatal(err)
+	}
+	ceiling := "1080p"
+	if err := f.store.UpdateProfile(ctx, "viewer", userstore.UpdateProfileInput{MaxPlaybackQuality: &ceiling}); err != nil {
+		t.Fatal(err)
+	}
+	claims := f.preparedClaims(t, "720p")
+	if !f.gate.allowedClaims(ctx, claims) {
+		t.Fatal("permitted 720p artifact was checked against its 2160p source")
+	}
+	if _, err := f.pool.Exec(ctx, "UPDATE download_artifacts SET resolution='2160p' WHERE id=$1", claims.DownloadArtifactRowID); err != nil {
+		t.Fatal(err)
+	}
+	if f.gate.allowedClaims(ctx, claims) {
+		t.Fatal("authoritative artifact quality change did not revoke access")
+	}
+	if _, err := f.pool.Exec(ctx, "UPDATE download_artifacts SET resolution='' WHERE id=$1", claims.DownloadArtifactRowID); err != nil {
+		t.Fatal(err)
+	}
+	if f.gate.allowedClaims(ctx, claims) {
+		t.Fatal("unknown artifact quality did not fall back to the source quality")
+	}
+	if _, err := f.pool.Exec(ctx, "UPDATE download_artifacts SET resolution='720p' WHERE id=$1", claims.DownloadArtifactRowID); err != nil {
+		t.Fatal(err)
+	}
+	restricted := true
+	empty := []int{}
+	if err := f.store.UpdateProfile(ctx, "viewer", userstore.UpdateProfileInput{LibraryRestrictionsEnabled: &restricted, AllowedLibraryIDs: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if f.gate.allowedClaims(ctx, claims) {
+		t.Fatal("prepared quality handling bypassed the profile's library restrictions")
+	}
+}
+
+func TestWorkerPreparedOutputRequiresMatchingReadyArtifact(t *testing.T) {
+	f := newContentFixture(t)
+	claims := f.preparedClaims(t, "720p")
+	alias := *claims
+	alias.TranscodeNode = "http://" + strings.ToUpper(strings.TrimPrefix(claims.TranscodeNode, "http://")) + ":80/"
+	if !f.gate.allowedClaims(t.Context(), &alias) {
+		t.Fatal("equivalent canonical artifact origin was rejected")
+	}
+	for _, status := range []string{"ready", "tone_map_ready", "audio_v2_ready", "tracks_v1_ready"} {
+		if _, err := f.pool.Exec(t.Context(), "UPDATE download_artifacts SET status=$2 WHERE id=$1", claims.DownloadArtifactRowID, status); err != nil {
+			t.Fatal(err)
+		}
+		if !f.gate.allowedClaims(t.Context(), claims) {
+			t.Fatalf("ready artifact status %s was rejected", status)
+		}
+	}
+	for _, change := range []struct {
+		name string
+		edit func(*streamtoken.Claims)
+	}{
+		{"missing row", func(c *streamtoken.Claims) { c.DownloadArtifactRowID = "" }},
+		{"unknown row", func(c *streamtoken.Claims) { c.DownloadArtifactRowID = uuid.NewString() }},
+		{"wrong work", func(c *streamtoken.Claims) { c.DownloadArtifactID = "another-artifact" }},
+		{"wrong origin", func(c *streamtoken.Claims) { c.TranscodeNode = "https://another.example.test" }},
+		{"wrong node", func(c *streamtoken.Claims) { c.RoutingExecutionNodeID++ }},
+		{"wrong fingerprint", func(c *streamtoken.Claims) { c.DownloadExecutionFingerprint = "another-fingerprint" }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			candidate := *claims
+			change.edit(&candidate)
+			if f.gate.allowedClaims(t.Context(), &candidate) {
+				t.Fatal("prepared output accepted a mismatched artifact")
+			}
+		})
+	}
+	if _, err := f.pool.Exec(t.Context(), "UPDATE download_artifacts SET status='queued' WHERE id=$1", claims.DownloadArtifactRowID); err != nil {
+		t.Fatal(err)
+	}
+	if f.gate.allowedClaims(t.Context(), claims) {
+		t.Fatal("prepared output accepted an artifact that is no longer ready")
 	}
 }
 

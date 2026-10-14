@@ -41,6 +41,8 @@ type Session struct {
 	// compat session ends with it. Empty for a session synthesized for an
 	// sa_ API key, which has no login session and is never stored.
 	LoginSessionID string
+	// OriginAPIKeyID identifies an authenticated, synthesized sa_ session.
+	OriginAPIKeyID int64
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
 }

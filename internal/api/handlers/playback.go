@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -796,6 +797,22 @@ func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 	return appendStreamToken(streamURL, h.signSessionToken(card, s.RequireMediaAuthorization))
 }
 
+// streamOriginCredential reads the authenticated source identity, never the
+// playback session ID or a credential supplied in the request body.
+func streamOriginCredential(ctx context.Context) streamtoken.OriginCredential {
+	claims := apimw.GetClaims(ctx)
+	if claims == nil {
+		return streamtoken.OriginCredential{}
+	}
+	if claims.TokenType == auth.TokenTypeAPIKey {
+		return streamtoken.OriginCredential{OriginAPIKeyID: claims.APIKeyID}
+	}
+	if claims.TokenType == auth.TokenTypeAccess || claims.TokenType == auth.TokenTypeDirectDownloadLink {
+		return streamtoken.OriginCredential{OriginLoginSessionID: claims.SessionID}
+	}
+	return streamtoken.OriginCredential{}
+}
+
 // identityRecipeCard builds the identity-only recipe for a direct-play or remux
 // session: reconstruction needs only ownership plus the audio selection, since
 // the bytes are served by HTTP Range / a re-spawned remux pipe at the
@@ -815,6 +832,7 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	default:
 		card = playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)
 	}
+	card.OriginCredential = s.OriginCredential
 	card.OriginalStartedAt = s.StartedAt
 	card.RoutingNetworkProvider = s.RoutingNetworkProvider
 	card.StreamLocation = s.StreamLocation

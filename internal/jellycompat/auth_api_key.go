@@ -240,6 +240,7 @@ func (a *AdminAPIKeyAuthenticator) resolveSession(ctx context.Context, token str
 		ProfileName:     profile.Name,
 		PseudoUserID:    PseudoUserID(user.ID, profile.ID),
 		StreamAppUserID: user.ID,
+		OriginAPIKeyID:  apiKey.ID,
 		CreatedAt:       a.now(),
 	}, adminAPIKeyAuthResult{ok: true}, true
 }

@@ -1454,6 +1454,7 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		claims.KeyframePlaylist = source.KeyframePlaylist
 	}
 	if compatSession != nil {
+		claims.OriginCredential = compatStreamOrigin(compatSession)
 		claims.UserID = compatSession.StreamAppUserID
 		claims.ProfileID = compatSession.ProfileID
 		claims.MediaFileID = source.FileID
@@ -2037,6 +2038,7 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 	if h.sessionMgr != nil {
 		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
 			card := playback.NewRecipeCard(upstream.UserID, upstream.ProfileID, upstream.MediaFileID, upstream.TranscodeNodeURL, opts)
+			card.OriginCredential = upstream.OriginCredential
 			// Mirror the client metadata into the card so a session rebuilt
 			// after a restart keeps its client label and Jellyfin
 			// identification instead of syncing with empty client fields.

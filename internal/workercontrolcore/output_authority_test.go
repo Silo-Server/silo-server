@@ -251,6 +251,15 @@ func TestRedisOutputAuthoritySurvivesCoreReplacementAndPrunesAtomically(t *testi
 
 }
 func TestPreparedOutputSnapshotRechecksEachViewerAndExposesOnlyOpaqueIDs(t *testing.T) {
+	testOutputSnapshotRechecksEachViewer(t, true)
+}
+
+func TestOrdinaryOutputSnapshotRechecksEachViewerAndExposesOnlyOpaqueIDs(t *testing.T) {
+	testOutputSnapshotRechecksEachViewer(t, false)
+}
+
+func testOutputSnapshotRechecksEachViewer(t *testing.T, prepared bool) {
+	t.Helper()
 	corePublic, coreKey, _ := ed25519.GenerateKey(rand.Reader)
 	nodePublic, nodeKey, _ := ed25519.GenerateKey(rand.Reader)
 	node := Node{ID: 7, URL: "https://worker.example.test", PublicKey: nodePublic, Enabled: true}
@@ -266,7 +275,11 @@ func TestPreparedOutputSnapshotRechecksEachViewerAndExposesOnlyOpaqueIDs(t *test
 		t.Fatal(err)
 	}
 	registry := NewMemoryOutputAuthorities()
-	claims := streamtoken.Claims{DownloadArtifactID: "artifact", TranscodeNode: node.URL, RoutingExecutionNodeID: 7, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}
+	claims := streamtoken.Claims{OriginCredential: streamtoken.OriginCredential{OriginLoginSessionID: "origin-login"}, DownloadArtifactID: "artifact", TranscodeNode: node.URL, RoutingExecutionNodeID: 7, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}
+	if !prepared {
+		claims.SessionID = claims.DownloadArtifactID
+		claims.DownloadArtifactID = ""
+	}
 	denied := false
 	service, err := New(Options{Origin: "https://core.example.test", PrivateKey: coreKey, Nodes: testNodes{[]Node{node}}, Store: store, OutputAuthorities: registry, VerifyToken: func(_ context.Context, token string) (*streamtoken.Claims, error) {
 		if denied && token == "private-viewer-a" {
@@ -319,8 +332,15 @@ func TestPreparedOutputSnapshotRechecksEachViewerAndExposesOnlyOpaqueIDs(t *test
 	if !initial.Outputs[aID] || !initial.Outputs[bID] {
 		t.Fatal("valid independent viewers were omitted")
 	}
+	for sequence, origin := range []string{"https://WORKER.Example.Test", "https://worker.example.test:443", "https://worker.example.test/"} {
+		claims.TranscodeNode = origin
+		if equivalent := snapshot(uint64(sequence + 1)); !equivalent.Outputs[aID] || !equivalent.Outputs[bID] {
+			t.Fatalf("equivalent admitted origin %q lost viewer authority", origin)
+		}
+	}
+	claims.TranscodeNode = node.URL
 	denied = true
-	updated := snapshot(1)
+	updated := snapshot(4)
 	if updated.Outputs[aID] || !updated.Outputs[bID] || updated.Active[a.WorkID] != a.Generation {
 		t.Fatal("viewer revoke either retained stale authority or stopped shared artifact")
 	}

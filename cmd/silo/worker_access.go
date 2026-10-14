@@ -11,38 +11,41 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
+	"github.com/Silo-Server/silo-server/internal/workeridentity"
 )
 
 type workerScopeResolver interface {
 	Resolve(context.Context, access.ResolveInput) (access.Scope, error)
 }
 type workerAccessState struct {
-	pool     *pgxpool.Pool
-	resolver workerScopeResolver
-	users    *auth.UserRepository
-	files    *scanner.FileRepository
-	items    *catalog.ItemRepository
-	episodes *catalog.EpisodeRepository
-	extras   *catalog.ExtraRepository
-	themes   *themesongs.Repository
-	groups   *access.GroupStore
+	pool      *pgxpool.Pool
+	resolver  workerScopeResolver
+	users     *auth.UserRepository
+	files     *scanner.FileRepository
+	items     *catalog.ItemRepository
+	episodes  *catalog.EpisodeRepository
+	extras    *catalog.ExtraRepository
+	themes    *themesongs.Repository
+	groups    *access.GroupStore
+	artifacts *downloads.ArtifactRepository
 }
 type workerContentAuthority struct {
 	state atomic.Pointer[workerAccessState]
 }
 
 func (a *workerContentAuthority) configure(pool *pgxpool.Pool, resolver workerScopeResolver) {
-	a.state.Store(&workerAccessState{pool: pool, resolver: resolver, users: auth.NewUserRepository(pool), files: scanner.NewFileRepository(pool), items: catalog.NewItemRepository(pool), episodes: catalog.NewEpisodeRepository(pool), extras: catalog.NewExtraRepository(pool), themes: themesongs.NewRepository(pool), groups: access.NewGroupStore(pool)})
+	a.state.Store(&workerAccessState{pool: pool, resolver: resolver, users: auth.NewUserRepository(pool), files: scanner.NewFileRepository(pool), items: catalog.NewItemRepository(pool), episodes: catalog.NewEpisodeRepository(pool), extras: catalog.NewExtraRepository(pool), themes: themesongs.NewRepository(pool), groups: access.NewGroupStore(pool), artifacts: downloads.NewArtifactRepository(pool)})
 }
 
 // A durable recipe proves the original admission, not continuing account,
 // profile or catalog permissions. Re-resolve them on the core authority path.
 func (a *workerContentAuthority) allowed(ctx context.Context, card *playback.RecipeCard) bool {
-	return a.allowedRecipe(ctx, card, false)
+	return a.allowedRecipe(ctx, card, nil)
 }
 
 func (a *workerContentAuthority) allowedClaims(ctx context.Context, claims *streamtoken.Claims) bool {
@@ -50,10 +53,14 @@ func (a *workerContentAuthority) allowedClaims(ctx context.Context, claims *stre
 		return false
 	}
 	card := playback.RecipeCardFromClaims(claims)
-	return a.allowedRecipe(ctx, &card, claims.DownloadArtifactID != "")
+	if claims.DownloadArtifactID != "" {
+		return a.allowedRecipe(ctx, &card, claims)
+	}
+	return a.allowedRecipe(ctx, &card, nil)
 }
 
-func (a *workerContentAuthority) allowedRecipe(ctx context.Context, card *playback.RecipeCard, prepared bool) bool {
+func (a *workerContentAuthority) allowedRecipe(ctx context.Context, card *playback.RecipeCard, preparedClaims *streamtoken.Claims) bool {
+	prepared := preparedClaims != nil
 	s := a.state.Load()
 	if s == nil || card == nil || card.UserID <= 0 {
 		return false
@@ -87,7 +94,23 @@ func (a *workerContentAuthority) allowedRecipe(ctx context.Context, card *playba
 		return err == nil && file.Path == card.InputPath
 	}
 	file, err := s.files.GetByID(ctx, card.MediaFileID)
-	if err != nil || file == nil || !prepared && file.MissingSince != nil || !catalog.FileAllowedByAccess(file, filter) {
+	if err != nil || file == nil || !prepared && file.MissingSince != nil {
+		return false
+	}
+	if prepared {
+		artifact, err := s.artifacts.GetByID(ctx, preparedClaims.DownloadArtifactRowID)
+		if err != nil || !workerPreparedArtifactMatches(artifact, preparedClaims) {
+			return false
+		}
+		// Apply the quality ceiling to the bytes served, while retaining the
+		// source's library and catalog ownership restrictions.
+		served := *file
+		if artifact.Resolution != "" {
+			served.Resolution = artifact.Resolution
+		}
+		file = &served
+	}
+	if !catalog.FileAllowedByAccess(file, filter) {
 		return false
 	}
 	var enabled bool
@@ -110,4 +133,19 @@ func (a *workerContentAuthority) allowedRecipe(ctx context.Context, card *playba
 		owner = extra.ParentID
 	}
 	return owner != "" && s.items.EnsureAccessible(ctx, owner, filter) == nil
+}
+
+func workerPreparedArtifactMatches(artifact *downloads.Artifact, claims *streamtoken.Claims) bool {
+	if artifact == nil || artifact.MediaFileID != claims.MediaFileID ||
+		artifact.OriginArtifactID != claims.DownloadArtifactID || !workeridentity.SameOrigin(artifact.OriginNodeURL, claims.TranscodeNode, strings.HasPrefix(strings.ToLower(artifact.OriginNodeURL), "http://")) ||
+		claims.RoutingExecutionNodeID != 0 && artifact.OriginNodeID != claims.RoutingExecutionNodeID ||
+		claims.DownloadExecutionFingerprint != "" && artifact.ParamsHash != claims.DownloadExecutionFingerprint {
+		return false
+	}
+	switch artifact.Status {
+	case downloads.ArtifactReady, downloads.ArtifactToneMapReady, downloads.ArtifactAudioV2Ready, downloads.ArtifactTracksReady:
+		return true
+	default:
+		return false
+	}
 }

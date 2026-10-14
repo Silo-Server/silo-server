@@ -17,6 +17,10 @@ var ErrFenced = errors.New("worker assignment fenced")
 var ErrUnavailable = errors.New("worker authority unavailable")
 var ErrDenied = errors.New("worker authority denied")
 
+// ErrOutputRevoked is a definitive customer-credential failure. Ambiguous
+// content/store failures must not use it: a later healthy snapshot can recover.
+var ErrOutputRevoked = errors.New("worker output credential revoked")
+
 type Node struct {
 	ID        int
 	URL       string

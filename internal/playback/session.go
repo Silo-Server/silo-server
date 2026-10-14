@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -29,6 +30,7 @@ const (
 
 // Session represents an active playback session.
 type Session struct {
+	streamtoken.OriginCredential
 	ID                   string
 	UserID               int
 	ProfileID            string
@@ -654,6 +656,19 @@ func (m *SessionManager) inlineAdmissionErrorLocked(userID int, method PlayMetho
 	return nil
 }
 
+type originCredentialContextKey struct{}
+
+// WithOriginCredential captures the credential at playback admission. Replans
+// retain the session's original credential instead of borrowing a new caller's.
+func WithOriginCredential(ctx context.Context, origin streamtoken.OriginCredential) context.Context {
+	return context.WithValue(ctx, originCredentialContextKey{}, origin)
+}
+
+func originCredentialFromContext(ctx context.Context) streamtoken.OriginCredential {
+	origin, _ := ctx.Value(originCredentialContextKey{}).(streamtoken.OriginCredential)
+	return origin
+}
+
 func newSession(
 	ctx context.Context,
 	userID int,
@@ -669,6 +684,7 @@ func newSession(
 	// build a ClientInfo from their own header vocabularies.
 	clientInfo := ClientInfoFromContext(ctx).Normalized()
 	return &Session{
+		OriginCredential:       originCredentialFromContext(ctx),
 		ID:                     uuid.New().String(),
 		UserID:                 userID,
 		ProfileID:              profileID,

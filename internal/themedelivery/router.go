@@ -83,6 +83,7 @@ type Router struct {
 // Request describes one theme authorization. File is already selected under
 // the viewer's current access filter.
 type Request struct {
+	streamtoken.OriginCredential
 	File       themesongs.File
 	Delivery   themesongs.Delivery
 	Conversion themesongs.Conversion
@@ -226,6 +227,7 @@ func (r *Router) publish(ctx context.Context, id, secret string, req Request, de
 	}
 	provider := req.AccessPath.Provider
 	card := playback.RecipeCard{
+		OriginCredential:       req.OriginCredential,
 		SessionID:              id,
 		UserID:                 req.UserID,
 		ProfileID:              req.ProfileID,

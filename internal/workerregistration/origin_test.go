@@ -114,7 +114,7 @@ func TestEnrolledCanonicalOriginsRefreshAndRouteCommandsAndOutput(t *testing.T) 
 				if err := verifier.Verify(out, 17); err != nil {
 					t.Fatalf("command not scoped to canonical origin: %v", err)
 				}
-				token, err := streamtoken.Sign(streamtoken.Claims{DownloadArtifactID: a.WorkID, TranscodeNode: lookup, RoutingExecutionNodeID: 17, PlayMethod: streamtoken.PlayMethodToneMapDownload, DownloadExecutionFingerprint: original, DownloadArtifactSize: 10, UserID: 5, MediaFileID: 9}, secret, time.Minute)
+				token, err := streamtoken.Sign(streamtoken.Claims{OriginCredential: streamtoken.OriginCredential{OriginLoginSessionID: "canonical-origin-fixture-login"}, DownloadArtifactID: a.WorkID, TranscodeNode: lookup, RoutingExecutionNodeID: 17, PlayMethod: streamtoken.PlayMethodToneMapDownload, DownloadExecutionFingerprint: original, DownloadArtifactSize: 10, UserID: 5, MediaFileID: 9}, secret, time.Minute)
 				if err != nil {
 					t.Fatal(err)
 				}

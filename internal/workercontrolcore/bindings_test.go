@@ -152,7 +152,7 @@ func TestRedisReadyPreparedOutputGrantHasGenerationOwnedReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := streamtoken.Sign(streamtoken.Claims{DownloadArtifactID: a.WorkID, TranscodeNode: node.URL, RoutingExecutionNodeID: node.ID, PlayMethod: streamtoken.PlayMethodToneMapDownload, DownloadExecutionFingerprint: original, DownloadArtifactSize: 10, UserID: 5, MediaFileID: 9}, secret, time.Minute)
+	token, err := streamtoken.Sign(streamtoken.Claims{OriginCredential: streamtoken.OriginCredential{OriginLoginSessionID: "origin-login"}, DownloadArtifactID: a.WorkID, TranscodeNode: node.URL, RoutingExecutionNodeID: node.ID, PlayMethod: streamtoken.PlayMethodToneMapDownload, DownloadExecutionFingerprint: original, DownloadArtifactSize: 10, UserID: 5, MediaFileID: 9}, secret, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

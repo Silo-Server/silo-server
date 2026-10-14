@@ -141,7 +141,7 @@ func replaceAliases(raw json.RawMessage, aliases map[string]string) (json.RawMes
 		return nil, err
 	}
 	for k, v := range obj {
-		if coreExecutionEnvironment(k) {
+		if coreExecutionEnvironment(k) || k == "olsid" || k == "oakid" {
 			delete(obj, k)
 			continue
 		}

@@ -29,7 +29,7 @@ func (w *outputFencedWriter) allowed() bool {
 	if !authenticated {
 		return true // Authentication failures may still return their error body.
 	}
-	return (scope.expires.IsZero() || time.Now().Before(scope.expires)) && (scope.epoch == "" || scope.epoch == w.runtime.config.OutputAuthorizationEpoch()) && w.runtime.workAllowed(scope.work, scope.generation) && (scope.authorityID == "" || w.runtime.authority.OutputAllowed(scope.authorityID))
+	return (scope.expires.IsZero() || time.Now().Before(scope.expires)) && (scope.epoch == "" || scope.epoch == w.runtime.config.OutputAuthorizationEpoch()) && w.runtime.workAllowed(scope.work, scope.generation) && (scope.epoch == "" || scope.authorityID != "" && w.runtime.authority.OutputAllowed(scope.authorityID))
 }
 
 func (w *outputFencedWriter) WriteHeader(status int) {

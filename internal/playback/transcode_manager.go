@@ -696,6 +696,7 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		toneMapMode = ""
 	}
 	s := &Session{
+		OriginCredential:              card.OriginCredential,
 		ID:                            card.SessionID,
 		UserID:                        card.UserID,
 		ProfileID:                     card.ProfileID,

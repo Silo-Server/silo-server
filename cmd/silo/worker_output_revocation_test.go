@@ -17,11 +17,16 @@ import (
 
 	"github.com/google/uuid"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/workercontrol"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
+	"github.com/Silo-Server/silo-server/internal/workerproxy"
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
@@ -72,19 +77,13 @@ func TestReadyWorkerOutputRevokesCachedViewerPermissionWithoutStoppingArtifact(t
 	defer core.Close()
 	coreURL := "http://" + core.Listener.Addr().String()
 	const secret = "ready-output-revocation-test-secret"
-	service, err = workercontrolcore.New(workercontrolcore.Options{OutputAuthorities: workercontrolcore.NewMemoryOutputAuthorities(), Origin: coreURL, AllowHTTP: true, PrivateKey: coreKey, Nodes: reportNodes{node}, Store: store, ExecutionActive: func(ctx context.Context, n workercontrolcore.Node, a workerwire.Assignment) bool {
+	outputAuthorities := workercontrolcore.NewMemoryOutputAuthorities()
+	service, err = workercontrolcore.New(workercontrolcore.Options{OutputAuthorities: outputAuthorities, Origin: coreURL, AllowHTTP: true, PrivateKey: coreKey, Nodes: reportNodes{node}, Store: store, ExecutionActive: func(ctx context.Context, n workercontrolcore.Node, a workerwire.Assignment) bool {
 		return workerDownloadActive(ctx, f.pool, n.ID, a)
 	}, ExecutionConfig: func(context.Context, int) (workerwire.ExecutionConfig, error) {
 		return workerwire.ExecutionConfig{Revision: "ready-output-test", SegmentRetentionSeconds: 600, SubtitleSyncCapacity: 1, OutputAuthorizationEpoch: workeridentity.OutputEpoch(secret)}, nil
 	}, VerifyToken: func(ctx context.Context, encoded string) (*streamtoken.Claims, error) {
-		claims, err := streamtoken.Verify(encoded, secret)
-		if err != nil {
-			return nil, err
-		}
-		if !f.gate.allowedClaims(ctx, claims) {
-			return nil, workercontrolcore.ErrDenied
-		}
-		return claims, nil
+		return verifyWorkerOutputToken(ctx, f.pool, f.gate, encoded, secret)
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +100,10 @@ func TestReadyWorkerOutputRevokesCachedViewerPermissionWithoutStoppingArtifact(t
 	if err = os.Truncate(filepath.Join(scratch, downloadprepare.ArtifactDirectoryName, work+".mp4"), artifactBytes); err != nil {
 		t.Fatal(err)
 	}
+	receipt, _ := json.Marshal(downloadprepare.Result{ArtifactID: work, FileSize: artifactBytes, ExecutionFingerprint: strings.Repeat("b", 64)})
+	if err = os.WriteFile(filepath.Join(scratch, downloadprepare.ArtifactDirectoryName, work+".mp4.receipt.json"), receipt, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	runtime, err := workercontrol.New(t.Context(), workercontrol.Options{Binding: workeridentity.Binding{Version: 1, NodeID: nodeID, CoreURL: coreURL, CorePublicKey: corePublic, NodePrivateKey: nodeKey, NodeURL: nodeURL, AllowHTTP: true}, Scratch: scratch, HWAccel: "none"})
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +112,11 @@ func TestReadyWorkerOutputRevokesCachedViewerPermissionWithoutStoppingArtifact(t
 	worker.Config.Handler = runtime.Handler()
 	worker.Start()
 	runtime.Run()
-	claims := streamtoken.Claims{SessionID: "download-viewer", DownloadArtifactID: work, TranscodeNode: nodeURL, RoutingExecutionNodeID: nodeID, PlayMethod: streamtoken.PlayMethodDownload, UserID: f.user, ProfileID: "viewer", MediaFileID: f.file}
+	login := uuid.NewString()
+	if err := auth.NewSessionRepository(f.pool).Create(t.Context(), models.AuthSession{ID: login, UserID: f.user, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	claims := streamtoken.Claims{OriginCredential: streamtoken.OriginCredential{OriginLoginSessionID: login}, SessionID: "download-viewer", DownloadArtifactRowID: artifact, DownloadArtifactID: work, TranscodeNode: nodeURL, RoutingExecutionNodeID: nodeID, PlayMethod: streamtoken.PlayMethodDownload, UserID: f.user, ProfileID: "viewer", MediaFileID: f.file}
 	token, err := streamtoken.Sign(claims, secret, time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -151,6 +158,11 @@ func TestReadyWorkerOutputRevokesCachedViewerPermissionWithoutStoppingArtifact(t
 	other := newContentFixture(t)
 	otherClaims := claims
 	otherClaims.UserID = other.user
+	otherLogin := uuid.NewString()
+	if err := auth.NewSessionRepository(f.pool).Create(t.Context(), models.AuthSession{ID: otherLogin, UserID: other.user, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	otherClaims.OriginLoginSessionID = otherLogin
 	otherClaims.SessionID = "second-download-viewer"
 	otherToken, err := streamtoken.Sign(otherClaims, secret, time.Minute)
 	if err != nil {
@@ -174,6 +186,35 @@ func TestReadyWorkerOutputRevokesCachedViewerPermissionWithoutStoppingArtifact(t
 			t.Fatal("valid ready output never became available")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	// Exercise the core's tokenless HTTPPreparer relay against an already-warm
+	// real worker. A newly minted viewer must be accepted on its first read,
+	// without manually refreshing its authority snapshot after registration.
+	outputs, err := workerproxy.New(coreURL, secret, reportNodes{node})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs.Grant = func(ctx context.Context, token, origin string) (workercontrolcore.GrantReply, error) {
+		return service.IssueOutputGrant(ctx, token, origin, secret)
+	}
+	relay := workerOutputRelay{pool: f.pool, authorities: outputAuthorities, assignments: store, secret: func() string { return secret }}
+	outputs.ResolveOutput = relay.token
+	nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
+		return outputs.WrapOutputs(base, service.WrapTransport(base))
+	})
+	t.Cleanup(func() { nodehttp.Configure(nil) })
+	relayContext := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{UserID: f.user, SessionID: login, TokenType: auth.TokenTypeAccess}), "viewer")
+	readRelay := func() (int, error) {
+		response, err := (downloadprepare.HTTPPreparer{}).Open(relayContext, nodeURL, secret, work, http.MethodGet, http.Header{"Range": []string{"bytes=0-9"}})
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = response.Body.Close() }()
+		_, err = io.Copy(io.Discard, response.Body)
+		return response.StatusCode, err
+	}
+	if status, err := readRelay(); err != nil || status != http.StatusPartialContent {
+		t.Fatalf("first tokenless prepared relay denied: status=%d error=%v", status, err)
 	}
 	slowClient := workeridentity.NewHTTPClient(true, 10*time.Second)
 	defer slowClient.CloseIdleConnections()
@@ -215,6 +256,9 @@ func TestReadyWorkerOutputRevokesCachedViewerPermissionWithoutStoppingArtifact(t
 	}
 	if get() == http.StatusPartialContent {
 		t.Fatal("cached ready grant survived viewer download permission revocation")
+	}
+	if status, err := readRelay(); err == nil && status < 400 {
+		t.Fatalf("tokenless prepared relay bypassed viewer revocation: status=%d", status)
 	}
 	if getGrant(otherReply.Grant, otherPrivate) != http.StatusPartialContent {
 		t.Fatal("viewer revocation stopped a different authorized viewer")

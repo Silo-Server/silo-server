@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
 )
@@ -100,5 +101,66 @@ func TestCoreOutputUsesCachedLocalGrantWithoutSendingCustomerToken(t *testing.T)
 	_ = response.Body.Close()
 	if grants.Load() != 1 || outputs.Load() != 8 || commands.calls.Load() != 1 {
 		t.Fatalf("local grants=%d, signed outputs=%d, commands=%d", grants.Load(), outputs.Load(), commands.calls.Load())
+	}
+}
+
+func TestCoreCustomerOutputCannotFallBackToCommandsWithoutViewer(t *testing.T) {
+	node := workercontrolcore.Node{ID: 17, URL: "https://worker.example.test", Enabled: true}
+	transport, err := New("https://core.example.test", "core-output-fixture", outputNodes{node})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := &commandRecorder{}
+	router := transport.WrapOutputs(http.DefaultTransport, commands)
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/transcode/work/master.m3u8"},
+		{http.MethodHead, "/downloads/artifacts/work"},
+		{http.MethodGet, "/remux/work"},
+		{http.MethodPost, "/transcode/work/segment/seg_00001.ts/downloaded"},
+	} {
+		request := httptest.NewRequest(route.method, node.URL+route.path, nil)
+		response, err := router.RoundTrip(request)
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		if err == nil {
+			t.Errorf("%s %s accepted without a viewer credential", route.method, route.path)
+		}
+	}
+	if commands.calls.Load() != 0 {
+		t.Fatal("customer output used core-command authority")
+	}
+}
+
+func TestCoreArtifactStatExceptionIsMetadataOnly(t *testing.T) {
+	node := workercontrolcore.Node{ID: 17, URL: "https://worker.example.test", Enabled: true}
+	transport, err := New("https://core.example.test", "core-output-fixture", outputNodes{node})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := &commandRecorder{}
+	router := transport.WrapOutputs(http.DefaultTransport, commands)
+	for _, route := range []struct {
+		method, path string
+		allowed      bool
+	}{
+		{http.MethodHead, "/downloads/artifacts/work", true},
+		{http.MethodGet, "/downloads/artifacts/work", false},
+		{http.MethodHead, "/downloads/artifacts/work/extra", false},
+		{http.MethodHead, "/downloads/artifacts/..", false},
+		{http.MethodHead, "/transcode/work/master.m3u8", false},
+	} {
+		request := httptest.NewRequest(route.method, node.URL+route.path, nil)
+		request = request.WithContext(nodehttp.WithArtifactStat(request.Context()))
+		response, err := router.RoundTrip(request)
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		if (err == nil) != route.allowed {
+			t.Errorf("%s %s allowed=%v want=%v: %v", route.method, route.path, err == nil, route.allowed, err)
+		}
+	}
+	if commands.calls.Load() != 1 {
+		t.Fatalf("metadata commands=%d want=1", commands.calls.Load())
 	}
 }

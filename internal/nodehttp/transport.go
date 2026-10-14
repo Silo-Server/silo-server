@@ -9,6 +9,19 @@ import (
 	"sync/atomic"
 )
 
+type artifactStatContextKey struct{}
+
+// WithArtifactStat marks the core preparer's metadata-only artifact probe.
+// Worker output selection limits this exception to exact artifact HEAD routes.
+func WithArtifactStat(ctx context.Context) context.Context {
+	return context.WithValue(ctx, artifactStatContextKey{}, true)
+}
+
+func IsArtifactStat(ctx context.Context) bool {
+	marked, _ := ctx.Value(artifactStatContextKey{}).(bool)
+	return marked
+}
+
 type configuration struct {
 	wrap           func(http.RoundTripper) http.RoundTripper
 	requiresRecipe func(context.Context, string) (bool, error)
