@@ -47,13 +47,16 @@ export function useAdminNavTopics(activeTopicId: string | null) {
     [activeTopicId, choices],
   );
 
+  // The desktop sidebar and the phone drawer each run this hook, so a toggle
+  // merges into what is stored instead of writing back this instance's whole
+  // snapshot, which would undo a choice the other instance made since.
   const toggle = useCallback(
     (topicId: string) => {
-      const next = { ...choices, [topicId]: !isOpen(topicId) };
-      setChoices(next);
-      writeChoices(next);
+      const open = !isOpen(topicId);
+      writeChoices({ ...readChoices(), [topicId]: open });
+      setChoices((current) => ({ ...current, [topicId]: open }));
     },
-    [choices, isOpen],
+    [isOpen],
   );
 
   return { isOpen, toggle };
