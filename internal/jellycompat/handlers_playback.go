@@ -2088,7 +2088,20 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 		deleteCommittedRecipe, err = playback.CaptureNodeRecipeDeletion(captureCtx, h.RecipeNodeStore, upstreamSessionID, recipe.TranscodeNodeURL)
 		captureCancel()
 		if err != nil {
-			return fmt.Errorf("capture uncommitted node transcode recipe: %w", err)
+			// The candidate is already published. Without its version, restore
+			// the replaced recipe or remove the key so a failed start leaves no
+			// reconstruction authority behind.
+			err = fmt.Errorf("capture uncommitted node transcode recipe: %w", err)
+			restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			if previousRecipe != nil && previousRecipe.TranscodeNodeURL != "" {
+				if restoreErr := h.RecipeNodeStore.Put(restoreCtx, upstreamSessionID, *previousRecipe); restoreErr != nil {
+					err = errors.Join(err, fmt.Errorf("restore prior node transcode recipe: %w", restoreErr))
+				}
+			} else if deleteErr := h.RecipeNodeStore.Delete(restoreCtx, upstreamSessionID); deleteErr != nil {
+				err = errors.Join(err, fmt.Errorf("remove uncommitted node transcode recipe: %w", deleteErr))
+			}
+			return err
 		}
 	}
 	remoteToLocal := recipe != nil && recipe.TranscodeNodeURL == "" && previousRecipe != nil && previousRecipe.TranscodeNodeURL != ""
