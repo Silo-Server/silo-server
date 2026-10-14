@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -54,7 +55,19 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	if len(live) > 0 && live[0] != nil {
 		liveConfig = live[0]
 	}
-	if pool == nil || rdb == nil {
+	if pool == nil {
+		return nil, nil
+	}
+	if rdb == nil {
+		// An enrolled worker must never receive the legacy source-path protocol,
+		// and its work cannot be fenced without the shared store.
+		configured, err := hasHTTPWorkers(ctx, pool)
+		if err != nil {
+			return nil, err
+		}
+		if configured {
+			return nil, errors.New("standalone workers are enrolled but Redis is unavailable")
+		}
 		return nil, nil
 	}
 	origin, allowHTTP, err := workerCoreOrigin(cfg.Server.PublicURL)
