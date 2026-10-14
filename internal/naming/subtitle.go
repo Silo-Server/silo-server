@@ -71,11 +71,13 @@ func ParseSubtitleSuffix(suffix string) SubtitleTags {
 			hiWords++
 		default:
 			tag := lang.RegisteredTag(word)
-			primary, _, _ := strings.Cut(tag, "-")
 			switch {
-			case len(primary) == 2 && tags.Language == "":
-				tags.Language = tag
-			case len(primary) == 3 && threeLetterOnly == "":
+			case tag == "":
+			case hasTwoLetterCode(word, tag):
+				if tags.Language == "" {
+					tags.Language = tag
+				}
+			case threeLetterOnly == "":
 				threeLetterOnly = tag
 			}
 		}
@@ -91,4 +93,13 @@ func ParseSubtitleSuffix(suffix string) SubtitleTags {
 		tags.HearingImpaired = true
 	}
 	return tags
+}
+
+// hasTwoLetterCode reports whether word, read as tag, names a language with an
+// ISO 639-1 code. The word's own spelling counts too: the deprecated "tl" is a
+// two-letter code even though it canonicalizes to "fil".
+func hasTwoLetterCode(word, tag string) bool {
+	primary, _, _ := strings.Cut(tag, "-")
+	written, _, _ := strings.Cut(strings.ReplaceAll(strings.TrimSpace(word), "_", "-"), "-")
+	return len(primary) == 2 || len(written) == 2
 }

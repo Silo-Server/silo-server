@@ -119,6 +119,9 @@ func TestParseSuffixReadsLanguageAndFlagsInAnyPosition(t *testing.T) {
 		{".und.en", "en", false, false},
 		{".yue", "yue", false, false},
 		{".fil.forced", "fil", true, false},
+		// "tl" is a two-letter code that canonicalizes to "fil".
+		{".tl.en", "fil", false, false},
+		{".tl.hi", "fil", false, true},
 		// "hi" is Hindi only when no other word names a language.
 		{".hi", "hi", false, false},
 		{".HI", "hi", false, false},
