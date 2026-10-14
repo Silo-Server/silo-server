@@ -88,6 +88,9 @@ func (s *Server) handleReprobeCapabilities(w http.ResponseWriter, r *http.Reques
 	s.capabilityBuildMu.Lock()
 	defer s.capabilityBuildMu.Unlock()
 
+	// Only a re-probe that owns both exclusions may retire the old fallback.
+	s.completeCapabilitySnapshot = nil
+	previous := s.storedCapabilityHash()
 	playback.InvalidateHWProbeCache()
 	tonemap.InvalidateProbeCache()
 	mediasample.InvalidateCapabilities()
@@ -106,10 +109,6 @@ func (s *Server) handleReprobeCapabilities(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "capability probe unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	previous := s.storedCapabilityHash()
-	// A re-probed report is as authoritative as a scheduled snapshot, so health
-	// starts advertising this hash immediately rather than at the next tick.
-	s.storeCapabilityHash(info.CapabilityHash)
 	slog.InfoContext(r.Context(), "transcode node capabilities re-probed", "component", "transcodenode",
 		"previous_hash", previous, "hash", info.CapabilityHash, "resolved", info.Resolved)
 	w.Header().Set("Content-Type", "application/json")

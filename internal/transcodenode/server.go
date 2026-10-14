@@ -417,7 +417,8 @@ type Server struct {
 	// snapshot (or an authenticated /hw-capabilities request) run its smoke
 	// matrix beside the operator's, which on session-limited hardware is
 	// exactly the collision that publishes a false regression.
-	capabilityBuildMu sync.Mutex
+	capabilityBuildMu          capabilityBuildLock
+	completeCapabilitySnapshot *completeCapabilitySnapshot
 }
 
 // storedCapabilityHash returns the last published capability hash, or empty
@@ -1424,19 +1425,11 @@ func (s *Server) StartMetricsSampler(ctx context.Context) {
 var ErrCapabilityBuildBusy = errors.New("capability build refused while the node is re-probing")
 
 func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelInfo, error) {
-	ctx, releaseJob, admitted := s.acquireJobContext(ctx, "")
-	if !admitted {
-		return playback.HWAccelInfo{}, ErrCapabilityBuildBusy
+	if err := ctx.Err(); err != nil {
+		return playback.HWAccelInfo{}, err
 	}
-	defer releaseJob()
-	// A snapshot runs ffmpeg on the GPU whenever the probe caches are cold, so
-	// it registers as GPU work. That is what stops a manual re-probe from
-	// claiming an apparently idle encoder and running its own smoke matrix
-	// beside this one.
-	//
-	// The default unlimited ceiling preserves periodic refresh under load. An
-	// operator limit can defer a refresh; the previous capability hash remains
-	// authoritative until a later successful snapshot.
+	// Waiting readers participate in re-probe exclusion, but reserve no
+	// encoding identity until they own the assembly lock.
 	if !s.gpu.beginWork() {
 		return playback.HWAccelInfo{}, ErrCapabilityBuildBusy
 	}
@@ -1444,9 +1437,17 @@ func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelI
 	if s.capabilityBuildAdmitted != nil {
 		s.capabilityBuildAdmitted()
 	}
-	s.capabilityBuildMu.Lock()
+	if err := s.capabilityBuildMu.LockContext(ctx); err != nil {
+		return playback.HWAccelInfo{}, err
+	}
 	defer s.capabilityBuildMu.Unlock()
-	return s.buildCapabilitySnapshotLocked(ctx)
+	inputs := s.capabilityInputs()
+	jobContext, releaseJob, admitted := s.acquireJobContext(ctx, "")
+	if !admitted {
+		return s.cachedCapabilitySnapshotLocked(ctx, inputs)
+	}
+	defer releaseJob()
+	return s.buildCapabilitySnapshotForInputsLocked(jobContext, inputs)
 }
 
 // buildCapabilitySnapshotLocked is buildCapabilitySnapshot's body. Callers must
@@ -1454,14 +1455,11 @@ func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelI
 // invalidation and its rebuild are one step no other builder can interleave
 // with.
 func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HWAccelInfo, error) {
-	ffmpegPath := ""
-	configuredHWAccel := playback.HWAccelNone
-	hwDevice := ""
-	if cfg := s.runtimeConfig().Config(); cfg != nil {
-		ffmpegPath = cfg.Playback.FFmpegPath
-		configuredHWAccel = cfg.Playback.HWAccel
-		hwDevice = cfg.Playback.HWDevice
-	}
+	return s.buildCapabilitySnapshotForInputsLocked(ctx, s.capabilityInputs())
+}
+
+func (s *Server) buildCapabilitySnapshotForInputsLocked(ctx context.Context, inputs capabilityInputs) (playback.HWAccelInfo, error) {
+	ffmpegPath, configuredHWAccel, hwDevice := inputs.ffmpeg, inputs.backend, inputs.device
 	resolveCtx, cancel := context.WithTimeout(ctx, toneMapCapabilityResolveTimeout(configuredHWAccel, hwDevice))
 	defer cancel()
 	// One detection walk answers both questions: Resolved honors the configured
@@ -1486,22 +1484,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	// Progressive remux tokens bind execution to the stable stream_nodes row.
-	// Do not let central commit work to this node until the watcher can resolve
-	// that identity; otherwise every committed GET would fail closed at serve
-	// time with no different route for a replan to choose.
-	if s.nodeRowID != nil {
-		if nodeID, ok := s.nodeRowID(); ok && nodeID > 0 {
-			info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxExecutionV1}
-			if s.themeInputs != nil {
-				info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeatureThemeAudioExecutionV1)
-			}
-		}
-	}
-	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
-		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2)
-	info.CapabilityHash = playback.ComputeCapabilityHash(info)
-	return info, nil
+	return s.publishCapabilitySnapshotLocked(ctx, inputs, info)
 }
 
 // handleHWCapabilities reports live smoke-tested node capabilities.
@@ -1511,9 +1494,6 @@ func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "capability probe unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	// A served report is as authoritative as a scheduled snapshot, so health
-	// starts advertising this hash immediately rather than at the next tick.
-	s.storeCapabilityHash(info.CapabilityHash)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }
@@ -1555,6 +1535,7 @@ func (s *Server) StartCapabilitySnapshots(ctx context.Context, ready <-chan stru
 }
 
 func (s *Server) refreshCapabilitySnapshot(ctx context.Context) {
+	previous := s.storedCapabilityHash()
 	info, err := s.buildCapabilitySnapshot(ctx)
 	if err != nil {
 		// Keep the previous hash: a failed probe is not evidence the hardware
@@ -1562,11 +1543,10 @@ func (s *Server) refreshCapabilitySnapshot(ctx context.Context) {
 		slog.DebugContext(ctx, "transcode node capability snapshot failed", "component", "transcodenode", "error", err)
 		return
 	}
-	if previous := s.storedCapabilityHash(); previous != "" && previous != info.CapabilityHash {
+	if previous != "" && previous != info.CapabilityHash {
 		slog.InfoContext(ctx, "transcode node capabilities changed", "component", "transcodenode",
 			"previous_hash", previous, "hash", info.CapabilityHash, "resolved", info.Resolved)
 	}
-	s.storeCapabilityHash(info.CapabilityHash)
 }
 
 func toneMapCapabilityResolveTimeout(hardwareBackend, hardwareDevice string) time.Duration {
