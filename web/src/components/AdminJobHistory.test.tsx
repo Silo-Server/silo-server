@@ -41,7 +41,17 @@ it("shows the totals a canceled image cache cleanup deleted before the cancel", 
   jobs.current = [imageCacheCleanupJob("canceled", "cancelled")];
   render(<AdminJobHistory />);
   expect(
-    screen.getByText("Canceled after deleting 17 cached objects across 2 prefixes"),
+    screen.getByText("Canceled after deleting 17 cached objects; 2 prefixes fully cleaned"),
+  ).toBeTruthy();
+});
+
+it("does not attribute an interrupted prefix's objects to cleaned prefixes", () => {
+  const job = imageCacheCleanupJob("interrupted", "cancelled");
+  job.result_payload = { deleted_prefixes: 0, deleted_s3_objects: 1000 };
+  jobs.current = [job];
+  render(<AdminJobHistory />);
+  expect(
+    screen.getByText("Canceled after deleting 1000 cached objects; 0 prefixes fully cleaned"),
   ).toBeTruthy();
 });
 

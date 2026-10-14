@@ -609,9 +609,6 @@ var (
 	errImageCacheCleanupClaimLost       = errors.New("image cache cleanup claim lost")
 )
 
-// imageCacheCleanupCanceledMessage describes a canceled cleanup that stopped
-// before prefix next of total. A cancel seen only after the last prefix left
-// nothing behind, so it must not say that undeleted images remain.
 // QueuedImageCacheCleanupCanceledMessage is the message for a cleanup canceled
 // while queued, either before its first claim or between slices.
 func QueuedImageCacheCleanupCanceledMessage(current, total int) string {
@@ -621,6 +618,9 @@ func QueuedImageCacheCleanupCanceledMessage(current, total int) string {
 	return "Image cache cleanup canceled; cached images not yet deleted remain in storage"
 }
 
+// imageCacheCleanupCanceledMessage describes a canceled cleanup that stopped
+// before prefix next of total. A cancel seen only after the last prefix left
+// nothing behind, so it must not say that undeleted images remain.
 func imageCacheCleanupCanceledMessage(next, total int) string {
 	if next >= total {
 		return fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; all prefixes were already processed", total, total)
@@ -670,29 +670,39 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 	defer stop(nil)
 	unregisterCancel := r.cancelRegistry.Register(job.ID, func() { stop(errImageCacheCleanupCancelRequested) })
 	defer unregisterCancel()
-	go func() {
-		ticker := time.NewTicker(r.heartbeatInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				cancelRequested, claimGeneration, err := r.repo.CancelState(ctx, job.ID)
-				if err != nil {
-					continue
-				}
-				if claimGeneration != job.ClaimGeneration {
-					stop(errImageCacheCleanupClaimLost)
+	// pollCancel reports whether it stopped the slice.
+	pollCancel := func() bool {
+		cancelRequested, claimGeneration, err := r.repo.CancelState(ctx, job.ID)
+		switch {
+		case err != nil:
+			return false
+		case claimGeneration != job.ClaimGeneration:
+			stop(errImageCacheCleanupClaimLost)
+		case cancelRequested:
+			stop(errImageCacheCleanupCancelRequested)
+		default:
+			return false
+		}
+		return true
+	}
+	// A cancel that arrived after the claim but before Register found no
+	// callback to run, so check the flag once before deleting anything.
+	if !pollCancel() {
+		go func() {
+			ticker := time.NewTicker(r.heartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
 					return
-				}
-				if cancelRequested {
-					stop(errImageCacheCleanupCancelRequested)
-					return
+				case <-ticker.C:
+					if pollCancel() {
+						return
+					}
 				}
 			}
-		}
-	}()
+		}()
+	}
 
 	heartbeatStop := make(chan struct{})
 	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)

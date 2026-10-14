@@ -135,6 +135,12 @@ func (h *AdminJobsHandler) RequestAdminTaskJobCancellation(ctx context.Context, 
 		if cancelErr != nil {
 			if !errors.Is(cancelErr, adminjob.ErrJobNotCancellable) {
 				slog.WarnContext(ctx, "admin jobs: failed to cancel queued image cache cleanup", "component", "api", "job_id", job.ID, "error", cancelErr)
+				return job, nil
+			}
+			// A runner claimed the job first. Report its current state: the
+			// claim may already have ended it from the flag.
+			if advanced, loadErr := h.repo.GetByID(ctx, job.ID); loadErr == nil {
+				return advanced, nil
 			}
 			return job, nil
 		}

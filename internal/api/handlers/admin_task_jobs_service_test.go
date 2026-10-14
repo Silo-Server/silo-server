@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
@@ -110,5 +111,32 @@ func TestRequestAdminTaskJobCancellationLeavesAClaimedCleanupToItsRunner(t *test
 	}
 	if got.Status == adminjob.StatusCancelled || !got.CancelRequested {
 		t.Fatalf("status=%q cancel_requested=%v, want a pending cancel left to the runner", got.Status, got.CancelRequested)
+	}
+}
+
+type claimCancelsFirstRepository struct {
+	cancellationRequestingRepository
+}
+
+func (r *claimCancelsFirstRepository) CancelQueued(context.Context, string, string, time.Time) (*models.AdminJob, error) {
+	cp := *r.job
+	cp.Status = adminjob.StatusCancelled
+	r.job = &cp
+	return nil, adminjob.ErrJobNotCancellable
+}
+
+// When a runner claims the flagged cleanup and ends it before the queued
+// cancel runs, the request reports the canceled job rather than the stale
+// queued one.
+func TestRequestAdminTaskJobCancellationReportsACleanupItsClaimEnded(t *testing.T) {
+	job := &models.AdminJob{ID: "cleanup", JobType: adminjob.JobTypeImageCacheCleanup, Status: adminjob.StatusQueued}
+	h := NewAdminJobsHandler(&claimCancelsFirstRepository{cancellationRequestingRepository{fakeAdminJobRepository{job: job}}}, nil)
+
+	got, err := h.RequestAdminTaskJobCancellation(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != adminjob.StatusCancelled {
+		t.Fatalf("status=%q, want the canceled job the claim recorded", got.Status)
 	}
 }

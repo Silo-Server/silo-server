@@ -407,6 +407,42 @@ func TestImageCacheCleanupCanceledMidSliceStopsAndKeepsTotals(t *testing.T) {
 	}
 }
 
+// A cancellation that lands after the claim but before the slice registers
+// with the cancel registry finds no callback to run. The slice checks the flag
+// before its first delete, so it deletes nothing rather than running until its
+// first cancel poll.
+func TestImageCacheCleanupCanceledBeforeRegisterDeletesNothing(t *testing.T) {
+	r := lifecycleRepo(t)
+	job := queueImageCacheCleanupJob(t, r, cleanupPrefixes(4))
+	store := &cleanupStore{deleteFn: func(context.Context, int, string) (int, error) { return 1, nil }}
+	runner := imageCacheCleanupRunner(r, store, time.Minute)
+	runner.heartbeatInterval = time.Hour
+
+	claimed, err := r.ClaimNextQueued(t.Context(), JobTypeImageCacheCleanup)
+	if err != nil || claimed == nil || claimed.ID != job.ID {
+		t.Fatalf("claim: %+v %v", claimed, err)
+	}
+	if _, err := r.RequestCancellation(t.Context(), job.ID); err != nil {
+		t.Fatalf("request cancellation: %v", err)
+	}
+	if runner.cancelRegistry.Cancel(job.ID) {
+		t.Fatal("cleanup registered before its slice started")
+	}
+	runner.repo = runner.repo.withClaim(claimed)
+	runner.executeImageCacheCleanup(claimed)
+
+	canceled, err := r.GetByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled.Status != StatusCancelled || canceled.ProgressCurrent != 0 {
+		t.Fatalf("status=%s progress=%d/%d, want canceled before the first prefix", canceled.Status, canceled.ProgressCurrent, canceled.ProgressTotal)
+	}
+	if calls := store.attempted(); len(calls) != 0 {
+		t.Fatalf("attempted %v, want no deletes after cancellation", calls)
+	}
+}
+
 // A cancellation that arrives during the last prefix, and is only seen after
 // it, still ends canceled, but keeps the deletion totals rather than the empty
 // result Complete would write, and does not claim that undeleted images remain.
