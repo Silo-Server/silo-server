@@ -1010,9 +1010,9 @@ func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID str
 			return
 		}
 		switch strings.ToLower(strings.TrimSpace(itemType)) {
-		case "movie":
+		case itemTypeMovie:
 			movieFiles = append(movieFiles, fileID)
-		case "series":
+		case itemTypeSeries:
 			if root.path != "" && !seen[root] {
 				seen[root] = true
 				roots = append(roots, root)
