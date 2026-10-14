@@ -22,8 +22,6 @@ import {
 // server's positioned extract starts at the window, so a fresh window reaches
 // back far enough to include a subtitle already showing at the playhead.
 const SEEK_BACKOFF = 10;
-// Larger than any real Blu-ray plane; a bigger object is damaged data.
-const MAX_OBJECT_PIXELS = 4096 * 4096;
 // Keeps a subtitle that would land past the player's edge (a Fill crop, or a
 // plane larger than the cropped video) this far inside it.
 const EDGE_MARGIN_RATIO = 0.02;
@@ -244,7 +242,6 @@ export function usePGSSubtitles({
     function bitmapFor(object: PGSPlacedObject): CanvasImageSource | null {
       const cached = bitmaps.get(object);
       if (cached !== undefined) return cached;
-      if (object.width * object.height > MAX_OBJECT_PIXELS) return null;
       const surface = document.createElement("canvas");
       surface.width = object.width;
       surface.height = object.height;

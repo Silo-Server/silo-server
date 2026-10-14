@@ -27,6 +27,11 @@ const SEGMENT_WDS = 0x17;
 const SEGMENT_END = 0x80;
 
 const COMPOSITION_EPOCH_START = 0x80;
+const COMPOSITION_ACQUISITION_POINT = 0x40;
+// One screen's objects together. A real plane is at most 1920x1080 and its
+// objects fit inside it, so a composition past this is damaged or crafted
+// data, and decoding it could exhaust the browser's memory.
+const MAX_COMPOSITION_PIXELS = 4096 * 4096;
 const ODS_FIRST_IN_SEQUENCE = 0x80;
 const ODS_LAST_IN_SEQUENCE = 0x40;
 const OBJECT_CROPPED = 0x80;
@@ -277,7 +282,9 @@ export class PGSStreamParser {
     const state = body[7]!;
     const paletteId = body[9]!;
     const count = body[10]!;
-    if (state & COMPOSITION_EPOCH_START) {
+    // Epoch starts and acquisition points both carry every definition their
+    // screen needs, so a decoder resets at either (as FFmpeg's does).
+    if (state & (COMPOSITION_EPOCH_START | COMPOSITION_ACQUISITION_POINT)) {
       this.palettes.clear();
       this.objects.clear();
       this.pendingObject = null;
@@ -370,10 +377,13 @@ export class PGSStreamParser {
     const palette = this.palettes.get(presentation.paletteId);
     if (!palette && presentation.objects.length > 0) return null;
     const objects: PGSPlacedObject[] = [];
+    let pixels = 0;
     for (const reference of presentation.objects) {
       const definition = this.objects.get(reference.objectId);
       if (!definition) return null;
       if (definition.width === 0 || definition.height === 0) continue;
+      pixels += definition.width * definition.height;
+      if (pixels > MAX_COMPOSITION_PIXELS) return null;
       objects.push({
         x: reference.x,
         y: reference.y,

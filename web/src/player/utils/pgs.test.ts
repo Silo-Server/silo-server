@@ -158,6 +158,40 @@ describe("PGSStreamParser", () => {
     expect(compositions.map((c) => c.start)).toEqual([1]);
   });
 
+  it("forgets objects at an acquisition point", () => {
+    const parser = new PGSStreamParser();
+    const compositions = parser.push(
+      new Uint8Array([
+        ...displaySetWithObject(1),
+        // An acquisition point redefines what it shows: palette 0, object 1.
+        ...pcs(2, { state: 0x40, objects: [{ id: 1, x: 0, y: 0 }] }),
+        ...pds(2, 0, [WHITE]),
+        ...ods(2, 1, 4, 2, RLE_4X2),
+        ...end(2),
+        // Object 0 belonged to the earlier epoch, so this screen cannot be drawn.
+        ...pcs(3, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] }),
+        ...end(3),
+      ]),
+    );
+    expect(compositions.map((c) => c.start)).toEqual([1, 2]);
+  });
+
+  it("drops a screen whose objects add up to more pixels than any plane", () => {
+    const parser = new PGSStreamParser();
+    const objects = [0, 1].map((id) => ({ id, x: 0, y: 0 }));
+    const compositions = parser.push(
+      new Uint8Array([
+        ...pcs(1, { objects }),
+        ...pds(1, 0, [WHITE]),
+        // Two 4096x2049 objects: each alone is plausible, together too large.
+        ...ods(1, 0, 4096, 2049, [0, 0]),
+        ...ods(1, 1, 4096, 2049, [0, 0]),
+        ...end(1),
+      ]),
+    );
+    expect(compositions).toEqual([]);
+  });
+
   it("keeps an earlier screen's colors after a palette-only update", () => {
     const parser = new PGSStreamParser();
     const [first, second] = parser.push(
