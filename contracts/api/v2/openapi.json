@@ -157687,7 +157687,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's favorites; an absent entry succeeds and changes nothing, so a retry is safe.",
+        "summary": "Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "favorites"
         ],
@@ -157991,7 +157991,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's favorites; adding an item already there succeeds and changes nothing, so a retry is safe.",
+        "summary": "Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "favorites"
         ],
@@ -209116,7 +209116,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's watchlist; an absent entry succeeds and changes nothing, so a retry is safe.",
+        "summary": "Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "watchlist"
         ],
@@ -209420,7 +209420,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's watchlist; adding an item already there succeeds and changes nothing, so a retry is safe.",
+        "summary": "Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "watchlist"
         ],

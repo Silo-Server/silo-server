@@ -7939,10 +7939,10 @@ export interface paths {
     };
     /** Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it). */
     get: operations["getFavorite"];
-    /** Add the item to the acting profile's favorites; adding an item already there succeeds and changes nothing, so a retry is safe. */
+    /** Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent. */
     put: operations["addFavorite"];
     post?: never;
-    /** Remove the item from the acting profile's favorites; an absent entry succeeds and changes nothing, so a retry is safe. */
+    /** Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent. */
     delete: operations["deleteFavorite"];
     options?: never;
     head?: never;
@@ -11959,10 +11959,10 @@ export interface paths {
     };
     /** Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it). */
     get: operations["getWatchlistEntry"];
-    /** Add the item to the acting profile's watchlist; adding an item already there succeeds and changes nothing, so a retry is safe. */
+    /** Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent. */
     put: operations["addToWatchlist"];
     post?: never;
-    /** Remove the item from the acting profile's watchlist; an absent entry succeeds and changes nothing, so a retry is safe. */
+    /** Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent. */
     delete: operations["deleteWatchlistEntry"];
     options?: never;
     head?: never;

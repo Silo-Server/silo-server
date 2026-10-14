@@ -58,10 +58,10 @@ func registerWatchlist(reg *Registry) {
 		"Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getWatchlistEntry)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/watchlist/{item_id}", "addToWatchlist", "watchlist",
-		"Add the item to the acting profile's watchlist; adding an item already there succeeds and changes nothing, so a retry is safe.")),
+		"Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.addToWatchlist)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/watchlist/{item_id}", "deleteWatchlistEntry", "watchlist",
-		"Remove the item from the acting profile's watchlist; an absent entry succeeds and changes nothing, so a retry is safe.")),
+		"Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.deleteWatchlistEntry)
 }
 
