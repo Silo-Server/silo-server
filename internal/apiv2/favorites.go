@@ -62,10 +62,10 @@ func registerFavorites(reg *Registry) {
 		"Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getFavorite)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/favorites/{item_id}", "addFavorite", "favorites",
-		"Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated.")),
+		"Add the item to the acting profile's favorites; adding an item already there succeeds and changes nothing, so a retry is safe.")),
 		reg.addFavorite)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/favorites/{item_id}", "deleteFavorite", "favorites",
-		"Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.")),
+		"Remove the item from the acting profile's favorites; an absent entry succeeds and changes nothing, so a retry is safe.")),
 		reg.deleteFavorite)
 }
 

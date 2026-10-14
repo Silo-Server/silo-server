@@ -63,7 +63,7 @@ func listFavoritesURLs(t *testing.T, handler *PersonalDataHandler, query string)
 
 func seedFavorite(t *testing.T, store userstore.UserStore) {
 	t.Helper()
-	if err := store.AddFavorite(context.Background(), "profile-1", "movie-1"); err != nil {
+	if _, err := store.AddFavorite(context.Background(), "profile-1", "movie-1"); err != nil {
 		t.Fatalf("AddFavorite: %v", err)
 	}
 }

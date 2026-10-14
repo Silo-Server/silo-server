@@ -142,7 +142,7 @@ func (s *directUserDataService) AddFavorite(ctx context.Context, session *Sessio
 	if err != nil {
 		return fmt.Errorf("open user store: %w", err)
 	}
-	if err := store.AddFavorite(ctx, session.ProfileID, contentID); err != nil {
+	if _, err := store.AddFavorite(ctx, session.ProfileID, contentID); err != nil {
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
@@ -154,7 +154,7 @@ func (s *directUserDataService) RemoveFavorite(ctx context.Context, session *Ses
 	if err != nil {
 		return fmt.Errorf("open user store: %w", err)
 	}
-	if err := store.RemoveFavorite(ctx, session.ProfileID, contentID); err != nil {
+	if _, err := store.RemoveFavorite(ctx, session.ProfileID, contentID); err != nil {
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
@@ -427,9 +427,9 @@ func (s *directUserDataService) UpdateUserData(ctx context.Context, session *Ses
 		}
 	} else if req.IsFavorite != nil {
 		if *req.IsFavorite {
-			err = store.AddFavorite(ctx, session.ProfileID, contentID)
+			_, err = store.AddFavorite(ctx, session.ProfileID, contentID)
 		} else {
-			err = store.RemoveFavorite(ctx, session.ProfileID, contentID)
+			_, err = store.RemoveFavorite(ctx, session.ProfileID, contentID)
 		}
 		if err != nil {
 			return err
