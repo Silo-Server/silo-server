@@ -328,6 +328,16 @@ func TestSeriesExtrasFoldersBelongToTheirShow(t *testing.T) {
 		"Toons/Peppa S01E01.mkv":                   {root: "Toons"},
 		"Toons/Shorts/Season 01/Shorts S01E01.mkv": {root: "Toons/Shorts"},
 		"Toons/Shorts/Specials/Shorts S00E01.mkv":  {root: "Toons/Shorts"},
+		// Season-like folders inside a show's extras still hold extras.
+		"Glimmer Harbor/Trailers/S01/Preview.mkv":                       {extra: true, kind: models.ExtraKindTrailer},
+		"Glimmer Harbor/other/Specials/Making of.mkv":                   {extra: true, kind: models.ExtraKindOther},
+		"Glimmer Harbor/Featurettes/Season 1 Featurettes/Making of.mkv": {extra: true, kind: models.ExtraKindFeaturette},
+		// A franchise folder holding shows from different years is not an
+		// extras owner, even though the shows share its title. (Root inference
+		// collapses the same-title folders into Doctor Who, as on main.)
+		"Doctor Who/Doctor Who (1963)/Season 01/Doctor Who S01E01.mkv": {root: "Doctor Who"},
+		"Doctor Who/Doctor Who (2005)/Season 01/Doctor Who S01E01.mkv": {root: "Doctor Who"},
+		"Doctor Who/Interviews/Interview S01E01.mkv":                   {root: "Doctor Who/Interviews"},
 		// A same-name wrapper folder owns its extras.
 		"Lumen/Lumen/Season 01/Lumen S01E01.mkv": {root: "Lumen"},
 		"Lumen/Trailers/teaser.mkv":              {extra: true, kind: models.ExtraKindTrailer},

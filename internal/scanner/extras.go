@@ -137,9 +137,11 @@ func (c *extrasClassifier) classify(path string) (extraCandidate, bool) {
 		}
 		candidate.Kind = models.NormalizeExtraKind(kind)
 	} else if !librarykind.IsMovie(c.folderType) {
-		// A folder named like an extras folder that holds season folders
-		// (Kids/Shorts/Season 01/) is a show of its own.
-		if ctx := c.pathContext(path); ctx != nil && ctx.HasSeasonStructure && cleanRoot(ctx) == candidate.SupplementalDir {
+		// A folder named like an extras folder that holds episodes in season
+		// folders (Kids/Shorts/Season 01/Shorts S01E01.mkv) is a show of its
+		// own. Without an episode code, a season-like folder inside a show's
+		// extras (Trailers/S01/Preview.mkv) holds extras.
+		if ctx := c.pathContext(path); ctx != nil && ctx.HasEpisodePattern && ctx.HasSeasonStructure && cleanRoot(ctx) == candidate.SupplementalDir {
 			return extraCandidate{}, false
 		}
 	}
@@ -240,12 +242,13 @@ func (c *extrasClassifier) walkedShowFolder(dir string) bool {
 // showEvidence reports what file, below dir, says about dir belonging to a
 // title: the file resolves to dir as its content root, to a show folder above
 // dir (dir is a season or disc folder of that show), or to a folder inside dir
-// under dir's own title (a version folder, Alien (1979)/1080p/, or a wrapper,
-// Show/Show/Season 01/), so dir owns its extras folders. A file that resolves
-// to a folder directly inside dir under another title marks that folder as a
-// show of its own, none of whose other files can resolve to dir, so the caller
-// can skip them (skip names it); this keeps a category folder of many shows to
-// about one file per show. A file more than showEvidenceDepth path components
+// under dir's own title and year (a version folder, Alien (1979)/1080p/, or a
+// wrapper, Show/Show/Season 01/; not a franchise folder, Doctor Who/Doctor Who
+// (2005)/), so dir owns its extras folders. A file that resolves to a folder
+// directly inside dir under another title marks that folder as a show of its
+// own, none of whose other files can resolve to dir, so the caller can skip
+// them (skip names it); this keeps a category folder of many shows to about
+// one file per show. A file more than showEvidenceDepth path components
 // below dir, or inside one of dir's own extras folders
 // (Kids/Extras/Show S01E01.mkv resolves to Kids), says nothing.
 func (c *extrasClassifier) showEvidence(file, dir string) (owns bool, skip string) {
@@ -272,8 +275,8 @@ func (c *extrasClassifier) showEvidence(file, dir string) (owns bool, skip strin
 		return false, ""
 	}
 	// root lies inside dir.
-	dirTitle, _, _ := naming.ParseInferFolderTitleYear(filepath.Base(dir))
-	if naming.InferTitlesCoherent(ctx.Title, dirTitle) {
+	dirTitle, dirYear, _ := naming.ParseInferFolderTitleYear(filepath.Base(dir))
+	if ctx.Year == dirYear && naming.InferTitlesCoherent(ctx.Title, dirTitle) {
 		return true, ""
 	}
 	if filepath.Dir(root) == dir && strings.HasPrefix(file, root+sep) {
