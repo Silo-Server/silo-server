@@ -5,7 +5,10 @@ import { usePrefetchCatalogSeason } from "@/hooks/queries/catalogRead";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { formatSeasonMeta, formatSeasonProgress, getSeasonDisplayTitle } from "./itemDetailLayout";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
+import CardOverlays from "@/components/overlays/CardOverlays";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { overlayDataFromSeason } from "@/lib/overlays";
 
 interface SeasonCarouselProps {
   seasons: Season[];
@@ -14,6 +17,7 @@ interface SeasonCarouselProps {
 export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
   const sorted = seasons.slice().sort((a, b) => a.season_number - b.season_number);
   const prefetchSeason = usePrefetchCatalogSeason();
+  const { prefs: overlayPrefs } = useOverlayPrefs();
 
   if (sorted.length === 0) {
     return null;
@@ -59,6 +63,10 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
                     <div className="text-muted-foreground bg-surface flex h-full items-center justify-center p-4 text-center text-sm font-medium">
                       {getSeasonDisplayTitle(season)}
                     </div>
+                  )}
+
+                  {overlayPrefs && (
+                    <CardOverlays data={overlayDataFromSeason(season)} prefs={overlayPrefs} />
                   )}
 
                   {/* Completed checkmark */}

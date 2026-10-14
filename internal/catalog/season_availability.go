@@ -6,13 +6,23 @@ import (
 )
 
 // SeasonAvailability counts one season's episodes: how many have aired (by
-// the provider's air dates), how many are dated to air later, and how many
-// have a file in an enabled library, in all and among the aired ones.
+// the provider's air dates), how many are dated to air later, how many are
+// known at all, and how many have a file in an enabled library, in all and
+// among the aired ones.
 type SeasonAvailability struct {
 	Aired     int
 	Upcoming  int
+	Total     int
 	Have      int
 	HaveAired int
+}
+
+// Availability is the poster badge for one series or season. Have is what is
+// in the library; Total is released seasons on a series, or known episodes on
+// a season.
+type Availability struct {
+	Have  int
+	Total int
 }
 
 // SeriesSeasonAvailability returns per-season episode counts for each series,
@@ -21,7 +31,7 @@ type SeasonAvailability struct {
 // spans it: such a file links to its first episode only.
 func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesContentIDs []string) (map[string]map[int]SeasonAvailability, error) {
 	out := map[string]map[int]SeasonAvailability{}
-	if len(seriesContentIDs) == 0 {
+	if r == nil || r.pool == nil || len(seriesContentIDs) == 0 {
 		return out, nil
 	}
 	rows, err := r.pool.Query(ctx, `
@@ -46,6 +56,7 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 		SELECT e.series_id, e.season_number,
 		       count(*) FILTER (WHERE e.air_date <= current_date),
 		       count(*) FILTER (WHERE e.air_date > current_date),
+		       count(*),
 		       count(p.content_id),
 		       count(p.content_id) FILTER (WHERE e.air_date <= current_date)
 		FROM episodes e
@@ -61,7 +72,7 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 		var series string
 		var season int
 		var a SeasonAvailability
-		if err := rows.Scan(&series, &season, &a.Aired, &a.Upcoming, &a.Have, &a.HaveAired); err != nil {
+		if err := rows.Scan(&series, &season, &a.Aired, &a.Upcoming, &a.Total, &a.Have, &a.HaveAired); err != nil {
 			return nil, err
 		}
 		if out[series] == nil {
@@ -70,4 +81,65 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 		out[series][season] = a
 	}
 	return out, rows.Err()
+}
+
+// EpisodeMetadataIncomplete reports series whose episode list is not a
+// reliable picture of what the provider says exists. A poster badge built
+// from that list would call a partial season complete.
+func (r *ItemRepository) EpisodeMetadataIncomplete(ctx context.Context, seriesContentIDs []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if r == nil || r.pool == nil || len(seriesContentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT content_id FROM media_items
+		WHERE content_id = ANY($1) AND episode_metadata_incomplete
+	`, seriesContentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("episode metadata incomplete: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// SeasonBadge is the episode fraction for one season poster. A season that
+// has not aired and has no files stays blank. Specials never reach this
+// function: the availability query excludes season 0.
+func SeasonBadge(a SeasonAvailability) (Availability, bool) {
+	if a.Total <= 0 || (a.Aired == 0 && a.Have == 0) {
+		return Availability{}, false
+	}
+	have := a.Have
+	if have > a.Total {
+		have = a.Total
+	}
+	return Availability{Have: have, Total: a.Total}, true
+}
+
+// SeriesBadge is complete released seasons over released seasons. A season
+// counts as released once an episode has aired, and complete when every
+// known episode of it is in an enabled library. Specials are already absent
+// from the map.
+func SeriesBadge(seasons map[int]SeasonAvailability) (Availability, bool) {
+	released, complete := 0, 0
+	for number, season := range seasons {
+		if number <= 0 || season.Aired <= 0 {
+			continue
+		}
+		released++
+		if season.Total > 0 && season.Have >= season.Total {
+			complete++
+		}
+	}
+	if released == 0 {
+		return Availability{}, false
+	}
+	return Availability{Have: complete, Total: released}, true
 }

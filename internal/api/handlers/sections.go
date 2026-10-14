@@ -412,10 +412,12 @@ type sectionItemResponse struct {
 	BackdropThumbhash      string                 `json:"backdrop_thumbhash,omitempty"`
 	LogoURL                string                 `json:"logo_url,omitempty"`
 	OverlaySummary         *models.OverlaySummary `json:"overlay_summary,omitempty"`
-	Badges                 []string               `json:"badges,omitempty"`
-	ItemSource             string                 `json:"item_source,omitempty"`
-	UserState              *itemUserStateResponse `json:"user_state,omitempty"`
-	UpcomingEvent          *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	// Availability is the series poster fraction. json:"-" because /api/v1 is frozen.
+	Availability  *catalog.Availability  `json:"-"`
+	Badges        []string               `json:"badges,omitempty"`
+	ItemSource    string                 `json:"item_source,omitempty"`
+	UserState     *itemUserStateResponse `json:"user_state,omitempty"`
+	UpcomingEvent *upcomingEventResponse `json:"upcoming_event,omitempty"`
 }
 
 type resolvedSectionResponse struct {
@@ -1512,6 +1514,18 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			Customized:  s.Customized,
 			Items:       items,
 		})
+	}
+	flat := make([]sectionItemResponse, 0)
+	for _, section := range resp.Sections {
+		flat = append(flat, section.Items...)
+	}
+	fillSectionAvailability(ctx, h.fetcher, flat)
+	n := 0
+	for si := range resp.Sections {
+		for ii := range resp.Sections[si].Items {
+			resp.Sections[si].Items[ii].Availability = flat[n].Availability
+			n++
+		}
 	}
 	return resp
 }
