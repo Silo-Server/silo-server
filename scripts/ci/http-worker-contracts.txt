@@ -98,3 +98,10 @@
 ./internal/playback TestMemoryRouteSessionPreservesAttemptAndRejectsStaleMoves
 ./internal/playback TestMemoryRouteSessionSharesCancellableReplanLock
 ./internal/api/handlers TestRelayMoveKeepsTheSessionsRecipeVersions
+
+# Proven pre-dispatch failures may recover; ambiguous starts retain owned cleanup.
+./internal/jellycompat TestMasterManifestReplansAfterUndispatchedRemoteStart
+./internal/jellycompat TestRemoteStartLostResponseKeepsUncertainWork
+./internal/jellycompat TestRemoteStartConnectedAttemptThenDialErrorKeepsUncertainWork
+./internal/jellycompat TestRemoteStartPartialWriteKeepsUncertainWork
+./internal/jellycompat TestRemoteStartDelayedAcceptCleanupPrecedesSuccessor

@@ -11,7 +11,9 @@ import (
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -1784,6 +1787,10 @@ func (h *PlaybackHandler) startOwnedRemoteTranscodeWithToneMapMode(ctx context.C
 		}
 		requestCtx, cancel := context.WithTimeout(nodehttp.WithPlaybackJob(ctx, upstreamSessionID), h.remoteTranscodeStartTimeout(request, nodeProbeTimeoutMillis))
 		defer cancel()
+		var connected atomic.Bool
+		requestCtx = httptrace.WithClientTrace(requestCtx, &httptrace.ClientTrace{
+			GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
+		})
 		httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, nodepool.NodeEndpoint(transcodeNodeURL, "/transcode/start"), strings.NewReader(string(body)))
 		if err != nil {
 			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("build transcode request: %w", logredact.SanitizeURLError(err))
@@ -1799,10 +1806,12 @@ func (h *PlaybackHandler) startOwnedRemoteTranscodeWithToneMapMode(ctx context.C
 		if err != nil {
 			nodepool.ReportConnectFailure(h.NodePlanner, transcodeNodeURL, err)
 			startErr := fmt.Errorf("remote transcode start failed: %w", logredact.SanitizeURLError(err))
-			if nodepool.IsConnectFailure(err) {
-				if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
-					return transcodenode.TranscodeStartResponse{}, 0, false, errors.Join(startErr, cleanupErr)
-				}
+			// Health classification also includes post-connect socket timeouts.
+			// Only a failed dial before any connection was obtained proves this
+			// start never reached the worker. In particular, a transport retry
+			// must not erase evidence of an earlier connected attempt.
+			var dialErr *net.OpError
+			if !connected.Load() && errors.As(err, &dialErr) && dialErr.Op == "dial" {
 				return transcodenode.TranscodeStartResponse{}, 0, false, startErr
 			}
 			return transcodenode.TranscodeStartResponse{}, 0, true, startErr
