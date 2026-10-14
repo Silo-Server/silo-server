@@ -3,7 +3,7 @@
 # tests, each job on its own runner.
 # LINT_BASE_REF, LINT_BASE_MODE, CONTRACT_BASE_REF, and TEST_GOFLAGS come from
 # the workflow.
-.PHONY: lint contracts tests
+.PHONY: lint contracts tests test-dependencies
 
 # Router recovery must hold over the whole tree, including inherited lines.
 lint:
@@ -23,8 +23,21 @@ contracts:
 # packages always rerun; the grep fails when a new test starts go, git, or node
 # outside them or the packages whose subprocess inputs are immutable.
 UNCACHED := cmd/silo internal/jellycompat internal/pluginhost internal/plugins
+# subprocess-manifest: scripts/ci/subprocess-tests.json
+# deferred: no recorded occurrence; retain UNCACHED and the subprocess guard.
 IMMUTABLE := internal/contractledger internal/contractspec internal/debugserver
-tests:
+test-dependencies:
+	@variants="$$(go list -deps -test -f '{{.ImportPath}}|{{.ForTest}}' ./internal/auth/ ./internal/api/handlers/)" || exit $$?; \
+	[ -n "$$variants" ] || { echo "::error::test dependency metadata is empty"; exit 1; }; \
+	printf '%s\n' "$$variants" | awk -F '|' '\
+	  $$2 != "" { split($$1, name, " "); \
+	    if ((name[1] == "github.com/Silo-Server/silo-server/internal/api/handlers" || \
+	         name[1] == "github.com/Silo-Server/silo-server/internal/apiv2") && name[1] != $$2) { \
+	      print "::error::lower-layer external test recompiles " $$0; bad=1 \
+	    } \
+	  } END { exit bad }'
+
+tests: test-dependencies
 	GOFLAGS="$${TEST_GOFLAGS}" $(MAKE) -f Makefile test-go
 	@want="$$(printf '%s\n' $(UNCACHED) $(IMMUTABLE) | sort -u)"; \
 	got="$$(git grep -l -E '(exec\.Command(Context)?\(([^,]+, )?"(go|git|node)"|LookPath\("(go|git|node)"\))' -- '*_test.go' | sed 's@/[^/]*$$@@' | sort -u)"; \

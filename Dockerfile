@@ -24,6 +24,7 @@ FROM scratch AS frontend_dist
 COPY --from=frontend /app/web/dist/. /
 
 # Stage 2: Build Go binary
+# The floating 1.26 tag is deliberate so images get Go patch releases without a manual bump.
 FROM golang:1.26 AS build
 ENV CGO_ENABLED=1
 ENV GOPROXY=https://proxy.golang.org,direct

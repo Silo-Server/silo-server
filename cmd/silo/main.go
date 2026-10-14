@@ -784,25 +784,10 @@ func main() {
 
 	if *migrateStatus {
 		migCtx, migCancel := database.MigrationContext(ctx)
-		statuses, statusErr := database.MigrationStatuses(migCtx, pool, migrations.FS, "sql")
+		statusErr := database.PrintMigrationStatus(migCtx, pool, migrations.FS, "sql", os.Stdout)
 		migCancel()
 		if statusErr != nil {
 			log.Fatalf("failed to read migration status: %v", statusErr)
-		}
-
-		fmt.Printf("%-8s %8s %-25s %s\n", "STATE", "VERSION", "APPLIED_AT", "MIGRATION")
-		for _, status := range statuses {
-			appliedAt := "-"
-			if !status.AppliedAt.IsZero() {
-				appliedAt = status.AppliedAt.UTC().Format(time.RFC3339)
-			}
-			source := status.Source
-			if source != "" {
-				source = filepath.Base(source)
-			} else {
-				source = "-"
-			}
-			fmt.Printf("%-8s %8d %-25s %s\n", status.State, status.Version, appliedAt, source)
 		}
 		return
 	}
@@ -824,10 +809,7 @@ func main() {
 
 	if *migrateOnly {
 		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
-		if migErr == nil {
-			migErr = ensureAuditDetailIndexes(migCtx, pool)
-		}
+		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
 		migCancel()
 		if migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
@@ -845,10 +827,7 @@ func main() {
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	if isPrimaryNode {
 		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
-		if migErr == nil {
-			migErr = ensureAuditDetailIndexes(migCtx, pool)
-		}
+		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
 		if migErr != nil {
 			migCancel()
 			log.Fatalf("failed to run migrations: %v", migErr)
@@ -4909,9 +4888,4 @@ type audiobooksSettingsAdapter struct {
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
 	return a.repo.Get(ctx, key)
-}
-
-func ensureAuditDetailIndexes(ctx context.Context, pool *pgxpool.Pool) error {
-	return partman.NewManager(pool, "activity_log", partman.Weekly, 2).EnsureIndexes(ctx,
-		"activity_log_action_time_idx", "activity_log_target_time_idx")
 }

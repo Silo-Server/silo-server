@@ -62,6 +62,18 @@ lint:
 lint-changed:
 	BASE_REF=$(BASE_REF) scripts/lint-changed.sh
 
+.PHONY: verify-actionlint verify-shellcheck
+verify-actionlint:
+	@test "$$(actionlint -version | head -n 1)" = 1.7.12 || { echo 'actionlint 1.7.12 is required' >&2; exit 1; }
+	actionlint
+
+verify-shellcheck:
+	@test "$$(shellcheck --version | sed -n 's/^version: //p')" = 0.11.0 || { echo 'ShellCheck 0.11.0 is required' >&2; exit 1; }
+	@python3 -c 'import pathlib, re, subprocess; paths = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0"); files = [p for p in paths if p and pathlib.Path(p).is_file() and (pathlib.Path(p).suffix in (".sh", ".bash", ".ksh") or re.match(rb"^#!.*\b(?:sh|bash|dash|ksh)\b", pathlib.Path(p).open("rb").readline()))]; assert files, "no tracked shell inputs"; subprocess.run(["shellcheck", "--", *files], check=True)'
+
+# hadolint: not measured; adoption needs a pinned binary, a seeded-defect trial, and reviewed findings and cost.
+# Makefile shell lint: not measured; recipe expansion needs a prototype that preserves Make's shell context.
+
 # Frontend test files that fail on main today. This list is shrink-only: delete
 # an entry along with its fix, and never extend it to land a change. The Go
 # suite has no equivalent — a Go test that cannot pass yet carries a t.Skip and

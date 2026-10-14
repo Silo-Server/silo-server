@@ -1,4 +1,4 @@
-package handlers_test
+package apiv2_test
 
 import (
 	"context"
