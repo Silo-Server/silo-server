@@ -2,8 +2,10 @@ package playback
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -240,6 +242,94 @@ func TestHardwareToneMapRemovesMetadataAfterHardwareFormatConversion(t *testing.
 	}
 }
 
+// TestQSVToneMapScalesBeforeOpenCL keeps every VAAPI resize ahead of the
+// OpenCL tone mapper on the subtitle-free graph, for hardware and software
+// decode. Only the passthrough interop may follow the tone mapper; a
+// scale_vaapi that reads the tone-mapped surface corrupts frames.
+func TestQSVToneMapScalesBeforeOpenCL(t *testing.T) {
+	for _, kind := range []tonemap.SourceKind{tonemap.SourcePQ, tonemap.SourceHLG, tonemap.SourceDolbyVision} {
+		for _, softwareDecode := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s software decode %t", kind, softwareDecode), func(t *testing.T) {
+				graph := strings.Join(buildFFmpegArgs(TranscodeOpts{
+					InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+					TargetResolution: "1080p", HWAccel: transcodeHWQSV, SoftwareVideoDecode: softwareDecode, SourceVideoBitDepth: 10,
+					ToneMapPolicy: tonemap.PolicyHardwareOnly, ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: kind,
+					ToneMapFilter: tonemap.HardwareFilterOpenCL, ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+				}), " ")
+				resize := strings.Index(graph, "scale_vaapi=w=-2:h=1080:format=p010")
+				toneMap := strings.Index(graph, tonemap.HardwareFilterOpenCL)
+				if resize < 0 || toneMap < resize {
+					t.Fatalf("QSV graph does not resize before tone mapping: %s", graph)
+				}
+				tail := "reverse=1:extra_hw_frames=16,format=vaapi," + tonemap.QSVInteropFilter() + ",sidedata="
+				if !strings.Contains(graph[toneMap:], tail) || strings.Contains(graph[toneMap:], "scale_vaapi=w=") {
+					t.Fatalf("QSV graph processes the tone-mapped surface before the encoder: %s", graph)
+				}
+			})
+		}
+	}
+}
+
+// TestQSVToneMapBitmapSubtitlesCompositeOnOpenCL keeps bitmap burn-in for HDR
+// sources on the OpenCL device after tone mapping: overlay_vaapi or a
+// scale_vaapi reading the tone-mapped surface corrupts frames. SDR bases never
+// reach OpenCL and keep overlay_vaapi.
+func TestQSVToneMapBitmapSubtitlesCompositeOnOpenCL(t *testing.T) {
+	graphFor := func(kind tonemap.SourceKind, resolution string, softwareDecode bool) string {
+		args := buildFFmpegArgs(TranscodeOpts{
+			InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+			TargetResolution: resolution, HWAccel: transcodeHWQSV, SoftwareVideoDecode: softwareDecode, SourceVideoBitDepth: 10,
+			ToneMapPolicy: tonemap.PolicyHardwareOnly, ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: kind,
+			ToneMapFilter: tonemap.HardwareFilterOpenCL, ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+			SubtitleBurnIn: true, SubtitleTrackIndex: 0, SubtitleCodec: "hdmv_pgs_subtitle",
+		})
+		return args[slices.Index(args, "-filter_complex")+1]
+	}
+
+	want := "[0:v:0]" + tonemap.QSVOpenCLToneMapFilter(tonemap.SourcePQ, 0) + "[vmain];" +
+		"[0:s:0]scale=out_color_matrix=bt709:out_range=tv,format=yuva420p,hwupload=derive_device=opencl[sub];" +
+		"[vmain][sub]overlay_opencl=eof_action=pass,scale_opencl=w=-2:h=1080," +
+		tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+	if got := graphFor(tonemap.SourcePQ, "1080p", false); got != want {
+		t.Fatalf("QSV HDR bitmap burn-in graph:\n got %s\nwant %s", got, want)
+	}
+
+	for _, kind := range []tonemap.SourceKind{tonemap.SourcePQ, tonemap.SourceHLG, tonemap.SourceDolbyVision} {
+		for _, resolution := range []string{"1080p", ""} {
+			for _, softwareDecode := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s %q software decode %t", kind, resolution, softwareDecode), func(t *testing.T) {
+					graph := graphFor(kind, resolution, softwareDecode)
+					if strings.HasPrefix(graph, "[0:v:0]format=p010le,hwupload,") != softwareDecode {
+						t.Fatalf("software-decode upload prefix is wrong: %s", graph)
+					}
+					toneMap := strings.Index(graph, tonemap.HardwareFilterOpenCL)
+					if toneMap < 0 || strings.Contains(graph, "overlay_vaapi") || strings.Contains(graph[toneMap:], "scale_vaapi=w=") {
+						t.Fatalf("a VAAPI filter processes the tone-mapped surface: %s", graph)
+					}
+					steps := []string{"overlay_opencl=eof_action=pass,", tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + ","}
+					if resolution != "" {
+						steps = []string{"overlay_opencl=eof_action=pass,", "scale_opencl=w=-2:h=1080,", tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + ","}
+					} else if strings.Contains(graph, "scale_opencl") {
+						t.Fatalf("unscaled graph resizes on OpenCL: %s", graph)
+					}
+					last := toneMap
+					for _, step := range steps {
+						index := strings.Index(graph, step)
+						if index <= last {
+							t.Fatalf("%q is missing or out of order: %s", step, graph)
+						}
+						last = index
+					}
+				})
+			}
+		}
+	}
+
+	if graph := graphFor(tonemap.SourceSDRBT2020, "1080p", false); !strings.Contains(graph, "overlay_vaapi=eof_action=pass") {
+		t.Fatalf("SDR base layer bitmap burn-in does not use overlay_vaapi: %s", graph)
+	}
+}
+
 // TestToneMapGraphOrdersTextAndBitmapSubtitles verifies subtitle composition follows color conversion.
 func TestToneMapGraphOrdersTextAndBitmapSubtitles(t *testing.T) {
 	base := TranscodeOpts{
@@ -312,6 +402,61 @@ func TestValidateToneMapOptsAcceptsVideoToolbox(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("VideoToolbox tone-map recipe rejected: %v", err)
+	}
+}
+
+// TestDolbyVisionBaseGraphsApplyTheRPU verifies that a Profile 5 style base
+// reaches FFmpeg only through filters told to apply its RPU, with or without
+// subtitle burn-in, and that a frozen recipe naming a filter that cannot apply
+// one is refused before FFmpeg starts.
+func TestDolbyVisionBaseGraphsApplyTheRPU(t *testing.T) {
+	revision := tonemap.SourceRevision{MediaFileID: 1, FileSize: 1, FileModifiedUnixNano: 1, FileHash: "hash", ProbeUpdatedUnixNano: 1, StreamSignature: "stream"}
+	tests := []struct {
+		name    string
+		mode    tonemap.Mode
+		hwAccel string
+		filter  string
+		want    string
+	}{
+		{name: "software", mode: tonemap.ModeSoftware, hwAccel: "none", filter: tonemap.SoftwareFilterBT2390, want: "tonemapx=tonemap=bt2390:peak=100:apply_dovi=1"},
+		{name: "QSV", mode: tonemap.ModeHardware, hwAccel: "qsv", filter: tonemap.HardwareFilterOpenCL, want: "tonemap_opencl=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390:peak=100:desat=0:apply_dovi=1"},
+		{name: "NVENC", mode: tonemap.ModeHardware, hwAccel: "nvenc", filter: tonemap.HardwareFilterCUDA, want: "tonemap_cuda=tonemap=bt2390:format=nv12:p=bt709:t=bt709:m=bt709:r=tv:apply_dovi=1"},
+	}
+	for _, tt := range tests {
+		for _, burnIn := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s burn-in %t", tt.name, burnIn), func(t *testing.T) {
+				opts := TranscodeOpts{
+					InputPath: "/media/dovi.mkv", OutputDir: t.TempDir(), SourceVideoBitDepth: 10,
+					TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "1080p", HWAccel: tt.hwAccel,
+					ToneMapPolicy: tonemap.PolicyHardwareThenSoftware, ToneMapMode: tt.mode,
+					ToneMapSourceKind: tonemap.SourceDolbyVision, ToneMapFilter: tt.filter,
+					ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, ToneMapSourceRevision: revision,
+				}
+				if burnIn {
+					opts.SubtitleBurnIn, opts.SubtitleTrackIndex, opts.SubtitleCodec = true, 0, "subrip"
+				}
+				if err := validateToneMapOpts(opts); err != nil {
+					t.Fatalf("Dolby Vision recipe rejected: %v", err)
+				}
+				joined := strings.Join(buildFFmpegArgs(opts), " ")
+				if !strings.Contains(joined, tt.want) {
+					t.Fatalf("args missing %q: %s", tt.want, joined)
+				}
+				if !strings.Contains(joined, "sidedata=mode=delete:type=DOVI_METADATA") {
+					t.Fatalf("Dolby Vision metadata survives the conversion: %s", joined)
+				}
+			})
+		}
+	}
+
+	err := validateToneMapOpts(TranscodeOpts{
+		TargetCodecVideo: "h264", HWAccel: "vaapi", ToneMapPolicy: tonemap.PolicyHardwareOnly,
+		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourceDolbyVision,
+		ToneMapFilter: tonemap.HardwareFilterVAAPI, ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+		ToneMapSourceRevision: revision,
+	})
+	if err == nil || !strings.Contains(err.Error(), "Dolby Vision RPU") {
+		t.Fatalf("VAAPI Dolby Vision recipe error = %v, want refusal", err)
 	}
 }
 

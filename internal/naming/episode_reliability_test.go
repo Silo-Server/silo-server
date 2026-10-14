@@ -28,7 +28,7 @@ func TestExplicitEpisodeMarkersSupportLargeSeasonNumbers(t *testing.T) {
 func TestEpisodeMarkersAcceptSingleLetterParts(t *testing.T) {
 	for _, name := range []string{"Example Show S03E01a", "Example Show S03E01B 1080p", "Example Show 3x01a", "E01a"} {
 		t.Run(name, func(t *testing.T) {
-			token, ok := parseEpisodeToken(name, []string{"Example Show", "Season 3"}, true, true)
+			token, ok := parseEpisodeToken(name, []string{"Example Show", "Season 3"}, false, true, true)
 			if !ok || token.season != 3 || token.episode != 1 || token.episodeEnd != 0 {
 				t.Fatalf("token = %+v, ok=%v; want season 3 episode 1 without a range", token, ok)
 			}
@@ -36,7 +36,7 @@ func TestEpisodeMarkersAcceptSingleLetterParts(t *testing.T) {
 	}
 	for _, name := range []string{"Example Show S03E01another", "Example Show 3x01bonus", "E01abc", "E01v2video"} {
 		t.Run(name, func(t *testing.T) {
-			token, _ := parseEpisodeToken(name, []string{"Example Show", "Season 3"}, true, true)
+			token, _ := parseEpisodeToken(name, []string{"Example Show", "Season 3"}, false, true, true)
 			if token.episode != 0 {
 				t.Fatalf("word suffix acquired episode coordinates: %+v", token)
 			}
@@ -88,7 +88,7 @@ func TestYearSeasonCoordinateIsNotPictureSize(t *testing.T) {
 		{"Example Show 128x96", 0, 0, false},
 		{"Example Show 12x96", 12, 96, true},
 	} {
-		token, ok := parseEpisodeToken(tt.name, nil, false)
+		token, ok := parseEpisodeToken(tt.name, nil, false, false)
 		if ok != tt.ok || token.season != tt.season || token.episode != tt.episode {
 			t.Fatalf("%s: ok=%v %+v", tt.name, ok, token)
 		}
@@ -177,7 +177,7 @@ func TestEpisodeRangeEndMarker(t *testing.T) {
 		{"Example.Show.S01E37-E40end", 40},
 		{"Example.Show.S01E37-E40Ending", 0},
 	} {
-		token, _ := parseEpisodeToken(tt.name, nil, false)
+		token, _ := parseEpisodeToken(tt.name, nil, false, false)
 		if token.episodeEnd != tt.end {
 			t.Fatalf("%s: %+v", tt.name, token)
 		}
@@ -290,7 +290,7 @@ func TestDelimitedEpisodeNumberIgnoresTitleNumbers(t *testing.T) {
 			}
 		})
 	}
-	token, ok := parseEpisodeToken("Example Show - 05-06 - Title", []string{"Example Show", "Season 1"}, true, true)
+	token, ok := parseEpisodeToken("Example Show - 05-06 - Title", []string{"Example Show", "Season 1"}, false, true, true)
 	if !ok || token.episode != 5 || token.episodeEnd != 6 {
 		t.Fatalf("delimited range = %+v, ok=%v; want episodes 5-6", token, ok)
 	}

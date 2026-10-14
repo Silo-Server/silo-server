@@ -115,6 +115,19 @@ new outbox attempt, invokes the configured sender, and returns HTTP 200 with
 `attempt_id`, `push_device_id`, `server_device_id`, `outcome`, and any existing
 relay/upstream diagnostic fields. A `retrying` or `failed` outcome is still a
 successful HTTP report of that attempt, not proof that a push was delivered.
+
+The test push carries the newest notification of the selected device's profile
+(matched by account as well, since profile IDs repeat across accounts), and the
+response names it as `delivery_id`. The device fetches that notification's real
+title, body and tap target exactly as for an ordinary push, and because the
+push reuses the notification's collapse ID it replaces that notification on the
+device if it is still shown. When the profile has no notification yet,
+`delivery_id` is absent and the push carries the attempt ID instead: it still
+proves transport, but the display fetch returns `404` and the device shows the
+relay's generic text. The test changes neither the notification's read state
+nor the inbox; it adds one `test` attempt to that notification's push attempt
+history, which nothing counts as a delivery. Pruning the notification removes
+the attempt with it.
 Background attempt recovery and sender retries retain their existing semantics.
 These operations are `non_retryable`: clients must not repeat a lost request
 automatically because another request creates another test attempt.
@@ -162,6 +175,23 @@ relay, and the relay keeps no device state, so a new deployment needs no client
 change. This covers a generation superseded by another holder of the same
 credential (a database cloned to a second server shares it), a signing key the
 relay retired, and a capability that expired past its renewal grace.
+
+Every push the server sends, administrator test pushes included, names the
+deployment (`server_id`, the identity `getServerIdentity` reports) and the push
+device's profile (`profile_id`). The relay forwards them to the device as
+`silo_server_id` and `silo_profile_id`, so a device signed into several servers
+or profiles fetches display data from the one the push belongs to. The two are
+sent together or not at all; without a readable server identity the push goes
+out without them. A relay that predates the fields answers 400
+`unexpected_field`. The sender then resends the attempt once without them under
+the same idempotency key, and leaves them out of later sends to that relay for an
+hour. The fields are part of the relay's idempotency hash, and a retry can
+differ from the attempt's first send (an earlier server version, another
+replica, or the hour ending). The relay answers such a retry with 422
+`idempotency_key_reuse`, and the sender resends it once with the other choice,
+which the relay replays or resumes. When the identity lookup failed, so the
+sender has no other choice to offer, that 422 is retried later instead of
+failing the push.
 Only an administrator's clear or a relay `deployment_disabled` response parks
 delivery behind the re-registration marker; either one stores an empty
 credential. An older server stored the rejected key along with the marker. That

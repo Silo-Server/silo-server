@@ -64,6 +64,7 @@ func TestSQLiteProgressPage(t *testing.T) {
 // text comparison of added_at to the RFC 3339 form AddFavoriteAt writes.
 func TestSQLitePersonalListPage(t *testing.T) {
 	storetest.RunPersonalListPage(t, newConformanceStore)
+	storetest.RunPersonalListMembership(t, newConformanceStore)
 }
 
 func TestSQLiteHistoryEntryOnce(t *testing.T) {

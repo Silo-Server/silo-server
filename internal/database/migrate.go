@@ -191,14 +191,15 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		// typed JSON, the displayprefs move parses the legacy jellycompat
 		// keys, and the subtitle language backfill applies the scanner's
 		// lang.CompatibleTag — none expressible in SQL without duplicating
-		// those rules. The invalid index rebuild decides per index whether to
-		// drop and rebuild it concurrently, which SQL cannot do outside a
-		// transaction.
+		// those rules. The invalid index rebuild and the push attempt key
+		// scope decide per index whether to drop and build it concurrently,
+		// which SQL cannot do outside a transaction.
 		goose.WithGoMigrations(
 			settingsBackfillMigration(),
 			displayPrefsMoveMigration(),
 			subtitleLanguageBackfillMigration(),
 			invalidIndexRebuildMigration(),
+			pushAttemptKeyScopeMigration(),
 		),
 	)
 	if err != nil {

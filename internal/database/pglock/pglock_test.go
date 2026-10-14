@@ -2,6 +2,7 @@ package pglock
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -239,6 +240,98 @@ func TestAcquireAlsoGivesUpAfterTheWait(t *testing.T) {
 	}
 	if lockHeld(t, pool, pglockTestKey) {
 		t.Fatal("advisory lock still held after Release")
+	}
+}
+
+func TestAcquireWaitsForTheHolderThenGivesUp(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	holder, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	if lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 100*time.Millisecond); err != nil || acquired {
+		_ = lock.Release(ctx)
+		t.Fatalf("Acquire while held = (%v, %v), want (false, nil) after the wait", acquired, err)
+	}
+	if waiters := lockWaiters(t, pool, pglockTestKey); waiters != 0 {
+		t.Fatalf("%d sessions still queued for the key, want none", waiters)
+	}
+
+	// A waiter gets the lock once the holder releases it.
+	got := make(chan error, 1)
+	go func() {
+		lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 20*time.Second)
+		if err == nil && !acquired {
+			err = errors.New("wait ran out")
+		}
+		if err == nil {
+			err = lock.Release(ctx)
+		}
+		got <- err
+	}()
+	for lockWaiters(t, pool, pglockTestKey) == 0 {
+		select {
+		case <-ctx.Done():
+			t.Fatal("the second Acquire never queued for the lock")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if err := holder.Release(ctx); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if err := <-got; err != nil {
+		t.Fatalf("waiting Acquire: %v", err)
+	}
+}
+
+// With no wait, Acquire only tries, and takes a free lock.
+func TestAcquireWithoutAWaitTakesAFreeLock(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 0)
+	if err != nil || !acquired {
+		t.Fatalf("Acquire without a wait = (%v, %v), want acquired", acquired, err)
+	}
+	if err := lock.Release(ctx); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+}
+
+// The wait also bounds getting a connection from an exhausted pool.
+func TestAcquireGivesUpWhenNoConnectionFrees(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	busy, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("Acquire connection: %v", err)
+	}
+	defer busy.Release()
+	start := time.Now()
+	if lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 100*time.Millisecond); err != nil || acquired {
+		_ = lock.Release(ctx)
+		t.Fatalf("Acquire with no free connection = (%v, %v), want (false, nil) after the wait", acquired, err)
+	}
+	if waited := time.Since(start); waited > 10*time.Second {
+		t.Fatalf("Acquire waited %v for a connection, want about the 100ms wait", waited)
 	}
 }
 

@@ -74,6 +74,7 @@ type RecommendationsHandler struct {
 	reader       RecommendationRowReader
 	items        recommendationItemLoader
 	durations    probedDurationSource
+	detailSvc    *catalog.DetailService
 	userData     UserDataService
 	codec        *ResourceIDCodec
 	mapper       *mapper
@@ -102,6 +103,7 @@ func NewRecommendationsHandler(
 	}
 	if detailSvc != nil {
 		h.durations = detailSvc
+		h.detailSvc = detailSvc
 	}
 	return h
 }
@@ -222,6 +224,9 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 		listItems = append(listItems, item)
 	}
 	fillListItemDurations(r.Context(), h.durations, listItems)
+	if h.detailSvc != nil {
+		attachListExtraBackdrops(r.Context(), h.detailSvc, listItems)
+	}
 	for _, item := range listItems {
 		itemsByID[item.ContentID] = item
 	}

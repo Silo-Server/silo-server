@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -68,8 +67,7 @@ func (h *InvitationHandler) HandleLookupInvitation(w http.ResponseWriter, r *htt
 // reuse their existing session plumbing.
 func (h *InvitationHandler) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	var req acceptInvitationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 	if len(req.Password) < 8 {

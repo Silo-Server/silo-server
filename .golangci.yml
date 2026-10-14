@@ -15,9 +15,13 @@ formatters:
     - goimports
 
   settings:
+    # Many files still group Silo imports with third-party ones. CI lints
+    # changed lines only, so such a file is flagged when a change edits an
+    # import line that goimports would regroup; `golangci-lint fmt <file>`
+    # regroups the whole file.
     goimports:
       local-prefixes:
-        - github.com/streamapp/streamapp
+        - github.com/Silo-Server/silo-server
 
 linters:
   enable:

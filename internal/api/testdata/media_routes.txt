@@ -217,12 +217,15 @@ GET /api/v2/admin/network-access/{provider}/status	non-media
 GET /api/v2/admin/node-sessions	non-media
 GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
+GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
+POST /api/v2/admin/nodes/{id}/drain	non-media
 POST /api/v2/admin/nodes/{id}/force-reload	non-media
 POST /api/v2/admin/nodes/{id}/reprobe	non-media
+POST /api/v2/admin/nodes/{id}/resume	non-media
 POST /api/v2/admin/notifications/discord/test	non-media
 POST /api/v2/admin/notifications/push/apple/test	non-media
 POST /api/v2/admin/notifications/push/fcm/test	non-media
@@ -473,6 +476,7 @@ POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
+POST /api/v2/catalog/letters	non-media
 GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
@@ -589,6 +593,7 @@ POST /api/v2/history-imports/runs	non-media
 GET /api/v2/history-imports/runs/{id}	non-media
 GET /api/v2/history-imports/sources	non-media
 POST /api/v2/history/remove	non-media
+GET /api/v2/home/capabilities	non-media
 DELETE /api/v2/home/dismissals/{surface}/{item_id}	non-media
 PUT /api/v2/home/dismissals/{surface}/{item_id}	non-media
 GET /api/v2/home/layout	non-media
@@ -832,7 +837,6 @@ GET /api/v2/system/connections	non-media
 GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
-GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
 GET /api/v2/user/libraries	non-media
@@ -1480,12 +1484,15 @@ GET /api/v2/admin/network-access/{provider}/status	non-media
 GET /api/v2/admin/node-sessions	non-media
 GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
+GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
+POST /api/v2/admin/nodes/{id}/drain	non-media
 POST /api/v2/admin/nodes/{id}/force-reload	non-media
 POST /api/v2/admin/nodes/{id}/reprobe	non-media
+POST /api/v2/admin/nodes/{id}/resume	non-media
 POST /api/v2/admin/notifications/discord/test	non-media
 POST /api/v2/admin/notifications/push/apple/test	non-media
 POST /api/v2/admin/notifications/push/fcm/test	non-media
@@ -1736,6 +1743,7 @@ POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
+POST /api/v2/catalog/letters	non-media
 GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
@@ -1852,6 +1860,7 @@ POST /api/v2/history-imports/runs	non-media
 GET /api/v2/history-imports/runs/{id}	non-media
 GET /api/v2/history-imports/sources	non-media
 POST /api/v2/history/remove	non-media
+GET /api/v2/home/capabilities	non-media
 DELETE /api/v2/home/dismissals/{surface}/{item_id}	non-media
 PUT /api/v2/home/dismissals/{surface}/{item_id}	non-media
 GET /api/v2/home/layout	non-media
@@ -2095,7 +2104,6 @@ GET /api/v2/system/connections	non-media
 GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
-GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
 GET /api/v2/user/libraries	non-media

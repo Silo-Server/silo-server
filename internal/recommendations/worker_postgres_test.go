@@ -303,7 +303,7 @@ func TestTasteProfileSubjectsReadTheSQLiteStorePostgres(t *testing.T) {
 			t.Fatalf("create profile %s: %v", id, err)
 		}
 	}
-	if err := store.AddFavorite(ctx, "with-signals", "movie-only-in-sqlite"); err != nil {
+	if _, err := store.AddFavorite(ctx, "with-signals", "movie-only-in-sqlite"); err != nil {
 		t.Fatal(err)
 	}
 

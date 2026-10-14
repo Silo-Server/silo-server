@@ -37,8 +37,15 @@ const sampleSpanSeconds = 0.04
 // sampleMetadataKey is the packet metadata entry naming a sample's time.
 const sampleMetadataKey = "sample"
 
-// concatInputArgs are the input options of a Samples request, before -i.
-var concatInputArgs = []string{"-skip_frame:v", "nokey", "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "0"}
+// skipFrameOption sets which video frames the decoder skips.
+const skipFrameOption = "-skip_frame:v"
+
+// concatDemuxerArgs open a list input; concatInputArgs are the input options
+// of a Samples request, before -i.
+var (
+	concatDemuxerArgs = []string{"-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "0"}
+	concatInputArgs   = append([]string{skipFrameOption, keyframeSkipFrame}, concatDemuxerArgs...)
+)
 
 // concatListInput is the input a Samples request reads its list from.
 const concatListInput = "pipe:0"

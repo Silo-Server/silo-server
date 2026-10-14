@@ -26,7 +26,7 @@ type fakeAdminAccounts struct {
 }
 
 func fixtureAdminAccounts() *fakeAdminAccounts {
-	return &fakeAdminAccounts{snapshot: handlers.AdminAccountView{User: handlers.AdminUserView{ID: 7, Username: "sample", Email: "sample@example.test", Role: "user", Enabled: true, MaxProfiles: 5, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}, Revision: 10, GroupRevision: 3}}
+	return &fakeAdminAccounts{snapshot: handlers.AdminAccountView{User: handlers.AdminUserView{ID: 7, Username: "sample", Email: "sample@example.test", Role: "user", Enabled: true, MaxProfiles: 5, EffectivePolicy: handlers.EffectivePolicyView{MaxProfiles: 5}, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}, Revision: 10, GroupRevision: 3}}
 }
 func (*fakeAdminAccounts) AdminAccountCapabilities() (bool, bool) { return true, true }
 func (f *fakeAdminAccounts) GetAdminAccount(context.Context, int) (handlers.AdminAccountView, error) {
@@ -184,6 +184,11 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	}
 	if f.create.DefaultProfile.Enabled || f.create.User.LibraryIDs == nil || f.create.User.DownloadAllowed == nil || *f.create.User.DownloadAllowed {
 		t.Fatalf("creation lost explicit values: %+v", f.create)
+	}
+	// An unknown library is named at the member the account body sends.
+	unknown := requireProblem(t, do(t, h, http.MethodPost, path, strings.Replace(body, `"library_ids":[]`, `"library_ids":["9"]`, 1), actingRequestAdmin), TypeValidationFailed)
+	if len(unknown.Errors) != 1 || unknown.Errors[0].Location != locationLibraryIDs {
+		t.Fatalf("unknown library errors = %+v", unknown.Errors)
 	}
 	f.err = auth.ErrDuplicate
 	requireProblem(t, do(t, h, http.MethodPost, path, body, actingRequestAdmin), TypeConflict)

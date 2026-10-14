@@ -15,9 +15,9 @@ import (
 // from the request body, and reports success so completeLogin runs.
 type recordingValidator struct{ gotUser, gotPass string }
 
-func (v *recordingValidator) Validate(_ context.Context, u, p string) (string, string, string, error) {
+func (v *recordingValidator) Validate(_ context.Context, u, p string) (Principal, error) {
 	v.gotUser, v.gotPass = u, p
-	return "1", "", "Alice", nil
+	return Principal{UserID: "1", DisplayName: "Alice"}, nil
 }
 
 func newLoginBodyHandler(v *recordingValidator) *Handler {
@@ -69,8 +69,8 @@ func TestLogin_AcceptsJSON(t *testing.T) {
 
 type refusingValidator struct{ err error }
 
-func (v refusingValidator) Validate(context.Context, string, string) (string, string, string, error) {
-	return "", "", "", v.err
+func (v refusingValidator) Validate(context.Context, string, string) (Principal, error) {
+	return Principal{}, v.err
 }
 
 // A temporary password is a refusal the client can show, not an outage.

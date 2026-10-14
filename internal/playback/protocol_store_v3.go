@@ -144,6 +144,9 @@ type AttemptRecordV3 struct {
 	// StoppedAt is set once the attempt has been stopped; a stopped attempt
 	// never replays as a playable decision.
 	StoppedAt *time.Time
+	// StopID is the stop_id the attempt was stopped under; empty while it is
+	// live. Server-minted ids tell who ended it (for example an administrator).
+	StopID string
 	// LastSampleAt is when the row last accepted a progress sample or a stop.
 	// A replica reaping a stale local copy compares it with its own activity
 	// clock, since requests can land on other replicas.
@@ -270,7 +273,7 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 		}
 		return ErrPlaybackAttemptExistsV3
 	}
-	record.LastSequence, record.LastSample, record.StoppedAt = 0, nil, nil
+	record.LastSequence, record.LastSample, record.StoppedAt, record.StopID = 0, nil, nil, ""
 	s.attempts[record.PlaybackAttemptID] = record
 	return nil
 }
@@ -398,7 +401,7 @@ func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, request
 	entry.completed = true
 	entry.response = append(json.RawMessage(nil), response...)
 	s.replans[key] = entry
-	record.LastSequence, record.LastSample, record.StoppedAt = existing.LastSequence, existing.LastSample, existing.StoppedAt
+	record.LastSequence, record.LastSample, record.StoppedAt, record.StopID = existing.LastSequence, existing.LastSample, existing.StoppedAt, existing.StopID
 	s.attempts[attemptID] = record
 	return nil
 }
@@ -517,6 +520,7 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	}
 	now := time.Now()
 	record.StoppedAt = &now
+	record.StopID = stopID
 	record.LastSampleAt = now
 	s.attempts[attemptID] = *record
 	receipt := StopReceiptV3{StopID: stopID}

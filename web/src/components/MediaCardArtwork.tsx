@@ -36,6 +36,11 @@ interface MediaCardArtworkProps {
   thumbhash?: string | null;
   square?: boolean;
   lazy?: boolean;
+  /**
+   * On screen at first paint (the first Home row): load eagerly at high fetch
+   * priority and show the image as it arrives instead of fading it in.
+   */
+  priority?: boolean;
   scrim?: keyof typeof SCRIM_CLASS;
   /** Recedes the artwork, for titles the viewer can't act on. */
   dim?: boolean;
@@ -55,6 +60,7 @@ export default function MediaCardArtwork({
   thumbhash,
   square = false,
   lazy = false,
+  priority = false,
   scrim = "black",
   dim = false,
   children,
@@ -83,11 +89,13 @@ export default function MediaCardArtwork({
           src={src!}
           alt={alt}
           className={cn(
-            "h-full w-full object-cover transition-opacity duration-300",
-            loaded ? "opacity-100" : "opacity-0",
+            "h-full w-full object-cover",
+            !priority && "transition-opacity duration-300",
+            priority || loaded ? "opacity-100" : "opacity-0",
             dimClass,
           )}
-          loading={lazy ? "lazy" : undefined}
+          loading={priority ? "eager" : lazy ? "lazy" : undefined}
+          fetchPriority={priority ? "high" : undefined}
           onLoad={onLoad}
           onError={() => {
             onError();

@@ -26,10 +26,31 @@ func (h *SubtitleSearchHandler) GetViewerSubtitleForDeletion(ctx context.Context
 		return nil, err
 	}
 	claims := apimw.GetClaims(ctx)
-	if claims == nil || claims.UserID != access.UserID || (claims.Role != roleAdmin && (row.DownloadedBy == nil || *row.DownloadedBy != claims.UserID)) {
+	if claims == nil || claims.UserID != access.UserID {
+		return nil, apiError(http.StatusForbidden, "forbidden", "Not authorized to delete this subtitle")
+	}
+	allowed, err := mayDeleteSubtitle(ctx, row)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
+	}
+	if !allowed {
 		return nil, apiError(http.StatusForbidden, "forbidden", "Not authorized to delete this subtitle")
 	}
 	return row, nil
+}
+
+// mayDeleteSubtitle reports whether the caller may delete a downloaded
+// subtitle: the account that downloaded it, or an acting admin. A child
+// profile on an admin's account is held to the ownership rule.
+func mayDeleteSubtitle(ctx context.Context, row *subtitles.DownloadedSubtitle) (bool, error) {
+	claims := apimw.GetClaims(ctx)
+	if claims == nil {
+		return false, nil
+	}
+	if row.DownloadedBy != nil && *row.DownloadedBy == claims.UserID {
+		return true, nil
+	}
+	return apimw.ActingAdmin(ctx)
 }
 
 func (h *SubtitleSearchHandler) DeleteViewerSubtitle(ctx context.Context, access catalog.AccessFilter, id int, revision int64) error {

@@ -21,6 +21,9 @@ type directUserDataService struct {
 	signalsNotifier signalsChangedNotifier
 	// events announces watched-state changes to other surfaces and replicas.
 	events UserStateEvents
+	// episodes expands a series or season unplayed mark to its episodes,
+	// including watched ones that no longer have a file.
+	episodes watchstate.EpisodePartitioner
 }
 
 func newDirectUserDataService(
@@ -33,7 +36,7 @@ func newDirectUserDataService(
 	signalsNotifier signalsChangedNotifier,
 	completionObserver watchstate.CompletionObserver,
 ) *directUserDataService {
-	return &directUserDataService{
+	svc := &directUserDataService{
 		storeProvider: storeProvider,
 		itemRepo:      itemRepo,
 		detailSvc:     detailSvc,
@@ -43,6 +46,10 @@ func newDirectUserDataService(
 		resumeFilter:    resumeFilter,
 		signalsNotifier: signalsNotifier,
 	}
+	if episodeRepo != nil {
+		svc.episodes = episodeRepo
+	}
+	return svc
 }
 
 func (s *directUserDataService) ListFavorites(ctx context.Context, session *Session, limit, offset int) ([]upstreamListItem, error) {
@@ -139,7 +146,7 @@ func (s *directUserDataService) AddFavorite(ctx context.Context, session *Sessio
 	if err != nil {
 		return fmt.Errorf("open user store: %w", err)
 	}
-	if err := store.AddFavorite(ctx, session.ProfileID, contentID); err != nil {
+	if _, err := store.AddFavorite(ctx, session.ProfileID, contentID); err != nil {
 		return err
 	}
 	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
@@ -151,7 +158,7 @@ func (s *directUserDataService) RemoveFavorite(ctx context.Context, session *Ses
 	if err != nil {
 		return fmt.Errorf("open user store: %w", err)
 	}
-	if err := store.RemoveFavorite(ctx, session.ProfileID, contentID); err != nil {
+	if _, err := store.RemoveFavorite(ctx, session.ProfileID, contentID); err != nil {
 		return err
 	}
 	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
@@ -328,6 +335,16 @@ func (s *directUserDataService) MarkUnplayed(ctx context.Context, session *Sessi
 	return nil
 }
 
+// ParentUnplayedTargets returns the episodes a series or season unplayed mark
+// must clear, including watched episodes whose file is gone; see
+// watchstate.Service.ParentUnwatchTargets.
+func (s *directUserDataService) ParentUnplayedTargets(ctx context.Context, session *Session, parentKind, parentID string) ([]string, error) {
+	if s.watchState == nil || s.episodes == nil {
+		return nil, nil
+	}
+	return s.watchState.ParentUnwatchTargets(ctx, session.StreamAppUserID, session.ProfileID, s.episodes, parentKind, parentID)
+}
+
 func (s *directUserDataService) MarkUnplayedBatch(ctx context.Context, session *Session, contentIDs []string) error {
 	if s.watchState == nil {
 		return fmt.Errorf("watch state service is not configured")
@@ -424,9 +441,9 @@ func (s *directUserDataService) UpdateUserData(ctx context.Context, session *Ses
 		}
 	} else if req.IsFavorite != nil {
 		if *req.IsFavorite {
-			err = store.AddFavorite(ctx, session.ProfileID, contentID)
+			_, err = store.AddFavorite(ctx, session.ProfileID, contentID)
 		} else {
-			err = store.RemoveFavorite(ctx, session.ProfileID, contentID)
+			_, err = store.RemoveFavorite(ctx, session.ProfileID, contentID)
 		}
 		if err != nil {
 			return err

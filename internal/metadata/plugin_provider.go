@@ -921,6 +921,15 @@ func imageTypeFromKind(kind string) ImageType {
 		return ImageStill
 	case "profile":
 		return ImageProfile
+	// The extra types use the image cache's names for them.
+	case ImageCacheImageBanner:
+		return ImageBanner
+	case ImageCacheImageThumb:
+		return ImageThumb
+	case ImageCacheImageClearArt:
+		return ImageClearArt
+	case ImageCacheImageDisc:
+		return ImageDisc
 	default:
 		return ImagePoster
 	}

@@ -19,7 +19,16 @@ const mocks = vi.hoisted(() => ({
 // see the same query states a failed or recovered server produces.
 vi.mock("@/api/v2/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/request")>()),
-  v2: mocks.v2,
+  // The title-ordered browse also asks for its letter index; answer it with
+  // an index of the fixture's titles so each test scripts only the browse pages.
+  v2: (key: string, options: unknown) =>
+    key === "POST /api/v2/catalog/letters"
+      ? Promise.resolve({
+          total: queryCatalogItemsOk.total,
+          letters: [{ letter: "H", count: queryCatalogItemsOk.total, position: 0 }],
+          runs: [{ letter: "H", position: 0 }],
+        })
+      : mocks.v2(key, options),
 }));
 
 vi.mock("@/hooks/queries/sections", async (importOriginal) => ({

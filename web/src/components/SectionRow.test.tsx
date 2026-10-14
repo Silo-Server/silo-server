@@ -210,6 +210,91 @@ describe("SectionRow", () => {
     expect(markup).not.toContain("aspect-video");
   });
 
+  function continueSection(items: ResolvedSection["items"]): ResolvedSection {
+    return {
+      id: "continue-watching",
+      section_type: "continue_watching",
+      title: "Continue Watching",
+      featured: false,
+      item_limit: 10,
+      total_count: items.length,
+      is_custom: false,
+      customized: false,
+      items,
+    };
+  }
+
+  function progressItem(
+    contentId: string,
+    type: ResolvedSection["items"][number]["type"],
+    art: { poster_url?: string; backdrop_url?: string },
+  ): ResolvedSection["items"][number] {
+    return {
+      content_id: contentId,
+      type,
+      title: contentId,
+      position_seconds: 600,
+      duration_seconds: 6000,
+      year: 2020,
+      genres: [],
+      status: "matched",
+      rating_imdb: null,
+      overview: "",
+      poster_url: art.poster_url ?? "",
+      poster_thumbhash: "",
+      backdrop_url: art.backdrop_url ?? "",
+      backdrop_thumbhash: "",
+      logo_url: "",
+    };
+  }
+
+  function renderRow(section: ResolvedSection) {
+    return renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <SectionRow section={section} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("keeps all-movie continue sections as wide backdrop cards", () => {
+    const markup = renderRow(
+      continueSection([
+        progressItem("movie-1", "movie", {
+          poster_url: "/movie-poster.jpg",
+          backdrop_url: "/movie-backdrop.jpg",
+        }),
+      ]),
+    );
+
+    expect(markup).toContain("aspect-video");
+    expect(markup).not.toContain("aspect-[2/3]");
+    expect(markup).toContain('src="/movie-backdrop.jpg"');
+  });
+
+  it("falls back to the poster on a wide movie card without a backdrop", () => {
+    const markup = renderRow(
+      continueSection([progressItem("movie-1", "movie", { poster_url: "/movie-poster.jpg" })]),
+    );
+
+    expect(markup).toContain("aspect-video");
+    expect(markup).toContain('src="/movie-poster.jpg"');
+  });
+
+  it("keeps continue sections that mix movies and books wide", () => {
+    const markup = renderRow(
+      continueSection([
+        progressItem("movie-1", "movie", { backdrop_url: "/movie-backdrop.jpg" }),
+        progressItem("book-1", "audiobook", { poster_url: "/book-cover.jpg" }),
+      ]),
+    );
+
+    expect(markup).toContain("aspect-video");
+    expect(markup).not.toContain("aspect-square");
+    expect(markup).not.toContain("aspect-[2/3]");
+  });
+
   it("routes supported home section view-all actions to home browse destinations", () => {
     const queryClient = new QueryClient();
     const section: ResolvedSection = {

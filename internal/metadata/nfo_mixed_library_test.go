@@ -12,6 +12,7 @@ package metadata_test
 import (
 	"context"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/naming"
 )
+
+// localSourceFile returns the file path a local artwork source names, failing
+// the test unless the source carries discovery's size+mtime fingerprint.
+func localSourceFile(t *testing.T, source string) string {
+	t.Helper()
+	match := regexp.MustCompile(`^file://(.+)\?v=\d+--?\d+$`).FindStringSubmatch(source)
+	if match == nil {
+		t.Fatalf("source %q is not a fingerprinted file:// source", source)
+	}
+	return match[1]
+}
 
 // ---------------------------------------------------------------------------
 // (a) Classification pin: naming decides type in a mixed library.
@@ -135,14 +147,14 @@ func TestMixedLibrary_MovieLane_NFOOnlyPPV(t *testing.T) {
 		t.Errorf("title-only PPV must carry no remote ids, got tmdb=%q tvdb=%q imdb=%q",
 			item.TmdbID, item.TvdbID, item.ImdbID)
 	}
-	if want := "file://" + filepath.Join(root, "poster.jpg"); item.PosterSourcePath != want {
+	if want := filepath.Join(root, "poster.jpg"); localSourceFile(t, item.PosterSourcePath) != want {
 		t.Errorf("item PosterSourcePath = %q, want %q", item.PosterSourcePath, want)
 	}
 
 	jobs := x.EnqueuedImageJobs()
 	found := false
 	for _, job := range jobs {
-		if job.SourcePath == "file://"+filepath.Join(root, "poster.jpg") {
+		if strings.HasPrefix(job.SourcePath, "file://") && localSourceFile(t, job.SourcePath) == filepath.Join(root, "poster.jpg") {
 			found = true
 			if job.TargetType != metadata.ImageCacheTargetItem || job.ProviderID != "local" {
 				t.Errorf("poster job = target %q provider %q, want item/local", job.TargetType, job.ProviderID)
@@ -214,7 +226,7 @@ func TestMixedLibrary_SeriesLane_WeeklyShow(t *testing.T) {
 	if len(seasons) != 1 || seasons[0].SeasonNumber != 27 || seasons[0].Title != "SmackDown 2025" {
 		t.Fatalf("seasons = %#v, want season 27 titled SmackDown 2025", seasons)
 	}
-	if want := "file://" + filepath.Join(s27, "poster.jpg"); seasons[0].PosterSourcePath != want {
+	if want := filepath.Join(s27, "poster.jpg"); localSourceFile(t, seasons[0].PosterSourcePath) != want {
 		t.Errorf("season PosterSourcePath = %q, want %q", seasons[0].PosterSourcePath, want)
 	}
 
@@ -225,7 +237,7 @@ func TestMixedLibrary_SeriesLane_WeeklyShow(t *testing.T) {
 	if episodes[0].Title != "SmackDown: April 11, 2025" || episodes[0].Overview != "Go-home show before Mania." {
 		t.Errorf("episode title/plot = %q/%q", episodes[0].Title, episodes[0].Overview)
 	}
-	if want := "file://" + filepath.Join(s27, "WWE SmackDown S27E15-thumb.jpg"); episodes[0].StillSourcePath != want {
+	if want := filepath.Join(s27, "WWE SmackDown S27E15-thumb.jpg"); localSourceFile(t, episodes[0].StillSourcePath) != want {
 		t.Errorf("episode StillSourcePath = %q, want %q", episodes[0].StillSourcePath, want)
 	}
 }

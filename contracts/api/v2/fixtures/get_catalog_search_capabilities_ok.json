@@ -1,5 +1,5 @@
 {
-  "revision": "8710ba863b31c3358c814452a1512152d2466d48a8a806a1ababca33ef71d41c",
+  "revision": "2873457c7e965b203740e8b53915b6eaffd95059eac5ff3b1552a83dd23a34cc",
   "state": "available",
   "allowed": true,
   "people_media_scope": true,
@@ -7,6 +7,7 @@
   "person_prefetch": true,
   "video_with_episodes_scope": true,
   "extended_query_rules": true,
+  "letter_index": true,
   "provider": "meilisearch",
   "result_window_limit": 1000,
   "session_ttl_seconds": 900,

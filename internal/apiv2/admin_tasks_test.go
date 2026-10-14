@@ -171,6 +171,35 @@ func TestStorageTransitionJobCancellationContract(t *testing.T) {
 	}
 }
 
+func TestImageCacheCleanupJobCanBeCanceled(t *testing.T) {
+	job := &models.AdminJob{ID: "cleanup", JobType: adminjob.JobTypeImageCacheCleanup, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: job}
+	h := newTestHandler(t, deps)
+	cancel := Prefix + "/admin/jobs/cleanup/cancel"
+
+	var body AdminTaskJob
+	response := do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
+	decodeJSON(t, response.Body, &body)
+	if response.Code != http.StatusAccepted || body.State != "canceling" || !body.Cancelable {
+		t.Fatalf("pending cleanup cancellation: %d %s", response.Code, response.Body)
+	}
+	job.Status = adminjob.StatusCancelled
+	job.ProgressCurrent, job.ProgressTotal = 3, 8
+	job.ResultPayload = []byte(`{"deleted_prefixes":3,"deleted_s3_objects":5}`)
+	response = do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
+	decodeJSON(t, response.Body, &body)
+	if response.Code != http.StatusOK || body.State != "canceled" || body.Cancelable {
+		t.Fatalf("already canceled cleanup: %d %s", response.Code, response.Body)
+	}
+	if body.LibraryResult == nil || body.LibraryResult.DeletedPrefixes != 3 || body.LibraryResult.DeletedS3Objects != 5 {
+		t.Fatalf("canceled cleanup lost its partial totals: %s", response.Body)
+	}
+	if body.Progress == nil || body.Progress.Current != 3 || body.Progress.Total != 8 {
+		t.Fatalf("canceled cleanup progress: %s", response.Body)
+	}
+}
+
 func TestStorageTransitionJobProjectsSafeProgressAndFailure(t *testing.T) {
 	job := &models.AdminJob{
 		ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning,
@@ -346,6 +375,24 @@ func TestAdminTaskHistoryAndJobCursorBinding(t *testing.T) {
 			mismatch = strings.Replace(next, "/fixture/", "/refresh_metadata/", 1)
 		}
 		requireProblem(t, do(t, h, "GET", mismatch, "", bearer(adminToken)), TypeInvalidCursor)
+	}
+}
+
+// TestJobPollsFollowActingProfile: the job polls outside the admin class
+// give admin reach only to the acting admin. A non-primary profile on the
+// admin's account gets the 404 any other non-owner gets.
+func TestJobPollsFollowActingProfile(t *testing.T) {
+	deps, _ := libraryDeps(t)
+	deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: &models.AdminJob{ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}}
+	deps.LibraryJobs = &fakeLibraryJobs{job: &models.AdminJob{ID: "job-1", JobType: adminjob.JobTypeLibraryRefresh, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}}
+	h := newTestHandler(t, deps)
+	child := with(bearer(adminToken), "X-Profile-Id", "p-owner")
+	primary := with(bearer(adminToken), "X-Profile-Id", "p-primary")
+	for _, path := range []string{Prefix + "/admin/jobs/transition", Prefix + "/library-jobs/job-1"} {
+		requireProblem(t, do(t, h, http.MethodGet, path, "", child), TypeNotFound)
+		if rec := do(t, h, http.MethodGet, path, "", primary); rec.Code != http.StatusOK {
+			t.Fatalf("%s as the primary profile: %d %s", path, rec.Code, rec.Body)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -79,7 +80,7 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	server.nodeRowID = func() (int, bool) { return 42, true }
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -114,7 +115,7 @@ func TestHWCapabilitiesWithholdsProgressiveRemuxWithoutNodeIdentity(t *testing.T
 	server := newTestServer(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
