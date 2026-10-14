@@ -675,6 +675,13 @@ func QSVFilter(kind SourceKind, height int) string {
 		}
 		return filter
 	}
+	return QSVOpenCLToneMapFilter(kind, height) + "," + QSVOpenCLReturnFilter()
+}
+
+// QSVOpenCLToneMapFilter is the HDR part of QSVFilter that ends with the
+// tone-mapped frame still on the OpenCL device, for graphs that composite onto
+// it there. QSVOpenCLReturnFilter then hands it back to VAAPI.
+func QSVOpenCLToneMapFilter(kind SourceKind, height int) string {
 	size := ""
 	if height > 0 {
 		size = "w=-2:h=" + strconv.Itoa(height) + ":"
@@ -682,8 +689,15 @@ func QSVFilter(kind SourceKind, height int) string {
 	return SourceParameters(kind) +
 		",scale_vaapi=" + size + "format=p010" +
 		",hwmap=derive_device=opencl:mode=read" +
-		"," + openCLToneMapFilter(kind) +
-		",hwmap=derive_device=vaapi:mode=write:reverse=1:extra_hw_frames=16,format=vaapi"
+		"," + openCLToneMapFilter(kind)
+}
+
+// QSVOpenCLReturnFilter hands OpenCL frames back to VAAPI: the reverse hwmap
+// makes the filter before it render into VAAPI surfaces, so that filter must
+// allocate its output frames rather than pass its input through. Before a QSV
+// encode only QSVInteropFilter may follow it.
+func QSVOpenCLReturnFilter() string {
+	return "hwmap=derive_device=vaapi:mode=write:reverse=1:extra_hw_frames=16,format=vaapi"
 }
 
 // openCLToneMapFilter matches Jellyfin's BT.2390 GPU recipe. A fixed 100-nit

@@ -1516,9 +1516,13 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 
 	switch opts.HWAccel {
 	case transcodeHWQSV:
-		graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind, 0) + "[vmain];" +
-			subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
-			qsvToneMapScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
+			graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind, 0) + "[vmain];" +
+				subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
+				qsvToneMapScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		} else {
+			graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + qsvOpenCLBitmapSubtitleGraph(opts, subInput)
+		}
 	case transcodeHWVAAPI:
 		graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.VAAPIFilter(opts.ToneMapSourceKind) + "[vmain];" +
 			subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
@@ -1542,6 +1546,27 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 		return args
 	}
 	return append(args, "-filter_complex", graph)
+}
+
+// qsvOpenCLBitmapSubtitleGraph composites a bitmap subtitle onto an HDR frame
+// while it is still on the OpenCL device after tone mapping, then scales it
+// there. overlay_vaapi reading the tone-mapped surface corrupts frames the
+// same way a scale_vaapi does (see tonemap.QSVFilter). The subtitle goes on at
+// the source resolution before the scale, as with overlay_vaapi, and its RGB
+// frames are converted with the BT.709 matrix of the tone-mapped frame.
+//
+// scale_opencl, overlay_opencl's eof_action and YUVA overlays, and a shared
+// OpenCL device for both hwupload and hwmap come from Jellyfin FFmpeg, which
+// the QSV tone-map path already requires for tonemap_opencl's bt2390 curve.
+func qsvOpenCLBitmapSubtitleGraph(opts TranscodeOpts, subInput string) string {
+	scale := ""
+	if height, ok := scaleTargetHeight(opts.TargetResolution); ok {
+		scale = fmt.Sprintf("scale_opencl=w=-2:h=%d,", height)
+	}
+	return tonemap.QSVOpenCLToneMapFilter(opts.ToneMapSourceKind, 0) + "[vmain];" +
+		subInput + "scale=out_color_matrix=bt709:out_range=tv,format=yuva420p,hwupload=derive_device=opencl[sub];" +
+		"[vmain][sub]overlay_opencl=eof_action=pass," + scale +
+		tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 }
 
 // softwareToneMapUploadFilter moves CPU-decoded frames onto the configured

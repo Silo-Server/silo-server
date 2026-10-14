@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -266,6 +267,66 @@ func TestQSVToneMapScalesBeforeOpenCL(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestQSVToneMapBitmapSubtitlesCompositeOnOpenCL keeps bitmap burn-in for HDR
+// sources on the OpenCL device after tone mapping: overlay_vaapi or a
+// scale_vaapi reading the tone-mapped surface corrupts frames. SDR bases never
+// reach OpenCL and keep overlay_vaapi.
+func TestQSVToneMapBitmapSubtitlesCompositeOnOpenCL(t *testing.T) {
+	graphFor := func(kind tonemap.SourceKind, resolution string, softwareDecode bool) string {
+		args := buildFFmpegArgs(TranscodeOpts{
+			InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+			TargetResolution: resolution, HWAccel: transcodeHWQSV, SoftwareVideoDecode: softwareDecode, SourceVideoBitDepth: 10,
+			ToneMapPolicy: tonemap.PolicyHardwareOnly, ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: kind,
+			ToneMapFilter: tonemap.HardwareFilterOpenCL, ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+			SubtitleBurnIn: true, SubtitleTrackIndex: 0, SubtitleCodec: "hdmv_pgs_subtitle",
+		})
+		return args[slices.Index(args, "-filter_complex")+1]
+	}
+
+	want := "[0:v:0]" + tonemap.QSVOpenCLToneMapFilter(tonemap.SourcePQ, 0) + "[vmain];" +
+		"[0:s:0]scale=out_color_matrix=bt709:out_range=tv,format=yuva420p,hwupload=derive_device=opencl[sub];" +
+		"[vmain][sub]overlay_opencl=eof_action=pass,scale_opencl=w=-2:h=1080," +
+		tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+	if got := graphFor(tonemap.SourcePQ, "1080p", false); got != want {
+		t.Fatalf("QSV HDR bitmap burn-in graph:\n got %s\nwant %s", got, want)
+	}
+
+	for _, kind := range []tonemap.SourceKind{tonemap.SourcePQ, tonemap.SourceHLG, tonemap.SourceDolbyVision} {
+		for _, resolution := range []string{"1080p", ""} {
+			for _, softwareDecode := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s %q software decode %t", kind, resolution, softwareDecode), func(t *testing.T) {
+					graph := graphFor(kind, resolution, softwareDecode)
+					if strings.HasPrefix(graph, "[0:v:0]format=p010le,hwupload,") != softwareDecode {
+						t.Fatalf("software-decode upload prefix is wrong: %s", graph)
+					}
+					toneMap := strings.Index(graph, tonemap.HardwareFilterOpenCL)
+					if toneMap < 0 || strings.Contains(graph, "overlay_vaapi") || strings.Contains(graph[toneMap:], "scale_vaapi=w=") {
+						t.Fatalf("a VAAPI filter processes the tone-mapped surface: %s", graph)
+					}
+					steps := []string{"overlay_opencl=eof_action=pass,", tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + ","}
+					if resolution != "" {
+						steps = []string{"overlay_opencl=eof_action=pass,", "scale_opencl=w=-2:h=1080,", tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + ","}
+					} else if strings.Contains(graph, "scale_opencl") {
+						t.Fatalf("unscaled graph resizes on OpenCL: %s", graph)
+					}
+					last := toneMap
+					for _, step := range steps {
+						index := strings.Index(graph, step)
+						if index <= last {
+							t.Fatalf("%q is missing or out of order: %s", step, graph)
+						}
+						last = index
+					}
+				})
+			}
+		}
+	}
+
+	if graph := graphFor(tonemap.SourceSDRBT2020, "1080p", false); !strings.Contains(graph, "overlay_vaapi=eof_action=pass") {
+		t.Fatalf("SDR base layer bitmap burn-in does not use overlay_vaapi: %s", graph)
 	}
 }
 
