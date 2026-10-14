@@ -464,6 +464,20 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("reports itself paused when it fails while playing", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
+    await settle();
+    await player.play();
+    expect(player.paused).toBe(false);
+    worker.emit({ type: "error", generation: null, classification: "x_failed", message: "boom" });
+    expect(player.paused).toBe(true);
+    expect(events.filter((event) => event === "pause")).toHaveLength(1);
+    player.destroy();
+  });
+
   it("reports when no picture arrives in time", async () => {
     const onFailure = vi.fn();
     const { player } = start(onFailure);

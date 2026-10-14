@@ -433,8 +433,13 @@ export class EnginePlayer {
   private fail(classification: string, message: string): void {
     if (this.stopped) return;
     this.failed = true;
-    this.audio?.setPlaying(false);
-    this.clock?.setRunning(false);
+    // The player follows media events, so a playing engine says it stopped.
+    if (this.pausedValue) {
+      this.audio?.setPlaying(false);
+      this.clock?.setRunning(false);
+    } else {
+      this.settlePaused();
+    }
     // This engine is done even if no other route takes over: stop reading and
     // decoding, free queued pictures and audio, and let the screen sleep. The
     // last picture stays up until the player replaces or destroys the engine.
