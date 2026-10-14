@@ -300,3 +300,42 @@ startup and 370 to 410 ms to seek, with gateways that closed each connection
 after its response. These figures do not cover WAN links, cold caches, p95
 latency or sustained capacity. The measurement reports are linked from pull
 request #2408.
+
+## Executor moves and committed report routing
+
+Native playback keeps the current executor origin and transport identity in the
+internal frozen attempt recipe. Moving an API-relayed legacy transcode updates
+that tuple with an exact compare-and-swap under the same session serialization
+as a replan. Reports from an overlapping replacement continue to use the
+committed tuple. The move changes no public playback decision fields or
+progress/stop state. Expired, stopped and mismatched native attempts cannot
+fall through to legacy recovery; only a definitively absent native attempt can
+use the existing non-v3 compatibility path.
+
+The move owns one database backend through confirmation and local adoption.
+Its bounded backend admission happens before detaching a pooled connection.
+That owner consumes no ordinary pool slot while holding the route lock;
+existing pooled replan holders and waiters still need normal pool headroom. A write timeout or
+lost acknowledgement never proves rollback: the owner discards that backend
+and reacquires the same session lock before reading a settled outcome. If that
+barrier is unavailable, it keeps the candidate and its existing expiring
+reservation, returns an unavailable response and tries no other executor. A
+later request reads locked durable authority before starting or adopting work.
+A retained local runtime cannot serve manifest or segment bytes until that
+locked read confirms its local tuple. An unavailable read returns HTTP 503; a
+confirmed local route adopts the same runtime, while a rejected candidate is
+closed without disturbing a successor. Pending runtime identity includes the
+original attempt, plan, replan, owner and transport; matching only the current
+node and transport cannot confirm a superseded start. A newer plan that owns
+the same remote node and transport is preserved without adopting or deleting
+that successor.
+
+Transparent moves that keep the same transport identity are currently refused
+for enrolled HTTP workers before dispatch. Their required recipe publication
+needs durable acceptance evidence across every native start, replan and
+same-transport writer before such a move can be made safe. Those workers use
+the existing failure-recovery replan to mint a fresh transport, or an executor
+fallback permitted by policy. Proxy-egress recovery likewise replans and
+remints. Registry classification failures refuse dispatch; a missing native
+attempt never classifies a worker as legacy. This boundary does not claim
+transparent HTTP-worker failover or uninterrupted playback.

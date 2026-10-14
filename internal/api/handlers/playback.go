@@ -305,8 +305,7 @@ type PlaybackHandler struct {
 	v3StartEffectsMu        sync.Mutex
 	v3StartEffectsPending   map[string]*playbackStartSideEffectsStateV3
 	v3AudioPreferenceMu     sync.Mutex
-	v3ReplanMu              sync.Mutex
-	v3ReplanLocks           map[string]*v3ReplanLock
+	v3ReplanLocks           playback.SessionLocksV3
 	v3ReplanSlotsOnce       sync.Once
 	v3ReplanSlots           chan struct{}
 	v3EventRateMu           sync.Mutex
@@ -1794,6 +1793,14 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 	attachPlaybackSession(r.Context(), session, claims)
 
 	transcodeSession := h.tm.GetTranscodeSession(sessionID)
+	if transcodeSession != nil {
+		var err error
+		session, transcodeSession, err = h.readyLocalRehomeRuntimeV3(r.Context(), session, transcodeSession)
+		if err != nil {
+			writeRehomeUnavailableV3(w)
+			return
+		}
+	}
 	if transcodeSession == nil && session.TranscodeNodeURL != "" {
 		// No local session — relay to the remote transcode node, moving the
 		// transcode to another executor if that node cannot be reached.
@@ -1912,6 +1919,14 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	attachPlaybackSession(r.Context(), session, claims)
 
 	transcodeSession := h.tm.GetTranscodeSession(sessionID)
+	if transcodeSession != nil {
+		var err error
+		session, transcodeSession, err = h.readyLocalRehomeRuntimeV3(r.Context(), session, transcodeSession)
+		if err != nil {
+			writeRehomeUnavailableV3(w)
+			return
+		}
+	}
 	if transcodeSession == nil && session.TranscodeNodeURL != "" {
 		h.touchSessionActivity(sessionID)
 		var served bool

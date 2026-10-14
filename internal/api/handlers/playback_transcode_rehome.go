@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -39,8 +40,10 @@ import (
 var errTranscodeNodeUnreachable = errors.New("transcode node unreachable")
 
 var (
-	errRehomeRecipeUnavailable = errors.New("no recipe to rebuild the transcode from")
-	errRehomeCopyUnsafe        = errors.New("stream-copy recipe is no longer safe to revive")
+	errRehomeRecipeUnavailable      = errors.New("no recipe to rebuild the transcode from")
+	errRehomeCopyUnsafe             = errors.New("stream-copy recipe is no longer safe to revive")
+	errRehomeAuthorityUnavailable   = errors.New("transcode move authority unavailable")
+	errRehomeFreshTransportRequired = errors.New("enrolled worker requires a fresh playback transport")
 )
 
 // maxRehomeAttemptsV3 bounds how many executors one move tries. Each failed
@@ -153,6 +156,10 @@ func (h *PlaybackHandler) relayOrRehomeTranscode(
 	if moveErr != nil {
 		slog.WarnContext(r.Context(), "could not move the transcode off an unreachable node",
 			"component", "api", "node", logredact.SanitizeURL(dead.NodeURL), "playback_session_id", session.ID, "error", logredact.SanitizeText(moveErr.Error()))
+		if errors.Is(moveErr, errRehomeOutcomeUnknown) || errors.Is(moveErr, errRehomeAuthorityUnavailable) {
+			writeRehomeUnavailableV3(w)
+			return nil, true
+		}
 		if !writePlaybackToneMapExecutionError(w, moveErr) {
 			writeTranscodeNodeUnavailable(w)
 		}
@@ -162,6 +169,14 @@ func (h *PlaybackHandler) relayOrRehomeTranscode(
 	// Serve from wherever the transcode runs now. This request may have joined
 	// a move another request led, or found the session already moved.
 	if runtime := h.tm.GetTranscodeSession(session.ID); runtime != nil {
+		current, err := h.sessionMgr.GetSession(session.ID)
+		if err == nil {
+			_, runtime, err = h.readyLocalRehomeRuntimeV3(r.Context(), current, runtime)
+		}
+		if err != nil {
+			writeRehomeUnavailableV3(w)
+			return nil, true
+		}
 		return runtime, false
 	}
 	current, getErr := h.sessionMgr.GetSession(session.ID)
@@ -186,16 +201,24 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 	tokenCard *playback.RecipeCard,
 	requestedSegment int,
 ) error {
-	mover, ok := h.sessionMgr.(transcodeExecutorMoverV3)
+	_, ok := h.sessionMgr.(transcodeExecutorMoverV3)
 	if !ok {
 		return errors.New("session manager cannot move a transcode")
 	}
+	guard, releaseRoute, err := h.acquireRehomeRouteV3(ctx, sessionID)
+	if err != nil {
+		return errors.Join(errRehomeAuthorityUnavailable, err)
+	}
+	defer releaseRoute()
 	session, err := h.sessionMgr.GetSession(sessionID)
 	if err != nil {
 		return err
 	}
 	if session.TranscodeNodeURL != dead.NodeURL || session.TranscodeTransportID != dead.TransportID {
 		return nil
+	}
+	if adopted, err := h.adoptRehomeRouteV3(ctx, guard, session, dead); err != nil || adopted {
+		return err
 	}
 	transportID := remoteTransportID(session)
 	card, fromStore := h.rehomeRecipeCardV3(ctx, session, transportID, tokenCard)
@@ -212,10 +235,22 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 	if card.VideoStreamCopy() {
 		workload, delivery = noderouting.WorkloadRemux, noderouting.DeliveryHLSRemux
 	}
+	if guard.record != nil && guard.record.FrozenRecipe.TranscodeNodeURL == "" {
+		shapes, err := noderouting.Candidates(noderouting.Request{Workload: workload, Delivery: delivery, Policy: h.playbackRoutingPolicyV3()})
+		if err != nil {
+			return err
+		}
+		for _, shape := range shapes.Candidates {
+			if shape.Execution == noderouting.ExecutionAPI {
+				return h.moveTranscodeToLocalV3(ctx, guard, session, dead, *card, rehomePlanV3(guard, card), fromStore, requestedSegment)
+			}
+		}
+		return errors.New("current routing policy cannot serve the confirmed local executor")
+	}
 	// The moved transport continues the same timeline under the same URLs, so
 	// its executor must run the same recipe versions a fresh start of this
 	// plan would require: the same capability filter applies.
-	plan := h.rehomePlanV3(ctx, session, card)
+	plan := rehomePlanV3(guard, card)
 	capable := h.transcodeEligibilityV3(ctx, plan, nil)
 	excludedNodes := map[string]struct{}{nodepool.NormalizeNodeURL(dead.NodeURL): {}}
 	excludedShapes := map[string]struct{}{}
@@ -257,11 +292,11 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 			return fmt.Errorf("no executor for the transcode: %s", decision.Outcome)
 		}
 		if decision.Shape.Execution == noderouting.ExecutionAPI {
-			moveErr := h.moveTranscodeToLocalV3(ctx, mover, session, dead, *card, plan, fromStore, requestedSegment)
+			moveErr := h.moveTranscodeToLocalV3(ctx, guard, session, dead, *card, plan, fromStore, requestedSegment)
 			if moveErr == nil {
 				return nil
 			}
-			if ctx.Err() != nil || isTerminalToneMapMoveError(moveErr) {
+			if ctx.Err() != nil || isTerminalToneMapMoveError(moveErr) || errors.Is(moveErr, errRehomeOutcomeUnknown) || errors.Is(moveErr, playback.ErrReplanSupersededV3) || errors.Is(moveErr, errRehomeAuthorityUnavailable) {
 				return moveErr
 			}
 			lastErr = moveErr
@@ -269,12 +304,17 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 			continue
 		}
 		node := decision.Plan.TranscodeNode
-		moveErr := h.moveTranscodeToNodeV3(ctx, mover, session, dead, *card, plan, fromStore, node, decision.Plan.Reservation, requestedSegment)
+		moveErr := h.moveTranscodeToNodeV3(ctx, guard, session, dead, *card, plan, fromStore, node, decision.Plan.Reservation, requestedSegment)
 		if moveErr == nil {
 			return nil
 		}
+		if errors.Is(moveErr, errRehomeOutcomeUnknown) {
+			// Its SQL acknowledgement was lost and the candidate may already
+			// be committed. Keep its expiring reservation and stop iteration.
+			return moveErr
+		}
 		h.releaseMoveReservationV3(sessionID, decision.Plan.Reservation)
-		if ctx.Err() != nil || isTerminalToneMapMoveError(moveErr) {
+		if ctx.Err() != nil || isTerminalToneMapMoveError(moveErr) || errors.Is(moveErr, playback.ErrReplanSupersededV3) || errors.Is(moveErr, errRehomeAuthorityUnavailable) {
 			return moveErr
 		}
 		slog.WarnContext(ctx, "transcode node rejected a moved transcode", "component", "api",
@@ -292,22 +332,14 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 	return fmt.Errorf("every executor refused the transcode: %w", lastErr)
 }
 
-// rehomePlanV3 is the planner result whose capability requirements the moved
-// transport must keep meeting: the session's current v3 plan, with the
-// tone-map identity the recipe froze. A session with no recorded plan (the
-// protocol store is absent or lost it) has no plan, which applies no capability
-// filter, as at that session's own start.
-func (h *PlaybackHandler) rehomePlanV3(ctx context.Context, session *playback.Session, card *playback.RecipeCard) playback.PlannerResultV3 {
+// rehomePlanV3 reuses the already locked native plan. Only a definitively
+// absent legacy attempt has no persisted capability requirements.
+func rehomePlanV3(guard *rehomeRouteV3, card *playback.RecipeCard) playback.PlannerResultV3 {
 	result := playback.PlannerResultV3{ToneMapMode: card.ToneMapMode, ToneMapSourceKind: card.ToneMapSourceKind}
-	if h.PlanStoreV3 == nil {
-		return result
+	if guard.record != nil {
+		plan := guard.record.CurrentPlan
+		result.Plan = &plan
 	}
-	record, err := h.PlanStoreV3.GetAttempt(ctx, session.ID)
-	if err != nil || record == nil {
-		return result
-	}
-	plan := record.CurrentPlan
-	result.Plan = &plan
 	return result
 }
 
@@ -351,7 +383,7 @@ func rehomeRecipeServesV3(card playback.RecipeCard, session *playback.Session, t
 // same reconstruction a restart uses, then points the session at it.
 func (h *PlaybackHandler) moveTranscodeToLocalV3(
 	ctx context.Context,
-	mover transcodeExecutorMoverV3,
+	guard *rehomeRouteV3,
 	session *playback.Session,
 	dead playback.TranscodeRoute,
 	card playback.RecipeCard,
@@ -378,11 +410,15 @@ func (h *PlaybackHandler) moveTranscodeToLocalV3(
 		}
 		return err
 	}
-	moved, err := mover.MoveTranscodeExecutor(session.ID, dead, playback.TranscodeExecutorMove{
+	runtime.MarkPendingRouteMoveV3(guard.record, remoteTransportID(session))
+	moved, err := h.commitRehomeRouteV3(ctx, guard, session, dead, playback.TranscodeExecutorMove{
 		Execution:        string(noderouting.ExecutionAPI),
 		TranscodeHWAccel: runtime.Opts().EffectiveEncoderHWAccel(),
 	})
 	if err != nil || !moved {
+		if errors.Is(err, errRehomeOutcomeUnknown) {
+			return err
+		}
 		// The session left the dead route while this ran. A local runtime is
 		// only stale when the session now runs on a node; a local successor owns
 		// the slot otherwise and must be left alone.
@@ -391,6 +427,7 @@ func (h *PlaybackHandler) moveTranscodeToLocalV3(
 		}
 		return err
 	}
+	runtime.ConfirmRouteMoveV3()
 	if fromStore {
 		// The stored card rebuilt a node transport; a local one never reads it.
 		h.deleteNodeRecipeV3(ctx, remoteTransportID(session))
@@ -406,7 +443,7 @@ func (h *PlaybackHandler) moveTranscodeToLocalV3(
 // points the session at it once the node has accepted it.
 func (h *PlaybackHandler) moveTranscodeToNodeV3(
 	ctx context.Context,
-	mover transcodeExecutorMoverV3,
+	guard *rehomeRouteV3,
 	session *playback.Session,
 	dead playback.TranscodeRoute,
 	card playback.RecipeCard,
@@ -417,6 +454,18 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 	requestedSegment int,
 ) error {
 	transportID := remoteTransportID(session)
+	classifyCtx, cancelClassify := context.WithTimeout(ctx, nodeRecipeWriteTimeoutV3)
+	requiresRecipe, classifyErr := nodehttp.RequiresRecipe(classifyCtx, node.URL)
+	cancelClassify()
+	if classifyErr != nil {
+		return errors.Join(errRehomeAuthorityUnavailable, classifyErr)
+	}
+	if requiresRecipe {
+		// A same-work move cannot prove the enrolled worker's accepted recipe
+		// publication across replicas. Its client must replan to a fresh work
+		// identity, as proxy-egress recovery already does. Refuse BEFORE POST.
+		return errRehomeFreshTransportRequired
+	}
 	// Re-check the selected node against the plan with a fresh inventory, as a
 	// fresh start does: the filter above may have read a cached one.
 	if planRequiresServerTransformationsV3(plan.Plan) {
@@ -477,15 +526,16 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 	// reading the route it replaces until it commits: either the replan sees
 	// this move and stops the transport on its new node, or this compare-and-
 	// swap sees the replan and fails.
-	unlock := h.tm.LockSessionLifecycle(session.ID)
-	moved, err := mover.MoveTranscodeExecutor(session.ID, dead, playback.TranscodeExecutorMove{
+	moved, err := h.commitRehomeRouteV3(ctx, guard, session, dead, playback.TranscodeExecutorMove{
 		NodeURL:          node.URL,
 		Execution:        string(noderouting.ExecutionTranscode),
 		ExecutionNodeID:  node.ID,
 		TranscodeHWAccel: firstNonEmptyHandlerV3(strings.TrimSpace(response.EncoderHWAccel), strings.TrimSpace(response.HWAccel), req.HWAccel),
 	})
-	unlock()
 	if err != nil || !moved {
+		if errors.Is(err, errRehomeOutcomeUnknown) {
+			return err
+		}
 		// The route changed under the move: give back the planner reservation
 		// Resolve made on this node along with the job.
 		h.releaseMoveReservationV3(session.ID, reservation)

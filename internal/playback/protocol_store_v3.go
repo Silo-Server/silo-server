@@ -229,6 +229,7 @@ type memoryReplanV3 struct {
 }
 
 type MemoryPlanStoreV3 struct {
+	sessionLocks SessionLocksV3
 	mu           sync.Mutex
 	attempts     map[string]AttemptRecordV3
 	replans      map[string]memoryReplanV3
@@ -240,13 +241,10 @@ func NewMemoryPlanStoreV3() *MemoryPlanStoreV3 {
 	return &MemoryPlanStoreV3{attempts: make(map[string]AttemptRecordV3), replans: make(map[string]memoryReplanV3)}
 }
 
-// AcquireSessionLock is deliberately a no-op. The store lock exists to
-// serialize replans across processes sharing one PostgreSQL database; the
-// memory store only ever backs a single-process, DB-less deployment, where
-// the handler's own per-session replan mutex already provides the same
-// serialization before this lock is taken.
-func (s *MemoryPlanStoreV3) AcquireSessionLock(context.Context, string) (func(), error) {
-	return func() {}, nil
+// Multiple handlers can share one memory store. Moves and replans must use
+// this same store-owned boundary even when their local handler locks differ.
+func (s *MemoryPlanStoreV3) AcquireSessionLock(ctx context.Context, sessionID string) (func(), error) {
+	return s.sessionLocks.Acquire(ctx, sessionID)
 }
 
 func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV3) error {

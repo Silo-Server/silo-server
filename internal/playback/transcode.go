@@ -231,6 +231,7 @@ type TranscodeSession struct {
 	waitErr              error
 	stderr               *boundedTailBuffer
 	mu                   sync.Mutex
+	pendingRouteMove     *RouteMoveIdentityV3
 	done                 chan struct{} // closed when the monitor goroutine finishes
 	stdinPipe            io.WriteCloser
 	lastRequestedSegment int

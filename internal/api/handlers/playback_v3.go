@@ -253,11 +253,6 @@ func wrapSubtitleStoreErrorV3(err error) error {
 	return fmt.Errorf("%w: %w", errSubtitleStoreUnavailableV3, err)
 }
 
-type v3ReplanLock struct {
-	mu   sync.Mutex
-	refs int
-}
-
 type v3EventRate struct {
 	windowStart time.Time
 	count       int
@@ -4689,7 +4684,10 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusServiceUnavailable, "replan_capacity_exhausted", "The server is replanning too many sessions; retry shortly")
 	}
 	defer releaseSlot()
-	unlockReplan := h.lockReplanV3(sessionID)
+	unlockReplan, err := h.lockReplanV3(r.Context(), sessionID)
+	if err != nil {
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusServiceUnavailable, "replan_capacity_exhausted", "The replan request was canceled while waiting for the session")
+	}
 	defer unlockReplan()
 	unlockStore, err := h.PlanStoreV3.AcquireSessionLock(r.Context(), sessionID)
 	if err != nil {
@@ -6221,28 +6219,8 @@ func (h *PlaybackHandler) clarifyOriginalQuality4KTerminalV3(ctx context.Context
 	}
 }
 
-func (h *PlaybackHandler) lockReplanV3(sessionID string) func() {
-	h.v3ReplanMu.Lock()
-	if h.v3ReplanLocks == nil {
-		h.v3ReplanLocks = make(map[string]*v3ReplanLock)
-	}
-	entry := h.v3ReplanLocks[sessionID]
-	if entry == nil {
-		entry = &v3ReplanLock{}
-		h.v3ReplanLocks[sessionID] = entry
-	}
-	entry.refs++
-	h.v3ReplanMu.Unlock()
-	entry.mu.Lock()
-	return func() {
-		entry.mu.Unlock()
-		h.v3ReplanMu.Lock()
-		entry.refs--
-		if entry.refs == 0 {
-			delete(h.v3ReplanLocks, sessionID)
-		}
-		h.v3ReplanMu.Unlock()
-	}
+func (h *PlaybackHandler) lockReplanV3(ctx context.Context, sessionID string) (func(), error) {
+	return h.v3ReplanLocks.Acquire(ctx, sessionID)
 }
 
 // maxConcurrentReplansV3 bounds simultaneous replan executions. Each replan
@@ -6261,7 +6239,7 @@ type sessionLockCapacityAdvisorV3 interface {
 }
 
 // acquireReplanSlotV3 blocks until a replan slot frees or the request context
-// is cancelled; excess replans queue here holding no DB resources at all.
+// is canceled; excess replans queue here holding no DB resources at all.
 func (h *PlaybackHandler) acquireReplanSlotV3(ctx context.Context) (func(), error) {
 	h.v3ReplanSlotsOnce.Do(func() {
 		capacity := maxConcurrentReplansV3

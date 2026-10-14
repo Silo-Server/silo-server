@@ -30,6 +30,7 @@ const rehomeTestTransport = "rehome-transport"
 type fakeRehomeNode struct {
 	server  *httptest.Server
 	starts  atomic.Int32
+	stops   atomic.Int32
 	release chan struct{} // when non-nil, a start waits for it to close
 
 	mu       sync.Mutex
@@ -63,6 +64,7 @@ func newFakeRehomeNode(t *testing.T, gated bool) *fakeRehomeNode {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"):
 			_, _ = io.WriteString(w, "moved:"+strings.TrimPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"))
 		case r.Method == http.MethodDelete:
+			node.stops.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -425,7 +427,8 @@ func TestRelayMoveKeepsTheSessionsRecipeVersions(t *testing.T) {
 	}, "ffmpeg")
 	store := playback.NewMemoryPlanStoreV3()
 	if err := store.SaveAttempt(context.Background(), playback.AttemptRecordV3{
-		PlaybackAttemptID: "attempt-1", SessionID: f.session.ID, UserID: 1, CurrentPlanID: "plan-1",
+		PlaybackAttemptID: "attempt-1", SessionID: f.session.ID, UserID: 1, ProfileID: "profile-1", EffectiveMediaFileID: 42, CurrentPlanID: "plan-1",
+		FrozenRecipe: playback.ExecutableRecipeV3{TranscodeNodeURL: f.deadURL, TranscodeTransportID: rehomeTestTransport},
 		CurrentPlan: playback.PlanV3{PlanID: "plan-1", Transformations: []playback.TransformationV3{
 			{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: "2"},
 		}},
@@ -433,7 +436,7 @@ func TestRelayMoveKeepsTheSessionsRecipeVersions(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f.handler.PlanStoreV3 = store
+	f.handler.PlanStoreV3 = &ownedRehomePlanStore{MemoryPlanStoreV3: store}
 	seedNodeTransformations(f.handler, older.server.URL, "1")
 	seedNodeTransformations(f.handler, current.server.URL, "2")
 
