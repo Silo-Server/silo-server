@@ -202,6 +202,8 @@ function concat(chunks: Uint8Array[], total: number): Uint8Array {
 export class PGSStreamParser {
   private buffer = new Uint8Array(0);
   private palettes = new Map<number, Uint32Array>();
+  // Palettes a finished screen holds. Only these are copied before an update.
+  private shownPalettes = new WeakSet<Uint32Array>();
   private objects = new Map<number, ObjectDefinition>();
   // Objects whose fragments are still arriving, by ID: one object's fragments
   // may be interleaved with another's. Their bytes share the epoch's budget.
@@ -333,8 +335,11 @@ export class PGSStreamParser {
     if (body.byteLength < 2) return;
     const id = body[0]!;
     const planeHeight = this.presentation?.height ?? 1080;
-    const existing = this.palettes.get(id);
-    const palette = existing ? new Uint32Array(existing) : new Uint32Array(256);
+    // Copy on write so a later update cannot recolor a screen already
+    // finished, but only once per screen: a palette no screen holds yet is
+    // updated in place, so a burst of palette segments allocates nothing.
+    let palette = this.palettes.get(id) ?? new Uint32Array(256);
+    if (this.shownPalettes.has(palette)) palette = new Uint32Array(palette);
     for (let offset = 2; offset + 5 <= body.byteLength; offset += 5) {
       const entry = body[offset]!;
       palette[entry] = pgsPaletteEntryToRGBA(
@@ -439,6 +444,7 @@ export class PGSStreamParser {
     }
     if (this.windowCompositions >= MAX_COMPOSITIONS_PER_WINDOW) return null;
     this.windowCompositions += 1;
+    if (palette) this.shownPalettes.add(palette);
     return {
       start: presentation.pts / PGS_TIMESCALE,
       width: presentation.width,

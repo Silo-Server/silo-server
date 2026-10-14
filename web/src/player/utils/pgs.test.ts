@@ -291,6 +291,35 @@ describe("PGSStreamParser", () => {
     expect(composition?.objects).toHaveLength(2);
   });
 
+  it("copies a palette only once a screen holds it", () => {
+    const parser = new PGSStreamParser();
+    const show = (pts: number) => [
+      ...pcs(pts, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] }),
+      ...end(pts),
+    ];
+    const [first, second, third] = parser.push(
+      new Uint8Array([
+        ...pcs(1, { objects: [{ id: 0, x: 0, y: 0 }] }),
+        // Two updates before any screen holds the palette: both apply.
+        ...pds(1, 0, [WHITE]),
+        ...pds(1, 0, [RED_HALF]),
+        ...ods(1, 0, 4, 2, RLE_4X2),
+        ...end(1),
+        ...show(2),
+        ...pds(3, 0, [[1, 16, 128, 128, 255]]),
+        ...show(3),
+      ]),
+    );
+    const firstPalette = first!.objects[0]!.palette;
+    expect(firstPalette[1]).toBe(pgsPaletteEntryToRGBA(235, 128, 128, 255, 1080));
+    expect(firstPalette[2]).toBe(pgsPaletteEntryToRGBA(63, 240, 102, 128, 1080));
+    // No update in between: the next screen shares the palette.
+    expect(second!.objects[0]!.palette).toBe(firstPalette);
+    // An update after a screen holds it makes a copy; the earlier screen keeps its colors.
+    expect(third!.objects[0]!.palette).not.toBe(firstPalette);
+    expect(firstPalette[1]).toBe(pgsPaletteEntryToRGBA(235, 128, 128, 255, 1080));
+  });
+
   it("keeps an earlier screen's colors after a palette-only update", () => {
     const parser = new PGSStreamParser();
     const [first, second] = parser.push(
