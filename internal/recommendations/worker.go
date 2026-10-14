@@ -301,24 +301,32 @@ type profileRefreshRequest struct {
 
 // RequestProfileRefresh queues a profile-scoped recommendation refresh without blocking the caller.
 func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileID string) {
+	w.queueProfileRefresh(ctx, userID, profileID)
+}
+
+// queueProfileRefresh is RequestProfileRefresh. It reports false when the
+// request was dropped: the queue stayed full, or ctx ended first.
+func (w *Worker) queueProfileRefresh(ctx context.Context, userID int, profileID string) bool {
 	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
-		return
+		return false
 	}
 
 	req := profileRefreshRequest{userID: userID, profileID: profileID}
 	key := profileRefreshKey(userID, profileID)
 	if !w.claimProfileRefreshOrAskAgain(key) {
-		return
+		return true // one is queued or running, and runs again after
 	}
 
 	select {
 	case w.profileRefreshCh <- req:
+		return true
 	case <-ctx.Done():
 		w.clearProfileRefreshPending(key)
 	case <-time.After(10 * time.Millisecond):
 		w.clearProfileRefreshPending(key)
 		slog.WarnContext(ctx, "profile refresh queue full; dropping request", "component", "recommendations", "user_id", userID, "profile_id", profileID)
 	}
+	return false
 }
 
 // NotifySignalsChanged records that a profile's recommendation signals
@@ -504,10 +512,14 @@ func (w *Worker) RequestReadRefresh(ctx context.Context, userID int, profileID s
 	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
 		return
 	}
-	if !w.readRefreshes.allow(profileRefreshKey(userID, profileID), readRefreshInterval) {
+	key := profileRefreshKey(userID, profileID)
+	if !w.readRefreshes.allow(key, readRefreshInterval) {
 		return
 	}
-	w.RequestProfileRefresh(ctx, userID, profileID)
+	// A dropped request leaves no stale mark, so the next read may ask again.
+	if !w.queueProfileRefresh(ctx, userID, profileID) {
+		w.readRefreshes.forget(key)
+	}
 }
 
 func (w *Worker) markProfileStale(ctx context.Context, userID int, profileID string) {
@@ -1480,6 +1492,13 @@ func (t *refreshThrottle) allow(key string, interval time.Duration) bool {
 	}
 	t.last[key] = now
 	return true
+}
+
+// forget drops key's record, so allow lets it through again.
+func (t *refreshThrottle) forget(key string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.last, key)
 }
 
 // due reports whether allow would let key go ahead now, without recording

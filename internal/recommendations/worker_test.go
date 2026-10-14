@@ -751,6 +751,23 @@ func TestNotifySignalsChangedMarksStaleThenQueues(t *testing.T) {
 	disabled.RequestReadRefresh(t.Context(), 7, "p")
 }
 
+// A read refresh the full queue dropped does not count against the
+// profile's allowance: it left no stale mark, so the next read asks again.
+func TestDroppedReadRefreshCanBeAskedAgain(t *testing.T) {
+	w, _ := newRefreshTestWorker()
+	ctx := t.Context()
+	w.RequestProfileRefresh(ctx, 7, "other") // fills the one-slot queue
+	w.RequestReadRefresh(ctx, 7, "p")
+	if !w.ReadRefreshDue(7, "p") {
+		t.Fatal("a dropped read refresh still counts against the profile")
+	}
+	takeQueued(t, w)
+	w.RequestReadRefresh(ctx, 7, "p")
+	if req := takeQueued(t, w); req.profileID != "p" {
+		t.Fatalf("queued %+v, want profile p", req)
+	}
+}
+
 // Reads that find a profile's rows missing queue at most one refresh per
 // profile per interval on a server; signal changes are not throttled.
 func TestRequestReadRefreshThrottlesEachProfile(t *testing.T) {
