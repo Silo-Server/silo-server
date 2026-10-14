@@ -30,6 +30,10 @@ WHERE stale.provider_item_key <> ''
   AND stale.provider_item_key = kept.provider_item_key
   AND (stale.updated_at, stale.id) < (kept.updated_at, kept.id);
 
+-- Up removed the unique index, so one found here is a leftover of an
+-- interrupted rollback, possibly invalid.
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_watch_provider_list_items_provider_key;
+
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_watch_provider_list_items_provider_key
     ON public.watch_provider_list_items (connection_id, list_kind, provider_item_key)
     WHERE provider_item_key <> '';
