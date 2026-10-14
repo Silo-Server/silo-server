@@ -117,6 +117,13 @@ let audioTrack: InputAudioTrack | null = null;
 /** Audio track facts, read once with Mediabunny's async getters. */
 let audioFacts: { sampleRate: number; channels: number } | null = null;
 let videoConfig: VideoDecoderConfig | null = null;
+/**
+ * Container time at player position 0. The server counts positions from the
+ * start of the file, as ffmpeg's seeks do, so a file whose packets begin at
+ * 10 s plays its first picture at 0. Never below 0: Mediabunny marks samples
+ * before 0 (such as audio priming) as not for presentation.
+ */
+let timelineOrigin = 0;
 let nalLengthSize: number | null = null;
 let audioOutput: { port: MessagePort; channels: number; sampleRate: number } | null = null;
 
@@ -193,6 +200,8 @@ async function open(spec: EngineSourceSpec): Promise<void> {
     };
   }
 
+  timelineOrigin = Math.max(0, await input.getFirstTimestamp());
+
   const config = await videoTrack.getDecoderConfig();
   if (!config) {
     throw new EngineFailure(
@@ -227,7 +236,7 @@ async function open(spec: EngineSourceSpec): Promise<void> {
       : null;
 
   let duration = spec.durationSeconds ?? 0;
-  if (!(duration > 0)) duration = await input.computeDuration();
+  if (!(duration > 0)) duration = (await input.computeDuration()) - timelineOrigin;
 
   post({
     type: "ready",
@@ -245,6 +254,11 @@ async function open(spec: EngineSourceSpec): Promise<void> {
       audio: audioFacts,
     },
   });
+}
+
+/** A packet's position on the player timeline, in seconds. */
+function playerTime(packet: EncodedPacket): number {
+  return packet.timestamp - timelineOrigin;
 }
 
 function toBytes(source: AllowSharedBufferSource): Uint8Array {
@@ -386,7 +400,7 @@ async function runVideo(run: number, position: number): Promise<void> {
   const startPacket = await findStartPacket(
     "video",
     async () =>
-      (await sink.getKeyPacket(position, { verifyKeyPackets: true })) ??
+      (await sink.getKeyPacket(position + timelineOrigin, { verifyKeyPackets: true })) ??
       (await sink.getFirstKeyPacket({ verifyKeyPackets: true })),
   );
   if (run !== generation) return;
@@ -459,7 +473,7 @@ async function runVideo(run: number, position: number): Promise<void> {
     decoder.decode(
       new EncodedVideoChunk({
         type: packet.type,
-        timestamp: Math.round(packet.timestamp * 1e6),
+        timestamp: Math.round(playerTime(packet) * 1e6),
         duration: Math.round(packet.duration * 1e6),
         data,
       }),
@@ -502,7 +516,7 @@ function webCodecsAudioDecoder(config: AudioDecoderConfig, run: number): AudioDe
       decoder.decode(
         new EncodedAudioChunk({
           type: "key",
-          timestamp: Math.round(packet.timestamp * 1e6),
+          timestamp: Math.round(playerTime(packet) * 1e6),
           duration: Math.round(packet.duration * 1e6),
           data: packet.data,
         }),
@@ -549,7 +563,8 @@ async function ffmpegAudioDecoder(
     });
   return {
     async decode(packet) {
-      return decoder.decode(packet.data, packet.timestamp * 1e6).map(convert(packet.timestamp));
+      const timestamp = playerTime(packet);
+      return decoder.decode(packet.data, timestamp * 1e6).map(convert(timestamp));
     },
     async flush() {
       return decoder.drain().map(convert(0));
@@ -569,7 +584,7 @@ function pcmAudioDecoder(format: PCMFormat): AudioDecoderAdapter {
           planes: unpackPCM(packet.data, format, channels),
           sampleRate,
           speakers: defaultSpeakers(channels),
-          timestamp: packet.timestamp,
+          timestamp: playerTime(packet),
         },
       ];
     },
@@ -603,7 +618,8 @@ async function runAudio(run: number, position: number): Promise<void> {
   const startPacket = await findStartPacket(
     "audio",
     async () =>
-      (await sink.getPacket(Math.max(0, position - preroll))) ?? (await sink.getFirstPacket()),
+      (await sink.getPacket(Math.max(0, position - preroll) + timelineOrigin)) ??
+      (await sink.getFirstPacket()),
   );
   if (run !== generation) return;
   const send = (message: WorkerToWorkletMessage, transfer: Transferable[] = []) =>
