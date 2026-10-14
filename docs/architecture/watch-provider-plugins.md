@@ -101,11 +101,12 @@ Several items with one key follow these rules:
   still on the local list, has the key. Removing the key would take that item
   off the provider too.
 - With removal sync on, an import does not add back an item whose local
-  removal has not reached the provider yet, unless the provider listed it after
-  the removal.
+  removal has not reached the provider yet, unless the provider dated its
+  listing after the removal. An undated listing never counts as newer.
 - A full import counts every IMDb, TMDB, and TVDB id on a provider row as
-  present, since a plugin's key can use a different id than the one stored at
-  export (Trakt keys shows by TVDB id first).
+  present for that row's kind, since a plugin's key can use a different id than
+  the one stored at export (Trakt keys shows by TVDB id first). A row or stored
+  item without a kind matches any kind.
 - A remote tombstone removes every row with its key, and with its kind when it
   names one. Plugin tombstones carry only the key, so one whose rows name more
   than one kind of title changes nothing and adds a warning.

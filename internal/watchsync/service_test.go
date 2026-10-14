@@ -4648,10 +4648,13 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 	tests := []struct {
 		name      string
 		listedAt  time.Time
+		guessed   bool
 		wantAdded bool
 	}{
 		{name: "listing older than the removal", listedAt: removedAt.Add(-24 * time.Hour)},
 		{name: "listing newer than the removal", listedAt: removedAt.Add(time.Hour), wantAdded: true},
+		// A provider that sends no listing time gets the import time.
+		{name: "undated listing", listedAt: removedAt.Add(time.Hour), guessed: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -4690,7 +4693,7 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 			provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{
 				Rows: []RemoteFavorite{{
 					ProviderItemKey: "imdb:tt0137523", Kind: "movie", IMDbID: "tt0137523", TMDBID: "550",
-					FavoritedAt: tt.listedAt,
+					FavoritedAt: tt.listedAt, FavoritedAtGuessed: tt.guessed,
 				}},
 			}}
 			result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
@@ -4712,6 +4715,53 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 				t.Fatalf("movie-a state = %#v, want local %v", a, tt.wantAdded)
 			}
 		})
+	}
+}
+
+// A complete read that lists only a movie does not keep a series with the
+// same TMDB id; a stored row without a kind is kept by any listing.
+func TestServiceFullFavoriteImportScopesPresenceByKind(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	repo := newServiceFakeRepo()
+	conn := Connection{
+		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
+		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
+	}
+	for id, kind := range map[string]string{"series:tmdb:550": "series", "unknown:tmdb:550": ""} {
+		if _, err := store.AddFavoriteAt(ctx, conn.ProfileID, id, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		repo.listItemStates = append(repo.listItemStates, ListItemState{
+			ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: id, Kind: kind,
+			ProviderItemKey: "tmdb:550", RemotePresent: true, LocalPresent: true,
+		})
+	}
+	// The movie is not in the library, so it matches nothing.
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(unmatchedMatcherStub{reason: "no tmdb_id match"}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{
+		Rows: []RemoteFavorite{{ProviderItemKey: "tmdb:550", Kind: "movie", TMDBID: "550"}},
+	}}
+	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Removed != 1 || len(favorites) != 1 || favorites[0].MediaItemID != "unknown:tmdb:550" {
+		t.Fatalf("result=%#v favorites=%#v", result, favorites)
 	}
 }
 

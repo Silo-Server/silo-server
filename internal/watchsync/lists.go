@@ -259,7 +259,7 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	if err != nil {
 		return result, err
 	}
-	seenRemoteKeys := make(map[string]bool, len(rows))
+	seenRemote := make(remoteListPresence, len(rows))
 	states := make([]ListItemState, 0, len(rows))
 	// orderedIDs records matched local ids in the order the provider returned
 	// them, so an order-providing list (e.g. MDBList watchlist) can mirror its
@@ -280,13 +280,8 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		if key == "" {
 			key = providerItemKeyForRemoteFavorite(row)
 		}
-		for _, seen := range []string{
-			key, prefixedID("imdb", row.IMDbID), prefixedID("tmdb", row.TMDBID), prefixedID("tvdb", row.TVDBID),
-		} {
-			if seen != "" {
-				seenRemoteKeys[seen] = true
-			}
-		}
+		seenRemote.add(row.Kind,
+			key, prefixedID("imdb", row.IMDbID), prefixedID("tmdb", row.TMDBID), prefixedID("tvdb", row.TVDBID))
 		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
 		if err != nil {
 			return result, err
@@ -299,8 +294,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			continue
 		}
 		// The provider listing the item again after the local removal is a
-		// newer add; an older listing is the one the removal will take off.
-		if removedAt, pending := removalsPending[match.MediaItemID]; pending && !row.FavoritedAt.After(removedAt) {
+		// newer add; an older or undated listing is the one the removal will
+		// take off.
+		if removedAt, pending := removalsPending[match.MediaItemID]; pending &&
+			(row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt)) {
 			continue
 		}
 		if err := b.localAdd(ctx, store, conn.ProfileID, match.MediaItemID, row.FavoritedAt); err != nil {
@@ -327,7 +324,7 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		return result, err
 	}
 	if !batch.Incremental {
-		if err := s.reconcileMissingRemoteListItems(ctx, conn, store, b, seenRemoteKeys, &result); err != nil {
+		if err := s.reconcileMissingRemoteListItems(ctx, conn, store, b, seenRemote, &result); err != nil {
 			return result, err
 		}
 	}
@@ -473,14 +470,38 @@ func sameListItemKind(states []*ListItemState) bool {
 	return true
 }
 
-func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Connection, store userstore.UserStore, b listBinding, seenRemoteKeys map[string]bool, result *ImportListResult) error {
+// remoteListPresence records the keys a complete provider read listed, with
+// the kinds of title listed under each. TMDB and TVDB number movies and series
+// separately, so a movie row does not keep a series with the same key.
+type remoteListPresence map[string]map[string]bool
+
+func (p remoteListPresence) add(kind string, keys ...string) {
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if p[key] == nil {
+			p[key] = make(map[string]bool)
+		}
+		p[key][kind] = true
+	}
+}
+
+// listed reports whether the read listed a title of this kind under key. A
+// row or stored state without a kind matches any kind.
+func (p remoteListPresence) listed(kind, key string) bool {
+	kinds := p[key]
+	return kinds[kind] || kinds[""] || (kind == "" && len(kinds) > 0)
+}
+
+func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Connection, store userstore.UserStore, b listBinding, seenRemote remoteListPresence, result *ImportListResult) error {
 	states, err := s.repo.ListListItemStates(ctx, conn.ID, b.kind)
 	if err != nil {
 		return err
 	}
 	now := s.now()
 	for _, state := range states {
-		if !state.RemotePresent || state.ProviderItemKey == "" || seenRemoteKeys[state.ProviderItemKey] {
+		if !state.RemotePresent || state.ProviderItemKey == "" || seenRemote.listed(state.Kind, state.ProviderItemKey) {
 			continue
 		}
 		if b.removalsEnabled(conn) && state.LocalPresent {
