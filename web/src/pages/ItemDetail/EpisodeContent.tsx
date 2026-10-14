@@ -178,7 +178,6 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       setSubtitlePreference.mutate({
         prefId: item.series_id,
         selection,
-        showForcedSubtitles: item.effective_show_forced_subtitles,
       });
     }
   };
@@ -201,7 +200,6 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       setSubtitlePreference.mutate({
         prefId: item.series_id,
         selection: null,
-        showForcedSubtitles: item.effective_show_forced_subtitles,
       });
     }
   };

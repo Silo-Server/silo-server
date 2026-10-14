@@ -213,7 +213,6 @@ describe("useSetSubtitlePreference", () => {
         hearing_impaired: false,
         track_index: 0,
       },
-      showForcedSubtitles: true,
     });
 
     expect(v2Requests()).toEqual(["PUT /api/v2/subtitle-prefs/series-1"]);
@@ -229,7 +228,6 @@ describe("useSetSubtitlePreference", () => {
         forced: false,
         hearing_impaired: false,
       },
-      show_forced_subtitles: true,
     });
     expect(apiMock).not.toHaveBeenCalled();
   });
