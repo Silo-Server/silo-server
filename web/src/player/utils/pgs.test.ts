@@ -367,6 +367,29 @@ describe("PGSStreamParser", () => {
     expect(compositions.map((c) => c.start)).toEqual([1, 2, 3, 4]);
   });
 
+  it("drops an object sent in more fragments than any real object needs", () => {
+    const parser = new PGSStreamParser();
+    const length = RLE_4X2.length + 4;
+    const first = segment(0x15, 1, [...u16(0), 0, 0x80, 0, 0, length, ...u16(4), ...u16(2)]);
+    const empty = segment(0x15, 1, [...u16(0), 0, 0x00]);
+    const last = segment(0x15, 1, [...u16(0), 0, 0x40, ...RLE_4X2]);
+    const send = (emptyFragments: number) =>
+      parser.push(
+        new Uint8Array([
+          ...pcs(1, { objects: [{ id: 0, x: 0, y: 0 }] }),
+          ...pds(1, 0, [WHITE]),
+          ...first,
+          ...new Array<number[]>(emptyFragments).fill(empty).flat(),
+          ...last,
+          ...end(1),
+        ]),
+      );
+    // A few empty fragments are harmless and add nothing.
+    expect(Array.from(send(3)[0]!.objects[0]!.rle)).toEqual(RLE_4X2);
+    // Past the limit the object, and so its screen, is dropped.
+    expect(send(600)).toEqual([]);
+  });
+
   it("keeps an earlier screen's colors after a palette-only update", () => {
     const parser = new PGSStreamParser();
     const [first, second] = parser.push(
