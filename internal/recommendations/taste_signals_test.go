@@ -69,3 +69,28 @@ func TestBuildCanonicalImplicitSignalsWeightsPartialEbookLikeMovie(t *testing.T)
 		t.Fatalf("no row was completed, got completed set %v", completed)
 	}
 }
+
+// A cleared resume position (issue #2134) leaves position 0 with the duration
+// kept. That is not an abandoned watch, so it must not count against the title
+// the way a play stopped early does.
+func TestBuildCanonicalImplicitSignalsIgnoresClearedResumePosition(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	progress := []WatchProgressRow{
+		{MediaItemID: "movie-cleared", PositionSeconds: 0, DurationSeconds: 5700, UpdatedAt: now},
+		{MediaItemID: "movie-abandoned", PositionSeconds: 300, DurationSeconds: 5700, UpdatedAt: now},
+	}
+	refs := map[string]canonicalContentRef{
+		"movie-cleared":   {Kind: canonicalKindMovie, CanonicalID: "movie-cleared"},
+		"movie-abandoned": {Kind: canonicalKindMovie, CanonicalID: "movie-abandoned"},
+	}
+
+	signals, _ := buildCanonicalImplicitSignals(progress, nil, refs, now, 90)
+
+	if got, ok := signals["movie-cleared"]; ok {
+		t.Fatalf("cleared resume position weight = %v, want no signal", got)
+	}
+	if got := signals["movie-abandoned"]; math.Abs(got-WeightWatchLow) > 1e-9 {
+		t.Fatalf("abandoned movie weight = %v, want WeightWatchLow (%v)", got, WeightWatchLow)
+	}
+}

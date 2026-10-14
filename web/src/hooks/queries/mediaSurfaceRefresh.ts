@@ -95,6 +95,16 @@ export function cancelItemDetailQueries(queryClient: QueryClient, itemId: string
   });
 }
 
+// The player starts from a cached watch detail's resume position while it
+// refetches, so a detail whose position changed elsewhere is dropped. An open
+// player's query is active and keeps its data.
+export function removeInactiveWatchDetail(queryClient: QueryClient, itemId: string) {
+  queryClient.removeQueries({
+    queryKey: [...itemKeys.all, "watchDetail", itemId],
+    type: "inactive",
+  });
+}
+
 export function removeItemFromHomeSectionCaches(
   queryClient: QueryClient,
   itemId: string,

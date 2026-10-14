@@ -369,6 +369,38 @@ func ClearProgress(db *sql.DB, profileID, mediaItemID string) error {
 	return nil
 }
 
+// ClearResumePosition sets a visible resume position to 0 and reports whether
+// there was one, in one conditional UPDATE. updated_at is raised to at least
+// event_at because the stamp trigger copies updated_at into an unchanged
+// event_at.
+func ClearResumePosition(db *sql.DB, profileID, mediaItemID string, at time.Time) (bool, error) {
+	atText := at.UTC().Format(time.RFC3339)
+	result, err := db.Exec(`
+		UPDATE watch_progress
+		SET position_seconds = 0,
+			updated_at = MAX(?, updated_at, COALESCE(event_at, updated_at)),
+			event_at = MAX(?, COALESCE(event_at, updated_at))
+		WHERE profile_id = ? AND media_item_id = ?
+		  AND position_seconds > 0
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM hidden_history_items hhi
+			WHERE hhi.profile_id = watch_progress.profile_id
+			  AND hhi.media_item_id = watch_progress.media_item_id
+			  AND watch_progress.updated_at <= hhi.hidden_before
+		  )`,
+		atText, atText, profileID, mediaItemID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("clearing resume position: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("clearing resume position: %w", err)
+	}
+	return affected > 0, nil
+}
+
 // MarkProgressBatch marks every (profile, media_item_id) pair as completed in a
 // single SQLite statement.
 func MarkProgressBatch(db *sql.DB, profileID string, mediaItemIDs []string, updatedAt time.Time) error {

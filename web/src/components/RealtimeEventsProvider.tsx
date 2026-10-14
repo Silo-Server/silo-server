@@ -64,6 +64,7 @@ import {
   sectionKeys,
 } from "@/hooks/queries/keys";
 import {
+  removeInactiveWatchDetail,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
@@ -400,6 +401,12 @@ function handleUserStateEvent(
         user_state: { played, is_favorite: isFavorite, in_watchlist: inWatchlist },
       };
     });
+  }
+
+  // Progress or watched state changed elsewhere, so a cached watch detail
+  // would start the next play at a resume point that no longer exists.
+  if (payload.content_id && (payload.change === "progress" || payload.change === "watched")) {
+    removeInactiveWatchDetail(queryClient, payload.content_id);
   }
 
   // The patch above only carries played/favourite/watchlist, which is the whole

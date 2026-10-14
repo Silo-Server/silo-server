@@ -90,6 +90,10 @@ func (s *SQLiteUserStore) ClearProgress(_ context.Context, profileID, mediaItemI
 	return ClearProgress(s.db, profileID, mediaItemID)
 }
 
+func (s *SQLiteUserStore) ClearResumePosition(_ context.Context, profileID, mediaItemID string, at time.Time) (bool, error) {
+	return ClearResumePosition(s.db, profileID, mediaItemID, at)
+}
+
 // MarkWatchedBatch is one of the few paths here that forwards ctx: the write
 // is transactional precisely so a canceled request marks nothing.
 func (s *SQLiteUserStore) MarkWatchedBatch(ctx context.Context, profileID string, targets []userstore.MarkWatchedTarget, entries []userstore.WatchHistoryEntry) ([]userstore.WatchHistoryEntry, error) {

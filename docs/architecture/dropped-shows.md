@@ -10,7 +10,8 @@ support them: Trakt, Simkl, and watch-sync plugins that advertise `sync_dropped`
 dropped. A drop is **active** while no episode of the series has watch progress, or a
 history-hide stamp (mark unwatched, remove from history), newer than `dropped_at`. So
 watching any episode again undrops the series, whichever path recorded the watch, and no
-writer needs to know about drops. Imported history keeps its original watch time, so
+writer needs to know about drops. Clearing an episode's resume position is a progress write
+too, so like mark unwatched it ends the drop. Imported history keeps its original watch time, so
 re-importing old plays never undrops a series. An inactive row means the same as no row;
 watch sync removes it.
 

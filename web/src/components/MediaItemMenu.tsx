@@ -23,6 +23,7 @@ import {
   MoreVertical,
   Plus,
   RotateCcw,
+  TimerReset,
   X,
 } from "lucide-react";
 import { useLocation } from "react-router";
@@ -36,6 +37,7 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { useClearResumePosition } from "@/hooks/queries/progress";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
@@ -112,6 +114,7 @@ type MediaItemMenuEntry =
       key:
         | "playFromBeginning"
         | "toggleWatched"
+        | "resetProgress"
         | "toggleFavorite"
         | "toggleWatchlist"
         | "dismissFromHome"
@@ -187,6 +190,11 @@ export function buildMediaItemMenuModel({
       key: "toggleWatched",
       label: getWatchedActionLabel({ type: mediaType, user_data: { played: userState.played } }),
     });
+  }
+
+  // Clears the resume point without passing through watched (issue #2134).
+  if ((mediaType === "movie" || mediaType === "episode") && hasPartialProgress) {
+    entries.push({ kind: "action", key: "resetProgress", label: "Reset Progress" });
   }
 
   if (userState) {
@@ -285,6 +293,8 @@ function MediaItemMenuActionIcon({
       ) : (
         <EyeOff aria-hidden="true" className="size-4" />
       );
+    case "resetProgress":
+      return <TimerReset aria-hidden="true" className="size-4" />;
     case "toggleFavorite":
       return (
         <Heart
@@ -946,6 +956,7 @@ function MediaItemMenuEngine({
   const watchlistMutation = useToggleWatchlist(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
+  const clearResumePositionMutation = useClearResumePosition();
   const currentHref = `${location.pathname}${location.search}`;
 
   const isPending =
@@ -953,7 +964,8 @@ function MediaItemMenuEngine({
     favoriteMutation.isPending ||
     watchlistMutation.isPending ||
     refreshMetadataMutation.isPending ||
-    dismissHomeItemMutation.isPending;
+    dismissHomeItemMutation.isPending ||
+    clearResumePositionMutation.isPending;
   const watchedPending = watchedMutation.isPending;
   const favoritePending = favoriteMutation.isPending;
   const refreshPending = refreshMetadataMutation.isPending;
@@ -1023,6 +1035,10 @@ function MediaItemMenuEngine({
       }
       case "toggleWatched": {
         await handleWatchedToggle();
+        return;
+      }
+      case "resetProgress": {
+        clearResumePositionMutation.mutate({ contentId });
         return;
       }
       case "toggleFavorite": {

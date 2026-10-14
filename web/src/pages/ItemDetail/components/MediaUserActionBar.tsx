@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { ItemDetail } from "@/api/types";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useWatchedStateMutation } from "@/hooks/queries/items";
+import { useResetProgressAction } from "@/hooks/queries/progress";
 import { useDeleteRating, useSetRating } from "@/hooks/queries/ratings";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { itemTitleLinks } from "@/lib/titleLinks";
@@ -13,6 +14,7 @@ type UserActionProps =
   | "watchedLabel"
   | "onToggleWatched"
   | "isUpdatingWatched"
+  | "onResetProgress"
   | "onToggleFavorite"
   | "isFavorite"
   | "onToggleWatchlist"
@@ -38,6 +40,7 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
   const { mutate: toggleWatchlist } = useToggleWatchlist(item.content_id);
   const { mutate: setRating } = useSetRating(item.content_id);
   const { mutate: deleteRating } = useDeleteRating(item.content_id);
+  const resetProgress = useResetProgressAction(item);
 
   const handleToggleWatched = useCallback(
     () => toggleWatched(!(item.user_data?.played ?? false)),
@@ -71,6 +74,7 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
       isWatched={item.user_data?.played ?? false}
       onToggleWatched={handleToggleWatched}
       isUpdatingWatched={isUpdatingWatched}
+      onResetProgress={resetProgress}
       onToggleFavorite={handleToggleFavorite}
       isFavorite={isFavorite}
       onToggleWatchlist={handleToggleWatchlist}

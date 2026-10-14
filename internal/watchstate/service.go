@@ -92,6 +92,19 @@ func (s *Service) RecordManualMarkUnwatchedWithResult(ctx context.Context, userI
 	return s.recordMarkUnwatched(ctx, userID, profileID, targetIDs)
 }
 
+// ClearResumePosition sets the profile's visible resume position on a leaf
+// item to zero and reports whether there was one. Unlike mark unwatched it
+// keeps watch history, the watched latch and the known duration, and it sends
+// nothing to watch providers. The write is stamped now, so delta sync carries
+// it to other devices and an older provider resume point cannot restore it.
+func (s *Service) ClearResumePosition(ctx context.Context, userID int, profileID, mediaItemID string) (bool, error) {
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return store.ClearResumePosition(ctx, profileID, mediaItemID, time.Now().UTC())
+}
+
 func (s *Service) RecordPlaybackStop(
 	ctx context.Context,
 	userID int,
