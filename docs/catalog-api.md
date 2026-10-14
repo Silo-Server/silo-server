@@ -1132,3 +1132,14 @@ ordinary localized fields; these members describe it:
   their own `pending_translation_language`, so a client that lists episodes
   inline (a single-season series) can translate that season. Children whose
   source text is already in the target language are skipped.
+- Home and library section cards carry the profile's localized title and
+  overview (an episode card its episode's), with the same
+  `pending_translation_language` and `machine_translated_fields` members as
+  the detail document. A library's rows resolve the language as a detail
+  page opened in that library does, so a profile without a metadata language
+  sees the library's. Cards keep the source poster, backdrop, and logo, and an
+  episode card's `series_title` stays the source title. Shuffle and Watch
+  Together picker cards come from the item detail and carry them too. Other
+  card lists, such as recommendations and Watch Tonight, are not localized
+  and never carry these members. The web Featured hero uses them to translate the
+  slide on screen; other cards only display them.

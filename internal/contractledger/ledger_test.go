@@ -1127,6 +1127,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"translateLibraryMetadata":                 "V2-only library prewarm of AI metadata translation (v1 is frozen). It coalesces on the library's active prewarm for the language; a replay after it finished starts another prewarm that finds only what is still missing, so nothing is translated twice.",
+	"cancelLibraryMetadataTranslation":         "V2-only cancellation of a library prewarm (v1 is frozen). Canceling a terminal job is a no-op, so a replay converges on the same state.",
 	"drainAdminNode":                           "V2-only transcode node drain (v1 is frozen): it sets the node's drain request, so a replay converges on the same request and placement state.",
 	"resumeAdminNode":                          "V2-only lift of a transcode node drain request (v1 is frozen): it clears the request, so a replay converges on the same state.",
 	"startAdminChatGPTLogin":                   "V2-only administrator ChatGPT sign-in: each request supersedes the pending attempt and creates fresh PKCE, state and nonce values, so an uncertain result must not be replayed automatically.",

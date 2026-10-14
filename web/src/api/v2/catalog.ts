@@ -97,6 +97,8 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
       : undefined,
     manga_chapter_count: item.manga_chapter_count,
     manga_volume_count: item.manga_volume_count,
+    pending_translation_language: item.pending_translation_language,
+    machine_translated_fields: item.machine_translated_fields,
   };
 }
 

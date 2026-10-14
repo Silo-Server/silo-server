@@ -26,14 +26,14 @@ func TestKeyframeSkipFollowsProbedCodec(t *testing.T) {
 
 	req := sheetsRequest(secondsFrom(5, 10, 4), 2, 2)
 	req.skipFrame, req.lowDelay = exactSkipFrame, true
-	list, _, err := buildSheetsArgs(req, Attempt{}, hardwareDecode{}, 0, "GRAPH", "", sampledSheetsList)
+	list, _, err := buildSheetsArgs(req, Attempt{}, hardwareDecode{}, sampleEntries(req.Samples.Seconds, 0), "GRAPH", "", sampledSheetsList)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(strings.Join(list, " "), "-skip_frame:v noref -flags:v +low_delay -protocol_whitelist") {
 		t.Fatalf("list args %q: want noref and low delay before the input", list)
 	}
-	exact, _, err := buildSheetsArgs(req, Attempt{}, hardwareDecode{}, 0, "GRAPH", "", sheetsList{span: 0.5, skip: exactSkipFrame})
+	exact, _, err := buildSheetsArgs(req, Attempt{}, hardwareDecode{}, sampleEntries(req.Samples.Seconds, 0), "GRAPH", "", sheetsList{span: 0.5, skip: exactSkipFrame})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestKeyframeSkipFollowsProbedCodec(t *testing.T) {
 	window := req
 	window.Samples = nil
 	window.Window = &Window{StartSeconds: 0, DurationSeconds: 40}
-	windowArgs, _, err := buildSheetsArgs(window, Attempt{}, hardwareDecode{}, 0, "GRAPH", "packets.framecrc", sampledSheetsList)
+	windowArgs, _, err := buildSheetsArgs(window, Attempt{}, hardwareDecode{}, nil, "GRAPH", "packets.framecrc", sampledSheetsList)
 	if err != nil {
 		t.Fatal(err)
 	}

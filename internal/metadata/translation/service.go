@@ -205,6 +205,17 @@ func (s *Service) AutoEnqueue(ctx context.Context, itemContentID, language strin
 	}
 }
 
+// EnqueueLibrary queues the prewarm of every item in a library that still
+// misses a localization for language. An identical active prewarm is reused.
+func (s *Service) EnqueueLibrary(ctx context.Context, libraryID int, language string, requestedBy *int) (*Job, error) {
+	return s.Enqueue(ctx, JobRequest{
+		TargetKind:     TargetLibrary,
+		ContentID:      LibraryContentID(libraryID),
+		TargetLanguage: language,
+		RequestedBy:    requestedBy,
+	})
+}
+
 // OnViewMode exposes the viewer-triggered translation mode for status probes.
 func (s *Service) OnViewMode(ctx context.Context) string {
 	cfg, _ := s.translationConfig(ctx)
@@ -220,6 +231,13 @@ func (s *Service) coveringJob(ctx context.Context, req JobRequest, model string)
 	}
 	switch req.TargetKind {
 	case TargetItem, TargetSeason, TargetEpisode:
+	case TargetLibrary:
+		if _, ok := ParseLibraryContentID(req.ContentID); !ok {
+			return req, nil, fmt.Errorf("%w: invalid library target %q", ErrInvalidRequest, req.ContentID)
+		}
+		// A prewarm only fills gaps; replacing existing text is an item action.
+		req.Force = false
+		req.IncludeChildren = true
 	default:
 		return req, nil, fmt.Errorf("%w: unsupported target kind %q", ErrInvalidRequest, req.TargetKind)
 	}
@@ -407,6 +425,11 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		}
 	}()
 
+	if job.TargetKind == TargetLibrary {
+		s.runLibrary(ctx, job)
+		return
+	}
+
 	if err := s.repo.UpdateProgress(ctx, job.ID, jobrunner.StatusRunning, 0, "Loading content", 0, 0); err != nil {
 		s.logger.WarnContext(ctx, "failed to mark metadata translation job running", "job", job.ID, "error", err)
 	}
@@ -427,9 +450,27 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	if err := s.repo.UpdateProgress(ctx, job.ID, jobrunner.StatusRunning, 0.05, "Translating", 0, total); err != nil {
 		s.logger.WarnContext(ctx, "failed to update metadata translation job", "job", job.ID, "error", err)
 	}
+	done, err := s.translateFields(ctx, job, fields, meta, func(done, batchDone, batchTotal int) {
+		progress := 0.05 + 0.9*float64(batchDone)/float64(batchTotal)
+		_ = s.repo.UpdateProgress(context.WithoutCancel(ctx), job.ID, jobrunner.StatusRunning, progress, "Translating", done, total)
+	})
+	if err != nil {
+		s.finishWithError(ctx, job, err)
+		return
+	}
 
-	segments := make([]aitranslate.Segment, total)
-	byID := make(map[string]field, total)
+	if err := s.repo.CompleteJob(context.WithoutCancel(ctx), job.ID, "", done, total); err != nil {
+		s.logger.WarnContext(ctx, "failed to complete metadata translation job", "job", job.ID, "error", err)
+	}
+}
+
+// translateFields translates fields in batches and persists each batch as it
+// lands, so a cancellation keeps completed fields. onBatch reports the fields
+// persisted so far and the batch position. It returns the persisted count and
+// the first persist or model error.
+func (s *Service) translateFields(ctx context.Context, job *Job, fields []field, meta jobMeta, onBatch func(done, batchDone, batchTotal int)) (int, error) {
+	segments := make([]aitranslate.Segment, len(fields))
+	byID := make(map[string]field, len(fields))
 	for i, f := range fields {
 		segments[i] = aitranslate.Segment{ID: f.segmentID(), Text: f.text}
 		byID[f.segmentID()] = f
@@ -438,9 +479,8 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	srcName := aitranslate.LanguageDisplayName(meta.srcLanguage)
 	tgtName := aitranslate.LanguageDisplayName(job.TargetLanguage)
 
-	// Persist per batch so a cancellation keeps completed fields. A persist
-	// failure cancels the remaining batches via persistCtx instead of burning
-	// model calls whose output cannot be stored.
+	// A persist failure cancels the remaining batches via persistCtx instead
+	// of burning model calls whose output cannot be stored.
 	persistCtx, cancelPersist := context.WithCancel(ctx)
 	defer cancelPersist()
 	var persistMu sync.Mutex
@@ -473,22 +513,120 @@ func (s *Service) run(ctx context.Context, job *Job) {
 			}
 			done++
 		}
-		progress := 0.05 + 0.9*float64(batchDone)/float64(batchTotal)
-		_ = s.repo.UpdateProgress(storeCtx, job.ID, jobrunner.StatusRunning, progress, "Translating", done, total)
+		if onBatch != nil {
+			onBatch(done, batchDone, batchTotal)
+		}
 	})
 
 	persistMu.Lock()
 	failure := persistErr
 	persistMu.Unlock()
-	if failure == nil && translateErr != nil {
+	if failure == nil {
 		failure = translateErr
 	}
-	if failure != nil {
-		s.finishWithError(ctx, job, failure)
+	return done, failure
+}
+
+// libraryMaxFailuresInRow is how many items in a row may fail before a
+// library prewarm gives up on the provider.
+const libraryMaxFailuresInRow = 3
+
+// runLibrary prewarms a library: it walks the library's items that still
+// miss a localization for the language and translates each one with its
+// seasons and episodes, one item at a time. It gives its AI slot back between
+// items so queued on-view and subtitle jobs are not held up for the whole
+// walk. Progress counts items. It never forces, so provider, manual and
+// earlier AI values stay. An item that fails is skipped; several failures in a
+// row stop the job, since then the provider itself is failing. Re-running
+// after a failure or restart resumes with the items that are still missing.
+func (s *Service) runLibrary(ctx context.Context, job *Job) {
+	libraryID, ok := ParseLibraryContentID(job.ContentID)
+	if !ok {
+		s.finishWithError(ctx, job, fmt.Errorf("%w: invalid library target %q", ErrInvalidRequest, job.ContentID))
+		return
+	}
+	if err := s.repo.UpdateProgress(ctx, job.ID, jobrunner.StatusRunning, 0, "Finding items to translate", 0, 0); err != nil {
+		s.logger.WarnContext(ctx, "failed to mark metadata translation job running", "job", job.ID, "error", err)
+	}
+	itemIDs, err := s.content.LibraryItemsMissing(ctx, libraryID, job.TargetLanguage)
+	if err != nil {
+		s.finishWithError(ctx, job, fmt.Errorf("list library items: %w", err))
+		return
+	}
+	total := len(itemIDs)
+	if total == 0 {
+		if err := s.repo.CompleteJob(context.WithoutCancel(ctx), job.ID, "Nothing to translate", 0, 0); err != nil {
+			s.logger.WarnContext(ctx, "failed to complete metadata translation job", "job", job.ID, "error", err)
+		}
 		return
 	}
 
-	if err := s.repo.CompleteJob(context.WithoutCancel(ctx), job.ID, "", done, total); err != nil {
+	fieldsDone, failed, failedInRow := 0, 0, 0
+	for i, itemID := range itemIDs {
+		if err := ctx.Err(); err != nil {
+			s.finishWithError(ctx, job, err)
+			return
+		}
+		// A cancel sent to another node only marks the row; stop here rather
+		// than wait for the next heartbeat to notice.
+		if current, err := s.repo.GetJob(ctx, job.ID); err == nil && current != nil && current.Status.Terminal() {
+			s.logger.InfoContext(ctx, "metadata translation library job stopped", "job", job.ID, "status", current.Status)
+			return
+		}
+		if i > 0 {
+			if err := jobrunner.Yield(ctx); err != nil {
+				s.finishWithError(ctx, job, err)
+				return
+			}
+		}
+		message := fmt.Sprintf("Translating item %d of %d", i+1, total)
+		_ = s.repo.UpdateProgress(context.WithoutCancel(ctx), job.ID, jobrunner.StatusRunning, float64(i)/float64(total), message, i, total)
+
+		item := Job{
+			TargetKind:      TargetItem,
+			ContentID:       itemID,
+			IncludeChildren: true,
+			TargetLanguage:  job.TargetLanguage,
+		}
+		fields, meta, err := s.collectFields(ctx, &item)
+		if errors.Is(err, ErrInvalidRequest) {
+			continue // removed since the walk started
+		}
+		if err != nil {
+			s.finishWithError(ctx, job, err)
+			return
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		done, err := s.translateFields(ctx, &item, fields, meta, nil)
+		fieldsDone += done
+		if err != nil {
+			if ctx.Err() != nil {
+				s.finishWithError(ctx, job, err)
+				return
+			}
+			// One item's text can fail on its own (an unusable model answer,
+			// or the item removed mid-run); skip it so it cannot block every
+			// later re-run. Failures in a row mean the provider is down; stop
+			// rather than spend the remaining budget on errors.
+			failed++
+			failedInRow++
+			if failedInRow >= libraryMaxFailuresInRow {
+				s.finishWithError(ctx, job, fmt.Errorf("item %s: %w", itemID, err))
+				return
+			}
+			s.logger.WarnContext(ctx, "metadata translation library item failed", "job", job.ID, "content_id", itemID, "error", err)
+			continue
+		}
+		failedInRow = 0
+	}
+
+	message := fmt.Sprintf("Translated %d descriptions across %d items", fieldsDone, total)
+	if failed > 0 {
+		message += fmt.Sprintf("; %d of them failed and can be retried", failed)
+	}
+	if err := s.repo.CompleteJob(context.WithoutCancel(ctx), job.ID, message, total, total); err != nil {
 		s.logger.WarnContext(ctx, "failed to complete metadata translation job", "job", job.ID, "error", err)
 	}
 }
@@ -639,6 +777,10 @@ func translatableField(baseText, locValue, locSource string, force bool) bool {
 }
 
 func (s *Service) itemFields(ctx context.Context, job *Job, item *ItemText) ([]field, error) {
+	// Text already in the target language needs no translation.
+	if sameLanguage(item.DefaultLanguage, job.TargetLanguage) {
+		return nil, nil
+	}
 	loc, err := s.locs.ItemLocalization(ctx, item.ContentID, job.TargetLanguage)
 	if err != nil {
 		return nil, fmt.Errorf("load item localization: %w", err)

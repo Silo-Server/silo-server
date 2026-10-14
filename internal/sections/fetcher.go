@@ -3156,6 +3156,8 @@ func itemColumnsList(alias string) []string {
 	cols := []string{
 		"content_id", "type", "title", "sort_title", "original_title", "year", "genres",
 		"content_rating", "runtime", "overview", "tagline",
+		// Localizing a card compares its target language with these.
+		"default_metadata_language", "original_language",
 		"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
 		"imdb_id", "tmdb_id", "tvdb_id",
 		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
@@ -3235,6 +3237,7 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 		err := rows.Scan(
 			&item.ContentID, &item.Type, &item.Title, &item.SortTitle, &item.OriginalTitle,
 			&item.Year, &item.Genres, &item.ContentRating, &item.Runtime, &item.Overview, &item.Tagline,
+			&item.DefaultMetadataLanguage, &item.OriginalLanguage,
 			&item.RatingIMDB, &item.RatingTMDB, &item.RatingRTCritic, &item.RatingRTAudience,
 			&item.ImdbID, &item.TmdbID, &item.TvdbID,
 			&item.PosterPath, &item.PosterThumbhash, &item.BackdropPath, &item.BackdropThumbhash, &item.LogoPath,

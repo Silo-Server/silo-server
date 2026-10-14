@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/workerinput"
@@ -120,8 +121,9 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	}
 	failure := &Error{}
 	toneMap := &toneMapResolver{}
+	keyframes := sheetKeyframes(ctx, req)
 	for _, attempt := range req.attempts() {
-		result, attemptErr := r.runAttempt(ctx, req, attempt, toneMap)
+		result, attemptErr := r.runAttempt(ctx, req, attempt, toneMap, keyframes)
 		if attemptErr == nil {
 			// Repairs may keep the initial frames after a decode failure, but
 			// they must not publish those frames after source authority is lost.
@@ -139,7 +141,7 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	return Result{}, failure
 }
 
-func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, toneMap *toneMapResolver) (Result, *AttemptError) {
+func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, toneMap *toneMapResolver, keyframes []float64) (Result, *AttemptError) {
 	decoder := softwareDecoder
 	if attempt.Hardware {
 		decoder = "hardware:" + r.HWAccel
@@ -177,7 +179,7 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 		attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(attempt.TimeoutSeconds*float64(time.Second)))
 		defer cancel()
 	}
-	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph, toneMap: toneMap}
+	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph, toneMap: toneMap, keyframes: keyframes}
 	switch {
 	case req.At != nil:
 		return run.image(req, imageArgs)
@@ -229,6 +231,9 @@ type attemptRun struct {
 	// sheetsGraph is the video chain of a Sheets request.
 	sheetsGraph string
 	toneMap     *toneMapResolver
+	// keyframes are the input's video keyframe times a Sheets list starts
+	// its entries at (see keyframes.go), nil for sample-time entries.
+	keyframes []float64
 }
 
 // samples runs a Samples request. Unless it reads through, it probes the
@@ -427,8 +432,64 @@ func watchDuplicatePOC(seen *bool) func(string) {
 // sheets runs a Sheets request for the sample times, reading req's list
 // (with inpoints offset by inputStart) or window, repairs a list's weak cells
 // (see sheet_repair.go), and tiles the frames. logHandlers also read
-// ffmpeg's log.
+// ffmpeg's log, except what an abandoned keyframe list logs from the line
+// that abandons it on (see keyframeSheets).
 func (a attemptRun) sheets(req Request, times []float64, inputStart float64, logHandlers ...func(string)) (Result, *AttemptError) {
+	if req.Samples == nil {
+		return a.readSheets(req, times, listPlan{}, nil, logHandlers...)
+	}
+	if len(a.keyframes) > 0 {
+		if result, failure, ok := a.keyframeSheets(req, times, inputStart, logHandlers); ok {
+			return result, failure
+		}
+	}
+	return a.readSheets(req, times, samplePlan(times, inputStart), nil, logHandlers...)
+}
+
+// keyframeSheets reads req's list with entries starting at keyframes (see
+// keyframes.go). It stops ffmpeg and reports false, for the caller to read
+// the samples from their own times, as soon as the decoder passes on a frame
+// from an earlier entry than the frame before it or drops a keyframe (see
+// droppedKeyframe); logHandlers see none of the log from then on. An
+// abandoned read never counts: when the attempt has ended by then, it fails
+// as timed out or canceled.
+func (a attemptRun) keyframeSheets(req Request, times []float64, inputStart float64, logHandlers []func(string)) (Result, *AttemptError, bool) {
+	ctx, cancel := context.WithCancel(a.attemptCtx)
+	defer cancel()
+	var abandoned atomic.Bool
+	abandon := func() {
+		abandoned.Store(true)
+		cancel()
+	}
+	run := a
+	run.attemptCtx = ctx
+	result, failure := run.readSheets(req, times, keyframePlan(times, inputStart, a.keyframes), abandon, func(line string) {
+		if droppedKeyframe(line) {
+			abandon()
+		}
+		if abandoned.Load() {
+			return
+		}
+		for _, handler := range logHandlers {
+			handler(line)
+		}
+	})
+	if !abandoned.Load() {
+		return result, failure, true
+	}
+	switch {
+	case a.ctx.Err() != nil:
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonCanceled, Err: a.ctx.Err()}, true
+	case a.attemptCtx.Err() != nil:
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonTimeout, Err: a.attemptCtx.Err()}, true
+	}
+	return Result{}, nil, false
+}
+
+// readSheets runs one Sheets read: plan's list, or req's window when it has
+// no Samples. onDisorder, when set, is called once a list frame comes from an
+// earlier entry than the frame before it. logHandlers also read ffmpeg's log.
+func (a attemptRun) readSheets(req Request, times []float64, plan listPlan, onDisorder func(), logHandlers ...func(string)) (Result, *AttemptError) {
 	var packetTimingPath string
 	if req.Window != nil {
 		dir, err := os.MkdirTemp("", "silo-sheets-*")
@@ -438,7 +499,7 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 		defer func() { _ = os.RemoveAll(dir) }()
 		packetTimingPath = filepath.Join(dir, "packets.framecrc")
 	}
-	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, inputStart, a.sheetsGraph, packetTimingPath, sampledSheetsList)
+	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, plan.entries, a.sheetsGraph, packetTimingPath, sampledSheetsList)
 	if err != nil {
 		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
 	}
@@ -447,7 +508,10 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 		offset = req.Window.StartSeconds
 	}
 	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset, sampledSheetsList.span)
-	assembler.inputStart = inputStart
+	if req.Samples != nil {
+		assembler.plan = plan
+		assembler.onDisorder = onDisorder
+	}
 	assembler.dtsTiming = req.lowDelay
 	if failure := a.exec(req, args, stdinBytes, assembler, append(logHandlers, assembler.line)...); failure != nil {
 		return Result{}, failure
@@ -462,7 +526,8 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, log
 		return Result{}, failure
 	}
 	if req.Samples != nil {
-		a.repairSheets(req, assembler, inputStart)
+		assembler.shareFrames()
+		a.repairSheets(req, assembler, plan.inputStart)
 		if err := a.ctx.Err(); err != nil {
 			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonCanceled, Err: err}
 		}

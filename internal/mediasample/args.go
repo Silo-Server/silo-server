@@ -159,13 +159,13 @@ func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []st
 }
 
 // buildSheetsArgs builds the arguments of a Sheets request whose video chain
-// is graph (see buildSheetsGraph). A Samples request reads its list as
-// buildSamplesArgs does, its entries lasting and its decoder skipping frames
-// as list says, and returns the list for stdin; a Window request, which a
+// is graph (see buildSheetsGraph). A Samples request reads a list of entries
+// as buildSamplesArgs does, each lasting and its decoder skipping frames as
+// list says, and returns the list for stdin; a Window request, which a
 // Samples request becomes for inputs the list cannot seek in, decodes the
 // window's keyframes. Either way the frames go to stdout raw, and hardware
 // attempts leave VideoToolbox frames in system memory, as images do.
-func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64, graph, packetTimingPath string, list sheetsList) ([]string, []byte, error) {
+func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []listEntry, graph, packetTimingPath string, list sheetsList) ([]string, []byte, error) {
 	if (req.Window == nil) == (req.Samples == nil) || req.Sheets == nil {
 		return nil, nil, errors.New("sheets need exactly one sampling mode")
 	}
@@ -182,7 +182,7 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart
 		args = append(args, "-threads", threads, "-filter_threads", threads)
 	}
 	if req.Samples != nil {
-		concat, err := buildConcatListSpan(req.Input, req.Samples.Seconds, inputStart, list.span)
+		concat, err := buildConcatListSpan(req.Input, entries, list.span)
 		if err != nil {
 			return nil, nil, err
 		}

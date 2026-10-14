@@ -97,7 +97,8 @@ statistics. Rules:
   one keyframe interval earlier. Frame timestamps follow the list, not the
   input, so a frame without the tag is dropped. A keyframe that serves
   several sample times is decoded once for each; when one sample decodes a
-  second keyframe, the first is kept.
+  second keyframe, the first is kept. Sheets lists over Matroska start their
+  entries at keyframes instead (see [Keyframe entries](#keyframe-entries)).
 - Sample times are finite, non-negative, strictly increasing, and at most
   10,000 per request. `Samples` takes no audio output.
 - `Samples.ReadThrough` reads the sampled span as the one keyframes-only
@@ -453,14 +454,84 @@ must use the returned height and reject chunks whose geometry differs.
   in order and `Result.SheetFrames` counts the decoded, filled, and
   repaired (`Refined`) cells.
 
+### Keyframe entries
+
+A sample-time entry makes the concat demuxer seek to the keyframe before the
+sample and read every packet of every stream, video and all audio tracks,
+from there up to the sample; the decoder skips them. With keyframes several
+seconds apart that is most of the file: 32 GB of a 43 GB 4K HEVC remux for
+645 cells. A Sheets list over a Matroska input therefore starts each entry
+at the sample's keyframe and reads only it and the entry's span
+(`keyframes.go`):
+
+- `Runner.Run` reads the keyframes once, before any attempt and its timeout,
+  from the file's Cues with `keyframes.ReadMatroska`: the index the
+  demuxer's seek uses, plus its spot check of a few clusters' block headers,
+  in-process and without decoding. The read runs in a goroutine, and the run
+  stops waiting after 10 seconds or when its context ends, which also stops
+  the read at its next call; a read blocked on stalled storage is left
+  behind. At most 4 reads are in flight in a process, blocked ones
+  included, which also bounds the memory parsing Cues takes (a few times
+  their size), and a run that finds none free skips the read. A file that is not
+  Matroska, has no Cues, whose Cues leave out keyframes, or whose read is
+  skipped or stopped gets sample-time entries.
+- An entry starts at the last keyframe at or before the sample's inpoint
+  (sample time plus container start, in the microseconds the list is
+  written in), rounded up to the microsecond so the seek never lands on the
+  keyframe before it. On ffmpeg-muxed files with B-frames and with container
+  starts of 3.21 and 11.4 s, this matched where ffprobe's
+  `-read_intervals` seek, which makes the same seek call, landed for every
+  sample. Samples before the first keyframe keep sample-time entries.
+- A sample whose keyframe is the previous sample's gets no entry: it would
+  only decode the frame the previous cell shows, and the HEVC decoder drops
+  a keyframe sent twice in a row as a duplicate picture order count. Once
+  the list is read, such a sample shows the previous cell's frame and its
+  source time, so the repair below finds it repeating that cell and decodes
+  its own moment. A distinct keyframe keeps its entry even when it lies
+  inside the previous entry's span.
+- Every frame of a keyframe entry lies at or after its inpoint, so its time
+  places it back in the input exactly. A sample-time entry decodes the
+  keyframe from before its inpoint, where ffmpeg rewrites the time to keep
+  the list's timestamps monotonic; with samples sharing a 40-second GOP,
+  that hid a repeat from the repair and left a cell showing the scene before.
+- An open-GOP keyframe after a jump takes a picture order count derived
+  from the last picture whose header the decoder parsed, skipped pictures
+  included. Keyframe entries leave longer gaps between parsed pictures, and
+  across a gap of more than half the count's cycle (128 frames with x265's
+  default 8-bit count) the derived counts run backwards: the decoder passes
+  on keyframes out of list order with rewritten times, or drops them as
+  duplicates. As soon as a frame comes from an earlier entry than the frame
+  before it, or the decoder logs a dropped keyframe ("Duplicate POC in a
+  sequence", or H.264's "illegal short term buffer state"), the attempt
+  stops ffmpeg and reads the samples from their own times, exactly as a
+  file without Cues. An abandoned read is never published: if the
+  attempt's time ran out meanwhile, it fails as `timeout`. A drop in the
+  abandoned read does not count toward the window fallbacks above.
+  Closed-GOP keyframes start their counts afresh and keep their keyframe
+  entries.
+- MP4 and every other container keep sample-time entries: an MP4 entry that
+  starts exactly at its keyframe's time often seeks past it (45 of 80
+  samples of one H.264 episode decoded nothing). Stats lists and repairs
+  keep sample-time entries too.
+
+Over Matroska test encodes (x264 and x265 at default settings and with
+scene cuts off at 5, 10, 20, and 40-second GOPs, open- and closed-GOP HEVC,
+samples every 5 and 10 seconds) keyframe entries never placed more wrong
+cells than sample-time entries, and fewer where samples share long GOPs.
+Open-GOP HEVC with an 8-bit count falls back once its listed keyframes lie
+more than about 5 seconds apart, which covers x265's default 10-second GOP at
+either interval; it then reads what it did before, plus the few entries read
+before the fallback.
+
 ### Repairs
 
 A list gives each sample the keyframe at or before its time, placed back in
-the input from its frame time: `pts + start - k*span + sample` for list entry
-`k`, where `start` is the list input's start time from its header, by which
-ffmpeg shifted every frame. Two kinds of cell come out worse than the input
-allows, and the attempt reads their samples again in a second list, after
-the first run and before the sheets are encoded (`sheet_repair.go`):
+the input from its frame time: `pts + start - k*span + inpoint - container
+start` for list entry `k`, where `start` is the list input's start time from
+its header, by which ffmpeg shifted every frame, and `inpoint` is where the
+entry starts in the container. Two kinds of cell come out worse than the
+input allows, and the attempt reads their samples again in a second list,
+after the first run and before the sheets are encoded (`sheet_repair.go`):
 
 - Missing cells decoded no frame. The demuxer could not seek to a keyframe
   before the sample, as in a container that flags no keyframes (VC-1 in
@@ -472,8 +543,9 @@ the first run and before the sheets are encoded (`sheet_repair.go`):
   keyframe before the sample, or failing that the first one after it.
 - Repeated cells show the same moment as the cell before: their frames lie
   within a tenth of the time between the two samples, because no keyframe
-  lies between them (a GOP longer than the interval), or because an open-GOP
-  keyframe brought a leading picture just before it that one sample kept.
+  lies between them (a GOP longer than the interval, including every sample
+  a keyframe list left out), or because an open-GOP keyframe brought a
+  leading picture just before it that one sample kept.
   The repair lists them again with `-skip_frame:v noref`, decoding every
   reference frame from the keyframe on, and keeps the last frame at or before
   each sample's time.

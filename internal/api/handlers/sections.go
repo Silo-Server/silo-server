@@ -416,6 +416,10 @@ type sectionItemResponse struct {
 	ItemSource             string                 `json:"item_source,omitempty"`
 	UserState              *itemUserStateResponse `json:"user_state,omitempty"`
 	UpcomingEvent          *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	// PendingTranslationLanguage and MachineTranslatedFields reach the v2
+	// card only; v1 is frozen.
+	PendingTranslationLanguage string   `json:"-"`
+	MachineTranslatedFields    []string `json:"-"`
 }
 
 type resolvedSectionResponse struct {
@@ -1464,6 +1468,14 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	} else {
 		wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
 	}
+	// localizedItems lines up with allItems: a content ID can sit in several
+	// rows with different artwork, so each row keeps its own clone.
+	var localizedItems []*models.MediaItem
+	var pendingTranslations map[string]string
+	localizationAccess := sectionLocalizationAccess(viewerAccess, libraryID)
+	wg.Go(func() {
+		localizedItems, pendingTranslations = h.localizeSectionItems(ctx, allItems, localizationAccess)
+	})
 	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
 	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
@@ -1473,9 +1485,15 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	resp := homeSectionsResponse{
 		Sections: make([]resolvedSectionResponse, 0, len(withItems)),
 	}
+	position := 0
 	for _, s := range withItems {
 		items := make([]sectionItemResponse, 0, len(s.Items))
 		for _, item := range s.Items {
+			card := item
+			if position < len(localizedItems) && localizedItems[position] != nil {
+				card = localizedItems[position]
+			}
+			position++
 			var meta *sections.SectionItemMeta
 			if s.ItemMeta != nil {
 				if value, ok := s.ItemMeta[item.ContentID]; ok {
@@ -1499,7 +1517,9 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 				meta.SeriesTitle = value.SeriesTitle
 			}
 			imageKey := sectionItemImageKey{sectionID: s.ID, contentID: item.ContentID}
-			items = append(items, h.toSectionItemResponse(s.SectionType, item, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)]))
+			response := h.toSectionItemResponse(s.SectionType, card, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)])
+			response.PendingTranslationLanguage = pendingTranslations[item.ContentID]
+			items = append(items, response)
 		}
 		resp.Sections = append(resp.Sections, resolvedSectionResponse{
 			ID:          s.ID,
@@ -1740,6 +1760,8 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		BackdropIsEpisodeStill: item.BackdropIsEpisodeStill,
 		OverlaySummary:         overlaySummary,
 		UserState:              userState,
+
+		MachineTranslatedFields: item.MachineTranslatedFields,
 	}
 	if meta != nil {
 		if item.Type == "episode" && item.PosterIsEpisodeStill == nil && meta.EpisodeStillPath != nil {
@@ -1774,6 +1796,34 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 	resp.LogoURL = imageURLs.logoURL
 
 	return resp
+}
+
+// sectionLocalizationAccess scopes a library's rows to that library, so its
+// cards localize like a detail page opened there: a profile without a
+// metadata language falls back to the library's. Home rows stay unscoped.
+func sectionLocalizationAccess(viewerAccess catalog.AccessFilter, libraryID *int) catalog.AccessFilter {
+	if libraryID != nil && *libraryID > 0 {
+		id := *libraryID
+		viewerAccess.PresentationLibraryID = &id
+	}
+	return viewerAccess
+}
+
+// localizeSectionItems localizes the section cards for the viewer in one
+// batch and returns the clones in input order. Section items are shared across
+// profiles (the resolved-list cache is process-global), so localized clones
+// are kept per request and never written back. A failure keeps the base text:
+// localization must not fail Home.
+func (h *SectionHandler) localizeSectionItems(ctx context.Context, items []*models.MediaItem, viewerAccess catalog.AccessFilter) ([]*models.MediaItem, map[string]string) {
+	if h == nil || h.DetailSvc == nil || len(items) == 0 {
+		return nil, nil
+	}
+	localized, pending, err := h.DetailSvc.LocalizeSectionItems(ctx, items, withProfileMetadataLanguage(ctx, viewerAccess))
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "localizing section items", "component", "api", "error", err)
+		return nil, nil
+	}
+	return localized, pending
 }
 
 // sizedSectionBackdropPath applies the request's image size to a section

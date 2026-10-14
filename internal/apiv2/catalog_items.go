@@ -371,8 +371,6 @@ type CatalogItemDetail struct {
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
 	Tagline                         string                               `json:"tagline,omitempty"`
-	PendingTranslationLanguage      string                               `json:"pending_translation_language,omitempty" doc:"This profile's metadata language when the page's descriptions are not available in it yet: the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription."`
-	MachineTranslatedFields         []string                             `json:"machine_translated_fields,omitempty" enum:"overview,tagline" doc:"Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were"`
 	ImdbID                          string                               `json:"imdb_id,omitempty"`
 	TmdbID                          string                               `json:"tmdb_id,omitempty"`
 	TvdbID                          string                               `json:"tvdb_id,omitempty"`
@@ -547,7 +545,7 @@ type Episode struct {
 	Files                      []EpisodeFile       `json:"files,omitempty"`
 	OverlaySummary             *CatalogItemOverlay `json:"overlay_summary,omitempty"`
 	MachineTranslatedFields    []string            `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
-	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"This profile's metadata language when the episode's description is not available in it yet; translating the episode's season fills it"`
+	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"The language this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it"`
 }
 
 // EpisodeCollection is the episodes of one season.
@@ -1389,6 +1387,7 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		Overview: d.Overview, ReleaseDate: d.ReleaseDate, LastAirDate: d.LastAirDate,
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,
 		OverlaySummary: catalogOverlayOf(d.OverlaySummary), WorkID: d.WorkID, WorkTitle: d.WorkTitle,
+		PendingTranslationLanguage: d.PendingTranslationLanguage, MachineTranslatedFields: d.MachineTranslatedFields,
 	}
 	if d.Type == themeOwnerEpisode {
 		// An episode detail's poster is its still; the still's ThumbHash is
@@ -1419,9 +1418,8 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 	}
 	out := CatalogItemDetail{
 		CatalogItem: card, PlaySeasonNumber: d.PlaySeasonNumber,
-		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
-		MachineTranslatedFields: d.MachineTranslatedFields,
-		ImdbID:                  d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
+		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline,
+		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		BannerURL: d.BannerURL, BannerThumbhash: d.BannerThumbhash, ThumbURL: d.ThumbURL, ThumbThumbhash: d.ThumbThumbhash,
 		ClearArtURL: d.ClearArtURL, DiscURL: d.DiscURL, BackdropURLs: d.BackdropURLs,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,

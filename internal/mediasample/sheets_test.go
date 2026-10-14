@@ -197,7 +197,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 	req.Threads = 2
 	output := []string{"-map", "0:V:0", "-an", "-sn", "-dn", "-vf", "GRAPH", "-fps_mode", "passthrough", "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"}
 
-	args, list, err := buildSheetsArgs(req, Attempt{Hardware: true}, hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, 11.4, "GRAPH", "", sampledSheetsList)
+	args, list, err := buildSheetsArgs(req, Attempt{Hardware: true}, hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, sampleEntries(req.Samples.Seconds, 11.4), "GRAPH", "", sampledSheetsList)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 	window := req
 	window.Samples = nil
 	window.Window = &Window{StartSeconds: 0, DurationSeconds: 15.04, KeyframesOnly: true}
-	args, list, err = buildSheetsArgs(window, Attempt{}, hardwareDecode{}, 0, "GRAPH", "packets.framecrc", sampledSheetsList)
+	args, list, err = buildSheetsArgs(window, Attempt{}, hardwareDecode{}, nil, "GRAPH", "packets.framecrc", sampledSheetsList)
 	if err != nil {
 		t.Fatal(err)
 	}

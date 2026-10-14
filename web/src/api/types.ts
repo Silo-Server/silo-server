@@ -4475,6 +4475,10 @@ export interface SectionItem {
   badges?: string[];
   user_state?: MediaItemUserState;
   upcoming_event?: SectionItemUpcomingEvent | null;
+  /** This profile's language when the card's description is not in it yet. */
+  pending_translation_language?: string;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface ResolvedSection {
