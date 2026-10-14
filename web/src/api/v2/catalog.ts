@@ -86,6 +86,7 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     release_date: item.release_date,
     last_air_date: item.last_air_date,
     overlay_summary: item.overlay_summary,
+    availability: item.availability,
     sort_metrics: item.sort_metrics,
     badges: item.badges,
     user_state: item.user_state,
@@ -387,6 +388,7 @@ export function seasonFromV2(season: SeasonV2): Season {
     poster_url: season.poster_url ?? "",
     poster_thumbhash: season.poster_thumbhash ?? "",
     user_data: season.user_data ? watchRollupFromV2(season.user_data) : undefined,
+    availability: season.availability,
   };
 }
 

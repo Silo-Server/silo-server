@@ -46,6 +46,8 @@ export const SAMPLE_SHOW_DATA: OverlayData = {
   show_status: "returning",
   rt_certified_fresh: false,
   imdb_top_250: null,
+  availability_have: 2,
+  availability_total: 3,
 };
 
 // A watchlist title outside the library: TMDB data only, no file badges.

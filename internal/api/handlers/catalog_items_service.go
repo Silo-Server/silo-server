@@ -544,6 +544,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 				resp = append(resp, sr)
 			}
 			h.items.enrichSeasonPlayTargets(ctx, v, id, resp)
+			h.items.attachSeasonListAvailability(ctx, id, resp)
 			return resp, nil
 		}
 	}
@@ -568,6 +569,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 		})
 	}
 	h.items.enrichSeasonPlayTargets(ctx, v, id, resp)
+	h.items.attachSeasonListAvailability(ctx, id, resp)
 	return resp, nil
 }
 

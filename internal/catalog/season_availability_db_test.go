@@ -73,11 +73,11 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 	}
 	got := bySeries[series]
 	want := map[int]SeasonAvailability{
-		1: {Aired: 2, Have: 2, HaveAired: 2},              // complete
-		2: {Aired: 1, Upcoming: 1, Have: 0, HaveAired: 0}, // its file is in a disabled library; e2 has not aired
-		3: {Aired: 0, Have: 1, HaveAired: 0},              // no air dates yet
-		4: {Aired: 3, Upcoming: 1, Have: 3, HaveAired: 2}, // e2 through the multi-episode file; e3 missing
-		5: {Aired: 0, Upcoming: 2, Have: 1, HaveAired: 0}, // dated, not aired yet
+		1: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // complete
+		2: {Aired: 1, Upcoming: 1, Total: 2, Have: 0, HaveAired: 0}, // its file is in a disabled library; e2 has not aired
+		3: {Aired: 0, Total: 1, Have: 1, HaveAired: 0},              // no air dates yet
+		4: {Aired: 3, Upcoming: 1, Total: 4, Have: 3, HaveAired: 2}, // e2 through the multi-episode file; e3 missing
+		5: {Aired: 0, Upcoming: 2, Total: 2, Have: 1, HaveAired: 0}, // dated, not aired yet
 	}
 	if len(got) != len(want) {
 		t.Fatalf("seasons = %+v, want %+v (specials excluded)", got, want)
