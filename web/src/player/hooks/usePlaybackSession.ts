@@ -1763,10 +1763,13 @@ export function usePlaybackSession(
         awaitingInitialPlayerPositionRef.current = false;
       }
     }
+    // Until the current plan's transport shows a frame, a paused report is the
+    // element between transports, not the viewer: the plan replacing one that
+    // fails before its first frame plays if this one was going to.
     if (playing) {
       playbackStartedRef.current = true;
       playbackPlayingRef.current = true;
-    } else if (playbackStartedRef.current) {
+    } else if (playbackStartedRef.current && planTransportShownRef.current) {
       playbackPlayingRef.current = false;
     }
   }, []);
