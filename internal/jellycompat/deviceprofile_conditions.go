@@ -307,6 +307,50 @@ func conditionsOnlyTargetAudio(conditions []ProfileCondition) bool {
 	return true
 }
 
+// encodeOutputConditionValues are the condition values of a planned encode.
+// Unlike a scanned file's, an encode's unknown reference-frame count gets no
+// FFmpeg 7 stand-in (see buildConditionValues): the encoder chooses it.
+func encodeOutputConditionValues(output catalog.FileVersion, audioStreamIndex *int) conditionValues {
+	values := buildConditionValues(output, audioStreamIndex)
+	if compatPrimaryVideoTrack(output).ReferenceFrames <= 0 {
+		delete(values, conditionPropertyRefFrames)
+	}
+	return values
+}
+
+// Normalized condition properties of the facts an encoder chooses.
+const (
+	conditionPropertyRefFrames    = "refframes"
+	conditionPropertyVideoProfile = "videoprofile"
+	conditionPropertyVideoLevel   = "videolevel"
+)
+
+// encodeOutputConditionsMatch matches conditions against a planned H.264
+// encode. Its reference frames are the encoder's choice and Silo does not yet
+// pass a client's limit to the encoder, so, as Jellyfin's StreamBuilder treats
+// a RefFrames rule (ApplyTranscodingConditions), the rule is an encode target
+// rather than a refusal. The streaming libx264 presets use one reference
+// frame. An optional rule on the stated profile or level is an encode target
+// too: Jellyfin applies it the same way, and before the encode stated them it
+// passed as unknown, so a client that sends one with a high bitrate limit
+// keeps its transcode. Every other rule, and a required profile or level
+// rule, is checked as usual.
+func encodeOutputConditionsMatch(conditions []ProfileCondition, values conditionValues) bool {
+	for _, condition := range conditions {
+		property := normalizeConditionToken(condition.Property)
+		if _, known := values[property]; !known && property == conditionPropertyRefFrames {
+			continue
+		}
+		if !condition.IsRequired && (property == conditionPropertyVideoProfile || property == conditionPropertyVideoLevel) {
+			continue
+		}
+		if !conditionMatches(condition, values) {
+			return false
+		}
+	}
+	return true
+}
+
 func conditionsMatch(conditions []ProfileCondition, values conditionValues) bool {
 	for _, condition := range conditions {
 		if !conditionMatches(condition, values) {
@@ -357,9 +401,10 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 		"isinterlaced":   {text: strconv.FormatBool(video.Interlaced)},
 	}
 
-	// Everything below is only inserted when Silo actually knows the value.
-	// An absent key falls through to conditionMatches' IsRequired handling,
-	// mirroring how Jellyfin's ConditionProcessor treats a null value.
+	// Everything below is only inserted when Silo actually knows the value,
+	// except a scanned file's reference frames (see below). An absent key
+	// falls through to conditionMatches' IsRequired handling, mirroring how
+	// Jellyfin's ConditionProcessor treats a null value.
 	if strings.TrimSpace(video.Profile) != "" {
 		values["videoprofile"] = conditionValue{text: video.Profile}
 	}
@@ -368,6 +413,18 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 	}
 	if refFrames := intConditionValue(video.ReferenceFrames); refFrames.hasNum {
 		values["refframes"] = refFrames
+	} else {
+		// FFmpeg 8.1 reports a stream's reference frames only while reading
+		// frames, so no scanned file carries a count (see mediaprobe.Stream).
+		// Under FFmpeg 7, ffprobe reported the decoder default of 1 for every
+		// file, Jellyfin recorded that 1, and clients tuned their rules to it:
+		// Moonfin requires RefFrames <= 4 from 1900 pixels wide. A planned
+		// encode does not get this stand-in (see encodeOutputConditionValues).
+		// Failing such a rule here would force an encode of every HD H.264
+		// file those clients direct play on Jellyfin, so evaluate it against
+		// the same 1. Reading max_num_ref_frames from the SPS at scan time
+		// would replace this with the real count.
+		values["refframes"] = intConditionValue(1)
 	}
 	if width := intConditionValue(video.Width); width.hasNum {
 		values["width"] = width
@@ -466,13 +523,8 @@ func compatAudioTrack(version catalog.FileVersion, streamIndex *int) models.Audi
 			return version.AudioTracks[audioIndex]
 		}
 	}
-	for _, track := range version.AudioTracks {
-		if track.Default {
-			return track
-		}
-	}
 	if len(version.AudioTracks) > 0 {
-		return version.AudioTracks[0]
+		return version.AudioTracks[playback.SelectAudioTrack(version.AudioTracks, "", nil)]
 	}
 	return models.AudioTrack{Codec: version.CodecAudio}
 }

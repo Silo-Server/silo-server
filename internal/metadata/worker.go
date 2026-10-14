@@ -1655,6 +1655,9 @@ func matchFailureFromDecision(decision *MatchDecision) MatchFailure {
 			message = "selected providers returned no usable metadata"
 		case MatchOutcomeProviderTransient:
 			message = "metadata provider is temporarily unavailable"
+			if decision.localSidecarUnreadable {
+				message = "local metadata (NFO) could not be read; the match will retry"
+			}
 		case MatchOutcomeProviderPermanent:
 			message = "metadata provider rejected the request permanently"
 		}

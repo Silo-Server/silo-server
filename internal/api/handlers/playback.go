@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -212,6 +213,10 @@ type PlaybackHandler struct {
 	// progressSideEffectLocks serializes v2 progress side effects per session
 	// (see persistProgressV2).
 	progressSideEffectLocks sync.Map
+	// realtimeResultQueues orders completed realtime command results per
+	// session off the socket reader (see runRealtimeResult).
+	realtimeResultMu     sync.Mutex
+	realtimeResultQueues map[string]*realtimeResultQueue
 	// ProxyGrantStore hands a proxy the recipe it serves a header-authenticated
 	// session from. Optional: without it (or without Redis behind it) an attempt
 	// that negotiated authorized_media_origins_v1 simply stays on the API origin.
@@ -272,6 +277,7 @@ type PlaybackHandler struct {
 	v3Registry           *playback.TransformationRegistryV3
 	v3RegistryProbe      func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error)
 	v3ToneMapProbe       func(context.Context, string, string, string) (tonemap.Capabilities, error)
+	v3RouteNodeProbe     func(context.Context, string) bool // nil: probeRouteNodeV3
 	v3NodeCapabilitiesMu sync.Mutex
 	v3NodeCapabilities   map[string]v3NodeCapabilityCache
 	// v3NodeProbeBudgets holds what each node last said a capability read of it
@@ -886,18 +892,6 @@ func (h *PlaybackHandler) loadFileByPreferredID(
 	return nil, nil
 }
 
-func directPlayAudioTrackIndex(file *models.MediaFile) int {
-	if file == nil || len(file.AudioTracks) == 0 {
-		return 0
-	}
-	for i, track := range file.AudioTracks {
-		if track.Default {
-			return i
-		}
-	}
-	return 0
-}
-
 func normalizeAudioTrackIndex(file *models.MediaFile, audioTrackIndex int) int {
 	if file == nil || len(file.AudioTracks) == 0 {
 		return 0
@@ -905,7 +899,7 @@ func normalizeAudioTrackIndex(file *models.MediaFile, audioTrackIndex int) int {
 	if audioTrackIndex >= 0 && audioTrackIndex < len(file.AudioTracks) {
 		return audioTrackIndex
 	}
-	return directPlayAudioTrackIndex(file)
+	return playback.SelectAudioTrack(file.AudioTracks, "", nil)
 }
 
 func (h *PlaybackHandler) resolveSeriesID(ctx context.Context, file *models.MediaFile) string {
@@ -1215,8 +1209,21 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 		ctx = context.Background()
 	}
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
+	h.cleanupStoppedSessionTransport(ctx, session)
+	stopResult := h.recordStoppedSession(ctx, session, userInitiated)
+	if syncNow {
+		h.syncSessionsNow(ctx, syncReason)
+	}
+	return stopResult
+}
 
+func (h *PlaybackHandler) recordStoppedSession(ctx context.Context, session *playback.Session, userInitiated bool) watchstate.PlaybackStopResult {
 	stopResult := h.recordStopHistory(ctx, session)
+	h.notifyStoppedSession(ctx, session, stopResult, userInitiated)
+	return stopResult
+}
+
+func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *playback.Session, stopResult watchstate.PlaybackStopResult, userInitiated bool) {
 	if h.WatchScrobbler != nil {
 		if event, ok := h.scrobbleEventForStoppedSession(ctx, session, stopResult); ok && (userInitiated || stopResult.Completed) {
 			if err := h.WatchScrobbler.ScrobbleStop(ctx, event); err != nil {
@@ -1233,7 +1240,9 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 			slog.ErrorContext(ctx, "failed to delete synced session", "component", "api", "session", session.ID, "error", err)
 		}
 	}
+}
 
+func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, session *playback.Session) {
 	h.closeTranscodeForSession(session)
 	// A session that ends must stop egressing everywhere, not just here: the
 	// grant is a proxy's whole authority to serve these bytes, and unlike the
@@ -1244,10 +1253,6 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
 	// the node for a transport that no longer exists.
 	h.deleteNodeRecipeV3(ctx, session.TranscodeTransportID)
-	if syncNow {
-		h.syncSessionsNow(ctx, syncReason)
-	}
-	return stopResult
 }
 
 // recordStopHistory writes a stopped session to watch history and the admin
@@ -1261,6 +1266,11 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 		return watchstate.PlaybackStopResult{}
 	}
 	result := h.persistStopAndHistory(ctx, session)
+	h.recordAdminStopHistory(ctx, session)
+	return result
+}
+
+func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *playback.Session) {
 	if entry, err := h.buildAdminHistoryEntry(ctx, session); err != nil {
 		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", err)
 	} else if entry != nil && h.AdminStore != nil {
@@ -1268,7 +1278,6 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 			slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
 		}
 	}
-	return result
 }
 
 // compatPlayHistoryNamespace derives a Jellyfin play's watch-history row ID
@@ -2093,7 +2102,10 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+	if err := nodeauth.Sign(req, transcodeNodeURL, h.JWTSecret); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if isSegmentRoute {
 		// The node's immediate transport peer is this API process, so receiving a
 		// complete response there does not prove that the browser received it.
@@ -2121,6 +2133,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 
 	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
+		nodepool.ReportConnectFailure(h.NodePlanner, transcodeNodeURL, err)
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "api", "error", err, "url", targetURL, "playback_session_id", sessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
@@ -2167,7 +2180,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 	fullSize := transcodeproxy.FullRepresentationSize(resp)
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(fullSize) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL+path, h.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, h.JWTSecret, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "api", "error", ackErr, "playback_session_id", sessionID)
 		}
 	}

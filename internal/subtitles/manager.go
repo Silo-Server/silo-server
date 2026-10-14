@@ -25,6 +25,9 @@ var (
 	// answers to. It is a client input problem, not an upstream failure, so the
 	// API layer answers 404 instead of 500.
 	ErrUnknownProvider = errors.New("unknown subtitle provider")
+	// ErrInvalidSubtitleID reports a provider result ID that is not in the
+	// shape the provider's search returns; no provider request was made.
+	ErrInvalidSubtitleID = errors.New("invalid subtitle id")
 )
 
 // Manager orchestrates subtitle search and download across providers.
@@ -214,6 +217,11 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 	data, format, err := prov.Download(ctx, req.SubtitleID)
 	if err != nil {
 		return nil, fmt.Errorf("download from %s: %w", req.ProviderName, err)
+	}
+	// Providers bound their own reads; this check keeps any provider from
+	// storing a subtitle larger than an upload may be.
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("download from %s: %w: %d bytes, limit %d", req.ProviderName, ErrSubtitleTooLarge, len(data), MaxUploadSize)
 	}
 
 	return m.StoreSubtitle(ctx, StoreSubtitleRequest{

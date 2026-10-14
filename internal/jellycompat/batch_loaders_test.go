@@ -434,3 +434,28 @@ func TestFetchCompatEpisodeTargetsByContentIDs_ResolvesDurationOnlyWhenRequested
 		t.Fatalf("duration-enriched duration = %d, want 1500", got)
 	}
 }
+
+// The series logo travels with the other series artwork, so episodes can name
+// it as their ParentLogo.
+func TestFetchCompatEpisodeTargetsByContentIDsFallback_CarriesSeriesLogo(t *testing.T) {
+	itemRepo := &countingItemRepo{
+		itemsByID: map[string]*models.MediaItem{
+			"series-1": {ContentID: "series-1", Type: "series", Title: "Show", LogoPath: "series-1/logo.png"},
+		},
+	}
+	episodeRepo := &countingEpisodeRepo{
+		episodesByID: map[string]*models.Episode{
+			"ep-1": {ContentID: "ep-1", SeriesID: "series-1", Title: "Pilot"},
+		},
+	}
+	h := &ItemsHandler{itemRepo: itemRepo, episodeRepo: episodeRepo}
+
+	got, err := h.fetchCompatEpisodeTargetsByContentIDsFallback(context.Background(), &Session{}, []string{"ep-1"}, nil)
+	if err != nil {
+		t.Fatalf("fetchCompatEpisodeTargetsByContentIDsFallback returned error: %v", err)
+	}
+	images := got["ep-1"].SeriesImages
+	if images.LogoPath != "series-1/logo.png" || images.LogoURL == "" {
+		t.Fatalf("series logo not carried: path=%q url=%q", images.LogoPath, images.LogoURL)
+	}
+}

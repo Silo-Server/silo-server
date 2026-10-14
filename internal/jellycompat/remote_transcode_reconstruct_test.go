@@ -1448,3 +1448,39 @@ func TestStartRemoteTranscode_UpdateFailureRollsBackNode(t *testing.T) {
 		t.Fatal("expected rollback DELETE to the node after Update failure")
 	}
 }
+
+// A runtime published on a node that has since drained is gone, so a start
+// for the same session runs fresh on the planned node instead of adopting it.
+func TestStartRemoteTranscodeDoesNotAdoptRuntimeOnDrainedNode(t *testing.T) {
+	const drainedURL = "http://drained.invalid"
+	var received transcodenode.TranscodeStartRequest
+	node := fakeTranscodeNode(t, &received)
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, drainedURL, &stubRecipeNodeStore{})
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{
+		{URL: drainedURL, Enabled: true, Healthy: true, DrainRequested: true, DrainState: nodepool.DrainStateDrained},
+		{URL: node.URL, Enabled: true, Healthy: true},
+	})
+	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
+	source := testRemoteTranscodeSource()
+	playbackStore.Put(PlaybackSession{
+		ID: "play-1", UpstreamSessionID: "upstream-1", TranscodeStarted: true,
+		Recipe: &playback.RecipeCard{
+			TranscodeNodeURL:    drainedURL,
+			MediaFileID:         source.FileID,
+			AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+			SourceAudioChannels: compatHLSRecipeSourceAudioChannels(source),
+		},
+	})
+
+	err := handler.startRemoteTranscode(
+		context.Background(), "play-1", "upstream-1", source,
+		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", CodecVideo: "h264"}, 0, node.URL,
+	)
+	if err != nil {
+		t.Fatalf("startRemoteTranscode: %v; want a fresh start, not adoption of the drained node's runtime", err)
+	}
+	if received.SessionID == "" {
+		t.Fatal("the planned node received no start request")
+	}
+}

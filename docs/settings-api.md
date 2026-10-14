@@ -450,13 +450,12 @@ Branding remains public so it can render before sign-in:
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/v2/theme/capabilities` | Branding, CSS-override, and asset-storage availability |
+| GET | `/api/v2/theme/capabilities` | Branding and asset-storage availability |
 | GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent color and asset URLs, storage availability |
-| GET | `/api/v2/theme/admin-css` | JSON object with `vars` and `raw_css` strings |
 | GET / HEAD | `/api/v2/branding/assets/{kind}` | Image bytes or matching headers without a body |
 
-Discovery uses the existing branding service and theme settings. When dependencies
-are absent, configuration returns default branding and empty overrides; capabilities
+Discovery uses the existing branding service. When dependencies are absent,
+configuration returns default branding; capabilities
 report availability explicitly. Discovery responses are not cached. The bundled web
 uses these v2 reads. Native server-identity discovery must adopt the same public
 endpoint through its negotiated API-version handling.
@@ -472,14 +471,20 @@ A valid kind without a configured asset returns `404`; missing asset storage ret
 
 The frozen v1 routes and administrator asset upload/delete operations are unchanged.
 
-The web client has one theme, Cinema Dark. Only an administrator customizes it, with
-the accent color and the overrides `admin-css` returns (`ui.admin_theme_vars` and
-`ui.admin_custom_css`), layered on that theme. The v2 branding document therefore
-has no default theme and no light-theme logo URLs, and v2 has no theme catalog.
-The frozen v1 `/theme/branding` response is unchanged: it still reports a stored
-`default_theme` and light logo URLs. The server keeps those settings for v1 alone. The v1
-`/theme/catalog`, `/theme/catalog/refresh` and `/theme/download` routes keep their
-behavior, and `theme.catalog_url` its default, until v1 retires.
+The web client has one theme, Cinema Dark. The only customization is the
+administrator's accent color (`branding.accent_color`), which the web client
+reads from the branding document and applies to the primary action color, the
+focus ring and the sidebar accent, turning the labels on those surfaces white
+when white reads better on the accent. A stored value that is not a `#rgb` or
+`#rrggbb` hex color is ignored, as email ignores it. Email buttons, the shell's `theme-color` and
+the web app manifest use it too. The v2 branding document has no default theme
+or light-theme logo URLs, and v2 has no theme overrides or theme catalog.
+The frozen v1 routes are unchanged: `/theme/branding` still reports a stored
+`default_theme` and light logo URLs, and `/theme/admin-css` still reports the
+stored `ui.admin_theme_vars` and `ui.admin_custom_css`. The server keeps those
+settings for v1 alone; nothing else reads them. The v1 `/theme/catalog`,
+`/theme/catalog/refresh` and `/theme/download` routes keep their behavior, and
+`theme.catalog_url` its default, until v1 retires.
 
 ### Retired theme settings
 
@@ -580,8 +585,10 @@ No browser Origin is required for these server-to-server deliveries.
 
 V2 limits the complete body to 10 MiB before provider parsing or watch-state
 side effects, including bodies with unknown or understated lengths. Oversize
-requests return a 413 `payload_too_large` problem. Multipart resources are cleaned
-up after parsing. The shared application processor retains explicit profile
+requests return a 413 `payload_too_large` problem. The bridge receivers
+(`/api/v1/webhook-sync/webhooks/{secret}` and `/api/v1/plex-sync/webhooks/{secret}`)
+enforce the same 10 MiB limit and answer an oversize delivery with 413
+`payload_too_large`. Multipart resources are cleaned up after parsing. The shared application processor retains explicit profile
 mapping, provider normalization, watch-state behavior and delivery logging with
 bounded sanitized body excerpts. A processed delivery returns bodyless 204,
 including ignored, skipped or unmatched events. Malformed payloads return 400,
@@ -1020,7 +1027,9 @@ Selecting `s3` without a configured `s3.public_bucket`, or clearing the bucket
 while `s3` is selected, is rejected as `invalid_settings`.
 
 `metadata.image_workers` sizes the pool that downloads and encodes provider
-artwork, in parallel encodes. `0`, the default, runs one encode per CPU core.
+artwork in parallel. The same per-server limit also covers manual refreshes
+and copies of local artwork found next to media files. `0`, the default, runs
+one encode per CPU core.
 Each encode is single-threaded in libvips, so the pool is the only source of
 parallelism; a lower value keeps a shared household server responsive during a
 first scan, a higher one finishes the backlog sooner. The value is capped by the
@@ -1028,7 +1037,11 @@ process memory limit at one worker per 512 MiB and applies to the next run
 without a restart.
 
 `metadata.cache_images` defaults to `true` on fresh installations. It no longer
-requires a public S3 bucket because local artwork storage is available.
+requires a public S3 bucket because local artwork storage is available. It
+governs provider artwork only: local sidecar artwork found next to media files
+is copied into artwork storage and served whatever its value, because clients
+cannot load it any other way. An image URL an NFO file names is downloaded like
+provider artwork, so it is used only while the setting is on.
 
 `catalog.scope_versions_to_library` (default `false`) makes a library-scoped v2
 catalog read return only the versions stored in the `library_id` it was given.

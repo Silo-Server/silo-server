@@ -38,11 +38,8 @@ import {
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
 import { watchlistTitlesAvailable } from "@/lib/watchlistTitles";
-import ActionBar, {
-  type ActionBarLink,
-  type ActionBarPrimaryAction,
-  type ActionBarSecondaryAction,
-} from "./ActionBar";
+import { titleLinks } from "@/lib/titleLinks";
+import ActionBar, { type ActionBarPrimaryAction, type ActionBarSecondaryAction } from "./ActionBar";
 
 const STATE_ICONS: Record<RequestDisplayState, LucideIcon> = {
   pending: Clock,
@@ -176,13 +173,10 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
     });
   }
 
-  const links: ActionBarLink[] = [];
-  if (item.imdb_id) {
-    links.push({ label: "IMDb", href: `https://www.imdb.com/title/${item.imdb_id}` });
-  }
-  links.push({
-    label: "TMDB",
-    href: `https://www.themoviedb.org/${item.media_type === "series" ? "tv" : "movie"}/${item.tmdb_id}`,
+  const links = titleLinks(item.media_type, {
+    imdb: item.imdb_id,
+    tmdb: item.tmdb_id,
+    tvdb: item.tvdb_id,
   });
 
   return (

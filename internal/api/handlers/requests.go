@@ -576,10 +576,17 @@ func requestViewer(w http.ResponseWriter, r *http.Request, requireProfile bool) 
 		writeError(w, http.StatusBadRequest, "profile_required", "Profile is required")
 		return mediarequests.Viewer{}, false
 	}
+	// Admin reach over other accounts' requests follows the acting profile:
+	// a child profile on an admin's account sees only its own account's.
+	isAdmin, err := apimw.ActingAdmin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
+		return mediarequests.Viewer{}, false
+	}
 	return mediarequests.Viewer{
 		UserID:    claims.UserID,
 		ProfileID: profileID,
-		IsAdmin:   claims.Role == "admin",
+		IsAdmin:   isAdmin,
 	}, true
 }
 

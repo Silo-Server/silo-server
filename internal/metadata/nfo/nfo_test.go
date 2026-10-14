@@ -234,6 +234,22 @@ func TestParseNFOData_TableCases(t *testing.T) {
 			},
 		},
 		{
+			// Radarr writes this before IMDb has a score: the bare <rating>
+			// repeats the default TMDB value and is not an IMDb rating.
+			name: "legacy bare rating ignored beside a ratings block without imdb",
+			data: `<movie><title>X</title><ratings>` +
+				`<rating name="themoviedb" max="10" default="true"><value>6.667</value><votes>6</votes></rating>` +
+				`</ratings><rating>6.667</rating></movie>`,
+			check: func(t *testing.T, p *parsedNFO) {
+				if p.RatingIMDB != 0 {
+					t.Errorf("RatingIMDB = %v, want 0", p.RatingIMDB)
+				}
+				if p.RatingTMDB != 6.667 {
+					t.Errorf("RatingTMDB = %v, want 6.667", p.RatingTMDB)
+				}
+			},
+		},
+		{
 			name: "ratings normalized to their slot scale",
 			data: `<movie><title>X</title><ratings>` +
 				`<rating name="imdb" max="5"><value>4.0</value></rating>` +

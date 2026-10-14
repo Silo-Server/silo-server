@@ -5610,6 +5610,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
                     "opened_signal"
@@ -5692,6 +5693,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
                     "opened_signal"
@@ -5795,6 +5797,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
                     "opened_signal"

@@ -11,7 +11,7 @@ import {
   StaleApiRequestContextError,
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
-import { v2 } from "@/api/v2/request";
+import { v2, type V2Result } from "@/api/v2/request";
 import type {
   StreamNode,
   NodeCapabilities,
@@ -246,32 +246,79 @@ export function useDeleteNode() {
   };
 }
 
-type NodeCommandIntent = { node: StreamNode; authority: ProfileRequestContextSnapshot };
-function useNodeObservationCommand(action: "check" | "reprobe") {
+type NodeCommandIntent<A> = {
+  node: StreamNode;
+  authority: ProfileRequestContextSnapshot;
+  action: A;
+};
+type NodeCommandRequest = {
+  path: { id: string };
+  profileContext: ProfileRequestContextSnapshot;
+  retryAuthentication: false;
+};
+
+/**
+ * A POST command on one node row. The selected node and the rendered authority
+ * are captured before the request queues, nothing is replayed automatically,
+ * and a result or invalidation that arrives under a changed authority is
+ * dropped. `send` issues the request for the intent's action.
+ */
+function useNodeCommand<A, R extends object>(command: {
+  send: (action: A, request: NodeCommandRequest) => Promise<R>;
+  onResult: (result: R, intent: NodeCommandIntent<A>) => void;
+  errorMessage: (intent: NodeCommandIntent<A>) => string;
+}) {
   const queryClient = useQueryClient();
   const renderedAuthority = captureProfileRequestContext();
   const mutation = useMutation({
     retry: false,
-    mutationFn: async (intent: NodeCommandIntent) => {
+    mutationFn: async (intent: NodeCommandIntent<A>) => {
       if (!isCapturedProfileAuthorityActive(intent.authority))
         throw new StaleApiRequestContextError();
-      const options = {
+      const result = await command.send(intent.action, {
         path: { id: String(intent.node.id) },
         profileContext: intent.authority,
         retryAuthentication: false,
-      };
-      const result =
-        action === "check"
-          ? await v2("POST /api/v2/admin/nodes/{id}/check", options)
-          : await v2("POST /api/v2/admin/nodes/{id}/reprobe", options);
+      });
       if (!isCapturedProfileAuthorityActive(intent.authority))
         throw new StaleApiRequestContextError();
       if ("node_id" in result && result.node_id !== String(intent.node.id))
-        throw new Error("Unexpected node observation");
+        throw new Error("Unexpected node command result");
       return result;
     },
     onSuccess: (result, intent) => {
-      if (!isCapturedProfileAuthorityActive(intent.authority)) return;
+      if (isCapturedProfileAuthorityActive(intent.authority)) command.onResult(result, intent);
+    },
+    onError: (_error, intent) => {
+      if (isCapturedProfileAuthorityActive(intent.authority))
+        toast.error(command.errorMessage(intent));
+    },
+    onSettled: (_result, _error, intent) => {
+      if (isCapturedProfileAuthorityActive(intent.authority))
+        queryClient.invalidateQueries({ queryKey: adminKeys.nodes() });
+    },
+  });
+  return {
+    ...mutation,
+    variables: mutation.variables?.node,
+    mutate: (node: StreamNode, action: A) => {
+      if (!renderedAuthority || !isCapturedProfileAuthorityActive(renderedAuthority)) return;
+      mutation.mutate({ node: structuredClone(node), authority: renderedAuthority, action });
+    },
+  };
+}
+
+type NodeObservation =
+  | V2Result<"POST /api/v2/admin/nodes/{id}/check">
+  | V2Result<"POST /api/v2/admin/nodes/{id}/reprobe">;
+
+function useNodeObservationCommand(action: "check" | "reprobe") {
+  const command = useNodeCommand<"check" | "reprobe", NodeObservation>({
+    send: (kind, request) =>
+      kind === "check"
+        ? v2("POST /api/v2/admin/nodes/{id}/check", request)
+        : v2("POST /api/v2/admin/nodes/{id}/reprobe", request),
+    onResult: (result, intent) => {
       if ("healthy" in result) {
         toast.success(
           result.healthy ? `${intent.node.name} is healthy` : `${intent.node.name} is unhealthy`,
@@ -287,31 +334,40 @@ function useNodeObservationCommand(action: "check" | "reprobe") {
         else toast.error(outcome.message);
       }
     },
-    onError: (_error, intent) => {
-      if (isCapturedProfileAuthorityActive(intent.authority))
-        toast.error(
-          "Node command could not be confirmed. Inspect node state before another explicit command.",
-        );
-    },
-    onSettled: (_result, _error, intent) => {
-      if (isCapturedProfileAuthorityActive(intent.authority))
-        queryClient.invalidateQueries({ queryKey: adminKeys.nodes() });
-    },
+    errorMessage: () =>
+      "Node command could not be confirmed. Inspect node state before another explicit command.",
   });
-  return {
-    ...mutation,
-    variables: mutation.variables?.node,
-    mutate: (node: StreamNode) => {
-      if (!renderedAuthority || !isCapturedProfileAuthorityActive(renderedAuthority)) return;
-      mutation.mutate({ node: structuredClone(node), authority: renderedAuthority });
-    },
-  };
+  return { ...command, mutate: (node: StreamNode) => command.mutate(node, action) };
 }
 export function useCheckNodeHealth() {
   return useNodeObservationCommand("check");
 }
 export function useReprobeNode() {
   return useNodeObservationCommand("reprobe");
+}
+
+/**
+ * Drains a transcode node (requested: true) or lifts the drain (false). The
+ * node stays listed and health-checked; the list refetches so the status line
+ * moves from "Draining" to "Drained" as the node reports it.
+ */
+export function useSetNodeDrain() {
+  return useNodeCommand({
+    send: (requested: boolean, request) =>
+      requested
+        ? v2("POST /api/v2/admin/nodes/{id}/drain", request)
+        : v2("POST /api/v2/admin/nodes/{id}/resume", request),
+    onResult: (result, intent) =>
+      toast.success(
+        result.drain_requested
+          ? `Draining ${intent.node.name}. New work goes to other nodes.`
+          : `${intent.node.name} takes new work again.`,
+      ),
+    errorMessage: (intent) =>
+      intent.action
+        ? `Could not drain ${intent.node.name}. Refresh node state and try again.`
+        : `Could not resume ${intent.node.name}. Refresh node state and try again.`,
+  });
 }
 
 export function useToggleNode() {

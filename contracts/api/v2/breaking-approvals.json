@@ -1,3 +1,18 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "getBrandingCapabilities",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "e694d8b1db36caa8200181773b35234d47dea4b450449b55632c47556c3e6183",
+      "reason": "Pre-lock removal: the field reported whether getThemeOverrides was available, and that operation is removed in the same change. No first-party client reads it; silo-apple and silo-android do not call the branding capability.",
+      "approved_in": "#2413"
+    },
+    {
+      "operation_id": "getThemeOverrides",
+      "change_id": "api-path-removed-without-deprecation",
+      "fingerprint": "144c93e5f4a3cf0f51527df6ca683a547e4e4fee0c91fdd4ceb8d1b9c1551b07",
+      "reason": "Pre-lock removal: the web client no longer offers the admin token and font overrides or custom CSS, so nothing reads them; the accent color stays on getBranding. The bundled web client stops calling this operation in the same change; silo-apple and silo-android never called it. The frozen v1 route stays for the bridge.",
+      "approved_in": "#2413"
+    }
+  ]
 }

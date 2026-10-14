@@ -1284,7 +1284,8 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	case BrowseSortTitle:
 		order = "LOWER(e.title), e.content_id"
 	case BrowseSortReleaseDate:
-		order = "e.air_date, e.content_id"
+		// Same-day episodes keep their season/episode order, like the catalog.
+		order = "e.air_date, e.season_number, e.episode_number, e.content_id"
 	case BrowseSortCreatedAt:
 		order = "e.created_at, e.content_id"
 	}

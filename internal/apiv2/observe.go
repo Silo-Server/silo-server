@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -140,20 +141,29 @@ func observe(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(sw, r)
+		status := sw.status
+		if activitylog.RecordedStatus(r, status, status != 0) == activitylog.StatusClientClosedRequest {
+			// The client went away, and its server error is recorded as
+			// abandoned, as the activity log records it as 499. The error is
+			// still written: net/http also cancels the context of a client
+			// that only half-closed, and an unwritten response would reach
+			// that client as an empty 200.
+			status = 0
+		}
 		if span.IsRecording() {
 			span.SetAttributes(attribute.String("operation", o.operationID), attribute.String("error.type", o.errorCode))
-			if sw.status != 0 {
-				span.SetAttributes(attribute.Int("http.response.status_code", sw.status))
+			if status != 0 {
+				span.SetAttributes(attribute.Int("http.response.status_code", status))
 			} else if sw.hijacked {
 				span.SetAttributes(attribute.String("http.response.outcome", "hijacked"))
 			} else {
 				span.SetAttributes(attribute.String("http.response.outcome", "abandoned"))
 			}
-			if sw.status >= 500 {
+			if status >= 500 {
 				span.SetStatus(codes.Error, "server_error")
 			}
 		}
-		report(r, o, sw.status, sw.hijacked, sw.bytes, time.Since(start))
+		report(r, o, status, sw.hijacked, sw.bytes, time.Since(start))
 	})
 }
 

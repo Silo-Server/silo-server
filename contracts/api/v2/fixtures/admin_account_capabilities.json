@@ -1,5 +1,5 @@
 {
-  "revision": "756d6d9a7e0546dde4bb44fe196522008b61748576d7923c93e7ed0d1c124c6d",
+  "revision": "c537fe27b1bb7a978c5584e48aa7f4503db9c74bbd825ce421b75ac378bb5f9c",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -7,6 +7,7 @@
   "default_profile": true,
   "exact_identity_filter": true,
   "access_groups": true,
+  "profile_limits": true,
   "password_reset_link": true,
   "password_reset_email": true,
   "ownership_transfer": true,

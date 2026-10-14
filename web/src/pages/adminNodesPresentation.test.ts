@@ -10,6 +10,7 @@ import {
   describeCapabilityDrift,
   describeGPUBusy,
   describeNodeAccelerationOverride,
+  describeNodeDrain,
   describeNodeEgress,
   describeNodeGPU,
   describeNodeGroups,
@@ -1241,5 +1242,63 @@ describe("resource attribution", () => {
     expect(describeNodeSystem(node, NOW + 30_000).kind).toBe("reported");
     node.last_stats!.sampled_at = new Date(NOW - 20_000).toISOString();
     expect(describeNodeSystem(node, NOW)).toMatchObject({ kind: "unreported", label: "Stale" });
+  });
+});
+
+describe("describeNodeDrain", () => {
+  it("says nothing for a node that is not draining or a proxy", () => {
+    expect(describeNodeDrain(makeNode())).toBeNull();
+    expect(describeNodeDrain(makeNode({ drain_requested: false, drain_state: "none" }))).toBeNull();
+    expect(describeNodeDrain(makeNode({ type: "proxy", drain_requested: true }))).toBeNull();
+    expect(describeNodeDrain(makeNode({ enabled: false }))).toBeNull();
+  });
+
+  it("keeps a disabled node's drain request visible", () => {
+    expect(describeNodeDrain(makeNode({ enabled: false, drain_requested: true }))?.label).toBe(
+      "Drain requested",
+    );
+  });
+
+  it("counts the transcodes left while an administrator's drain runs", () => {
+    expect(
+      describeNodeDrain(
+        makeNode({ drain_requested: true, drain_state: "draining", active_jobs: 3 }),
+      ),
+    ).toMatchObject({ phase: "draining", label: "Draining · 3 transcodes left" });
+    expect(
+      describeNodeDrain(
+        makeNode({ drain_requested: true, drain_state: "draining", active_jobs: 1 }),
+      )?.label,
+    ).toBe("Draining · 1 transcode left");
+  });
+
+  it("keeps a request the node has not reported yet at Draining, even with nothing running", () => {
+    expect(
+      describeNodeDrain(makeNode({ drain_requested: true, drain_state: "none", active_jobs: 0 })),
+    ).toMatchObject({ phase: "draining", label: "Draining · 0 transcodes left" });
+  });
+
+  it("says safe to stop only once the node reports it is drained", () => {
+    expect(
+      describeNodeDrain(makeNode({ drain_requested: true, drain_state: "drained" })),
+    ).toMatchObject({ phase: "drained", label: "Drained · safe to stop" });
+  });
+
+  it("describes a drain without a request in terms true of a stopping node and a pending resume", () => {
+    const draining = describeNodeDrain(makeNode({ drain_state: "draining", active_jobs: 2 }));
+    expect(draining?.label).toBe("Draining · 2 transcodes left");
+    expect(draining?.detail).toContain("takes no new work");
+    expect(describeNodeDrain(makeNode({ drain_state: "drained" }))?.label).toBe(
+      "Drained · no work left",
+    );
+  });
+
+  it("does not claim a drained state for a node that stopped answering", () => {
+    expect(
+      describeNodeDrain(
+        makeNode({ healthy: false, drain_requested: true, drain_state: "drained" }),
+      ),
+    ).toMatchObject({ phase: "draining", label: "Draining · not answering" });
+    expect(describeNodeDrain(makeNode({ healthy: false, drain_state: "none" }))).toBeNull();
   });
 });

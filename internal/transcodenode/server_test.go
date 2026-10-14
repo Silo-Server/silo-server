@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
@@ -743,7 +744,7 @@ func TestHandleDownloadPreparePublishesToneMapReceiptAndStatusAttestation(t *tes
 	}
 
 	head := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/artifact-tone-map", nil)
-	head.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, head, testSecret)
 	headRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(headRecorder, head)
 	if headRecorder.Code != http.StatusOK {
@@ -814,7 +815,7 @@ func TestHandleDownloadPreparePublishesStereoDownmixReceiptAndStatusAttestation(
 	}
 
 	head := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+prepareRequest.ArtifactID, nil)
-	head.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, head, testSecret)
 	headRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(headRecorder, head)
 	if headRecorder.Code != http.StatusOK {
@@ -1392,6 +1393,21 @@ func TestValidateThrottleAttestation(t *testing.T) {
 	}
 }
 
+// A node that ignores a requested keyframe playlist would serve FFmpeg's
+// growing playlist under a recipe that records the planned one.
+func TestValidateKeyframePlaylistAttestation(t *testing.T) {
+	request := TranscodeStartRequest{KeyframePlaylist: true}
+	if err := ValidateKeyframePlaylistAttestation(request, TranscodeStartResponse{KeyframePlaylist: true}); err != nil {
+		t.Fatalf("matching attestation rejected: %v", err)
+	}
+	if err := ValidateKeyframePlaylistAttestation(request, TranscodeStartResponse{}); !errors.Is(err, ErrKeyframePlaylistAttestationMismatch) {
+		t.Fatalf("missing attestation error = %v, want %v", err, ErrKeyframePlaylistAttestationMismatch)
+	}
+	if err := ValidateKeyframePlaylistAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
+		t.Fatalf("request without a keyframe playlist rejected a legacy node response: %v", err)
+	}
+}
+
 func TestHandleStartRejectsUnversionedSourceAudioRecipeBeforeExecution(t *testing.T) {
 	server := newTestServer(t)
 	body, err := json.Marshal(TranscodeStartRequest{
@@ -1679,7 +1695,7 @@ func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/downloads/artifacts/artifact-range", nil)
-	req.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, req, testSecret)
 	req.Header.Set("Range", "bytes=3-6")
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr, req)
@@ -1691,7 +1707,7 @@ func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/downloads/artifacts/artifact-range", nil)
-	deleteReq.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, deleteReq, testSecret)
 	deleteRR := httptest.NewRecorder()
 	server.Handler().ServeHTTP(deleteRR, deleteReq)
 	if deleteRR.Code != http.StatusNoContent {
@@ -1723,7 +1739,7 @@ func TestDeleteDownloadArtifactReceiptInvalidationFailurePreservesArtifact(t *te
 	}
 
 	request := httptest.NewRequest(http.MethodDelete, "/downloads/artifacts/artifact-delete-invalidation", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError {
@@ -1793,7 +1809,7 @@ func TestDownloadArtifactHeadDoesNotWaitForConcurrentRelay(t *testing.T) {
 	getDone := make(chan struct{})
 	go func() {
 		req := httptest.NewRequest(http.MethodGet, "/downloads/artifacts/"+artifactID, nil)
-		req.Header.Set("Authorization", "Bearer "+testSecret)
+		nodeauthtest.Sign(t, req, testSecret)
 		server.Handler().ServeHTTP(blocked, req)
 		close(getDone)
 	}()
@@ -1807,7 +1823,7 @@ func TestDownloadArtifactHeadDoesNotWaitForConcurrentRelay(t *testing.T) {
 	headDone := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		req := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+artifactID, nil)
-		req.Header.Set("Authorization", "Bearer "+testSecret)
+		nodeauthtest.Sign(t, req, testSecret)
 		rr := httptest.NewRecorder()
 		server.Handler().ServeHTTP(rr, req)
 		headDone <- rr

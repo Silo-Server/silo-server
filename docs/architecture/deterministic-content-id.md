@@ -210,7 +210,10 @@ An item matched to the wrong title sits on that title's id, for example
 the real `73244` show would merge into it when it is scanned in. So the same
 gate re-anchors a provider-anchored item when its identity is corrected: an
 Identify whose choice rejects the provider ID the item is anchored on
-(`identityChoiceCorrects`), or a manual refresh after an NFO `<uniqueid>` fix.
+(`identityChoiceCorrects`), a manual refresh after an NFO `<uniqueid>` fix, or
+an initial match whose NFO IDs replaced the folder-tag IDs the scanner
+anchored the skeleton on (the NFO's IDs must resolve first; see
+[local NFO metadata](local-nfo-metadata.md#identity-hint-first-never-candidate-first)).
 An Identify that confirms or extends the match, or only replaces an anchor
 already recorded as stale (no other title can claim a dead ID), keeps the id,
 as does every scheduled refresh.

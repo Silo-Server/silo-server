@@ -178,3 +178,39 @@ func TestEpisodeTargetSeasonPosterDB(t *testing.T) {
 		t.Fatalf("season without poster should carry no season images: %+v", second.SeasonImages)
 	}
 }
+
+// TestEpisodeTargetSeriesLogoDB: the SQL episode loader carries the series logo
+// with the series poster and backdrop, so episodes get a ParentLogo.
+func TestEpisodeTargetSeriesLogoDB(t *testing.T) {
+	pool, suffix := jellyfin12CompatPool(t)
+	withLogo := fmt.Sprintf("jf12-logo-series-%d", suffix)
+	noLogo := fmt.Sprintf("jf12-nologo-series-%d", suffix)
+	ep1 := fmt.Sprintf("jf12-logo-ep1-%d", suffix)
+	ep2 := fmt.Sprintf("jf12-logo-ep2-%d", suffix)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM episodes WHERE series_id = ANY($1)`, []string{withLogo, noLogo})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{withLogo, noLogo})
+	})
+	jellyfin12Exec(t, pool, `INSERT INTO media_items (content_id, type, title, poster_path, genres, content_rating, backdrop_path, logo_path, status) VALUES ($1, 'series', 'Show', 'series/poster.jpg', '{}', '', 'series/backdrop.jpg', 'series/logo.png', 'matched'), ($2, 'series', 'Other', 'other/poster.jpg', '{}', '', '', '', 'matched')`, withLogo, noLogo)
+	jellyfin12Exec(t, pool, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview, runtime, still_path, imdb_id, tmdb_id, tvdb_id) VALUES ($1, $2, 1, 1, 'Pilot', '', 0, '', '', '', ''), ($3, $4, 1, 1, 'Other Pilot', '', 0, '', '', '', '')`, ep1, withLogo, ep2, noLogo)
+
+	codec := NewResourceIDCodec()
+	h := &ItemsHandler{codec: codec, browseRepo: catalog.NewBrowseRepository(pool), mapper: newMapper(codec, &config.Config{Auth: config.AuthConfig{JWTSecret: "secret"}})}
+	targets, err := h.fetchCompatEpisodeTargetsByContentIDs(context.Background(), &Session{}, []string{ep1, ep2}, nil)
+	if err != nil {
+		t.Fatalf("fetch targets: %v", err)
+	}
+	if got := targets[ep1].SeriesImages; got.LogoPath != "series/logo.png" || got.LogoURL == "" {
+		t.Fatalf("series logo not loaded: path=%q url=%q", got.LogoPath, got.LogoURL)
+	}
+	if got := targets[ep2].SeriesImages; got.LogoPath != "" || got.LogoURL != "" {
+		t.Fatalf("series without a logo should carry none: path=%q url=%q", got.LogoPath, got.LogoURL)
+	}
+
+	dto := baseItemDTO{ID: codec.EncodeStringID(EncodedIDItem, ep1), SeriesID: codec.EncodeStringID(EncodedIDItem, withLogo)}
+	h.applyCompatEpisodeTarget(&dto, targets[ep1])
+	if dto.ParentLogoItemID != dto.SeriesID || dto.ParentLogoImageTag == "" {
+		t.Fatalf("episode ParentLogo = %q %q, want the series id and a tag", dto.ParentLogoItemID, dto.ParentLogoImageTag)
+	}
+}

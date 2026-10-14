@@ -496,6 +496,20 @@ func (r *Repository) nextHomePosition(ctx context.Context) (int, error) {
 }
 
 func (r *Repository) createGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int, libraryName, libraryType string) ([]*PageSection, error) {
+	if IsVideoLibraryType(libraryType) {
+		home, err := r.ListByScopeAll(ctx, "home", nil)
+		if err != nil {
+			return nil, fmt.Errorf("listing home sections: %w", err)
+		}
+		// Enabled home Recently Added rows covering this library's types
+		// (the split default rows, or a combined row from older defaults)
+		// already show the new library. Homes without them, or whose admin
+		// disabled them, still get per-library rows.
+		if hasEnabledHomeRecentlyAddedCovering(home, libraryType) {
+			return nil, nil
+		}
+	}
+
 	existing, err := r.listGeneratedHomeLibraryRecentSections(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing generated home sections: %w", err)

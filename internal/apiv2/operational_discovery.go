@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
 )
@@ -22,6 +23,7 @@ type CompatConnectInfoOutput struct {
 type ImageCapabilities struct {
 	Capability
 	EpisodeStillProvenance bool                       `json:"episode_still_provenance" doc:"Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown"`
+	ExtendedItemArtwork    bool                       `json:"extended_item_artwork" doc:"Movie and series detail (getCatalogItem) may carry banner_url, thumb_url, clearart_url, disc_url and backdrop_urls, and widths lists banner, thumb, clearart and disc"`
 	SeasonListArtworkParam string                     `json:"season_list_artwork_param" doc:"Season-list boolean query parameter; false omits poster URLs and thumbhashes"`
 	Param                  string                     `json:"param"`
 	Sizes                  []imagesize.Size           `json:"sizes"`
@@ -30,6 +32,10 @@ type ImageCapabilities struct {
 	StorageBackend         string                     `json:"storage_backend" enum:"local,s3"`
 	Delivery               string                     `json:"delivery" enum:"server,direct"`
 }
+
+// extendedItemArtworkTypes are the item artwork types beyond poster, backdrop
+// and logo that movie and series detail can carry.
+var extendedItemArtworkTypes = []string{artworkkey.ImageBanner, artworkkey.ImageThumb, artworkkey.ImageClearArt, artworkkey.ImageDisc}
 
 type ImageCapabilitiesOutput struct {
 	Status       int
@@ -54,8 +60,14 @@ func registerOperationalDiscovery(reg *Registry) {
 			for key, value := range view.Widths {
 				widths[key] = ImageSizeWidths(value)
 			}
+			// The v1 capability view is frozen, so the extended artwork
+			// types are listed here only.
+			for _, imageType := range extendedItemArtworkTypes {
+				widths[imageType] = ImageSizeWidths(handlers.ImageWidthsFor(imageType))
+			}
 			return &ImageCapabilitiesOutput{Body: ImageCapabilities{
 				EpisodeStillProvenance: true,
+				ExtendedItemArtwork:    true,
 				SeasonListArtworkParam: view.SeasonListArtworkParam,
 				StorageBackend:         view.StorageBackend, Delivery: view.Delivery,
 				Capability: Capability{State: StateAvailable}, Param: view.Param, Sizes: view.Sizes, Widths: widths, OriginalMaxWidthPx: view.OriginalMaxWidthPx,
