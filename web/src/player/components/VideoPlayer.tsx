@@ -1,6 +1,6 @@
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import { skipTarget } from "../utils/skipTarget";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
 import { resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
@@ -834,7 +834,6 @@ export function VideoPlayer({
   // and nudges the rate itself to keep viewers together.
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const baseRate = roomPlaybackActive ? 1 : playbackSpeed;
-  baseRateRef.current = baseRate;
   const roomSyncWaiting = watchTogether.room?.playback_state === "waiting";
   // Media events acknowledge readiness while the room waits and while this
   // viewer recovers from a stall the room did not wait for.
@@ -1142,9 +1141,12 @@ export function VideoPlayer({
     }
   }, []);
 
-  // defaultPlaybackRate carries the speed across media reloads (quality
-  // switches, stream rebuilds), which reset playbackRate to it.
-  useEffect(() => {
+  // Runs before this commit's other effects, so a catch-up reset in them
+  // already returns to the committed rate. defaultPlaybackRate carries the
+  // speed across media reloads (quality switches, stream rebuilds), which
+  // reset playbackRate to it.
+  useLayoutEffect(() => {
+    baseRateRef.current = baseRate;
     const video = videoRef.current;
     if (!video) return;
     video.defaultPlaybackRate = baseRate;

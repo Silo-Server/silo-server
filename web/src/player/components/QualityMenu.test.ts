@@ -247,7 +247,7 @@ describe("available playback choices", () => {
 });
 
 describe("playback speed", () => {
-  it("keeps the menu for speed alone and picks a speed", () => {
+  it("keeps the menu for speed alone and picks a speed without closing it", () => {
     const onPlaybackSpeedChange = vi.fn();
     render(
       createElement(
@@ -256,7 +256,6 @@ describe("playback speed", () => {
       ),
     );
     const trigger = screen.getByRole("button", { name: "Playback settings" });
-    expect(trigger).toHaveTextContent("1×");
 
     fireEvent.click(trigger);
     expect(screen.getByRole("group", { name: "Speed" })).toBeInTheDocument();
@@ -267,7 +266,8 @@ describe("playback speed", () => {
     );
     fireEvent.click(screen.getByRole("menuitemradio", { name: "1.5×" }));
     expect(onPlaybackSpeedChange).toHaveBeenCalledExactlyOnceWith(1.5);
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    // The menu stays open so the viewer sees the speed take effect.
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
   it("moves between speeds with the left and right arrow keys", () => {
@@ -281,7 +281,7 @@ describe("playback speed", () => {
     expect(half).toHaveFocus();
   });
 
-  it("names a speed other than 1x next to the quality", () => {
+  it("badges the gear with a speed other than 1x", () => {
     const props = menuProps({
       options: [auto, original],
       activeId: "original",
@@ -294,9 +294,8 @@ describe("playback speed", () => {
     );
 
     rerender(createElement(QualityMenu, { ...props, playbackSpeed: 1.5 }));
-    // The second copy of the speed is the narrow-screen label.
-    expect(screen.getByRole("button", { name: "Playback settings, 1.5×" })).toHaveTextContent(
-      "Original · 1.5×1.5×",
-    );
+    const trigger = screen.getByRole("button", { name: "Playback settings, 1.5×" });
+    expect(trigger.querySelector(".player-quality-label")).toHaveTextContent(/^Original$/);
+    expect(trigger.querySelector(".player-speed-badge")).toHaveTextContent(/^1\.5×$/);
   });
 });

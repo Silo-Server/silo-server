@@ -4,6 +4,7 @@ import { resolveActiveQualityOptionId } from "../playback-info";
 import type { EffectiveRecipeV3 } from "../protocol-v3";
 import type { QualityOption } from "../types";
 import { PLAYBACK_SPEEDS, formatPlaybackSpeed } from "../utils/playbackSpeed";
+import { PlaybackSpeedTrack } from "./PlaybackSpeedTrack";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 export interface VersionInfo {
@@ -119,78 +120,55 @@ export function QualityMenu({
   let sourceLabel: string | null = null;
   if (showQuality) sourceLabel = isTranscoding ? "…" : (activeOption?.label ?? "Quality");
   else if (showVersions) sourceLabel = "Version";
-  // A speed other than 1x stays visible on the trigger, narrow screens included.
+  // A speed other than 1x stays on the gear in every layout: inline after the
+  // quality label, or on the gear's corner where the label is hidden.
   const changedSpeed = showSpeed && playbackSpeed !== 1 ? formatPlaybackSpeed(playbackSpeed) : null;
-  // With no quality or version to name, the trigger shows the speed even at 1x.
-  const speedLabel =
-    showSpeed && (changedSpeed || !sourceLabel) ? formatPlaybackSpeed(playbackSpeed) : null;
-  const triggerLabel = [sourceLabel, speedLabel].filter(Boolean).join(" · ");
-  let menuItemIndex = 0;
+  // The speed stops come first in the menu's arrow-key order.
+  let menuItemIndex = showSpeed ? PLAYBACK_SPEEDS.length : 0;
 
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
       <button
         type="button"
-        className={`player-quality-trigger player-utility-btn sm:w-auto sm:gap-1.5 sm:px-3 ${
-          changedSpeed ? "w-auto gap-1 px-2" : ""
-        }`}
+        className="player-quality-trigger player-utility-btn sm:w-auto sm:gap-1.5 sm:px-3"
         onClick={() => setOpen((v) => !v)}
         aria-label={changedSpeed ? `${menuLabel}, ${changedSpeed}` : menuLabel}
         aria-expanded={open}
         aria-haspopup="menu"
       >
         <Settings className="h-[18px] w-[18px]" />
-        <span className="hidden text-[11px] font-medium tracking-wide sm:inline">
-          {triggerLabel}
-        </span>
+        {sourceLabel && (
+          <span className="player-quality-label hidden text-[11px] font-medium tracking-wide sm:inline">
+            {sourceLabel}
+          </span>
+        )}
         {changedSpeed && (
-          <span className="text-[11px] font-medium tabular-nums sm:hidden">{changedSpeed}</span>
+          <span
+            aria-hidden="true"
+            className="player-speed-badge pointer-events-none absolute top-0.5 left-6 rounded-full bg-white px-1 text-[9px] leading-[13px] font-semibold text-black tabular-nums shadow-[0_0_0_2px_rgba(0,0,0,0.65)] sm:static"
+          >
+            {changedSpeed}
+          </span>
         )}
       </button>
 
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 max-h-[calc(100dvh-8rem)] min-w-[200px] overflow-y-auto rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
+          className="absolute right-0 bottom-full z-30 mb-2 max-h-[calc(100dvh-8rem)] min-w-[224px] overflow-y-auto rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           {error && <div className="px-3 py-1 text-xs text-red-400">{error}</div>}
           {showSpeed && (
             <>
-              <div className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase">Speed</div>
-              <div
-                role="group"
-                aria-label="Speed"
-                className="flex max-w-[288px] flex-wrap gap-1.5 px-3 pt-1 pb-2"
-              >
-                {PLAYBACK_SPEEDS.map((rate) => {
-                  const idx = menuItemIndex++;
-                  const isActive = rate === playbackSpeed;
-                  return (
-                    <button
-                      key={rate}
-                      ref={(el) => {
-                        menuItemsRef.current[idx] = el;
-                      }}
-                      role="menuitemradio"
-                      type="button"
-                      aria-checked={isActive}
-                      className={`w-12 rounded-md py-1.5 text-center text-[13px] tabular-nums focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
-                        isActive
-                          ? "bg-white font-semibold text-black"
-                          : "bg-white/10 text-white/80 hover:bg-white/20"
-                      }`}
-                      onClick={() => {
-                        onPlaybackSpeedChange(rate);
-                        setOpen(false);
-                      }}
-                    >
-                      {formatPlaybackSpeed(rate)}
-                    </button>
-                  );
-                })}
-              </div>
+              <PlaybackSpeedTrack
+                value={playbackSpeed}
+                onChange={onPlaybackSpeedChange}
+                itemRef={(stop) => (el) => {
+                  menuItemsRef.current[stop] = el;
+                }}
+              />
               {(showVersions || showQuality) && <div className="my-1 border-t border-white/10" />}
             </>
           )}
