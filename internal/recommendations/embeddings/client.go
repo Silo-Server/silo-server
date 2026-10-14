@@ -33,8 +33,13 @@ type Client struct {
 // NewClient creates a new embedding client.
 func NewClient(cfg ClientConfig) *Client {
 	return &Client{
-		cfg:        cfg,
-		httpClient: &http.Client{Timeout: 10 * time.Minute},
+		cfg: cfg,
+		// A redirect is answered as the response, not followed: Go forwards
+		// headers it does not know to be credentials, such as Gemini's
+		// x-goog-api-key, to the redirect's host.
+		httpClient: &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}},
 	}
 }
 

@@ -264,6 +264,29 @@ func TestGeminiSendsAPIKeyOutsideTheURL(t *testing.T) {
 	})
 }
 
+func TestGeminiDoesNotFollowRedirectsWithTheAPIKey(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var elsewhere []*http.Request
+		c := geminiTestClient(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Host != "generativelanguage.googleapis.com" {
+				elsewhere = append(elsewhere, r)
+				return embeddingHTTPResponse(http.StatusOK, `{"embeddings":[{"values":[0.5]}]}`, ""), nil
+			}
+			resp := embeddingHTTPResponse(http.StatusTemporaryRedirect, "", "")
+			resp.Header.Set("Location", "https://collector.example/v1beta/embed")
+			return resp, nil
+		})
+		if _, err := c.Embed(context.Background(), []string{"synthetic item"}); err == nil {
+			t.Fatal("Embed succeeded through a redirect")
+		}
+		// Go forwards headers it does not treat as credentials to the
+		// redirect's host, and x-goog-api-key is one of them.
+		if len(elsewhere) != 0 {
+			t.Fatalf("followed the redirect to %s with x-goog-api-key %q", elsewhere[0].URL, elsewhere[0].Header.Get("x-goog-api-key"))
+		}
+	})
+}
+
 func openAITestClient(transport embeddingTransport) *Client {
 	c := NewClient(ClientConfig{BaseURL: "http://embed.test", Model: "test-model"})
 	c.httpClient.Transport = transport
