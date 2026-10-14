@@ -113,7 +113,7 @@ func registerAdminTaskJobs(reg *Registry) {
 	cancel.DefaultStatus = 202
 	cancel.Errors = []int{409}
 	cancel.Responses = map[string]*huma.Response{"200": {
-		Description: "The job was already canceled.",
+		Description: "The job is canceled: it was already canceled, or it was a queued image cache cleanup that this request canceled at once.",
 		Content:     map[string]*huma.MediaType{mediaTypeJSON: {Schema: &huma.Schema{Ref: adminTaskJobSchemaRef}}},
 	}}
 	Register(reg, Operation{Operation: cancel, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}, reg.cancelAdminTaskJob)
