@@ -37,7 +37,7 @@ describe("detectHLSSupport", () => {
 });
 
 describe("buildDeliveriesV3", () => {
-  it("advertises the embedded text artifacts rendered by the web player", () => {
+  it("advertises the embedded text and PGS artifacts rendered by the web player", () => {
     const deliveries = buildDeliveriesV3({
       containers: ["mp4"],
       codecsVideo: ["h264"],
@@ -60,6 +60,8 @@ describe("buildDeliveriesV3", () => {
     for (const delivery of Object.values(deliveries)) {
       expect(delivery.subtitles.embedded_text).toBe(true);
       expect(delivery.subtitles.sidecar_text).toBe(true);
+      expect(delivery.subtitles.embedded_bitmap).toBe(true);
+      expect(delivery.subtitles.sidecar_bitmap).toBe(false);
     }
   });
 });
