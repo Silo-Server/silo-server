@@ -395,7 +395,8 @@ func (a attemptRun) sheets(req Request, times []float64, inputStart float64, dup
 // keyframes.go). It stops ffmpeg and reports false, for the caller to read
 // the samples from their own times, as soon as the decoder passes on a frame
 // from an earlier entry than the frame before it or logs
-// duplicatePOCMessage, unless the attempt itself has ended.
+// duplicatePOCMessage. An abandoned read never counts: when the attempt has
+// ended by then, it fails as timed out or canceled.
 func (a attemptRun) keyframeSheets(req Request, times []float64, inputStart float64) (Result, *AttemptError, bool) {
 	ctx, cancel := context.WithCancel(a.attemptCtx)
 	defer cancel()
@@ -411,10 +412,16 @@ func (a attemptRun) keyframeSheets(req Request, times []float64, inputStart floa
 			abandon()
 		}
 	})
-	if abandoned.Load() && a.attemptCtx.Err() == nil {
-		return Result{}, nil, false
+	if !abandoned.Load() {
+		return result, failure, true
 	}
-	return result, failure, true
+	switch {
+	case a.ctx.Err() != nil:
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonCanceled, Err: a.ctx.Err()}, true
+	case a.attemptCtx.Err() != nil:
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonTimeout, Err: a.attemptCtx.Err()}, true
+	}
+	return Result{}, nil, false
 }
 
 // readSheets runs one Sheets read: plan's list, or req's window when it has

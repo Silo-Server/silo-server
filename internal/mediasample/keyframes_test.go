@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestKeyframePlan(t *testing.T) {
@@ -280,6 +281,38 @@ func TestRunSheetsAbandonsAKeyframeList(t *testing.T) {
 				t.Fatalf("runs %d, lists %q; want probe, keyframe list, sample-time list %q", len(*runs), sampleRun.lists, want)
 			}
 		})
+	}
+}
+
+// TestRunSheetsDiscardsAnAbandonedListAfterTheAttemptEnds has ffmpeg exit
+// successfully after passing on frames out of list order, once the attempt's
+// time is up: the abandoned list's cells are not published, and the attempt
+// fails as timed out.
+func TestRunSheetsDiscardsAnAbandonedListAfterTheAttemptEnds(t *testing.T) {
+	stubKeyframes(t, []float64{0, 10, 20})
+	keyframeRun := &fakeSheets{format: "matroska,webm", frames: []fakeSheetFrame{at(30, 25, "1"), at(10, 5, "1.5"), at(20, 15, "2")}}
+	exec, _ := runSequence([]*fakeSheets{keyframeRun, {}, {}, {}}, nil)
+	listRuns := 0
+	waitOut := func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+		if err := exec(ctx, name, args, stdin, stdout, stderr); err != nil || !slices.Contains(args, "concat") {
+			return err
+		}
+		if listRuns++; listRuns == 1 {
+			// Exit cleanly, but only once the guard stopped the read and
+			// the attempt's deadline has passed.
+			<-ctx.Done()
+			if deadline, ok := ctx.Deadline(); ok {
+				<-time.After(time.Until(deadline))
+			}
+		}
+		return nil
+	}
+	req := sheetsRequest(secondsFrom(5, 10, 3), 3, 1)
+	req.Attempts = []Attempt{{TimeoutSeconds: 0.2}}
+	result, err := Runner{Exec: waitOut}.Run(t.Context(), req)
+	failure, ok := errors.AsType[*Error](err)
+	if !ok || failure.Reason != ReasonTimeout || len(result.Sheets) != 0 {
+		t.Fatalf("frames %+v error %v, want the attempt to time out without sheets", result.SheetFrames, err)
 	}
 }
 

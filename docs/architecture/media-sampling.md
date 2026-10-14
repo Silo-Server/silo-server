@@ -462,7 +462,8 @@ at the sample's keyframe and reads only it and the entry's span
   duplicates. As soon as a frame comes from an earlier entry than the frame
   before it, or the decoder logs "Duplicate POC in a sequence", the attempt
   stops ffmpeg and reads the samples from their own times, exactly as a
-  file without Cues. A duplicate in the abandoned read does not count
+  file without Cues. An abandoned read is never published: if the attempt's
+  time ran out meanwhile, it fails as `timeout`. A duplicate in the abandoned read does not count
   toward the window fallback above. Closed-GOP keyframes start their counts
   afresh and keep their keyframe entries.
 - MP4 and every other container keep sample-time entries: an MP4 entry that
