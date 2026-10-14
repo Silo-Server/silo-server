@@ -113,6 +113,11 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	if req.CollectionType == adminCollectionTrakt || isTraktCollectionSourceConfig(req.SourceConfig) {
 		return none, apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
 	}
+	if req.CollectionType != "" {
+		if err := validateCollectionType(req.CollectionType); err != nil {
+			return none, err
+		}
+	}
 	if err := validateCollectionVisibility(req.Visibility); err != nil {
 		return none, err
 	}
@@ -211,6 +216,11 @@ func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, re
 
 func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
+	if req.CollectionType != nil {
+		if err := validateCollectionType(*req.CollectionType); err != nil {
+			return none, err
+		}
+	}
 	visibility, err := normalizeCollectionVisibilityUpdate(req.Visibility)
 	if err != nil {
 		return none, err
@@ -315,6 +325,19 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		h.refreshSmartCountAsync(collectionID)
 	}
 	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, updated)), nil
+}
+
+// validateCollectionType rejects values the library_collections
+// collection_type CHECK constraint would refuse. Create skips it for an empty
+// value, which later defaults to manual; an update has no default to fall back
+// to, so an explicit empty value is an error. Trakt passes so that a legacy
+// Trakt collection can be saved unchanged; validateAdminCollectionSourceUpdate
+// and createAdminCollection refuse new ones.
+func validateCollectionType(collectionType string) error {
+	if catalog.IsKnownType(collectionType) {
+		return nil
+	}
+	return fieldError("collection_type", "collection_type must be manual, smart, mdblist, or tmdb")
 }
 
 // normalizeCollectionVisibilityUpdate validates an update's visibility. Nil

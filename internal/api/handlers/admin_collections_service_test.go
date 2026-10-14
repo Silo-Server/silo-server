@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -22,6 +25,51 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 		err := h.UploadAdminCollectionArtwork(t.Context(), "collection", kind, nil)
 		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 {
 			t.Fatalf("invalid artwork: %v", err)
+		}
+	}
+}
+
+func TestAdminCollectionServiceRejectsUnknownCollectionType(t *testing.T) {
+	h := &LibraryCollectionHandler{}
+	_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", CollectionType: "bogus"})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
+		t.Fatalf("create: expected collection_type field error, got %v", err)
+	}
+	for _, v := range []string{"bogus", ""} {
+		_, err = h.UpdateAdminCollection(t.Context(), "collection", AdminCollectionUpdate{CollectionType: new(v)})
+		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
+			t.Fatalf("update %q: expected collection_type field error, got %v", v, err)
+		}
+	}
+	for _, v := range []string{"manual", "smart", "mdblist", "tmdb", "trakt"} {
+		if err := validateCollectionType(v); err != nil {
+			t.Fatalf("%q rejected: %v", v, err)
+		}
+	}
+	// An omitted type defaults to manual on create, so it must get past the
+	// type check; the missing title is what stops this request.
+	_, err = h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Field == "collection_type" || e.Code != "bad_request" {
+		t.Fatalf("create without a type: expected the title error, got %v", err)
+	}
+}
+
+// The v1 bridge routes share the service validation and answer it as a 400.
+func TestAdminCollectionV1RoutesRejectUnknownCollectionType(t *testing.T) {
+	h := &LibraryCollectionHandler{}
+	for _, tc := range []struct {
+		method string
+		serve  func(http.ResponseWriter, *http.Request)
+	}{
+		{http.MethodPost, h.HandleCreateAdminCollection},
+		{http.MethodPut, h.HandleUpdateAdminCollection},
+	} {
+		req := accessGroupRequestWithID(tc.method, "/api/v1/admin/collections/c1", strings.NewReader(`{"title":"repro","library_id":1,"collection_type":"bogus"}`), "c1")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		tc.serve(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "collection_type") {
+			t.Fatalf("%s: got %d %s", tc.method, rec.Code, rec.Body)
 		}
 	}
 }
