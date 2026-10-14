@@ -524,10 +524,22 @@ func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem
 			b.counts.Failed++
 			b.consecutiveFailures++
 			slog.WarnContext(ctx, "skipping item, embed failed", "component", "recommendations", "item_id", item.ContentID, "error", err)
-			// The batch call already failed; when the first item alone fails
-			// too and nothing has been stored, the provider is not working.
-			if (i == 0 && b.counts.Embedded == 0) || b.consecutiveFailures >= maxConsecutiveEmbedFailures {
+			if b.consecutiveFailures >= maxConsecutiveEmbedFailures {
 				return providerUnavailable(err)
+			}
+			// The batch call already failed; when the first item alone fails
+			// too and nothing has been stored, the provider may not be
+			// working. Embedding embedProbeText tells an outage from an item
+			// the provider cannot embed, which would otherwise end every run
+			// at the head of the backlog.
+			if i == 0 && b.counts.Embedded == 0 && !b.probed {
+				if _, probeErr := b.embedText(ctx, embedProbeText); probeErr != nil {
+					if stop := runStopError(ctx, probeErr); stop != nil {
+						return stop
+					}
+					return providerUnavailable(err)
+				}
+				b.probed = true
 			}
 			continue
 		}

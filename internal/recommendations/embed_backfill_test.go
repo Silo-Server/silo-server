@@ -318,7 +318,7 @@ func TestBackfillLocksImportedEmbeddings(t *testing.T) {
 }
 
 // A provider that answers 200 with a malformed body fails the run before any
-// lock or row is written.
+// lock or row is written: the batch, its first item and the probe all fail.
 func TestBackfillMalformedResponsesFailTheRun(t *testing.T) {
 	for name, entry := range map[string]func(index int) string{
 		"no data":      nil,
@@ -356,7 +356,7 @@ func TestBackfillMalformedResponsesFailTheRun(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "embedding provider unavailable") {
 				t.Fatalf("error = %v, want the run to fail", err)
 			}
-			if store.lock != nil || len(store.stored) != 0 || requests != 2 {
+			if store.lock != nil || len(store.stored) != 0 || requests != 3 {
 				t.Fatalf("lock=%+v stored=%d requests=%d", store.lock, len(store.stored), requests)
 			}
 		})
@@ -395,8 +395,32 @@ func TestBackfillStopsWhenFallbackItemsKeepFailing(t *testing.T) {
 			return nil, broken
 		}), nil)
 		err := b.run(context.Background(), true)
-		if calls != 2 || !errors.Is(err, broken) || !strings.Contains(err.Error(), "embedding provider unavailable") {
+		// The batch, the first item, then the probe.
+		if calls != 3 || !errors.Is(err, broken) || !strings.Contains(err.Error(), "embedding provider unavailable") {
 			t.Fatalf("calls=%d counts=%+v error=%v", calls, b.counts, err)
+		}
+	})
+
+	t.Run("a first item the provider cannot embed does not stop the run", func(t *testing.T) {
+		// "item-0000" always fails with an error that is not a refusal;
+		// every run starts from it, so ending the run there would leave the
+		// items after it unembedded forever.
+		store := newFakeEmbeddingStore(testIDs("item-", 10)...)
+		b := newTestBackfill(store, quotaTestEmbedder(func(_ context.Context, texts []string) ([][]float32, error) {
+			if slices.Contains(texts, "item-0000") {
+				return nil, broken
+			}
+			out := make([][]float32, len(texts))
+			for i := range out {
+				out[i] = testVector(8)
+			}
+			return out, nil
+		}), nil)
+		if err := b.run(context.Background(), true); err != nil {
+			t.Fatal(err)
+		}
+		if b.counts.Embedded != 9 || b.counts.Failed != 1 {
+			t.Fatalf("counts=%+v, want the nine other items embedded", b.counts)
 		}
 	})
 
