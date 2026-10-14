@@ -4606,20 +4606,21 @@ func TestServiceFullFavoriteImportKeepsAmbiguousKey(t *testing.T) {
 		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
 		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
 	}
-	for _, id := range []string{"movie:tmdb:550", "movie:imdb:tt0137523"} {
+	// Export stored both copies under the IMDb key; Trakt keys shows by TVDB id.
+	for _, id := range []string{"series:tvdb:81189", "series:imdb:tt0903747"} {
 		if _, err := store.AddFavoriteAt(ctx, conn.ProfileID, id, time.Now().UTC()); err != nil {
 			t.Fatal(err)
 		}
 		repo.listItemStates = append(repo.listItemStates, ListItemState{
-			ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: id, Kind: "movie",
-			ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LocalPresent: true,
+			ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: id, Kind: "series",
+			ProviderItemKey: "imdb:tt0903747", RemotePresent: true, LocalPresent: true,
 		})
 	}
 	service := NewService(repo, NewRegistry()).
-		WithMatcher(unmatchedMatcherStub{reason: "ambiguous imdb match"}).
+		WithMatcher(unmatchedMatcherStub{reason: "ambiguous tvdb_id match"}).
 		WithUserStoreProvider(staticStoreProvider{store: store})
 	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{
-		Rows: []RemoteFavorite{{ProviderItemKey: "imdb:tt0137523", Kind: "movie", IMDbID: "tt0137523"}},
+		Rows: []RemoteFavorite{{ProviderItemKey: "tvdb:81189", Kind: "series", IMDbID: "tt0903747", TVDBID: "81189"}},
 	}}
 	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
 	if err != nil {
@@ -4640,50 +4641,77 @@ func TestServiceFullFavoriteImportKeepsAmbiguousKey(t *testing.T) {
 }
 
 // Unfavoriting one copy of a title while another copy holds the key leaves
-// the key on the provider; an import must not favorite that copy again.
-func TestServiceFavoriteImportKeepsPendingLocalRemoval(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatal(err)
+// the key on the provider. An import must not favorite that copy again from
+// the listing the removal is waiting on, but a newer listing is a new add.
+func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
+	removedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		listedAt  time.Time
+		wantAdded bool
+	}{
+		{name: "listing older than the removal", listedAt: removedAt.Add(-24 * time.Hour)},
+		{name: "listing newer than the removal", listedAt: removedAt.Add(time.Hour), wantAdded: true},
 	}
-	defer func() { _ = db.Close() }()
-	if err := userdb.InitSchema(db); err != nil {
-		t.Fatal(err)
-	}
-	store := userdb.NewSQLiteUserStore(db)
-	ctx := context.Background()
-	repo := newServiceFakeRepo()
-	conn := Connection{
-		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
-		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
-	}
-	if _, err := store.AddFavoriteAt(ctx, conn.ProfileID, "movie-b", time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	repo.listItemStates = []ListItemState{
-		{ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: "movie-a", Kind: "movie", ProviderItemKey: "imdb:tt0137523", RemotePresent: true},
-		{ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: "movie-b", Kind: "movie", ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LocalPresent: true},
-	}
-	// The provider's row carries a TMDB id only movie-a has, so it matches a.
-	service := NewService(repo, NewRegistry()).
-		WithMatcher(matchedMatcherStub{mediaItemID: "movie-a"}).
-		WithUserStoreProvider(staticStoreProvider{store: store})
-	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{
-		Rows: []RemoteFavorite{{ProviderItemKey: "imdb:tt0137523", Kind: "movie", IMDbID: "tt0137523", TMDBID: "550"}},
-	}}
-	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
-	if err != nil {
-		t.Fatal(err)
-	}
-	favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Imported != 0 || result.Removed != 0 || len(favorites) != 1 || favorites[0].MediaItemID != "movie-b" {
-		t.Fatalf("result=%#v favorites=%#v", result, favorites)
-	}
-	if a := repo.listItemStates[0]; a.LocalPresent || !a.RemotePresent {
-		t.Fatalf("movie-a state = %#v, want still pending removal", a)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = db.Close() }()
+			if err := userdb.InitSchema(db); err != nil {
+				t.Fatal(err)
+			}
+			store := userdb.NewSQLiteUserStore(db)
+			ctx := context.Background()
+			repo := newServiceFakeRepo()
+			conn := Connection{
+				ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
+				ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
+			}
+			if _, err := store.AddFavoriteAt(ctx, conn.ProfileID, "movie-b", time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			repo.listItemStates = []ListItemState{
+				{
+					ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: "movie-a", Kind: "movie",
+					ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LastRemovedLocalAt: &removedAt,
+				},
+				{
+					ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: "movie-b", Kind: "movie",
+					ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LocalPresent: true,
+				},
+			}
+			// The provider's row carries a TMDB id only movie-a has, so it matches a.
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(matchedMatcherStub{mediaItemID: "movie-a"}).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+			provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{
+				Rows: []RemoteFavorite{{
+					ProviderItemKey: "imdb:tt0137523", Kind: "movie", IMDbID: "tt0137523", TMDBID: "550",
+					FavoritedAt: tt.listedAt,
+				}},
+			}}
+			result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+			if err != nil {
+				t.Fatal(err)
+			}
+			favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantFavorites := 1
+			if tt.wantAdded {
+				wantFavorites = 2
+			}
+			if result.Removed != 0 || len(favorites) != wantFavorites {
+				t.Fatalf("result=%#v favorites=%#v", result, favorites)
+			}
+			if a := repo.listItemStates[0]; a.LocalPresent != tt.wantAdded || !a.RemotePresent {
+				t.Fatalf("movie-a state = %#v, want local %v", a, tt.wantAdded)
+			}
+		})
 	}
 }
 

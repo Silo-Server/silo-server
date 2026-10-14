@@ -272,14 +272,20 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			}
 			continue
 		}
-		// The provider still lists the key even when the row matches no single
-		// library item, for example when two items carry its id.
+		// The provider still lists the title even when the row matches no
+		// single library item, for example when two items carry its id. Its
+		// key format can differ from the one stored at export (Trakt keys
+		// shows by TVDB id first), so every id the row carries counts.
 		key := row.ProviderItemKey
 		if key == "" {
 			key = providerItemKeyForRemoteFavorite(row)
 		}
-		if key != "" {
-			seenRemoteKeys[key] = true
+		for _, seen := range []string{
+			key, prefixedID("imdb", row.IMDbID), prefixedID("tmdb", row.TMDBID), prefixedID("tvdb", row.TVDBID),
+		} {
+			if seen != "" {
+				seenRemoteKeys[seen] = true
+			}
 		}
 		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
 		if err != nil {
@@ -292,7 +298,9 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			}
 			continue
 		}
-		if removalsPending[match.MediaItemID] {
+		// The provider listing the item again after the local removal is a
+		// newer add; an older listing is the one the removal will take off.
+		if removedAt, pending := removalsPending[match.MediaItemID]; pending && !row.FavoritedAt.After(removedAt) {
 			continue
 		}
 		if err := b.localAdd(ctx, store, conn.ProfileID, match.MediaItemID, row.FavoritedAt); err != nil {
@@ -341,12 +349,13 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	return result, nil
 }
 
-// listItemsPendingRemoval returns the items removed from the local list whose
-// removal has not reached the provider yet, when removals sync. The provider
-// still lists them, so an import must not add them back: a failed removal
-// retries later in the run, and a removal held because another library item
-// shares the key stays until that item leaves too.
-func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (map[string]bool, error) {
+// listItemsPendingRemoval maps each item whose local removal has not reached
+// the provider yet to when it left the local list, when removals sync. The
+// provider still lists these items, so an import must not add them back from
+// that listing: a failed removal retries later in the run, and a removal held
+// because another library item shares the key stays until that item leaves
+// too.
+func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (map[string]time.Time, error) {
 	if !b.removalsEnabled(conn) {
 		return nil, nil
 	}
@@ -354,10 +363,14 @@ func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, 
 	if err != nil {
 		return nil, err
 	}
-	pending := make(map[string]bool)
+	pending := make(map[string]time.Time)
 	for _, state := range states {
 		if !state.LocalPresent && state.RemotePresent {
-			pending[state.MediaItemID] = true
+			var removedAt time.Time
+			if state.LastRemovedLocalAt != nil {
+				removedAt = *state.LastRemovedLocalAt
+			}
+			pending[state.MediaItemID] = removedAt
 		}
 	}
 	return pending, nil
