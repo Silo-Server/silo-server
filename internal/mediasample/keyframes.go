@@ -55,8 +55,8 @@ import (
 const keyframeLookupTimeout = 10 * time.Second
 
 // keyframeLookups bounds the lookups in flight across the process, including
-// those left behind blocked, and so the memory parsing Cues takes: a few
-// times the Cues' size, which keyframes.ReadMatroska accepts up to 64 MiB. A
+// those left behind blocked, and so the memory parsing Cues takes, a few
+// times their size up to keyframes.ReadMatroska's limit on them. A
 // lookup takes milliseconds, so a few slots serve any number of trickplay
 // workers. A run that finds every slot taken lists sample times without
 // reading the Cues.
