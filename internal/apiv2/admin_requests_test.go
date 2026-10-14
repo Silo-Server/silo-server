@@ -287,16 +287,18 @@ func TestAdminRequestOptionsTellsOmittedFromClearedBaseURL(t *testing.T) {
 	for _, tc := range []struct {
 		body        string
 		wantCleared bool
+		wantURL     string
 	}{
-		{`{}`, false},
-		{`{"base_url":""}`, true},
-		{`{"base_url":"10.0.0.5:8989"}`, false},
+		{`{}`, false, ""},
+		{`{"base_url":""}`, true, ""},
+		{`{"base_url":"  "}`, true, ""},
+		{`{"base_url":"10.0.0.5:8989"}`, false, "http://10.0.0.5:8989"},
 	} {
 		if rec := do(t, h, http.MethodPost, path, tc.body, actingRequestAdmin); rec.Code != 200 {
 			t.Fatal(tc.body, rec.Code, rec.Body.String())
 		}
-		if f.probedBaseURLCleared != tc.wantCleared {
-			t.Fatalf("%s: cleared = %v, want %v", tc.body, f.probedBaseURLCleared, tc.wantCleared)
+		if f.probedBaseURLCleared != tc.wantCleared || f.probedBaseURL != tc.wantURL {
+			t.Fatalf("%s: cleared = %v, url = %q; want %v, %q", tc.body, f.probedBaseURLCleared, f.probedBaseURL, tc.wantCleared, tc.wantURL)
 		}
 	}
 }

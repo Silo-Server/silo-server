@@ -1562,7 +1562,8 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 	// On UPDATE the client omits api_key_ref ("leave blank to keep saved key"),
 	// so we would otherwise validate against an empty credential. Mirror
 	// LoadIntegrationOptions's backfill: load the stored row by id and reuse the
-	// saved (already-decrypted) api key (and BaseURL/PluginConfig if also blank).
+	// saved (already-decrypted) api key (and PluginConfig if also blank). The
+	// base URL is validated as sent, since that is what the save stores.
 	// Nil-safe — a brand-new id has no stored row, so just proceed with what the
 	// body carries.
 	if strings.TrimSpace(in.APIKeyRef) == "" && strings.TrimSpace(in.ID) != "" {
@@ -1580,9 +1581,6 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 				return &ValidationError{FieldErrors: map[string]string{fieldAPIKey: integrationKeyReentry}}
 			}
 			in.APIKeyRef = stored.APIKeyRef
-			if strings.TrimSpace(in.BaseURL) == "" && s.blankURLMeansSaved(ctx, in) {
-				in.BaseURL = stored.BaseURL
-			}
 			if in.PluginConfig == nil {
 				in.PluginConfig = stored.PluginConfig
 			}

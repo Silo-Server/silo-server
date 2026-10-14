@@ -307,10 +307,11 @@ func TestUpdateIntegrationAddressChangeNeedsKeyOnlyWhenOneIsSaved(t *testing.T) 
 	}
 }
 
-// A blank URL sent for a saved server is tested and validated as blank when
-// its router declares base_url_optional, since that is what the save stores.
-// For any other router it still stands for the saved address, and so does a
-// URL a connection test leaves out.
+// A blank URL in a connection test of a saved server is tested as blank when
+// its router declares base_url_optional. For any other router it still stands
+// for the saved address, and so does a URL a connection test leaves out. A
+// save validates the blank URL it stores, whatever the router declares, so the
+// plugin can refuse an address it can't use.
 func TestClearedURLIsTestedAndValidatedAsBlankForURLOptionalRouter(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -346,8 +347,12 @@ func TestClearedURLIsTestedAndValidatedAsBlankForURLOptionalRouter(t *testing.T)
 			}); err != nil {
 				t.Fatalf("UpdateIntegration: %v", err)
 			}
-			if router.gotValidateConn.BaseURL != tc.want {
-				t.Fatalf("validated address = %q, want %q", router.gotValidateConn.BaseURL, tc.want)
+			stored, err := store.GetIntegration(context.Background(), "router-1")
+			if err != nil {
+				t.Fatalf("GetIntegration: %v", err)
+			}
+			if router.gotValidateConn.BaseURL != "" || stored.BaseURL != "" {
+				t.Fatalf("validated address = %q, stored address = %q; want the blank address validated and stored", router.gotValidateConn.BaseURL, stored.BaseURL)
 			}
 		})
 	}

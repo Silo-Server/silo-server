@@ -21,8 +21,8 @@ type RouterFeatures struct {
 	// a key (see missingAPIKey).
 	APIKeyOptional bool
 	// BaseURLOptional: the plugin works without a base URL, so a blank one
-	// on a saved server is tested and validated as blank rather than as the
-	// saved address (see blankURLMeansSaved).
+	// in a connection test of a saved server is tested as blank rather than
+	// as the saved address (see blankURLMeansSaved).
 	BaseURLOptional bool
 }
 
@@ -67,8 +67,8 @@ func (s *Service) routerFeatures(ctx context.Context, fc *fulfillContext, instal
 	return features, nil
 }
 
-// blankURLMeansSaved reports whether a blank base URL sent for a saved
-// server stands for its saved address, as it does for a plugin that needs
+// blankURLMeansSaved reports whether a blank base URL in a connection test
+// of a saved server stands for its saved address, as it does for a plugin that needs
 // one. A plugin that declares base_url_optional takes a blank address as it
 // is, so an admin can clear it. When the declaration cannot be read, a blank
 // address stands for the saved one, as before.

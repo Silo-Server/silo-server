@@ -408,10 +408,11 @@ without a key has none to protect, so its URL can change without one. The save
 checks this again under the row lock, so a key saved, or an address changed,
 by another admin in the meantime is never paired with a different address. A
 connection test of a saved server that leaves the URL out tests its saved
-address. A blank URL in a test or save stands for the saved address too,
-unless the plugin declares `base_url_optional`; then it is tested and saved
-blank, so an admin can clear it. Clearing it counts as changing the address: a
-saved key has to be typed again, and the test goes without it.
+address. A blank URL in a test stands for the saved address too, unless the
+plugin declares `base_url_optional`; then it is tested blank, so an admin can
+clear it. A save validates and stores the URL it is given, blank included.
+Clearing it counts as changing the address: a saved key has to be typed again,
+and the test goes without it.
 
 The library also completes requests that never reached a router: a `pending`
 request whose title appears needs no approval any more, and a `failed` request
