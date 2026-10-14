@@ -21,10 +21,6 @@ import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
 import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
-import type { EngineCapabilities } from "../engine/capabilities";
-import { resolveOriginalPlaybackRoute, type NativeOriginalSupport } from "../engine/routing";
-import type { BrowserEngineSession } from "../engine";
-import { ENGINE_READ_FAILED } from "../engine/protocol";
 import { useSubtitleSync } from "../hooks/useSubtitleSync";
 import { useSubtitleSyncFeedback } from "../hooks/useSubtitleSyncFeedback";
 import { syncKeyOf } from "../utils/subtitleSync";
@@ -158,14 +154,6 @@ interface VideoPlayerProps {
   plan: PlanV3;
   /** Bumped on every adopted plan; stream-reload effects key on it. */
   planRevision: number;
-  /**
-   * The browser decode engine, when browser decoding is on and this browser
-   * can run it. An `original_http` plan the media element cannot play goes to
-   * the engine instead.
-   */
-  browserEngine?: EngineCapabilities | null;
-  /** What the media element itself plays from an untouched original. */
-  nativeOriginalSupport?: NativeOriginalSupport;
   /** Whether a newly adopted transport should begin playing immediately. */
   shouldAutoPlay?: boolean;
   /** True while a replan is in flight, so the quality menu can show progress. */
@@ -365,8 +353,6 @@ export function VideoPlayer({
   streamUrl,
   plan,
   planRevision,
-  browserEngine = null,
-  nativeOriginalSupport,
   shouldAutoPlay = true,
   replanning = false,
   replanError = null,
@@ -439,13 +425,6 @@ export function VideoPlayer({
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // Box under the <video> that holds the browser decode engine's canvas.
-  const engineSurfaceRef = useRef<HTMLDivElement>(null);
-  const [browserEngineActive, setBrowserEngineActive] = useState(false);
-  // Bumped whenever an engine transport starts or stops. Frame callbacks
-  // registered on one engine end with it, so renderers that drive themselves
-  // from requestVideoFrameCallback (JASSUB) rebuild on it.
-  const [engineTransportRevision, setEngineTransportRevision] = useState(0);
   const fullscreenRootRef = usePlayerFullscreenRoot();
   const isMountedRef = useRef(true);
   const hlsRef = useRef<HlsType | null>(null);
@@ -1936,11 +1915,6 @@ export function VideoPlayer({
   const plannedBitrateKbps = plan.effective_recipe.bitrate_kbps ?? 0;
   const plannedDynamicRange = plan.effective_recipe.dynamic_range;
 
-  // Read by the transport effect, which reruns on planRevision rather than on
-  // every input the original-file route depends on.
-  const originalRouteInputRef = useRef({ plan, browserEngine, nativeOriginalSupport, audioTracks });
-  originalRouteInputRef.current = { plan, browserEngine, nativeOriginalSupport, audioTracks };
-
   // -- hls.js lifecycle --
   useEffect(() => {
     // "Played" belongs to one transport. A replacement that has not shown a
@@ -1951,7 +1925,6 @@ export function VideoPlayer({
     if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
 
     let hls: HlsType | null = null;
-    let engineSession: BrowserEngineSession | null = null;
     let destroyed = false;
     let playbackStarted = false;
     let autoplayInFlight = false;
@@ -2216,71 +2189,6 @@ export function VideoPlayer({
           }
         }
       } else {
-        const routeInput = originalRouteInputRef.current;
-        const route =
-          routeInput.browserEngine && routeInput.plan.delivery === "original_http"
-            ? resolveOriginalPlaybackRoute({
-                plan: routeInput.plan,
-                streamUrl: effectiveStreamUrl,
-                native: routeInput.nativeOriginalSupport ?? {
-                  containers: [],
-                  videoCodecs: [],
-                  audioCodecs: [],
-                },
-                engine: routeInput.browserEngine,
-                audioTracks: routeInput.audioTracks,
-              })
-            : ({ kind: "native" } as const);
-        if (route.kind === "unsupported") {
-          if (!reportCurrentPlanFailure(route.failure)) {
-            setError("This browser cannot play this file.");
-          }
-          return;
-        }
-        if (route.kind === "engine") {
-          // The original goes to the browser decode engine, which stands in
-          // for the element's media pipeline; the readiness gate below sees
-          // the same events either way.
-          try {
-            const { attachBrowserEngine } = await import("../engine");
-            const surface = engineSurfaceRef.current;
-            if (destroyed || !surface) return;
-            engineSession = attachBrowserEngine({
-              video,
-              surface,
-              source: route.source,
-              onFailure: (failure) => {
-                if (destroyed) return;
-                // Like MEDIA_ERR_NETWORK on the element: a read that fails
-                // after the stream played reconnects on the same route.
-                if (
-                  failure.classification === ENGINE_READ_FAILED &&
-                  reportConnectionLostRef.current()
-                ) {
-                  return;
-                }
-                if (!reportCurrentPlanFailure(failure)) {
-                  setError(`Playback error: ${failure.message ?? failure.classification}`);
-                }
-              },
-            });
-            setBrowserEngineActive(true);
-            setEngineTransportRevision((revision) => revision + 1);
-            attemptAutoplayWhenReady();
-          } catch (error) {
-            if (
-              !destroyed &&
-              !reportCurrentPlanFailure({
-                classification: "player_initialization_error",
-                message:
-                  error instanceof Error ? error.message : "Failed to load the browser engine.",
-              })
-            ) {
-              setError("Failed to load video player.");
-            }
-          }
-          return;
-        }
         // Direct play — set video src directly. Starting playback goes through
         // the same readiness gate as HLS rather than calling play() against a
         // src that has not loaded yet: a play issued at HAVE_NOTHING is racing
@@ -2297,13 +2205,6 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
-      if (engineSession) {
-        // Restores the element's own media pipeline before it is reset below.
-        engineSession.destroy();
-        engineSession = null;
-        setBrowserEngineActive(false);
-        setEngineTransportRevision((revision) => revision + 1);
-      }
       if (hls) {
         hls.destroy();
         hlsRef.current = null;
@@ -2861,7 +2762,6 @@ export function VideoPlayer({
     videoFit,
     coverCrop,
     activeSubtitleCueRevision,
-    engineTransportRevision,
   );
 
   // -- PGS rendering (client-side Blu-ray bitmaps) --
@@ -3117,13 +3017,8 @@ export function VideoPlayer({
   const handlePlayPause = useCallback(() => setPlayback("toggle"), [setPlayback]);
 
   const handleFullscreenToggle = useCallback(() => {
-    // The engine draws on a canvas beside the <video>, so the video's own
-    // native fullscreen (the iPhone fallback) would show an empty player.
-    toggleFullscreen(
-      fullscreenRootRef?.current ?? containerRef.current,
-      browserEngineActive ? null : videoRef.current,
-    );
-  }, [browserEngineActive, fullscreenRootRef]);
+    toggleFullscreen(fullscreenRootRef?.current ?? containerRef.current, videoRef.current);
+  }, [fullscreenRootRef]);
 
   const handleSurfaceTap = useCallback(
     (event?: React.MouseEvent<HTMLElement>) => {
@@ -3484,9 +3379,7 @@ export function VideoPlayer({
     skipActions,
     toggleCaptions,
     handleToggleMuted,
-    // The engine draws on a canvas, which cannot float; the control is hidden
-    // too, so the shortcut does nothing rather than reject.
-    browserEngineActive ? undefined : handleTogglePiP,
+    handleTogglePiP,
     displayMode === "foreground",
   );
 
@@ -4125,16 +4018,6 @@ export function VideoPlayer({
       {/* Subtitle tracks are managed programmatically by useSubtitleTracks
           instead of <track> elements, so subtitle rendering stays on the same
           media timeline as restarted HLS playback. */}
-      {/* Browser decode engine picture. It sits under the <video>, which has no
-          source of its own then and stays the transparent, clickable surface
-          every hook binds to. */}
-      <div
-        ref={engineSurfaceRef}
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={browserEngineActive ? undefined : { display: "none" }}
-      />
-
       <video
         ref={videoRef}
         className={`${isDetached ? "h-full w-full" : "absolute inset-0 h-full w-full"} ${
@@ -4318,7 +4201,7 @@ export function VideoPlayer({
               ? (fileId) => onSwitchVersion(fileId, currentTime)
               : undefined
           }
-          onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
+          onTogglePiP={handleTogglePiP}
           onPlayPause={handlePlayPause}
           onSeek={handlePlayerSeek}
           onVolumeChange={handleVolumeChange}
@@ -4327,9 +4210,7 @@ export function VideoPlayer({
           onVideoFitToggle={() =>
             setVideoFit((current) => (current === "cover" ? "contain" : "cover"))
           }
-          onFullscreenToggle={
-            browserEngineActive && !document.fullscreenEnabled ? undefined : handleFullscreenToggle
-          }
+          onFullscreenToggle={handleFullscreenToggle}
           onSurfaceTap={handleSurfaceTap}
           showPlaybackInfo={showPlaybackInfo}
           onTogglePlaybackInfo={() => setShowPlaybackInfo((v) => !v)}
@@ -4351,7 +4232,6 @@ export function VideoPlayer({
           plan={plan}
           currentSourceVersion={effectiveVersion}
           requestedVersion={selectedVersion}
-          browserEngine={browserEngineActive}
           onClose={() => setShowPlaybackInfo(false)}
         />
       )}

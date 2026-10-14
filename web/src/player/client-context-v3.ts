@@ -13,8 +13,6 @@
  */
 
 import {
-  CLAIM_CLIENT_MANAGED_DYNAMIC_RANGE_V3,
-  CLAIM_CLIENT_SELECTED_AUDIO_TRACK_V3,
   PROTOCOL_V3,
   type ClientCodecCapabilitiesV3,
   type ClientPlaybackContextV3,
@@ -24,7 +22,6 @@ import {
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
-import type { EngineCapabilities } from "./engine/capabilities";
 
 /** App version reported to the server for diagnostics. */
 const WEB_APP_VERSION = "web";
@@ -99,37 +96,21 @@ export interface WebCapabilityProbe {
   nativeHLS: boolean;
 }
 
-function union(...lists: readonly (readonly string[])[]): string[] {
-  return Array.from(new Set(lists.flat()));
-}
-
 /**
  * Builds the `client_capabilities` block. Every list is a flat declaration;
  * `codecs_video_hardware` mirrors `codecs_video` because a browser exposes no
  * way to tell software from hardware decode, and on the `declared` tier the
  * server treats the two lists identically.
- *
- * With the browser decode engine on, the device-level lists include what the
- * engine adds. The server reads these lists for every route and then narrows
- * each one by its delivery class, and only `original_http` carries the engine's
- * additions, so remux and HLS routes are unaffected.
  */
-export function buildClientCapabilitiesV3(
-  probe: WebCapabilityProbe,
-  engine: EngineCapabilities | null = null,
-): ClientCodecCapabilitiesV3 {
-  const codecsVideo = union(
-    probe.codecsVideo,
-    probe.progressiveCodecsVideo,
-    engine?.videoCodecs ?? [],
-  );
+export function buildClientCapabilitiesV3(probe: WebCapabilityProbe): ClientCodecCapabilitiesV3 {
+  const codecsVideo = Array.from(new Set([...probe.codecsVideo, ...probe.progressiveCodecsVideo]));
   return {
     video_evidence: "declared",
     audio_evidence: "declared",
     codecs_video: codecsVideo,
     codecs_video_hardware: codecsVideo,
-    codecs_audio: union(probe.codecsAudio, engine?.audioCodecs ?? []),
-    containers: union(probe.containers, engine?.containers ?? []),
+    codecs_audio: probe.codecsAudio,
+    containers: probe.containers,
     max_resolution: probe.maxResolution,
     hdr: probe.hdr,
     hdr_details: probe.hdrDetails,
@@ -162,40 +143,13 @@ function buildDeliveryCapability(
 }
 
 /**
- * The browser decode engine's additions to the `original_http` class: what it
- * decodes on top of the media element, the audio track it can pick from the
- * whole file, and, when WebGPU can tone-map and the display is SDR, HDR and
- * Dolby Vision originals (see docs/architecture/web-decode-engine.md). The
- * engine only presents SDR, so on an HDR display the claim stays off and HDR
- * sources keep the routes that preserve HDR.
- */
-function engineOriginalOverrides(
-  probe: WebCapabilityProbe,
-  original: Partial<DeliveryCapabilityV3>,
-  engine: EngineCapabilities,
-): Partial<DeliveryCapabilityV3> {
-  return {
-    ...original,
-    containers: union(probe.containers, engine.containers),
-    video_codecs: union(probe.codecsVideo, engine.videoCodecs),
-    audio_decode_codecs: union(probe.codecsAudio, engine.audioCodecs),
-    validated_claims: [
-      CLAIM_CLIENT_SELECTED_AUDIO_TRACK_V3,
-      ...(engine.hdr && !probe.hdr ? [CLAIM_CLIENT_MANAGED_DYNAMIC_RANGE_V3] : []),
-    ],
-  };
-}
-
-/**
  * Builds the `deliveries` map. `original_http` and `progressive` ride the
  * `<video>` element directly; `hls` uses hls.js where MSE is available and the
- * media element's native HLS implementation otherwise. With the decode engine
- * on, `original_http` also covers what the engine can play.
+ * media element's native HLS implementation otherwise.
  */
 export function buildDeliveriesV3(
   probe: WebCapabilityProbe,
   userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "",
-  engine: EngineCapabilities | null = null,
 ): Partial<Record<DeliveryClassV3, DeliveryCapabilityV3>> {
   const nonProgressiveHDRDetails: HDRCapabilitiesV3 = {
     ...probe.hdrDetails,
@@ -214,12 +168,10 @@ export function buildDeliveriesV3(
   const progressiveHDRDetails = nativeHLSPreferred ? nonProgressiveHDRDetails : probe.hdrDetails;
   const hlsHDRDetails = nativeHLSPreferred ? probe.hdrDetails : nonProgressiveHDRDetails;
   const hlsVideoCodecs = nativeHLSPreferred ? probe.progressiveCodecsVideo : probe.codecsVideo;
-  const original: Partial<DeliveryCapabilityV3> = { hdr_details: nonProgressiveHDRDetails };
   return {
-    original_http: buildDeliveryCapability(
-      probe,
-      engine ? engineOriginalOverrides(probe, original, engine) : original,
-    ),
+    original_http: buildDeliveryCapability(probe, {
+      hdr_details: nonProgressiveHDRDetails,
+    }),
     progressive: buildDeliveryCapability(probe, {
       video_codecs: probe.progressiveCodecsVideo,
       audio_decode_codecs: probe.progressiveCodecsAudio,
@@ -301,10 +253,7 @@ function boundedDetail(value: string | undefined): string | undefined {
  * and the server only ever compares that token for equality, so a synthesized
  * value would invalidate plans at random.
  */
-export function buildClientPlaybackContextV3(
-  probe: WebCapabilityProbe,
-  engine: EngineCapabilities | null = null,
-): ClientPlaybackContextV3 {
+export function buildClientPlaybackContextV3(probe: WebCapabilityProbe): ClientPlaybackContextV3 {
   const platformDetails: Record<string, string> = {};
   const userAgent = boundedDetail(typeof navigator !== "undefined" ? navigator.userAgent : "");
   if (userAgent) platformDetails["user_agent"] = userAgent;
@@ -324,7 +273,6 @@ export function buildClientPlaybackContextV3(
     deliveries: buildDeliveriesV3(
       probe,
       typeof navigator !== "undefined" ? navigator.userAgent : "",
-      engine,
     ),
   };
 }

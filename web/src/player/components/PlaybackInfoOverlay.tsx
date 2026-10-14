@@ -12,8 +12,6 @@ interface PlaybackInfoOverlayProps {
   plan: PlanV3;
   currentSourceVersion?: PlayerFileVersion;
   requestedVersion?: PlayerFileVersion;
-  /** True while the browser decode engine plays the stream. */
-  browserEngine?: boolean;
   onClose: () => void;
 }
 
@@ -24,7 +22,6 @@ export function PlaybackInfoOverlay({
   plan,
   currentSourceVersion,
   requestedVersion,
-  browserEngine = false,
   onClose,
 }: PlaybackInfoOverlayProps) {
   const [runtimeStats, setRuntimeStats] = useState<RuntimePlaybackStats>({});
@@ -63,9 +60,8 @@ export function PlaybackInfoOverlay({
         currentSourceVersion,
         requestedVersion,
         runtimeStats,
-        browserEngine,
       }),
-    [streamUrl, plan, currentSourceVersion, requestedVersion, runtimeStats, browserEngine],
+    [streamUrl, plan, currentSourceVersion, requestedVersion, runtimeStats],
   );
 
   return (
