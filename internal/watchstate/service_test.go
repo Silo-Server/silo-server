@@ -612,7 +612,7 @@ func TestImportedWatchIfNewerSuppressesHiddenOlderWatch(t *testing.T) {
 func TestClearResumePositionKeepsHistoryAndWatchedState(t *testing.T) {
 	ctx := context.Background()
 	store, db := newTestUserStore(t)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	createWatchstateProfile(t, store)
 	service := NewService(testStoreProvider{store: store})
 
@@ -683,7 +683,7 @@ func TestClearResumePositionKeepsHistoryAndWatchedState(t *testing.T) {
 func TestClearResumePositionUnderFutureHiddenWatermark(t *testing.T) {
 	ctx := context.Background()
 	store, db := newTestUserStore(t)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	createWatchstateProfile(t, store)
 
 	hiddenBefore := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
@@ -712,7 +712,7 @@ func TestClearResumePositionUnderFutureHiddenWatermark(t *testing.T) {
 func TestClearResumePositionWithoutProgressWritesNothing(t *testing.T) {
 	ctx := context.Background()
 	store, db := newTestUserStore(t)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
 	createWatchstateProfile(t, store)
 
 	cleared, err := NewService(testStoreProvider{store: store}).ClearResumePosition(ctx, 1, "profile-1", "movie-1")
