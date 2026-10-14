@@ -380,14 +380,7 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		return &ScanResult{}, nil
 	}
 	if librarykind.IsPodcast(folder.Type) {
-		result, err := s.scanPodcastSubtree(watchCtx, folder, cleanSubtree)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
-			return nil, err
-		}
-		return result, nil
+		return s.scanPodcastSubtree(watchCtx, folder, cleanSubtree)
 	}
 	if librarykind.IsManga(folder.Type) {
 		if err := s.scanMangaPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {

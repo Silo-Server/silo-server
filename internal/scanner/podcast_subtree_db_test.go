@@ -359,12 +359,30 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 		t.Fatal("subtree scan consumed the empty-cleanup confirmation")
 	}
 
-	// Show C's folder is gone. Only a full scan retires it.
+	// Show C's folder is gone. Only a full scan retires it, and a scan that
+	// indexes nothing leaves the folder's catalog state alone: it does not
+	// even run the membership repair, so a membership removed by hand stays
+	// removed until a scan that indexes runs.
+	showAID := f.fileRow(t, keptA).contentID
+	if _, err := f.pool.Exec(context.Background(),
+		`DELETE FROM media_item_libraries WHERE content_id = $1 AND media_folder_id = $2`, showAID, f.folder.ID,
+	); err != nil {
+		t.Fatalf("remove Show A membership: %v", err)
+	}
 	requireCounts(t, "vanished Show C", f.scanSubtree(t, showC), 0, 0, 0, 0)
 	if f.fileRow(t, removedC).missing {
 		t.Fatal("subtree scan of a vanished show folder marked its episode missing")
 	}
 	f.requireListed(t, showCID)
+	var repaired bool
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT EXISTS (SELECT 1 FROM media_item_libraries WHERE content_id = $1 AND media_folder_id = $2)`, showAID, f.folder.ID,
+	).Scan(&repaired); err != nil {
+		t.Fatalf("check Show A membership: %v", err)
+	}
+	if repaired {
+		t.Fatal("subtree scan of a vanished show folder ran the folder-wide membership repair")
+	}
 
 	f.scanFolder(t)
 	for _, path := range []string{removedB, removedC} {

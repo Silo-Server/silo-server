@@ -102,7 +102,9 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 //
 // For a show folder the result counts new, restored and newly missing episode
 // files and the cleanup that followed; the ingest publishes its catalog event
-// only when a scan reports a change.
+// only when a scan reports a change. A scan that indexes nothing, because the
+// show folder is unavailable or not a directory, also leaves the folder-wide
+// membership state alone.
 func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*ScanResult, error) {
 	if s == nil || folder == nil || s.fileRepo == nil {
 		return nil, fmt.Errorf("scanPodcastSubtree: scanner, folder or file repository not configured")
@@ -113,7 +115,13 @@ func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFo
 		if scopeLibraryRoot(subtreePath, folder.Paths) == "" {
 			return nil, fmt.Errorf("podcast scan: %s is not inside a library root of folder_id=%d", subtreePath, folder.ID)
 		}
-		return result, s.ScanPodcastFolder(ctx, folder)
+		if err := s.ScanPodcastFolder(ctx, folder); err != nil {
+			return nil, err
+		}
+		if err := s.syncFolderScopedAudioLibraryState(ctx, folder.ID); err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
 
 	// Lstat, like the full scan's directory listing: a full scan only treats
@@ -167,6 +175,9 @@ func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFo
 	}
 	if err := s.reconcilePodcastMissingFiles(ctx, folder, []string{showPath}, seenPaths, false, result); err != nil {
 		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
+	}
+	if err := s.syncFolderScopedAudioLibraryState(ctx, folder.ID); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
