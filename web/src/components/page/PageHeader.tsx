@@ -44,6 +44,15 @@ export function PageHeader({ title, subtitle, actions, eyebrow, className }: Pag
 }
 
 /**
+ * The frame admin pages and user settings pages sit in: full width up to
+ * 1560px, then centered, so on a wide window the content does not hug the
+ * sidebar. Both areas use it so their pages line up the same way.
+ */
+export function PageFrame({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={cn("mx-auto w-full max-w-[1560px] min-w-0", className)}>{children}</div>;
+}
+
+/**
  * The column a page's content sits in. It starts at the layout's gutter on
  * every page instead of centering, so a narrow page and a wide one share the
  * same left edge and title position. `settings` caps it at a width where

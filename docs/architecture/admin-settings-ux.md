@@ -95,10 +95,10 @@ shared `PageHeader` (`web/src/components/page/`): one title size at one
 position, a one-sentence subtitle, and page actions at the right. An admin
 settings page's subtitle is its description from the settings index, which
 `AdminSettingsLayout` provides to `SettingsPageHeader`. No breadcrumb and no
-status strip. Every admin page sits in one frame, the admin shell, which
-centers once the window is wider than it; pages carry no `page-shell` box of
-their own, so the title sits at the same place on every admin page. There are
-two widths inside the frame: settings pages cap their `PageColumn` at a
+status strip. Every admin page and every user settings page sits in one
+frame, `PageFrame`, which centers once the window is wider than it; pages
+carry no `page-shell` box of their own, so the title sits at the same place
+on every page. There are two widths inside the frame: settings pages cap their `PageColumn` at a
 reading width from its left edge, while tables and dashboards fill it. A section's title and
 description move into a left column only on a desktop-width window with room
 beside the sidebar, so resizing switches each section once. Below the header, settings are
@@ -193,8 +193,9 @@ Reuse these instead of adding a bespoke variant per page:
   which is why `App.tsx` mounts a data router (`createBrowserRouter` +
   `RouterProvider`) — a page must never grow its own prompt, its own blocker,
   or its own draft store.
-- `PageHeader` and `PageColumn` (`web/src/components/page/`) — the one page
-  title and the one content column for admin and settings pages;
+- `PageHeader`, `PageFrame`, and `PageColumn` (`web/src/components/page/`) —
+  the one page title, the one centered frame, and the one content column for
+  admin and settings pages;
   `SettingsPageHeader` is the admin settings pages' way into it. Server health belongs in the Dashboard's attention
   notice, not repeated as a strip on every page.
 - `SideNavSection`/`SideNavItem`/`SideNavTopic`/`SideNavSubItem`

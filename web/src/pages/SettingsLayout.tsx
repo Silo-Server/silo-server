@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router";
 import { ChevronLeft } from "lucide-react";
 
-import { PageColumn, PageHeader } from "@/components/page/PageHeader";
+import { PageColumn, PageFrame, PageHeader } from "@/components/page/PageHeader";
 import PageBack from "@/components/PageBack";
 import { CurrentProfileLink } from "@/components/settings/CurrentProfileLink";
 import { SettingsIndexList } from "@/components/settings/SettingsIndexList";
@@ -59,9 +59,11 @@ export default function SettingsLayout() {
         <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         All settings
       </Link>
-      <PageColumn width={wideSetting ? "full" : "settings"}>
-        <Outlet />
-      </PageColumn>
+      <PageFrame>
+        <PageColumn width={wideSetting ? "full" : "settings"}>
+          <Outlet />
+        </PageColumn>
+      </PageFrame>
     </div>
   );
 }

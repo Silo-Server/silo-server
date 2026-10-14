@@ -2172,20 +2172,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 1.75rem;
   }
 
-  /* One frame for every admin page, centered once the window is wider than
-     it, so a page title sits at the same place on every admin page. Settings
-     pages narrow their PageColumn to a reading width inside it; every other
-     page fills it. */
-  .admin-shell {
-    width: 100%;
-    min-width: 0;
-    max-width: 1560px;
-    margin-inline: auto;
-  }
-
-  /* AdminLayout owns the gutter and the width. Shared components that also
-     render in the app (the collection editor) carry page-shell, so drop its
-     own gutter, cap, and centering here. */
+  /* .admin-shell marks AdminLayout's PageFrame, which sets the width. Shared
+     components that also render in the app (the collection editor) carry
+     page-shell, so drop its own gutter, cap, and centering here. */
   .admin-shell > .page-shell,
   .admin-shell > .page-shell-wide {
     max-width: none;

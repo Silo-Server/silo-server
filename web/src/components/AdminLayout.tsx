@@ -4,6 +4,7 @@ import AdminSidebar from "@/components/AdminSidebar";
 import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialog";
 import ServerActivity from "@/components/ServerActivity";
 import { RestartBanner } from "@/components/admin/RestartBanner";
+import { PageFrame } from "@/components/page/PageHeader";
 import {
   Sheet,
   SheetClose,
@@ -178,7 +179,7 @@ export default function AdminLayout() {
           hasBackgroundBar ? "pb-32 sm:pb-36" : ""
         }`}
       >
-        <div className="admin-shell">
+        <PageFrame className="admin-shell">
           {/* Above the routed page and inside the content column, so every
               admin page carries the prompt and none of them can be covered by
               it. */}
@@ -187,7 +188,7 @@ export default function AdminLayout() {
             restartSignal={serverStatus?.restart_mark_count}
           />
           <Outlet />
-        </div>
+        </PageFrame>
       </main>
     </div>
   );
