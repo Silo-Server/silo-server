@@ -16,6 +16,10 @@ type RouterFeatures struct {
 	// ReportsDownloadProgress: CheckStatus fills each live target's download
 	// progress. The download refresh pass polls only such plugins.
 	ReportsDownloadProgress bool
+	// APIKeyOptional: the plugin works without an API key, so a connection
+	// with none is used like any other. Any other plugin's connection needs
+	// a key (see missingAPIKey).
+	APIKeyOptional bool
 }
 
 // RouterFeatureReader reads a router capability's declared features from the

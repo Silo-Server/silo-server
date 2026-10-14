@@ -184,7 +184,7 @@ func (s *Service) targetReportsProgress(ctx context.Context, fc *fulfillContext,
 		installationID, capabilityID = id, capability
 	} else {
 		in := integrationByID(fc, t.IntegrationID)
-		if !statusCheckable(in) {
+		if !s.statusCheckable(ctx, fc, in) {
 			return false, nil
 		}
 		installationID, capabilityID = *in.InstallationID, in.CapabilityID

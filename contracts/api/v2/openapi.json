@@ -12194,6 +12194,10 @@
             ],
             "type": "string"
           },
+          "request_router": {
+            "$ref": "#/components/schemas/AdminPluginRequestRouter",
+            "description": "On a request_router.v1 capability: which request server fields its plugin can do without. Omitted for other capability types"
+          },
           "sign_in_mode": {
             "description": "How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types",
             "enum": [
@@ -13011,6 +13015,24 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "AdminPluginRequestRouter": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_optional": {
+            "description": "The plugin works without an API key: a request server for it can be saved and tested without one, and gets requests without one",
+            "type": "boolean"
+          },
+          "base_url_optional": {
+            "description": "The plugin works without a base URL: a request server for it can be saved and tested without one",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "api_key_optional",
+          "base_url_optional"
+        ],
         "type": "object"
       },
       "AdminPluginRuntime": {

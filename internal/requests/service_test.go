@@ -3182,8 +3182,11 @@ type fakeRouterProvider struct {
 	// progressCapable marks the installations whose router declares
 	// reports_download_progress.
 	progressCapable map[int]bool
-	featuresErr     error
-	gotTVDBID       *int
+	// keyOptional marks the installations whose router declares
+	// api_key_optional.
+	keyOptional map[int]bool
+	featuresErr error
+	gotTVDBID   *int
 
 	// CheckStatus behavior.
 	statuses  []RouterTargetStatus
@@ -3217,6 +3220,7 @@ func (f *fakeRouterProvider) RouterFeatures(_ context.Context, installationID in
 	return RouterFeatures{
 		SupportsSeasons:         f.seasonCapable[installationID],
 		ReportsDownloadProgress: f.progressCapable[installationID],
+		APIKeyOptional:          f.keyOptional[installationID],
 	}, f.featuresErr
 }
 

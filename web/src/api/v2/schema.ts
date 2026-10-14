@@ -16705,6 +16705,8 @@ export interface components {
        * @example https://silo.example.test/login
        */
       post_logout_redirect_url?: string;
+      /** @description On a request_router.v1 capability: which request server fields its plugin can do without. Omitted for other capability types */
+      request_router?: components["schemas"]["AdminPluginRequestRouter"];
       /**
        * @description How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types
        * @example oauth
@@ -16947,6 +16949,12 @@ export interface components {
       display_name?: string;
       enabled?: boolean;
       url?: string;
+    };
+    AdminPluginRequestRouter: {
+      /** @description The plugin works without an API key: a request server for it can be saved and tested without one, and gets requests without one */
+      api_key_optional: boolean;
+      /** @description The plugin works without a base URL: a request server for it can be saved and tested without one */
+      base_url_optional: boolean;
     };
     AdminPluginRuntime: {
       /** @description Why the process last stopped or failed to start */
