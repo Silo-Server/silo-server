@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -402,5 +403,20 @@ func TestRecommendationCacheQueriesStoreGlobalRowsAsNull(t *testing.T) {
 	samplers := strings.Join(strings.Fields(listCachedGenreSamplersQuery), " ")
 	if !strings.Contains(samplers, "WHERE user_id IS NULL AND profile_id = $1") {
 		t.Fatalf("genre sampler query must read NULL-owned global rows: %s", samplers)
+	}
+}
+
+// AccessFilter requires every consuming query builder to apply
+// ExcludedMediaTypes; popular and recently added share these conditions.
+func TestItemAccessConditionsExcludesMediaTypes(t *testing.T) {
+	conditions, args, ok := itemAccessConditions(catalog.AccessFilter{ExcludedMediaTypes: []string{"audiobook"}}, []any{30})
+	if !ok {
+		t.Fatal("itemAccessConditions reported no library, want conditions")
+	}
+	if !strings.Contains(strings.Join(conditions, " AND "), "NOT (mi.type = ANY($2))") {
+		t.Fatalf("conditions = %v, want the excluded media types bound to $2", conditions)
+	}
+	if len(args) != 2 || !reflect.DeepEqual(args[1], []string{"audiobook"}) {
+		t.Fatalf("args = %v, want the days then the excluded types", args)
 	}
 }

@@ -118,7 +118,7 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 		limit = 50
 	}
 
-	items, err := h.SimilarItems(r.Context(), itemID, limit)
+	items, err := h.SimilarItems(r.Context(), itemID, limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -163,7 +163,7 @@ func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *
 	}
 
 	limit, _ := parsePagination(r)
-	items, err := h.BecauseWatched(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit)
+	items, err := h.BecauseWatched(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -204,7 +204,7 @@ func (h *RecommendationsHandler) HandlePopular(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
+	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -228,7 +228,7 @@ func (h *RecommendationsHandler) HandleRecentlyAdded(w http.ResponseWriter, r *h
 		}
 	}
 
-	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
+	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return

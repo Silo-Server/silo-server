@@ -368,8 +368,8 @@ func sortScoredItems(items []ScoredItem) {
 
 // buildColdStartRows generates non-personalized rows.
 func (e *Engine) buildColdStartRows(ctx context.Context) ([]ForYouRow, error) {
-	popular, _ := e.repo.GetPopularItems(ctx, 30, 20)
-	recentlyAdded, _ := e.repo.GetRecentlyAddedItems(ctx, 14, 20)
+	popular, _ := e.repo.GetPopularItems(ctx, 30, 20, catalog.AccessFilter{})
+	recentlyAdded, _ := e.repo.GetRecentlyAddedItems(ctx, 14, 20, catalog.AccessFilter{})
 	topRated, _ := e.repo.GetTopRatedItems(ctx, 5, 20)
 
 	genreSamplers := make(map[string][]ScoredItem)
