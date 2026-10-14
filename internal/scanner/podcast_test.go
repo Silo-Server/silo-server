@@ -98,25 +98,37 @@ func TestScanPodcastFolderReturnsCanceledContext(t *testing.T) {
 	}
 }
 
-func TestParsePodcastShowRecordsTheFileAsProbed(t *testing.T) {
-	dir := t.TempDir()
-	ffprobePath := filepath.Join(dir, "ffprobe")
-	// Prints the probe stored in the file, then grows the file, as a
-	// replacement written while ffprobe reads it would.
-	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\nprintf ' ' >> \"$last\"\n")
+// podcastProbeFixture writes a one-episode show whose file holds the ffprobe
+// output for a probed duration, and returns the show folder and episode path.
+func podcastProbeFixture(t *testing.T, dir, duration string) (string, string) {
+	t.Helper()
 	showDir := filepath.Join(dir, "Show")
 	if err := os.Mkdir(showDir, 0o755); err != nil {
 		t.Fatalf("mkdir show: %v", err)
 	}
-	probe := `{"format":{"format_name":"mp3","duration":"61","tags":{"album":"Show","title":"One","track":"1"}},` +
-		`"streams":[{"index":0,"codec_type":"audio","codec_name":"mp3"}]}`
 	path := filepath.Join(showDir, "01.mp3")
-	if err := os.WriteFile(path, []byte(probe), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(podcastProbeJSON(duration)), 0o644); err != nil {
 		t.Fatalf("write episode: %v", err)
 	}
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat episode: %v", err)
+	return showDir, path
+}
+
+func podcastProbeJSON(duration string) string {
+	return `{"format":{"format_name":"mp3","duration":"` + duration + `","tags":{"album":"Show","title":"One","track":"1"}},` +
+		`"streams":[{"index":0,"codec_type":"audio","codec_name":"mp3"}]}`
+}
+
+func TestParsePodcastShowReprobesAFileReplacedDuringTheProbe(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	// Prints the probe stored in the file. The first time, it then renames a
+	// waiting replacement over the file with the same size and mtime, as an
+	// atomic replacement written while ffprobe reads the file would.
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"+
+		"if [ -e \"$last.next\" ]; then touch -r \"$last\" \"$last.next\"; mv \"$last.next\" \"$last\"; fi\n")
+	showDir, path := podcastProbeFixture(t, dir, "61")
+	if err := os.WriteFile(path+".next", []byte(podcastProbeJSON("62")), 0o644); err != nil {
+		t.Fatalf("write replacement: %v", err)
 	}
 
 	got, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
@@ -127,12 +139,30 @@ func TestParsePodcastShowRecordsTheFileAsProbed(t *testing.T) {
 		t.Fatalf("got %d episodes, want 1", len(got.Episodes))
 	}
 	ep := got.Episodes[0]
-	if ep.Probe == nil || ep.Probe.Duration != 61 {
-		t.Fatalf("probe = %+v, want the probed 61-second episode", ep.Probe)
+	if ep.Probe == nil || ep.Probe.Duration != 62 {
+		t.Fatalf("probe = %+v, want the replacement's 62-second probe", ep.Probe)
 	}
-	if ep.Size != before.Size() || !ep.ModTime.Equal(normalizeFileModifiedAt(before.ModTime())) {
-		t.Fatalf("recorded size %d mtime %v, want the probed file's %d %v",
-			ep.Size, ep.ModTime, before.Size(), normalizeFileModifiedAt(before.ModTime()))
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat episode: %v", err)
+	}
+	if ep.Size != after.Size() || !ep.ModTime.Equal(normalizeFileModifiedAt(after.ModTime())) {
+		t.Fatalf("recorded size %d mtime %v, want the replacement's %d %v",
+			ep.Size, ep.ModTime, after.Size(), normalizeFileModifiedAt(after.ModTime()))
+	}
+}
+
+func TestParsePodcastShowRejectsAFileStillChanging(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	// Prints the probe stored in the file, then grows the file, as a download
+	// still being written would.
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\nprintf ' ' >> \"$last\"\n")
+	showDir, _ := podcastProbeFixture(t, dir, "61")
+
+	_, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
+	if err == nil || !strings.Contains(err.Error(), "changed while it was probed") {
+		t.Fatalf("parsePodcastShow error = %v, want a file that changed while it was probed", err)
 	}
 }
 

@@ -51,16 +51,9 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 
 	show := &parsedPodcastShow{}
 	for idx, path := range audioFiles {
-		// Stat before probing, as the video scanner does: a file replaced
-		// while ffprobe reads it is then recorded with the size and mtime of
-		// the file that was probed, so a later check sees it changed.
-		info, err := os.Stat(path)
+		probed, info, err := probeStablePodcastFile(ctx, ffprobePath, path)
 		if err != nil {
-			return nil, fmt.Errorf("stat podcast file %s: %w", path, err)
-		}
-		probed, err := ProbeFile(ctx, ffprobePath, path)
-		if err != nil {
-			return nil, fmt.Errorf("probe podcast file %s: %w", path, err)
+			return nil, err
 		}
 		tags := probed.FormatTags
 		if show.Title == "" {
@@ -90,6 +83,35 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 		})
 	}
 	return show, nil
+}
+
+// probeStablePodcastFile probes path and returns the stat of the file that was
+// probed. The file is stat'ed before and after the probe; if it was replaced
+// or rewritten in between, even by a file with the same size and mtime, it is
+// probed once more, and a file still changing is reported as an error so the
+// next scan reads it again. Without this, the probe of one file could be
+// recorded under another file's size and mtime and look current.
+func probeStablePodcastFile(ctx context.Context, ffprobePath, path string) (*ProbeData, os.FileInfo, error) {
+	for attempt := 1; ; attempt++ {
+		before, err := os.Stat(path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stat podcast file %s: %w", path, err)
+		}
+		probed, err := ProbeFile(ctx, ffprobePath, path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("probe podcast file %s: %w", path, err)
+		}
+		after, err := os.Stat(path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stat podcast file %s: %w", path, err)
+		}
+		if os.SameFile(before, after) && before.Size() == after.Size() && before.ModTime().Equal(after.ModTime()) {
+			return probed, before, nil
+		}
+		if attempt == 2 {
+			return nil, nil, fmt.Errorf("podcast file %s changed while it was probed", path)
+		}
+	}
 }
 
 func listPodcastShowAudioFiles(folderPath string, inheritedRules []ignoreRules) ([]string, error) {
