@@ -606,7 +606,7 @@ func SoftwareFilter(kind SourceKind, filterName string) string {
 	}
 	if filterName == SoftwareFilterBT2390 {
 		return SourceParameters(kind) +
-			",tonemapx=tonemap=bt2390" + dolbyVisionOption(kind) +
+			",tonemapx=tonemap=bt2390" + toneMapPeakOption + dolbyVisionOption(kind) +
 			",zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p," + HDRMetadataRemovalFilter()
 	}
 	return SourceParameters(kind) +
@@ -668,10 +668,16 @@ func QSVFilter(kind SourceKind) string {
 		",hwmap=derive_device=vaapi:mode=write:reverse=1:extra_hw_frames=16,format=vaapi"
 }
 
-// openCLToneMapFilter matches Jellyfin's BT.2390 GPU recipe. A fixed 100-nit
-// SDR peak keeps output stable across sources while preserving PQ midtones.
+// toneMapPeakOption pins the source peak tonemapx and tonemap_opencl map to
+// SDR at 1000 nits (the option counts in tens of nits), so every source
+// converts on the same curve. Left unset, both filters read a Dolby Vision
+// frame's peak from its RPU instead, and a title mastered at 4000 nits comes
+// out about a third darker in the midtones.
+const toneMapPeakOption = ":peak=100"
+
+// openCLToneMapFilter matches Jellyfin's BT.2390 GPU recipe.
 func openCLToneMapFilter(kind SourceKind) string {
-	return HardwareFilterOpenCL + "=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390:peak=100:desat=0" + dolbyVisionOption(kind)
+	return HardwareFilterOpenCL + "=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390" + toneMapPeakOption + ":desat=0" + dolbyVisionOption(kind)
 }
 
 // vaapiToneMapFilter returns the HDR luminance and color conversion stage.

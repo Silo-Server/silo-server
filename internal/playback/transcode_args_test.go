@@ -329,7 +329,7 @@ func TestDolbyVisionBaseGraphsApplyTheRPU(t *testing.T) {
 		filter  string
 		want    string
 	}{
-		{name: "software", mode: tonemap.ModeSoftware, hwAccel: "none", filter: tonemap.SoftwareFilterBT2390, want: "tonemapx=tonemap=bt2390:apply_dovi=1"},
+		{name: "software", mode: tonemap.ModeSoftware, hwAccel: "none", filter: tonemap.SoftwareFilterBT2390, want: "tonemapx=tonemap=bt2390:peak=100:apply_dovi=1"},
 		{name: "QSV", mode: tonemap.ModeHardware, hwAccel: "qsv", filter: tonemap.HardwareFilterOpenCL, want: "tonemap_opencl=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390:peak=100:desat=0:apply_dovi=1"},
 		{name: "NVENC", mode: tonemap.ModeHardware, hwAccel: "nvenc", filter: tonemap.HardwareFilterCUDA, want: "tonemap_cuda=tonemap=bt2390:format=nv12:p=bt709:t=bt709:m=bt709:r=tv:apply_dovi=1"},
 	}

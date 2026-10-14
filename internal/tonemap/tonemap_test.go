@@ -210,6 +210,25 @@ func TestSoftwareFiltersUseThePixelFormatExpectedByEachToneMapper(t *testing.T) 
 	}
 }
 
+// TestSoftwareAndQSVToneMapsPinTheSourcePeak keeps tonemapx on the source
+// peak the QSV graph uses. Without it tonemapx reads a Dolby Vision frame's
+// peak from the RPU and darkens sources mastered above 1000 nits.
+func TestSoftwareAndQSVToneMapsPinTheSourcePeak(t *testing.T) {
+	for _, kind := range AllSourceKinds() {
+		if IsSDRSource(kind) {
+			continue
+		}
+		for name, filter := range map[string]string{
+			"software": SoftwareFilter(kind, SoftwareFilterBT2390),
+			"qsv":      QSVFilter(kind),
+		} {
+			if !strings.Contains(filter, ":peak=100") {
+				t.Errorf("%s %s filter %q does not pin the source peak", name, kind, filter)
+			}
+		}
+	}
+}
+
 // TestDolbyVisionGraphsApplyTheRPU pins RPU application to the Dolby Vision
 // kind: standard bases keep their validated graphs, and only filters that can
 // apply an RPU may carry the kind.
