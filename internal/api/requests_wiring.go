@@ -37,6 +37,7 @@ func (a PluginRequestRouterAdapter) RouterFeatures(ctx context.Context, installa
 		SupportsSeasons:         descriptor.GetSupportsSeasons(),
 		ReportsDownloadProgress: descriptor.GetReportsDownloadProgress(),
 		APIKeyOptional:          descriptor.GetApiKeyOptional(),
+		BaseURLOptional:         descriptor.GetBaseUrlOptional(),
 	}, nil
 }
 

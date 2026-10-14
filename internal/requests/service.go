@@ -1576,10 +1576,10 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 			// exfiltrating a stored, API-unreadable key to an attacker-supplied URL).
 			// A server saved without a key has none to protect.
 			if strings.TrimSpace(stored.APIKeyRef) != "" && strings.TrimSpace(in.BaseURL) != "" && !sameIntegrationBaseURL(in.BaseURL, stored.BaseURL) {
-				return &ValidationError{FieldErrors: map[string]string{"api_key_ref": "re-enter the API key when changing the base URL"}}
+				return &ValidationError{FieldErrors: map[string]string{fieldAPIKey: integrationKeyReentry}}
 			}
 			in.APIKeyRef = stored.APIKeyRef
-			if strings.TrimSpace(in.BaseURL) == "" {
+			if strings.TrimSpace(in.BaseURL) == "" && s.blankURLMeansSaved(ctx, in) {
 				in.BaseURL = stored.BaseURL
 			}
 			if in.PluginConfig == nil {
@@ -1672,17 +1672,17 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		}
 		if stored != nil {
 			submittedBaseURL := strings.TrimSpace(integration.BaseURL)
-			if submittedBaseURL == "" {
-				integration.BaseURL = stored.BaseURL
-			}
-			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || sameIntegrationBaseURL(submittedBaseURL, stored.BaseURL)) {
-				integration.APIKeyRef = stored.APIKeyRef
-			}
 			if strings.TrimSpace(integration.CapabilityID) == "" {
 				integration.CapabilityID = stored.CapabilityID
 			}
 			if integration.InstallationID == nil {
 				integration.InstallationID = stored.InstallationID
+			}
+			if submittedBaseURL == "" && s.blankURLMeansSaved(ctx, integration) {
+				integration.BaseURL = stored.BaseURL
+			}
+			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || sameIntegrationBaseURL(submittedBaseURL, stored.BaseURL)) {
+				integration.APIKeyRef = stored.APIKeyRef
 			}
 			if integration.PluginConfig == nil {
 				integration.PluginConfig = stored.PluginConfig
@@ -3019,6 +3019,7 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 	}
 	groups := map[owner]*group{}
 	var order []owner
+	var errs []error
 	groupFor := func(key owner) *group {
 		g := groups[key]
 		if g == nil {
@@ -3052,7 +3053,11 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 			continue
 		}
 		in := integrationByID(fc, t.IntegrationID)
-		if !s.statusCheckable(ctx, fc, in) {
+		checkable, err := s.statusCheckable(ctx, fc, in)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if !checkable {
 			continue
 		}
 		g := groupFor(owner{*in.InstallationID, in.CapabilityID})
@@ -3062,7 +3067,6 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 	// One plugin being down must not hide the statuses another reported, so
 	// every group is asked and the errors are returned alongside them.
 	var out []RouterTargetStatus
-	var errs []error
 	for _, key := range order {
 		g := groups[key]
 		statuses, err := s.router.CheckStatus(ctx, key.installationID, key.capabilityID, req, g.refs, g.conns)
@@ -3107,13 +3111,14 @@ func soleRefConnection(refs []RouterTargetRef) string {
 
 // statusCheckable reports whether a target's server can be asked for the
 // target's status: it still exists, is enabled, is bound to a router
-// capability, and has an API key unless its plugin needs none.
-func (s *Service) statusCheckable(ctx context.Context, fc *fulfillContext, in *Integration) bool {
+// capability, and has an API key unless its plugin needs none. The error is
+// from reading that declaration; the server is not asked then.
+func (s *Service) statusCheckable(ctx context.Context, fc *fulfillContext, in *Integration) (bool, error) {
 	if in == nil || !in.Enabled || in.InstallationID == nil || in.CapabilityID == "" {
-		return false
+		return false, nil
 	}
-	missing, _ := s.missingAPIKey(ctx, fc, *in)
-	return !missing
+	missing, err := s.missingAPIKey(ctx, fc, *in)
+	return !missing && err == nil, err
 }
 
 func integrationByID(fc *fulfillContext, id string) *Integration {

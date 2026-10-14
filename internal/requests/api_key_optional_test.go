@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
@@ -200,6 +201,29 @@ func TestRefreshDownloadsPollsKeyOptionalServer(t *testing.T) {
 	}
 }
 
+// When a key-optional router's declaration cannot be read, the download
+// refresh pass settles the target as unanswered: fresh progress is kept and
+// the server is not asked, rather than the progress being cleared as if the
+// server could no longer be asked.
+func TestRefreshDownloadsKeepsProgressWhenKeyOptionalDeclarationCannotBeRead(t *testing.T) {
+	store := newFakeStore()
+	service, router := downloadRefreshService(store)
+	store.integrations = []Integration{keylessRouterInst("router-1")}
+	router.keyOptional = map[int]bool{1: true}
+	router.featuresErr = errors.New("capabilities unavailable")
+	reported := service.now().Add(-2 * time.Minute)
+	progress := &DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 400, Downloads: 1, UpdatedAt: reported}
+	seedDownloadTarget(t, store, "req-keyless", "router-1", Quality1080p, StatusDownloading, progress)
+
+	_, _ = service.RefreshDownloads(context.Background(), 200, 0)
+	if router.statusCalls != 0 {
+		t.Fatalf("status calls = %d, want none", router.statusCalls)
+	}
+	if got := onlyTarget(t, store, "req-keyless"); !sameProgress(got.Download, progress) || !got.Download.UpdatedAt.Equal(reported) {
+		t.Fatalf("progress = %+v, want the reported progress kept", got.Download)
+	}
+}
+
 // Testing a new server for a key-optional router reaches the plugin without
 // a key or an address.
 func TestLoadIntegrationOptionsProbesKeyOptionalRouterWithoutKey(t *testing.T) {
@@ -278,6 +302,45 @@ func TestUpdateIntegrationAddressChangeNeedsKeyOnlyWhenOneIsSaved(t *testing.T) 
 			}
 			if err != nil || router.validateCalls != 1 {
 				t.Fatalf("err = %v, validate calls = %d; want the change validated by the plugin", err, router.validateCalls)
+			}
+		})
+	}
+}
+
+// A blank URL sent for a saved server is tested and validated as blank when
+// its router declares base_url_optional, since that is what the save stores.
+// For any other router it still stands for the saved address.
+func TestClearedURLIsTestedAndValidatedAsBlankForURLOptionalRouter(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		urlOptional bool
+		want        string
+	}{
+		{"router needs no URL", true, ""},
+		{"router needs a URL", false, "http://router-1.local"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			store.integrations = []Integration{routerInst("router-1")}
+			router := &fakeRouterProvider{urlOptional: map[int]bool{1: tc.urlOptional}}
+			service := newTestService(store)
+			service.SetRouterProvider(router)
+			admin := Viewer{UserID: 1, IsAdmin: true}
+
+			if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1"}); err != nil {
+				t.Fatalf("LoadIntegrationOptions: %v", err)
+			}
+			if router.gotOptionsConn.BaseURL != tc.want {
+				t.Fatalf("probed address = %q, want %q", router.gotOptionsConn.BaseURL, tc.want)
+			}
+			install := 1
+			if _, err := service.UpdateIntegration(context.Background(), admin, Integration{
+				ID: "router-1", Name: "router-1", Enabled: true, CapabilityID: "arr", InstallationID: &install,
+			}); err != nil {
+				t.Fatalf("UpdateIntegration: %v", err)
+			}
+			if router.gotValidateConn.BaseURL != tc.want {
+				t.Fatalf("validated address = %q, want %q", router.gotValidateConn.BaseURL, tc.want)
 			}
 		})
 	}

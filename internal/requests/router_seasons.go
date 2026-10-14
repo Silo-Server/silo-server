@@ -20,6 +20,10 @@ type RouterFeatures struct {
 	// with none is used like any other. Any other plugin's connection needs
 	// a key (see missingAPIKey).
 	APIKeyOptional bool
+	// BaseURLOptional: the plugin works without a base URL, so a blank one
+	// on a saved server is tested and validated as blank rather than as the
+	// saved address (see blankURLMeansSaved).
+	BaseURLOptional bool
 }
 
 // RouterFeatureReader reads a router capability's declared features from the
@@ -61,6 +65,19 @@ func (s *Service) routerFeatures(ctx context.Context, fc *fulfillContext, instal
 	fc.features[key] = features
 	fc.mu.Unlock()
 	return features, nil
+}
+
+// blankURLMeansSaved reports whether a blank base URL sent for a saved
+// server stands for its saved address, as it does for a plugin that needs
+// one. A plugin that declares base_url_optional takes a blank address as it
+// is, so an admin can clear it. When the declaration cannot be read, a blank
+// address stands for the saved one, as before.
+func (s *Service) blankURLMeansSaved(ctx context.Context, in Integration) bool {
+	if in.InstallationID == nil || in.CapabilityID == "" {
+		return true
+	}
+	features, err := s.routerFeatures(ctx, &fulfillContext{}, *in.InstallationID, in.CapabilityID)
+	return err != nil || !features.BaseURLOptional
 }
 
 // routerSupportsSeasons reports whether the router capability takes a request
