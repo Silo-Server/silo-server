@@ -197,13 +197,6 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 	if err := s.upsertPodcastEpisodesAndFiles(ctx, folder, showContentID, folderPath, parsed); err != nil {
 		return nil, fmt.Errorf("upsert podcast episodes+files: %w", err)
 	}
-	if _, err := s.fileRepo.Pool().Exec(ctx, `
-		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (content_id, media_folder_id) DO NOTHING
-	`, showContentID, folder.ID); err != nil {
-		return nil, fmt.Errorf("upsert podcast library membership: %w", err)
-	}
 
 	slog.InfoContext(ctx, "podcast scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
@@ -310,7 +303,7 @@ func applyPodcastShowMetadata(item *models.MediaItem, show *parsedPodcastShow) b
 
 // reconcilePodcastMissingFiles marks the cataloged files under roots that the
 // scan did not see as missing, then reconciles memberships. fullScan is false
-// for a subtree scan, which never consumes the folder's empty-cleanup
+// for a show-folder scan, which never consumes the folder's empty-cleanup
 // confirmation: a show folder that walked empty keeps its rows until a full
 // library scan decides.
 func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, fullScan bool) error {
@@ -366,9 +359,14 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 }
 
 // upsertPodcastEpisodesAndFiles writes one episodes row and one media_files
-// row per episode in the parsed show. The episode's content_id is linked back
-// through media_files.episode_id so playback and library queries can resolve
-// it.
+// row per episode in the parsed show, plus the show's library membership. The
+// episode's content_id is linked back through media_files.episode_id so
+// playback and library queries can resolve it.
+//
+// The files and the membership commit together. Scans of the same library run
+// side by side (a subtree scan of one show next to another, or next to a full
+// scan), and each one's membership sweep deletes any item whose files have no
+// membership; a show committed file by file would be deleted mid-write.
 //
 // Podcast episodes use season_number=0 (no season concept) and
 // episode_number=track.
@@ -383,6 +381,7 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 		return fmt.Errorf("episodeRepo not configured on Scanner")
 	}
 
+	files := make([]models.MediaFile, 0, len(show.Episodes))
 	for _, ep := range show.Episodes {
 		episodeID, err := idgen.NextID()
 		if err != nil {
@@ -401,7 +400,7 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 			return fmt.Errorf("upsert episode %q: %w", ep.Title, err)
 		}
 
-		mf := models.MediaFile{
+		files = append(files, models.MediaFile{
 			ContentID:          showContentID,
 			EpisodeID:          episode.ContentID,
 			SeasonNumber:       0,
@@ -417,10 +416,28 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 			IdentityConfidence: podcastIdentityConfidence(show, ep),
 			FilePath:           ep.Path,
 			ProbeSource:        "local",
-		}
-		if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
-			return fmt.Errorf("upsert media file %s: %w", ep.Path, err)
-		}
+		})
+	}
+
+	tx, err := s.fileRepo.Pool().Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin podcast show transaction: %w", err)
+	}
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelCleanup()
+	defer func() { _ = tx.Rollback(cleanupCtx) }()
+	if err := s.fileRepo.UpsertBatchTx(ctx, tx, files); err != nil {
+		return fmt.Errorf("upsert media files for %s: %w", folderPath, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (content_id, media_folder_id) DO NOTHING
+	`, showContentID, folder.ID); err != nil {
+		return fmt.Errorf("upsert podcast library membership: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit podcast show transaction: %w", err)
 	}
 	return nil
 }

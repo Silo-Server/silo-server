@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -15,10 +18,11 @@ import (
 // scanned with a fake ffprobe that prints each episode file's content: every
 // episode file holds the ffprobe JSON for its own tags.
 type podcastSubtreeFixture struct {
-	pool    *pgxpool.Pool
-	scanner *Scanner
-	folder  *models.MediaFolder
-	root    string
+	pool        *pgxpool.Pool
+	scanner     *Scanner
+	folder      *models.MediaFolder
+	root        string
+	ffprobePath string
 }
 
 func newPodcastSubtreeFixture(t *testing.T) *podcastSubtreeFixture {
@@ -61,10 +65,11 @@ func newPodcastSubtreeFixture(t *testing.T) *podcastSubtreeFixture {
 	})
 
 	return &podcastSubtreeFixture{
-		pool:    pool,
-		scanner: NewScanner(NewFileRepository(pool), ffprobePath, nil, 2, false, 0),
-		folder:  folder,
-		root:    root,
+		pool:        pool,
+		scanner:     NewScanner(NewFileRepository(pool), ffprobePath, nil, 2, false, 0),
+		folder:      folder,
+		root:        root,
+		ffprobePath: ffprobePath,
 	}
 }
 
@@ -157,6 +162,23 @@ func (f *podcastSubtreeFixture) requireEpisodeOf(t *testing.T, path, showDir, sh
 	return row
 }
 
+// requireListed fails unless the item exists and belongs to the library.
+func (f *podcastSubtreeFixture) requireListed(t *testing.T, contentID string) {
+	t.Helper()
+	var listed bool
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT EXISTS (
+			SELECT 1 FROM media_items mi
+			JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+			WHERE mi.content_id = $1 AND mil.media_folder_id = $2
+		)`, contentID, f.folder.ID).Scan(&listed); err != nil {
+		t.Fatalf("check library membership of %s: %v", contentID, err)
+	}
+	if !listed {
+		t.Fatalf("item %s is gone or no longer in the library", contentID)
+	}
+}
+
 func (f *podcastSubtreeFixture) requireOnlyPodcastItems(t *testing.T) {
 	t.Helper()
 	var others int
@@ -231,9 +253,10 @@ func TestScanSubtreeIndexesPodcastShowFolders(t *testing.T) {
 }
 
 // TestScanSubtreeReconcilesOnlyTheScannedPodcastShow checks that a show-folder
-// scan marks missing only the files of that show, and that it leaves a show
-// folder alone when it cannot verify it: emptied shows wait for the
-// empty-cleanup confirmation and vanished shows wait for a full scan.
+// scan marks missing only the files of that show and leaves the other shows in
+// the library, and that it leaves a show folder alone when it cannot verify
+// it: emptied shows wait for a full scan even when the empty-cleanup
+// confirmation is granted, and vanished shows wait for a full scan.
 func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 	f := newPodcastSubtreeFixture(t)
 	showA := filepath.Join(f.root, "Show A")
@@ -244,7 +267,13 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 	removedA := f.addEpisode(t, "Show A", "Episode 2.mp3", "Show A", "Removed", "2")
 	removedB := f.addEpisode(t, "Show B", "Episode 1.mp3", "Show B", "Removed", "1")
 	removedC := f.addEpisode(t, "Show C", "Episode 1.mp3", "Show C", "Removed", "1")
+	notes := filepath.Join(showA, "notes")
+	if err := os.Mkdir(notes, 0o755); err != nil {
+		t.Fatalf("mkdir notes: %v", err)
+	}
 	f.scanFolder(t)
+	showBID := f.fileRow(t, removedB).contentID
+	showCID := f.fileRow(t, removedC).contentID
 
 	for _, path := range []string{removedA, removedB} {
 		if err := os.Remove(path); err != nil {
@@ -255,8 +284,8 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 		t.Fatalf("remove Show C: %v", err)
 	}
 
-	// A path inside the show stands for the whole show folder.
-	f.scanSubtree(t, filepath.Join(showA, "Episode 1.mp3"))
+	// A folder inside the show stands for the whole show folder.
+	f.scanSubtree(t, notes)
 	f.requireEpisodeOf(t, keptA, showA, "Show A")
 	if !f.fileRow(t, removedA).missing {
 		t.Fatal("deleted Show A episode is still present after scanning Show A")
@@ -267,12 +296,30 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 	if f.fileRow(t, removedC).missing {
 		t.Fatal("scanning Show A marked a Show C episode missing")
 	}
+	f.requireListed(t, showBID)
+	f.requireListed(t, showCID)
 
 	// Show B's folder is now empty, which is also what a lost mount looks
-	// like. A subtree scan must not consume the empty-cleanup confirmation.
+	// like. Even with the operator's empty-cleanup confirmation granted, a
+	// subtree scan leaves the rows and the confirmation for a full scan.
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE media_folders SET allow_empty_cleanup_once = true WHERE id = $1`, f.folder.ID,
+	); err != nil {
+		t.Fatalf("grant empty cleanup: %v", err)
+	}
 	f.scanSubtree(t, showB)
 	if f.fileRow(t, removedB).missing {
 		t.Fatal("subtree scan of an emptied show folder marked its episode missing")
+	}
+	f.requireListed(t, showBID)
+	var allowed bool
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT allow_empty_cleanup_once FROM media_folders WHERE id = $1`, f.folder.ID,
+	).Scan(&allowed); err != nil {
+		t.Fatalf("read empty cleanup confirmation: %v", err)
+	}
+	if !allowed {
+		t.Fatal("subtree scan consumed the empty-cleanup confirmation")
 	}
 
 	// Show C's folder is gone. Only a full scan retires it.
@@ -280,6 +327,7 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 	if f.fileRow(t, removedC).missing {
 		t.Fatal("subtree scan of a vanished show folder marked its episode missing")
 	}
+	f.requireListed(t, showCID)
 
 	f.scanFolder(t)
 	for _, path := range []string{removedB, removedC} {
@@ -287,5 +335,65 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 			t.Fatalf("%s is still present after a full scan", path)
 		}
 	}
+	f.requireOnlyPodcastItems(t)
+}
+
+// membershipInsertHook runs a callback once, right before the first query that
+// inserts a podcast show's library membership.
+type membershipInsertHook struct {
+	once sync.Once
+	run  func()
+}
+
+func (h *membershipInsertHook) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "INSERT INTO media_item_libraries") && strings.Contains(data.SQL, "VALUES ($1, $2, NOW())") {
+		h.once.Do(h.run)
+	}
+	return ctx
+}
+
+func (*membershipInsertHook) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// TestPodcastShowSurvivesConcurrentMembershipSweep covers two scans of one
+// podcast library running side by side, which the ingest executor allows for
+// subtree scans of different shows. While one scan writes a new show, the
+// other's folder-wide membership sweep runs. The sweep must not find the new
+// show's files without their membership and delete the show.
+func TestPodcastShowSurvivesConcurrentMembershipSweep(t *testing.T) {
+	f := newPodcastSubtreeFixture(t)
+	ctx := context.Background()
+	f.addEpisode(t, "Show A", "Episode 1.mp3", "Show A", "Episode One", "1")
+	f.scanFolder(t)
+	pilot := f.addEpisode(t, "Show B", "Episode 1.mp3", "Show B", "Pilot", "1")
+
+	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("parse database URL: %v", err)
+	}
+	var sweepRan bool
+	var sweepErr error
+	hook := &membershipInsertHook{run: func() {
+		sweepRan = true
+		_, _, _, sweepErr = f.scanner.sweepMissingAndReconcile(ctx, f.folder, false)
+	}}
+	cfg.ConnConfig.Tracer = hook
+	traced, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect traced pool: %v", err)
+	}
+	t.Cleanup(traced.Close)
+
+	scanning := NewScanner(NewFileRepository(traced), f.ffprobePath, nil, 2, false, 0)
+	if _, err := scanning.ScanSubtree(ctx, f.folder, filepath.Join(f.root, "Show B")); err != nil {
+		t.Fatalf("ScanSubtree(Show B) with a concurrent sweep: %v", err)
+	}
+	if !sweepRan {
+		t.Fatal("the concurrent sweep never ran; the membership insert was not traced")
+	}
+	if sweepErr != nil {
+		t.Fatalf("concurrent sweep: %v", sweepErr)
+	}
+	row := f.requireEpisodeOf(t, pilot, filepath.Join(f.root, "Show B"), "Show B")
+	f.requireListed(t, row.contentID)
 	f.requireOnlyPodcastItems(t)
 }
