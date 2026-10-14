@@ -409,7 +409,8 @@ checks this again under the row lock, so a key saved, or an address changed,
 by another admin in the meantime is never paired with a different address. A
 blank URL in a test or save of a saved server stands for its saved address,
 unless the plugin declares `base_url_optional`; then it is tested and saved
-blank, so an admin can clear it.
+blank, so an admin can clear it. Clearing it counts as changing the address: a
+saved key has to be typed again, and the test goes without it.
 
 The library also completes requests that never reached a router: a `pending`
 request whose title appears needs no approval any more, and a `failed` request

@@ -1066,11 +1066,11 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 	if err != nil {
 		return nil, fmt.Errorf("encrypt api key: %w", err)
 	}
-	if apiKeyRef == "" && strings.TrimSpace(i.BaseURL) != "" {
+	if apiKeyRef == "" {
 		// A blank key keeps the saved one only for the address it was saved
-		// for. validateViaPlugin checks this too, but before the write: under
-		// the row lock, a key saved since then, or an address changed since
-		// then, is caught here.
+		// for; a blank address is a different one. validateViaPlugin checks
+		// this too, but before the write: under the row lock, a key saved
+		// since then, or an address changed since then, is caught here.
 		var storedBaseURL string
 		var hasKey bool
 		err := exec.QueryRow(ctx, `SELECT base_url, api_key_ref <> '' FROM request_integrations WHERE id=$1 FOR UPDATE`, i.ID).Scan(&storedBaseURL, &hasKey)

@@ -1574,8 +1574,9 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 			// Don't pair a stored API key with a caller-changed base URL: require the
 			// key to be re-entered when the server URL changes (defense against
 			// exfiltrating a stored, API-unreadable key to an attacker-supplied URL).
-			// A server saved without a key has none to protect.
-			if strings.TrimSpace(stored.APIKeyRef) != "" && strings.TrimSpace(in.BaseURL) != "" && !sameIntegrationBaseURL(in.BaseURL, stored.BaseURL) {
+			// A cleared URL is a change too, since the save stores it blank. A
+			// server saved without a key has none to protect.
+			if strings.TrimSpace(stored.APIKeyRef) != "" && !sameIntegrationBaseURL(in.BaseURL, stored.BaseURL) {
 				return &ValidationError{FieldErrors: map[string]string{fieldAPIKey: integrationKeyReentry}}
 			}
 			in.APIKeyRef = stored.APIKeyRef
@@ -1681,7 +1682,9 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 			if submittedBaseURL == "" && s.blankURLMeansSaved(ctx, integration) {
 				integration.BaseURL = stored.BaseURL
 			}
-			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || sameIntegrationBaseURL(submittedBaseURL, stored.BaseURL)) {
+			// The saved key goes only to the address it was saved for, so a
+			// changed or cleared address is probed without it.
+			if strings.TrimSpace(integration.APIKeyRef) == "" && sameIntegrationBaseURL(integration.BaseURL, stored.BaseURL) {
 				integration.APIKeyRef = stored.APIKeyRef
 			}
 			if integration.PluginConfig == nil {

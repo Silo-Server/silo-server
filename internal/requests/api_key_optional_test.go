@@ -321,8 +321,8 @@ func TestClearedURLIsTestedAndValidatedAsBlankForURLOptionalRouter(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeStore()
-			store.integrations = []Integration{routerInst("router-1")}
-			router := &fakeRouterProvider{urlOptional: map[int]bool{1: tc.urlOptional}}
+			store.integrations = []Integration{keylessRouterInst("router-1")}
+			router := &fakeRouterProvider{keyOptional: map[int]bool{1: true}, urlOptional: map[int]bool{1: tc.urlOptional}}
 			service := newTestService(store)
 			service.SetRouterProvider(router)
 			admin := Viewer{UserID: 1, IsAdmin: true}
@@ -343,5 +343,34 @@ func TestClearedURLIsTestedAndValidatedAsBlankForURLOptionalRouter(t *testing.T)
 				t.Fatalf("validated address = %q, want %q", router.gotValidateConn.BaseURL, tc.want)
 			}
 		})
+	}
+}
+
+// A cleared URL is a different address, so a saved key stays behind: the
+// connection test goes without it, and the save needs it typed again.
+func TestClearingURLOfServerWithSavedKeyNeedsTheKeyAgain(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	router := &fakeRouterProvider{keyOptional: map[int]bool{1: true}, urlOptional: map[int]bool{1: true}}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+	admin := Viewer{UserID: 1, IsAdmin: true}
+
+	if _, err := service.LoadIntegrationOptions(context.Background(), admin, Integration{ID: "router-1"}); err != nil {
+		t.Fatalf("LoadIntegrationOptions: %v", err)
+	}
+	if router.gotOptionsConn.BaseURL != "" || router.gotOptionsConn.APIKey != "" {
+		t.Fatalf("probe conn = %+v, want no address and no saved key", router.gotOptionsConn)
+	}
+	install := 1
+	cleared := Integration{ID: "router-1", Name: "router-1", Enabled: true, CapabilityID: "arr", InstallationID: &install}
+	_, err := service.UpdateIntegration(context.Background(), admin, cleared)
+	var ve *ValidationError
+	if !errors.As(err, &ve) || ve.FieldErrors[fieldAPIKey] != integrationKeyReentry || router.validateCalls != 0 {
+		t.Fatalf("err = %v, validate calls = %d; want the re-enter error and no validation", err, router.validateCalls)
+	}
+	cleared.APIKeyRef = "key-router-1"
+	if _, err := service.UpdateIntegration(context.Background(), admin, cleared); err != nil || router.gotValidateConn.BaseURL != "" {
+		t.Fatalf("err = %v, validated address = %q; want the cleared address saved with the key typed again", err, router.gotValidateConn.BaseURL)
 	}
 }

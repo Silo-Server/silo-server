@@ -310,6 +310,12 @@ func TestIntegrationKeyStaysWithItsAddressDatabase(t *testing.T) {
 	if _, err = repo.UpdateIntegrationConditional(ctx, edit, current.Revision); !refused(err) {
 		t.Fatalf("conditional save of a new address without the key: %v, want the re-enter error", err)
 	}
+	// Clearing the address is a change of address too.
+	cleared := *current
+	cleared.APIKeyRef, cleared.BaseURL = "", ""
+	if _, err = repo.SaveIntegrationWithDefaults(ctx, cleared, false); !refused(err) {
+		t.Fatalf("cleared address without the key: %v, want the re-enter error", err)
+	}
 	// With the key typed again, the address can change.
 	moved.APIKeyRef = keyed.APIKeyRef
 	if _, err = repo.SaveIntegrationWithDefaults(ctx, moved, false); err != nil {
