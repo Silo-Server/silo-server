@@ -254,6 +254,7 @@
 # HTTP-only workers retain SQL-backed enrollment and current content/job authority.
 ./internal/workerregistration TestSigningKeyConcurrentCreationIsEncryptedAndStable
 ./internal/workerregistration TestEnrollmentRedeemsAtomicallyAndCannotReplay
+./internal/workerregistration TestEnrollmentRetiresOtherOutstandingTicketsForNode
 ./internal/workerregistration TestEnrollmentBindsEntireIssuedContextAndChangedNode
 ./internal/workerregistration TestHTTPEnrollmentConcurrentConsumeUsesSQLAuthority
 ./internal/workerregistration TestHTTPSEnrollmentRequiresTrustAndVerifiesSignedBinding
