@@ -376,3 +376,43 @@ func TestStreamExtractArgs_PGSProducesSup(t *testing.T) {
 		t.Fatalf("PGS extract should copy into a sup stream: %s", joined)
 	}
 }
+
+// A window from a cached .sup that starts at or before the first cue cannot
+// be seeked (ffmpeg fails the seek and loses the first presentation
+// segment), so it reads from the start and keeps its absolute end.
+func TestWindowFromCachedSup(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		seek, duration    float64
+		wantSeek, wantDur float64
+	}{
+		{name: "before the first cue", seek: 35, duration: 60, wantSeek: 0, wantDur: 95},
+		{name: "onto the first cue", seek: 40, duration: 60, wantSeek: 0, wantDur: 100},
+		{name: "after the first cue", seek: 95, duration: 60, wantSeek: 95, wantDur: 60},
+		{name: "from the start", seek: 0, duration: 60, wantSeek: 0, wantDur: 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := windowFromCachedSup(StreamExtractOpts{SeekSeconds: tc.seek, DurationSeconds: tc.duration}, 40)
+			if got.SeekSeconds != tc.wantSeek || got.DurationSeconds != tc.wantDur {
+				t.Fatalf("got seek %v duration %v, want %v %v", got.SeekSeconds, got.DurationSeconds, tc.wantSeek, tc.wantDur)
+			}
+		})
+	}
+}
+
+func TestReadSupFirstCue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "track.sup")
+	if err := os.WriteFile(path, testSupStream([]float64{91.88, 100}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readSupFirstCue(path)
+	if err != nil || got != 91.88 {
+		t.Fatalf("readSupFirstCue = %v, %v; want 91.88", got, err)
+	}
+	if err := os.WriteFile(path, []byte("not a sup stream"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readSupFirstCue(path); err == nil {
+		t.Fatal("a file without the PG magic should be refused")
+	}
+}

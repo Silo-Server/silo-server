@@ -41,6 +41,8 @@ func TestStreamExtractArgs_CachedSupWindowsRealFFmpeg(t *testing.T) {
 		seek float64
 	}{
 		{name: "from the start", seek: 0},
+		{name: "before the first cue", seek: 35},
+		{name: "onto the first cue", seek: 40},
 		{name: "after a seek", seek: 95},
 		{name: "a seek onto a cue", seek: 100},
 		{name: "an extend window", seek: 355},
@@ -48,14 +50,18 @@ func TestStreamExtractArgs_CachedSupWindowsRealFFmpeg(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
-			args := streamExtractArgs(StreamExtractOpts{
+			firstCue, err := readSupFirstCue(cached)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := streamExtractArgs(windowFromCachedSup(StreamExtractOpts{
 				InputPath:           cached,
 				SourceCodec:         "hdmv_pgs_subtitle",
 				SeekSeconds:         tc.seek,
 				DurationSeconds:     60,
 				AllowWindow:         true,
 				InputIsExtractedSup: true,
-			})
+			}, firstCue))
 			var stdout, stderr bytes.Buffer
 			cmd := exec.CommandContext(ctx, ffmpeg, args...)
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr

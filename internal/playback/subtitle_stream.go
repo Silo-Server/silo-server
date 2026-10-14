@@ -2,12 +2,14 @@ package playback
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -135,6 +137,44 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	return nil
 }
 
+// cachedSupSeekSlack is how far before a window's start an extract from a
+// cached .sup seeks, so a display set at the start is read whole.
+const cachedSupSeekSlack = 0.001
+
+// windowFromCachedSup adapts a windowed extract whose input is a cached .sup
+// whose first cue is at firstCue seconds. ffmpeg cannot seek to a point
+// before a file's first packet: it reports the failed seek, carries on, and
+// loses the first display set's presentation segment. A window that starts
+// at or before the first cue reads from the start instead and ends where it
+// would have; nothing before the first cue exists to leave out.
+func windowFromCachedSup(opts StreamExtractOpts, firstCue float64) StreamExtractOpts {
+	if opts.SeekSeconds > 0 && opts.SeekSeconds-cachedSupSeekSlack <= firstCue {
+		if opts.DurationSeconds > 0 {
+			opts.DurationSeconds += opts.SeekSeconds
+		}
+		opts.SeekSeconds = 0
+	}
+	return opts
+}
+
+// readSupFirstCue returns the time, in seconds, of the first segment in a
+// .sup file.
+func readSupFirstCue(path string) (float64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = f.Close() }()
+	header := make([]byte, 13)
+	if _, err := io.ReadFull(f, header); err != nil {
+		return 0, err
+	}
+	if header[0] != 'P' || header[1] != 'G' {
+		return 0, errors.New("not a .sup stream")
+	}
+	return float64(binary.BigEndian.Uint32(header[2:6])) / 90000, nil
+}
+
 // streamExtractArgs builds the ffmpeg argument list for a streaming
 // subtitle extract.
 func streamExtractArgs(opts StreamExtractOpts) []string {
@@ -164,7 +204,7 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 			// land after the first of them. Seeking a millisecond early reads
 			// the whole set; at most a stray segment of the set before comes
 			// along, which a decoder ignores.
-			seek = max(0, seek-0.001)
+			seek = max(0, seek-cachedSupSeekSlack)
 		}
 		args = append(args, "-ss", strconv.FormatFloat(seek, 'f', 3, 64))
 		// ffmpeg offsets an input seek by the input's start time. A cached
