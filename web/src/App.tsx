@@ -32,7 +32,6 @@ import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useNavigationDirection } from "@/hooks/useNavigationDirection";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { DateTimeFormatProvider, useDateTimeFormat } from "@/hooks/useDateTimeFormat";
-import { CustomThemeProvider } from "@/contexts/CustomThemeProvider";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -830,30 +829,28 @@ function AppShell() {
         <ErrorBoundary>
           <BrandingProvider>
             <ThemeProvider>
-              <CustomThemeProvider>
-                <DateTimeFormatProvider>
-                  <WatchPlaybackProvider>
-                    <AudiobookPlaybackProvider>
-                      <RealtimeEventsProvider>
-                        <PlaybackCapabilityPrewarmer />
-                        <RouteChunkPrewarmer />
-                        <RealtimeEventChannels />
-                        <ScrollRestorationManager />
-                        <NavigationDirectionManager />
-                        <RouteAnnouncer />
-                        <QueryCacheManager />
-                        <AppChrome />
-                        <Suspense fallback={<RouteLoading />}>
-                          <Outlet />
-                        </Suspense>
-                        <WatchPlaybackHost />
-                        <WatchPlaybackBar />
-                        <Toaster />
-                      </RealtimeEventsProvider>
-                    </AudiobookPlaybackProvider>
-                  </WatchPlaybackProvider>
-                </DateTimeFormatProvider>
-              </CustomThemeProvider>
+              <DateTimeFormatProvider>
+                <WatchPlaybackProvider>
+                  <AudiobookPlaybackProvider>
+                    <RealtimeEventsProvider>
+                      <PlaybackCapabilityPrewarmer />
+                      <RouteChunkPrewarmer />
+                      <RealtimeEventChannels />
+                      <ScrollRestorationManager />
+                      <NavigationDirectionManager />
+                      <RouteAnnouncer />
+                      <QueryCacheManager />
+                      <AppChrome />
+                      <Suspense fallback={<RouteLoading />}>
+                        <Outlet />
+                      </Suspense>
+                      <WatchPlaybackHost />
+                      <WatchPlaybackBar />
+                      <Toaster />
+                    </RealtimeEventsProvider>
+                  </AudiobookPlaybackProvider>
+                </WatchPlaybackProvider>
+              </DateTimeFormatProvider>
             </ThemeProvider>
           </BrandingProvider>
         </ErrorBoundary>

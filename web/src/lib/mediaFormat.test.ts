@@ -2,6 +2,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  audioTrackHasAtmos,
+  audioTrackLabel,
   compactHdrSuffix,
   dolbyVisionLabel,
   formatBitrate,
@@ -35,8 +37,16 @@ describe("formatCodecLabel", () => {
 
 describe("mapAudioLabel", () => {
   it("prefers Atmos over other markers", () => {
-    expect(mapAudioLabel("TrueHD Atmos")).toBe("Atmos");
-    expect(mapAudioLabel("eac3 atmos")).toBe("Atmos");
+    expect(mapAudioLabel("TrueHD Atmos")).toBe("TrueHD Atmos");
+    expect(mapAudioLabel("eac3 atmos")).toBe("DD+ Atmos");
+    expect(mapAudioLabel("Atmos")).toBe("Atmos");
+  });
+
+  it("reads Atmos from the FFprobe profile of a plain codec", () => {
+    expect(mapAudioLabel("eac3", "Dolby Digital Plus + Dolby Atmos")).toBe("DD+ Atmos");
+    expect(mapAudioLabel("truehd", "Dolby TrueHD + Dolby Atmos")).toBe("TrueHD Atmos");
+    expect(mapAudioLabel("eac3", "")).toBe("EAC3");
+    expect(mapAudioLabel("dts", "DTS-HD MA")).toBe("DTS");
   });
 
   it("maps codec families", () => {
@@ -172,5 +182,38 @@ describe("compactHdrSuffix", () => {
 
   it("returns null for missing values", () => {
     expect(compactHdrSuffix(undefined)).toBeNull();
+  });
+});
+
+describe("audioTrackLabel", () => {
+  it("reads Atmos from a track's profile or titles", () => {
+    const longName = "ATSC A/52B (AC-3, E-AC-3)";
+    expect(
+      audioTrackLabel({
+        codec: "eac3",
+        title: longName,
+        profile: "Dolby Digital Plus + Dolby Atmos",
+      }),
+    ).toBe("DD+ Atmos");
+    expect(audioTrackLabel({ codec: "truehd", embedded_title: "TrueHD Atmos 7.1" })).toBe(
+      "TrueHD Atmos",
+    );
+    expect(audioTrackLabel({ codec: "eac3", title: longName })).toBe("EAC3");
+    expect(audioTrackLabel({ title: "Atmos" })).toBe("");
+    expect(audioTrackHasAtmos({ codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos" })).toBe(
+      true,
+    );
+    expect(audioTrackHasAtmos({ codec: "eac3", title: longName })).toBe(false);
+  });
+
+  it("ignores Atmos titles on codecs that cannot carry it", () => {
+    expect(audioTrackLabel({ codec: "ac3", title: "AC3 5.1 (from TrueHD Atmos)" })).toBe("AC3");
+    expect(audioTrackLabel({ codec: "aac", title: "AAC 2.0 (DDP Atmos downmix)" })).toBe("AAC");
+    expect(audioTrackHasAtmos({ codec: "opus", title: "Opus 5.1 from Atmos" })).toBe(false);
+    expect(audioTrackLabel({ codec: "mlp", profile: "Dolby Atmos" })).toBe("Atmos");
+  });
+
+  it("matches Atmos only as a word", () => {
+    expect(audioTrackLabel({ codec: "eac3", title: "Atmospheric score" })).toBe("EAC3");
   });
 });

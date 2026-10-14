@@ -24,6 +24,22 @@ func NewResolver(trusted []*net.IPNet) *Resolver {
 
 // ClientIP returns the resolved client IP address string.
 // The returned value is always normalized via net.ParseIP().String().
+//
+// Forwarding headers count only when the transport peer is a trusted proxy.
+// X-Forwarded-For is read across all of its header lines in order, because
+// some proxies (HAProxy's option forwardfor) add their own line after the
+// client's instead of appending to it. Each entry was written by the hop to
+// its right, so walking right to left the first untrusted entry is the client.
+// An entry that is not an address stops the walk at the trusted hop that
+// wrote it, since nothing to its left can be attributed.
+//
+// X-Real-IP, as a single value, is read only when the peer named no address
+// in X-Forwarded-For: a proxy that appends to X-Forwarded-For may pass a
+// client's X-Real-IP through, so it never overrides an entry. It keeps nginx's
+// `X-Real-IP $remote_addr` setup working. That setup forwards a client's
+// X-Forwarded-For as sent, so ignoring X-Real-IP would not make it safe; it
+// would only resolve a client that sends junk X-Forwarded-For to the proxy's
+// own, local-looking address.
 func (r *Resolver) ClientIP(req *http.Request) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -35,39 +51,55 @@ func (r *Resolver) ClientIP(req *http.Request) string {
 		return normalize(remoteIP)
 	}
 
-	// Check X-Forwarded-For: walk right-to-left, return first untrusted IP.
-	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
-		ips := strings.Split(xff, ",")
-		for i := len(ips) - 1; i >= 0; i-- {
-			candidate := strings.TrimSpace(ips[i])
-			if candidate == "" {
-				continue
-			}
-			parsed := net.ParseIP(candidate)
-			if parsed == nil {
-				continue
-			}
-			if !r.isTrusted(parsed) {
-				return normalize(parsed)
-			}
-		}
-		// All IPs in chain are trusted — return leftmost
-		for _, raw := range ips {
-			candidate := strings.TrimSpace(raw)
-			if parsed := net.ParseIP(candidate); parsed != nil {
-				return normalize(parsed)
-			}
-		}
+	if ip := r.forwardedFor(req.Header.Values("X-Forwarded-For")); ip != nil {
+		return normalize(ip)
 	}
 
-	// Fallback: X-Real-IP
-	if realIP := req.Header.Get("X-Real-IP"); realIP != "" {
-		if parsed := net.ParseIP(realIP); parsed != nil {
+	if realIP := req.Header.Values("X-Real-IP"); len(realIP) == 1 {
+		if parsed := parseForwardedAddr(strings.TrimSpace(realIP[0])); parsed != nil {
 			return normalize(parsed)
 		}
 	}
 
 	return normalize(remoteIP)
+}
+
+// forwardedFor walks the X-Forwarded-For lines right to left and returns the
+// first untrusted entry, the leftmost entry when all are trusted, or the
+// trusted hop before an entry that is not an address. It returns nil when the
+// peer named no address.
+func (r *Resolver) forwardedFor(lines []string) net.IP {
+	var last net.IP
+	for i := len(lines) - 1; i >= 0; i-- {
+		entries := strings.Split(lines[i], ",")
+		for j := len(entries) - 1; j >= 0; j-- {
+			entry := strings.TrimSpace(entries[j])
+			if entry == "" {
+				continue
+			}
+			ip := parseForwardedAddr(entry)
+			if ip == nil {
+				return last
+			}
+			if !r.isTrusted(ip) {
+				return ip
+			}
+			last = ip
+		}
+	}
+	return last
+}
+
+// parseForwardedAddr parses a forwarded address: a bare IP, or an IP with a
+// port or in brackets, as some proxies write it. It returns nil otherwise.
+func parseForwardedAddr(addr string) net.IP {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return net.ParseIP(host)
+	}
+	if len(addr) > 1 && addr[0] == '[' && addr[len(addr)-1] == ']' {
+		addr = addr[1 : len(addr)-1]
+	}
+	return net.ParseIP(addr)
 }
 
 // parseRemoteAddr extracts the IP from r.RemoteAddr using net.SplitHostPort.

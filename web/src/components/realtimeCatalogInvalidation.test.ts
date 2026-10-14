@@ -121,6 +121,28 @@ describe("createCatalogInvalidationScheduler", () => {
     expect(invalidatedLibraries(queryClient, [3])).toEqual([3]);
   });
 
+  it("keeps a library-wide event broad when coalesced with a single item", async () => {
+    const queryClient = new QueryClient();
+    const otherDetailKey = catalogKeys.itemDetail("item-2");
+    queryClient.setQueryData(otherDetailKey, { content_id: "item-2" });
+    const scheduler = createCatalogInvalidationScheduler(queryClient, WINDOW_MS);
+
+    try {
+      scheduler.schedule({ itemId: "item-1", libraryId: 3, allowDashboardRefetch: false });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
+
+      scheduler.schedule({ itemId: "item-1", libraryId: 3, allowDashboardRefetch: false });
+      scheduler.schedule({ libraryId: 3, allowDashboardRefetch: false });
+      await vi.advanceTimersByTimeAsync(WINDOW_MS);
+
+      expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(true);
+    } finally {
+      scheduler.cancel();
+      queryClient.clear();
+    }
+  });
+
   it("marks home section data stale (without refetching) on a library-scoped sweep", async () => {
     const queryClient = new QueryClient();
     const homeLayoutKey = sectionKeys.homeLayout();

@@ -99,6 +99,7 @@ export interface PlayerAudioTrack {
   embedded_title?: string;
   language?: string;
   codec?: string;
+  profile?: string;
   layout?: string;
   channels?: number;
   bitrate?: number;

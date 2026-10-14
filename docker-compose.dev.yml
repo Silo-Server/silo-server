@@ -111,6 +111,9 @@ services:
       REDIS_URL: redis://redis:6379
       SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
       POSTGRES_TUNE: "off"
+      # air restarts on every rebuild and kills the process 500 ms after
+      # interrupting it; a single dev server has no traffic to route away.
+      SILO_SHUTDOWN_DELAY: "0"
     ports:
       - "${BACKEND_PORT:-18080}:8080"
       - "${JF_PORT:-8096}:8096"

@@ -2,7 +2,6 @@ import { useEffect, useRef, type RefObject } from "react";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
 import { videoContentRect, type FitRect } from "../utils/videoFit";
 import { isPGSCodec } from "../utils/subtitleCodecs";
-import { toMediaTime } from "../utils/mediaTimeline";
 import {
   decodePGSObject,
   mergePGSCompositions,
@@ -13,21 +12,29 @@ import {
   type PGSPlacedObject,
 } from "../utils/pgs";
 import {
-  nextSubtitleRetryDelay,
-  planSubtitleWindow,
-  SUBTITLE_FETCH_STALL_TIMEOUT_MS,
+  createSubtitleWindowFetcher,
   SUBTITLE_WINDOW_SECONDS,
+  subtitlePlayheadSeconds,
+  subtitleWindowUrl,
 } from "../utils/subtitleWindows";
 
 // A PGS composition stays on screen until the next one replaces it, and the
 // server's positioned extract starts at the window, so a fresh window reaches
 // back far enough to include a subtitle already showing at the playhead.
 const SEEK_BACKOFF = 10;
-// Larger than any real Blu-ray plane; a bigger object is damaged data.
-const MAX_OBJECT_PIXELS = 4096 * 4096;
+// Decoding is the costly step, and a crafted stream could redefine a huge
+// object on every display set. Real streams stay well under this, even a
+// full-plane fade at 24 frames a second (about 50 million pixels).
+const MAX_DECODED_PIXELS_PER_SECOND = 4 * 4096 * 4096;
 // Keeps a subtitle that would land past the player's edge (a Fill crop, or a
 // plane larger than the cropped video) this far inside it.
 const EDGE_MARGIN_RATIO = 0.02;
+
+interface DecodedBitmap {
+  rle: Uint8Array;
+  palette: Uint32Array;
+  bitmap: CanvasImageSource | null;
+}
 
 export type PGSLoadState = "idle" | "loading" | "ready" | "error";
 
@@ -86,14 +93,15 @@ function clampSpan(start: number, size: number, min: number, max: number): numbe
 }
 
 /**
- * Where one object lands in the player box. It keeps its place on the plane,
- * then stays inside the box with a small margin, shrinking when it does not
- * fit (a Fill crop on a narrow screen, or a tall object over a short player);
- * lower-half objects also stay above `bottomInsetPx`.
+ * Where a composition's objects land in the player box. Each object keeps its
+ * place on the plane. Objects in the same half of the box then move and shrink
+ * as one block, so the two lines of a subtitle stay apart and at one scale:
+ * the block stays inside the box with a small margin, shrinking when it does
+ * not fit (a Fill crop on a narrow screen, or a tall subtitle over a short
+ * player), and a lower-half block also stays above `bottomInsetPx`.
  */
-export function placePGSObject({
-  object,
-  source,
+export function placePGSObjects({
+  objects,
   plane,
   planeWidth,
   planeHeight,
@@ -101,36 +109,57 @@ export function placePGSObject({
   boxHeight,
   bottomInsetPx,
 }: {
-  object: { x: number; y: number };
-  source: FitRect;
+  objects: { object: { x: number; y: number }; source: FitRect }[];
   plane: FitRect;
   planeWidth: number;
   planeHeight: number;
   boxWidth: number;
   boxHeight: number;
   bottomInsetPx: number;
-}): FitRect {
+}): FitRect[] {
   const scaleX = plane.width / planeWidth;
   const scaleY = plane.height / planeHeight;
   const marginX = boxWidth * EDGE_MARGIN_RATIO;
   const marginY = boxHeight * EDGE_MARGIN_RATIO;
-  let width = source.width * scaleX;
-  let height = source.height * scaleY;
-  const centerX = plane.x + object.x * scaleX + width / 2;
-  const centerY = plane.y + object.y * scaleY + height / 2;
-  const lowerHalf = centerY > boxHeight / 2;
-  const bottom = boxHeight - Math.max(marginY, lowerHalf ? bottomInsetPx : 0);
-  const roomX = boxWidth - 2 * marginX;
-  const roomY = bottom - marginY;
-  const shrink = Math.max(0, Math.min(1, roomX / width, roomY / height));
-  width *= shrink;
-  height *= shrink;
-  return {
-    x: clampSpan(centerX - width / 2, width, marginX, boxWidth - marginX),
-    y: clampSpan(centerY - height / 2, height, marginY, bottom),
-    width,
-    height,
-  };
+  const onPlane = objects.map(({ object, source }) => ({
+    x: plane.x + object.x * scaleX,
+    y: plane.y + object.y * scaleY,
+    width: source.width * scaleX,
+    height: source.height * scaleY,
+  }));
+  const placed = [...onPlane];
+  for (const lowerHalf of [false, true]) {
+    const group = onPlane
+      .map((rect, index) => ({ rect, index }))
+      .filter(({ rect }) => rect.y + rect.height / 2 > boxHeight / 2 === lowerHalf);
+    if (group.length === 0) continue;
+    const left = Math.min(...group.map(({ rect }) => rect.x));
+    const top = Math.min(...group.map(({ rect }) => rect.y));
+    const width = Math.max(...group.map(({ rect }) => rect.x + rect.width)) - left;
+    const height = Math.max(...group.map(({ rect }) => rect.y + rect.height)) - top;
+    const bottom = boxHeight - Math.max(marginY, lowerHalf ? bottomInsetPx : 0);
+    const roomX = boxWidth - 2 * marginX;
+    const roomY = bottom - marginY;
+    const shrink = Math.max(0, Math.min(1, roomX / width, roomY / height));
+    const blockWidth = width * shrink;
+    const blockHeight = height * shrink;
+    const blockX = clampSpan(
+      left + (width - blockWidth) / 2,
+      blockWidth,
+      marginX,
+      boxWidth - marginX,
+    );
+    const blockY = clampSpan(top + (height - blockHeight) / 2, blockHeight, marginY, bottom);
+    for (const { rect, index } of group) {
+      placed[index] = {
+        x: blockX + (rect.x - left) * shrink,
+        y: blockY + (rect.y - top) * shrink,
+        width: rect.width * shrink,
+        height: rect.height * shrink,
+      };
+    }
+  }
+  return placed;
 }
 
 function objectSourceRect(object: PGSPlacedObject): FitRect {
@@ -144,11 +173,6 @@ function objectSourceRect(object: PGSPlacedObject): FitRect {
     width: Math.max(0, Math.min(crop.width, object.width - x)),
     height: Math.max(0, Math.min(crop.height, object.height - y)),
   };
-}
-
-function appendWindow(url: string, position: number): string {
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}windowed=1&position=${position}&duration=${SUBTITLE_WINDOW_SECONDS}`;
 }
 
 /**
@@ -211,37 +235,39 @@ export function usePGSSubtitles({
     // Carried across contiguous windows so an epoch that began in one window
     // still resolves in the next; a fresh window starts a new one.
     let parser: PGSStreamParser | null = null;
-    let coverageStart = 0;
-    let windowEnd = 0;
-    let atEOF = false;
-    let hasFetched = false;
-    let inflight: AbortController | null = null;
-    let inflightStart = 0;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastFetchFailureAt = 0;
-    let retryDelay = 0;
     let frameRequest = 0;
     let painted: { composition: PGSComposition | null; key: string } = {
       composition: null,
       key: "",
     };
-    // Only the screen being drawn keeps decoded bitmaps; a feature-length
-    // track would otherwise hold every subtitle it has shown.
-    let bitmaps = new Map<PGSPlacedObject, CanvasImageSource | null>();
+    // Only the last screen drawn keeps decoded bitmaps; a feature-length
+    // track would otherwise hold every subtitle it has shown. They are keyed by
+    // the object's pixel data and palette, which display sets share by
+    // reference while the definitions are unchanged, so a screen that is
+    // placed again or repeated at an acquisition point is not decoded again.
+    let bitmaps: DecodedBitmap[] = [];
+    let decodeBudget = { since: 0, pixels: 0 };
 
     function sourceTime(): number {
       const { origin, delayMs } = timingRef.current;
-      const mediaTime =
-        videoEl.readyState > 0
-          ? toMediaTime(videoEl.currentTime, origin)
-          : (fetchAnchorRef.current ?? 0);
-      return mediaTime - delayMs / 1000;
+      return subtitlePlayheadSeconds(videoEl, origin, fetchAnchorRef.current) - delayMs / 1000;
     }
 
-    function bitmapFor(object: PGSPlacedObject): CanvasImageSource | null {
-      const cached = bitmaps.get(object);
-      if (cached !== undefined) return cached;
-      if (object.width * object.height > MAX_OBJECT_PIXELS) return null;
+    function bitmapFor(
+      object: PGSPlacedObject,
+      previous: DecodedBitmap[],
+    ): CanvasImageSource | null {
+      const same = (entry: DecodedBitmap) =>
+        entry.rle === object.rle && entry.palette === object.palette;
+      const reused = bitmaps.find(same) ?? previous.find(same);
+      if (reused) {
+        if (!bitmaps.includes(reused)) bitmaps.push(reused);
+        return reused.bitmap;
+      }
+      const now = performance.now();
+      if (now - decodeBudget.since > 1000) decodeBudget = { since: now, pixels: 0 };
+      decodeBudget.pixels += object.width * object.height;
+      if (decodeBudget.pixels > MAX_DECODED_PIXELS_PER_SECOND) return null;
       const surface = document.createElement("canvas");
       surface.width = object.width;
       surface.height = object.height;
@@ -256,7 +282,7 @@ export function usePGSSubtitles({
         );
         bitmap = surface;
       }
-      bitmaps.set(object, bitmap);
+      bitmaps.push({ rle: object.rle, palette: object.palette, bitmap });
       return bitmap;
     }
 
@@ -274,13 +300,11 @@ export function usePGSSubtitles({
       if (!context) return;
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, pixelWidth, pixelHeight);
-      const previous = bitmaps;
-      bitmaps = new Map();
+      // A clear keeps the last screen's bitmaps, so a screen that comes back
+      // after it is not decoded again.
       if (!composition || composition.objects.length === 0) return;
-      for (const object of composition.objects) {
-        const kept = previous.get(object);
-        if (kept !== undefined) bitmaps.set(object, kept);
-      }
+      const previous = bitmaps;
+      bitmaps = [];
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
@@ -293,21 +317,24 @@ export function usePGSSubtitles({
         videoFitRef.current,
       );
       const plane = pgsPlaneRect(picture, composition.width, composition.height);
-      for (const object of composition.objects) {
+      const drawable = composition.objects.flatMap((object) => {
         const source = objectSourceRect(object);
-        if (source.width === 0 || source.height === 0) continue;
-        const bitmap = bitmapFor(object);
-        if (!bitmap) continue;
-        const target = placePGSObject({
-          object,
-          source,
-          plane,
-          planeWidth: composition.width,
-          planeHeight: composition.height,
-          boxWidth,
-          boxHeight,
-          bottomInsetPx: bottomInsetRef.current,
-        });
+        if (source.width === 0 || source.height === 0) return [];
+        const bitmap = bitmapFor(object, previous);
+        return bitmap ? [{ object, source, bitmap }] : [];
+      });
+      const targets = placePGSObjects({
+        objects: drawable,
+        plane,
+        planeWidth: composition.width,
+        planeHeight: composition.height,
+        boxWidth,
+        boxHeight,
+        bottomInsetPx: bottomInsetRef.current,
+      });
+      drawable.forEach(({ source, bitmap }, index) => {
+        const target = targets[index];
+        if (!target) return;
         context.drawImage(
           bitmap,
           source.x,
@@ -319,7 +346,7 @@ export function usePGSSubtitles({
           target.width,
           target.height,
         );
-      }
+      });
     }
 
     function renderFrame() {
@@ -328,6 +355,7 @@ export function usePGSSubtitles({
       // The clear for the last screen may not have arrived yet, so the
       // timeline only reaches the last finished window or, past it, the
       // latest segment the parser has read.
+      const { windowEnd } = fetcher.coverage();
       const loadedUntil = Math.max(windowEnd, parser?.receivedUntil ?? -Infinity) + 1;
       const composition = pgsCompositionAt(timeline, sourceTime(), loadedUntil);
       const key = `${canvasEl.clientWidth}x${canvasEl.clientHeight}@${window.devicePixelRatio}:${videoEl.videoWidth}x${videoEl.videoHeight}:${layoutRevisionRef.current}`;
@@ -343,104 +371,43 @@ export function usePGSSubtitles({
       frameRequest = requestAnimationFrame(renderFrame);
     }
 
-    async function fetchWindow(seekStart: number, resetExisting: boolean) {
-      inflight?.abort();
-      const controller = new AbortController();
-      inflight = controller;
-      inflightStart = seekStart;
-      if (retryTimer !== null) clearTimeout(retryTimer);
-      if (resetExisting) {
-        onLoadStateRef.current?.("loading");
-        timeline = [];
-        coverageStart = seekStart;
-        windowEnd = seekStart;
-        atEOF = false;
-      }
-      const requestedEnd = seekStart + SUBTITLE_WINDOW_SECONDS;
-      let stallTimer: ReturnType<typeof setTimeout> | null = null;
-      const armStallTimer = () => {
-        if (stallTimer !== null) clearTimeout(stallTimer);
-        stallTimer = setTimeout(() => controller.abort(), SUBTITLE_FETCH_STALL_TIMEOUT_MS);
-      };
-      // A fresh window starts a new epoch history. An extend continues the
-      // last one, so display sets past the join can still place objects the
-      // previous window defined; the repeats in the overlap keep the copy the
-      // earlier window resolved.
-      if (resetExisting || !parser) parser = new PGSStreamParser();
-      else parser.resetBuffer();
-      const windowParser = parser;
-      let succeeded = false;
-      try {
-        armStallTimer();
-        const response = await fetch(appendWindow(url, seekStart), { signal: controller.signal });
-        if (!response.ok || !response.body) {
-          console.error(`[usePGSSubtitles] Failed to fetch ${url}: ${response.status}`);
-          return;
+    const fetcher = createSubtitleWindowFetcher({
+      windowUrl: (start) => subtitleWindowUrl(url, start, "windowed=1"),
+      playhead: () => Math.max(0, sourceTime()),
+      duration: () => durationRef.current ?? 0,
+      seekBackoffSeconds: SEEK_BACKOFF,
+      logTag: "usePGSSubtitles",
+      onWindowStart: (fresh) => {
+        if (fresh) {
+          onLoadStateRef.current?.("loading");
+          timeline = [];
         }
-        const reader = response.body.getReader();
-        while (!cancelled) {
-          armStallTimer();
-          const { value, done } = await reader.read();
-          if (cancelled || controller.signal.aborted || inflight !== controller) return;
-          if (done) break;
-          const parsed = windowParser.push(value);
-          if (parsed.length > 0) {
-            timeline = mergePGSCompositions(timeline, parsed);
-            onLoadStateRef.current?.("ready");
-          }
+        // A fresh window starts a new epoch history. An extend continues the
+        // last one, so display sets past the join can still place objects the
+        // previous window defined; the repeats in the overlap keep the copy the
+        // earlier window resolved.
+        if (fresh || !parser) parser = new PGSStreamParser();
+        else parser.resetBuffer();
+      },
+      onChunk: (chunk) => {
+        const parsed = parser?.push(chunk) ?? [];
+        if (parsed.length === 0) return;
+        timeline = mergePGSCompositions(timeline, parsed);
+        onLoadStateRef.current?.("ready");
+      },
+      onWindowCommitted: (fresh) => {
+        onLoadStateRef.current?.("ready");
+        // Keep about one window behind the playhead, so a straight run
+        // through a long film holds a bounded number of screens.
+        const keepFrom = sourceTime() - SUBTITLE_WINDOW_SECONDS;
+        if (!fresh && keepFrom > fetcher.coverage().coverageStart) {
+          timeline = prunePGSTimeline(timeline, keepFrom);
+          fetcher.releaseBefore(keepFrom);
         }
-        succeeded = true;
-      } catch (error) {
-        if ((error as Error).name !== "AbortError") {
-          console.error("[usePGSSubtitles] Stream error:", error);
-        }
-      } finally {
-        if (stallTimer !== null) clearTimeout(stallTimer);
-        const superseded = inflight !== controller;
-        if (inflight === controller) inflight = null;
-        if (succeeded && !cancelled && !superseded) {
-          onLoadStateRef.current?.("ready");
-          hasFetched = true;
-          retryDelay = 0;
-          lastFetchFailureAt = 0;
-          windowEnd = Math.max(windowEnd, requestedEnd);
-          const duration = durationRef.current ?? 0;
-          if (duration > 0 && requestedEnd >= duration) atEOF = true;
-          // Keep about one window behind the playhead, so a straight run
-          // through a long film holds a bounded number of screens.
-          const keepFrom = sourceTime() - SUBTITLE_WINDOW_SECONDS;
-          if (!resetExisting && keepFrom > coverageStart) {
-            timeline = prunePGSTimeline(timeline, keepFrom);
-            coverageStart = keepFrom;
-          }
-        } else if (!succeeded && !superseded && !cancelled) {
-          lastFetchFailureAt = Date.now();
-          onLoadStateRef.current?.("error");
-          retryDelay = nextSubtitleRetryDelay(retryDelay);
-          retryTimer = setTimeout(maybeFetch, retryDelay);
-        }
-      }
-    }
-
-    function maybeFetch() {
-      if (cancelled) return;
-      const action = planSubtitleWindow(
-        {
-          hasFetched,
-          coverageStart,
-          windowEnd,
-          atEOF,
-          inflightStart: inflight ? inflightStart : null,
-          failedAt: lastFetchFailureAt,
-          retryDelayMs: retryDelay,
-        },
-        Math.max(0, sourceTime()),
-        Date.now(),
-        SEEK_BACKOFF,
-      );
-      if (action.kind === "fresh") void fetchWindow(action.start, true);
-      else if (action.kind === "extend") void fetchWindow(action.start, false);
-    }
+      },
+      onWindowFailed: () => onLoadStateRef.current?.("error"),
+    });
+    const maybeFetch = fetcher.maybeFetch;
 
     maybeFetch();
     videoEl.addEventListener("timeupdate", maybeFetch);
@@ -450,10 +417,8 @@ export function usePGSSubtitles({
 
     return () => {
       cancelled = true;
-      if (retryTimer !== null) clearTimeout(retryTimer);
+      fetcher.dispose();
       if (frameRequest) cancelAnimationFrame(frameRequest);
-      inflight?.abort();
-      inflight = null;
       videoEl.removeEventListener("timeupdate", maybeFetch);
       videoEl.removeEventListener("seeking", maybeFetch);
       videoEl.removeEventListener("seeked", maybeFetch);

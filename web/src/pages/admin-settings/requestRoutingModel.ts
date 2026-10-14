@@ -457,10 +457,14 @@ const INLINE_OVERRIDES: readonly string[] = ["root_folder", "quality_profile_id"
 const SELF_NAMED_OVERRIDES = new Set(["root_folder"]);
 
 /**
- * Override keys whose values are IDs on the server (a quality profile, tags),
- * so naming them takes the server's options.
+ * Override keys whose values are IDs on the server (a quality profile, tags, a
+ * Sonarr metadata language), so naming them takes the server's options.
  */
-export const SERVER_NAMED_OVERRIDES: ReadonlySet<string> = new Set(["quality_profile_id", "tags"]);
+export const SERVER_NAMED_OVERRIDES: ReadonlySet<string> = new Set([
+  "quality_profile_id",
+  "tags",
+  "metadata_language",
+]);
 
 export interface OverrideNames {
   /** The server's loaded options (root folders, quality profiles, tags), by field key. */

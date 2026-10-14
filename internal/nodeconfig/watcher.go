@@ -89,6 +89,19 @@ type Watcher struct {
 	nodeRowID         int
 	nodeRegisteredURL string
 
+	// drainRequested is the drain request last read from this node's row;
+	// onDrainChange runs when it changes. Both guarded by mu.
+	drainRequested bool
+	onDrainChange  []func(requested bool)
+	// loadDrain reads a row's drain request; a field so tests run without a
+	// database. drainMu serializes reads of it with the notification they
+	// lead to, and drainReadFailed latches its failure log. drainRefreshCh
+	// asks the poll goroutine for a read, as reloadCh asks for a reload.
+	loadDrain       func(ctx context.Context, rowID int) (bool, error)
+	drainMu         sync.Mutex
+	drainReadFailed bool
+	drainRefreshCh  chan struct{}
+
 	// reloadMu makes one reload atomic from the read of server_settings through
 	// the config swap and its callbacks; see reload.
 	reloadMu sync.Mutex
@@ -137,6 +150,97 @@ func (w *Watcher) NodeRegisteredURL() (string, bool) {
 	return w.nodeRegisteredURL, w.nodeRowID > 0 && w.nodeRegisteredURL != ""
 }
 
+// refreshesDrainOn reports whether an admin-channel event calls for rereading
+// this node's drain request. The API publishes node_pool_changed after a drain
+// or resume, so a node rereads that one column then rather than waiting for
+// the poll. It does not reload the config: that would swap the config pointer
+// under in-flight starts, which refuse when it changes.
+func (w *Watcher) refreshesDrainOn(event cache.Event) bool {
+	return event.Type == cache.EventNodePoolChanged && w.hasNodeIdentity()
+}
+
+// refreshNodeDrain reads this node's drain request from its row and records
+// it. Before the row is matched there is nothing to read; a failed read keeps
+// the request last read, as a failed override read keeps its overrides, and is
+// logged once until a read succeeds.
+func (w *Watcher) refreshNodeDrain(ctx context.Context) {
+	if w.loadDrain == nil {
+		return
+	}
+	id, ok := w.rememberedNodeRowID()
+	if !ok {
+		return
+	}
+	w.drainMu.Lock()
+	defer w.drainMu.Unlock()
+	requested, err := w.loadDrain(ctx, id)
+	if err != nil {
+		if !w.drainReadFailed {
+			w.drainReadFailed = true
+			slog.WarnContext(ctx, "could not read this node's drain request; keeping the last one read",
+				"component", "nodeconfig", "node_id", id, "error", err)
+		}
+		return
+	}
+	w.drainReadFailed = false
+	w.noteNodeDrainRequested(requested)
+}
+
+// queryNodeDrainRequested reads one row's drain request. It is its own query,
+// not a column of the override read, so a node started against a database the
+// API has not migrated yet still reads its acceleration overrides.
+func (w *Watcher) queryNodeDrainRequested(ctx context.Context, rowID int) (bool, error) {
+	if w.pool == nil {
+		return false, errors.New("no database pool")
+	}
+	var requested bool
+	if err := w.pool.QueryRow(ctx, `SELECT drain_requested FROM stream_nodes WHERE id = $1`, rowID).Scan(&requested); err != nil {
+		return false, fmt.Errorf("query node drain request: %w", err)
+	}
+	return requested, nil
+}
+
+// hasNodeIdentity reports whether this process is a node with a stream_nodes
+// row to read; an API host has none.
+func (w *Watcher) hasNodeIdentity() bool {
+	return w.bootstrap.NodeURL != "" || w.bootstrap.NodeName != ""
+}
+
+// NodeDrainRequested reports whether this node's row carries an
+// administrator's drain request, as of the last read of it.
+func (w *Watcher) NodeDrainRequested() bool {
+	if w == nil {
+		return false
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.drainRequested
+}
+
+// OnNodeDrainChange registers fn to run whenever a read of this node's row
+// finds a different drain request. fn must not block.
+func (w *Watcher) OnNodeDrainChange(fn func(requested bool)) {
+	w.mu.Lock()
+	w.onDrainChange = append(w.onDrainChange, fn)
+	w.mu.Unlock()
+}
+
+// noteNodeDrainRequested records a drain request read from the row and tells
+// the registered callbacks when it changed.
+func (w *Watcher) noteNodeDrainRequested(requested bool) {
+	w.mu.Lock()
+	changed := w.drainRequested != requested
+	w.drainRequested = requested
+	callbacks := w.onDrainChange
+	w.mu.Unlock()
+	if !changed {
+		return
+	}
+	for _, fn := range callbacks {
+		fn(requested)
+	}
+}
+
 // forgetNodeRowID drops a remembered row that no longer exists.
 func (w *Watcher) forgetNodeRowID() {
 	w.mu.Lock()
@@ -156,8 +260,11 @@ func NewWatcher(pool *pgxpool.Pool, cipher *secret.Cipher, eventBus cache.EventB
 		eventBus:  eventBus,
 		bootstrap: bootstrap,
 		reloadCh:  make(chan struct{}, 1),
+		// Buffered for the same coalescing as reloadCh.
+		drainRefreshCh: make(chan struct{}, 1),
 	}
 	w.loadOverrides = w.queryNodeHWOverrides
+	w.loadDrain = w.queryNodeDrainRequested
 	return w
 }
 
@@ -195,6 +302,13 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to settings change events for immediate reload.
 	if err := w.eventBus.Subscribe(ctx, cache.ChannelAdmin, func(event cache.Event) {
+		if w.refreshesDrainOn(event) {
+			select {
+			case w.drainRefreshCh <- struct{}{}:
+			default:
+			}
+			return
+		}
 		if event.Type == cache.EventSettingsChanged {
 			select {
 			case w.reloadCh <- struct{}{}:
@@ -231,6 +345,12 @@ func (w *Watcher) RequestReload() {
 	default:
 		// Already pending — coalesce.
 	}
+}
+
+// SetNodeDrainRequestedForTest records a drain request as a reload reading it
+// from this node's row would, callbacks included. Tests only.
+func (w *Watcher) SetNodeDrainRequestedForTest(requested bool) {
+	w.noteNodeDrainRequested(requested)
 }
 
 // SetConfigForTest sets the config directly without loading from DB.
@@ -342,6 +462,9 @@ func (w *Watcher) applySettings(ctx context.Context, m map[string]string) error 
 	// own row decides its acceleration policy, and nothing above may put the
 	// cluster value back.
 	w.applyNodeHWOverrides(ctx, newCfg)
+	// The override read has matched the row by now, so its drain request can
+	// be read on the same cadence.
+	w.refreshNodeDrain(ctx)
 
 	w.mu.Lock()
 	old := w.cfg
@@ -373,7 +496,7 @@ func (w *Watcher) applySettings(ctx context.Context, m map[string]string) error 
 // read its row keeps the overlay it last read, because a database hiccup is
 // not evidence that an operator cleared the override.
 func (w *Watcher) applyNodeHWOverrides(ctx context.Context, cfg *config.Config) {
-	if (w.bootstrap.NodeURL == "" && w.bootstrap.NodeName == "") || w.loadOverrides == nil || cfg == nil {
+	if !w.hasNodeIdentity() || w.loadOverrides == nil || cfg == nil {
 		return
 	}
 
@@ -599,6 +722,8 @@ func (w *Watcher) poll(ctx context.Context) {
 			if err := w.reload(ctx); err != nil {
 				slog.WarnContext(ctx, "config event reload failed", "component", "nodeconfig", "error", err)
 			}
+		case <-w.drainRefreshCh:
+			w.refreshNodeDrain(ctx)
 		}
 	}
 }
