@@ -840,3 +840,53 @@ func TestBackfillStopsOnALockForAnotherModel(t *testing.T) {
 		t.Fatalf("calls=%d error=%v", calls, err)
 	}
 }
+
+// lostAfterLock is a clusterLock whose session closes after its first checks
+// calls to Check.
+type lostAfterLock struct {
+	fakeClusterLock
+	checks *int
+}
+
+func (l lostAfterLock) Check(context.Context) error {
+	if *l.checks <= 0 {
+		return errJobLockLost
+	}
+	*l.checks--
+	return nil
+}
+
+// A run whose cluster lock session closes stores nothing more: an embeddings
+// reset or another server's run may hold the lock by then.
+func TestBackfillStopsStoringWhenItsLockIsLost(t *testing.T) {
+	t.Run("batches", func(t *testing.T) {
+		calls, checks := 0, 1
+		store := newFakeEmbeddingStore(testIDs("item-", 25)...)
+		b := newTestBackfill(store, vectorsOf(768, &calls), nil)
+		b.held = lostAfterLock{checks: &checks}
+		if err := b.run(context.Background(), true); !errors.Is(err, errJobLockLost) {
+			t.Fatalf("run error = %v, want errJobLockLost", err)
+		}
+		if b.counts.Embedded != embeddingBackfillBatchSize || calls != 2 {
+			t.Fatalf("counts=%+v calls=%d, want one batch stored and the second dropped", b.counts, calls)
+		}
+	})
+	t.Run("one item at a time", func(t *testing.T) {
+		checks := 1
+		store := newFakeEmbeddingStore(testIDs("item-", 3)...)
+		var client quotaTestEmbedder = func(_ context.Context, texts []string) ([][]float32, error) {
+			if len(texts) > 1 {
+				return nil, errors.New("batch refused")
+			}
+			return [][]float32{testVector(768)}, nil
+		}
+		b := newTestBackfill(store, client, nil)
+		b.held = lostAfterLock{checks: &checks}
+		if err := b.run(context.Background(), true); !errors.Is(err, errJobLockLost) {
+			t.Fatalf("run error = %v, want errJobLockLost", err)
+		}
+		if b.counts.Embedded != 1 {
+			t.Fatalf("counts=%+v, want only the first item stored", b.counts)
+		}
+	})
+}

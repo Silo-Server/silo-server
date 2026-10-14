@@ -158,7 +158,7 @@ func TestCowatchSkipsDeletedItemsAndPrunesStalePairsPostgres(t *testing.T) {
 	}
 
 	w := &Worker{engine: &Engine{repo: NewRepo(pool)}}
-	if _, err := w.doCowatch(ctx); err != nil {
+	if _, err := w.doCowatch(ctx, fakeClusterLock{}); err != nil {
 		t.Fatal(err)
 	}
 	got := cowatchPairsFor(t, pool, prefix)
@@ -178,7 +178,7 @@ func TestCowatchSkipsDeletedItemsAndPrunesStalePairsPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := w.doCowatch(ctx); err != nil {
+	if _, err := w.doCowatch(ctx, fakeClusterLock{}); err != nil {
 		t.Fatal(err)
 	}
 	got = cowatchPairsFor(t, pool, prefix)

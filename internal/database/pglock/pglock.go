@@ -148,6 +148,22 @@ func (l *Lock) Held() bool {
 	return l != nil && l.conn != nil
 }
 
+// Check runs a query on l's session and returns an error when the session
+// has closed, which released every lock l held. A failed query closes the
+// session, as in AcquireAlso, and Held then reports false.
+func (l *Lock) Check(ctx context.Context) error {
+	if l == nil || l.conn == nil {
+		return errors.New("checking advisory lock: no session holds a lock")
+	}
+	if _, err := l.conn.Exec(ctx, `SELECT 1`); err != nil {
+		conn := l.conn
+		l.conn = nil
+		_ = conn.Hijack().Close(context.WithoutCancel(ctx))
+		return fmt.Errorf("checking advisory lock session: %w", err)
+	}
+	return nil
+}
+
 // ReleaseAlso unlocks key, which AcquireAlso took on l's session, and keeps
 // l's other locks, so work that takes one key after another under a
 // longer-held lock does not hold them all to the end. When the unlock fails

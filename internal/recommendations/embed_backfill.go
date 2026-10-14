@@ -89,9 +89,7 @@ type EmbedCounts struct {
 // A run that attempted items and stored none of them returns an error, unless
 // the provider only refused their inputs.
 func (e *Engine) EmbedAll(ctx context.Context) (EmbedCounts, error) {
-	b := e.newBackfill()
-	err := b.run(ctx, true)
-	return b.counts, err
+	return e.embed(ctx, nil, true)
 }
 
 // EmbedMissing runs Pass 1 of EmbedAll only: it embeds items that have no
@@ -100,8 +98,17 @@ func (e *Engine) EmbedAll(ctx context.Context) (EmbedCounts, error) {
 // It skips items whose unchanged text the provider refused since this
 // server's last EmbedAll.
 func (e *Engine) EmbedMissing(ctx context.Context) (EmbedCounts, error) {
+	return e.embed(ctx, nil, false)
+}
+
+// embed runs EmbedAll, or EmbedMissing without includeTextStale. With held,
+// the embeddings job's cluster lock, the run stops with errJobLockLost before
+// storing vectors once held's session has closed: another server's run or an
+// embeddings reset may hold the lock by then.
+func (e *Engine) embed(ctx context.Context, held clusterLock, includeTextStale bool) (EmbedCounts, error) {
 	b := e.newBackfill()
-	err := b.run(ctx, false)
+	b.held = held
+	err := b.run(ctx, includeTextStale)
 	return b.counts, err
 }
 
@@ -267,6 +274,9 @@ type embedBackfill struct {
 	// progress live in a user store outside Postgres, where the item-based
 	// stale mark cannot see them.
 	signalsOutsidePostgres bool
+	// held is the embeddings job's cluster lock, or nil for a run outside the
+	// job.
+	held clusterLock
 
 	counts EmbedCounts
 	// lock is the embedding lock once this run has read or written it.
@@ -458,6 +468,9 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 		}
 
 		b.consecutiveFailures = 0
+		if err := b.checkHeld(ctx); err != nil {
+			return err
+		}
 		for i, item := range chunkItems {
 			if _, err := b.save(ctx, item, vectors[i], chunkTexts[i]); err != nil {
 				return err
@@ -465,6 +478,15 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 		}
 	}
 	return nil
+}
+
+// checkHeld returns errJobLockLost once the session holding b.held has
+// closed. A run without a held lock is never stopped.
+func (b *embedBackfill) checkHeld(ctx context.Context) error {
+	if b.held == nil {
+		return nil
+	}
+	return b.held.Check(ctx)
 }
 
 // markSignalsStale marks stale the taste profiles with signals on the items
@@ -552,6 +574,9 @@ func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem
 		// Store the full text, not the shortened one: Pass 2 compares the
 		// stored text with the full text and would otherwise re-embed the
 		// item on every run.
+		if err := b.checkHeld(ctx); err != nil {
+			return err
+		}
 		saved, err := b.save(ctx, item, vector, texts[i])
 		if err != nil {
 			return err

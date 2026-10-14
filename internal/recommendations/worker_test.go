@@ -58,6 +58,8 @@ func (l fakeClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, 
 	return other.Release, true, nil
 }
 
+func (l fakeClusterLock) Check(context.Context) error { return nil }
+
 func (l fakeClusterLock) Release() { l.release() }
 
 func (l *fakeLocker) snapshot() (keys []int64, released int) {

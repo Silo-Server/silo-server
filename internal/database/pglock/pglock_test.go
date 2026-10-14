@@ -407,7 +407,8 @@ func TestReleaseAlsoUnlocksOnlyThatKey(t *testing.T) {
 	}
 }
 
-// A lock whose session dies is no longer held, and AcquireAlso on it fails.
+// A lock whose session dies fails Check and is no longer held, and
+// AcquireAlso on it fails.
 func TestHeldIsFalseAfterTheSessionDies(t *testing.T) {
 	pool := testPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -428,10 +429,13 @@ func TestHeldIsFalseAfterTheSessionDies(t *testing.T) {
 	if _, err := pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err == nil {
-		t.Fatal("AcquireAlso succeeded on a dead session")
+	if err := lock.Check(ctx); err == nil {
+		t.Fatal("Check succeeded on a dead session")
 	}
 	if lock.Held() {
 		t.Fatal("Held = true after the session died")
+	}
+	if _, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err == nil {
+		t.Fatal("AcquireAlso succeeded on a dead session")
 	}
 }

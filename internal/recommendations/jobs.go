@@ -115,6 +115,9 @@ type clusterLock interface {
 	// acquired is false when another server holds key. release unlocks key
 	// alone; Release unlocks it too when release was not called.
 	TryAlso(ctx context.Context, key int64) (release func(), acquired bool, err error)
+	// Check returns errJobLockLost once the lock's session has closed, which
+	// released every key the lock held.
+	Check(ctx context.Context) error
 	// Release unlocks every key the lock holds.
 	Release()
 }
@@ -153,6 +156,16 @@ func (l pgClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, er
 			slog.WarnContext(releaseCtx, "releasing recommendation lock failed", "component", "recommendations", "lock", key, "error", err)
 		}
 	}, true, nil
+}
+
+func (l pgClusterLock) Check(ctx context.Context) error {
+	if err := l.lock.Check(ctx); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return fmt.Errorf("%w: %w", errJobLockLost, err)
+	}
+	return nil
 }
 
 func (l pgClusterLock) Release() {

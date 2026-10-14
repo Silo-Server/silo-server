@@ -210,11 +210,11 @@ func (w *Worker) tryStart(name JobName) bool {
 func (w *Worker) jobFor(name JobName) job {
 	switch name {
 	case JobEmbeddings:
-		return job{name: name, timeout: w.embeddingsJobTimeout, run: func(ctx context.Context, _ clusterLock) (jobResult, error) { return w.doEmbeddings(ctx) }}
+		return job{name: name, timeout: w.embeddingsJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doEmbeddings(ctx, held) }}
 	case JobTasteProfiles:
 		return job{name: name, timeout: tasteProfilesJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doTasteProfiles(ctx, held) }}
 	case JobCowatch:
-		return job{name: name, timeout: cowatchJobTimeout, run: func(ctx context.Context, _ clusterLock) (jobResult, error) { return w.doCowatch(ctx) }}
+		return job{name: name, timeout: cowatchJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doCowatch(ctx, held) }}
 	default:
 		return job{name: JobRecommendations, timeout: cacheJobTimeout, run: func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doRecommendations(ctx, held) }}
 	}
@@ -254,7 +254,7 @@ func (w *Worker) embedMissingJob() job {
 		timeout:       w.embeddingsJobTimeout,
 		partial:       true,
 		quietWhenIdle: true,
-		run:           func(ctx context.Context, _ clusterLock) (jobResult, error) { return w.doEmbedMissing(ctx) },
+		run:           func(ctx context.Context, held clusterLock) (jobResult, error) { return w.doEmbedMissing(ctx, held) },
 	}
 }
 
@@ -581,13 +581,13 @@ func newEmbeddingsResult(counts EmbedCounts, err error, missingOnly bool) embedd
 	return res
 }
 
-func (w *Worker) doEmbeddings(ctx context.Context) (embeddingsResult, error) {
-	counts, err := w.engine.EmbedAll(ctx)
+func (w *Worker) doEmbeddings(ctx context.Context, held clusterLock) (embeddingsResult, error) {
+	counts, err := w.engine.embed(ctx, held, true)
 	return newEmbeddingsResult(counts, err, false), err
 }
 
-func (w *Worker) doEmbedMissing(ctx context.Context) (embeddingsResult, error) {
-	counts, err := w.engine.EmbedMissing(ctx)
+func (w *Worker) doEmbedMissing(ctx context.Context, held clusterLock) (embeddingsResult, error) {
+	counts, err := w.engine.embed(ctx, held, false)
 	return newEmbeddingsResult(counts, err, true), err
 }
 
@@ -740,7 +740,7 @@ func (cowatchResult) failures() int { return 0 }
 // deleted since the last run, pairs that fell below the shared-watcher floor,
 // and pairs pushed out of an item's top neighbors. The table then holds only
 // this run's pairs.
-func (w *Worker) doCowatch(ctx context.Context) (cowatchResult, error) {
+func (w *Worker) doCowatch(ctx context.Context, held clusterLock) (cowatchResult, error) {
 	var res cowatchResult
 	repo := w.engine.repo
 	// The database clock stamps updated_at, so the cutoff comes from it too.
@@ -763,12 +763,20 @@ func (w *Worker) doCowatch(ctx context.Context) (cowatchResult, error) {
 	const batchSize = 1000
 	for i := 0; i < len(pairs); i += batchSize {
 		end := min(i+batchSize, len(pairs))
+		if err := held.Check(ctx); err != nil {
+			return res, err
+		}
 		if err := repo.UpsertCowatchPairs(ctx, pairs[i:end]); err != nil {
 			return res, fmt.Errorf("upsert co-watch pairs from %d: %w", i, err)
 		}
 		res.Pairs = end
 	}
 
+	// Another server may hold the lock once this one's session closes, and
+	// its run's pairs would be deleted with this run's leftovers.
+	if err := held.Check(ctx); err != nil {
+		return res, err
+	}
 	res.Pruned, err = repo.DeleteCowatchPairsBefore(ctx, runStart)
 	if err != nil {
 		return res, fmt.Errorf("delete stale co-watch pairs: %w", err)
