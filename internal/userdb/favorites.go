@@ -19,10 +19,9 @@ type WatchlistEntry = userstore.WatchlistEntry
 // ---------- Favorites ----------
 
 // AddFavorite adds a media item to a profile's favorites.
-// If the item is already a favorite, the operation is a no-op.
-func AddFavorite(db *sql.DB, profileID, mediaItemID string) error {
-	_, err := AddFavoriteAt(db, profileID, mediaItemID, time.Now().UTC())
-	return err
+// If the item is already a favorite, the operation is a no-op that reports false.
+func AddFavorite(db *sql.DB, profileID, mediaItemID string) (bool, error) {
+	return AddFavoriteAt(db, profileID, mediaItemID, time.Now().UTC())
 }
 
 func AddFavoriteAt(db *sql.DB, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
@@ -40,13 +39,21 @@ func AddFavoriteAt(db *sql.DB, profileID, mediaItemID string, addedAt time.Time)
 	return rows > 0, nil
 }
 
-// RemoveFavorite removes a media item from a profile's favorites.
-func RemoveFavorite(db *sql.DB, profileID, mediaItemID string) error {
-	_, err := db.Exec(
+// RemoveFavorite removes a media item from a profile's favorites and reports
+// whether it was there.
+func RemoveFavorite(db *sql.DB, profileID, mediaItemID string) (bool, error) {
+	result, err := db.Exec(
 		`DELETE FROM favorites WHERE profile_id = ? AND media_item_id = ?`,
 		profileID, mediaItemID,
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // ListFavorites returns a paginated list of favorites for a profile,
@@ -196,10 +203,9 @@ func ListFavoritesByMediaItems(db *sql.DB, profileID string, mediaItemIDs []stri
 // ---------- Watchlist ----------
 
 // AddToWatchlist adds a media item to a profile's watchlist.
-// If the item is already on the watchlist, the operation is a no-op.
-func AddToWatchlist(db *sql.DB, profileID, mediaItemID string) error {
-	_, err := AddToWatchlistAt(db, profileID, mediaItemID, time.Now().UTC())
-	return err
+// If the item is already on the watchlist, the operation is a no-op that reports false.
+func AddToWatchlist(db *sql.DB, profileID, mediaItemID string) (bool, error) {
+	return AddToWatchlistAt(db, profileID, mediaItemID, time.Now().UTC())
 }
 
 // AddToWatchlistAt adds a media item to a profile's watchlist with an explicit
@@ -219,13 +225,21 @@ func AddToWatchlistAt(db *sql.DB, profileID, mediaItemID string, addedAt time.Ti
 	return rows > 0, nil
 }
 
-// RemoveFromWatchlist removes a media item from a profile's watchlist.
-func RemoveFromWatchlist(db *sql.DB, profileID, mediaItemID string) error {
-	_, err := db.Exec(
+// RemoveFromWatchlist removes a media item from a profile's watchlist and
+// reports whether it was there.
+func RemoveFromWatchlist(db *sql.DB, profileID, mediaItemID string) (bool, error) {
+	result, err := db.Exec(
 		`DELETE FROM watchlist WHERE profile_id = ? AND media_item_id = ?`,
 		profileID, mediaItemID,
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // ReplaceWatchlistOrder assigns sort_index 0..N-1 to the given ids in order and

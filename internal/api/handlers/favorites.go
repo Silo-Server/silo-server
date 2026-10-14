@@ -230,8 +230,9 @@ func (h *PersonalDataHandler) GetFavorite(ctx context.Context, viewer PersonalLi
 }
 
 // AddFavorite adds an item the viewer may see to the profile's favorites.
-// Adding an item that is already a favorite is a no-op that still notifies
-// the same listeners, so a retried add converges.
+// Listeners hear only about an add that inserted the row: adding an item
+// that is already a favorite succeeds and notifies nobody, so a retried add
+// repeats no side effect.
 func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
@@ -240,34 +241,33 @@ func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalLi
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
-	if err := store.AddFavorite(ctx, viewer.ProfileID, itemID); err != nil {
+	added, err := store.AddFavorite(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add favorite")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
-		IsFavorite: boolPtr(true),
-	})
+	if added {
+		h.notifyListChange(ctx, watchsync.ListKindFavorites, watchsync.ListChangeAdded, viewer, itemID)
+	}
 	return nil
 }
 
 // RemoveFavorite removes an item from the profile's favorites. Removing an
-// item that is not a favorite succeeds, so a retried remove converges. No
-// access check runs: the item may have left the viewer's scope since it was
-// added, and the profile must still be able to drop it.
+// item that is not a favorite succeeds and notifies nobody, so a retried
+// remove converges and repeats no side effect. No access check runs: the
+// item may have left the viewer's scope since it was added, and the profile
+// must still be able to drop it.
 func (h *PersonalDataHandler) RemoveFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	if err := store.RemoveFavorite(ctx, viewer.ProfileID, itemID); err != nil {
+	removed, err := store.RemoveFavorite(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove favorite")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
-		IsFavorite: boolPtr(false),
-	})
+	if removed {
+		h.notifyListChange(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer, itemID)
+	}
 	return nil
 }
 
@@ -323,6 +323,29 @@ func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *htt
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// listChangeNoticeTimeout bounds the notices for one committed favorites or
+// watchlist change, which no longer end with the request.
+const listChangeNoticeTimeout = 30 * time.Second
+
+// notifyListChange tells every listener about a favorites or watchlist row a
+// write inserted or deleted: connected watch providers, the profile's
+// recommendations, and the profile's clients. The row is already committed,
+// so the notices run on a context the request's cancellation does not reach.
+// A client that disconnects now would retry, and its retry changes no row and
+// sends nothing.
+func (h *PersonalDataHandler) notifyListChange(ctx context.Context, list watchsync.ListKind, change watchsync.ListChange, viewer PersonalListViewer, itemID string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), listChangeNoticeTimeout)
+	defer cancel()
+	h.dispatchLocalListEvent(ctx, list, change, viewer.UserID, viewer.ProfileID, itemID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	member := change == watchsync.ListChangeAdded
+	state, stateChange := userStateEventState{IsFavorite: &member}, "favorite"
+	if list == watchsync.ListKindWatchlist {
+		state, stateChange = userStateEventState{InWatchlist: &member}, "watchlist"
+	}
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", stateChange, state)
 }
 
 func (h *PersonalDataHandler) dispatchLocalListEvent(ctx context.Context, list watchsync.ListKind, change watchsync.ListChange, userID int, profileID string, itemID string) {
@@ -479,8 +502,9 @@ func (h *PersonalDataHandler) GetWatchlistEntry(ctx context.Context, viewer Pers
 }
 
 // AddToWatchlist adds an item the viewer may see to the profile's
-// watchlist. Adding an item that is already on it is a no-op that still
-// notifies the same listeners, so a retried add converges.
+// watchlist. Listeners hear only about an add that inserted the row: adding
+// an item that is already on it succeeds and notifies nobody, so a retried
+// add repeats no side effect.
 func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
@@ -489,34 +513,33 @@ func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer Persona
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
-	if err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+	added, err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(true),
-	})
+	if added {
+		h.notifyListChange(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer, itemID)
+	}
 	return nil
 }
 
 // RemoveFromWatchlist removes an item from the profile's watchlist.
-// Removing an item that is not on it succeeds, so a retried remove
-// converges. No access check runs: the item may have left the viewer's
-// scope since it was added, and the profile must still be able to drop it.
+// Removing an item that is not on it succeeds and notifies nobody, so a
+// retried remove converges and repeats no side effect. No access check
+// runs: the item may have left the viewer's scope since it was added, and
+// the profile must still be able to drop it.
 func (h *PersonalDataHandler) RemoveFromWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	if err := store.RemoveFromWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+	removed, err := store.RemoveFromWatchlist(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(false),
-	})
+	if removed {
+		h.notifyListChange(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer, itemID)
+	}
 	return nil
 }
 

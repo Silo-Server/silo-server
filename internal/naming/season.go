@@ -10,7 +10,12 @@ import (
 // seasonDirectoryLabels name a season level. Accented labels also accept the
 // decomposed spelling (a letter plus a combining accent) that macOS file
 // systems and shares commonly store.
-const seasonDirectoryLabels = `season|staffel|stagione|sæson|temporada|kausi|s(?:ä|a\x{308})song|seizoen|seasong|sezon|sezona|sez(?:ó|o\x{301})na|sezonul|saison|시즌|シーズン|сезон|s|` + wordSeasonDirectoryLabels
+const seasonDirectoryLabels = bareSeasonDirectoryLabels + `|s|` + wordSeasonDirectoryLabels
+
+// bareSeasonDirectoryLabels also name a season level with no number, as in a
+// folder called just Season. The one-letter S and the word labels below are
+// left out so category folders such as Series are not taken for seasons.
+const bareSeasonDirectoryLabels = `season|staffel|stagione|sæson|temporada|kausi|s(?:ä|a\x{308})song|seizoen|seasong|sezon|sezona|sez(?:ó|o\x{301})na|sezonul|saison|시즌|シーズン|сезон`
 
 // wordSeasonDirectoryLabels also begin ordinary titles (Series 7 Documentary).
 // A folder directly in the library folder is usually the show, so there a bare
@@ -24,7 +29,26 @@ var (
 	reversedSeasonDirectoryRe  = regexp.MustCompile(`(?i)^(\d{1,4})(st|nd|rd|th)?[ ._-]+(` + seasonDirectoryLabels + `)(?:$|[ ._\-\[\]])`)
 	wordSeasonDirectoryLabelRe = regexp.MustCompile(`(?i)^(?:` + wordSeasonDirectoryLabels + `)$`)
 	seasonYearPrefixRe         = regexp.MustCompile(`^(?:19|20)\d{2}(?:$|[^0-9])`)
+	bareSeasonDirectoryRe      = regexp.MustCompile(`(?i)^(?:` + bareSeasonDirectoryLabels + `)$`)
 )
+
+// isBareSeasonDirectory reports whether segment is a season label with no
+// number, such as "Season". It is not a season number: the episode numbers in
+// the file names still decide the season.
+func isBareSeasonDirectory(segment string) bool {
+	return bareSeasonDirectoryRe.MatchString(strings.TrimSpace(segment))
+}
+
+// isBareSeasonFolder is isBareSeasonDirectory for a folder that holds a file
+// whose own series title is fileTitle. When that title is the folder name, as
+// in Season/Season.S01E01.mkv, the folder is a show named "Season", not a
+// season level.
+func isBareSeasonFolder(segment, fileTitle string) bool {
+	if !isBareSeasonDirectory(segment) {
+		return false
+	}
+	return fileTitle == "" || normalizeComparableTitle(segment) != normalizeComparableTitle(fileTitle)
+}
 
 // seasonLabelStandsAlone reports whether a bare season label in a folder
 // directly in the library folder names a season, given the text after its

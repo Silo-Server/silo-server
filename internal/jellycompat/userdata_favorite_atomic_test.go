@@ -18,11 +18,11 @@ func (s atomicFavoriteOnlyStore) ApplyJellycompatProgress(ctx context.Context, p
 	}
 	return writer.ApplyJellycompatProgress(ctx, profile, edit)
 }
-func (atomicFavoriteOnlyStore) AddFavorite(context.Context, string, string) error {
-	return errors.New("separate favorite addition forbidden")
+func (atomicFavoriteOnlyStore) AddFavorite(context.Context, string, string) (bool, error) {
+	return false, errors.New("separate favorite addition forbidden")
 }
-func (atomicFavoriteOnlyStore) RemoveFavorite(context.Context, string, string) error {
-	return errors.New("separate favorite removal forbidden")
+func (atomicFavoriteOnlyStore) RemoveFavorite(context.Context, string, string) (bool, error) {
+	return false, errors.New("separate favorite removal forbidden")
 }
 
 func TestUserDataCombinedFavoriteUsesOneTransaction(t *testing.T) {
