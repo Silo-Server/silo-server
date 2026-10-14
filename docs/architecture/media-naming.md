@@ -46,6 +46,19 @@ one show). Deeper folders, and names that start with the show title, keep the UK
 (`La Série 2/La Série 2 S01E03.mkv`) keeps the label as part of the title. `TestSeasonDirectoryWordLabelsAtTheLibraryTop`
 and `TestWordSeasonLabelsKeepShowContext` hold these cases.
 
+### Extras folders in a series root
+
+The scanner files most of a show's extras folders (`naming.ExtrasDirKind`: `other`, `Trailers`,
+`Featurettes`, ...) as extras, but some files in them stay primary content: an episode-numbered
+file, or a file the scanner can't tie to a show folder that already holds episodes. For those,
+`deriveSeriesRoot` steps over the extras folder, so the file belongs to the show above it and
+never founds a series named `other` or `Trailers`. A `Specials` or `Extras` folder inside a
+season folder belongs to that season's show. The step-over needs a configured library folder,
+and it skips a folder that sits directly in the library folder or that the file's own episode
+title names (`Documentaries/Interviews/Interviews S01E01.mkv`). In those places the word is a
+show title or an organizational folder. `TestSeriesExtrasFolderBelongsToShow` and
+`TestSeriesExtrasFolderNeverBecomesASeries` hold these cases.
+
 ## Episode numbers
 
 - `parseEpisodeNumber` (`internal/naming/episode.go`) returns 0 for a digit run longer than

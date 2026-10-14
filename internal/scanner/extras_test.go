@@ -273,3 +273,39 @@ func TestMovieSupplementalDirsNoLongerSkipExtras(t *testing.T) {
 		}
 	}
 }
+
+// TestSeriesExtrasFolderNeverBecomesASeries covers extras folders whose files
+// stay primary content: an episode-numbered file, a show whose episodes sit
+// below the depth the classifier inspects, and a show folder with no episodes
+// yet. Each file still belongs to its show, never to a series named after the
+// extras folder.
+func TestSeriesExtrasFolderNeverBecomesASeries(t *testing.T) {
+	root := "/tv"
+	paths := []string{
+		"/tv/Glimmer Harbor/Season 01/Glimmer Harbor - S01E01.mkv",
+		"/tv/Glimmer Harbor/other/Glimmer Harbor - S00E01 - Making of.mkv",
+		"/tv/Ironvale/Season 01/Disc 1/Ironvale - S01E01.mkv",
+		"/tv/Ironvale/other/Behind the camera.mkv",
+		"/tv/Emberfall (2021)/trailers/Emberfall trailer.mkv",
+	}
+	primary, _ := partitionExtraPaths(paths, "series", []string{root}, []string{root})
+	result := inferRootAssignments(primary, "series", 1, nil, root)
+	got := make(map[string]string, len(result.Snapshots))
+	for _, snapshot := range result.Snapshots {
+		got[snapshot.RootPath] = snapshot.Title
+	}
+	want := map[string]string{
+		"/tv/Glimmer Harbor":   "Glimmer Harbor",
+		"/tv/Ironvale":         "Ironvale",
+		"/tv/Emberfall (2021)": "Emberfall",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("series roots = %v, want %v", got, want)
+	}
+	for rootPath, title := range want {
+		if got[rootPath] != title {
+			t.Errorf("series roots = %v, want %v", got, want)
+			break
+		}
+	}
+}

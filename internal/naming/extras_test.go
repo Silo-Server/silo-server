@@ -47,3 +47,47 @@ func TestExtraTitleFromFile(t *testing.T) {
 		}
 	}
 }
+
+func TestSeriesExtrasFolderBelongsToShow(t *testing.T) {
+	cases := []struct {
+		path        string
+		wantRoot    string
+		wantTitle   string
+		wantYear    int
+		wantEpisode int
+	}{
+		{"/tv/Show/other/Show - S00E01 - Making of.mkv", "/tv/Show", "Show", 0, 1},
+		{"/tv/Show/other/Behind the camera.mkv", "/tv/Show", "Show", 0, 0},
+		{"/tv/Show (2021)/trailers/Show trailer.mkv", "/tv/Show (2021)", "Show", 2021, 0},
+		{"/tv/Show/Featurettes/Show S00E02 Featurette.mkv", "/tv/Show", "Show", 0, 2},
+		{"/tv/Show/Extras/Behind The Scenes/clip.mkv", "/tv/Show", "Show", 0, 0},
+		{"/tv/Show/Season 01/Trailers/Preview.mkv", "/tv/Show", "Show", 0, 0},
+		{"/tv/Show/Season 01/Extras/Show S01E05 Deleted.mkv", "/tv/Show", "Show", 0, 5},
+		{"/tv/Show/Season 01/Specials/Show S00E05.mkv", "/tv/Show", "Show", 0, 5},
+		{"/tv/Show/Specials/Show S00E06.mkv", "/tv/Show", "Show", 0, 6},
+		// Extras words directly in the library folder, or named by the file's
+		// own episode title, name a show or an organizational folder.
+		{"/tv/Other/Other - S01E01.mkv", "/tv/Other", "Other", 0, 1},
+		{"/tv/Trailers/Season 01/Trailers - S01E01.mkv", "/tv/Trailers", "Trailers", 0, 1},
+		{"/tv/other/Flat Show/pilot.mkv", "/tv/other/Flat Show", "Flat Show", 0, 0},
+		{"/tv/Documentaries/Interviews/Interviews S01E01.mkv", "/tv/Documentaries/Interviews", "Interviews", 0, 1},
+	}
+	for _, tc := range cases {
+		ctx := ResolvePathContext(tc.path, "series", "/tv")
+		if ctx.RootPath != tc.wantRoot || ctx.Title != tc.wantTitle || ctx.Year != tc.wantYear || ctx.EpisodeNum != tc.wantEpisode {
+			t.Errorf("ResolvePathContext(%q) = root %q title %q year %d episode %d, want root %q title %q year %d episode %d",
+				tc.path, ctx.RootPath, ctx.Title, ctx.Year, ctx.EpisodeNum, tc.wantRoot, tc.wantTitle, tc.wantYear, tc.wantEpisode)
+		}
+	}
+}
+
+func TestExtrasDirKind(t *testing.T) {
+	for name, want := range map[string]bool{
+		"Trailers": true, "behind.the.scenes": true, "Deleted_Scenes": true, "other": true,
+		"others": false, "Season 01": false, "Specials": false,
+	} {
+		if _, got := ExtrasDirKind(name); got != want {
+			t.Errorf("ExtrasDirKind(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

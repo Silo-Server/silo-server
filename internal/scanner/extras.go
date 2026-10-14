@@ -77,7 +77,7 @@ func newExtrasClassifier(folderType string, libraryRoots, walkRoots, walkedPaths
 	for _, p := range walkedPaths {
 		dir := filepath.Dir(p)
 		c.dirFiles[dir] = true
-		if extrasDirKinds[normalizeScannerDirLabel(filepath.Base(dir))] == "" {
+		if !naming.IsExtrasDir(filepath.Base(dir)) {
 			c.dirFilesBelow[filepath.Dir(dir)] = true
 		}
 	}
@@ -105,8 +105,7 @@ func (c *extrasClassifier) classify(path string) (extraCandidate, bool) {
 
 	dir := filepath.Dir(path)
 	for depth := 0; depth < extrasDirAncestorDepth; depth++ {
-		label := normalizeScannerDirLabel(filepath.Base(dir))
-		if kind, ok := extrasDirKinds[label]; ok {
+		if kind, ok := naming.ExtrasDirKind(filepath.Base(dir)); ok {
 			if c.titleDirOwns(dir) {
 				candidate.Kind = kind
 				candidate.SupplementalDir = dir
@@ -218,7 +217,7 @@ func (c *extrasClassifier) dirHoldsMedia(dir string, depth int, inherited []igno
 			}
 		}
 		if isDir {
-			if depth > 1 && extrasDirKinds[normalizeScannerDirLabel(entry.Name())] == "" &&
+			if depth > 1 && !naming.IsExtrasDir(entry.Name()) &&
 				c.dirHoldsMedia(child, depth-1, rules) {
 				return true
 			}
@@ -239,7 +238,7 @@ func (c *extrasClassifier) dirHoldsMedia(dir string, depth int, inherited []igno
 // cleaned directory that owns the supplemental chain.
 func firstNonSupplementalAncestor(supplementalDir string) string {
 	dir := filepath.Dir(filepath.Clean(supplementalDir))
-	for extrasDirKinds[normalizeScannerDirLabel(filepath.Base(dir))] != "" {
+	for naming.IsExtrasDir(filepath.Base(dir)) {
 		next := filepath.Dir(dir)
 		if next == dir {
 			break
