@@ -18939,6 +18939,7 @@
         "additionalProperties": false,
         "properties": {
           "force": {
+            "description": "Also replace text an earlier AI translation wrote. Provider and manual text is never replaced.",
             "type": "boolean"
           },
           "include_children": {
@@ -22427,6 +22428,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga": {
             "$ref": "#/components/schemas/MangaDetailExtension"
           },
@@ -22461,7 +22473,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "A translation of the overview is queued for this language",
+            "description": "The profile's metadata language when the overview has no translation in it yet; request one with translate-description",
             "type": "string"
           },
           "play_content_id": {
@@ -29386,6 +29398,16 @@
           "imdb_id": {
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI; absent when none were",
+            "items": {
+              "enum": [
+                "overview"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "overlay_summary": {
             "$ref": "#/components/schemas/CatalogItemOverlay"
           },
@@ -34429,7 +34451,7 @@
             "type": "boolean"
           },
           "on_view": {
-            "description": "Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the server queues it on view)",
+            "description": "Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the client requests the translation itself when it shows an item whose pending_translation_language is set)",
             "examples": [
               "button"
             ],
@@ -34717,6 +34739,7 @@
             "type": "integer"
           },
           "force": {
+            "description": "The job also replaces earlier AI text; provider and manual text is never replaced",
             "type": "boolean"
           },
           "id": {
@@ -43207,6 +43230,16 @@
           },
           "is_specials": {
             "type": "boolean"
+          },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI; absent when none were",
+            "items": {
+              "enum": [
+                "overview"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
           "overview": {
             "type": "string"

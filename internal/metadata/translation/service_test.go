@@ -156,7 +156,6 @@ type aiWrite struct {
 	contentID string
 	overview  string
 	tagline   string
-	force     bool
 }
 
 type fakeLocs struct {
@@ -186,13 +185,13 @@ func (l *fakeLocs) EpisodeLocalizations(context.Context, []string, string) (map[
 	return l.episodeLocs, nil
 }
 
-func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, _ string, overview, tagline *string, force bool) error {
+func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, _ string, overview, tagline *string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
 		return fmt.Errorf("boom")
 	}
-	w := aiWrite{kind: TargetItem, contentID: contentID, force: force}
+	w := aiWrite{kind: TargetItem, contentID: contentID}
 	if overview != nil {
 		w.overview = *overview
 	}
@@ -203,23 +202,23 @@ func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, _ string, overview
 	return nil
 }
 
-func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, _ string, overview string, force bool) error {
+func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, _ string, overview string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
 		return fmt.Errorf("boom")
 	}
-	l.writes = append(l.writes, aiWrite{kind: TargetSeason, contentID: contentID, overview: overview, force: force})
+	l.writes = append(l.writes, aiWrite{kind: TargetSeason, contentID: contentID, overview: overview})
 	return nil
 }
 
-func (l *fakeLocs) UpsertEpisodeAI(_ context.Context, contentID, _ string, overview string, force bool) error {
+func (l *fakeLocs) UpsertEpisodeAI(_ context.Context, contentID, _ string, overview string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
 		return fmt.Errorf("boom")
 	}
-	l.writes = append(l.writes, aiWrite{kind: TargetEpisode, contentID: contentID, overview: overview, force: force})
+	l.writes = append(l.writes, aiWrite{kind: TargetEpisode, contentID: contentID, overview: overview})
 	return nil
 }
 
@@ -376,12 +375,17 @@ func TestSkipIfFilledShortCircuitsWithoutModelCalls(t *testing.T) {
 	}
 }
 
-func TestForceRetranslatesProviderAndAIButNeverManual(t *testing.T) {
+// AC4: a forced re-translation refreshes earlier AI text only. Provider and
+// manual text is never replaced.
+func TestForceRetranslatesAIButNeverProviderOrManual(t *testing.T) {
 	repo, content, chat := newFakeRepo(), seriesContent(), &upperChat{}
 	locs := &fakeLocs{
 		itemLoc: &models.MediaItemLocalization{
 			Overview: "Vieux.", OverviewSource: "provider",
 			Tagline: "Manuel.", TaglineSource: "manual",
+		},
+		seasonLocs: map[string]*models.SeasonLocalization{
+			"sea1": {Overview: "Fournisseur.", OverviewSource: "provider"},
 		},
 		episodeLocs: map[string]*models.EpisodeLocalization{
 			"ep1": {Overview: "IA.", OverviewSource: "ai"},
@@ -399,25 +403,12 @@ func TestForceRetranslatesProviderAndAIButNeverManual(t *testing.T) {
 	waitDone(t, repo)
 
 	final := repo.job(job.ID)
-	// item overview (provider, forced) + sea1 + ep1 (ai, forced) = 3;
-	// tagline and ep2 are manual and stay untouched even with force.
-	if final.FieldsTotal != 3 {
-		t.Fatalf("fields_total = %d, want 3", final.FieldsTotal)
-	}
-	if final.Status != jobrunner.StatusCompleted || final.FieldsDone != 3 {
-		t.Fatalf("completed job = %+v, want 3 fields done", final)
+	if final.Status != jobrunner.StatusCompleted || final.FieldsTotal != 1 || final.FieldsDone != 1 {
+		t.Fatalf("job = %+v, want only the AI episode overview translated", final)
 	}
 	writes := locs.allWrites()
-	if len(writes) != 3 {
-		t.Fatalf("writes = %+v, want 3", writes)
-	}
-	for _, w := range writes {
-		if !w.force {
-			t.Errorf("write without force flag: %+v", w)
-		}
-		if w.tagline != "" || w.contentID == "ep2" {
-			t.Errorf("manual field was translated: %+v", w)
-		}
+	if len(writes) != 1 || writes[0].kind != TargetEpisode || writes[0].contentID != "ep1" {
+		t.Fatalf("writes = %+v, want only ep1", writes)
 	}
 }
 
@@ -731,5 +722,24 @@ func TestEnqueueStartsAFullSeriesJobWhileASeriesOnlyJobRuns(t *testing.T) {
 	}
 	if full.ID == narrow.ID || !full.IncludeChildren {
 		t.Fatalf("full-series request got %+v, want a new job with children", full)
+	}
+}
+
+func TestTranslatableField(t *testing.T) {
+	cases := []struct {
+		name, base, value, source string
+		force, want               bool
+	}{
+		{"empty provider field fills", "Text.", "", "provider", false, true},
+		{"empty manual field stays, the repository keeps manual values", "Text.", "", "manual", true, false},
+		{"provider text stays even when forced", "Text.", "Anbieter.", "provider", true, false},
+		{"AI text refreshes when forced", "Text.", "KI.", "ai", true, true},
+		{"AI text stays unforced", "Text.", "KI.", "ai", false, false},
+		{"no source text", "", "", "", true, false},
+	}
+	for _, tc := range cases {
+		if got := translatableField(tc.base, tc.value, tc.source, tc.force); got != tc.want {
+			t.Errorf("%s: got %t, want %t", tc.name, got, tc.want)
+		}
 	}
 }

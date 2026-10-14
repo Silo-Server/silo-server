@@ -97,7 +97,7 @@ type TrailerRefreshOutput struct {
 // and how the viewer-facing on-view translation behaves.
 type MetadataAICapability struct {
 	Capability
-	OnView string `json:"on_view" doc:"Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the server queues it on view)" example:"button"`
+	OnView string `json:"on_view" doc:"Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the client requests the translation itself when it shows an item whose pending_translation_language is set)" example:"button"`
 }
 
 // MetadataAICapabilityOutput is the getMetadataAICapability response.
@@ -123,7 +123,7 @@ type MetadataTranslationJob struct {
 	ProgressMessage string  `json:"progress_message"`
 	FieldsDone      int     `json:"fields_done"`
 	FieldsTotal     int     `json:"fields_total"`
-	Force           bool    `json:"force"`
+	Force           bool    `json:"force" doc:"The job also replaces earlier AI text; provider and manual text is never replaced"`
 	ErrorMessage    string  `json:"error_message,omitempty"`
 	CreatedAt       Instant `json:"created_at"`
 	UpdatedAt       Instant `json:"updated_at"`

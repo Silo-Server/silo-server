@@ -178,9 +178,12 @@ is checked by the same permission middleware used by the frozen v1 routes.
 | `POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel` | Empty `204` after a cancellation request |
 
 Enqueue accepts `target_language`, optional `include_children`, and optional
-`force`. Children default to included for item targets; season and episode
-targets never include children, and neither do movies. The requesting account
-is recorded by the service. When a pending or running job for the same target
+`force`. A job fills only fields with no localized text; `force` also replaces
+text an earlier AI translation wrote. Provider and manual text is never
+replaced, and the repository enforces the same rule on every AI write.
+Children default to included for item targets; season and episode targets
+never include children, and neither do movies. The requesting account is
+recorded by the service. When a pending or running job for the same target
 and language already covers the request (it includes children whenever the
 request does, and is forced whenever the request is), the service returns that
 job, so its `include_children` and `force` can differ from the request;

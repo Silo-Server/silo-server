@@ -255,3 +255,6 @@
 ./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
 ./migrations TestLibraryDeleteRacingAccessWritePostgres
 ./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
+
+# AI metadata translations never replace provider or manual localized text.
+./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText

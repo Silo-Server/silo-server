@@ -75,8 +75,8 @@ type JobRequest struct {
 	ContentID       string
 	TargetLanguage  string
 	IncludeChildren bool
-	// Force re-translates fields that already have a provider or AI value.
-	// Manual values are never overwritten regardless.
+	// Force re-translates fields an earlier AI translation filled. Provider
+	// and manual values are never overwritten regardless.
 	Force       bool
 	RequestedBy *int
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -464,13 +465,13 @@ func (s *Service) persistField(ctx context.Context, job *Job, f field, text stri
 	switch f.kind {
 	case TargetItem:
 		if f.isTagline {
-			return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, nil, &text, job.Force)
+			return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, nil, &text)
 		}
-		return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, &text, nil, job.Force)
+		return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, &text, nil)
 	case TargetSeason:
-		return s.locs.UpsertSeasonAI(ctx, f.contentID, job.TargetLanguage, text, job.Force)
+		return s.locs.UpsertSeasonAI(ctx, f.contentID, job.TargetLanguage, text)
 	case TargetEpisode:
-		return s.locs.UpsertEpisodeAI(ctx, f.contentID, job.TargetLanguage, text, job.Force)
+		return s.locs.UpsertEpisodeAI(ctx, f.contentID, job.TargetLanguage, text)
 	default:
 		return fmt.Errorf("unknown field kind %q", f.kind)
 	}
@@ -484,8 +485,8 @@ type jobMeta struct {
 }
 
 // collectFields expands the job target into translatable fields, dropping any
-// field whose localized value is already filled (unless force, which still
-// respects manual provenance).
+// field whose localized value is already filled, unless the job is forced and
+// an earlier AI translation wrote it (see translatableField).
 func (s *Service) collectFields(ctx context.Context, job *Job) ([]field, jobMeta, error) {
 	var meta jobMeta
 
@@ -567,20 +568,18 @@ func (s *Service) parentMeta(ctx context.Context, job *Job, seriesID string) (jo
 
 // translatableField reports whether a field with base text and an existing
 // localized value/source should be translated. Empty base text never
-// translates; filled localizations are skipped unless force; manual values
-// are skipped even with force (the SQL layer guards them too — skipping here
-// saves the model call).
+// translates, and a manual field never does, even when empty: the repository
+// keeps manual values, so the model call would be wasted. Otherwise an empty
+// localized value translates, and a filled one only when an earlier AI
+// translation wrote it and the job is forced.
 func translatableField(baseText, locValue, locSource string, force bool) bool {
-	if strings.TrimSpace(baseText) == "" {
+	if strings.TrimSpace(baseText) == "" || locSource == models.LocalizationSourceManual {
 		return false
 	}
-	if locSource == "manual" {
-		return false
+	if locValue == "" {
+		return true
 	}
-	if locValue != "" && !force {
-		return false
-	}
-	return true
+	return force && locSource == models.LocalizationSourceAI
 }
 
 func (s *Service) itemFields(ctx context.Context, job *Job, item *ItemText) ([]field, error) {
