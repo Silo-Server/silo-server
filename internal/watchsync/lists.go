@@ -255,6 +255,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	if err != nil {
 		return result, err
 	}
+	removalsPending, err := s.listItemsPendingRemoval(ctx, conn, b)
+	if err != nil {
+		return result, err
+	}
 	seenRemoteKeys := make(map[string]bool, len(rows))
 	states := make([]ListItemState, 0, len(rows))
 	// orderedIDs records matched local ids in the order the provider returned
@@ -268,6 +272,15 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			}
 			continue
 		}
+		// The provider still lists the key even when the row matches no single
+		// library item, for example when two items carry its id.
+		key := row.ProviderItemKey
+		if key == "" {
+			key = providerItemKeyForRemoteFavorite(row)
+		}
+		if key != "" {
+			seenRemoteKeys[key] = true
+		}
 		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
 		if err != nil {
 			return result, err
@@ -279,18 +292,14 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			}
 			continue
 		}
+		if removalsPending[match.MediaItemID] {
+			continue
+		}
 		if err := b.localAdd(ctx, store, conn.ProfileID, match.MediaItemID, row.FavoritedAt); err != nil {
 			return result, err
 		}
 		orderedIDs = append(orderedIDs, match.MediaItemID)
 		result.Imported++
-		key := row.ProviderItemKey
-		if key == "" {
-			key = providerItemKeyForRemoteFavorite(row)
-		}
-		if key != "" {
-			seenRemoteKeys[key] = true
-		}
 		listedAt := row.FavoritedAt
 		states = append(states, ListItemState{
 			ConnectionID:     conn.ID,
@@ -332,12 +341,34 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	return result, nil
 }
 
+// listItemsPendingRemoval returns the items removed from the local list whose
+// removal has not reached the provider yet, when removals sync. The provider
+// still lists them, so an import must not add them back: a failed removal
+// retries later in the run, and a removal held because another library item
+// shares the key stays until that item leaves too.
+func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (map[string]bool, error) {
+	if !b.removalsEnabled(conn) {
+		return nil, nil
+	}
+	states, err := s.repo.ListListItemStates(ctx, conn.ID, b.kind)
+	if err != nil {
+		return nil, err
+	}
+	pending := make(map[string]bool)
+	for _, state := range states {
+		if !state.LocalPresent && state.RemotePresent {
+			pending[state.MediaItemID] = true
+		}
+	}
+	return pending, nil
+}
+
 func (s *Service) listItemStatesByRemoteKey(
 	ctx context.Context,
 	connectionID string,
 	kind ListKind,
 	rows []RemoteFavorite,
-) (map[string]ListItemState, error) {
+) (map[string][]ListItemState, error) {
 	hasTombstone := false
 	for _, row := range rows {
 		if row.Removed {
@@ -352,10 +383,12 @@ func (s *Service) listItemStatesByRemoteKey(
 	if err != nil {
 		return nil, err
 	}
-	byRemoteKey := make(map[string]ListItemState, len(states))
+	// Several library items can share a key, such as two items for one title
+	// with the same IMDb id.
+	byRemoteKey := make(map[string][]ListItemState, len(states))
 	for _, state := range states {
 		if key := strings.TrimSpace(state.ProviderItemKey); key != "" {
-			byRemoteKey[key] = state
+			byRemoteKey[key] = append(byRemoteKey[key], state)
 		}
 	}
 	return byRemoteKey, nil
@@ -367,32 +400,64 @@ func (s *Service) applyRemoteListTombstone(
 	store userstore.UserStore,
 	b listBinding,
 	row RemoteFavorite,
-	existingByRemoteKey map[string]ListItemState,
+	existingByRemoteKey map[string][]ListItemState,
 	result *ImportListResult,
 ) error {
 	key := strings.TrimSpace(row.ProviderItemKey)
-	state, ok := existingByRemoteKey[key]
-	if key == "" || !ok {
+	// Point into the map's rows so a later tombstone for the key in this
+	// batch sees them already removed.
+	existing := existingByRemoteKey[key]
+	var states []*ListItemState
+	for i := range existing {
+		if row.Kind == "" || existing[i].Kind == "" || existing[i].Kind == row.Kind {
+			states = append(states, &existing[i])
+		}
+	}
+	if key == "" || len(states) == 0 {
 		result.Warnings = append(result.Warnings, "watch sync provider returned an unknown list removal")
 		return nil
 	}
+	// Copies of one title share a kind and all leave. A movie and a series
+	// with the same key are different titles, and a tombstone without a kind
+	// cannot say which one left.
+	if !sameListItemKind(states) {
+		result.Warnings = append(result.Warnings, "watch sync provider returned a list removal for "+key+" that matches more than one title")
+		return nil
+	}
 	now := s.now()
-	if b.removalsEnabled(conn) && state.LocalPresent {
-		if err := b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID); err != nil {
+	for _, state := range states {
+		if b.removalsEnabled(conn) && state.LocalPresent {
+			if err := b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID); err != nil {
+				return err
+			}
+			if err := s.repo.MarkListItemLocalRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
+				return err
+			}
+			result.Removed++
+			state.LocalPresent = false
+		}
+		if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
 			return err
 		}
-		if err := s.repo.MarkListItemLocalRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
-			return err
-		}
-		result.Removed++
-		state.LocalPresent = false
+		state.RemotePresent = false
 	}
-	if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
-		return err
-	}
-	state.RemotePresent = false
-	existingByRemoteKey[key] = state
 	return nil
+}
+
+// sameListItemKind reports whether the rows name one kind of title. A row
+// without a kind matches any.
+func sameListItemKind(states []*ListItemState) bool {
+	kind := ""
+	for _, state := range states {
+		switch {
+		case state.Kind == "":
+		case kind == "":
+			kind = state.Kind
+		case state.Kind != kind:
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Connection, store userstore.UserStore, b listBinding, seenRemoteKeys map[string]bool, result *ImportListResult) error {
@@ -706,7 +771,14 @@ func (s *Service) processLocalListEvent(ctx context.Context, event LocalListEven
 			if !b.removalsEnabled(conn) || !b.capRemove(provider.Capabilities()) {
 				continue
 			}
-			result, ok, err := b.removeItems(ctx, cfg, conn, provider, event.Items)
+			toRemove, err := s.listItemsReleasedLocally(ctx, conn, b, event.Items)
+			if err != nil {
+				return err
+			}
+			if len(toRemove) == 0 {
+				continue
+			}
+			result, ok, err := b.removeItems(ctx, cfg, conn, provider, toRemove)
 			if !ok {
 				continue
 			}
@@ -715,7 +787,7 @@ func (s *Service) processLocalListEvent(ctx context.Context, event LocalListEven
 				s.recordLocalWatchEventError(ctx, conn, err)
 				continue
 			}
-			for _, item := range event.Items {
+			for _, item := range toRemove {
 				if sent, notFound := exportItemOutcome(result, item.MediaItemID, item.ProviderItemKey); sent || notFound {
 					if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
 						return err
@@ -725,6 +797,27 @@ func (s *Service) processLocalListEvent(ctx context.Context, event LocalListEven
 		}
 	}
 	return nil
+}
+
+// listItemsReleasedLocally drops the removed items whose provider key another
+// item on the local list still holds, since removing that key would take the
+// other item off the provider's list too. Their rows stay pending removal.
+func (s *Service) listItemsReleasedLocally(ctx context.Context, conn Connection, b listBinding, items []LocalFavorite) ([]LocalFavorite, error) {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.MediaItemID)
+	}
+	held, err := s.repo.ListListItemsWithSharedKeyHeld(ctx, conn.ID, b.kind, ids)
+	if err != nil {
+		return nil, err
+	}
+	released := make([]LocalFavorite, 0, len(items))
+	for _, item := range items {
+		if !held[item.MediaItemID] {
+			released = append(released, item)
+		}
+	}
+	return released, nil
 }
 
 func (s *Service) exportLocalListItems(ctx context.Context, conn Connection, cfg ServerConfig, provider Provider, b listBinding, items []LocalFavorite) error {
