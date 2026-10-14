@@ -15,6 +15,7 @@ const base: AccessGroup = {
   audio_transcode_allowed: true,
   max_streams: 1,
   max_transcodes: 0,
+  max_profiles: 5,
   max_remote_stream_bitrate_kbps: 8000,
   max_local_stream_bitrate_kbps: 0,
   allowed_permissions: [],
@@ -111,5 +112,11 @@ it("compares an ungrouped account against the no-group policy", () => {
     { label: "Remote stream bitrate", from: "Unlimited", to: "8 Mbps" },
     { label: "Permissions", from: "All", to: "None" },
     { label: "Requests", from: "Allowed", to: "Not allowed" },
+  ]);
+});
+
+it("lists a household profile limit change", () => {
+  expect(groupPolicyChanges(base, { ...base, max_profiles: 2 })).toEqual([
+    { label: "Household profiles", from: "5", to: "2" },
   ]);
 });

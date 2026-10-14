@@ -23,6 +23,7 @@ export type GroupPolicy = Pick<
   | "max_transcodes"
   | "max_remote_stream_bitrate_kbps"
   | "max_local_stream_bitrate_kbps"
+  | "max_profiles"
   | "allowed_permissions"
   | "requests_allowed"
 >;
@@ -41,6 +42,8 @@ export const NO_GROUP_POLICY: GroupPolicy = {
   max_transcodes: 0,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  // access.DefaultMaxProfiles: profiles were never unlimited.
+  max_profiles: 5,
   allowed_permissions: null,
   requests_allowed: true,
 };
@@ -157,6 +160,7 @@ export function groupPolicyChanges(
   );
   add("Concurrent streams", limit(from.max_streams), limit(to.max_streams));
   add("Concurrent transcodes", limit(from.max_transcodes), limit(to.max_transcodes));
+  add("Household profiles", String(from.max_profiles), String(to.max_profiles));
   add(
     "Remote stream bitrate",
     bitrate(from.max_remote_stream_bitrate_kbps),
