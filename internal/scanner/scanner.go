@@ -43,7 +43,7 @@ var ignoredDirNames = map[string]bool{
 // ignoredMovieSupplementalDirNames holds movie-library directory names whose
 // contents are never playable content (noise). Extras-shaped directories
 // (Trailers/, Featurettes/, ...) are NOT in this set: they are walked and
-// classified via naming.ExtrasDirKind instead of discarded.
+// classified via extrasDirKinds instead of discarded.
 var ignoredMovieSupplementalDirNames = map[string]bool{
 	"sample":    true,
 	"samples":   true,
@@ -51,8 +51,46 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 	"subtitles": true,
 }
 
+// extrasDirKinds classifies supplemental directory names (normalized via
+// normalizeScannerDirLabel) into the shared extra-kind vocabulary. The set
+// mirrors the Jellyfin/Plex extras folder convention ("other" included: both
+// conventions document it).
+//
+// Deliberately absent: the plural "others", which is in neither convention.
+// Convention labels can also appear as content-scope folder names ("movies/
+// other/<Movie>/<file>", "movies/shorts/..."); those never classify as extras
+// because extrasClassifier only honors a convention-named dir owned by a
+// title folder — one that holds media of its own, which library roots and
+// organizational folders do not.
+var extrasDirKinds = map[string]models.ExtraKind{
+	"extra":             models.ExtraKindOther,
+	"extras":            models.ExtraKindOther,
+	"other":             models.ExtraKindOther,
+	"featurette":        models.ExtraKindFeaturette,
+	"featurettes":       models.ExtraKindFeaturette,
+	"behind the scenes": models.ExtraKindBehindTheScenes,
+	"deleted scene":     models.ExtraKindDeletedScene,
+	"deleted scenes":    models.ExtraKindDeletedScene,
+	"trailer":           models.ExtraKindTrailer,
+	"trailers":          models.ExtraKindTrailer,
+	"teaser":            models.ExtraKindTeaser,
+	"teasers":           models.ExtraKindTeaser,
+	"clip":              models.ExtraKindClip,
+	"clips":             models.ExtraKindClip,
+	"bloopers":          models.ExtraKindBloopers,
+	"interviews":        models.ExtraKindOther,
+	"scenes":            models.ExtraKindOther,
+	"shorts":            models.ExtraKindOther,
+}
+
+func normalizeScannerDirLabel(name string) string {
+	surface := strings.ToLower(strings.TrimSpace(name))
+	surface = strings.NewReplacer(".", " ", "_", " ", "-", " ").Replace(surface)
+	return strings.Join(strings.Fields(surface), " ")
+}
+
 func shouldSkipMovieSupplementalDir(path string) bool {
-	label := naming.NormalizeDirLabel(filepath.Base(path))
+	label := normalizeScannerDirLabel(filepath.Base(path))
 	if label == "" {
 		return false
 	}
@@ -61,7 +99,7 @@ func shouldSkipMovieSupplementalDir(path string) bool {
 
 func shouldSkipMovieSupplementalFile(path string) bool {
 	baseNoExt := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	surface := naming.NormalizeDirLabel(baseNoExt)
+	surface := normalizeScannerDirLabel(baseNoExt)
 	if surface == "" {
 		return false
 	}

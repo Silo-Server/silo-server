@@ -274,43 +274,94 @@ func TestMovieSupplementalDirsNoLongerSkipExtras(t *testing.T) {
 	}
 }
 
-// TestSeriesExtrasFolderNeverBecomesASeries covers extras folders whose files
-// stay primary content: an episode-numbered file, a show whose episodes sit
-// below the depth the classifier inspects, and a show folder with no episodes
-// yet. Each file still belongs to its show, never to a series named after the
-// extras folder, while shows named like extras folders keep their own root.
-func TestSeriesExtrasFolderNeverBecomesASeries(t *testing.T) {
-	root := "/tv"
-	paths := []string{
-		"/tv/Glimmer Harbor/Season 01/Glimmer Harbor - S01E01.mkv",
-		"/tv/Glimmer Harbor/other/Glimmer Harbor - S00E01 - Making of.mkv",
-		"/tv/Ironvale/Season 01/Disc 1/Ironvale - S01E01.mkv",
-		"/tv/Ironvale/other/Behind the camera.mkv",
-		"/tv/Emberfall (2021)/trailers/Emberfall trailer.mkv",
-		"/tv/Glimmer Harbor/other/Extras/Glimmer Harbor.S00E02.mkv",
-		"/tv/Kids/Shorts/Shorts.2024-10-01.mkv",
-		"/tv/Kids/Clips/Clips.2024-10-01.mkv",
+// TestSeriesExtrasFoldersBelongToTheirShow covers extras folders in a series
+// library: their files bind to the show that owns them, never found a series
+// named after the folder, and the same folder names used as category or show
+// folders keep their own series. A full scan, a subtree scan of the file's own
+// folder, and a single-file event must agree, because a file that flips
+// between extra and primary from one scan to the next churns its show.
+func TestSeriesExtrasFoldersBelongToTheirShow(t *testing.T) {
+	type want struct {
+		extra bool
+		kind  models.ExtraKind
+		root  string // series root of a primary file, relative to the library
 	}
-	primary, _ := partitionExtraPaths(paths, "series", []string{root}, []string{root})
-	result := inferRootAssignments(primary, "series", 1, nil, root)
-	got := make(map[string]string, len(result.Snapshots))
-	for _, snapshot := range result.Snapshots {
-		got[snapshot.RootPath] = snapshot.Title
+	layout := map[string]want{
+		// A show with episodes in season folders owns every extras folder in
+		// it, whatever the files are named.
+		"Glimmer Harbor/Season 01/Glimmer Harbor - S01E01.mkv":            {root: "Glimmer Harbor"},
+		"Glimmer Harbor/other/Glimmer Harbor - S00E01 - Making of.mkv":    {extra: true, kind: models.ExtraKindOther},
+		"Glimmer Harbor/other/Extras/Glimmer Harbor.S00E02.mkv":           {extra: true, kind: models.ExtraKindOther},
+		"Glimmer Harbor/Featurettes/Glimmer Harbor S00E04 Featurette.mkv": {extra: true, kind: models.ExtraKindFeaturette},
+		"Glimmer Harbor/Extras/Behind The Scenes/clip.mkv":                {extra: true, kind: models.ExtraKindBehindTheScenes},
+		"Glimmer Harbor/Trailers/1080p/Glimmer Harbor S00E05.mkv":         {extra: true, kind: models.ExtraKindTrailer},
+		"Glimmer Harbor/Season 01/Trailers/Preview.mkv":                   {extra: true, kind: models.ExtraKindTrailer},
+		// Directly under the show's or a season's Extras/, an episode code
+		// keeps its documented meaning.
+		"Glimmer Harbor/Extras/Glimmer Harbor S00E03.mkv":                   {root: "Glimmer Harbor"},
+		"Glimmer Harbor/Season 01/Extras/Glimmer Harbor S01E05 Deleted.mkv": {root: "Glimmer Harbor"},
+		// Episodes deeper than a season folder still make the show.
+		"Ironvale/Season 01/Disc 1/Ironvale - S01E01.mkv": {root: "Ironvale"},
+		"Ironvale/other/Behind the camera.mkv":            {extra: true, kind: models.ExtraKindOther},
+		// A show with no episodes yet, named with its year.
+		"Emberfall (2021)/trailers/Emberfall trailer.mkv": {extra: true, kind: models.ExtraKindTrailer},
+		// A bare Season folder (#1660) and its Specials stay with the show.
+		"Quillmere/Season/Quillmere S01E01.mkv":          {root: "Quillmere"},
+		"Quillmere/Season/Specials/Quillmere S00E01.mkv": {root: "Quillmere"},
+		// Category folders own no extras: their extras-named folders hold
+		// shows or loose episodes, which keep their own series.
+		"Kids/Bluey/Season 01/Bluey S01E01.mkv":              {root: "Kids/Bluey"},
+		"Kids/Peppa/Peppa S01E01.mkv":                        {root: "Kids/Peppa"},
+		"Kids/Shorts/Season 01/S01E01.mkv":                   {root: "Kids/Shorts"},
+		"Kids/Shorts/Specials/S00E01.mkv":                    {root: "Kids/Shorts"},
+		"Kids/Clips/Peppa Pig S01E02.mkv":                    {root: "Kids/Clips"},
+		"Kids/Other/Other.2024.S01E02.mkv":                   {root: "Kids/Other"},
+		"Documentaries/Interviews/Interviews S01E01.mkv":     {root: "Documentaries/Interviews"},
+		"Documentaries/Interviews/S01E02.mkv":                {root: "Documentaries/Interviews"},
+		"Documentaries/Interviews/The.Interviews.S01E03.mkv": {root: "Documentaries/Interviews"},
+		"other/Flat Show/pilot.mkv":                          {root: "other/Flat Show"},
+		// Shows titled like extras folders or with a number.
+		"Comedy/Extras/Season 01/Extras S01E01.mkv": {root: "Comedy/Extras"},
+		"Comedy/Extras/Specials/Extras S00E01.mkv":  {root: "Comedy/Extras"},
+		"Extras/Season 01/Extras S01E01.mkv":        {root: "Extras"},
+		"Extras/Specials/Extras S00E01.mkv":         {root: "Extras"},
+		"Drama/1883/Season 01/1883 S01E01.mkv":      {root: "Drama/1883"},
+		"Drama/1883/Specials/1883 S00E01.mkv":       {root: "Drama/1883"},
 	}
-	want := map[string]string{
-		"/tv/Glimmer Harbor":   "Glimmer Harbor",
-		"/tv/Ironvale":         "Ironvale",
-		"/tv/Emberfall (2021)": "Emberfall",
-		"/tv/Kids/Shorts":      "Shorts",
-		"/tv/Kids/Clips":       "Clips",
+	library := filepath.Join(t.TempDir(), "tv")
+	for rel := range layout {
+		writeTestFile(t, filepath.Join(library, rel), "media")
 	}
-	if len(got) != len(want) {
-		t.Fatalf("series roots = %v, want %v", got, want)
+	roots := []string{library}
+	walked := collectTestFilePaths(t, library, "series")
+	if len(walked) != len(layout) {
+		t.Fatalf("walked %d files, want %d", len(walked), len(layout))
 	}
-	for rootPath, title := range want {
-		if got[rootPath] != title {
-			t.Errorf("series roots = %v, want %v", got, want)
-			break
+
+	primary, extras := partitionExtraPaths(walked, "series", roots, roots)
+	full := make(map[string]extraCandidate, len(extras))
+	for _, candidate := range extras {
+		full[candidate.Path] = candidate
+	}
+	assignments := inferRootAssignments(primary, "series", 1, nil, library).Assignments
+	watch := newWatchExtrasClassifier("series", roots)
+	for rel, w := range layout {
+		path := filepath.Join(library, rel)
+		candidate, isExtra := full[path]
+		if isExtra != w.extra || (isExtra && candidate.Kind != w.kind) {
+			t.Errorf("full scan: %s extra=%v kind=%q, want extra=%v kind=%q", rel, isExtra, candidate.Kind, w.extra, w.kind)
+		}
+		if !w.extra {
+			if got := assignments[path].RootPath; got != filepath.Join(library, w.root) {
+				t.Errorf("full scan: %s root %q, want %q", rel, got, filepath.Join(library, w.root))
+			}
+		}
+		_, subtree := partitionExtraPaths([]string{path}, "series", roots, []string{filepath.Dir(path)})
+		if got := len(subtree) == 1; got != w.extra {
+			t.Errorf("subtree scan of its folder: %s extra=%v, want %v", rel, got, w.extra)
+		}
+		if _, got := watch.classify(path); got != w.extra {
+			t.Errorf("single-file scan: %s extra=%v, want %v", rel, got, w.extra)
 		}
 	}
 }

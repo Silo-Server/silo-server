@@ -46,22 +46,31 @@ one show). Deeper folders, and names that start with the show title, keep the UK
 (`La Série 2/La Série 2 S01E03.mkv`) keeps the label as part of the title. `TestSeasonDirectoryWordLabelsAtTheLibraryTop`
 and `TestWordSeasonLabelsKeepShowContext` hold these cases.
 
-### Extras folders in a series root
+### Extras folders in a series library
 
-The scanner files most of a show's extras folders (`naming.ExtrasDirKind`: `other`, `Trailers`,
-`Featurettes`, ...) as extras, but some files in them stay primary content: an episode-numbered
-file, or a file the scanner can't tie to a show folder that already holds episodes. For those,
-`deriveSeriesRoot` steps over the extras folder, so the file belongs to the show above it and
-never founds a series named `other` or `Trailers`. A chain of extras folders (`other/Extras/`) is
-stepped over as a whole. The step-over needs a configured library folder, and it skips a folder
-that sits directly in the library folder or that the file name names before its episode code or
-air date (`Documentaries/Interviews/Interviews S01E01.mkv`, `Kids/Shorts/Shorts.2024-10-01.mkv`).
-In those places the word is a show title or an organizational folder.
+The scanner's extras classifier (`internal/scanner/extras.go`) decides whether a folder named
+like an extras folder (`other`, `Trailers`, `Featurettes`, `Extras`, ...) holds extras or
+content. It is an extras folder only when its owner, the first ancestor not named like one,
+is a title folder: a folder that holds media directly, or a show folder. A folder is a show
+folder when a file up to three levels below it (`Season 01/Disc 1/episode.mkv`) resolves to
+it as its series root, or, in a TV library, when its name carries a year or provider IDs, so
+a show whose episodes haven't arrived yet still owns its `trailers/`. A category folder such
+as `Kids/` holds shows that resolve to their own folders, so `Kids/Shorts/` and
+`Documentaries/Interviews/` stay content and keep their own series. A full scan, a subtree
+scan of the extras folder, and a single-file event apply the same test; the last two read
+the filesystem.
 
-A `Specials` or `Extras` folder inside a season folder belongs to that season's show. A bare number
-or a `Specials`/`Extras` label above it (`Drama/1883/Specials/`, `Extras/Specials/`) is the show's
-title, not a season. `TestSeriesExtrasFolderBelongsToShow` and
-`TestSeriesExtrasFolderNeverBecomesASeries` hold these cases.
+An episode code makes a file in an extras folder an episode only directly under a title's
+`Extras/` folder (`Show/Extras/Show S00E01.mkv` is a special, `Show/Season 01/Extras/Show
+S01E05.mkv` is season 1). Anywhere else (`other/`, `Trailers/1080p/`, `Extras/Behind The
+Scenes/`) it is part of an extra's name. An extra binds to its owner's item and never founds a
+series; while the owner has no item yet, the scan defers it.
+
+`deriveSeriesRoot` puts a `Specials/` or `Extras/` folder inside a season folder (`Season 01`,
+`S01`, or a bare `Season` folder) with that season's show. A bare number or a
+`Specials`/`Extras` label above it (`Drama/1883/Specials/`, `Extras/Specials/`) is the show's
+title, not a season. `TestSeriesExtrasFoldersBelongToTheirShow` and
+`TestSpecialsInsideASeasonFolderJoinTheShow` hold these cases.
 
 ## Episode numbers
 

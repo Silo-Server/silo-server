@@ -3,8 +3,6 @@ package naming
 import (
 	"path/filepath"
 	"strings"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // extraSuffixKinds maps the Jellyfin/Plex filename-suffix convention onto the
@@ -24,60 +22,6 @@ var extraSuffixKinds = map[string]string{
 	"short":           "other",
 	"extra":           "other",
 	"other":           "other",
-}
-
-// extrasDirKinds classifies supplemental directory names (normalized via
-// NormalizeDirLabel) into the shared extra-kind vocabulary. The set mirrors
-// the Jellyfin/Plex extras folder convention ("other" included: both
-// conventions document it).
-//
-// Deliberately absent: the plural "others", which is in neither convention.
-// The same words also name content-scope folders ("movies/other/<Movie>/",
-// "tv/Kids/Shorts/"), so a name match alone never makes a folder an extras
-// folder. extrasClassifier in internal/scanner also requires a title folder
-// that holds media; deriveSeriesRoot only checks the folder's position and the
-// file name, so a category folder below the library folder can still be read
-// as an extras folder there.
-var extrasDirKinds = map[string]models.ExtraKind{
-	"extra":             models.ExtraKindOther,
-	"extras":            models.ExtraKindOther,
-	"other":             models.ExtraKindOther,
-	"featurette":        models.ExtraKindFeaturette,
-	"featurettes":       models.ExtraKindFeaturette,
-	"behind the scenes": models.ExtraKindBehindTheScenes,
-	"deleted scene":     models.ExtraKindDeletedScene,
-	"deleted scenes":    models.ExtraKindDeletedScene,
-	"trailer":           models.ExtraKindTrailer,
-	"trailers":          models.ExtraKindTrailer,
-	"teaser":            models.ExtraKindTeaser,
-	"teasers":           models.ExtraKindTeaser,
-	"clip":              models.ExtraKindClip,
-	"clips":             models.ExtraKindClip,
-	"bloopers":          models.ExtraKindBloopers,
-	"interviews":        models.ExtraKindOther,
-	"scenes":            models.ExtraKindOther,
-	"shorts":            models.ExtraKindOther,
-}
-
-var dirLabelSeparators = strings.NewReplacer(".", " ", "_", " ", "-", " ")
-
-// NormalizeDirLabel folds a directory name for convention lookups: lower
-// case, with dots, underscores, and dashes read as spaces.
-func NormalizeDirLabel(name string) string {
-	return collapseWhitespace(dirLabelSeparators.Replace(strings.ToLower(name)))
-}
-
-// ExtrasDirKind reports whether name is an extras folder name ("Trailers",
-// "Behind The Scenes", ...) and the extra kind it implies.
-func ExtrasDirKind(name string) (models.ExtraKind, bool) {
-	kind, ok := extrasDirKinds[NormalizeDirLabel(name)]
-	return kind, ok
-}
-
-// IsExtrasDir reports whether name is an extras folder name.
-func IsExtrasDir(name string) bool {
-	_, ok := ExtrasDirKind(name)
-	return ok
 }
 
 // ParseExtraSuffix reports whether the file name (or stem) carries a
