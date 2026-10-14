@@ -106,6 +106,8 @@ it("reads typed counts, last runs and running flags from v2", async () => {
 });
 
 it("resets embeddings once, without refresh or replay after 401", async () => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const { calls, wrapper } = setup(
     () =>
       new Response(
