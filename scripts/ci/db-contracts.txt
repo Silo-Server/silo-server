@@ -309,6 +309,10 @@
 ./internal/workerregistration TestRegistryAdminDeleteAcquiresFenceBeforeParentRow
 ./internal/workerregistration TestRegistrySavepointRollbackDoesNotReuseDrain
 
+# DOWN keeps authentication available and retries failed lock promotion safely.
+./internal/workerregistration TestRegistryMigrationDownAllowsAuthenticationDuringDrain
+./internal/workerregistration TestRegistryMigrationDownRetriesPromotionAfterReleasingSnapshotFence
+
 # Deleting a library removes its ID from access groups, account overrides and
 # invitations, without widening an emptied list; a write keeps only existing
 # libraries, even racing the delete; the migration repairs earlier deletes.

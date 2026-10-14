@@ -150,6 +150,9 @@ FOR EACH STATEMENT EXECUTE FUNCTION reject_worker_registry_truncate();
 -- Never wait for those table locks while retaining the fence, or for the fence
 -- while retaining tables a snapshot reader still needs. Each failed attempt
 -- rolls both lock types back in its subtransaction before retrying.
+-- Keep authentication SELECTs available during the drain, then promote every
+-- table with NOWAIT before DDL. A failed promotion also rolls back the drain's
+-- transaction-local marker: readers admitted between attempts need a new drain.
 -- +goose StatementBegin
 DO $$
 DECLARE
@@ -161,6 +164,9 @@ BEGIN
                 RAISE lock_not_available;
             END IF;
             LOCK TABLE stream_nodes, worker_http_nodes, worker_http_origin_history
+                IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+            PERFORM drain_worker_registry_snapshots();
+            LOCK TABLE stream_nodes, worker_http_nodes, worker_http_origin_history
                 IN ACCESS EXCLUSIVE MODE NOWAIT;
             EXIT;
         EXCEPTION WHEN lock_not_available THEN
@@ -171,7 +177,6 @@ BEGIN
         END;
         PERFORM pg_sleep(0.05);
     END LOOP;
-    PERFORM drain_worker_registry_snapshots();
 END;
 $$;
 -- +goose StatementEnd
