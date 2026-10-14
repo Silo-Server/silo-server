@@ -81,9 +81,11 @@ func (f *podcastSubtreeFixture) addEpisode(t *testing.T, show, file, album, titl
 	probe, err := json.Marshal(map[string]any{
 		"format": map[string]any{
 			"format_name": "mp3",
+			"duration":    "61",
+			"bit_rate":    "128000",
 			"tags":        map[string]string{"album": album, "title": title, "track": track},
 		},
-		"streams": []map[string]any{{"index": 0, "codec_type": "audio", "codec_name": "mp3"}},
+		"streams": []map[string]any{{"index": 0, "codec_type": "audio", "codec_name": "mp3", "channels": 2}},
 	})
 	if err != nil {
 		t.Fatalf("marshal probe output: %v", err)
@@ -105,10 +107,25 @@ func (f *podcastSubtreeFixture) scanFolder(t *testing.T) {
 	}
 }
 
-func (f *podcastSubtreeFixture) scanSubtree(t *testing.T, path string) {
+func (f *podcastSubtreeFixture) scanSubtree(t *testing.T, path string) *ScanResult {
 	t.Helper()
-	if _, err := f.scanner.ScanSubtree(context.Background(), f.folder, path); err != nil {
+	result, err := f.scanner.ScanSubtree(context.Background(), f.folder, path)
+	if err != nil {
 		t.Fatalf("ScanSubtree(%s): %v", path, err)
+	}
+	if result == nil {
+		t.Fatalf("ScanSubtree(%s) returned no result", path)
+	}
+	return result
+}
+
+// requireCounts fails unless the scan reported exactly these changes; the
+// ingest publishes its catalog event only for a scan that reports one.
+func requireCounts(t *testing.T, scope string, got *ScanResult, newFiles, restored, unchanged, missing int) {
+	t.Helper()
+	if got.New != newFiles || got.Updated != restored || got.Unchanged != unchanged || got.Missing != missing {
+		t.Fatalf("scan of %s: new=%d updated=%d unchanged=%d missing=%d, want new=%d updated=%d unchanged=%d missing=%d",
+			scope, got.New, got.Updated, got.Unchanged, got.Missing, newFiles, restored, unchanged, missing)
 	}
 }
 
@@ -121,6 +138,10 @@ type podcastFileRow struct {
 	itemType          string
 	itemTitle         string
 	missing           bool
+	duration          float64
+	codecAudio        string
+	fileSize          int64
+	hasModifiedAt     bool
 }
 
 func (f *podcastSubtreeFixture) fileRow(t *testing.T, path string) podcastFileRow {
@@ -129,14 +150,16 @@ func (f *podcastSubtreeFixture) fileRow(t *testing.T, path string) podcastFileRo
 	if err := f.pool.QueryRow(context.Background(), `
 		SELECT COALESCE(mf.content_id, ''), COALESCE(mf.episode_id, ''), COALESCE(mf.base_type, ''),
 		       COALESCE(mf.canonical_root_path, ''), COALESCE(mi.type, ''), COALESCE(mi.title, ''),
-		       mf.missing_since IS NOT NULL
+		       mf.missing_since IS NOT NULL, COALESCE(mf.duration, 0)::float8, COALESCE(mf.codec_audio, ''),
+		       COALESCE(mf.file_size, 0)::bigint, mf.file_modified_at IS NOT NULL
 		FROM media_files mf
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1 AND mf.file_path = $2
 	`, f.folder.ID, path).Scan(
 		&row.contentID, &row.episodeID, &row.baseType,
 		&row.canonicalRootPath, &row.itemType, &row.itemTitle,
-		&row.missing,
+		&row.missing, &row.duration, &row.codecAudio,
+		&row.fileSize, &row.hasModifiedAt,
 	); err != nil {
 		t.Fatalf("load media file %s: %v", path, err)
 	}
@@ -159,6 +182,15 @@ func (f *podcastSubtreeFixture) requireEpisodeOf(t *testing.T, path, showDir, sh
 	}
 	if row.missing {
 		t.Fatalf("%s: marked missing, want present", path)
+	}
+	// The scanner records what it probed instead of clearing it.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if row.duration != 61 || row.codecAudio != "mp3" || row.fileSize != info.Size() || !row.hasModifiedAt {
+		t.Fatalf("%s: duration=%v codec_audio=%q file_size=%d has_modified_at=%v, want 61 mp3 %d true",
+			path, row.duration, row.codecAudio, row.fileSize, row.hasModifiedAt, info.Size())
 	}
 	return row
 }
@@ -212,8 +244,8 @@ func TestScanSubtreeIndexesPodcastShowFolders(t *testing.T) {
 
 	episodeTwo := f.addEpisode(t, "Show A", "Episode 2.mp3", "Show A", "Episode Two", "2")
 	pilot := f.addEpisode(t, "Show B", "Episode 1.mp3", "Show B", "Pilot", "1")
-	f.scanSubtree(t, showA)
-	f.scanSubtree(t, showB)
+	requireCounts(t, "Show A", f.scanSubtree(t, showA), 1, 0, 1, 0)
+	requireCounts(t, "Show B", f.scanSubtree(t, showB), 1, 0, 0, 0)
 
 	afterOne := f.requireEpisodeOf(t, episodeOne, showA, "Show A")
 	if afterOne.contentID != before.contentID || afterOne.episodeID != before.episodeID {
@@ -232,6 +264,8 @@ func TestScanSubtreeIndexesPodcastShowFolders(t *testing.T) {
 		t.Fatalf("Show B shares content_id %s with Show A", showBRow.contentID)
 	}
 	f.requireOnlyPodcastItems(t)
+	// Nothing changed since, so a rescan reports nothing to publish.
+	requireCounts(t, "Show A again", f.scanSubtree(t, showA), 0, 0, 2, 0)
 
 	// The full scan that rebuilt Show A under a new content ID in the issue
 	// must now find both shows where the subtree scans left them.
@@ -286,7 +320,7 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 	}
 
 	// A folder inside the show stands for the whole show folder.
-	f.scanSubtree(t, notes)
+	requireCounts(t, "Show A/notes", f.scanSubtree(t, notes), 0, 0, 1, 1)
 	f.requireEpisodeOf(t, keptA, showA, "Show A")
 	if !f.fileRow(t, removedA).missing {
 		t.Fatal("deleted Show A episode is still present after scanning Show A")
@@ -308,7 +342,7 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 	); err != nil {
 		t.Fatalf("grant empty cleanup: %v", err)
 	}
-	f.scanSubtree(t, showB)
+	requireCounts(t, "emptied Show B", f.scanSubtree(t, showB), 0, 0, 0, 0)
 	if f.fileRow(t, removedB).missing {
 		t.Fatal("subtree scan of an emptied show folder marked its episode missing")
 	}
@@ -324,7 +358,7 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 	}
 
 	// Show C's folder is gone. Only a full scan retires it.
-	f.scanSubtree(t, showC)
+	requireCounts(t, "vanished Show C", f.scanSubtree(t, showC), 0, 0, 0, 0)
 	if f.fileRow(t, removedC).missing {
 		t.Fatal("subtree scan of a vanished show folder marked its episode missing")
 	}
@@ -336,6 +370,12 @@ func TestScanSubtreeReconcilesOnlyTheScannedPodcastShow(t *testing.T) {
 			t.Fatalf("%s is still present after a full scan", path)
 		}
 	}
+	f.requireOnlyPodcastItems(t)
+
+	// A file that comes back is reported as a change too.
+	f.addEpisode(t, "Show B", "Episode 1.mp3", "Show B", "Removed", "1")
+	requireCounts(t, "restored Show B", f.scanSubtree(t, showB), 0, 1, 0, 0)
+	f.requireEpisodeOf(t, removedB, showB, "Show B")
 	f.requireOnlyPodcastItems(t)
 }
 

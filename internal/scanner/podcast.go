@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // parsedPodcastShow is what parsePodcastShow returns. The scanner write
@@ -20,15 +21,19 @@ type parsedPodcastShow struct {
 }
 
 type parsedPodcastEpisode struct {
-	Path  string
-	Title string
-	Track int
+	Path    string
+	Title   string
+	Track   int
+	Probe   *ProbeData
+	Size    int64
+	ModTime time.Time
 }
 
 // parsePodcastShow walks a single subdirectory of a podcast library and
 // returns the show's metadata + episode list. Each audio file inside
 // becomes one episode; tags are read from each file individually so
-// per-episode titles surface correctly.
+// per-episode titles surface correctly. Each episode keeps its probe and file
+// stat so its media_files row records the file's technical facts.
 //
 // Returns an errFolderHasNoMedia-wrapped error if the folder contains zero
 // audible episodes or is skipped by an ignore marker. Every other error
@@ -50,6 +55,10 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 		if err != nil {
 			return nil, fmt.Errorf("probe podcast file %s: %w", path, err)
 		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("stat podcast file %s: %w", path, err)
+		}
 		tags := probed.FormatTags
 		if show.Title == "" {
 			show.Title = firstNonEmpty(tags["album"], tags["show"], filepath.Base(folderPath))
@@ -69,9 +78,12 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 			}
 		}
 		show.Episodes = append(show.Episodes, parsedPodcastEpisode{
-			Path:  path,
-			Title: firstNonEmpty(tags["title"], stem),
-			Track: track,
+			Path:    path,
+			Title:   firstNonEmpty(tags["title"], stem),
+			Track:   track,
+			Probe:   probed,
+			Size:    info.Size(),
+			ModTime: normalizeFileModifiedAt(info.ModTime()),
 		})
 	}
 	return show, nil
