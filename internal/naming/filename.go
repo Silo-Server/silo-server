@@ -355,7 +355,7 @@ func deriveSeriesRoot(filePath, fileTitle string, hasEpisodePattern bool, forceP
 	parentDir := path.Dir(filePath)
 	ownerDir := parentDir
 	specialsOwner := ""
-	specialsHoldsFile := false
+	specialsBareSeasonOK := false
 	fileStem := strings.TrimSuffix(path.Base(filePath), path.Ext(filePath))
 	bareSeason := ""
 	for current := parentDir; current != "." && current != "/" && current != ""; current = path.Dir(current) {
@@ -375,7 +375,7 @@ func deriveSeriesRoot(filePath, fileTitle string, hasEpisodePattern bool, forceP
 			if inLibraryFolder {
 				break
 			}
-			if specialsInSeasonFolder(segment, path.Base(path.Dir(current)), fileTitle, specialsHoldsFile && (hasEpisodePattern || forceParent)) {
+			if specialsInSeasonFolder(segment, path.Base(path.Dir(current)), fileTitle, specialsBareSeasonOK) {
 				return seriesRootAt(path.Dir(current))
 			}
 			if !stepOver() {
@@ -399,7 +399,7 @@ func deriveSeriesRoot(filePath, fileTitle string, hasEpisodePattern bool, forceP
 		if isSeason {
 			if specialsDirRe.MatchString(strings.TrimSpace(segment)) {
 				specialsOwner = path.Dir(current)
-				specialsHoldsFile = current == parentDir
+				specialsBareSeasonOK = current == parentDir && (hasEpisodePattern || forceParent)
 				continue
 			}
 			return seriesRootAt(path.Dir(current))
