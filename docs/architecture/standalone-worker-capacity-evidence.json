@@ -1,0 +1,412 @@
+{
+  "schema_version": 1,
+  "scope": "Finite-capacity functional regression; these are not latency measurements.",
+  "date_utc": "2026-10-14",
+  "source_commit": "b993b3300f528eb38cc64989d04b2f8fc8f4949a",
+  "binary_sha256": "bd1ebe34e5b9002ff0b5ca880ac880ace5a409655a37cfc8aaf5885a7c7bb57a",
+  "source_content_sha256": "2d1f7d1925c578d2a3a83c85e25948808e12a2232b47d94f52594143cb73688c",
+  "embedded_content_sha256": "78a472f5c9c4358c96558803b2291f1f8a2fe9cbef83cdffe0c27d8e96cca38c",
+  "source_helper_sha256": "d750e72aee122bc2ce8124a0cd97fa75e2ee69122602332c0c2ecaf4ce58e801",
+  "tooling": {
+    "go_version": "go version go1.26.4 linux/amd64",
+    "go_sha256": "86b748c64de0175db601f56805251f3b08cd12bffb927ad5c68ef8497c50c7ba",
+    "python_version": "Python 3.12.3",
+    "openssl_version": "OpenSSL 3.0.13 30 Jan 2024 (Library: OpenSSL 3.0.13 30 Jan 2024)",
+    "helper_source_sha256": "59085274544ad26eb9e39f147e09fad57ec466907ced1c051554806ceb8b9abe",
+    "local_ffmpeg_sha256": "ed16af623947494a72e284b6eb8ff225f2da22b38b5d5069c2fd4b4ba3384e41",
+    "local_ffprobe_sha256": "272f6ebc634a63d9c8b4ca68e964119d980f25154e5aa2c35e5487da48e9a58f"
+  },
+  "build_identity": {
+    "automatic_vcs_stamping": false,
+    "revision_override": "b993b3300f528eb38cc64989d04b2f8fc8f4949a",
+    "dirty_override": false,
+    "explanation": "Built from the verified clean commit with -buildvcs=false and explicit application revision overrides. Existing web embed bytes and compiler inputs were inventoried before and after the build."
+  },
+  "harness_sha256": {
+    "transport_proof.py": "1f2af5c49827be33dd4b5b720d254339af1be509247afa420f8bebc1c5789b9a",
+    "remote_manager.py": "f37ad870ffd9d269691637b6cbc874cdd037eafef11913d3a1623d98f1a72fd4",
+    "guard_remote_readonly.py": "1743085c24b083a0cf6b10e0615e52b7cec9d2a7235ed2c5de00e51e8d01b38e",
+    "build_candidate.py": "3d081162e7ae8da5b3c42d0c5ceec1c27d37f75e4574558f339f92d6f93c5c0e",
+    "namespace.sh": "4af5da97f1724dd31075d9e82acb2427f6996f6ce4bf66b232eeb1249850eb3f",
+    "gpu_hls.py": "78d73482f19b7192b6f4a7d31fa2bb9847d73c0fe267e5b2ee3459ed8e076b0e",
+    "gateway_server.py": "25a537086ec3c5b65a97e882ebb990e30482b92d13fba722b6961d99c5e7cd18",
+    "integration_run.py": "278f12955d1fc300844f2c27e4988649a0e6b60ca02dfaefcd803725e9a519a7",
+    "gpu_monitor.py": "4577f50034ad19b9ea1c38c438f0f4b297ff7c81565e66a9fb4634ee4d28d32d",
+    "tls_gateway.py": "f25f1053c759a8f5e4b68c2d892bc5d7ef48531755af4cdb7f2e33fb611bf743",
+    "realtime_client.py": "980dfdd15bdfffbda0028fc54d9c70b8007c1d0dcb0560463c90c80336e1e2b6",
+    "case_actions.py": "23d85af2fa55558d48428733d23047f26b8247b2041e8f7bb72d78837c62cd89",
+    "run_cases.py": "a62683a15075fb4131d42142dd369545aac5757086146e94ff99ec88bc3c52ee",
+    "gpu_arm.py": "e6da247cc9686ed67fb102af84be55abe3955a1a97b5ed267a8bac16f817a757",
+    "capture_provenance.py": "25db0090dbbcb06deba44fa3604a0a31a698efa4ce58507ba40cbb09a0ad385d",
+    "signed_commands.py": "3874e4e14a1b05651b027b062709f4c6349ec50c1f547a5e790f0512feb8e516"
+  },
+  "private_raw_group_result_sha256": "a0d1df0afb042b66323aa365b981b16b8d2d8d2e8328fa9ded5fa807e4c0d621",
+  "environment": {
+    "gpu": "Intel Flex 140",
+    "decode": "VAAPI",
+    "encode": "h264_qsv",
+    "network": "LAN; HTTP/1.1 with ordinary pooled gateway connections",
+    "worker_media_mount": false,
+    "worker_shared_filesystem_access": false,
+    "worker_local_scratch": true
+  },
+  "cases": [
+    {
+      "transport": "http",
+      "worker_max_jobs": 1,
+      "planner_max_jobs": null,
+      "fixture": {
+        "sha256": "34f644e40396e8a6f6389327b0ca0ee45510ac75dea4b42af313f69e1db9c34b",
+        "size": 21779142,
+        "duration": 14.016
+      },
+      "retained_seconds_since_last_actual_core_capability_fetch": 65.42914152145386,
+      "signed_capability_statuses": [
+        200,
+        200
+      ],
+      "capability_burst_ffmpeg_exec_count": 0,
+      "native_header_auth": {
+        "exercised": true,
+        "actual_login_Authorization": true,
+        "client_stream_token_sent": false,
+        "new_worker_execute_calls": 0
+      },
+      "playback_accounting": {
+        "authoritative_job_matches_native_session": true,
+        "distinct_transport_work_ids": 2,
+        "post_seek_active_jobs": 1
+      },
+      "independent_start": {
+        "http_status": 201,
+        "no_playback_plan": true,
+        "worker_refusal_statuses": [
+          503
+        ]
+      },
+      "checks": {
+        "passed": 59,
+        "failed": []
+      },
+      "outputs": [
+        {
+          "action": "startup",
+          "video_frames": 420,
+          "height": 720,
+          "audio_codec": "aac",
+          "duration": 14.021334,
+          "first_segment": 0,
+          "segment_hashes": [
+            "ce1f85545e2614ee421162fd6da302f87e7888120ba18a5c341c73c02e840487",
+            "383db411df895c23a99e9114161cde6f10cc3f5f9125b427c1d37bab8f3b7131",
+            "b0f16cf84888fb4d7755912990c0ec2afe8ddcd2cc49a67b928ba7715e76e9dd",
+            "db7b714af702b366264ced8dba3b97bfafc129ff12a42341a87a2cc0a11937b4",
+            "ed7d6ab921547a965b1aa2a634b33b69682ca2d9733c8fb8699cabf4aabe1528",
+            "42480555aea15528ae2dacc26d1f3549c9c81c0078a84974cb5821553e70a186",
+            "004b605fbb0826b40b96b3ede294bacdb02ac1cfcf6d669ba7c2aab8d42a0117"
+          ],
+          "decoded_video_framemd5_sha256": "67c9ffb0889baaef51a45d4a4a0a20842975abebb7306207d7d01b050f1a5792",
+          "decoded_audio_framemd5_sha256": "6c68e73198c3850a595782ae5fde50f637820d83871cb2706f034cb614e5fdd2",
+          "packet_metadata_sha256": "c79b977586cc8d140e41337fd7146be1979a67b3af11bb45d05804080bc61558",
+          "hardware_pipeline_verified": true
+        },
+        {
+          "action": "seek",
+          "video_frames": 240,
+          "height": 720,
+          "audio_codec": "aac",
+          "duration": 8.021333,
+          "first_segment": 3,
+          "segment_hashes": [
+            "137ac07f52cd79c2e7cd75b805170918e123b044308a6bbe301ee3f5a6c3a578",
+            "e2eaad4c212f738c653a7c75f0be0ab4c6dd39e03860c2f7e9bc952ea94e306f",
+            "c3981a930f52be9b8b205b378f04ae6291f8ecde759e5dcfa25388ec8d8d45fe",
+            "d8c9fc9d04c097db2bc4cc250be3bc612baa24947426c1af4d2d4935b39a53df"
+          ],
+          "decoded_video_framemd5_sha256": "a4002885c95e7ad3dd14440f5d330aa327a42c7e2232f6f270832620032c38dd",
+          "decoded_audio_framemd5_sha256": "3480f5c59ea363a2d85ecf4b6c345eb064de46efa9e10a4d71c9d335554cad3d",
+          "packet_metadata_sha256": "6f447867d467f8b68bdd58fc392146663134744af9830b52a55e8b20f068d81a",
+          "hardware_pipeline_verified": true
+        }
+      ],
+      "signed_stop_acknowledged": true,
+      "cleanup": true,
+      "worker_egress_only_expected_origins": true,
+      "private_raw_case_result_sha256": "7c98b0143123bbe6bc7b7ed3392c09526b26902802f5ce4097517a65d5935e97"
+    },
+    {
+      "transport": "http",
+      "worker_max_jobs": 2,
+      "planner_max_jobs": null,
+      "fixture": {
+        "sha256": "34f644e40396e8a6f6389327b0ca0ee45510ac75dea4b42af313f69e1db9c34b",
+        "size": 21779142,
+        "duration": 14.016
+      },
+      "retained_seconds_since_last_actual_core_capability_fetch": 65.42658972740173,
+      "signed_capability_statuses": [
+        200,
+        200
+      ],
+      "capability_burst_ffmpeg_exec_count": 10,
+      "native_header_auth": {
+        "exercised": true,
+        "actual_login_Authorization": true,
+        "client_stream_token_sent": false,
+        "new_worker_execute_calls": 0
+      },
+      "playback_accounting": {
+        "authoritative_job_matches_native_session": true,
+        "distinct_transport_work_ids": 2,
+        "post_seek_active_jobs": 1
+      },
+      "independent_start": {
+        "exercised": false,
+        "reason": "MaxJobs=2 retains one job with spare capacity; full-two denial is a focused tracker test."
+      },
+      "checks": {
+        "passed": 56,
+        "failed": []
+      },
+      "outputs": [
+        {
+          "action": "startup",
+          "video_frames": 420,
+          "height": 720,
+          "audio_codec": "aac",
+          "duration": 14.021334,
+          "first_segment": 0,
+          "segment_hashes": [
+            "ce1f85545e2614ee421162fd6da302f87e7888120ba18a5c341c73c02e840487",
+            "383db411df895c23a99e9114161cde6f10cc3f5f9125b427c1d37bab8f3b7131",
+            "b0f16cf84888fb4d7755912990c0ec2afe8ddcd2cc49a67b928ba7715e76e9dd",
+            "db7b714af702b366264ced8dba3b97bfafc129ff12a42341a87a2cc0a11937b4",
+            "ed7d6ab921547a965b1aa2a634b33b69682ca2d9733c8fb8699cabf4aabe1528",
+            "42480555aea15528ae2dacc26d1f3549c9c81c0078a84974cb5821553e70a186",
+            "004b605fbb0826b40b96b3ede294bacdb02ac1cfcf6d669ba7c2aab8d42a0117"
+          ],
+          "decoded_video_framemd5_sha256": "67c9ffb0889baaef51a45d4a4a0a20842975abebb7306207d7d01b050f1a5792",
+          "decoded_audio_framemd5_sha256": "6c68e73198c3850a595782ae5fde50f637820d83871cb2706f034cb614e5fdd2",
+          "packet_metadata_sha256": "c79b977586cc8d140e41337fd7146be1979a67b3af11bb45d05804080bc61558",
+          "hardware_pipeline_verified": true
+        },
+        {
+          "action": "seek",
+          "video_frames": 240,
+          "height": 720,
+          "audio_codec": "aac",
+          "duration": 8.021333,
+          "first_segment": 3,
+          "segment_hashes": [
+            "137ac07f52cd79c2e7cd75b805170918e123b044308a6bbe301ee3f5a6c3a578",
+            "e2eaad4c212f738c653a7c75f0be0ab4c6dd39e03860c2f7e9bc952ea94e306f",
+            "c3981a930f52be9b8b205b378f04ae6291f8ecde759e5dcfa25388ec8d8d45fe",
+            "d8c9fc9d04c097db2bc4cc250be3bc612baa24947426c1af4d2d4935b39a53df"
+          ],
+          "decoded_video_framemd5_sha256": "a4002885c95e7ad3dd14440f5d330aa327a42c7e2232f6f270832620032c38dd",
+          "decoded_audio_framemd5_sha256": "3480f5c59ea363a2d85ecf4b6c345eb064de46efa9e10a4d71c9d335554cad3d",
+          "packet_metadata_sha256": "6f447867d467f8b68bdd58fc392146663134744af9830b52a55e8b20f068d81a",
+          "hardware_pipeline_verified": true
+        }
+      ],
+      "signed_stop_acknowledged": true,
+      "cleanup": true,
+      "worker_egress_only_expected_origins": true,
+      "private_raw_case_result_sha256": "38c83553b258256505409eacbd7920439c33a5d6fc073a807510648c1c2d1962"
+    },
+    {
+      "transport": "https",
+      "worker_max_jobs": 1,
+      "planner_max_jobs": null,
+      "fixture": {
+        "sha256": "34f644e40396e8a6f6389327b0ca0ee45510ac75dea4b42af313f69e1db9c34b",
+        "size": 21779142,
+        "duration": 14.016
+      },
+      "retained_seconds_since_last_actual_core_capability_fetch": 65.38098621368408,
+      "signed_capability_statuses": [
+        200,
+        200
+      ],
+      "capability_burst_ffmpeg_exec_count": 0,
+      "native_header_auth": {
+        "exercised": true,
+        "actual_login_Authorization": true,
+        "client_stream_token_sent": false,
+        "new_worker_execute_calls": 0
+      },
+      "playback_accounting": {
+        "authoritative_job_matches_native_session": true,
+        "distinct_transport_work_ids": 2,
+        "post_seek_active_jobs": 1
+      },
+      "independent_start": {
+        "http_status": 201,
+        "no_playback_plan": true,
+        "worker_refusal_statuses": [
+          503
+        ]
+      },
+      "checks": {
+        "passed": 59,
+        "failed": []
+      },
+      "outputs": [
+        {
+          "action": "startup",
+          "video_frames": 420,
+          "height": 720,
+          "audio_codec": "aac",
+          "duration": 14.021334,
+          "first_segment": 0,
+          "segment_hashes": [
+            "ce1f85545e2614ee421162fd6da302f87e7888120ba18a5c341c73c02e840487",
+            "383db411df895c23a99e9114161cde6f10cc3f5f9125b427c1d37bab8f3b7131",
+            "b0f16cf84888fb4d7755912990c0ec2afe8ddcd2cc49a67b928ba7715e76e9dd",
+            "db7b714af702b366264ced8dba3b97bfafc129ff12a42341a87a2cc0a11937b4",
+            "ed7d6ab921547a965b1aa2a634b33b69682ca2d9733c8fb8699cabf4aabe1528",
+            "42480555aea15528ae2dacc26d1f3549c9c81c0078a84974cb5821553e70a186",
+            "004b605fbb0826b40b96b3ede294bacdb02ac1cfcf6d669ba7c2aab8d42a0117"
+          ],
+          "decoded_video_framemd5_sha256": "67c9ffb0889baaef51a45d4a4a0a20842975abebb7306207d7d01b050f1a5792",
+          "decoded_audio_framemd5_sha256": "6c68e73198c3850a595782ae5fde50f637820d83871cb2706f034cb614e5fdd2",
+          "packet_metadata_sha256": "c79b977586cc8d140e41337fd7146be1979a67b3af11bb45d05804080bc61558",
+          "hardware_pipeline_verified": true
+        },
+        {
+          "action": "seek",
+          "video_frames": 240,
+          "height": 720,
+          "audio_codec": "aac",
+          "duration": 8.021333,
+          "first_segment": 3,
+          "segment_hashes": [
+            "137ac07f52cd79c2e7cd75b805170918e123b044308a6bbe301ee3f5a6c3a578",
+            "e2eaad4c212f738c653a7c75f0be0ab4c6dd39e03860c2f7e9bc952ea94e306f",
+            "c3981a930f52be9b8b205b378f04ae6291f8ecde759e5dcfa25388ec8d8d45fe",
+            "d8c9fc9d04c097db2bc4cc250be3bc612baa24947426c1af4d2d4935b39a53df"
+          ],
+          "decoded_video_framemd5_sha256": "a4002885c95e7ad3dd14440f5d330aa327a42c7e2232f6f270832620032c38dd",
+          "decoded_audio_framemd5_sha256": "3480f5c59ea363a2d85ecf4b6c345eb064de46efa9e10a4d71c9d335554cad3d",
+          "packet_metadata_sha256": "6f447867d467f8b68bdd58fc392146663134744af9830b52a55e8b20f068d81a",
+          "hardware_pipeline_verified": true
+        }
+      ],
+      "signed_stop_acknowledged": true,
+      "cleanup": true,
+      "worker_egress_only_expected_origins": true,
+      "private_raw_case_result_sha256": "a8076f508d30a78faa92f11d778e18e065a3478ed3671750eb3110d656880a84"
+    },
+    {
+      "transport": "https",
+      "worker_max_jobs": 2,
+      "planner_max_jobs": null,
+      "fixture": {
+        "sha256": "34f644e40396e8a6f6389327b0ca0ee45510ac75dea4b42af313f69e1db9c34b",
+        "size": 21779142,
+        "duration": 14.016
+      },
+      "retained_seconds_since_last_actual_core_capability_fetch": 65.39672207832336,
+      "signed_capability_statuses": [
+        200,
+        200
+      ],
+      "capability_burst_ffmpeg_exec_count": 10,
+      "native_header_auth": {
+        "exercised": true,
+        "actual_login_Authorization": true,
+        "client_stream_token_sent": false,
+        "new_worker_execute_calls": 0
+      },
+      "playback_accounting": {
+        "authoritative_job_matches_native_session": true,
+        "distinct_transport_work_ids": 2,
+        "post_seek_active_jobs": 1
+      },
+      "independent_start": {
+        "exercised": false,
+        "reason": "MaxJobs=2 retains one job with spare capacity; full-two denial is a focused tracker test."
+      },
+      "checks": {
+        "passed": 56,
+        "failed": []
+      },
+      "outputs": [
+        {
+          "action": "startup",
+          "video_frames": 420,
+          "height": 720,
+          "audio_codec": "aac",
+          "duration": 14.021334,
+          "first_segment": 0,
+          "segment_hashes": [
+            "ce1f85545e2614ee421162fd6da302f87e7888120ba18a5c341c73c02e840487",
+            "383db411df895c23a99e9114161cde6f10cc3f5f9125b427c1d37bab8f3b7131",
+            "b0f16cf84888fb4d7755912990c0ec2afe8ddcd2cc49a67b928ba7715e76e9dd",
+            "db7b714af702b366264ced8dba3b97bfafc129ff12a42341a87a2cc0a11937b4",
+            "ed7d6ab921547a965b1aa2a634b33b69682ca2d9733c8fb8699cabf4aabe1528",
+            "42480555aea15528ae2dacc26d1f3549c9c81c0078a84974cb5821553e70a186",
+            "004b605fbb0826b40b96b3ede294bacdb02ac1cfcf6d669ba7c2aab8d42a0117"
+          ],
+          "decoded_video_framemd5_sha256": "67c9ffb0889baaef51a45d4a4a0a20842975abebb7306207d7d01b050f1a5792",
+          "decoded_audio_framemd5_sha256": "6c68e73198c3850a595782ae5fde50f637820d83871cb2706f034cb614e5fdd2",
+          "packet_metadata_sha256": "c79b977586cc8d140e41337fd7146be1979a67b3af11bb45d05804080bc61558",
+          "hardware_pipeline_verified": true
+        },
+        {
+          "action": "seek",
+          "video_frames": 240,
+          "height": 720,
+          "audio_codec": "aac",
+          "duration": 8.021333,
+          "first_segment": 3,
+          "segment_hashes": [
+            "137ac07f52cd79c2e7cd75b805170918e123b044308a6bbe301ee3f5a6c3a578",
+            "e2eaad4c212f738c653a7c75f0be0ab4c6dd39e03860c2f7e9bc952ea94e306f",
+            "c3981a930f52be9b8b205b378f04ae6291f8ecde759e5dcfa25388ec8d8d45fe",
+            "d8c9fc9d04c097db2bc4cc250be3bc612baa24947426c1af4d2d4935b39a53df"
+          ],
+          "decoded_video_framemd5_sha256": "a4002885c95e7ad3dd14440f5d330aa327a42c7e2232f6f270832620032c38dd",
+          "decoded_audio_framemd5_sha256": "3480f5c59ea363a2d85ecf4b6c345eb064de46efa9e10a4d71c9d335554cad3d",
+          "packet_metadata_sha256": "6f447867d467f8b68bdd58fc392146663134744af9830b52a55e8b20f068d81a",
+          "hardware_pipeline_verified": true
+        }
+      ],
+      "signed_stop_acknowledged": true,
+      "cleanup": true,
+      "worker_egress_only_expected_origins": true,
+      "private_raw_case_result_sha256": "5601fa94692227a791c0336dd18174a4af067076ecbb0912cb93a7c050ec8b3b"
+    }
+  ],
+  "group_checks": {
+    "passed": 13,
+    "failed": []
+  },
+  "protected_cleanup": true,
+  "new_gpu_kernel_error": false,
+  "limits": [
+    "One synthetic source and one sequential playback session per case.",
+    "MaxJobs=2 retains one job with spare capacity; full-two denial is a focused tracker test.",
+    "No WAN, sustained-load, cold-cache, HDR, production shared-storage or timing-parity claim."
+  ],
+  "earlier_attempts": [
+    {
+      "source_commit": "072a01f7bf4406cb2a04de9100801f85e1cc5d04",
+      "binary_sha256": "04235316cc00e687b07d4c2768817906f9526de5ae8a3c033c177d32cee83370",
+      "outcome": "Harness setup failed before worker/encoder launch; zero media outputs. Remote path validation and SSH argument quoting were corrected.",
+      "original_report_cleanup": false,
+      "subsequent_independent_cleanup_verified": true,
+      "private_raw_result_sha256": "8183edd85bc97b85131b388a359e9869a67cda7fc69318e7209b93af01a336c5",
+      "private_supplemental_cleanup_sha256": "7af8007a9518355e7ea112a283cb1a1b1aa2c453104314f7c11b638db98151d5"
+    },
+    {
+      "source_commit": "072a01f7bf4406cb2a04de9100801f85e1cc5d04",
+      "binary_sha256": "04235316cc00e687b07d4c2768817906f9526de5ae8a3c033c177d32cee83370",
+      "outcome": "HTTP MaxJobs=1 startup produced 420 frames and capability reads succeeded. Native seek had no plan after worker execute returned503: the new transport WorkID counted as a separate job. Later three cases did not run.",
+      "complete_startup_outputs": 1,
+      "complete_seek_outputs": 0,
+      "cleanup": true,
+      "private_raw_result_sha256": "76a9139296433d98c64155213217cbc63c8e20f2ea7f8bb87f6de92fa3f82fc1"
+    }
+  ]
+}

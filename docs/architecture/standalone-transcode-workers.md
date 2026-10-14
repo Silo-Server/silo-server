@@ -188,16 +188,33 @@ new viewer; active records remain subject to the record and byte limits.
 
 Signed configuration contains only segment retention, subtitle sampling capacity,
 drain state, a revision and the output authorization epoch. The worker's hardware,
-scratch paths and job ceiling stay operator-owned. The ceiling counts actual
-encoding and probe lifetimes, including shared probes that outlive a cancelled
-caller. Healthy and replacement generations of one work identity share one job
-slot. Source reads do not consume compute slots.
+scratch paths and job ceiling stay operator-owned. The ceiling accounts for
+producer and probe lifetimes, including shared probes that outlive a cancelled
+caller. Source reads do not consume compute slots.
+
+An admitted playback carries a server-owned `job_id` in its signed assignment and
+output authority. Healthy and replacement transports share that logical playback
+slot while retaining distinct work IDs. Native replans hold both the local session
+lock and the shared database session lock through preparation and commit, bounding
+that overlap to one replacement candidate. Health can briefly report two active transports
+at a one-job limit; after commit the prior transport stops. A failed candidate
+leaves the healthy producer running. The slot is released after the last transport and its retained probes finish.
+Unrelated sessions, downloads and probes retain separate accounting identities.
+
+The accounting ID grants no source, output or stop authority: those still require
+the exact work ID and generation. Only verified core metadata selects a playback
+group; request bodies and headers cannot select it. Separate namespaces distinguish
+playback groups from fallback work identities. Existing assignments without the
+field retain their original fallback identity. Memory and Redis stores preserve
+each live work's accounting identity atomically through admission, completion and
+source recovery, including an originally empty field. Signed output metadata lets
+cold reconstruction retain the same group without another lookup or worker cache.
 
 Capability builders waiting on another builder hold no compute permit. A full
 worker may reuse its last complete capability report only for the same FFmpeg
 identity, acceleration backend and device. With spare capacity it rebuilds the
 report normally. An accepted reprobe invalidates that fallback until a new report
-completes successfully. Cold probes and new encoder work remain subject to the
+completes successfully. Cold probes and independent encoder jobs remain subject to the
 worker's compute limit.
 
 Draining refuses new work and permits the traffic of existing sessions. Health
