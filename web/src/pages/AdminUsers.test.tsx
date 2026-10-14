@@ -1,5 +1,6 @@
 import type { AccessGroup, AdminPolicyDefaults, AdminUser } from "@/api/types";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { V2ProblemError } from "@/api/v2/request";
 // @vitest-environment jsdom
 
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -466,6 +467,50 @@ describe("AdminUsers user dialog policy hints", () => {
     expect(mocks.create.mock.calls[0]![0].body.access_group_id).toBe(3);
     // The profile limit follows the group unless the admin sets one.
     expect(mocks.create.mock.calls[0]![0].body).not.toHaveProperty("max_profiles");
+  });
+
+  it("shows the refused field when creation fails validation", async () => {
+    mocks.accessGroupsLoaded = true;
+    mocks.create.mockReset().mockRejectedValue(
+      new V2ProblemError("createAdminUser", {
+        type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+        title: "Validation failed",
+        status: 422,
+        detail: "The request did not pass validation; see errors.",
+        instance: "urn:silo:request:1",
+        errors: [{ location: "body.password", code: "too_short", detail: "expected length >= 8" }],
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /Add User/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("button", { name: /create|save/i }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent("password: expected length >= 8");
+    expect(alert).not.toHaveTextContent("see errors");
+  });
+
+  it("explains a short password before asking the server", async () => {
+    mocks.accessGroupsLoaded = true;
+    mocks.create.mockReset();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /Add User/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "short");
+    await user.click(within(dialog).getByRole("button", { name: /create|save/i }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Use at least 8 characters.",
+    );
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("disables the group picker for admins", async () => {

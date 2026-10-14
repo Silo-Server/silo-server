@@ -75,6 +75,7 @@ import {
   getAdminUser,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
+import { V2ProblemError } from "@/api/v2/request";
 import { userDetailTabSearch } from "./admin-users/detail/userDetailTabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import InvitationsTab from "./admin-settings/InvitationsTab";
@@ -87,6 +88,7 @@ import {
 } from "@/lib/permissions";
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { newPasswordProblem } from "@/lib/newPassword";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -703,6 +705,24 @@ function formatRelativeTime(value?: string | null, fallback = "-") {
   return fallback;
 }
 
+// A validation failure's summary is "see errors"; the reason is in the field
+// details. Show those, and keep a real summary (a duplicate username, for
+// example) when there are no field details.
+function createUserErrorMessage(err: unknown): string {
+  if (err instanceof V2ProblemError) {
+    const details = (err.problem.errors ?? []).flatMap((item) => {
+      if (!item.detail) return [];
+      const field = item.location?.replace(/^body\./, "").replaceAll("_", " ");
+      return [field ? `${field}: ${item.detail}` : item.detail];
+    });
+    if (details.length > 0) return details.join(" ");
+  }
+  const message = err instanceof Error ? err.message : "";
+  // The summary only points at field details. Without those, it is not a reason.
+  if (!message || message.endsWith("see errors.")) return "Could not save user.";
+  return message;
+}
+
 function CreateUserForm({
   onClose,
   onBusy,
@@ -795,8 +815,17 @@ function CreateUserForm({
       (createDefaultProfile && !capabilities.data.default_profile)
     )
       return;
+    if (username.trim() === "") {
+      setError("Enter a username.");
+      return;
+    }
     if (!isValidEmail(email)) {
       setError(INVALID_EMAIL_MESSAGE);
+      return;
+    }
+    const passwordProblem = newPasswordProblem(password, password);
+    if (passwordProblem) {
+      setError(passwordProblem);
       return;
     }
     // A cleared or half-typed limit is not in the policy state, which still
@@ -827,7 +856,7 @@ function CreateUserForm({
       createMutation.reset();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save user.");
+      setError(createUserErrorMessage(err));
     } finally {
       busy.current = false;
       onBusy(false);
@@ -835,8 +864,7 @@ function CreateUserForm({
   }
 
   return (
-    <form ref={formRef} onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
-      {error && <p role="alert">{error}</p>}
+    <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
       <label className="mb-3 flex items-center gap-2">
         <input
           type="checkbox"
@@ -892,7 +920,11 @@ function CreateUserForm({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  aria-describedby={`${passwordId}-hint`}
                 />
+                <p id={`${passwordId}-hint`} className="text-muted-foreground text-xs">
+                  At least 8 characters, at most 72 bytes.
+                </p>
                 <div className="flex items-center gap-2">
                   <Switch
                     id={requireChangeId}
@@ -1019,6 +1051,14 @@ function CreateUserForm({
       </Tabs>
 
       <div className="border-border mt-4 border-t pt-4">
+        {error && (
+          <p
+            role="alert"
+            className="border-destructive/40 bg-destructive/10 text-destructive mb-3 rounded-md border px-3 py-2 text-sm"
+          >
+            {error}
+          </p>
+        )}
         <Button
           type="submit"
           className="w-full"
