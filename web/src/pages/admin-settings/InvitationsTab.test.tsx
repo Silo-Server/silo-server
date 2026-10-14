@@ -234,6 +234,7 @@ it("selects a delivery option when its card text is clicked", () => {
   fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
   fireEvent.click(screen.getByText("You share the link yourself, for example in a chat."));
   expect(screen.getByLabelText("Create link")).toBeChecked();
+  expect(screen.getByLabelText("Create link")).toHaveFocus();
   fireEvent.click(screen.getByText("We email the link. You can copy it too."));
   expect(screen.getByLabelText("Send email")).toBeChecked();
 });
