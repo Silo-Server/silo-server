@@ -81,8 +81,8 @@ type EmbeddingsReset struct {
 }
 
 // ResetEmbeddings deletes the embedding lock, every item embedding, every
-// taste profile and cluster, and every profile's cached rows in one
-// transaction, so the next embedding run starts a new embedding space with
+// taste cluster and every profile's cached rows, and clears every taste
+// profile's vector, in one transaction, so the next embedding run starts a new embedding space with
 // whatever model the server is configured for. Global rows (popular, recently
 // added, top rated, genre samplers) do not use embeddings and stay.
 //
@@ -134,8 +134,8 @@ func (w *Worker) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 }
 
 // ResetEmbeddings deletes the embedding lock, every item embedding, taste
-// profile, taste cluster and per-profile cache row in one transaction, and
-// queues a search index upsert for every item that had an embedding.
+// cluster and per-profile cache row, and clears every taste profile's vector,
+// in one transaction, and queues a search index upsert for every item that had an embedding.
 func (r *Repo) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 	var res EmbeddingsReset
 	tx, err := r.pool.Begin(ctx)

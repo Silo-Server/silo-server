@@ -102549,7 +102549,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Delete the embedding lock, every item embedding, taste profiles and per-profile cached rows in one transaction.",
+        "summary": "Delete the embedding lock, every item embedding, taste clusters and per-profile cached rows, and clear taste profile vectors, in one transaction.",
         "tags": [
           "admin-recommendations"
         ],

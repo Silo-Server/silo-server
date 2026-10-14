@@ -105,7 +105,7 @@ func registerAdminRecommendations(reg *Registry) {
 			return &AdminRecommendationStartedOutput{Body: AdminRecommendationStarted{Status: "started"}}, nil
 		})
 	}
-	reset := op(http.MethodPost, "/embeddings/reset", "resetAdminRecommendationEmbeddings", "Delete the embedding lock, every item embedding, taste profiles and per-profile cached rows in one transaction.")
+	reset := op(http.MethodPost, "/embeddings/reset", "resetAdminRecommendationEmbeddings", "Delete the embedding lock, every item embedding, taste clusters and per-profile cached rows, and clear taste profile vectors, in one transaction.")
 	reset.Description = "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. " +
 		"It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, " +
 		"while a catalog import with embeddings runs, and while saved embedding settings wait for a server restart. " +

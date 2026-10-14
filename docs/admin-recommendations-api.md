@@ -71,9 +71,11 @@ and releases any lock the process held.
 ## Embeddings reset
 
 The reset deletes the embedding lock, every item embedding, every taste
-profile and taste cluster, and every profile's cached rows in one
-transaction, and answers with the counts it deleted (`embeddings`,
-`taste_profiles`, `taste_clusters`, `cached_rows`). It is the recovery path
+cluster and every profile's cached rows, and clears every taste profile's
+vector, in one transaction. It answers with the counts (`embeddings`,
+`taste_clusters` and `cached_rows` deleted, `taste_profiles` cleared). Taste
+profile rows keep their signal counts, so they are rebuilt once the
+embedding job stores their titles' vectors again. It is the recovery path
 for a server whose lock pins a model it can no longer use, and the way to
 switch embedding models. Global rows (popular, recently added, top rated,
 genre samplers) and co-watch pairs do not use embeddings and stay.
