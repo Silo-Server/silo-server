@@ -2,7 +2,6 @@ import { useEffect, useRef, type RefObject } from "react";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
 import { videoContentRect, type FitRect } from "../utils/videoFit";
 import { isPGSCodec } from "../utils/subtitleCodecs";
-import { toMediaTime } from "../utils/mediaTimeline";
 import {
   decodePGSObject,
   mergePGSCompositions,
@@ -13,10 +12,10 @@ import {
   type PGSPlacedObject,
 } from "../utils/pgs";
 import {
-  nextSubtitleRetryDelay,
-  planSubtitleWindow,
-  SUBTITLE_FETCH_STALL_TIMEOUT_MS,
+  createSubtitleWindowFetcher,
   SUBTITLE_WINDOW_SECONDS,
+  subtitlePlayheadSeconds,
+  subtitleWindowUrl,
 } from "../utils/subtitleWindows";
 
 // A PGS composition stays on screen until the next one replaces it, and the
@@ -134,18 +133,15 @@ export function placePGSObjects({
     const roomX = boxWidth - 2 * marginX;
     const roomY = bottom - marginY;
     const shrink = Math.max(0, Math.min(1, roomX / width, roomY / height));
+    const blockWidth = width * shrink;
+    const blockHeight = height * shrink;
     const blockX = clampSpan(
-      left + (width - width * shrink) / 2,
-      width * shrink,
+      left + (width - blockWidth) / 2,
+      blockWidth,
       marginX,
       boxWidth - marginX,
     );
-    const blockY = clampSpan(
-      top + (height - height * shrink) / 2,
-      height * shrink,
-      marginY,
-      bottom,
-    );
+    const blockY = clampSpan(top + (height - blockHeight) / 2, blockHeight, marginY, bottom);
     for (const { rect, index } of group) {
       placed[index] = {
         x: blockX + (rect.x - left) * shrink,
@@ -169,11 +165,6 @@ function objectSourceRect(object: PGSPlacedObject): FitRect {
     width: Math.max(0, Math.min(crop.width, object.width - x)),
     height: Math.max(0, Math.min(crop.height, object.height - y)),
   };
-}
-
-function appendWindow(url: string, position: number): string {
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}windowed=1&position=${position}&duration=${SUBTITLE_WINDOW_SECONDS}`;
 }
 
 /**
@@ -236,15 +227,6 @@ export function usePGSSubtitles({
     // Carried across contiguous windows so an epoch that began in one window
     // still resolves in the next; a fresh window starts a new one.
     let parser: PGSStreamParser | null = null;
-    let coverageStart = 0;
-    let windowEnd = 0;
-    let atEOF = false;
-    let hasFetched = false;
-    let inflight: AbortController | null = null;
-    let inflightStart = 0;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastFetchFailureAt = 0;
-    let retryDelay = 0;
     let frameRequest = 0;
     let painted: { composition: PGSComposition | null; key: string } = {
       composition: null,
@@ -256,11 +238,7 @@ export function usePGSSubtitles({
 
     function sourceTime(): number {
       const { origin, delayMs } = timingRef.current;
-      const mediaTime =
-        videoEl.readyState > 0
-          ? toMediaTime(videoEl.currentTime, origin)
-          : (fetchAnchorRef.current ?? 0);
-      return mediaTime - delayMs / 1000;
+      return subtitlePlayheadSeconds(videoEl, origin, fetchAnchorRef.current) - delayMs / 1000;
     }
 
     function bitmapFor(object: PGSPlacedObject): CanvasImageSource | null {
@@ -335,6 +313,7 @@ export function usePGSSubtitles({
       });
       drawable.forEach(({ source, bitmap }, index) => {
         const target = targets[index];
+        if (!target) return;
         context.drawImage(
           bitmap,
           source.x,
@@ -355,6 +334,7 @@ export function usePGSSubtitles({
       // The clear for the last screen may not have arrived yet, so the
       // timeline only reaches the last finished window or, past it, the
       // latest segment the parser has read.
+      const { windowEnd } = fetcher.coverage();
       const loadedUntil = Math.max(windowEnd, parser?.receivedUntil ?? -Infinity) + 1;
       const composition = pgsCompositionAt(timeline, sourceTime(), loadedUntil);
       const key = `${canvasEl.clientWidth}x${canvasEl.clientHeight}@${window.devicePixelRatio}:${videoEl.videoWidth}x${videoEl.videoHeight}:${layoutRevisionRef.current}`;
@@ -370,104 +350,43 @@ export function usePGSSubtitles({
       frameRequest = requestAnimationFrame(renderFrame);
     }
 
-    async function fetchWindow(seekStart: number, resetExisting: boolean) {
-      inflight?.abort();
-      const controller = new AbortController();
-      inflight = controller;
-      inflightStart = seekStart;
-      if (retryTimer !== null) clearTimeout(retryTimer);
-      if (resetExisting) {
-        onLoadStateRef.current?.("loading");
-        timeline = [];
-        coverageStart = seekStart;
-        windowEnd = seekStart;
-        atEOF = false;
-      }
-      const requestedEnd = seekStart + SUBTITLE_WINDOW_SECONDS;
-      let stallTimer: ReturnType<typeof setTimeout> | null = null;
-      const armStallTimer = () => {
-        if (stallTimer !== null) clearTimeout(stallTimer);
-        stallTimer = setTimeout(() => controller.abort(), SUBTITLE_FETCH_STALL_TIMEOUT_MS);
-      };
-      // A fresh window starts a new epoch history. An extend continues the
-      // last one, so display sets past the join can still place objects the
-      // previous window defined; the repeats in the overlap keep the copy the
-      // earlier window resolved.
-      if (resetExisting || !parser) parser = new PGSStreamParser();
-      else parser.resetBuffer();
-      const windowParser = parser;
-      let succeeded = false;
-      try {
-        armStallTimer();
-        const response = await fetch(appendWindow(url, seekStart), { signal: controller.signal });
-        if (!response.ok || !response.body) {
-          console.error(`[usePGSSubtitles] Failed to fetch ${url}: ${response.status}`);
-          return;
+    const fetcher = createSubtitleWindowFetcher({
+      windowUrl: (start) => subtitleWindowUrl(url, start, "windowed=1"),
+      playhead: () => Math.max(0, sourceTime()),
+      duration: () => durationRef.current ?? 0,
+      seekBackoffSeconds: SEEK_BACKOFF,
+      logTag: "usePGSSubtitles",
+      onWindowStart: (fresh) => {
+        if (fresh) {
+          onLoadStateRef.current?.("loading");
+          timeline = [];
         }
-        const reader = response.body.getReader();
-        while (!cancelled) {
-          armStallTimer();
-          const { value, done } = await reader.read();
-          if (cancelled || controller.signal.aborted || inflight !== controller) return;
-          if (done) break;
-          const parsed = windowParser.push(value);
-          if (parsed.length > 0) {
-            timeline = mergePGSCompositions(timeline, parsed);
-            onLoadStateRef.current?.("ready");
-          }
+        // A fresh window starts a new epoch history. An extend continues the
+        // last one, so display sets past the join can still place objects the
+        // previous window defined; the repeats in the overlap keep the copy the
+        // earlier window resolved.
+        if (fresh || !parser) parser = new PGSStreamParser();
+        else parser.resetBuffer();
+      },
+      onChunk: (chunk) => {
+        const parsed = parser?.push(chunk) ?? [];
+        if (parsed.length === 0) return;
+        timeline = mergePGSCompositions(timeline, parsed);
+        onLoadStateRef.current?.("ready");
+      },
+      onWindowCommitted: (fresh) => {
+        onLoadStateRef.current?.("ready");
+        // Keep about one window behind the playhead, so a straight run
+        // through a long film holds a bounded number of screens.
+        const keepFrom = sourceTime() - SUBTITLE_WINDOW_SECONDS;
+        if (!fresh && keepFrom > fetcher.coverage().coverageStart) {
+          timeline = prunePGSTimeline(timeline, keepFrom);
+          fetcher.releaseBefore(keepFrom);
         }
-        succeeded = true;
-      } catch (error) {
-        if ((error as Error).name !== "AbortError") {
-          console.error("[usePGSSubtitles] Stream error:", error);
-        }
-      } finally {
-        if (stallTimer !== null) clearTimeout(stallTimer);
-        const superseded = inflight !== controller;
-        if (inflight === controller) inflight = null;
-        if (succeeded && !cancelled && !superseded) {
-          onLoadStateRef.current?.("ready");
-          hasFetched = true;
-          retryDelay = 0;
-          lastFetchFailureAt = 0;
-          windowEnd = Math.max(windowEnd, requestedEnd);
-          const duration = durationRef.current ?? 0;
-          if (duration > 0 && requestedEnd >= duration) atEOF = true;
-          // Keep about one window behind the playhead, so a straight run
-          // through a long film holds a bounded number of screens.
-          const keepFrom = sourceTime() - SUBTITLE_WINDOW_SECONDS;
-          if (!resetExisting && keepFrom > coverageStart) {
-            timeline = prunePGSTimeline(timeline, keepFrom);
-            coverageStart = keepFrom;
-          }
-        } else if (!succeeded && !superseded && !cancelled) {
-          lastFetchFailureAt = Date.now();
-          onLoadStateRef.current?.("error");
-          retryDelay = nextSubtitleRetryDelay(retryDelay);
-          retryTimer = setTimeout(maybeFetch, retryDelay);
-        }
-      }
-    }
-
-    function maybeFetch() {
-      if (cancelled) return;
-      const action = planSubtitleWindow(
-        {
-          hasFetched,
-          coverageStart,
-          windowEnd,
-          atEOF,
-          inflightStart: inflight ? inflightStart : null,
-          failedAt: lastFetchFailureAt,
-          retryDelayMs: retryDelay,
-        },
-        Math.max(0, sourceTime()),
-        Date.now(),
-        SEEK_BACKOFF,
-      );
-      if (action.kind === "fresh") void fetchWindow(action.start, true);
-      else if (action.kind === "extend") void fetchWindow(action.start, false);
-    }
+      },
+      onWindowFailed: () => onLoadStateRef.current?.("error"),
+    });
+    const maybeFetch = fetcher.maybeFetch;
 
     maybeFetch();
     videoEl.addEventListener("timeupdate", maybeFetch);
@@ -477,10 +396,8 @@ export function usePGSSubtitles({
 
     return () => {
       cancelled = true;
-      if (retryTimer !== null) clearTimeout(retryTimer);
+      fetcher.dispose();
       if (frameRequest) cancelAnimationFrame(frameRequest);
-      inflight?.abort();
-      inflight = null;
       videoEl.removeEventListener("timeupdate", maybeFetch);
       videoEl.removeEventListener("seeking", maybeFetch);
       videoEl.removeEventListener("seeked", maybeFetch);
