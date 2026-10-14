@@ -86,14 +86,15 @@ function clampSpan(start: number, size: number, min: number, max: number): numbe
 }
 
 /**
- * Where one object lands in the player box. It keeps its place on the plane,
- * then stays inside the box with a small margin, shrinking when it does not
- * fit (a Fill crop on a narrow screen, or a tall object over a short player);
- * lower-half objects also stay above `bottomInsetPx`.
+ * Where a composition's objects land in the player box. Each object keeps its
+ * place on the plane. Objects in the same half of the box then move and shrink
+ * as one block, so the two lines of a subtitle stay apart and at one scale:
+ * the block stays inside the box with a small margin, shrinking when it does
+ * not fit (a Fill crop on a narrow screen, or a tall subtitle over a short
+ * player), and a lower-half block also stays above `bottomInsetPx`.
  */
-export function placePGSObject({
-  object,
-  source,
+export function placePGSObjects({
+  objects,
   plane,
   planeWidth,
   planeHeight,
@@ -101,36 +102,60 @@ export function placePGSObject({
   boxHeight,
   bottomInsetPx,
 }: {
-  object: { x: number; y: number };
-  source: FitRect;
+  objects: { object: { x: number; y: number }; source: FitRect }[];
   plane: FitRect;
   planeWidth: number;
   planeHeight: number;
   boxWidth: number;
   boxHeight: number;
   bottomInsetPx: number;
-}): FitRect {
+}): FitRect[] {
   const scaleX = plane.width / planeWidth;
   const scaleY = plane.height / planeHeight;
   const marginX = boxWidth * EDGE_MARGIN_RATIO;
   const marginY = boxHeight * EDGE_MARGIN_RATIO;
-  let width = source.width * scaleX;
-  let height = source.height * scaleY;
-  const centerX = plane.x + object.x * scaleX + width / 2;
-  const centerY = plane.y + object.y * scaleY + height / 2;
-  const lowerHalf = centerY > boxHeight / 2;
-  const bottom = boxHeight - Math.max(marginY, lowerHalf ? bottomInsetPx : 0);
-  const roomX = boxWidth - 2 * marginX;
-  const roomY = bottom - marginY;
-  const shrink = Math.max(0, Math.min(1, roomX / width, roomY / height));
-  width *= shrink;
-  height *= shrink;
-  return {
-    x: clampSpan(centerX - width / 2, width, marginX, boxWidth - marginX),
-    y: clampSpan(centerY - height / 2, height, marginY, bottom),
-    width,
-    height,
-  };
+  const onPlane = objects.map(({ object, source }) => ({
+    x: plane.x + object.x * scaleX,
+    y: plane.y + object.y * scaleY,
+    width: source.width * scaleX,
+    height: source.height * scaleY,
+  }));
+  const placed = [...onPlane];
+  for (const lowerHalf of [false, true]) {
+    const group = onPlane
+      .map((rect, index) => ({ rect, index }))
+      .filter(({ rect }) => rect.y + rect.height / 2 > boxHeight / 2 === lowerHalf);
+    if (group.length === 0) continue;
+    const left = Math.min(...group.map(({ rect }) => rect.x));
+    const top = Math.min(...group.map(({ rect }) => rect.y));
+    const width = Math.max(...group.map(({ rect }) => rect.x + rect.width)) - left;
+    const height = Math.max(...group.map(({ rect }) => rect.y + rect.height)) - top;
+    const bottom = boxHeight - Math.max(marginY, lowerHalf ? bottomInsetPx : 0);
+    const roomX = boxWidth - 2 * marginX;
+    const roomY = bottom - marginY;
+    const shrink = Math.max(0, Math.min(1, roomX / width, roomY / height));
+    const blockX = clampSpan(
+      left + (width - width * shrink) / 2,
+      width * shrink,
+      marginX,
+      boxWidth - marginX,
+    );
+    const blockY = clampSpan(
+      top + (height - height * shrink) / 2,
+      height * shrink,
+      marginY,
+      bottom,
+    );
+    for (const { rect, index } of group) {
+      placed[index] = {
+        x: blockX + (rect.x - left) * shrink,
+        y: blockY + (rect.y - top) * shrink,
+        width: rect.width * shrink,
+        height: rect.height * shrink,
+      };
+    }
+  }
+  return placed;
 }
 
 function objectSourceRect(object: PGSPlacedObject): FitRect {
@@ -293,21 +318,23 @@ export function usePGSSubtitles({
         videoFitRef.current,
       );
       const plane = pgsPlaneRect(picture, composition.width, composition.height);
-      for (const object of composition.objects) {
+      const drawable = composition.objects.flatMap((object) => {
         const source = objectSourceRect(object);
-        if (source.width === 0 || source.height === 0) continue;
+        if (source.width === 0 || source.height === 0) return [];
         const bitmap = bitmapFor(object);
-        if (!bitmap) continue;
-        const target = placePGSObject({
-          object,
-          source,
-          plane,
-          planeWidth: composition.width,
-          planeHeight: composition.height,
-          boxWidth,
-          boxHeight,
-          bottomInsetPx: bottomInsetRef.current,
-        });
+        return bitmap ? [{ object, source, bitmap }] : [];
+      });
+      const targets = placePGSObjects({
+        objects: drawable,
+        plane,
+        planeWidth: composition.width,
+        planeHeight: composition.height,
+        boxWidth,
+        boxHeight,
+        bottomInsetPx: bottomInsetRef.current,
+      });
+      drawable.forEach(({ source, bitmap }, index) => {
+        const target = targets[index];
         context.drawImage(
           bitmap,
           source.x,
@@ -319,7 +346,7 @@ export function usePGSSubtitles({
           target.width,
           target.height,
         );
-      }
+      });
     }
 
     function renderFrame() {
