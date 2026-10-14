@@ -2,13 +2,10 @@ import { Link, useNavigate } from "react-router";
 
 import type { PluginInstallation } from "@/api/types";
 import { ProviderTile, ProviderTileGrid } from "@/components/settings/ProviderTile";
-import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { installationConfigReady } from "@/lib/pluginConfigReady";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
-
-import { FieldGroup } from "./FieldGroup";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginPagePath } from "@/lib/pluginPresentation";
 
@@ -57,18 +54,20 @@ function pluginWatchProviders(installations: PluginInstallation[]): PluginWatchP
   return providers.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export default function WatchSyncSettings() {
+/**
+ * Watch providers are plugins with their own config pages, so these tiles
+ * only report status and link out; nothing here is staged or saved.
+ */
+export function WatchProviderTiles() {
   const navigate = useNavigate();
   const { data: installations, isLoading, isError, refetch } = useAdminPluginInstallations();
   const providers = pluginWatchProviders(installations ?? []);
 
   if (isLoading) {
     return (
-      <div className="max-w-5xl space-y-6" role="status" aria-label="Loading watch sync">
-        <Skeleton className="h-9 w-64" />
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-40 w-full" />
-        <span className="sr-only">Loading watch sync</span>
+      <div role="status" aria-label="Loading watch providers">
+        <Skeleton className="h-24 w-full" />
+        <span className="sr-only">Loading watch providers</span>
       </div>
     );
   }
@@ -83,52 +82,42 @@ export default function WatchSyncSettings() {
   );
 
   return (
-    <div className="flex h-full max-w-5xl flex-col gap-7">
-      <SettingsPageHeader title="Watch Providers" />
-
-      <FieldGroup label="Watch providers">
-        <div className="py-3.5">
-          {isError ? (
-            <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
-              <span>Couldn&apos;t load the installed watch provider plugins.</span>
-              <Button type="button" size="sm" variant="outline" onClick={() => void refetch()}>
-                Retry
-              </Button>
-            </div>
-          ) : providers.length > 0 ? (
-            <ProviderTileGrid>
-              {providers.map((provider) => (
-                <ProviderTile
-                  key={`plugin-${provider.installationId}-${provider.capabilityId}`}
-                  name={provider.name}
-                  tagline="Watch provider plugin"
-                  monogram={providerMonogram(provider.name)}
-                  monogramClass="bg-violet-500/20 text-violet-700 dark:text-violet-300"
-                  state={provider.enabled && provider.configReady ? "connected" : "not_connected"}
-                  statePill={
-                    !provider.enabled
-                      ? "Disabled"
-                      : provider.configReady
-                        ? "Enabled"
-                        : "Needs setup"
-                  }
-                  primaryAction={{
-                    label: "Configure",
-                    onClick: () => navigate(pluginPagePath(provider.pluginId)),
-                  }}
-                />
-              ))}
-            </ProviderTileGrid>
-          ) : (
-            <p className="text-sm">No watch provider plugins are installed.</p>
-          )}
-          <p className="text-muted-foreground mt-3 text-xs">
-            Trakt, Simkl, MDBList, and other watch providers install from the {catalogLink}. A
-            provider&apos;s app credentials live on its plugin page, and viewers link their own
-            accounts from profile settings.
-          </p>
+    <>
+      {isError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+          <span>Couldn&apos;t load the installed watch provider plugins.</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => void refetch()}>
+            Retry
+          </Button>
         </div>
-      </FieldGroup>
-    </div>
+      ) : providers.length > 0 ? (
+        <ProviderTileGrid>
+          {providers.map((provider) => (
+            <ProviderTile
+              key={`plugin-${provider.installationId}-${provider.capabilityId}`}
+              name={provider.name}
+              tagline="Watch provider plugin"
+              monogram={providerMonogram(provider.name)}
+              monogramClass="bg-violet-500/20 text-violet-700 dark:text-violet-300"
+              state={provider.enabled && provider.configReady ? "connected" : "not_connected"}
+              statePill={
+                !provider.enabled ? "Disabled" : provider.configReady ? "Enabled" : "Needs setup"
+              }
+              primaryAction={{
+                label: "Configure",
+                onClick: () => navigate(pluginPagePath(provider.pluginId)),
+              }}
+            />
+          ))}
+        </ProviderTileGrid>
+      ) : (
+        <p className="text-sm">No watch provider plugins are installed.</p>
+      )}
+      <p className="text-muted-foreground mt-3 text-xs">
+        Trakt, Simkl, MDBList, and other watch providers install from the {catalogLink}. A
+        provider&apos;s app credentials live on its plugin page, and viewers link their own accounts
+        from profile settings.
+      </p>
+    </>
   );
 }

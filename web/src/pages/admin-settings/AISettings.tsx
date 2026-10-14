@@ -139,6 +139,31 @@ const TRANSCRIPTION_PRESETS = [
   },
 ] as const;
 
+/**
+ * Hosted providers that reject a request without a key, matched by host
+ * suffix like the server's own hosted-provider list (strictHostedASRHosts in
+ * internal/ai/llm/transcribe.go), so an Azure resource subdomain counts too.
+ */
+const KEY_REQUIRED_HOSTS = [
+  "api.openai.com",
+  "openai.azure.com",
+  "api.groq.com",
+  "api.mistral.ai",
+  "openrouter.ai",
+];
+
+/**
+ * Whether an endpoint can be ready without an API key. The server sends no
+ * Authorization header when the key is empty, which is how a local provider
+ * (Ollama, Speaches) runs, so a missing key only disqualifies the hosted
+ * providers Silo knows require one. Treating the default OpenAI endpoint as
+ * ready is how a fresh install read "Configured".
+ */
+function keylessEndpoint(rawURL: string): boolean {
+  const host = hostLabel(rawURL).toLowerCase().replace(/:\d+$/, "");
+  return !KEY_REQUIRED_HOSTS.some((hosted) => host === hosted || host.endsWith(`.${hosted}`));
+}
+
 function hostLabel(rawURL: string): string {
   const trimmed = rawURL.trim();
   if (!trimmed) return "";
@@ -207,7 +232,7 @@ function ModelPanelActions({
           role="status"
           aria-live="polite"
           className={cn(
-            "mr-auto text-[11.5px]",
+            "mr-auto text-xs",
             test.ok ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400",
           )}
         >
@@ -274,6 +299,7 @@ function TextModelTile({
   authMode,
   reasoningEffort,
   reasoningLevels,
+  reasoningAttention,
   chatGPTSupported,
   baseURL,
   chatModel,
@@ -281,6 +307,7 @@ function TextModelTile({
   apiKeyConfigured,
   apiKeyCleared,
   ready,
+  missingAPIKey,
   canTest,
   dirty,
   restartKeys,
@@ -299,6 +326,11 @@ function TextModelTile({
   authMode: string;
   reasoningEffort: string;
   reasoningLevels: string[];
+  /**
+   * The reasoning level has a staged edit, or one the selected model cannot
+   * use; either holds the tile's Advanced section open.
+   */
+  reasoningAttention: boolean;
   chatGPTSupported: boolean;
   baseURL: string;
   chatModel: string;
@@ -306,6 +338,8 @@ function TextModelTile({
   apiKeyConfigured: boolean;
   apiKeyCleared: boolean;
   ready: boolean;
+  /** Endpoint and model are set, and only the API key is missing. */
+  missingAPIKey: boolean;
   canTest: boolean;
   dirty: boolean;
   restartKeys: RestartKeyMatcher;
@@ -346,7 +380,9 @@ function TextModelTile({
               ? `${chatModel} · ${authMode === "chatgpt" ? "ChatGPT plan" : hostLabel(baseURL)}`
               : authMode === "chatgpt"
                 ? "Connect an account and choose a model"
-                : "Base URL and model required"
+                : missingAPIKey
+                  ? "API key required"
+                  : "Base URL and model required"
       }
       expanded={expanded}
       primaryAction={{ label: ready ? "Manage" : "Connect", onClick: onExpand }}
@@ -404,34 +440,36 @@ function TextModelTile({
           />
         </>
       )}
-      <SettingField
-        label="Reasoning level"
-        type="select"
-        value={reasoningEffort || "default"}
-        description="Higher effort can improve complex translations and use more time and tokens."
-        onChange={(next) => onChange("ai.reasoning_effort", next === "default" ? "" : next)}
-        options={[
-          { value: "default", label: "Provider default" },
-          ...reasoningLevels.map((level) => ({
-            value: level,
-            label:
-              level === "none"
-                ? "None"
-                : level === "xhigh"
-                  ? "Extra high"
-                  : level.charAt(0).toUpperCase() + level.slice(1),
-          })),
-          ...(reasoningEffort && !reasoningLevels.includes(reasoningEffort)
-            ? [
-                {
-                  value: reasoningEffort,
-                  label: `${reasoningEffort} (unsupported by this model)`,
-                  disabled: true,
-                },
-              ]
-            : []),
-        ]}
-      />
+      <AdvancedSection id="ai.text-model" count={1} forceOpen={reasoningAttention}>
+        <SettingField
+          label="Reasoning level"
+          type="select"
+          value={reasoningEffort || "default"}
+          description="Higher effort can improve complex translations and use more time and tokens."
+          onChange={(next) => onChange("ai.reasoning_effort", next === "default" ? "" : next)}
+          options={[
+            { value: "default", label: "Provider default" },
+            ...reasoningLevels.map((level) => ({
+              value: level,
+              label:
+                level === "none"
+                  ? "None"
+                  : level === "xhigh"
+                    ? "Extra high"
+                    : level.charAt(0).toUpperCase() + level.slice(1),
+            })),
+            ...(reasoningEffort && !reasoningLevels.includes(reasoningEffort)
+              ? [
+                  {
+                    value: reasoningEffort,
+                    label: `${reasoningEffort} (unsupported by this model)`,
+                    disabled: true,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      </AdvancedSection>
       <ModelPanelActions
         testLabel="Test text model"
         pendingLabel="Testing text model..."
@@ -664,22 +702,54 @@ export default function AISettings() {
   const chatModel = effectiveValue("ai.chat_model", "subtitle_ai.chat_model", "gpt-4o-mini");
   const asrBaseURL = value("ai.asr_base_url");
   const asrModel = value("ai.asr_model", "whisper-1");
+  // A key counts once it is saved (and no clear is staged) or typed in. The
+  // legacy key still serves an upgraded server until the modern one is saved.
+  const textAPIKeyConfigured =
+    form.sensitiveConfigured.includes("ai.api_key") ||
+    form.sensitiveConfigured.includes("subtitle_ai.api_key");
+  const textHasAPIKey =
+    value("ai.api_key").trim() !== "" ||
+    (textAPIKeyConfigured && !form.isClearStaged("ai.api_key"));
+  const textEndpointSet = textBaseURL.trim() !== "" && chatModel.trim() !== "";
+  const textMissingAPIKey = textEndpointSet && !textHasAPIKey && !keylessEndpoint(textBaseURL);
+  // Defaults alone (the OpenAI endpoint and gpt-4o-mini, no key) are not a
+  // configured provider: every request would fail at the provider.
   const textReady =
     authMode === "chatgpt"
       ? authenticatedAccount?.connected === true &&
         !!chatGPTModels.data?.models.some((model) => model.id === chatModel)
-      : textBaseURL.trim() !== "" && chatModel.trim() !== "";
+      : textEndpointSet && !textMissingAPIKey;
   const textCanTest =
     textReady ||
     (authMode === "chatgpt" &&
       authenticatedAccount?.usage_limited === true &&
       configuredChatModel.trim() !== "");
   const speechUsesTextEndpoint = asrBaseURL.trim() === "";
+  // Speech borrows the text endpoint and the text key when its own are empty,
+  // as the server does (`internal/ai/llm/client.go`).
+  const speechBaseURL = speechUsesTextEndpoint ? textBaseURL : asrBaseURL;
+  const speechHasAPIKey =
+    value("ai.asr_api_key").trim() !== "" ||
+    (form.sensitiveConfigured.includes("ai.asr_api_key") &&
+      !form.isClearStaged("ai.asr_api_key")) ||
+    textHasAPIKey;
   const speechReady =
-    (asrBaseURL.trim() !== "" || textBaseURL.trim() !== "") && asrModel.trim() !== "";
+    speechBaseURL.trim() !== "" &&
+    asrModel.trim() !== "" &&
+    (speechHasAPIKey || keylessEndpoint(speechBaseURL));
   const subtitleTranslateEnabled = value("subtitle_ai.enabled", "false") === "true";
   const transcribeEnabled = value("subtitle_ai.transcribe_enabled", "false") === "true";
   const descriptionEnabled = value("metadata_ai.enabled", "false") === "true";
+  // Only judged once the capabilities describe the model being saved; while
+  // they are stale or loading, the server's own validation decides.
+  const reasoningEffort = value("ai.reasoning_effort");
+  const reasoningUnsupported =
+    reasoningEffort !== "" &&
+    capabilityModel === currentModel &&
+    !capabilities.isFetching &&
+    capabilities.isSuccess &&
+    !!capabilities.data &&
+    !capabilities.data.reasoning_levels.includes(reasoningEffort);
   const textDirty = TEXT_AI_KEYS.some((key) => form.isDirty(key));
   const speechDirty = SPEECH_ONLY_KEYS.some((key) => form.isDirty(key));
   const advancedChangedCount = AI_ADVANCED_KEYS.filter((key) => form.isDirty(key)).length;
@@ -765,20 +835,13 @@ export default function AISettings() {
       toast.error(
         authMode === "chatgpt"
           ? "Connect a ChatGPT account and choose an available text model."
-          : "Text AI base URL and chat model are required.",
+          : textMissingAPIKey
+            ? "Add an API key for the text model, or point it at an endpoint that needs none."
+            : "Text AI base URL and chat model are required.",
       );
       return;
     }
-    const effort = value("ai.reasoning_effort");
-    if (
-      requiresTextConnection &&
-      effort &&
-      capabilityModel === currentModel &&
-      !capabilities.isFetching &&
-      capabilities.isSuccess &&
-      capabilities.data &&
-      !capabilities.data.reasoning_levels.includes(effort)
-    ) {
+    if (requiresTextConnection && reasoningUnsupported) {
       toast.error("Choose a reasoning level supported by the selected model.");
       return;
     }
@@ -812,7 +875,7 @@ export default function AISettings() {
   }
 
   return (
-    <div className="flex h-full max-w-5xl flex-col gap-7">
+    <div className="space-y-5">
       <SettingsPageHeader title="AI Services" />
 
       {authMode === "chatgpt" ? (
@@ -826,18 +889,17 @@ export default function AISettings() {
           <ProviderTileGrid>
             <TextModelTile
               authMode={authMode}
-              reasoningEffort={value("ai.reasoning_effort")}
+              reasoningEffort={reasoningEffort}
               reasoningLevels={capabilities.data?.reasoning_levels ?? []}
+              reasoningAttention={form.isDirty("ai.reasoning_effort") || reasoningUnsupported}
               chatGPTSupported={capabilities.data?.chatgpt_sign_in === true}
               baseURL={textBaseURL}
               chatModel={chatModel}
               apiKeyValue={value("ai.api_key")}
-              apiKeyConfigured={
-                form.sensitiveConfigured.includes("ai.api_key") ||
-                form.sensitiveConfigured.includes("subtitle_ai.api_key")
-              }
+              apiKeyConfigured={textAPIKeyConfigured}
               apiKeyCleared={form.isClearStaged("ai.api_key")}
               ready={textReady}
+              missingAPIKey={authMode !== "chatgpt" && textMissingAPIKey}
               canTest={textCanTest}
               dirty={textDirty}
               restartKeys={restartKeys}
@@ -974,7 +1036,9 @@ export default function AISettings() {
                 "2",
               )}
               onChange={(next) => setValue("ai.max_concurrent_jobs", next)}
-              description="One budget shared by every AI job on the server."
+              // Each server process builds its own dispatch semaphore at start
+              // (internal/api/router.go), so a cluster runs this many per process.
+              description="Shared by every AI job in one server process; each process gets its own budget."
               restartRequired={restartKeys.has("ai.max_concurrent_jobs")}
             />
             <SettingField

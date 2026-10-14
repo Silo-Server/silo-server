@@ -2561,6 +2561,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.ObserveThemeAudio = func(method string, handler http.Handler) http.Handler {
 		return observeNative(deps.StreamTelemetry, method, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", handler.ServeHTTP)
 	}
+	v2deps.ObserveDownloadDelivery = func(method, pattern string, handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, method, pattern, handler.ServeHTTP)
+	}
 
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {

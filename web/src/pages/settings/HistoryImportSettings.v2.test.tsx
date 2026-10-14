@@ -204,3 +204,14 @@ it("keeps the server's message for a refused import by the primary profile", () 
   expect(alerts.some((text) => text.includes("This profile can only import"))).toBe(false);
   expect(alerts.some((text) => text.includes(state.createError!.message))).toBe(true);
 });
+
+it("says so when the server defines no Emby or Plex servers to pick from", () => {
+  renderPage();
+
+  fireEvent.click(screen.getByRole("button", { name: "Saved Server" }));
+  expect(screen.getByText("No server-defined Emby servers are available yet.")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /Plex account or direct server/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Saved Server" }));
+  expect(screen.getByText("No server-defined Plex servers are available yet.")).toBeTruthy();
+});

@@ -162,7 +162,7 @@ function DeviceSettingRow({
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium">{definition.label}</span>
             {changedHere ? (
-              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[10px] font-semibold tracking-[0.04em] text-amber-300 uppercase">
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-xs font-semibold tracking-[0.04em] text-amber-300 uppercase">
                 Changed here
               </span>
             ) : null}
@@ -170,7 +170,7 @@ function DeviceSettingRow({
               <span className="text-muted-foreground text-xs">{inheritedFrom}</span>
             ) : null}
             {constrained ? (
-              <span className="border-info/30 bg-info/10 text-info inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-semibold tracking-[0.04em] uppercase">
+              <span className="border-info/30 bg-info/10 text-info inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-xs font-semibold tracking-[0.04em] uppercase">
                 <Lock className="h-2.5 w-2.5" />
                 Household limit
               </span>
@@ -180,12 +180,12 @@ function DeviceSettingRow({
             {definition.description}
           </p>
           {constrained ? (
-            <p className="text-[12.5px] leading-relaxed text-amber-300/90">
+            <p className="text-[13px] leading-relaxed text-amber-300/90">
               {constraintExplanation(effective)}
             </p>
           ) : null}
           {profileWide ? (
-            <p className="text-muted-foreground text-[12.5px] leading-relaxed">
+            <p className="text-muted-foreground text-[13px] leading-relaxed">
               {retainedHere
                 ? `Set for all devices on this profile, so this device's own choice (${retainedValueLabel(settingKey, storedOnDevice?.[settingKey])}) isn't used right now. `
                 : "Set for all devices on this profile. "}

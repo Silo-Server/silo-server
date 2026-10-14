@@ -2,32 +2,25 @@ import { describe, expect, it } from "vitest";
 
 import { ADMIN_SETTINGS_NAV } from "@/lib/adminSettingsSearch";
 import {
-  buildSettingsOverview,
-  type OverviewCard,
-  type OverviewTile,
-  type SettingsOverviewInput,
-} from "./useSettingsOverview";
+  ADMIN_SETTINGS_PAGE_IDS,
+  buildSettingsHealth,
+  settingsAttentionItems,
+  type SettingsHealthInput,
+  type SettingsHealthItem,
+} from "./useSettingsHealth";
 
-function tile(input: SettingsOverviewInput, id: string): OverviewTile {
-  const found = buildSettingsOverview(input).tiles.find((entry) => entry.id === id);
+function tile(input: SettingsHealthInput, id: string): SettingsHealthItem {
+  const found = buildSettingsHealth(input).find((entry) => entry.id === id);
   if (!found) throw new Error(`no tile ${id}`);
   return found;
 }
 
-function card(input: SettingsOverviewInput, id: string): OverviewCard {
-  const found = buildSettingsOverview(input).cards.find((entry) => entry.id === id);
-  if (!found) throw new Error(`no card ${id}`);
-  return found;
-}
-
-describe("buildSettingsOverview health tiles", () => {
+describe("buildSettingsHealth", () => {
   it("degrades to placeholders rather than throwing when nothing has loaded", () => {
-    const model = buildSettingsOverview({});
+    const items = buildSettingsHealth({});
 
-    expect(model.tiles).toHaveLength(5);
-    expect(model.cards).toHaveLength(15);
+    expect(items).toHaveLength(6);
     expect(tile({}, "storage").stateText).toBe("Not set up");
-    expect(card({}, "general")).toEqual({ id: "general" });
   });
 
   it("names the bucket when only public storage is configured", () => {
@@ -75,7 +68,7 @@ describe("buildSettingsOverview health tiles", () => {
     expect(storage.state).toBe("warn");
     expect(storage.stateText).toBe("Restart pending");
     expect(storage.detail).toBe("S3 · silo-art · applies after a restart");
-    expect(storage.action).toEqual({ label: "Fix", page: "infrastructure" });
+    expect(storage.action).toEqual({ label: "Fix", page: "storage" });
   });
 
   it("still calls storage unconfigured when no bucket is saved", () => {
@@ -95,7 +88,7 @@ describe("buildSettingsOverview health tiles", () => {
 
     expect(storage.state).toBe("off");
     expect(storage.stateText).toBe("Not set up");
-    expect(storage.action).toEqual({ label: "Set up", page: "infrastructure" });
+    expect(storage.action).toEqual({ label: "Set up", page: "storage" });
   });
 
   it("does not read a restart another subsystem asked for as pending storage", () => {
@@ -116,23 +109,15 @@ describe("buildSettingsOverview health tiles", () => {
     expect(storage.stateText).toBe("Not set up");
   });
 
-  it("reports the detected accelerator on the transcoding tile", () => {
+  it("names the configured accelerator on the transcoding item", () => {
     const transcoding = tile(
-      {
-        settings: { "playback.transcode_enabled": "true", "playback.hw_accel": "auto" },
-        hwAccel: {
-          resolved: "vaapi",
-          render_devices: ["/dev/dri/renderD128"],
-          intel_detected: true,
-          source: "local",
-        },
-      },
+      { settings: { "playback.transcode_enabled": "true", "playback.hw_accel": "vaapi" } },
       "transcoding",
     );
 
     expect(transcoding.state).toBe("ok");
     expect(transcoding.stateText).toBe("Ready");
-    expect(transcoding.detail).toBe("Auto · VA-API · /dev/dri/renderD128");
+    expect(transcoding.detail).toBe("VA-API");
   });
 
   it("scopes restart warnings to the tile whose keys are actually pending", () => {
@@ -222,7 +207,7 @@ describe("buildSettingsOverview health tiles", () => {
         search: {
           active_provider: "meilisearch",
           meilisearch: { configured: true, healthy: true },
-        } as SettingsOverviewInput["search"],
+        } as SettingsHealthInput["search"],
       },
       "search",
     );
@@ -246,14 +231,14 @@ describe("buildSettingsOverview health tiles", () => {
           degraded: true,
           degraded_reason: "Search index rebuild required; using Meilisearch keyword search",
           meilisearch: { configured: true, healthy: true },
-        } as SettingsOverviewInput["search"],
+        } as SettingsHealthInput["search"],
       },
       "search",
     );
 
     expect(search.state).toBe("warn");
     expect(search.detail).toBe("Search index rebuild required; using Meilisearch keyword search");
-    expect(search.action).toEqual({ label: "Fix", page: "library" });
+    expect(search.action).toEqual({ label: "Fix", page: "search" });
   });
 
   it("only calls email ready when it is on with a host and a sender address", () => {
@@ -281,10 +266,33 @@ describe("buildSettingsOverview health tiles", () => {
   });
 });
 
-describe("buildSettingsOverview groups", () => {
-  it("keeps the group manifest aligned with the overview ids", () => {
-    expect(buildSettingsOverview({}).cards.map((entry) => entry.id)).toEqual(
-      ADMIN_SETTINGS_NAV.map((item) => item.id),
+describe("settingsAttentionItems", () => {
+  it("keeps only the items that ask the admin to act", () => {
+    const items = settingsAttentionItems(
+      buildSettingsHealth({
+        settings: {
+          "email.enabled": "true",
+          "email.smtp_host": "smtp.example.com",
+          "email.from_address": "silo@example.com",
+          "playback.transcode_enabled": "true",
+          "server.public_url": "https://silo.example.com",
+        },
+        storageAvailable: true,
+      }),
+    );
+
+    expect(items).toEqual([]);
+    expect(settingsAttentionItems(buildSettingsHealth({})).map((item) => item.id)).toEqual([
+      "storage",
+      "transcoding",
+      "public-url",
+      "email",
+    ]);
+  });
+
+  it("only links to settings pages that exist", () => {
+    expect([...ADMIN_SETTINGS_PAGE_IDS].sort()).toEqual(
+      ADMIN_SETTINGS_NAV.map((item) => item.id).sort(),
     );
   });
 });

@@ -132,8 +132,38 @@ type ContentReader interface {
 }
 
 // idempotencyKey derives the dedup key for a job. Two requests for the same
-// target, language, and model collapse to one in-flight job.
-func idempotencyKey(kind TargetKind, contentID, targetLang, model string) string {
+// target, language, model, scope, and force flag collapse to one in-flight job.
+func idempotencyKey(kind TargetKind, contentID, targetLang, model string, includeChildren, force bool) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%s|%s|%s|%t|%t", kind, contentID, targetLang, model, includeChildren, force))
+	return hex.EncodeToString(sum[:])
+}
+
+// legacyIdempotencyKey is the key format before scope and force were part of
+// it. Active jobs a previous release created still carry it until they finish.
+func legacyIdempotencyKey(kind TargetKind, contentID, targetLang, model string) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%s|%s|%s", kind, contentID, targetLang, model))
 	return hex.EncodeToString(sum[:])
+}
+
+// covers reports whether an active job does at least the work req asks for.
+func (j *Job) covers(req JobRequest) bool {
+	return (j.IncludeChildren || !req.IncludeChildren) && (j.Force || !req.Force)
+}
+
+// coveringKeys lists the keys of every job that would do at least the work of
+// a request: the same target with the same or wider scope, forced or not when
+// the request is not forced. A forced request is only covered by a forced job,
+// because a plain job skips fields that already have a value.
+func coveringKeys(kind TargetKind, contentID, targetLang, model string, includeChildren, force bool) []string {
+	keys := []string{idempotencyKey(kind, contentID, targetLang, model, includeChildren, force)}
+	if !includeChildren {
+		keys = append(keys, idempotencyKey(kind, contentID, targetLang, model, true, force))
+	}
+	if !force {
+		keys = append(keys, idempotencyKey(kind, contentID, targetLang, model, includeChildren, true))
+		if !includeChildren {
+			keys = append(keys, idempotencyKey(kind, contentID, targetLang, model, true, true))
+		}
+	}
+	return keys
 }

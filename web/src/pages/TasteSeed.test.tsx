@@ -158,7 +158,7 @@ describe("TasteSeed destinations", () => {
           <Route path="/taste-seed" element={<TasteSeed />} />
           <Route path="/" element={<p>home page</p>} />
           <Route path="/recommendations" element={<p>recommendations page</p>} />
-          <Route path="/settings/playback" element={<p>settings page</p>} />
+          <Route path="/settings/personalize" element={<p>settings page</p>} />
         </Routes>
       </MemoryRouter>,
     );

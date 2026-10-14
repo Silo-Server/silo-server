@@ -1110,3 +1110,39 @@ func TestPersonRefreshWithProviders_RefreshesWhenAttemptWriteFails(t *testing.T)
 		t.Fatalf("bio = %q, want %q", person.Bio, "Refreshed anyway")
 	}
 }
+
+// A refresh must not carry AI text forward: the provider upsert would label
+// it provider. Blank AI fields go out empty, which keeps the stored AI text
+// and source; provider text replaces AI text in either merge mode.
+func TestBuildLocalizationRecordsDoNotCarryAITextForward(t *testing.T) {
+	for _, mode := range []MergeMode{MergeFillEmpty, MergeReplaceUnlocked} {
+		item := buildItemLocalizationRecord(&models.MediaItemLocalization{
+			Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
+			Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
+		}, "series-1", "fr", "series", &MetadataResult{Overview: "Apercu fournisseur"}, nil, mode, "fr", false)
+		if item.Overview != "Apercu fournisseur" || item.Tagline != "" {
+			t.Errorf("mode %v: item overview/tagline = %q/%q, want provider overview and empty tagline", mode, item.Overview, item.Tagline)
+		}
+
+		season := buildSeasonLocalizationRecord(&models.SeasonLocalization{
+			Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
+		}, "season-1", "fr", SeasonResult{}, mode)
+		if season.Overview != "" {
+			t.Errorf("mode %v: season overview = %q, want empty", mode, season.Overview)
+		}
+
+		episode := buildEpisodeLocalizationRecord(&models.EpisodeLocalization{
+			Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
+		}, "episode-1", "fr", EpisodeResult{Overview: "Apercu fournisseur"}, mode)
+		if episode.Overview != "Apercu fournisseur" {
+			t.Errorf("mode %v: episode overview = %q, want provider overview", mode, episode.Overview)
+		}
+
+		kept := buildEpisodeLocalizationRecord(&models.EpisodeLocalization{
+			Overview: "Saisi", OverviewSource: models.LocalizationSourceManual,
+		}, "episode-1", "fr", EpisodeResult{}, mode)
+		if kept.Overview != "Saisi" {
+			t.Errorf("mode %v: manual overview = %q, want it carried forward", mode, kept.Overview)
+		}
+	}
+}

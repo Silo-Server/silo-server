@@ -22,8 +22,8 @@ export default function TasteSeed() {
   const isReturning = searchParams.get("from") === "settings";
   // Finishing the picker opens the recommendations it just shaped; skipping
   // it, or returning from settings, goes back where the user came from.
-  const exitPath = isReturning ? "/settings/playback" : "/";
-  const donePath = isReturning ? "/settings/playback" : "/recommendations";
+  const exitPath = isReturning ? "/settings/personalize" : "/";
+  const donePath = isReturning ? "/settings/personalize" : "/recommendations";
 
   // Track only the user's explicit toggles. Final `selected` set is derived
   // from items + toggles each render, so already-favorited items are

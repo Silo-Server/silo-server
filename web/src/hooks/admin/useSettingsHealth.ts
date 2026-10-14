@@ -10,25 +10,27 @@ import {
   useCatalogSearchStatus,
   type CatalogSearchStatus,
 } from "@/hooks/queries/admin/settings";
-import { useHWAccelDetection, type HWAccelInfo } from "@/hooks/queries/admin/system";
 
 /**
- * The settings pages the overview links to. The ids here are stable route
- * segments and have to match the pages the settings layout mounts.
+ * The settings pages a health item can send the admin to. The ids here are
+ * stable route segments and have to match the pages the settings layout mounts.
  */
 export const ADMIN_SETTINGS_PAGE_IDS = [
   "general",
-  "infrastructure",
+  "storage",
+  "search",
+  "logging",
   "appearance",
   "security",
   "sign-in",
   "library",
+  "autoscan",
   "playback",
   "downloads",
   "requests",
   "providers",
-  "watch-sync",
   "ai",
+  "email",
   "notifications",
   "compatibility",
   "network-access",
@@ -36,34 +38,23 @@ export const ADMIN_SETTINGS_PAGE_IDS = [
 
 export type AdminSettingsPageID = (typeof ADMIN_SETTINGS_PAGE_IDS)[number];
 
-/** Colour band a health tile reads in: green, amber, dimmed, or neutral blue. */
-export type OverviewState = "ok" | "warn" | "off" | "info";
+/** How a health item reads: healthy, needs fixing, not set up, or informational. */
+export type SettingsHealthState = "ok" | "warn" | "off" | "info";
 
-export interface OverviewTileAction {
+export interface SettingsHealthAction {
   label: string;
   page: AdminSettingsPageID;
 }
 
-export interface OverviewTile {
+export interface SettingsHealthItem {
   id: string;
   label: string;
-  state: OverviewState;
+  state: SettingsHealthState;
   /** One or two words, e.g. "Healthy" or "Restart pending". */
   stateText: string;
   /** Single supporting line under the state. */
   detail: string;
-  action?: OverviewTileAction;
-}
-
-export interface OverviewCard {
-  id: AdminSettingsPageID;
-}
-
-export interface SettingsOverviewModel {
-  /** True until the settings map has arrived; the page shows skeletons. */
-  isLoading: boolean;
-  tiles: OverviewTile[];
-  cards: OverviewCard[];
+  action?: SettingsHealthAction;
 }
 
 /**
@@ -71,18 +62,12 @@ export interface SettingsOverviewModel {
  * off hooks inside the builder) so the derivation is testable without a query
  * client, and so a missing/failed query is just `undefined` here.
  */
-export interface SettingsOverviewInput {
+export interface SettingsHealthInput {
   settings?: Record<string, string>;
   sensitiveConfigured?: readonly string[];
   storageAvailable?: boolean;
   serverStatus?: AdminServerStatus;
   search?: CatalogSearchStatus;
-  hwAccel?: HWAccelInfo;
-}
-
-/** Deep link to one settings page. */
-export function settingsPageHref(page: string): string {
-  return `/admin/settings/${encodeURIComponent(page)}`;
 }
 
 const TRUE_VALUES = new Set(["true", "1", "yes", "on"]);
@@ -122,17 +107,9 @@ function hwAccelLabel(value: string): string {
   return HW_ACCEL_LABELS[value] ?? value.toUpperCase();
 }
 
-/**
- * How transcoding is set up, in one phrase: the configured mode, and for
- * "auto" the mode detection actually resolved to.
- */
-function transcodeModeLabel(configured: string, detection: HWAccelInfo | undefined): string {
-  const mode = configured || "auto";
-  if (mode !== "auto") return hwAccelLabel(mode);
-  const resolved = detection?.resolved;
-  if (!resolved) return "Auto";
-  if (resolved === "none") return "Auto · software";
-  return `Auto · ${hwAccelLabel(resolved)}`;
+/** The configured transcoding mode, in one word. */
+function transcodeModeLabel(configured: string): string {
+  return hwAccelLabel(configured || "auto");
 }
 
 const SEARCH_PROVIDER_LABELS: Record<string, string> = {
@@ -165,7 +142,7 @@ function legacySettingsRestartPending(status: AdminServerStatus): boolean {
  * Whether a saved setting under one of `prefixes` is waiting for a restart.
  *
  * The server accumulates one "setting:<key>" reason per restart-required save,
- * so a tile can warn about its own keys and stay quiet for everyone else's —
+ * so an item can warn about its own keys and stay quiet for everyone else's —
  * and a later unrelated save cannot overwrite the evidence. An older server
  * without the list falls back to the coarse last-reason heuristic, which warns
  * for any settings save rather than missing a real one.
@@ -185,23 +162,24 @@ function settingsRestartPending(
 }
 
 // ---------------------------------------------------------------------------
-// Health tiles
+// Health items
 // ---------------------------------------------------------------------------
 
 /**
- * The link a tile carries. Only a tile the admin has to do something about
- * gets one — a healthy tile is a fact, not a task.
+ * The link an item carries. Only an item the admin has to do something about
+ * gets one — a healthy item is a fact, not a task.
  */
 function tileAction(
-  state: OverviewState,
+  state: SettingsHealthState,
   page: AdminSettingsPageID,
-): OverviewTileAction | undefined {
+): SettingsHealthAction | undefined {
   if (state === "warn") return { label: "Fix", page };
   if (state === "off") return { label: "Set up", page };
   return undefined;
 }
 
-function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
+/** Every health item, healthy or not, derived from already-fetched data. */
+export function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthItem[] {
   const { settings } = input;
   const configured = new Set(input.sensitiveConfigured ?? []);
 
@@ -219,16 +197,19 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
   // admin who just did the work that it did not take.
   const storageRestartPending =
     !storageReady && publicBucket !== "" && settingsRestartPending(input.serverStatus, ["s3."]);
-  const storageState: OverviewState = storageReady ? "ok" : storageRestartPending ? "warn" : "off";
+  const storageState: SettingsHealthState = storageReady
+    ? "ok"
+    : storageRestartPending
+      ? "warn"
+      : "off";
 
   const maxConnections = readInt(settings, "database.max_connections");
   const redisConfigured = configured.has("redis.url") || readText(settings, "redis.url") !== "";
 
   const transcodeEnabled = readBool(settings, "playback.transcode_enabled");
-  const transcodeMode = transcodeModeLabel(readText(settings, "playback.hw_accel"), input.hwAccel);
-  const renderDevice = input.hwAccel?.render_devices?.[0] ?? "";
+  const transcodeMode = transcodeModeLabel(readText(settings, "playback.hw_accel"));
   const playbackRestartPending = settingsRestartPending(input.serverStatus, ["playback."]);
-  const transcodeState: OverviewState = playbackRestartPending
+  const transcodeState: SettingsHealthState = playbackRestartPending
     ? "warn"
     : transcodeEnabled
       ? "ok"
@@ -240,7 +221,7 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
   const meiliConfigured = input.search?.meilisearch.configured ?? false;
   const meiliHealthy = input.search?.meilisearch.healthy ?? false;
   const searchDegraded = input.search?.degraded ?? false;
-  const searchState: OverviewState =
+  const searchState: SettingsHealthState =
     activeSearch === "meilisearch"
       ? !searchStatusResolved
         ? "info"
@@ -257,7 +238,12 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
     emailHost,
     readText(settings, "email.from_address"),
   );
-  const emailState: OverviewState = mailReady ? "ok" : "off";
+  const emailState: SettingsHealthState = mailReady ? "ok" : "off";
+
+  // Invitation and reset links, sign-in provider redirects, and links in
+  // email and Discord messages are all built from it, and Silo cannot guess it.
+  const publicUrl = readText(settings, "server.public_url");
+  const publicUrlState: SettingsHealthState = publicUrl ? "ok" : "off";
 
   return [
     {
@@ -274,7 +260,7 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
         : storageRestartPending
           ? `${bucketDetail} · applies after a restart`
           : "Artwork and uploads have nowhere to go",
-      action: tileAction(storageState, "infrastructure"),
+      action: tileAction(storageState, "storage"),
     },
     {
       id: "database",
@@ -295,7 +281,7 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
       detail: playbackRestartPending
         ? "Saved changes apply after a restart"
         : transcodeEnabled
-          ? join([transcodeMode, renderDevice])
+          ? transcodeMode
           : "Video plays as-is; remux and audio conversion still run",
       action: tileAction(transcodeState, "playback"),
     },
@@ -316,7 +302,15 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
           : meiliConfigured
             ? "Meilisearch configured but not active"
             : "Meilisearch not connected",
-      action: tileAction(searchState, "library"),
+      action: tileAction(searchState, "search"),
+    },
+    {
+      id: "public-url",
+      label: "Public URL",
+      state: publicUrlState,
+      stateText: publicUrl ? "Set" : "Not set",
+      detail: publicUrl || "Invitation and reset links, and sign-in providers, need it",
+      action: tileAction(publicUrlState, "general"),
     },
     {
       id: "email",
@@ -324,34 +318,24 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
       state: emailState,
       stateText: mailReady ? "Ready" : "Not set up",
       detail: mailReady ? `SMTP · ${emailHost}` : "Invites and resets can't send",
-      action: tileAction(emailState, "notifications"),
+      action: tileAction(emailState, "email"),
     },
   ];
 }
 
-// ---------------------------------------------------------------------------
-// Settings groups
-// ---------------------------------------------------------------------------
-
-function buildCards(): OverviewCard[] {
-  return ADMIN_SETTINGS_PAGE_IDS.map((id) => ({ id }));
-}
-
-/** Derives the whole overview model from already-fetched data. */
-export function buildSettingsOverview(input: SettingsOverviewInput): SettingsOverviewModel {
-  const tiles = buildTiles(input);
-  const cards = buildCards();
-
-  return { isLoading: false, tiles, cards };
+/** The health items that ask the admin to do something, and the page that does it. */
+export function settingsAttentionItems(items: readonly SettingsHealthItem[]): SettingsHealthItem[] {
+  return items.filter((item) => item.action != null);
 }
 
 /**
- * Live settings state for the admin settings landing page. Every query it
- * reads is one an individual page already loads, so opening the overview warms
- * the caches those pages go on to use.
+ * What in the server's setup needs the admin, for the Dashboard's notice and
+ * the admin sidebar's dots. Every query it reads is one a settings page
+ * already loads. Empty until the settings map arrives, so an unloaded server
+ * never reads as unconfigured.
  */
-export function useSettingsOverview(): SettingsOverviewModel {
-  const { data: settings, isLoading: settingsLoading } = useAdminServerSettings();
+export function useSettingsAttention(): SettingsHealthItem[] {
+  const { data: settings } = useAdminServerSettings();
   const { data: sensitive } = useAdminSensitiveStatus();
   const { data: serverStatus } = useAdminServerStatus();
   const branding = useBranding();
@@ -361,35 +345,29 @@ export function useSettingsOverview(): SettingsOverviewModel {
   const searchProvider = (settings?.["catalog.search.provider"] ?? "").trim() || "postgres";
   const { data: search } = useCatalogSearchStatus(
     settings != null && searchProvider === "meilisearch",
-  );
-
-  // Hardware detection shells out to ffmpeg on the transcode host, so it is
-  // only asked for when transcoding could actually use it.
-  const hwAccelMode = (settings?.["playback.hw_accel"] ?? "").trim();
-  const transcodeEnabled = TRUE_VALUES.has(
-    (settings?.["playback.transcode_enabled"] ?? "").trim().toLowerCase(),
-  );
-  const { data: hwAccel } = useHWAccelDetection(
-    settings != null && transcodeEnabled && hwAccelMode !== "none",
+    { pollRebuild: false },
   );
 
   return useMemo(() => {
-    const model = buildSettingsOverview({
-      settings,
-      sensitiveConfigured: sensitive?.configured,
-      storageAvailable: branding.storageAvailable,
-      serverStatus,
-      search,
-      hwAccel,
-    });
-    return { ...model, isLoading: settingsLoading && settings == null };
+    if (settings == null) return [];
+    const items = settingsAttentionItems(
+      buildSettingsHealth({
+        settings,
+        sensitiveConfigured: sensitive?.configured,
+        storageAvailable: branding.storageAvailable,
+        serverStatus,
+        search,
+      }),
+    );
+    // Branding reports whether storage is available; before it arrives that
+    // reads as false, which is not the same as storage that is not set up.
+    return branding.loaded ? items : items.filter((item) => item.id !== "storage");
   }, [
+    branding.loaded,
     branding.storageAvailable,
-    hwAccel,
     search,
     sensitive?.configured,
     serverStatus,
     settings,
-    settingsLoading,
   ]);
 }

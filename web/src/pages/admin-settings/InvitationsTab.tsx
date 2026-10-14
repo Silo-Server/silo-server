@@ -753,12 +753,12 @@ function CreateInvitationForm({
           <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
             <p className="text-[13px] leading-relaxed">
-              To send invitations by email, set up email in{" "}
+              To send invitations by email, set up the mail server in{" "}
               <Link
-                to="/admin/settings/notifications"
+                to="/admin/settings/email"
                 className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
               >
-                Notifications settings
+                Email settings
                 <ArrowRight className="h-3 w-3" aria-hidden="true" />
               </Link>
             </p>

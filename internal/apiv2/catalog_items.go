@@ -445,6 +445,11 @@ func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []C
 			item.Sources[source.Source] = source.Score
 		}
 	}
+	return builtRatingsOf(item, sel)
+}
+
+// builtRatingsOf renders item's ratings, keeping only the sources sel shows.
+func builtRatingsOf(item ratingsources.Item, sel ratingsources.Selection) []CatalogRating {
 	built := ratingsources.Build(item, sel)
 	out := make([]CatalogRating, 0, len(built))
 	for _, r := range built {
@@ -533,6 +538,7 @@ type Episode struct {
 	ImdbID              string              `json:"imdb_id,omitempty"`
 	TmdbID              string              `json:"tmdb_id,omitempty"`
 	TvdbID              string              `json:"tvdb_id,omitempty"`
+	Ratings             []CatalogRating     `json:"ratings,omitempty" doc:"The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating."`
 	StillIsEpisodeStill *bool               `json:"still_is_episode_still,omitempty" doc:"Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable."`
 	StillURL            string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
 	StillThumbhash      string              `json:"still_thumbhash,omitempty"`
@@ -1444,11 +1450,14 @@ func datePtr(s string) *string {
 	return &s
 }
 
+// episodesOf renders episode rows. An episode's ratings come from its IMDb and
+// TMDB columns only, which every selection shows, so it needs no rating policy.
 func episodesOf(views []handlers.EpisodeView) []Episode {
 	out := make([]Episode, 0, len(views))
 	for _, e := range views {
 		ep := Episode{ContentID: e.ContentID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Title: e.Title, Overview: e.Overview,
 			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillIsEpisodeStill: e.StillIsEpisodeStill, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
+			Ratings:  builtRatingsOf(ratingsources.Item{IMDB: e.RatingIMDB, TMDB: e.RatingTMDB}, ratingsources.Selection{}),
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,

@@ -22,6 +22,12 @@ import type { StreamNode } from "@/api/types";
 import { useCreateNode, useUpdateNode, useDeleteNode } from "./nodes";
 import { adminKeys } from "../keys";
 import AdminNodes from "@/pages/AdminNodes";
+
+// Routing settings have their own suite, and their unsaved-changes guard needs
+// a data router these node-command tests do not mount.
+vi.mock("@/pages/admin-settings/NodeRoutingSettings", () => ({
+  NodeRoutingSettings: () => null,
+}));
 const node: StreamNode = {
   id: "17",
   config_etag: '"original"',
