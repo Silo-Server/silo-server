@@ -10,8 +10,10 @@ import {
   deleteAdminSection,
   reorderAdminSections,
   restoreAdminSections,
+  restoreLibraryPages,
   bulkCreateAdminSections,
 } from "./adminSections";
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { previewSection } from "@/lib/recipes";
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/api/v2/request", async () => ({
@@ -207,6 +209,42 @@ describe("admin sections adapter", () => {
     expect(request.mock.calls[0]).toEqual([
       "POST /api/v2/admin/sections/preview",
       { body: { section_type: "query", config: row.config, library_id: "7", library_ids: ["7"] } },
+    ]);
+  });
+  it("tells a library page that kept its rows from one whose restore got no answer", async () => {
+    const lost = new TypeError("Failed to fetch");
+    const changed = v2Problem(412, "precondition_failed", "Changed on another client");
+    const unreadable = new TypeError("Failed to fetch");
+    request.mockImplementation(
+      (
+        key: string,
+        options: { query?: { library_id?: string }; onResponse?: (r: Response) => void },
+      ) => {
+        const id = options.query?.library_id;
+        if (key === "GET /api/v2/admin/sections/order") {
+          if (id === "9") return Promise.reject(unreadable);
+          options.onResponse?.(new Response(null, { headers: { ETag: `"order-${id}"` } }));
+          return Promise.resolve({ ordered_ids: [] });
+        }
+        if (id === "7") return Promise.reject(lost);
+        if (id === "8") return Promise.reject(changed);
+        return Promise.resolve({ items: [] });
+      },
+    );
+    await expect(restoreLibraryPages([6, 7, 8, 9], true)).resolves.toEqual([
+      { libraryId: 7, error: lost, outcome: "unknown" },
+      { libraryId: 8, error: changed, outcome: "failed" },
+      { libraryId: 9, error: unreadable, outcome: "failed" },
+    ]);
+    const restores = request.mock.calls.filter(
+      ([key]) => key === "PUT /api/v2/admin/sections/defaults",
+    );
+    expect(
+      restores.map(([, options]) => [options.query.library_id, options.headers["If-Match"]]),
+    ).toEqual([
+      ["6", '"order-6"'],
+      ["7", '"order-7"'],
+      ["8", '"order-8"'],
     ]);
   });
 });

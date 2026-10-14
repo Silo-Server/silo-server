@@ -66,7 +66,10 @@ function reportShownBatch({ changedIds, failures }: ShownBatchResult, shown: boo
     toast.error(`Could not turn ${shown ? "on" : "off"} ${rowCount(attempted)}.`, { description });
 }
 
-/** Reports a restore, naming every other library page that kept its rows. */
+/**
+ * Reports a restore, naming every other library page that kept its rows or
+ * whose restore got no answer.
+ */
 function reportRestore(
   page: PageRef,
   pageLabel: string,
@@ -85,9 +88,11 @@ function reportRestore(
     return;
   }
   const description = failures
-    .map(({ libraryId, error }) => {
+    .map(({ libraryId, error, outcome }) => {
       const label =
         alsoPages.find((page) => page.id === libraryId)?.label ?? `Library ${libraryId}`;
+      if (outcome === "unknown")
+        return `${label}: the server didn't answer, so it may have been restored. Reload it to check.`;
       return `${label}: ${adminSectionMutationMessage(error, "Could not restore the default rows")}`;
     })
     .join(" ");

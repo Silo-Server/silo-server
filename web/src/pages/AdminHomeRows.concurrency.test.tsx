@@ -397,6 +397,31 @@ describe("admin section captured snapshots", () => {
       libraries.pop();
     }
   });
+  it("says a library page may have been restored when its restore got no answer", async () => {
+    const implementation = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation((operation: string, args: Args = {}) => {
+      if (operation === "PUT /api/v2/admin/sections/defaults" && args.query?.library_id === "7") {
+        writes.push({ operation, args });
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      return implementation(operation, args);
+    });
+    await setup();
+    await chooseMoreAction("Restore defaults…");
+    const dialog = await screen.findByRole("dialog", { name: "Restore Home to the default rows?" });
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: "Also restore every library page" }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore defaults" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.warning).toHaveBeenCalledWith(
+      "Restored the default rows on Home and 0 of 1 library page.",
+      {
+        description:
+          "Movies: the server didn't answer, so it may have been restored. Reload it to check.",
+      },
+    );
+  });
   it("names the collection rows as of the version Restore replaces", async () => {
     await setup();
     // Another admin adds a collection row after this page loaded.
