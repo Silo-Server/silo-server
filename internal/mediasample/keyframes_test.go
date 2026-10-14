@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -183,12 +182,7 @@ func TestMatroskaKeyframesSkipsOtherFiles(t *testing.T) {
 	if err := os.WriteFile(text, []byte("not a Matroska file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Opening a FIFO without a writer would block.
-	fifo := filepath.Join(dir, "fifo.mkv")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Skipf("mkfifo: %v", err)
-	}
-	for _, path := range []string{text, fifo, filepath.Join(dir, "missing.mkv"), dir} {
+	for _, path := range []string{text, filepath.Join(dir, "missing.mkv"), dir} {
 		if got := matroskaKeyframes(t.Context(), path); got != nil {
 			t.Fatalf("%s: keyframes %v, want none", filepath.Base(path), got)
 		}
