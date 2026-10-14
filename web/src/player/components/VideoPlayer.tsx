@@ -3520,6 +3520,20 @@ export function VideoPlayer({
     // Play state is the caller's: a play command plays at 1x afterwards unless
     // this starts a nudge.
     const applyRoomPosition = (video: HTMLVideoElement) => {
+      // A play command is the room's new reference; it supersedes an earlier
+      // seek target the element never settled on (one that landed more than
+      // the settle tolerance away). Left pending, that target would pin the
+      // shown time and hold the drift loop off for good. A seek still running
+      // or a stream still being replaced is genuinely in progress and stays.
+      const pendingSeekSeconds = pendingSeekTimeRef.current;
+      if (
+        command.action === "play" &&
+        pendingSeekSeconds !== null &&
+        !video.seeking &&
+        !planChangeInFlightRef.current
+      ) {
+        releasePendingSeek(pendingSeekSeconds);
+      }
       // Only a viewer that keeps playing through a play command keeps (or
       // starts) a nudge; everything else runs at 1x.
       if (command.action !== "play" || video.paused) resetRoomCatchupRate();
@@ -3710,6 +3724,7 @@ export function VideoPlayer({
     canSeekAnywhere,
     elementMediaPosition,
     issueRoomSeek,
+    releasePendingSeek,
     resetRoomCatchupRate,
     sessionId,
     watchTogetherRoomId,

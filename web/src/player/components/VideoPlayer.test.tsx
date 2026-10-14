@@ -884,6 +884,61 @@ describe("VideoPlayer room catch-up", () => {
     },
   );
 
+  it("lets the room's resume replace a seek target that landed ahead of it", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    const seekCommand = {
+      ...command,
+      action: "seek" as const,
+      playback_state: "waiting" as const,
+      position_seconds: 1500,
+      execute_at: new Date(Date.now() + 500).toISOString(),
+    };
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        room: { ...connection.room!, playback_state: "waiting" as const },
+        transportCommand: seekCommand,
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    // The stream lands 3 s past the target: ready, but the seek never settles.
+    video.currentTime = 1503;
+    fireEvent.seeked(video);
+    fireEvent.canPlay(video);
+    expect(connection.sendRoomMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ready", position_seconds: 1503 }),
+    );
+    expect(controls.current!.currentTime).toBe(1500);
+
+    // The room resumes from the barrier.
+    markPlaying(video);
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: {
+          ...command,
+          command_id: "room-command-2",
+          position_seconds: 1500,
+          execute_at: new Date().toISOString(),
+        },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // The old target is gone: the shown time follows the element again.
+    expect(controls.current!.currentTime).toBe(1503);
+    video.currentTime = 1503.5;
+    fireFrameTimeUpdate(video);
+    expect(controls.current!.currentTime).toBe(1503.5);
+    // The 3 s lead is left to a nudge, and the drift loop keeps converging.
+    expect(video.playbackRate).toBe(0.96);
+    expect(playerSeek).not.toHaveBeenCalled();
+    // A second later the room is at 1501; 0.5 s ahead slows by 2 %.
+    video.currentTime = 1501.5;
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(video.playbackRate).toBe(0.98);
+  });
+
   it("reports readiness only after the current seek reaches buffered media", async () => {
     const { connection, video, command, rerenderPlayer } = setup(100);
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
