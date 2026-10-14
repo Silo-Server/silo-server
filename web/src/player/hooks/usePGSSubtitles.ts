@@ -22,9 +22,19 @@ import {
 // server's positioned extract starts at the window, so a fresh window reaches
 // back far enough to include a subtitle already showing at the playhead.
 const SEEK_BACKOFF = 10;
+// Decoding is the costly step, and a crafted stream could redefine a huge
+// object on every display set. Real streams stay well under this, even a
+// full-plane fade at 24 frames a second (about 50 million pixels).
+const MAX_DECODED_PIXELS_PER_SECOND = 4 * 4096 * 4096;
 // Keeps a subtitle that would land past the player's edge (a Fill crop, or a
 // plane larger than the cropped video) this far inside it.
 const EDGE_MARGIN_RATIO = 0.02;
+
+interface DecodedBitmap {
+  rle: Uint8Array;
+  palette: Uint32Array;
+  bitmap: CanvasImageSource | null;
+}
 
 export type PGSLoadState = "idle" | "loading" | "ready" | "error";
 
@@ -230,18 +240,34 @@ export function usePGSSubtitles({
       composition: null,
       key: "",
     };
-    // Only the screen being drawn keeps decoded bitmaps; a feature-length
-    // track would otherwise hold every subtitle it has shown.
-    let bitmaps = new Map<PGSPlacedObject, CanvasImageSource | null>();
+    // Only the last screen drawn keeps decoded bitmaps; a feature-length
+    // track would otherwise hold every subtitle it has shown. They are keyed by
+    // the object's pixel data and palette, which display sets share by
+    // reference while the definitions are unchanged, so a screen that is
+    // placed again or repeated at an acquisition point is not decoded again.
+    let bitmaps: DecodedBitmap[] = [];
+    let decodeBudget = { since: 0, pixels: 0 };
 
     function sourceTime(): number {
       const { origin, delayMs } = timingRef.current;
       return subtitlePlayheadSeconds(videoEl, origin, fetchAnchorRef.current) - delayMs / 1000;
     }
 
-    function bitmapFor(object: PGSPlacedObject): CanvasImageSource | null {
-      const cached = bitmaps.get(object);
-      if (cached !== undefined) return cached;
+    function bitmapFor(
+      object: PGSPlacedObject,
+      previous: DecodedBitmap[],
+    ): CanvasImageSource | null {
+      const same = (entry: DecodedBitmap) =>
+        entry.rle === object.rle && entry.palette === object.palette;
+      const reused = bitmaps.find(same) ?? previous.find(same);
+      if (reused) {
+        if (!bitmaps.includes(reused)) bitmaps.push(reused);
+        return reused.bitmap;
+      }
+      const now = performance.now();
+      if (now - decodeBudget.since > 1000) decodeBudget = { since: now, pixels: 0 };
+      decodeBudget.pixels += object.width * object.height;
+      if (decodeBudget.pixels > MAX_DECODED_PIXELS_PER_SECOND) return null;
       const surface = document.createElement("canvas");
       surface.width = object.width;
       surface.height = object.height;
@@ -256,7 +282,7 @@ export function usePGSSubtitles({
         );
         bitmap = surface;
       }
-      bitmaps.set(object, bitmap);
+      bitmaps.push({ rle: object.rle, palette: object.palette, bitmap });
       return bitmap;
     }
 
@@ -274,13 +300,11 @@ export function usePGSSubtitles({
       if (!context) return;
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, pixelWidth, pixelHeight);
-      const previous = bitmaps;
-      bitmaps = new Map();
+      // A clear keeps the last screen's bitmaps, so a screen that comes back
+      // after it is not decoded again.
       if (!composition || composition.objects.length === 0) return;
-      for (const object of composition.objects) {
-        const kept = previous.get(object);
-        if (kept !== undefined) bitmaps.set(object, kept);
-      }
+      const previous = bitmaps;
+      bitmaps = [];
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
@@ -296,7 +320,7 @@ export function usePGSSubtitles({
       const drawable = composition.objects.flatMap((object) => {
         const source = objectSourceRect(object);
         if (source.width === 0 || source.height === 0) return [];
-        const bitmap = bitmapFor(object);
+        const bitmap = bitmapFor(object, previous);
         return bitmap ? [{ object, source, bitmap }] : [];
       });
       const targets = placePGSObjects({
