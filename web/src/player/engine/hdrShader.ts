@@ -12,7 +12,8 @@ export const PRESENTER_WGSL = /* wgsl */ `
 struct Params {
   // Picture quad in normalized device coordinates: x0, y0, x1, y1.
   rect: vec4f,
-  // x: transfer (1 = PQ, 2 = HLG); y: bit depth of uploaded planes.
+  // x: transfer (1 = PQ, 2 = HLG); y: bit depth of uploaded planes;
+  // z: clockwise quarter turns that put the picture upright; w: 1 to mirror it after.
   mode: vec4u,
   // x: source peak nits, y: target (SDR white) nits.
   tone: vec4f,
@@ -42,8 +43,23 @@ fn vertexMain(@builtin(vertex_index) index: u32) -> VertexOut {
     0.0,
     1.0,
   );
-  out.uv = corner;
+  out.uv = decodedUV(corner);
   return out;
+}
+
+// Where a point of the upright picture (0..1, y down) lies in the decoded
+// one: undo the mirror, then the clockwise quarter turns.
+fn decodedUV(upright: vec2f) -> vec2f {
+  var p = upright;
+  if (params.mode.w == 1u) {
+    p.x = 1.0 - p.x;
+  }
+  switch params.mode.z {
+    case 1u: { return vec2f(p.y, 1.0 - p.x); }
+    case 2u: { return vec2f(1.0 - p.x, 1.0 - p.y); }
+    case 3u: { return vec2f(1.0 - p.y, p.x); }
+    default: { return p; }
+  }
 }
 
 const PQ_M1: f32 = 0.1593017578125;

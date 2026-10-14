@@ -15,6 +15,7 @@ import {
   WebGPURenderer,
   type EnginePicture,
   type FrameRenderer,
+  type PictureSize,
 } from "./renderers";
 import type { EngineSourceSpec } from "./source";
 import { EngineTextTrack } from "./textTracks";
@@ -689,13 +690,17 @@ export class EnginePlayer {
     this.renderer = new Canvas2DRenderer(this.canvas);
   }
 
-  private pictureSize(picture: QueuedPicture): { width: number; height: number } {
-    if (this.info && this.info.video.displayWidth > 0) {
-      return { width: this.info.video.displayWidth, height: this.info.video.displayHeight };
+  private pictureSize(picture: QueuedPicture): PictureSize {
+    const video = this.info?.video;
+    if (video && video.displayWidth > 0) {
+      const { displayWidth: width, displayHeight: height, rotation, flip } = video;
+      return { width, height, rotation, flip };
     }
-    return picture.kind === "frame"
-      ? { width: picture.frame.displayWidth, height: picture.frame.displayHeight }
-      : { width: picture.planes.width, height: picture.planes.height };
+    const [width, height] =
+      picture.kind === "frame"
+        ? [picture.frame.displayWidth, picture.frame.displayHeight]
+        : [picture.planes.width, picture.planes.height];
+    return { width, height, rotation: 0, flip: false };
   }
 
   private readonly tick = (): void => {

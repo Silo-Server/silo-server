@@ -100,7 +100,16 @@ describe("EnginePlayer", () => {
     );
     vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
-      () => ({ fillRect: vi.fn(), drawImage: vi.fn(), clearRect: vi.fn() }) as never,
+      () =>
+        ({
+          fillRect: vi.fn(),
+          drawImage: vi.fn(),
+          clearRect: vi.fn(),
+          translate: vi.fn(),
+          scale: vi.fn(),
+          rotate: vi.fn(),
+          resetTransform: vi.fn(),
+        }) as never,
     );
     element = document.createElement("video");
     events = [];
@@ -146,7 +155,14 @@ describe("EnginePlayer", () => {
       type: "ready",
       info: {
         durationSeconds: 10,
-        video: { codedWidth: 1920, codedHeight: 1080, displayWidth: 1920, displayHeight: 1080 },
+        video: {
+          codedWidth: 1920,
+          codedHeight: 1080,
+          displayWidth: 1920,
+          displayHeight: 1080,
+          rotation: 0,
+          flip: false,
+        },
         audio: withAudio ? { sampleRate: 48_000, channels: 6 } : null,
       },
     });

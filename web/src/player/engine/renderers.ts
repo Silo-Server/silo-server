@@ -11,9 +11,13 @@ export type EnginePicture =
   | { kind: "planes"; planes: EnginePlaneFrame; timestamp: number; duration: number };
 
 export interface PictureSize {
-  /** Display size of the picture, after the container's aspect ratio. */
+  /** Display size of the picture, after the container's aspect ratio and rotation. */
   width: number;
   height: number;
+  /** Clockwise turn, in degrees, that puts the decoded picture upright. */
+  rotation: 0 | 90 | 180 | 270;
+  /** Mirror the turned picture horizontally. */
+  flip: boolean;
 }
 
 export interface FrameRenderer {
@@ -55,7 +59,15 @@ export class Canvas2DRenderer implements FrameRenderer {
     this.context.fillRect(0, 0, width, height);
     this.context.imageSmoothingEnabled = true;
     this.context.imageSmoothingQuality = "high";
-    this.context.drawImage(picture.frame, rect.x, rect.y, rect.width, rect.height);
+    // Draw the decoded picture around the rect's center, turned and then mirrored.
+    const sideways = size.rotation % 180 !== 0;
+    const drawWidth = sideways ? rect.height : rect.width;
+    const drawHeight = sideways ? rect.width : rect.height;
+    this.context.translate(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    if (size.flip) this.context.scale(-1, 1);
+    this.context.rotate((size.rotation * Math.PI) / 180);
+    this.context.drawImage(picture.frame, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    this.context.resetTransform();
   }
 
   destroy(): void {
@@ -191,6 +203,8 @@ export class WebGPURenderer implements FrameRenderer {
     floats.set([x0, y0, x1, y1], 0);
     uints[4] = this.transfer;
     uints[5] = picture.kind === "planes" ? picture.planes.bitDepth : 0;
+    uints[6] = size.rotation / 90;
+    uints[7] = size.flip ? 1 : 0;
     floats.set([DEFAULT_SOURCE_PEAK_NITS, SDR_WHITE_NITS, 0, 0], 8);
 
     let pictureBindGroup: GPUBindGroup;

@@ -236,8 +236,11 @@ async function open(spec: EngineSourceSpec): Promise<void> {
       video: {
         codedWidth: await videoTrack.getCodedWidth(),
         codedHeight: await videoTrack.getCodedHeight(),
+        // Already turned by the rotation; the presenter turns the pictures to match.
         displayWidth: await videoTrack.getDisplayWidth(),
         displayHeight: await videoTrack.getDisplayHeight(),
+        rotation: await videoTrack.getRotation(),
+        flip: await videoTrack.getFlip(),
       },
       audio: audioFacts,
     },

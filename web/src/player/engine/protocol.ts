@@ -22,6 +22,10 @@ export interface EngineMediaInfo {
     codedHeight: number;
     displayWidth: number;
     displayHeight: number;
+    /** Clockwise turn, in degrees, that puts decoded pictures upright. */
+    rotation: 0 | 90 | 180 | 270;
+    /** Mirror the turned picture horizontally. */
+    flip: boolean;
   };
   audio: { sampleRate: number; channels: number } | null;
 }
