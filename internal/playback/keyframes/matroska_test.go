@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -100,6 +101,7 @@ type layout struct {
 	unknownSize bool    // a live-style segment with no size
 	dropCue     *uint64 // a video keyframe left out of the Cues
 	noPositions bool
+	padding     int // extra duplicate cue points, to grow the Cues
 }
 
 // file builds a Matroska file whose Cues index the fixture's keyframes, plus
@@ -140,13 +142,17 @@ func cuesFor(l layout, posA, posB uint64) []byte {
 		}
 		return el(idCuePoint, uintEl(idCueTime, ticks), el(idCueTrackPos, trackPos...))
 	}
-	return el(idCues,
+	points := [][]byte{
 		point(4218, videoTrack, posB),
 		point(0, videoTrack, posA),
 		point(10, audioTrack, posA), // audio: not a video keyframe
 		point(2216, videoTrack, posA),
 		point(2216, videoTrack, posA), // duplicate
-	)
+	}
+	for range l.padding {
+		points = append(points, point(2216, videoTrack, posA))
+	}
+	return el(idCues, points...)
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -304,6 +310,9 @@ func TestReadMatroskaRejectsOtherFiles(t *testing.T) {
 	}
 }
 
+// cuesLimit is the largest Cues element the reader loads (maxCuesSize).
+const cuesLimit = 16 << 20
+
 // A Cues element larger than the reader loads is a damaged file, not a
 // multi-gigabyte allocation.
 func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
@@ -316,6 +325,48 @@ func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
 	)
 	if _, err := read(f); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want a size error", err)
+	}
+
+	// Well-formed Cues just under the limit read; one more point is refused.
+	const header = 12 // a 4-byte ID and an 8-byte size (el)
+	pointLen := len(cuesFor(layout{padding: 1}, 0, 0)) - len(cuesFor(layout{}, 0, 0))
+	under := layout{cuesFirst: true}
+	under.padding = (cuesLimit - (len(cuesFor(under, 0, 0)) - header)) / pointLen
+	got, err := read(file(under))
+	wantIndex(t, got, err)
+	over := under
+	over.padding++
+	if size := len(cuesFor(over, 0, 0)) - header; size <= cuesLimit {
+		t.Fatalf("fixture Cues are %d bytes, want over %d", size, cuesLimit)
+	}
+	if _, err := read(file(over)); err == nil || errors.Is(err, ErrNoIndex) {
+		t.Fatalf("err = %v, want a size error", err)
+	}
+}
+
+// Cues packed with small cue points, each with its own time and cluster
+// position, cost a small multiple of their size: a crafted file can't make
+// one read cost hundreds of megabytes.
+func TestReadMatroskaCuesCostBoundedMemory(t *testing.T) {
+	var points bytes.Buffer
+	for i := range (cuesLimit - 16) / 17 {
+		points.Write([]byte{
+			byte(idCuePoint), 0x8F,
+			byte(idCueTime), 0x83, byte(i >> 16), byte(i >> 8), byte(i),
+			byte(idCueTrackPos), 0x88,
+			byte(idCueTrack), 0x81, videoTrack,
+			byte(idCueClusterPosition), 0x83, byte(i >> 16), byte(i >> 8), byte(i),
+		})
+	}
+	cues := el(idCues, points.Bytes())
+	f := slices.Concat(ebmlHeader, el(idSegment, slices.Concat(info, tracks, cues)))
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, _ = read(f) // the cue positions don't hold clusters; only the cost matters
+	runtime.ReadMemStats(&after)
+	if got, limit := after.TotalAlloc-before.TotalAlloc, uint64(4*len(cues)); got > limit {
+		t.Fatalf("reading %d bytes of Cues allocated %d bytes, want at most %d", len(cues), got, limit)
 	}
 }
 
