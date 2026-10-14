@@ -190,6 +190,9 @@
 # A retried push attempt key migration keeps the key an earlier run built.
 ./internal/database TestPushAttemptKeyMigrationRetriesKeepTheBuiltKeyPostgres
 
+# Stored sidecar subtitles take the scanner's reading of their names.
+./internal/database TestPostgresExternalSubtitleNameBackfill
+
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
 
