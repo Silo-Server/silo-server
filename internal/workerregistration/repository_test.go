@@ -169,6 +169,43 @@ func TestEnrollmentRedeemsAtomicallyAndCannotReplay(t *testing.T) {
 	}
 }
 
+func TestEnrollmentRetiresOtherOutstandingTicketsForNode(t *testing.T) {
+	r := registrationDB(t)
+	exposed, err := r.Issue(t.Context(), 17, "https://core.example.test", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reissued, err := r.Issue(t.Context(), 17, "https://core.example.test", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherNode, err := r.Issue(t.Context(), 18, "https://core.example.test", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrolled, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intruder, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Redeem(t.Context(), reissued, enrolled); err != nil {
+		t.Fatal(err)
+	}
+	if r.Redeem(t.Context(), exposed, intruder) == nil {
+		t.Fatal("an older outstanding ticket replaced the enrolled worker key")
+	}
+	node, found, err := r.ByID(t.Context(), 17)
+	if err != nil || !found || !bytes.Equal(node.PublicKey, enrolled) {
+		t.Fatal("enrolled public key was not retained")
+	}
+	if err := r.Redeem(t.Context(), otherNode, intruder); err != nil {
+		t.Fatalf("another node's ticket was retired: %v", err)
+	}
+}
+
 func TestEnrollmentBindsEntireIssuedContextAndChangedNode(t *testing.T) {
 	r := registrationDB(t)
 	public, _, err := ed25519.GenerateKey(rand.Reader)

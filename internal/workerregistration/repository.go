@@ -197,6 +197,11 @@ func (r *Repository) Redeem(ctx context.Context, enrollment Enrollment, key ed25
 	if err != nil || nodeID != enrollment.NodeID {
 		return errors.New("worker enrollment expired or already consumed")
 	}
+	// Another outstanding ticket for this node would otherwise be able to
+	// replace the key installed below.
+	if _, err := tx.Exec(ctx, "UPDATE worker_http_enrollments SET consumed_at=now() WHERE node_id=$1 AND consumed_at IS NULL", nodeID); err != nil {
+		return err
+	}
 	var currentURL string
 	if err := tx.QueryRow(ctx, "SELECT url FROM stream_nodes WHERE id=$1 AND enabled AND type='transcode' FOR UPDATE", nodeID).Scan(&currentURL); err != nil {
 		return errors.New("worker enrollment node changed")
