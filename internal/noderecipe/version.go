@@ -22,12 +22,6 @@ func publicationVersion() (string, error) {
 	return hex.EncodeToString(value[:]), nil
 }
 
-var putPublicationScript = redis.NewScript(`
-redis.call('SET',KEYS[1],ARGV[1],'PX',ARGV[2])
-redis.call('SET',KEYS[2],ARGV[3],'PX',ARGV[2])
-redis.call('DEL',KEYS[3],KEYS[4])
-return 1`)
-
 // Older records have no publication token. Adopt the exact record under one
 // Redis operation; subsequent current Put calls always replace that token,
 // including byte-identical cards. The sidecar keeps the legacy JSON unchanged.
@@ -36,10 +30,12 @@ local recipe=redis.call('GET',KEYS[1])
 if not recipe then return {'',''} end
 local version=redis.call('GET',KEYS[2])
 if not version then
+ if redis.call('EXISTS',KEYS[3])==1 then return redis.error_reply('pending recipe publication has no version') end
  local ttl=redis.call('PTTL',KEYS[1])
  if ttl==-2 or ttl==0 then return {'',''} end
  if ttl<0 then ttl=tonumber(ARGV[2]) end
  redis.call('SET',KEYS[2],ARGV[1],'PX',ttl)
+ redis.call('SET',ARGV[3]..ARGV[1],'committed','PX',ttl)
  version=ARGV[1]
 end
 return {recipe,version}`)
@@ -62,7 +58,7 @@ func (s *Store) RecipeVersion(ctx context.Context, work string) (*playback.Recip
 	if err != nil {
 		return nil, "", err
 	}
-	values, err := capturePublicationScript.Run(ctx, s.rdb, []string{s.key(work), publicationVersionKey(work)}, version, max(s.ttl.Milliseconds(), 1)).StringSlice()
+	values, err := capturePublicationScript.Run(ctx, s.rdb, []string{s.key(work), publicationVersionKey(work), publicationOwnerKeyPrefix + work}, version, max(s.ttl.Milliseconds(), 1), publicationUndoKeyPrefix).StringSlice()
 	if err != nil {
 		return nil, "", err
 	}

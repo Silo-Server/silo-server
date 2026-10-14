@@ -79,6 +79,9 @@ type PlaybackSession struct {
 	// recipe in its own durable compat store (this struct, persisted as JSONB)
 	// rather than in the token. Nil until a transcode actually starts.
 	Recipe *playback.RecipeCard
+	// RecipePublicationID distinguishes separate writes of identical recipes.
+	// Compensation may only restore the exact publication it attempted.
+	RecipePublicationID string `json:",omitempty"`
 	// RoutingAssignment is committed only after the master manifest prepares a
 	// complete route. Child HLS resources use it as their durable proof that the
 	// recipe may egress through this API process; it survives API restarts with
@@ -170,6 +173,13 @@ type PlaybackSubtitleDelivery struct {
 // implementation lets the mapping survive a server restart so a Jellyfin client
 // can resume — a Redis switch then touches only the constructor, nothing else.
 type CompatPlaybackStore interface {
+	// WithRemoteStart owns canonical work across remote HTTP start and publication/cleanup.
+	WithRemoteStart(context.Context, string, func(context.Context) error) error
+
+	// PublishRecipe serializes one remote recipe publication with its authoritative
+	// compat row and reconciles uncertain commits before compensating Redis.
+	PublishRecipe(context.Context, string, string, playback.RecipeCard, recipeNodePutter) error
+
 	// Put stores or replaces a compat playback session.
 	Put(session PlaybackSession)
 	// PutNegotiated stores a PlaybackInfo negotiation and atomically replaces
@@ -234,6 +244,11 @@ type CompatPlaybackStore interface {
 // PlaybackSessionStore keeps compat playback sessions in memory. It is the
 // default CompatPlaybackStore implementation.
 type PlaybackSessionStore struct {
+	recipeWorkMu        sync.Mutex
+	recipeWorks         map[string]*recipeWorkGate
+	recipeAdmissionOnce sync.Once
+	recipeAdmission     chan struct{}
+
 	mu       sync.RWMutex
 	sessions map[string]PlaybackSession
 	ttl      time.Duration

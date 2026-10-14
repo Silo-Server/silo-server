@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -13,17 +14,17 @@ type uncapturableRecipeNodeStore struct {
 	*stubRecipeNodeStore
 }
 
-var errRecipeCapture = errors.New("recipe version unavailable")
+var errRecipeCapture = errors.New("recipe publication response lost")
 
-func (uncapturableRecipeNodeStore) RecipeVersion(context.Context, string) (*playback.RecipeCard, string, error) {
-	return nil, "", errRecipeCapture
+func (s uncapturableRecipeNodeStore) PublishWithUndo(ctx context.Context, work string, card playback.RecipeCard, accepted ...*noderecipe.AcceptedPublication) (noderecipe.Publication, error) {
+	receipt, err := s.stubRecipeNodeStore.PublishWithUndo(ctx, work, card, accepted...)
+	if err != nil {
+		return receipt, err
+	}
+	return receipt, errRecipeCapture
 }
 
-func (uncapturableRecipeNodeStore) DeleteVersion(context.Context, string, string) error {
-	return nil
-}
-
-func TestPersistRemoteTranscodeCompensatesFailedRecipeCapture(t *testing.T) {
+func TestPersistRemoteTranscodeCompensatesUncertainPublication(t *testing.T) {
 	const oldNode, newNode = "http://old-node.example.test", "http://new-node.example.test"
 	for _, replacing := range []bool{true, false} {
 		t.Run(map[bool]string{true: "restores replaced recipe", false: "removes candidate"}[replacing], func(t *testing.T) {
@@ -49,7 +50,7 @@ func TestPersistRemoteTranscodeCompensatesFailedRecipeCapture(t *testing.T) {
 
 			err := handler.persistTranscodeRecipe(t.Context(), "play-1", "upstream-1", playback.TranscodeOpts{SessionID: "upstream-1", InputPath: "/media/movie.mkv"})
 			if !errors.Is(err, errRecipeCapture) {
-				t.Fatalf("persist error = %v, want capture failure", err)
+				t.Fatalf("persist error = %v, want publication failure", err)
 			}
 			card, found := recipes.Get("upstream-1")
 			if replacing && (!found || card.TranscodeNodeURL != oldNode) {

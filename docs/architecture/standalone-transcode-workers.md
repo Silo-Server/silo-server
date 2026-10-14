@@ -155,9 +155,23 @@ core-authorized recipe and fresh source grants; it cannot reconstruct from
 token-carried filesystem paths alone.
 Enrolled standalone HLS workers require a stored core recipe for both client
 authentication modes. The core classifies the selected node before dispatch and
-persists the accepted recipe before publishing a client or proxy route. A failed
-recipe write rolls back the accepted work. Existing legacy token-based workers
-retain their token-carried reconstruction behavior.
+persists the accepted recipe before publishing a client or proxy route. Existing
+legacy token-based workers retain their token-carried reconstruction behavior.
+
+Jellyfin-compatible playback serializes remote starts, recipe publication and
+rejection cleanup by canonical work across API replicas. A known rejection
+rolls back the accepted work; an uncertain publication retains the transport
+until authoritative state can settle the result. Each publication owns
+an exact candidate version and recipe bytes. Its receipt can undo only that
+candidate, restoring the predecessor's original bytes and expiry. A fixed
+admission deadline prevents delayed Redis retries from recreating rejected
+candidates after cleanup. The durable playback row records the accepted
+publication; a lost database commit reply requires a fresh locked read before
+compensation. Unknown outcomes preserve recoverable work, and an acknowledgement
+failure after proven acceptance does not stop the accepted transport. Detached
+database sessions have bounded, cancellable admission so this serialization
+does not exhaust the ordinary query pool.
+
 Core recipe publications also have independent opaque versions. Teardown captures
 the version before stopping work and removes only that publication. Publishing
 the same recipe again still creates a new version, so delayed cleanup cannot

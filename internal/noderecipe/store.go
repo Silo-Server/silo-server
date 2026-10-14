@@ -96,22 +96,6 @@ type audioRecipeEnvelope struct {
 	Recipe  playback.RecipeCard `json:"audio_recipe"`
 }
 
-// putNodeRecipeScript reads the node generation and writes the legacy-readable
-// recipe plus generation and digest sidecars in one Redis operation. It
-// therefore orders a concurrent Put and RevokeNode: a recipe written before
-// the increment is stale, while one written after it carries the new generation.
-var putNodeRecipeScript = redis.NewScript(`
-local generation = redis.call("GET", KEYS[3])
-if not generation then
-  generation = "0"
-end
-redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
-redis.call("SET", KEYS[2], generation, "PX", ARGV[2])
-redis.call("SET", KEYS[4], ARGV[3], "PX", ARGV[2])
-redis.call("SET", KEYS[5], ARGV[4], "PX", ARGV[2])
-return generation
-`)
-
 // validateLegacyNodeRecipeScript accepts a record with missing or mismatched
 // sidecars only when its Redis expiry proves that an older writer issued it
 // after the latest reload. The exact recipe comparison makes the decision
@@ -251,25 +235,9 @@ func (s *Store) PutTTL(ctx context.Context, sessionID string, card playback.Reci
 	if err != nil {
 		return err
 	}
-	var version string
 	if s.prefix == KeyPrefix {
-		version, err = publicationVersion()
-		if err != nil {
-			return err
-		}
-	}
-	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
-		ttlMillis := max(ttl.Milliseconds(), 1)
-		return putNodeRecipeScript.Run(ctx, s.rdb, []string{
-			s.key(sessionID),
-			nodeAuthorityRecordGenerationKey(sessionID),
-			authorityKey,
-			nodeAuthorityRecordDigestKey(sessionID),
-			publicationVersionKey(sessionID),
-		}, data, ttlMillis, nodeAuthorityRecordDigest(data), version).Err()
-	}
-	if s.prefix == KeyPrefix {
-		return putPublicationScript.Run(ctx, s.rdb, []string{s.key(sessionID), publicationVersionKey(sessionID), nodeAuthorityRecordGenerationKey(sessionID), nodeAuthorityRecordDigestKey(sessionID)}, data, max(ttl.Milliseconds(), 1), version).Err()
+		_, err = s.publish(ctx, sessionID, card, data, ttl, false)
+		return err
 	}
 	return s.rdb.Set(ctx, s.key(sessionID), data, ttl).Err()
 }

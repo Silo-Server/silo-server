@@ -886,6 +886,13 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 				remoteNodeURL = tcNode.URL
 			}
 		}
+		if recipePublicationUncertain(startErr) {
+			// The existing executor may already be accepted. Preserve it while
+			// a later request reconciles the authoritative publication.
+			w.Header().Set("Retry-After", "1")
+			writeCompatTranscodeError(w, startErr)
+			return
+		}
 		if startErr != nil {
 			lastPreparationErr = startErr
 			h.releaseCompatSessionReservation(playSession.UpstreamSessionID)
@@ -981,6 +988,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 
 func writeCompatTranscodeError(w http.ResponseWriter, err error) {
 	switch {
+	case recipePublicationUncertain(err):
+		writeError(w, http.StatusServiceUnavailable, "TranscodeUnavailable", "Transcode publication is temporarily unavailable")
 	case errors.Is(err, errToneMapCapabilityUnavailable),
 		errors.Is(err, errAudioDownmixCapabilityUnavailable),
 		errors.Is(err, errCompatRecipeSourceMismatch),
@@ -3333,6 +3342,9 @@ func (h *PlaybackHandler) applyCompatAudioSelection(
 		return restored, nil, false, errors.Join(err, rollbackErr)
 	}
 	restarted, err := h.restartCompatTranscodeForAudioSelection(ctx, updatedPlaySession, *updatedSource, positionSeconds)
+	if recipePublicationUncertain(err) {
+		return updatedPlaySession, updatedSource, false, err
+	}
 	if err != nil {
 		restored, rollbackErr := h.rollbackCompatAudioSelection(updatedPlaySession.ID, mediaSourceID, *originalSource, *candidateSource)
 		return restored, nil, false, errors.Join(err, rollbackErr)

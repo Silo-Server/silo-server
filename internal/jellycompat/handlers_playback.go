@@ -37,6 +37,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
@@ -401,12 +402,14 @@ func (h *PlaybackHandler) serverBitrateCap(ctx context.Context, session *Session
 	return streamlocation.BitrateCap(ctx, scope.MaxLocalStreamBitrateKbps, scope.MaxRemoteStreamBitrateKbps), nil
 }
 
-// recipeNodePutter persists and removes a remote transcode's reconstruction
+// recipeNodePutter atomically publishes and reconciles a remote transcode's reconstruction
 // recipe in a control-plane store keyed by upstream session id. *noderecipe.Store
 // implements it. Delete is nil-safe and treats a missing key as a no-op success;
 // it is called on deliberate teardown so a stopped session cannot be resurrected
 // from a leaked recipe.
 type recipeNodePutter interface {
+	PublishWithUndo(ctx context.Context, sessionID string, card playback.RecipeCard, accepted ...*noderecipe.AcceptedPublication) (noderecipe.Publication, error)
+	ReconcileAccepted(context.Context, string, *noderecipe.AcceptedPublication) error
 	Put(ctx context.Context, sessionID string, card playback.RecipeCard) error
 	Delete(ctx context.Context, sessionID string) error
 }
@@ -1566,6 +1569,15 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	transcodeNodeURL string,
 	requiredToneMapMode tonemap.Mode,
 ) error {
+	if h.playbackStore != nil {
+		return h.playbackStore.WithRemoteStart(ctx, upstreamSessionID, func(owned context.Context) error {
+			return h.startOwnedRemoteTranscodeWithToneMapMode(owned, playSessionID, upstreamSessionID, source, file, initialSeekSeconds, transcodeNodeURL, requiredToneMapMode)
+		})
+	}
+	return h.startOwnedRemoteTranscodeWithToneMapMode(ctx, playSessionID, upstreamSessionID, source, file, initialSeekSeconds, transcodeNodeURL, requiredToneMapMode)
+}
+
+func (h *PlaybackHandler) startOwnedRemoteTranscodeWithToneMapMode(ctx context.Context, playSessionID, upstreamSessionID string, source PlaybackMediaSource, file *models.MediaFile, initialSeekSeconds float64, transcodeNodeURL string, requiredToneMapMode tonemap.Mode) error {
 	// Remote contenders for one upstream session single-flight across route
 	// binding, node start, and durable publication. This uses a dedicated key,
 	// so a local software fallback can still proceed and win through the normal
@@ -1780,14 +1792,17 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		if err := nodeauth.Sign(httpReq, transcodeNodeURL, h.JWTSecret); err != nil {
 			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("sign transcode request: %w", err)
 		}
+		if err := checkRecipeWorkOwner(ctx, upstreamSessionID); err != nil {
+			return transcodenode.TranscodeStartResponse{}, 0, false, err
+		}
 		resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpReq, "transcode_start")
 		if err != nil {
 			nodepool.ReportConnectFailure(h.NodePlanner, transcodeNodeURL, err)
 			startErr := fmt.Errorf("remote transcode start failed: %w", logredact.SanitizeURLError(err))
 			if nodepool.IsConnectFailure(err) {
-				// Stopped in the background rather than by the caller, which
-				// would wait on the unreachable node before trying another.
-				h.tm.StopRemoteTranscodeAfterFailure(upstreamSessionID, transcodeNodeURL, err)
+				if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+					return transcodenode.TranscodeStartResponse{}, 0, false, errors.Join(startErr, cleanupErr)
+				}
 				return transcodenode.TranscodeStartResponse{}, 0, false, startErr
 			}
 			return transcodenode.TranscodeStartResponse{}, 0, true, startErr
@@ -1833,7 +1848,9 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	retryWithSoftware := false
 	if err != nil {
 		if cleanupRequired {
-			h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+			if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+				return cleanupErr
+			}
 		}
 		if cleanupRequired && ctx.Err() == nil {
 			retryWithSoftware = downgradeToSoftwareToneMap(
@@ -1864,7 +1881,9 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		}
 		if err != nil {
 			if cleanupRequired {
-				h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+				if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+					return cleanupErr
+				}
 			}
 			if initialErr != nil {
 				return fmt.Errorf("%w: remote hardware tone-map start failed: %w; software retry failed: %w", errRemoteSoftwareToneMapStartFailed, initialErr, err)
@@ -1895,23 +1914,33 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, startErr)
 	}
 	if err := transcodenode.ValidateAudioRecipeAttestation(reqBody, nodeResponse); err != nil {
-		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+			return cleanupErr
+		}
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
 	}
 	if err := transcodenode.ValidateCopyFMP4RecipeAttestation(reqBody, nodeResponse); err != nil {
-		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+			return cleanupErr
+		}
 		return err
 	}
 	if err := transcodenode.ValidateThrottleAttestation(reqBody, nodeResponse); err != nil {
-		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+			return cleanupErr
+		}
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
 	}
 	if err := transcodenode.ValidateKeyframePlaylistAttestation(reqBody, nodeResponse); err != nil {
-		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+			return cleanupErr
+		}
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
 	}
 	if reqBody.ToneMapMode != "" && nodeResponse.ToneMapMode != reqBody.ToneMapMode {
-		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+			return cleanupErr
+		}
 		err := errors.New("remote transcode node did not confirm tone-map mode")
 		if reqBody.ToneMapMode == tonemap.ModeSoftware {
 			return fmt.Errorf("%w: %w", errRemoteSoftwareToneMapStartFailed, err)
@@ -1942,7 +1971,9 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 	if !remoteStillOwnsRoute {
 		publishUnlock()
-		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+			return cleanupErr
+		}
 		if localWinner {
 			return errRemoteStartAdoptedLocal
 		}
@@ -1995,8 +2026,13 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, opts); err != nil {
-		// Roll back the already-started node ffmpeg so it isn't leaked.
-		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		// Only definite rejection permits cleanup. An unresolved publication
+		// may already be authoritative on another replica.
+		if !recipePublicationUncertain(err) {
+			if cleanupErr := h.stopOwnedRemoteStart(ctx, upstreamSessionID, transcodeNodeURL); cleanupErr != nil {
+				return cleanupErr
+			}
+		}
 		return err
 	}
 
@@ -2014,15 +2050,16 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 // so both stores stay in lock-step.
 //
 // For dedicated nodes, the recipe is first committed to the node recipe store
-// (Redis), then recorded in the compat store in the same Update that marks the
-// transcode started. The node
+// (Redis), then accepted by the compat store under its authoritative mutation
+// lock. That acceptance marks the transcode started and acknowledges the same
+// publication ID to Redis. The node
 // URL is taken from the upstream session (bound before start on the remote path),
 // so it is "" for integrated transcodes and the node-store write is skipped.
 // A Jellyfin client carries no native token of its own and the node-hop token is
 // deliberately identity-only (see internal/noderecipe), so the persisted recipe is
 // the only way a node or central restart can rebuild ffmpeg.
 //
-// The caller owns rolling back its transcode when either durable write fails.
+// The caller rolls back its transcode only after a definite publication rejection.
 // A missing upstream
 // session (a start/build race, or no session manager in tests) is logged and the
 // live transcode is left serving — only restart resilience is forfeited.
@@ -2066,43 +2103,20 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 			"playback_session_id", upstreamSessionID)
 	}
 
+	publicationID := uuidNewString()
+	var previousPublicationID string
 	var previousRecipe *playback.RecipeCard
 	previousTranscodeStarted := false
 	if previous, ok := h.playbackStore.Get(playSessionID); ok && previous != nil {
 		previousTranscodeStarted = previous.TranscodeStarted
+		previousPublicationID = previous.RecipePublicationID
 		if previous.Recipe != nil {
 			copy := *previous.Recipe
 			previousRecipe = &copy
 		}
 	}
-	nodeRecipeCommitted := recipe != nil && recipe.TranscodeNodeURL != "" && h.RecipeNodeStore != nil
-	var deleteCommittedRecipe func(context.Context) error
-	if nodeRecipeCommitted {
-		putCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		err := h.RecipeNodeStore.Put(putCtx, upstreamSessionID, *recipe)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("persist node transcode recipe: %w", err)
-		}
-		captureCtx, captureCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		deleteCommittedRecipe, err = playback.CaptureNodeRecipeDeletion(captureCtx, h.RecipeNodeStore, upstreamSessionID, recipe.TranscodeNodeURL)
-		captureCancel()
-		if err != nil {
-			// The candidate is already published. Without its version, restore
-			// the replaced recipe or remove the key so a failed start leaves no
-			// reconstruction authority behind.
-			err = fmt.Errorf("capture uncommitted node transcode recipe: %w", err)
-			restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			defer cancel()
-			if previousRecipe != nil && previousRecipe.TranscodeNodeURL != "" {
-				if restoreErr := h.RecipeNodeStore.Put(restoreCtx, upstreamSessionID, *previousRecipe); restoreErr != nil {
-					err = errors.Join(err, fmt.Errorf("restore prior node transcode recipe: %w", restoreErr))
-				}
-			} else if deleteErr := h.RecipeNodeStore.Delete(restoreCtx, upstreamSessionID); deleteErr != nil {
-				err = errors.Join(err, fmt.Errorf("remove uncommitted node transcode recipe: %w", deleteErr))
-			}
-			return err
-		}
+	if recipe != nil && recipe.TranscodeNodeURL != "" && h.RecipeNodeStore != nil {
+		return h.playbackStore.PublishRecipe(ctx, playSessionID, upstreamSessionID, *recipe, h.RecipeNodeStore)
 	}
 	remoteToLocal := recipe != nil && recipe.TranscodeNodeURL == "" && previousRecipe != nil && previousRecipe.TranscodeNodeURL != ""
 	oldNodeRecipeRemoved := false
@@ -2129,22 +2143,20 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 		}
 	}
 
-	if updateErr := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+	updateErr := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
 		current.TranscodeStarted = true
 		current.Recipe = recipe
+		current.RecipePublicationID = publicationID
 		return nil
-	}); updateErr != nil {
+	})
+	if updateErr != nil {
 		var restoreErr error
-		if nodeRecipeCommitted || oldNodeRecipeRemoved {
-			restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if oldNodeRecipeRemoved {
+			restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			defer cancel()
 			if previousRecipe != nil && previousRecipe.TranscodeNodeURL != "" {
 				if err := h.RecipeNodeStore.Put(restoreCtx, upstreamSessionID, *previousRecipe); err != nil {
 					restoreErr = fmt.Errorf("restore prior node transcode recipe: %w", err)
-				}
-			} else {
-				if err := deleteCommittedRecipe(restoreCtx); err != nil {
-					restoreErr = fmt.Errorf("remove uncommitted node transcode recipe: %w", err)
 				}
 			}
 		}
@@ -2152,9 +2164,10 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 		// cache. Compensate only the exact candidate this call published so a
 		// concurrent newer recipe remains authoritative.
 		compatRestoreErr := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
-			if current.TranscodeStarted && reflect.DeepEqual(current.Recipe, recipe) {
+			if current.TranscodeStarted && current.RecipePublicationID == publicationID && reflect.DeepEqual(current.Recipe, recipe) {
 				current.TranscodeStarted = previousTranscodeStarted
 				current.Recipe = previousRecipe
+				current.RecipePublicationID = previousPublicationID
 			}
 			return nil
 		})
