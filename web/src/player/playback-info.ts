@@ -43,6 +43,8 @@ interface BuildPlaybackInfoSectionsInput {
   currentSourceVersion?: PlayerFileVersion;
   requestedVersion?: PlayerFileVersion;
   runtimeStats: RuntimePlaybackStats;
+  /** True while the browser decode engine plays the stream instead of the media element. */
+  browserEngine?: boolean;
 }
 
 export function buildPlaybackInfoSections({
@@ -51,6 +53,7 @@ export function buildPlaybackInfoSections({
   currentSourceVersion,
   requestedVersion,
   runtimeStats,
+  browserEngine = false,
 }: BuildPlaybackInfoSectionsInput): PlaybackInfoSection[] {
   const videoTrack = currentSourceVersion ? pickVideoTrack(currentSourceVersion) : undefined;
   const audioTrack = currentSourceVersion ? pickAudioTrack(currentSourceVersion) : undefined;
@@ -65,7 +68,7 @@ export function buildPlaybackInfoSections({
     {
       title: "Player",
       rows: [
-        { label: "Player", value: "HTML Video Player" },
+        { label: "Player", value: browserEngine ? "Browser decoder" : "HTML Video Player" },
         { label: "Play method", value: formatDelivery(plan.delivery) },
         { label: "Protocol", value: formatProtocol(streamUrl) },
         { label: "Stream type", value: formatStreamType(plan) },

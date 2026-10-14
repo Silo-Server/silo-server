@@ -2558,8 +2558,16 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       padding-inline: 0;
     }
 
-    .player-controls[data-compact="true"][data-touch="false"] .player-quality-trigger > span {
+    .player-controls[data-compact="true"][data-touch="false"]
+      .player-quality-trigger
+      > .player-quality-label {
       display: none;
+    }
+
+    .player-controls[data-compact="true"][data-touch="false"]
+      .player-quality-trigger
+      > .player-speed-badge {
+      position: absolute;
     }
   }
 

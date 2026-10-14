@@ -106,7 +106,8 @@ func (s *Service) favoritesBinding() listBinding {
 			return err
 		},
 		localRemove: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error {
-			return store.RemoveFavorite(ctx, profileID, mediaItemID)
+			_, err := store.RemoveFavorite(ctx, profileID, mediaItemID)
+			return err
 		},
 		localList: func(ctx context.Context, store userstore.UserStore, profileID string, limit, offset int) ([]listRow, error) {
 			favorites, err := store.ListFavorites(ctx, profileID, limit, offset)
@@ -175,7 +176,8 @@ func (s *Service) watchlistBinding() listBinding {
 			return err
 		},
 		localRemove: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error {
-			return store.RemoveFromWatchlist(ctx, profileID, mediaItemID)
+			_, err := store.RemoveFromWatchlist(ctx, profileID, mediaItemID)
+			return err
 		},
 		localList: func(ctx context.Context, store userstore.UserStore, profileID string, limit, offset int) ([]listRow, error) {
 			entries, err := store.ListWatchlist(ctx, profileID, limit, offset)

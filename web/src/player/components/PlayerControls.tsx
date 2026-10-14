@@ -101,6 +101,9 @@ interface PlayerControlsProps {
   versions?: VersionInfo[];
   versionLocked?: boolean;
   onSwitchVersion?: (fileId: number) => void;
+  // Speed. Omitted while something else owns the rate (a Watch Party room).
+  playbackSpeed?: number;
+  onPlaybackSpeedChange?: (rate: number) => void;
   // PiP
   onTogglePiP?: () => void;
   // Playback info
@@ -119,7 +122,8 @@ interface PlayerControlsProps {
   onSeek: (seconds: number) => void;
   onVolumeChange: (volume: number) => void;
   onMutedChange: (muted: boolean) => void;
-  onFullscreenToggle: () => void;
+  /** Absent when fullscreen cannot work, such as engine playback on iPhone. */
+  onFullscreenToggle?: () => void;
   onSurfaceTap?: (event: MouseEvent<HTMLElement>) => void;
 }
 
@@ -173,6 +177,8 @@ export function PlayerControls({
   versions,
   versionLocked,
   onSwitchVersion,
+  playbackSpeed,
+  onPlaybackSpeedChange,
   onTogglePiP,
   showPlaybackInfo,
   onTogglePlaybackInfo,
@@ -367,6 +373,8 @@ export function PlayerControls({
               versions={versions}
               versionLocked={versionLocked}
               onSwitchVersion={onSwitchVersion}
+              playbackSpeed={playbackSpeed}
+              onPlaybackSpeedChange={onPlaybackSpeedChange}
             />
             <button
               type="button"
@@ -378,18 +386,20 @@ export function PlayerControls({
             >
               <MoreHorizontal className="h-5 w-5" />
             </button>
-            <button
-              type="button"
-              className="player-utility-btn"
-              onClick={onFullscreenToggle}
-              aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-            >
-              {isFullscreen ? (
-                <Minimize className="h-[18px] w-[18px]" />
-              ) : (
-                <Maximize className="h-[18px] w-[18px]" />
-              )}
-            </button>
+            {onFullscreenToggle && (
+              <button
+                type="button"
+                className="player-utility-btn"
+                onClick={onFullscreenToggle}
+                aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              >
+                {isFullscreen ? (
+                  <Minimize className="h-[18px] w-[18px]" />
+                ) : (
+                  <Maximize className="h-[18px] w-[18px]" />
+                )}
+              </button>
+            )}
           </div>
         ) : (
           <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-5">
@@ -545,6 +555,8 @@ export function PlayerControls({
                 versions={versions}
                 versionLocked={versionLocked}
                 onSwitchVersion={onSwitchVersion}
+                playbackSpeed={playbackSpeed}
+                onPlaybackSpeedChange={onPlaybackSpeedChange}
               />
 
               {markerEditAvailable && onToggleMarkerEdit && (
@@ -595,18 +607,20 @@ export function PlayerControls({
                 <Scaling className="h-[18px] w-[18px]" />
               </button>
 
-              <button
-                type="button"
-                className="player-utility-btn"
-                onClick={onFullscreenToggle}
-                aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-              >
-                {isFullscreen ? (
-                  <Minimize className="h-[18px] w-[18px]" />
-                ) : (
-                  <Maximize className="h-[18px] w-[18px]" />
-                )}
-              </button>
+              {onFullscreenToggle && (
+                <button
+                  type="button"
+                  className="player-utility-btn"
+                  onClick={onFullscreenToggle}
+                  aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                >
+                  {isFullscreen ? (
+                    <Minimize className="h-[18px] w-[18px]" />
+                  ) : (
+                    <Maximize className="h-[18px] w-[18px]" />
+                  )}
+                </button>
+              )}
             </div>
           </div>
         )}

@@ -501,7 +501,7 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	}
 	setProgress(episodes[0], true, watchedAt)
 	setProgress(episodes[1], false, watchedAt)
-	if err := store.AddFavorite(ctx, profileID, seriesID); err != nil {
+	if _, err := store.AddFavorite(ctx, profileID, seriesID); err != nil {
 		t.Fatalf("AddFavorite: %v", err)
 	}
 

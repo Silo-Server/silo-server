@@ -155,6 +155,27 @@ func nextRefreshAtForDebt(reasonMask int64, attemptCount int, now time.Time) tim
 	return now.Add(nextRefreshDelay(reasonMask, attemptCount))
 }
 
+// nextRefreshAtForEpisodeDebt is nextRefreshAtForDebt for debt held by
+// episodes. A recent episode can owe debt only because it is recent (a TBA/TBD
+// title or a missing still), so the row is due again no later than the moment
+// the first of them leaves EpisodeRecentStillWindow. Without that, terminal
+// parking would hold the debt for up to 90 days after the rule stops applying.
+func nextRefreshAtForEpisodeDebt(reasonMask int64, attemptCount int, now time.Time, episodes ...*models.Episode) time.Time {
+	next := nextRefreshAtForDebt(reasonMask, attemptCount, now)
+	for _, ep := range episodes {
+		if ep == nil || ep.AirDate == nil {
+			continue
+		}
+		// The window still covers an air date exactly EpisodeRecentStillWindow
+		// old, so wake just after it closes.
+		windowEnd := ep.AirDate.Add(EpisodeRecentStillWindow + time.Minute)
+		if windowEnd.After(now) && windowEnd.Before(next) {
+			next = windowEnd
+		}
+	}
+	return next
+}
+
 // logRefreshDebtTerminal emits a one-time notice when an episode-incomplete debt row first
 // crosses into the terminal give-up state, so the demotion is observable in logs rather
 // than silent. Logging on the exact transition attempt keeps it to a single line per row,
