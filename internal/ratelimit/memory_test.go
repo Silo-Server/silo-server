@@ -3,6 +3,8 @@ package ratelimit
 import (
 	"testing"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 func TestMemoryLimiterRetryAfterCoversEmptyMinuteBucket(t *testing.T) {
@@ -72,5 +74,28 @@ func TestMemoryLimiterRetryAfterKeepsSecondWaitWhenMinuteHasRoom(t *testing.T) {
 	}
 	if res := ml.allowAt("client", limit, now.Add(refused.RetryAfter)); !res.Allowed {
 		t.Fatalf("request after retry after refused again with retry after %s", res.RetryAfter)
+	}
+}
+
+func TestMemoryLimiterRetryAfterSaturatesForTinyMinuteRate(t *testing.T) {
+	ml := NewMemoryLimiter()
+	t.Cleanup(ml.Close)
+
+	// A minute bucket this slow needs longer than a Duration can hold.
+	limit := Rate{RequestsPerSecond: 1, RequestsPerMinute: 1e-12, Burst: 1}
+	now := time.Unix(1_800_000_000, 0).Add(400 * time.Millisecond)
+
+	if res := ml.allowAt("client", limit, now); !res.Allowed {
+		t.Fatal("first request refused, want allowed")
+	}
+	refused := ml.allowAt("client", limit, now)
+	if refused.Allowed {
+		t.Fatal("second request allowed, want refused")
+	}
+	if refused.RetryAfter != rate.InfDuration {
+		t.Fatalf("retry after = %s, want rate.InfDuration", refused.RetryAfter)
+	}
+	if refused.ResetAt.Before(now) {
+		t.Fatalf("reset at %s is before now %s", refused.ResetAt, now)
 	}
 }

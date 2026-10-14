@@ -62,8 +62,12 @@ func (ml *MemoryLimiter) allowAt(key string, limit Rate, now time.Time) AllowRes
 		// An empty per-minute bucket would refuse the retry too, so wait for both.
 		if minDelay := tokenDelay(entry.perMinute, now); minDelay > delay {
 			delay = minDelay
-			// Round up: X-RateLimit-Reset carries whole seconds.
-			resetAt = now.Add(delay + time.Second - 1).Truncate(time.Second)
+			// Round up: X-RateLimit-Reset carries whole seconds. Rounding the
+			// time, not the delay, keeps a saturated delay from overflowing.
+			resetAt = now.Add(delay)
+			if whole := resetAt.Truncate(time.Second); whole.Before(resetAt) {
+				resetAt = whole.Add(time.Second)
+			}
 		}
 		return AllowResult{
 			Allowed:    false,
