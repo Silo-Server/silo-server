@@ -267,8 +267,15 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	orderedIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if row.Removed {
-			if err := s.applyRemoteListTombstone(ctx, conn, store, b, row, existingByRemoteKey, &result); err != nil {
+			unlisted, err := s.applyRemoteListTombstone(ctx, conn, store, b, row, existingByRemoteKey, &result)
+			if err != nil {
 				return result, err
+			}
+			// The provider no longer lists them, so a later row in this batch
+			// that lists one again is a new add, not the listing a pending
+			// local removal waits on.
+			for _, id := range unlisted {
+				delete(removalsPending, id)
 			}
 			continue
 		}
@@ -404,6 +411,8 @@ func (s *Service) listItemStatesByRemoteKey(
 	return byRemoteKey, nil
 }
 
+// applyRemoteListTombstone applies a provider removal to the rows with its key
+// and returns the media items it marked as no longer listed by the provider.
 func (s *Service) applyRemoteListTombstone(
 	ctx context.Context,
 	conn Connection,
@@ -412,7 +421,7 @@ func (s *Service) applyRemoteListTombstone(
 	row RemoteFavorite,
 	existingByRemoteKey map[string][]ListItemState,
 	result *ImportListResult,
-) error {
+) ([]string, error) {
 	key := strings.TrimSpace(row.ProviderItemKey)
 	// Point into the map's rows so a later tombstone for the key in this
 	// batch sees them already removed.
@@ -425,33 +434,35 @@ func (s *Service) applyRemoteListTombstone(
 	}
 	if key == "" || len(states) == 0 {
 		result.Warnings = append(result.Warnings, "watch sync provider returned an unknown list removal")
-		return nil
+		return nil, nil
 	}
 	// Copies of one title share a kind and all leave. A movie and a series
 	// with the same key are different titles, and a tombstone without a kind
 	// cannot say which one left.
 	if !sameListItemKind(states) {
 		result.Warnings = append(result.Warnings, "watch sync provider returned a list removal for "+key+" that matches more than one title")
-		return nil
+		return nil, nil
 	}
 	now := s.now()
+	unlisted := make([]string, 0, len(states))
 	for _, state := range states {
 		if b.removalsEnabled(conn) && state.LocalPresent {
 			if err := b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID); err != nil {
-				return err
+				return nil, err
 			}
 			if err := s.repo.MarkListItemLocalRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
-				return err
+				return nil, err
 			}
 			result.Removed++
 			state.LocalPresent = false
 		}
 		if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
-			return err
+			return nil, err
 		}
 		state.RemotePresent = false
+		unlisted = append(unlisted, state.MediaItemID)
 	}
-	return nil
+	return unlisted, nil
 }
 
 // sameListItemKind reports whether the rows name one kind of title. A row

@@ -4765,6 +4765,56 @@ func TestServiceFullFavoriteImportScopesPresenceByKind(t *testing.T) {
 	}
 }
 
+// A pending local removal waits on the provider's listing. When an incremental
+// read removes that listing and then lists the item again, the second row is a
+// new add, even without a listing time.
+func TestServiceIncrementalFavoriteRemoveThenAddReplacesPendingRemoval(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	repo := newServiceFakeRepo()
+	conn := Connection{
+		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
+		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
+	}
+	removedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	repo.listItemStates = []ListItemState{{
+		ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: testMovieMediaID, Kind: "movie",
+		ProviderItemKey: testMovieProviderItemKey, RemotePresent: true, LastRemovedLocalAt: &removedAt,
+	}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{
+		Rows: []RemoteFavorite{
+			{ProviderItemKey: testMovieProviderItemKey, Removed: true},
+			{ProviderItemKey: testMovieProviderItemKey, Kind: "movie", IMDbID: "tt0133093", FavoritedAt: time.Now().UTC(), FavoritedAtGuessed: true},
+		},
+		Incremental: true,
+	}}
+	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || len(favorites) != 1 {
+		t.Fatalf("result=%#v favorites=%#v", result, favorites)
+	}
+	if state := repo.listItemStates[0]; !state.LocalPresent || !state.RemotePresent {
+		t.Fatalf("state = %#v, want listed on both sides", state)
+	}
+}
+
 type favoriteRemoverStub struct {
 	removed [][]string
 }
