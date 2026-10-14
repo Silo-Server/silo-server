@@ -235,7 +235,9 @@ func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	if strings.Contains(joined, "0:s:3") {
 		t.Fatalf("original container track ordinal must not leak into sup input mapping: %s", joined)
 	}
-	if !strings.Contains(joined, "-ss 1200.000") || !strings.Contains(joined, "-to 4800.000") {
+	// The seek starts a millisecond early so a display set whose segments
+	// sit exactly at the window start is read whole; the end is unchanged.
+	if !strings.Contains(joined, "-ss 1199.999") || !strings.Contains(joined, "-to 4800.000") {
 		t.Fatalf("cached sup extract must still window the input: %s", joined)
 	}
 	ssIdx := slices.Index(args, "-ss")

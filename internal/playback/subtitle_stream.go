@@ -157,7 +157,16 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	windowable := !IsASS(opts.SourceCodec) && (!IsPGS(opts.SourceCodec) || opts.AllowWindow)
 	seekApplied := opts.SeekSeconds > 0 && windowable
 	if seekApplied {
-		args = append(args, "-ss", strconv.FormatFloat(opts.SeekSeconds, 'f', 3, 64))
+		seek := opts.SeekSeconds
+		if opts.InputIsExtractedSup {
+			// Each segment of a display set is its own .sup packet, all at
+			// the set's timestamp, and a seek exactly onto that timestamp can
+			// land after the first of them. Seeking a millisecond early reads
+			// the whole set; at most a stray segment of the set before comes
+			// along, which a decoder ignores.
+			seek = max(0, seek-0.001)
+		}
+		args = append(args, "-ss", strconv.FormatFloat(seek, 'f', 3, 64))
 		// ffmpeg offsets an input seek by the input's start time. A cached
 		// .sup's start time is its first cue, so the seek has to be taken
 		// as an absolute timestamp or the window starts that much late.

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -34,16 +35,15 @@ func TestStreamExtractArgs_CachedSupWindowsRealFFmpeg(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Each window is [seek, seek+60): the end is exclusive.
 	for _, tc := range []struct {
-		name      string
-		seek      float64
-		wantFirst float64
-		wantLast  float64
+		name string
+		seek float64
 	}{
-		// Each window is [seek, seek+60): the end is exclusive.
-		{name: "from the start", seek: 0, wantFirst: 40, wantLast: 50},
-		{name: "after a seek", seek: 95, wantFirst: 100, wantLast: 150},
-		{name: "an extend window", seek: 355, wantFirst: 360, wantLast: 400},
+		{name: "from the start", seek: 0},
+		{name: "after a seek", seek: 95},
+		{name: "a seek onto a cue", seek: 100},
+		{name: "an extend window", seek: 355},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
@@ -62,13 +62,15 @@ func TestStreamExtractArgs_CachedSupWindowsRealFFmpeg(t *testing.T) {
 			if err := cmd.Run(); err != nil {
 				t.Fatalf("ffmpeg %v: %v\n%s", args, err, stderr.String())
 			}
-			got := testSupPresentationTimes(stdout.Bytes())
-			if len(got) == 0 {
-				t.Fatalf("window at %gs came back empty; args %v", tc.seek, args)
+			var want []float64
+			for _, at := range cues {
+				if at >= tc.seek && at < tc.seek+60 {
+					want = append(want, at)
+				}
 			}
-			if got[0] != tc.wantFirst || got[len(got)-1] != tc.wantLast {
-				t.Fatalf("window at %gs held cues %v..%v, want %v..%v; args %v",
-					tc.seek, got[0], got[len(got)-1], tc.wantFirst, tc.wantLast, args)
+			got := testSupPresentationTimes(stdout.Bytes())
+			if !slices.Equal(got, want) {
+				t.Fatalf("window at %gs held cues %v, want %v; args %v", tc.seek, got, want, args)
 			}
 		})
 	}
