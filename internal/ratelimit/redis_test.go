@@ -33,20 +33,23 @@ func TestRedisWindowLimitsKeepMinuteOnlyRatesUsable(t *testing.T) {
 }
 
 func TestRedisRetryAfterWaitsForAFullMinuteWindow(t *testing.T) {
-	// 10 seconds into the minute, so the minute window has 50 seconds left.
-	now := time.Unix(1_800_000_000-1_800_000_000%60+10, 0)
+	minuteStart := time.Unix(1_800_000_000-1_800_000_000%60, 0)
 	const secTTL = 2 * time.Second
 
 	tests := []struct {
 		name     string
+		second   int
 		minCount int
 		want     time.Duration
 	}{
-		{name: "minute window has room", minCount: 20, want: secTTL},
-		{name: "minute window full", minCount: 30, want: 50 * time.Second},
+		{name: "minute window has room", second: 10, minCount: 20, want: secTTL},
+		{name: "minute window full", second: 10, minCount: 30, want: 50 * time.Second},
+		// The second key's cleanup TTL outlives the window; both roll over at the minute.
+		{name: "minute window full in its last second", second: 59, minCount: 30, want: time.Second},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			now := minuteStart.Add(time.Duration(tt.second) * time.Second)
 			got := redisRetryAfter(now, tt.minCount, 30, secTTL)
 			if got != tt.want {
 				t.Fatalf("retry after = %s, want %s", got, tt.want)
