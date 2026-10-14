@@ -34,6 +34,10 @@ const READINESS_TIMEOUT_MS = 20_000;
 const STALL_TIMEOUT_MS = 20_000;
 /** While the tab is hidden, due frames are still released at this cadence. */
 const HIDDEN_TICK_MS = 100;
+// Paused with its picture up, the engine has nothing to present, so the loop
+// checks at this pace instead of every frame; play(), seek() and any message
+// from the worker or the audio worklet wake it.
+const IDLE_TICK_MS = 250;
 /** Video further behind the clock than this on return to the tab is re-synced. */
 const RESYNC_LAG_SECONDS = 2;
 /** Without audio, a frame this overdue means the decoder is starved. */
@@ -143,6 +147,7 @@ export class EnginePlayer {
 
   private frameRequest = 0;
   private hiddenTimer: ReturnType<typeof setInterval> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private readinessTimer: ReturnType<typeof setTimeout> | null = null;
   /** When the current wait for data began, while playing; null otherwise. */
   private waitingSince: number | null = null;
@@ -284,6 +289,7 @@ export class EnginePlayer {
     if (this.endedValue) this.seek(0);
     if (!this.pausedValue) return;
     this.pausedValue = false;
+    this.wake();
     this.dispatch("play");
     if (this.audio && !this.silent && !(await this.audio.resume())) {
       if (!this.mutedValue) {
@@ -321,6 +327,7 @@ export class EnginePlayer {
       return;
     }
     this.seekingValue = true;
+    this.wake();
     this.endedValue = false;
     this.ready = Math.min(this.ready, 1);
     // A read that never answers (a node gone, a half-open connection) would
@@ -433,13 +440,9 @@ export class EnginePlayer {
   private fail(classification: string, message: string): void {
     if (this.stopped) return;
     this.failed = true;
-    // The player follows media events, so a playing engine says it stopped.
-    if (this.pausedValue) {
-      this.audio?.setPlaying(false);
-      this.clock?.setRunning(false);
-    } else {
-      this.settlePaused();
-    }
+    const wasPlaying = !this.pausedValue;
+    this.audio?.setPlaying(false);
+    this.clock?.setRunning(false);
     // This engine is done even if no other route takes over: stop reading and
     // decoding, free queued pictures and audio, and let the screen sleep. The
     // last picture stays up until the player replaces or destroys the engine.
@@ -451,7 +454,11 @@ export class EnginePlayer {
     this.audio?.close();
     this.audio = null;
     this.updatePresence();
+    // Report while `paused` still says whether it was playing: the player
+    // reads it to decide whether a reconnect resumes. Then, since the player
+    // follows media events, a playing engine says it stopped.
     this.onFailure({ classification, message, decoder_name: "silo-web-engine" });
+    if (wasPlaying && !this.disposed && !this.pausedValue) this.settlePaused();
   }
 
   private onWorker(message: WorkerToPageMessage): void {
@@ -459,6 +466,9 @@ export class EnginePlayer {
       if (message.type === "frame") message.frame.close();
       return;
     }
+    // Pictures, buffered audio and the end of the stream can change what the
+    // loop presents or reports, so an idle loop runs again.
+    this.wake();
     switch (message.type) {
       case "ready":
         void this.onReady(message.info);
@@ -576,6 +586,7 @@ export class EnginePlayer {
 
   private onWorklet(message: WorkletToPageMessage): void {
     if (message.generation !== this.generation || !this.clock) return;
+    this.wake();
     switch (message.type) {
       case "clock":
         this.clock.onAnchor(message);
@@ -715,14 +726,36 @@ export class EnginePlayer {
   }
 
   private readonly tick = (): void => {
+    this.idleTimer = null;
     if (this.stopped) return;
     this.advance(true);
     // advance() fails the engine on a stall; a failed engine draws no more frames.
-    if (!this.stopped) this.frameRequest = requestAnimationFrame(this.tick);
+    if (this.stopped) return;
+    if (this.idle()) this.idleTimer = setTimeout(this.tick, IDLE_TICK_MS);
+    else this.frameRequest = requestAnimationFrame(this.tick);
   };
+
+  /** Paused with the current picture shown: nothing changes until play or seek. */
+  private idle(): boolean {
+    return (
+      this.pausedValue &&
+      !this.seekingValue &&
+      this.shown !== null &&
+      this.shown.generation === this.generation
+    );
+  }
+
+  private wake(): void {
+    if (this.stopped || this.idleTimer === null) return;
+    clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    this.frameRequest = requestAnimationFrame(this.tick);
+  }
 
   private stopPresentationTimers(): void {
     cancelAnimationFrame(this.frameRequest);
+    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
     if (this.hiddenTimer !== null) clearInterval(this.hiddenTimer);
     this.hiddenTimer = null;
   }
@@ -979,7 +1012,9 @@ export class EnginePlayer {
     if (this.stopped) return;
     if (document.hidden) {
       if (this.hiddenTimer === null) {
-        this.hiddenTimer = setInterval(() => this.advance(false), HIDDEN_TICK_MS);
+        this.hiddenTimer = setInterval(() => {
+          if (!this.idle()) this.advance(false);
+        }, HIDDEN_TICK_MS);
       }
       return;
     }

@@ -465,7 +465,12 @@ describe("EnginePlayer", () => {
   });
 
   it("reports itself paused when it fails while playing", async () => {
-    const { player, worker } = start();
+    // The player reads `paused` in onFailure to decide whether a reconnect resumes.
+    let pausedWhenReported: boolean | null = null;
+    const onFailure = vi.fn(() => {
+      pausedWhenReported = player.paused;
+    });
+    const { player, worker } = start(onFailure);
     await open(worker);
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
     worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
@@ -473,8 +478,31 @@ describe("EnginePlayer", () => {
     await player.play();
     expect(player.paused).toBe(false);
     worker.emit({ type: "error", generation: null, classification: "x_failed", message: "boom" });
+    expect(pausedWhenReported).toBe(false);
     expect(player.paused).toBe(true);
     expect(events.filter((event) => event === "pause")).toHaveLength(1);
+    player.destroy();
+  });
+
+  it("slows its presentation loop while paused and wakes on play", async () => {
+    const frames = vi.fn((callback: FrameRequestCallback) =>
+      setTimeout(() => callback(performance.now()), 16),
+    );
+    vi.stubGlobal("requestAnimationFrame", frames);
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0.04) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(100);
+    // Paused with the first picture up: a second of idling asks for few frames.
+    const before = frames.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(frames.mock.calls.length - before).toBeLessThanOrEqual(5);
+    await player.play();
+    const playing = frames.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(frames.mock.calls.length - playing).toBeGreaterThan(5);
     player.destroy();
   });
 
