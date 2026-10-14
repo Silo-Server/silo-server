@@ -421,6 +421,10 @@ export function usePlaybackSession(
   const planRevisionRef = useRef(0);
   const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
+  // Set as soon as the server says an administrator ended the session, before
+  // the state carrying it renders, so a caller acting on an older render
+  // cannot start a reconnect against it.
+  const sessionEndedRef = useRef(false);
   const activeRequestKeyRef = useRef<string | null>(null);
   const activeCapabilityRequestKeyRef = useRef<string | null>(null);
   const playbackPositionRef = useRef(initialPosition);
@@ -647,6 +651,7 @@ export function usePlaybackSession(
       const sessionId = plan.session_id ?? decision.session_id ?? sessionIdRef.current;
       planAttemptIdRef.current = randomUUID();
       planRef.current = plan;
+      sessionEndedRef.current = false;
       sessionIdRef.current = sessionId ?? null;
       planRevisionRef.current += 1;
       hasAdoptedPlanRef.current = true;
@@ -1265,6 +1270,7 @@ export function usePlaybackSession(
         if (isPlaybackSessionEndedError(err)) {
           // An administrator ended the session: leave rather than show an
           // error or recover into a fresh session.
+          sessionEndedRef.current = true;
           setState((current) => ({
             ...current,
             replanning: false,
@@ -1554,6 +1560,7 @@ export function usePlaybackSession(
       } catch (error) {
         if (!isCurrent()) return;
         if (isPlaybackSessionEndedError(error)) {
+          sessionEndedRef.current = true;
           endReconnect(false);
           setState((current) => ({
             ...current,
@@ -1605,8 +1612,9 @@ export function usePlaybackSession(
 
   const recoverConnection = useCallback(
     (positionSeconds: number, resume: boolean) => {
-      // Only a stream that exists can lose its connection.
-      if (!planRef.current || !sessionIdRef.current) return;
+      // Only a stream that exists can lose its connection, and a session an
+      // administrator ended stays ended.
+      if (!planRef.current || !sessionIdRef.current || sessionEndedRef.current) return;
       beginReconnect(positionSeconds, resume, false);
     },
     [beginReconnect],

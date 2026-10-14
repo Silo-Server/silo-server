@@ -676,6 +676,7 @@ function WatchPagePlayer({
       planRevision={session.planRevision}
       shouldAutoPlay={session.shouldAutoPlay}
       replanning={session.replanning}
+      replacing={session.replacing}
       replanError={fallingBack ? null : session.error}
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}
