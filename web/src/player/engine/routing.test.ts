@@ -135,6 +135,27 @@ describe("resolveOriginalPlaybackRoute", () => {
     });
   });
 
+  it("leaves an HDR original the plan validated for this display to the media element", () => {
+    for (const [range, claim] of [
+      ["hdr10", "hdr10"],
+      ["hlg", "hlg"],
+    ] as const) {
+      const plan = originalPlan({
+        source: { dynamic_range: range, video_codec: "hevc" },
+        recipe: { video_codec: "hevc" },
+      });
+      plan.claims = { ...plan.claims, video: { ...plan.claims.video, [claim]: true } };
+      const route = resolveOriginalPlaybackRoute({
+        plan,
+        streamUrl: "/stream",
+        native: { ...native, videoCodecs: [...native.videoCodecs, "hevc"] },
+        engine,
+        audioTracks: [],
+      });
+      expect(route.kind).toBe("native");
+    }
+  });
+
   it("refuses with a typed failure what neither can play", () => {
     const profile5 = resolveOriginalPlaybackRoute({
       plan: originalPlan({

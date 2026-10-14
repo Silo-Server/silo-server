@@ -92,10 +92,17 @@ export function resolveOriginalPlaybackRoute(input: {
   const audioOrdinal = plan.selected_tracks.audio?.index ?? defaultOrdinal;
   const transfer = engineTransferForPlan(plan);
 
+  // An HDR original the plan validated for this display plays natively, in
+  // HDR; the engine would tone-map it down to SDR.
+  const claims = plan.claims.video;
+  const nativeRange =
+    transfer === "sdr" ||
+    (transfer === "hlg" && claims.hlg) ||
+    (transfer === "pq" && (claims.hdr10 || claims.hdr10_plus || claims.dolby_vision));
   const nativePlays =
     native.containers.includes(container) &&
     native.videoCodecs.includes(videoCodec) &&
-    transfer === "sdr" &&
+    nativeRange &&
     (audioCodec === "" || native.audioCodecs.includes(audioCodec)) &&
     audioOrdinal === defaultOrdinal;
   if (nativePlays) return { kind: "native" };
