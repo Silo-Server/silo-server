@@ -105,3 +105,11 @@
 ./internal/jellycompat TestRemoteStartConnectedAttemptThenDialErrorKeepsUncertainWork
 ./internal/jellycompat TestRemoteStartPartialWriteKeepsUncertainWork
 ./internal/jellycompat TestRemoteStartDelayedAcceptCleanupPrecedesSuccessor
+
+# Authoritative legacy reconstruction preserves expiry and fences unknown old tokens.
+./internal/noderecipe TestRedisPublicationRebuildsLegacyAuthorityWithoutChangingExpiry
+./internal/noderecipe TestRedisPublicationLegacyRebuildKeepsRevokedAuthority
+./internal/noderecipe TestRedisPublicationLegacyRebuildRejectsUnprovenState
+./internal/noderecipe TestRedisPublicationLegacyRebuildFencesLostModernReceipt
+./internal/jellycompat TestRecipePublicationCanReplacePreReceiptVersion
+./internal/jellycompat TestRecipePublicationLegacyRebuildUsesFreshRow

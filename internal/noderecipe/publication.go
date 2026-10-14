@@ -123,7 +123,26 @@ local function terminal(key,deadline)
 end
 `
 
+// A pre-receipt PutTTL token and a modern token with lost metadata have the
+// same format. Fresh locked legacy-row evidence may reconstruct the exact
+// accepted bytes under a new token, but never commits the unknown old token.
+// Preserve every authority expiry and retire the old admission for the maximum
+// preparation window, so delayed original commands cannot undo this recovery.
 const reconcilePublicationLua = restorePublicationLua + terminalPublicationLua + `
+local function rebuild_legacy(current,owner,receipt_key)
+ if owner or not current or #current~=32 or string.find(current,'[^0-9a-f]') then return 0 end
+ if ARGV[5]~='1' or ARGV[6]~='' or ARGV[7]=='' or ARGV[8]=='' or ARGV[9]~='1' then return 0 end
+ if redis.call('GET',KEYS[1])~=ARGV[8] then return 0 end
+ local ttl=redis.call('PTTL',KEYS[2])
+ if ttl~=-1 and ttl<=0 then return 0 end
+ local now=redis.call('TIME')
+ local now_ms=now[1]*1000+math.floor(now[2]/1000)
+ terminal(receipt_key,now_ms+tonumber(ARGV[2]))
+ redis.call('SET',KEYS[2],ARGV[4],'KEEPTTL')
+ if ttl==-1 then redis.call('SET',ARGV[3]..ARGV[4],'committed')
+ else redis.call('SET',ARGV[3]..ARGV[4],'committed','PX',ttl) end
+ return 1
+end
 local function reconcile()
  local owner=redis.call('GET',KEYS[6])
  local current=redis.call('GET',KEYS[2])
@@ -131,7 +150,7 @@ local function reconcile()
  if not pending then return 1 end
  local receipt_key=ARGV[3]..pending
  local encoded=redis.call('GET',receipt_key)
- if not encoded then return 0 end
+ if not encoded then return rebuild_legacy(current,owner,receipt_key) end
  if encoded=='retired' then return 0 end
  if encoded=='committed' then
   if owner==pending then redis.call('DEL',KEYS[6]) end

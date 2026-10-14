@@ -172,6 +172,14 @@ failure after proven acceptance does not stop the accepted transport. Detached
 database sessions have bounded, cancellable admission so this serialization
 does not exhaust the ordinary query pool.
 
+An accepted compat row without a publication ID can reconstruct exact retained
+recipe bytes under that same lock. It must describe started work, match the
+retained card and have no active Redis publication owner. Reconstruction creates
+a fresh version while preserving source-authority stamps and every existing
+expiry. It retires the unknown old token through the maximum preparation
+admission horizon; it never declares that token committed. Missing receipts with
+other evidence remain uncertain.
+
 Core recipe publications also have independent opaque versions. Teardown captures
 the version before stopping work and removes only that publication. Publishing
 the same recipe again still creates a new version, so delayed cleanup cannot
