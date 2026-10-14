@@ -511,6 +511,40 @@ describe("AdminUsers user dialog policy hints", () => {
       "Use at least 8 characters.",
     );
     expect(mocks.create).not.toHaveBeenCalled();
+
+    await user.type(within(dialog).getByLabelText(/^Password/), "word");
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+  });
+
+  it("refuses an invalid custom bitrate instead of creating the account", async () => {
+    mocks.accessGroupsLoaded = true;
+    mocks.create.mockReset();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /Add User/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+
+    const bitrate = within(dialog).getByText("Max remote stream bitrate").parentElement!
+      .parentElement!;
+    await user.click(within(bitrate).getByRole("switch", { name: "Override" }));
+    await user.click(within(dialog).getByRole("combobox", { name: "Max remote stream bitrate" }));
+    await user.click(await screen.findByRole("option", { name: "Custom" }));
+    await user.type(within(dialog).getByLabelText("Max remote stream bitrate in Mbps"), "nope");
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("button", { name: /create|save/i }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Enter a value above 0 Mbps",
+    );
+    expect(within(dialog).getByRole("tab", { name: "Limits" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("disables the group picker for admins", async () => {
