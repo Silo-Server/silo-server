@@ -2301,7 +2301,10 @@ export function VideoPlayer({
         if (route.kind === "engine") {
           // The original goes to the browser decode engine, which stands in
           // for the element's media pipeline; the readiness gate below sees
-          // the same events either way.
+          // the same events either way. Its clock starts at the file's first
+          // frame, so an origin measured by an earlier native load is dropped.
+          setDirectPlayOriginSeconds(0);
+          timelineOffsetRef.current = planTimelineOffsetRef.current;
           try {
             const { attachBrowserEngine } = await import("../engine");
             const surface = engineSurfaceRef.current;

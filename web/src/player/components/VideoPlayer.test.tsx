@@ -77,6 +77,22 @@ vi.mock("../hooks/usePlaybackRealtime", () => ({
 vi.mock("../hooks/useWatchProgress", () => ({
   useWatchProgress: () => vi.fn().mockResolvedValue(undefined),
 }));
+// Opted into per test: plans whose original the browser engine plays.
+const engineRoute = vi.hoisted(() => ({ chosen: false }));
+vi.mock("../engine/routing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../engine/routing")>();
+  return {
+    ...actual,
+    resolveOriginalPlaybackRoute: (
+      ...args: Parameters<typeof actual.resolveOriginalPlaybackRoute>
+    ) =>
+      engineRoute.chosen
+        ? { kind: "engine", source: {} }
+        : actual.resolveOriginalPlaybackRoute(...args),
+  };
+});
+const attachBrowserEngine = vi.hoisted(() => vi.fn(() => ({ destroy: vi.fn() })));
+vi.mock("../engine", () => ({ attachBrowserEngine }));
 vi.mock("../hooks/useKeyboardShortcuts", () => ({ useKeyboardShortcuts: vi.fn() }));
 vi.mock("../hooks/useRemuxSeeking", () => ({
   useRemuxSeeking: () => ({ handleSeek: playerSeek }),
@@ -2989,6 +3005,41 @@ describe("VideoPlayer source timeline", () => {
       controls.current!.onSeek(1400);
     });
     expect(playerSeek).toHaveBeenCalledWith(expect.closeTo(1400 + origin));
+  });
+
+  // The engine starts its clock at the file's first frame itself, so the
+  // origin a native load measured must not carry into an engine session, and
+  // a native load after the engine measures its own again.
+  it("drops a native clock origin while the browser engine plays the original", async () => {
+    const engine = {
+      containers: ["mkv"],
+      videoCodecs: ["h264"],
+      audioCodecs: ["aac"],
+      hdr: false,
+    };
+    const { container, rerenderPlayer } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    video.currentTime = 29.977;
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-29.977));
+
+    engineRoute.chosen = true;
+    try {
+      rerenderPlayer({ planRevision: 2, browserEngine: engine });
+      await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalled());
+      await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBe(0));
+      expect(subtitleTimeline.assOffsetSeconds).toBe(0);
+    } finally {
+      engineRoute.chosen = false;
+    }
+
+    rerenderPlayer({ planRevision: 3, browserEngine: null });
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    video.currentTime = 1.4;
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-1.4));
   });
 
   // Written to the element before metadata, a seek would become the default
