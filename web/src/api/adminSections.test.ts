@@ -215,6 +215,8 @@ describe("admin sections adapter", () => {
     const lost = new TypeError("Failed to fetch");
     const changed = v2Problem(412, "precondition_failed", "Changed on another client");
     const unreadable = new TypeError("Failed to fetch");
+    // The server reads the new order back after saving; failing there is a 5xx.
+    const afterSave = v2Problem(500, "internal_error", "Database unavailable");
     request.mockImplementation(
       (
         key: string,
@@ -228,13 +230,15 @@ describe("admin sections adapter", () => {
         }
         if (id === "7") return Promise.reject(lost);
         if (id === "8") return Promise.reject(changed);
+        if (id === "10") return Promise.reject(afterSave);
         return Promise.resolve({ items: [] });
       },
     );
-    await expect(restoreLibraryPages([6, 7, 8, 9], true)).resolves.toEqual([
+    await expect(restoreLibraryPages([6, 7, 8, 9, 10], true)).resolves.toEqual([
       { libraryId: 7, error: lost, outcome: "unknown" },
       { libraryId: 8, error: changed, outcome: "failed" },
       { libraryId: 9, error: unreadable, outcome: "failed" },
+      { libraryId: 10, error: afterSave, outcome: "unknown" },
     ]);
     const restores = request.mock.calls.filter(
       ([key]) => key === "PUT /api/v2/admin/sections/defaults",
@@ -245,6 +249,7 @@ describe("admin sections adapter", () => {
       ["6", '"order-6"'],
       ["7", '"order-7"'],
       ["8", '"order-8"'],
+      ["10", '"order-10"'],
     ]);
   });
 });

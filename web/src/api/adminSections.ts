@@ -177,8 +177,9 @@ export interface LibraryRestoreFailure {
   error: unknown;
   /**
    * "failed" when the page kept its rows: its version couldn't be read, or the
-   * server answered the restore with a problem. "unknown" when the restore got
-   * no answer, so it may have been applied.
+   * server refused the restore with a 4xx before changing anything. "unknown"
+   * when the restore got a 5xx or no answer: the server reads the new order
+   * back after saving, so a 5xx can follow a restore that was applied.
    */
   outcome: "failed" | "unknown";
 }
@@ -207,8 +208,8 @@ export async function restoreLibraryPages(
         reset_profiles: resetProfiles,
       });
     } catch (error) {
-      const outcome = error instanceof V2ProblemError ? "failed" : "unknown";
-      failures.push({ libraryId, error, outcome });
+      const refused = error instanceof V2ProblemError && error.status < 500;
+      failures.push({ libraryId, error, outcome: refused ? "failed" : "unknown" });
     }
   }
   return failures;

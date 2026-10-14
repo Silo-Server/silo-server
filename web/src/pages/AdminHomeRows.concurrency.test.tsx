@@ -366,7 +366,7 @@ describe("admin section captured snapshots", () => {
     mocks.request.mockImplementation((operation: string, args: Args = {}) => {
       if (operation === "PUT /api/v2/admin/sections/defaults" && args.query?.library_id === "7") {
         writes.push({ operation, args });
-        return Promise.reject(v2Problem(500, "internal_error", "Database unavailable"));
+        return Promise.reject(v2Problem(404, "not_found", "Library not found"));
       }
       return implementation(operation, args);
     });
@@ -384,7 +384,7 @@ describe("admin section captured snapshots", () => {
       expect(writes.map(({ args }) => args.query?.library_id)).toEqual([undefined, "7", "8"]);
       expect(mocks.warning).toHaveBeenCalledWith(
         "Restored the default rows on Home and 1 library page. 1 library page kept its rows.",
-        { description: "Movies: Database unavailable" },
+        { description: "Movies: Library not found" },
       );
     } finally {
       libraries.pop();
@@ -411,7 +411,7 @@ describe("admin section captured snapshots", () => {
       "Restored the default rows on Home. 1 library page may have been restored.",
       {
         description:
-          "Movies: the server didn't answer, so it may have been restored. Reload it to check.",
+          "Movies: it may have been restored, but Silo couldn't confirm it. Reload it to check.",
       },
     );
   });

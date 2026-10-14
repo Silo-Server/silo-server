@@ -68,7 +68,7 @@ function reportShownBatch({ changedIds, failures }: ShownBatchResult, shown: boo
 
 /**
  * Reports a restore: the library pages confirmed restored in the title, then
- * those that kept their rows and those whose restore got no answer, each named
+ * those that kept their rows and those whose restore Silo couldn't confirm, each named
  * with the reason.
  */
 function reportRestore(
@@ -99,7 +99,7 @@ function reportRestore(
       const label =
         alsoPages.find((page) => page.id === libraryId)?.label ?? `Library ${libraryId}`;
       if (outcome === "unknown")
-        return `${label}: the server didn't answer, so it may have been restored. Reload it to check.`;
+        return `${label}: it may have been restored, but Silo couldn't confirm it. Reload it to check.`;
       return `${label}: ${adminSectionMutationMessage(error, "Could not restore the default rows")}`;
     })
     .join(" ");
