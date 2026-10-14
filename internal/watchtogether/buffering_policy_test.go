@@ -330,8 +330,8 @@ func TestHostDriftInsideTheCatchUpBandIsCorrected(t *testing.T) {
 	frames := len(f.conns["host"].payloads)
 
 	// Drift the client converges on by rate is neither followed nor corrected.
-	f.report("host", f.expected()-1.8)
-	f.report("host", f.expected()-1.8)
+	f.report("host", f.expected()-0.8)
+	f.report("host", f.expected()-0.8)
 	if f.repo.room.AnchorPositionSeconds != anchor || transportCount(f.conns["host"]) != transportCountIn(f.conns["host"].payloads[:frames]) {
 		t.Fatalf("host drift inside the nudge band moved the room or was corrected")
 	}

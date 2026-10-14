@@ -73,10 +73,11 @@ const (
 	// seconds, so a correction that is still converging is not resent sooner.
 	guestCorrectionRetryInterval = 10 * time.Second
 	// guestCorrectionDriftSeconds is how far a member's reported position may
-	// sit from the room before the server corrects it. Clients nudge smaller
-	// drift themselves by playback rate against the last command they applied;
-	// the server only steps in when that has not held.
-	guestCorrectionDriftSeconds = 2.0
+	// sit from the room before the server corrects it. A client with the rate
+	// loop closes the drift itself; a correction only refreshes its reference,
+	// and it still converges by rate, never a seek, under 5 s. For an older
+	// client without the loop, this is what keeps it near the room.
+	guestCorrectionDriftSeconds = 1.0
 	// guestCorrectionStrikes is how many consecutive reports must exceed
 	// guestCorrectionDriftSeconds before a correction is sent, so one late or
 	// noisy report never moves a member.

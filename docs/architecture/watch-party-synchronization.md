@@ -92,9 +92,11 @@ drift against it about twice a second. That loop only changes the rate; it
 never seeks. Rate and play state change when a command executes, never when it
 arrives, and users cannot change playback speed in a room.
 
-The server corrects a member only when two consecutive reports are more than 2
-seconds from the room, or its pause state differs, and repeats a correction at
-most every 10 seconds. Reports within 1.5 seconds after a command's
+The server corrects a member only when two consecutive reports are more than 1
+second from the room, or its pause state differs, and repeats a correction at
+most every 10 seconds. A correction refreshes the client's reference; a client
+with the drift loop still closes up to 5 seconds by rate, and an older client
+without it is kept near the room. Reports within 1.5 seconds after a command's
 `execute_at` can describe the state before it, so they are neither corrected nor
 taken as the host's decision, unless the report's `command_id` names that
 command as the last one its client applied. A command sent to a member starts
