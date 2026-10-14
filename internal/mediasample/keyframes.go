@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"syscall"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
@@ -101,17 +102,18 @@ func sheetKeyframes(ctx context.Context, req Request) []float64 {
 
 // matroskaKeyframes reads the keyframe times of the Matroska file at path
 // from its Cues and a few clusters' block headers (keyframes.ReadMatroska),
-// or returns nil. Only regular files are opened: opening a FIFO would block.
+// or returns nil. The file opens without blocking, so a FIFO in its place
+// cannot hold the lookup, and only a regular file is read.
 func matroskaKeyframes(ctx context.Context, path string) []float64 {
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return nil
-	}
-	file, err := os.Open(path)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil
 	}
 	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
 	index, err := keyframes.ReadMatroska(contextReaderAt{ctx: ctx, r: file}, info.Size())
 	if err != nil {
 		return nil
