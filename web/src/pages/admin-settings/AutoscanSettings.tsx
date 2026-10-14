@@ -69,9 +69,12 @@ export default function AutoscanSettings() {
   }
 
   function save() {
+    // A failed refetch hides the fields behind "Reload before editing", so the
+    // draft can no longer be seen and must not be sent.
     if (
       !activeDraft ||
       !saved ||
+      settings.isError ||
       updateSettings.isPending ||
       !readAuthority ||
       !isCapturedProfileAuthorityActive(readAuthority)

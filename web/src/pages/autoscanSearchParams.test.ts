@@ -22,6 +22,16 @@ describe("legacyAutoscanPageTarget", () => {
     expect(legacyAutoscanPageTarget("?tab=settings&source=42")).toBe("/admin/settings/autoscan");
   });
 
+  it("reads an old view parameter when there is no tab", () => {
+    expect(legacyAutoscanPageTarget("?view=activity&source=42")).toBe(
+      "/admin/autoscan/activity?source=42",
+    );
+    expect(legacyAutoscanPageTarget("?view=connections")).toBe("/admin/settings/autoscan");
+    expect(legacyAutoscanPageTarget("?tab=activity&view=settings")).toBe(
+      "/admin/autoscan/activity",
+    );
+  });
+
   it("lands an explicit or unknown tab on Sources without the tab", () => {
     expect(legacyAutoscanPageTarget("?tab=sources")).toBe("/admin/autoscan");
     expect(legacyAutoscanPageTarget("?tab=nonsense&source=42")).toBe("/admin/autoscan?source=42");

@@ -19,13 +19,16 @@ afterEach(() => {
 function setup() {
   let stored = { enabled: true, default_poll_interval_seconds: 300, debounce_seconds: 10 };
   let finish!: () => void;
+  let failReads = false;
   const writes: (typeof stored)[] = [];
   const reply = (body: unknown) =>
     new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
   vi.stubGlobal(
     "fetch",
     vi.fn((_url: unknown, init: RequestInit) => {
-      if (init.method !== "PUT") return Promise.resolve(reply(stored));
+      if (init.method !== "PUT") {
+        return Promise.resolve(failReads ? new Response("", { status: 500 }) : reply(stored));
+      }
       const body = JSON.parse(String(init.body)) as typeof stored;
       writes.push(body);
       return new Promise<Response>((resolve) => {
@@ -48,7 +51,15 @@ function setup() {
     </MemoryRouter>
   );
   const { rerender } = render(tree());
-  return { writes, finish: () => act(async () => finish()), rerender: () => rerender(tree()) };
+  return {
+    writes,
+    client,
+    failReads: () => {
+      failReads = true;
+    },
+    finish: () => act(async () => finish()),
+    rerender: () => rerender(tree()),
+  };
 }
 it.each([false, true])("explicit save keeps later edits=%s", async (changed) => {
   const f = setup();
@@ -84,5 +95,20 @@ it("does not submit a retained draft under a replacement authority", async () =>
   const reloaded = (await screen.findByLabelText("Default check interval")) as HTMLInputElement;
   expect(reloaded.value).toBe("300");
   expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  expect(f.writes).toHaveLength(0);
+});
+
+it("does not send a draft hidden by a failed refetch", async () => {
+  const f = setup();
+  const input = await screen.findByLabelText("Default check interval");
+  fireEvent.change(input, { target: { value: "120" } });
+  f.failReads();
+  await act(() => f.client.refetchQueries());
+  await screen.findByRole("alert");
+  expect(screen.queryByLabelText("Default check interval")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  // The write would go out on a later tick; let it.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
   expect(f.writes).toHaveLength(0);
 });

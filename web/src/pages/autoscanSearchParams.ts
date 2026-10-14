@@ -32,14 +32,16 @@ function target(view: string | null, rest: URLSearchParams): string {
 }
 
 /**
- * Where `/admin/autoscan?tab=…` belongs now, or null when the URL has no old
- * `tab` and is already the Sources page.
+ * Where `/admin/autoscan?tab=…` (or `?view=…`, which the one-page layout also
+ * accepted) belongs now, or null when the URL names neither and is already
+ * the Sources page.
  */
 export function legacyAutoscanPageTarget(search: string): string | null {
   const params = new URLSearchParams(search);
-  const view = params.get("tab");
+  const view = params.get("tab") ?? params.get("view");
   if (view === null) return null;
   params.delete("tab");
+  params.delete("view");
   return target(view, params);
 }
 

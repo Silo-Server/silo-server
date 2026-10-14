@@ -75,6 +75,18 @@ describe("AdminSectionCommandDialog", () => {
     expect(screen.queryByRole("searchbox", { name: "Search admin sections" })).toBeNull();
   });
 
+  it("finds a settings page listed as Settings under its topic by its own name", async () => {
+    renderDialog();
+
+    const searchBox = await openDialog();
+    await userEvent.type(searchBox, "logging");
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    await userEvent.click(options[0]!);
+
+    expect(screen.getByLabelText("Current path")).toHaveTextContent("/admin/settings/logging");
+  });
+
   it("includes admin plugin app destinations", async () => {
     const sections = buildAdminCommandNavSections([
       {

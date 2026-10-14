@@ -139,8 +139,18 @@ const TRANSCRIPTION_PRESETS = [
   },
 ] as const;
 
-/** Hosted providers in the presets above; each rejects a request without a key. */
-const KEY_REQUIRED_HOSTS = new Set(["api.openai.com", "api.groq.com", "openrouter.ai"]);
+/**
+ * Hosted providers that reject a request without a key, matched by host
+ * suffix like the server's own hosted-provider list (strictHostedASRHosts in
+ * internal/ai/llm/transcribe.go), so an Azure resource subdomain counts too.
+ */
+const KEY_REQUIRED_HOSTS = [
+  "api.openai.com",
+  "openai.azure.com",
+  "api.groq.com",
+  "api.mistral.ai",
+  "openrouter.ai",
+];
 
 /**
  * Whether an endpoint can be ready without an API key. The server sends no
@@ -150,7 +160,8 @@ const KEY_REQUIRED_HOSTS = new Set(["api.openai.com", "api.groq.com", "openroute
  * ready is how a fresh install read "Configured".
  */
 function keylessEndpoint(rawURL: string): boolean {
-  return !KEY_REQUIRED_HOSTS.has(hostLabel(rawURL).toLowerCase());
+  const host = hostLabel(rawURL).toLowerCase().replace(/:\d+$/, "");
+  return !KEY_REQUIRED_HOSTS.some((hosted) => host === hosted || host.endsWith(`.${hosted}`));
 }
 
 function hostLabel(rawURL: string): string {

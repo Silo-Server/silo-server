@@ -202,6 +202,16 @@ describe("GeneralSettings", () => {
     expect(form.setValue).toHaveBeenCalledWith("redis.db", "5");
   });
 
+  it("holds the Redis switch and database number while a save is in flight", () => {
+    settingsFormMock.mockReturnValue(
+      makeForm({ "redis.db": "3" }, { sensitiveConfigured: ["redis.url"], isSaving: true }),
+    );
+    renderPage();
+
+    expect(redis().getByRole("switch", { name: "Use Redis" })).toBeDisabled();
+    expect(redis().getByLabelText("Database number")).toBeDisabled();
+  });
+
   it("makes the Redis database number read-only when REDIS_URL comes from the environment", () => {
     settingsFormMock.mockReturnValue(
       makeForm(
@@ -260,6 +270,25 @@ describe("GeneralSettings", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Redis settings are unavailable");
     expect(screen.queryByRole("group", { name: "Redis" })).toBeNull();
     expect(network().getByLabelText("Silo public URL")).toBeEnabled();
+  });
+
+  it("saves other edits but not a Redis draft hidden by a credential status error", async () => {
+    const form = makeForm(
+      {},
+      {
+        sensitiveStatusReady: false,
+        sensitiveStatusError: true,
+        dirtyCount: 2,
+        dirtyKeys: ["server.public_url", "redis.url"],
+        isDirty: (key: string) => key === "server.public_url" || key === "redis.url",
+      },
+    );
+    settingsFormMock.mockReturnValue(form);
+    renderPage();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).toHaveBeenCalledWith(["server.public_url"]);
   });
 
   describe("editing the Redis connection", () => {

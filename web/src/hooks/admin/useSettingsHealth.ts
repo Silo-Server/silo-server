@@ -345,6 +345,7 @@ export function useSettingsAttention(): SettingsHealthItem[] {
   const searchProvider = (settings?.["catalog.search.provider"] ?? "").trim() || "postgres";
   const { data: search } = useCatalogSearchStatus(
     settings != null && searchProvider === "meilisearch",
+    { pollRebuild: false },
   );
 
   return useMemo(() => {

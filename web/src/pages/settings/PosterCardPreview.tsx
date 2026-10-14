@@ -39,17 +39,18 @@ const SAMPLES: Record<OverlayPreviewVariant, { title: string; meta: string; art:
   },
 };
 
-/**
- * How many sample posters fit each size, and how wide they are. More, smaller
- * posters for Compact is the point of the setting, so the preview shows it.
- */
 const SHORTCUT_TILE =
   "border-border/20 bg-background/80 flex size-6 items-center justify-center rounded-md border shadow-sm";
 
-const SIZE_LAYOUT: Record<CardPresentation["poster_size"], { count: number; width: string }> = {
-  compact: { count: 3, width: "w-[5.25rem]" },
-  standard: { count: 2, width: "w-[6.5rem]" },
-  large: { count: 2, width: "w-32" },
+/**
+ * How wide a sample poster is at each size. Every sample shows at every size,
+ * wrapping when the row runs out, so the request sample and the show-only
+ * badges can be previewed whatever the size.
+ */
+const POSTER_WIDTH: Record<CardPresentation["poster_size"], string> = {
+  compact: "w-[5.25rem]",
+  standard: "w-[6.5rem]",
+  large: "w-32",
 };
 
 interface PosterCardPreviewViewProps {
@@ -70,8 +71,7 @@ export function PosterCardPreviewView({
   variants,
   revealShortcuts = false,
 }: PosterCardPreviewViewProps) {
-  const { count, width } = SIZE_LAYOUT[presentation.poster_size];
-  const shown = variants.slice(0, count);
+  const width = POSTER_WIDTH[presentation.poster_size];
   const hasShortcuts = quickActionMode !== "none";
 
   return (
@@ -80,17 +80,24 @@ export function PosterCardPreviewView({
         <span className="text-sm font-semibold">Preview</span>
         <span className="text-muted-foreground text-[13px]">Updates as you change things</span>
       </figcaption>
-      <div className="flex min-h-56 items-start justify-center gap-2">
-        {shown.map((variant) => {
+      <div className="flex min-h-56 flex-wrap items-start justify-center gap-2">
+        {variants.map((variant) => {
           const sample = SAMPLES[variant];
           const data = OVERLAY_PREVIEW_SAMPLES[variant];
           const downloadPercent = overlayPrefs
             ? requestDownloadBarPercent(data, overlayPrefs)
             : null;
           return (
+            // Holding a poster on a touch screen keeps it :active, which shows
+            // its shortcuts as the hint below says. The empty touch handler is
+            // what lets iOS Safari apply :active at all.
             <div
               key={variant}
-              className={cn("group/preview shrink-0 transition-[width] duration-300", width)}
+              onTouchStart={() => {}}
+              className={cn(
+                "group/preview shrink-0 transition-[width] duration-300 select-none [-webkit-touch-callout:none]",
+                width,
+              )}
             >
               <div
                 className={cn(
@@ -111,7 +118,9 @@ export function PosterCardPreviewView({
                     aria-hidden="true"
                     className={cn(
                       "absolute bottom-1.5 left-1.5 z-20 flex gap-1 transition-opacity duration-200",
-                      revealShortcuts ? "opacity-100" : "opacity-0 group-hover/preview:opacity-100",
+                      revealShortcuts
+                        ? "opacity-100"
+                        : "opacity-0 group-hover/preview:opacity-100 group-active/preview:opacity-100",
                     )}
                   >
                     {showsWatchedQuickAction(quickActionMode) ? (

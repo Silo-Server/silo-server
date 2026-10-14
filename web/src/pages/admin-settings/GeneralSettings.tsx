@@ -61,7 +61,13 @@ export default function GeneralSettings() {
     saveInProgressRef.current = true;
     setSaveInProgress(true);
     try {
-      await form.save();
+      // While credential status is unavailable the Redis group is replaced by
+      // "Reload before editing", so its retained draft stays unsent.
+      await form.save(
+        form.sensitiveStatusError
+          ? form.dirtyKeys.filter((key) => !REDIS_KEYS.includes(key))
+          : undefined,
+      );
     } finally {
       saveInProgressRef.current = false;
       setSaveInProgress(false);

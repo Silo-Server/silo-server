@@ -446,6 +446,8 @@ describe("AISettings", () => {
   it.each([
     ["Groq", "https://api.groq.com/openai"],
     ["OpenRouter", "https://openrouter.ai/api/v1"],
+    ["Mistral", "https://api.mistral.ai/v1"],
+    ["an Azure OpenAI resource", "https://example-resource.openai.azure.com/openai"],
   ])("does not count %s ready for transcription without a key", (_name, url) => {
     values["ai.base_url"] = "http://ollama:11434";
     values["ai.asr_base_url"] = url;

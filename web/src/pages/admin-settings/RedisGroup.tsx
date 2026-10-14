@@ -80,6 +80,9 @@ export function RedisGroup({
         }
         value={enabled ? "true" : "false"}
         onChange={(value) => {
+          // The switch stages or takes back the credential, so it holds still
+          // while a save is in flight, like the URL field below.
+          if (secrets.disabled) return;
           if (value === "true") {
             setEnabledOverride(true);
             // Takes back a staged switch-off, which cleared the number too.
@@ -90,7 +93,7 @@ export function RedisGroup({
           setEnabledOverride(false);
           stageRedisUrl(form, "");
         }}
-        disabled={managedByEnv}
+        disabled={managedByEnv || secrets.disabled}
         restartRequired={restartKeys.has("redis.url")}
       />
       {enabled && (
@@ -123,8 +126,10 @@ export function RedisGroup({
                 : "Replaces the number in the URL. Installs sharing one Redis each need their own."
             }
             value={form.getValue("redis.db")}
-            onChange={(v) => form.setValue("redis.db", v)}
-            disabled={managedByEnv}
+            onChange={(v) => {
+              if (!secrets.disabled) form.setValue("redis.db", v);
+            }}
+            disabled={managedByEnv || secrets.disabled}
             restartRequired={restartKeys.has("redis.db")}
           />
           {/*

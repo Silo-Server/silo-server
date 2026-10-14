@@ -438,13 +438,20 @@ export function useCheckAdminSettingsConnection() {
   });
 }
 
-export function useCatalogSearchStatus(enabled = true) {
+/**
+ * Search status. The Search page polls it every 2s while an index rebuild is
+ * pending; `pollRebuild: false` is for readers that sit on every admin page
+ * (the sidebar's health dots), where that poll would run a full-catalog count
+ * on the server every 2s from anywhere in admin.
+ */
+export function useCatalogSearchStatus(enabled = true, { pollRebuild = true } = {}) {
   return useQuery({
     queryKey: adminKeys.catalogSearchStatus(),
     queryFn: ({ signal }) => v2("GET /api/v2/admin/catalog/search/status", { signal }),
     enabled,
     staleTime: 15_000,
-    refetchInterval: (query) => (query.state.data?.index.rebuild_required ? 2_000 : false),
+    refetchInterval: (query) =>
+      pollRebuild && query.state.data?.index.rebuild_required ? 2_000 : false,
   });
 }
 

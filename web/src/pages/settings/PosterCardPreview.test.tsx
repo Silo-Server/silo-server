@@ -24,13 +24,17 @@ function markup(props: Partial<Parameters<typeof PosterCardPreviewView>[0]> = {}
 }
 
 describe("PosterCardPreviewView", () => {
-  it("shows more, smaller posters for Compact", () => {
-    expect(markup().match(/aspect-\[2\/3\]/g)).toHaveLength(2);
-    expect(
-      markup({ presentation: { poster_size: "compact", caption: "title" } }).match(
-        /aspect-\[2\/3\]/g,
-      ),
-    ).toHaveLength(3);
+  // Every sample shows at every size, so the request sample and show-only
+  // badges can be previewed at Standard, the default, too.
+  it("shows every sample at every size, narrower for Compact", () => {
+    for (const poster_size of ["compact", "standard", "large"] as const) {
+      const html = markup({ presentation: { poster_size, caption: "title" } });
+      expect(html.match(/aspect-\[2\/3\]/g)).toHaveLength(3);
+      expect(html).toContain("Glass Harbor");
+    }
+    expect(markup({ presentation: { poster_size: "compact", caption: "title" } })).toContain(
+      "w-[5.25rem]",
+    );
   });
 
   it("follows the caption choice", () => {

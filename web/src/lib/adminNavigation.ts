@@ -289,7 +289,8 @@ const PAGES = {
 
 /**
  * A settings page as a sidebar entry. Under a topic that also holds tools the
- * page is just "Settings"; the topic already says whose.
+ * page is just "Settings"; the topic already says whose. Its own name stays a
+ * keyword, so searching "Logging" still finds Logs › Settings.
  */
 function settingsPage(id: string, label?: string): AdminNavItem {
   const page = ADMIN_SETTINGS_NAV.find((item) => item.id === id);
@@ -297,7 +298,7 @@ function settingsPage(id: string, label?: string): AdminNavItem {
   return {
     label: label ?? page.label,
     description: page.description,
-    keywords: ["settings", "configuration", ...(page.keywords ?? [])],
+    keywords: ["settings", "configuration", page.label, ...(page.keywords ?? [])],
     settings: page.settings,
     icon: page.icon,
     href: adminSettingsHref(id),
