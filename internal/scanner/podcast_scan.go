@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -66,13 +67,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				continue
 			}
 			attempted++
-			if paths, err := listPodcastShowAudioFiles(subPath, rootIgnoreRules); err == nil {
-				for _, path := range paths {
-					seenPaths[path] = true
-				}
-			}
-			episodePaths, err := s.reconcilePodcastShow(ctx, folder, subPath, rootIgnoreRules)
-			if err != nil {
+			if err := s.indexPodcastShow(ctx, folder, subPath, rootIgnoreRules, seenPaths); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
@@ -85,17 +80,103 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				// Continue with siblings — one bad show should not stop the scan.
 				continue
 			}
-			for _, path := range episodePaths {
-				seenPaths[path] = true
-			}
 			succeeded++
 		}
 	}
 	if attempted > 0 && succeeded == 0 && failures.len() > 0 {
 		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, failures.join())
 	}
-	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths); err != nil {
+	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths, true); err != nil {
 		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
+	}
+	return nil
+}
+
+// scanPodcastSubtree scans the part of a podcast library under subtreePath
+// with the podcast pipeline. A library root scans the whole library, as the
+// scan resolver already does for a root path. Any other path stands for the
+// show folder that holds it: that show is indexed the way a full scan indexes
+// it, and missing-file reconciliation is limited to the show folder.
+func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) error {
+	if s == nil || folder == nil {
+		return fmt.Errorf("scanPodcastSubtree: nil scanner or folder")
+	}
+	showPath := podcastShowFolder(subtreePath, folder.Paths)
+	if showPath == "" {
+		if scopeLibraryRoot(subtreePath, folder.Paths) == "" {
+			return fmt.Errorf("podcast scan: %s is not inside a library root of folder_id=%d", subtreePath, folder.ID)
+		}
+		return s.ScanPodcastFolder(ctx, folder)
+	}
+
+	// Lstat, like the full scan's directory listing: a full scan only treats
+	// real directories under the root as shows, so a subtree scan must not
+	// index a symlink or a loose file that the next full scan would retire.
+	info, err := os.Lstat(showPath)
+	if err != nil {
+		// Like the other subtree scans, a scope that cannot be inspected is
+		// left alone rather than reconciled; a vanished show is retired by the
+		// next full library scan.
+		slog.WarnContext(ctx, "podcast scan: show folder unavailable; leaving it to a full library scan", "component", "scanner",
+			"folder_id", folder.ID,
+			"path", showPath,
+			"error", err,
+		)
+		return nil
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	rootIgnoreRules, ignored, err := scanRootIgnoreRules(showPath, folder.Paths)
+	if err != nil {
+		return fmt.Errorf("podcast scan: %w", err)
+	}
+	seenPaths := make(map[string]bool)
+	if !ignored {
+		if err := s.indexPodcastShow(ctx, folder, showPath, rootIgnoreRules, seenPaths); err != nil {
+			return fmt.Errorf("podcast scan: show %s: %w", showPath, err)
+		}
+	}
+	if err := s.reconcilePodcastMissingFiles(ctx, folder, []string{showPath}, seenPaths, false); err != nil {
+		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
+	}
+	return nil
+}
+
+// podcastShowFolder returns the show folder that holds path in a podcast
+// library: the first directory below the most specific library root that
+// contains path. It returns "" for a library root itself and for a path
+// outside every root.
+func podcastShowFolder(path string, libraryRoots []string) string {
+	cleanPath := filepath.Clean(path)
+	root := scopeLibraryRoot(cleanPath, libraryRoots)
+	if root == "" || root == cleanPath {
+		return ""
+	}
+	rel, err := filepath.Rel(root, cleanPath)
+	if err != nil {
+		return ""
+	}
+	show, _, _ := strings.Cut(rel, string(filepath.Separator))
+	return filepath.Join(root, show)
+}
+
+// indexPodcastShow reconciles one show folder and records its episode files
+// in seenPaths. The files are recorded before the show is parsed, so a show
+// that fails to parse keeps its catalog rows instead of having them marked
+// missing.
+func (s *Scanner) indexPodcastShow(ctx context.Context, folder *models.MediaFolder, showPath string, rootIgnoreRules []ignoreRules, seenPaths map[string]bool) error {
+	if paths, err := listPodcastShowAudioFiles(showPath, rootIgnoreRules); err == nil {
+		for _, path := range paths {
+			seenPaths[path] = true
+		}
+	}
+	episodePaths, err := s.reconcilePodcastShow(ctx, folder, showPath, rootIgnoreRules)
+	if err != nil {
+		return err
+	}
+	for _, path := range episodePaths {
+		seenPaths[path] = true
 	}
 	return nil
 }
@@ -227,13 +308,18 @@ func applyPodcastShowMetadata(item *models.MediaItem, show *parsedPodcastShow) b
 	return changed
 }
 
-func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool) error {
+// reconcilePodcastMissingFiles marks the cataloged files under roots that the
+// scan did not see as missing, then reconciles memberships. fullScan is false
+// for a subtree scan, which never consumes the folder's empty-cleanup
+// confirmation: a show folder that walked empty keeps its rows until a full
+// library scan decides.
+func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, fullScan bool) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
 
 	confirmedCleanup, blockAll, err := s.emptyCleanupDecision(
-		ctx, folder, roots, seenPaths, true, "podcast",
+		ctx, folder, roots, seenPaths, fullScan, "podcast",
 	)
 	if err != nil {
 		return err
