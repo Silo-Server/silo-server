@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 const routeBackendLimitV3 = 8

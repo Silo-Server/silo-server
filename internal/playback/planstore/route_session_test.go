@@ -14,9 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func TestPostgresRouteSessionCASPreservesAttempt(t *testing.T) {
