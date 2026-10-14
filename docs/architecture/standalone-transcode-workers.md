@@ -153,6 +153,13 @@ delayed stop from removing a successor. Worker source handles and producers are
 closed by the exact affected generation. Reconstruction obtains the latest
 core-authorized recipe and fresh source grants; it cannot reconstruct from
 token-carried filesystem paths alone.
+
+Report registrations also identify the exact local producer instance. The
+engine reserves that registration before scheduling asynchronous reporting;
+retirement makes later updates inert. An old registration cannot replace or
+remove a successor, including reconstruction within the same assignment
+generation. Legacy network-backed tracking stays asynchronous.
+
 Enrolled standalone HLS workers require a stored core recipe for both client
 authentication modes. The core classifies the selected node before dispatch and
 persists the accepted recipe before publishing a client or proxy route. Existing

@@ -56,12 +56,13 @@ func (w *stopStatusWriter) Write(body []byte) (int, error) {
 }
 
 type stopFixture struct {
-	runtime *Runtime
-	worker  *httptest.Server
-	service *workercontrolcore.Service
-	store   *workercontrolcore.MemoryStore
-	source  string
-	stops   chan stopObservation
+	corePrivate ed25519.PrivateKey
+	runtime     *Runtime
+	worker      *httptest.Server
+	service     *workercontrolcore.Service
+	store       *workercontrolcore.MemoryStore
+	source      string
+	stops       chan stopObservation
 }
 
 type stopNodes struct{ node workercontrolcore.Node }
@@ -111,7 +112,7 @@ func newStopFixture(t *testing.T) *stopFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runtime.Close(context.Background()) })
-	f := &stopFixture{runtime: runtime, worker: worker, service: service, store: store, stops: make(chan stopObservation, 8), source: filepath.Join(t.TempDir(), "source.bin")}
+	f := &stopFixture{corePrivate: corePrivate, runtime: runtime, worker: worker, service: service, store: store, stops: make(chan stopObservation, 8), source: filepath.Join(t.TempDir(), "source.bin")}
 	if err := os.WriteFile(f.source, []byte("0123456789"), 0600); err != nil {
 		t.Fatal(err)
 	}

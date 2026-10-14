@@ -126,3 +126,13 @@
 
 # An expired lookup must preserve a concurrent live replacement.
 ./internal/jellycompat TestMemorySessionExpiredGetPreservesConcurrentReplacement
+
+# Async monitoring belongs to an exact producer instance and assignment generation.
+./internal/workercontrol TestDelayedTrackerCannotResurrectStoppedOrOverwriteNewGeneration
+./internal/workercontrol TestDelayedTrackerRetirementPreservesSameGenerationReconstruction
+./internal/workercontrol TestTrackerRegistrationRevokePromotionAndCleanupAreExact
+./internal/transcodenode TestPreparedTranscodeTrackingRetiresOnIdleReloadAndShutdown
+./internal/transcodenode TestPreparedTrackingRejectedOrFailedSpawnDoesNotUseLegacy
+./internal/transcodenode TestPreparedDownloadTrackingOwnsExactCleanup
+./internal/transcodenode TestPreparedProgressiveTrackingOwnsExactCleanup
+./internal/transcodenode TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack

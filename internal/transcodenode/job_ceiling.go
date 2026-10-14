@@ -25,8 +25,9 @@ type jobCeiling struct {
 }
 
 type sessionJobLease struct {
-	context context.Context
-	release func()
+	tracking SessionTracking
+	context  context.Context
+	release  func()
 }
 
 // SetJobCeiling sets the local operator's concurrent work ceiling. Zero keeps
@@ -104,13 +105,13 @@ func (c *jobCeiling) release(key jobKey) func() {
 	})
 }
 
-func (s *Server) holdSessionJob(session *playback.TranscodeSession, ctx context.Context, release func()) {
+func (s *Server) holdSessionJob(session *playback.TranscodeSession, ctx context.Context, release func(), tracking SessionTracking) {
 	s.jobs.mu.Lock()
 	defer s.jobs.mu.Unlock()
 	if s.jobs.sessions == nil {
 		s.jobs.sessions = map[*playback.TranscodeSession]sessionJobLease{}
 	}
-	s.jobs.sessions[session] = sessionJobLease{context: ctx, release: release}
+	s.jobs.sessions[session] = sessionJobLease{context: ctx, release: release, tracking: tracking}
 }
 
 func (s *Server) sessionJobContext(ctx context.Context, session *playback.TranscodeSession) context.Context {
@@ -128,6 +129,9 @@ func (s *Server) releaseSessionJob(session *playback.TranscodeSession) {
 	lease := s.jobs.sessions[session]
 	delete(s.jobs.sessions, session)
 	s.jobs.mu.Unlock()
+	if lease.tracking != nil {
+		lease.tracking.Remove(context.Background())
+	}
 	if lease.release != nil {
 		lease.release()
 	}

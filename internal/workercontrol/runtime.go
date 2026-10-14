@@ -543,6 +543,7 @@ func (r *Runtime) publishStaged(work string, generation uint64) {
 	old := r.handles[work]
 	r.handles[work] = handles
 	r.generations[work] = generation
+	r.tracker.retireGenerationLocked(work, generation, true)
 	closeHandles(old)
 }
 func (r *Runtime) discardStaged(work string, generation uint64) {
@@ -672,6 +673,7 @@ func (r *Runtime) revoked(workID string, generation uint64) {
 		delete(r.generations, workID)
 		delete(r.handles, workID)
 	}
+	r.tracker.retireGenerationLocked(workID, generation, false)
 	r.mu.Unlock()
 	closeHandles(pending)
 	paths := make([]string, 0, len(active))

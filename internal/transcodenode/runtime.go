@@ -189,6 +189,6 @@ func (s *Server) StopWorkInputs(ctx context.Context, sessionID string, inputs []
 	s.mu.Unlock()
 	if session != nil {
 		_ = s.closeSessionOffGPU(session)
-		s.tracker.Remove(ctx, sessionID)
+		s.removeLegacyTracking(ctx, sessionID)
 	}
 }

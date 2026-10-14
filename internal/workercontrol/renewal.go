@@ -250,6 +250,7 @@ func (r *Runtime) completeSourceWork(work string, generation uint64, handles map
 			delete(r.handles, work)
 		}
 		r.generations[work] = generation
+		r.tracker.retireGenerationLocked(work, generation, true)
 	}
 	r.mu.Unlock()
 	closeHandles(pending)

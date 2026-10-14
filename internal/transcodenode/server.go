@@ -278,6 +278,7 @@ type sessionTracker interface {
 }
 
 type progressiveRemuxRequest struct {
+	tracking          SessionTracking
 	inputPath         string
 	id                uint64
 	playbackSessionID string
@@ -803,7 +804,7 @@ func (s *Server) reapSession(sessionID string, session *playback.TranscodeSessio
 		slog.Error("close idle transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 	}
 	if s.tracker != nil {
-		s.tracker.Remove(context.Background(), sessionID)
+		s.removeLegacyTracking(context.Background(), sessionID)
 	}
 	slog.Info("transcode node reaped idle session", "component", "transcodenode",
 		"session", sessionID, "playback_session_id", sessionID, "idle_ms", time.Since(last).Milliseconds())
@@ -1341,14 +1342,15 @@ func (s *Server) trackDownloadPrepare(ctx context.Context, info nodesessions.Ses
 	finished := make(chan struct{})
 	var finishOnce sync.Once
 	baseCtx := context.WithoutCancel(ctx)
+	tracking := s.prepareTracking(ctx, info)
 	go func() {
 		trackCtx, cancelTrack := context.WithTimeout(baseCtx, sessionTrackingOperationTimeout)
-		s.tracker.Track(trackCtx, info)
+		s.trackPrepared(trackCtx, info, tracking)
 		cancelTrack()
 
 		<-finished
 		removeCtx, cancelRemove := context.WithTimeout(baseCtx, sessionTrackingOperationTimeout)
-		s.tracker.Remove(removeCtx, info.SessionID)
+		s.removePrepared(removeCtx, info.SessionID, tracking)
 		cancelRemove()
 	}()
 	return func() {
@@ -1871,7 +1873,20 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	s.holdSessionJob(session, jobContext, releaseJob)
+	trackingInfo := nodesessions.SessionInfo{
+		SessionID:   req.SessionID,
+		NodeURL:     s.tracker.NodeURL(),
+		NodeName:    s.tracker.NodeName(),
+		Type:        "transcode",
+		CodecVideo:  req.TargetCodecVideo,
+		CodecAudio:  req.TargetCodecAudio,
+		Resolution:  req.TargetResolution,
+		HWAccel:     session.Opts().EffectiveEncoderHWAccel(),
+		ToneMapMode: string(session.Opts().ToneMapMode),
+		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+	tracking := s.prepareTracking(r.Context(), trackingInfo)
+	s.holdSessionJob(session, jobContext, releaseJob, tracking)
 	releaseJob = nil
 	s.sessions[req.SessionID] = session
 	published = true
@@ -1887,18 +1902,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	effectiveHWAccel := session.Opts().HWAccel
 	encoderHWAccel := session.Opts().EffectiveEncoderHWAccel()
 	trackCtx := context.WithoutCancel(r.Context())
-	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
-		SessionID:   req.SessionID,
-		NodeURL:     s.tracker.NodeURL(),
-		NodeName:    s.tracker.NodeName(),
-		Type:        "transcode",
-		CodecVideo:  req.TargetCodecVideo,
-		CodecAudio:  req.TargetCodecAudio,
-		Resolution:  req.TargetResolution,
-		HWAccel:     encoderHWAccel,
-		ToneMapMode: string(session.Opts().ToneMapMode),
-		StartedAt:   time.Now().UTC().Format(time.RFC3339),
-	})
+	go s.trackPrepared(trackCtx, trackingInfo, tracking)
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(TranscodeStartResponse{
@@ -2223,16 +2227,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		_ = session.CloseProcess()
 		return existing, nil
 	}
-	s.holdSessionJob(session, jobContext, releaseJob)
-	releaseJob = nil
-	s.sessions[sessionID] = session
-	s.noteSessionAccessLocked(sessionID)
-	s.mu.Unlock()
-	s.activeJobs.Add(1)
-	s.armSessionThrottler(session, card.ThrottleSeconds)
-
-	trackCtx := context.WithoutCancel(r.Context())
-	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
+	trackingInfo := nodesessions.SessionInfo{
 		SessionID:   sessionID,
 		NodeURL:     s.tracker.NodeURL(),
 		NodeName:    s.tracker.NodeName(),
@@ -2246,7 +2241,18 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		AuthUserID:  card.UserID,
 		ProfileID:   card.ProfileID,
 		MediaFileID: card.MediaFileID,
-	})
+	}
+	tracking := s.prepareTracking(r.Context(), trackingInfo)
+	s.holdSessionJob(session, jobContext, releaseJob, tracking)
+	releaseJob = nil
+	s.sessions[sessionID] = session
+	s.noteSessionAccessLocked(sessionID)
+	s.mu.Unlock()
+	s.activeJobs.Add(1)
+	s.armSessionThrottler(session, card.ThrottleSeconds)
+
+	trackCtx := context.WithoutCancel(r.Context())
+	go s.trackPrepared(trackCtx, trackingInfo, tracking)
 
 	slog.InfoContext(r.Context(), "transcode node session reconstructed from token", "component", "transcodenode",
 		"session", sessionID, "playback_session_id", sessionID,
@@ -2291,7 +2297,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("close session %s: %w", victim.id, err))
 		}
 		if s.tracker != nil {
-			s.tracker.Remove(ctx, victim.id)
+			s.removeLegacyTracking(ctx, victim.id)
 		}
 	}
 	waitCtx, cancelWait := context.WithTimeout(ctx, progressiveRemuxShutdownTimeout)
@@ -2467,8 +2473,26 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session already active", http.StatusConflict)
 		return
 	}
+	var tracking SessionTracking
+	var trackingInfo nodesessions.SessionInfo
+	if s.tracker != nil {
+		startedAt, source := claims.StartedAt()
+		if source == streamtoken.StartedAtSourceNone {
+			startedAt = time.Now().UTC()
+		}
+		trackerType := string(playback.PlayRemux)
+		if theme {
+			trackerType = "theme_audio"
+		}
+		trackingInfo = nodesessions.SessionInfo{
+			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: trackerType,
+			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
+			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
+		}
+		tracking = s.prepareTracking(ctx, trackingInfo)
+	}
 	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{
-		id: requestID, playbackSessionID: playbackSessionID, cancel: stop, done: done, inputPath: claims.MediaPath,
+		id: requestID, playbackSessionID: playbackSessionID, cancel: stop, done: done, inputPath: claims.MediaPath, tracking: tracking,
 	}
 	s.mu.Unlock()
 	unlock()
@@ -2486,20 +2510,8 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	s.activeJobs.Add(1)
 	defer s.activeJobs.Add(-1)
 	if s.tracker != nil {
-		startedAt, source := claims.StartedAt()
-		if source == streamtoken.StartedAtSourceNone {
-			startedAt = time.Now().UTC()
-		}
-		trackerType := "remux"
-		if theme {
-			trackerType = "theme_audio"
-		}
-		s.tracker.Track(ctx, nodesessions.SessionInfo{
-			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: trackerType,
-			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
-			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
-		})
-		defer s.tracker.Remove(context.WithoutCancel(ctx), playbackSessionID)
+		s.trackPrepared(ctx, trackingInfo, tracking)
+		defer s.removePrepared(context.WithoutCancel(ctx), playbackSessionID, tracking)
 	}
 
 	request := r.WithContext(ctx)
@@ -2672,7 +2684,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.tracker != nil {
-		s.tracker.Remove(r.Context(), playbackSessionID)
+		s.removeLegacyTracking(r.Context(), playbackSessionID)
 	}
 	var shutdownErr error
 	if progressiveFound {
@@ -3083,7 +3095,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 		// also wipe unrelated tracker-only work, such as an active download
 		// preparation, even though force reload does not stop that job.
 		if s.tracker != nil {
-			s.tracker.Remove(ctx, victim.id)
+			s.removeLegacyTracking(ctx, victim.id)
 		}
 		unlock()
 	}
@@ -3113,7 +3125,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 			if trackerSessionID == "" {
 				trackerSessionID = id
 			}
-			s.tracker.Remove(ctx, trackerSessionID)
+			s.removePrepared(ctx, trackerSessionID, request.tracking)
 		}
 	}
 

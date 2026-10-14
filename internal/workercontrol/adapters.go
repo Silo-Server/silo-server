@@ -58,41 +58,27 @@ func (a inputAuthorizer) AllowedTheme(_ context.Context, _ int64, path string, _
 }
 
 type reportTracker struct {
-	runtime  *Runtime
-	mu       sync.Mutex
-	sessions map[string]nodesessions.SessionInfo
-	scopes   map[string]workerwire.SessionReport
+	runtime       *Runtime
+	mu            sync.Mutex
+	sessions      map[string]nodesessions.SessionInfo
+	scopes        map[string]workerwire.SessionReport
+	registrations map[string]*reportRegistration
 }
 
 func (t *reportTracker) Track(ctx context.Context, info nodesessions.SessionInfo) {
-	work, _ := ctx.Value(workContextKey{}).(string)
-	generation, _ := ctx.Value(generationContextKey{}).(uint64)
-	if work == "" {
-		work = info.SessionID
+	if registration := t.PrepareSessionTracking(ctx, info); registration != nil {
+		registration.Track(ctx)
 	}
-	if generation == 0 {
-		t.runtime.mu.Lock()
-		generation = t.runtime.generations[work]
-		t.runtime.mu.Unlock()
-	}
-	t.mu.Lock()
-	if t.scopes == nil {
-		t.scopes = make(map[string]workerwire.SessionReport)
-	}
-	t.sessions[info.SessionID] = info
-	t.scopes[info.SessionID] = workerwire.SessionReport{WorkID: work, Generation: generation, Info: info}
-	t.mu.Unlock()
 }
-func (t *reportTracker) Remove(_ context.Context, id string) {
-	t.mu.Lock()
-	delete(t.sessions, id)
-	delete(t.scopes, id)
-	t.mu.Unlock()
-}
+
+// Remove cannot infer an instance from a session ID. The prepared worker
+// engine retires the exact receipt; the legacy callback has no deletion rights.
+func (t *reportTracker) Remove(context.Context, string) {}
 func (t *reportTracker) Cleanup(context.Context) {
 	t.mu.Lock()
 	clear(t.sessions)
 	clear(t.scopes)
+	clear(t.registrations)
 	t.mu.Unlock()
 }
 func (t *reportTracker) NodeURL() string  { return t.runtime.options.Binding.NodeURL }
@@ -251,6 +237,7 @@ func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.C
 		}
 		r.mu.Lock()
 		r.generations[workID] = grant.Generation
+		r.tracker.retireGenerationLocked(workID, grant.Generation, true)
 		r.mu.Unlock()
 		claims.MediaPath = ""
 	}

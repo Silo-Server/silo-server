@@ -28,6 +28,9 @@ func observationRuntime(t *testing.T) (*Runtime, context.Context) {
 	if err := r.authority.Apply(workerwire.Snapshot{Version: 1, NodeID: 17, BootID: r.bootID, Nonce: "observation", Sequence: 1, Active: map[string]uint64{"work": 1}, ValidForMillis: 2000}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	r.mu.Lock()
+	r.generations["work"] = 1
+	r.mu.Unlock()
 	ctx := context.WithValue(t.Context(), workContextKey{}, "work")
 	ctx = context.WithValue(ctx, generationContextKey{}, uint64(1))
 	return r, ctx
@@ -164,6 +167,9 @@ func TestObservationsForwardOnlyThroughSignedHTTPReport(t *testing.T) {
 	if err := r.authority.Apply(workerwire.Snapshot{Version: 1, NodeID: 17, BootID: r.bootID, Nonce: "http-report", Sequence: 1, Active: map[string]uint64{"work": 1}, ValidForMillis: 2000}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	r.mu.Lock()
+	r.generations["work"] = 1
+	r.mu.Unlock()
 	ctx := context.WithValue(t.Context(), workContextKey{}, "work")
 	ctx = context.WithValue(ctx, generationContextKey{}, uint64(1))
 	r.tracker.Track(ctx, nodesessions.SessionInfo{SessionID: "viewer", Type: "transcode"})
