@@ -869,9 +869,10 @@ export function VideoPlayer({
   });
   const roomPlaybackActive = !!watchTogetherRoomId && !watchTogether.closedReason;
   // The viewer's speed for this player session. A room plays everyone at 1x
-  // and nudges the rate itself to keep viewers together.
+  // and nudges the rate itself to keep viewers together. The browser engine
+  // also plays at 1x: its audio follows the rate without keeping pitch.
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const baseRate = roomPlaybackActive ? 1 : playbackSpeed;
+  const baseRate = roomPlaybackActive || browserEngineActive ? 1 : playbackSpeed;
   const roomSyncWaiting = watchTogether.room?.playback_state === "waiting";
   // Media events acknowledge readiness while the room waits and while this
   // viewer recovers from a stall the room did not wait for.
@@ -4549,7 +4550,9 @@ export function VideoPlayer({
               : undefined
           }
           playbackSpeed={playbackSpeed}
-          onPlaybackSpeedChange={roomPlaybackActive ? undefined : setPlaybackSpeed}
+          onPlaybackSpeedChange={
+            roomPlaybackActive || browserEngineActive ? undefined : setPlaybackSpeed
+          }
           onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
           onPlayPause={handlePlayPause}
           onSeek={handlePlayerSeek}

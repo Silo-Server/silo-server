@@ -3088,6 +3088,33 @@ describe("VideoPlayer source timeline", () => {
     await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-1.4));
   });
 
+  // The engine's audio follows playbackRate without keeping pitch, so it plays
+  // at 1x and the speed control is hidden, as in a Watch Party.
+  it("plays the browser engine at 1x and hides the speed control", async () => {
+    const engine = {
+      containers: ["mkv"],
+      videoCodecs: ["h264"],
+      audioCodecs: ["aac"],
+      hdr: false,
+    };
+    const { container, rerenderPlayer } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    act(() => controls.current!.onPlaybackSpeedChange!(1.5));
+    expect(video.playbackRate).toBe(1.5);
+
+    engineRoute.chosen = true;
+    try {
+      rerenderPlayer({ planRevision: 2, browserEngine: engine });
+      await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalled());
+      await waitFor(() => expect(controls.current!.onPlaybackSpeedChange).toBeUndefined());
+      expect(video.playbackRate).toBe(1);
+    } finally {
+      engineRoute.chosen = false;
+    }
+  });
+
   // Written to the element before metadata, a seek would become the default
   // start position and be read back as the clock origin.
   it("holds a direct-play seek made before metadata until the origin is known", async () => {
