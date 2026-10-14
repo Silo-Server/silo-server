@@ -89,6 +89,10 @@ func sheetKeyframes(ctx context.Context, req Request) []float64 {
 	}()
 	select {
 	case keyframes := <-found:
+		// A lookup can finish just as the wait ends; the run has moved on.
+		if ctx.Err() != nil {
+			return nil
+		}
 		return keyframes
 	case <-ctx.Done():
 		return nil
