@@ -431,12 +431,12 @@ describe("StorageSettings", () => {
     expect(screen.queryByRole("group", { name: "S3 storage" })).not.toBeInTheDocument();
   });
 
-  // Public storage serves only S3 and Automatic. Private storage still works on
-  // local disk, so it folds into one optional row there.
+  // Public storage serves only S3 and Automatic, and local disk keeps private
+  // files in the local path, so Local disk shows neither bucket section.
   it.each([
     ["Local disk", ""],
     ["Local disk with a leftover public bucket", "artwork"],
-  ])("hides public storage and folds private storage for %s", async (_, savedBucket) => {
+  ])("hides both bucket sections for %s", (_, savedBucket) => {
     mockForm({
       getPersistedValue: (key: string) =>
         key === "artwork.storage_backend" ? "local" : key === "s3.public_bucket" ? savedBucket : "",
@@ -452,14 +452,11 @@ describe("StorageSettings", () => {
     render(<StorageSettings />);
 
     expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
-    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
-    expect(privateStorage.queryByLabelText("Bucket")).not.toBeInTheDocument();
-    await userEvent.click(
-      privateStorage.getByRole("button", { name: "Keep private files in an S3 bucket" }),
-    );
-    expect(privateStorage.getByLabelText("Bucket")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Private storage" })).not.toBeInTheDocument();
   });
 
+  // A saved private bucket holds the avatars even on local disk, so it stays
+  // in view where it can be changed or cleared.
   it("keeps a saved private bucket in view on Local disk", () => {
     mockForm({
       getPersistedValue: (key: string) =>
@@ -523,7 +520,9 @@ describe("StorageSettings", () => {
     render(<StorageSettings />);
 
     const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
-    expect(privateStorage.getByText(/Optional on local disk/)).toBeInTheDocument();
+    expect(
+      privateStorage.getByText(/on local disk they stay in the local storage path/),
+    ).toBeInTheDocument();
     for (const label of [
       "Endpoint",
       "Bucket",
@@ -852,13 +851,9 @@ describe("StorageSettings", () => {
     expect(screen.getByRole("switch", { name: "Save provider artwork to storage" })).toBeEnabled();
     expect(screen.getByRole("combobox", { name: "Backend" })).toBeDisabled();
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();
-    expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
-    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
-    await userEvent.click(
-      privateStorage.getByRole("button", { name: "Keep private files in an S3 bucket" }),
-    );
-    expect(privateStorage.getByLabelText("Endpoint")).toBeDisabled();
-    expect(privateStorage.getByLabelText("Bucket")).toBeDisabled();
+    for (const name of ["Public storage", "Private storage"]) {
+      expect(screen.queryByRole("group", { name })).not.toBeInTheDocument();
+    }
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(form.save).toHaveBeenCalledWith(["metadata.cache_images"]);
     expect(createStorageTransitionMock).not.toHaveBeenCalled();
@@ -1144,11 +1139,17 @@ describe("StorageSettings", () => {
       dirtyCount: 2,
       dirtyKeys: ["artwork.local_path", "metadata.cache_images"],
       isDirty: (key: string) => key === "artwork.local_path" || key === "metadata.cache_images",
+      // A saved private bucket keeps Private storage on the Local disk page.
       getPersistedValue: (key: string) =>
-        key === "artwork.local_path" ? "/srv/silo/artwork-old" : "",
+        key === "artwork.local_path"
+          ? "/srv/silo/artwork-old"
+          : key === "s3.private_bucket"
+            ? "ops"
+            : "",
       getValue: (key: string) => {
         if (key === "artwork.storage_backend") return "local";
         if (key === "artwork.local_path") return "/srv/silo/artwork-new";
+        if (key === "s3.private_bucket") return "ops";
         if (key === "s3.public_url_auth") return "presigned";
         return "";
       },
@@ -1156,9 +1157,6 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
     const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
-    await userEvent.click(
-      privateStorage.getByRole("button", { name: "Keep private files in an S3 bucket" }),
-    );
     expect(privateStorage.getByLabelText("Endpoint")).toBeEnabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -1843,6 +1841,7 @@ describe("StorageSettings", () => {
 
       await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
       await userEvent.click(screen.getByRole("option", { name: "S3" }));
+      expect(screen.getByRole("group", { name: "Private storage" })).toBeInTheDocument();
       const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
       await userEvent.type(publicStorage.getByLabelText("Bucket"), "artwork");
       await userEvent.click(screen.getByRole("button", { name: "Save" }));

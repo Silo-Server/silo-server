@@ -243,7 +243,6 @@ function S3Group({
   artworkLockedBackend,
   publicBackendChangePending = false,
   locationFieldsDisabled = false,
-  optionalTitle,
 }: {
   form: SettingsForm;
   restartKeys: RestartKeyMatcher;
@@ -255,8 +254,6 @@ function S3Group({
   artworkLockedBackend?: string;
   publicBackendChangePending?: boolean;
   locationFieldsDisabled?: boolean;
-  /** When set, the fields fold into one closed row with this title. */
-  optionalTitle?: string;
 }) {
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
@@ -289,8 +286,8 @@ function S3Group({
     }
   }
 
-  const fields = (
-    <>
+  return (
+    <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
       <SettingField
         label="Endpoint"
         hint="https://s3.us-east-1.amazonaws.com"
@@ -458,26 +455,6 @@ function S3Group({
           )}
         </>
       )}
-    </>
-  );
-
-  return (
-    <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
-      {optionalTitle ? (
-        // Open while a bucket is saved or a field holds an unsaved edit, so a
-        // configured bucket or a pending change is never folded away.
-        <AdvancedSection
-          id={`storage.s3.${scope}.optional`}
-          title={optionalTitle}
-          forceOpen={
-            Boolean(form.getPersistedValue(key("bucket")).trim()) || countDirty(form, keys) > 0
-          }
-        >
-          {fields}
-        </AdvancedSection>
-      ) : (
-        fields
-      )}
     </FieldGroup>
   );
 }
@@ -547,6 +524,14 @@ export default function StorageSettings() {
   // A local install can keep its operational data in a private bucket, which a
   // copy policy has to read just like an S3 source.
   const persistedPrivateBucket = form.getPersistedValue("s3.private_bucket").trim();
+  // Public storage only serves S3 and Automatic, so Local disk hides it unless
+  // one of its fields holds an unsaved edit; choosing S3 stages the backend,
+  // which brings it back before any transition review. Local disk keeps
+  // avatars, diagnostics, and catalog artifacts in the local path too, so
+  // private storage shows there only while a saved or staged bucket holds them.
+  const showPublicStorage = !localDiskSelected || countDirty(form, PUBLIC_S3_KEYS) > 0;
+  const showPrivateStorage =
+    !localDiskSelected || Boolean(persistedPrivateBucket) || countDirty(form, PRIVATE_S3_KEYS) > 0;
   const currentSourceUsesS3 = currentSourceIsS3 || Boolean(persistedPrivateBucket);
   const recoveryHealth = useStorageTransitionSourceHealth(false, managedTransitionsAvailable);
   const sourceHealth = useStorageTransitionSourceHealth(
@@ -1293,10 +1278,7 @@ export default function StorageSettings() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        {/* Public storage only serves S3 and Automatic, so Local disk hides it
-            unless one of its fields holds an unsaved edit. Choosing S3 stages
-            the backend, which brings it back before any transition review. */}
-        {(!localDiskSelected || countDirty(form, PUBLIC_S3_KEYS) > 0) && (
+        {showPublicStorage && (
           <S3Group
             form={form}
             restartKeys={restartKeys}
@@ -1310,18 +1292,19 @@ export default function StorageSettings() {
             locationFieldsDisabled={!storageStatusKnown}
           />
         )}
-        <S3Group
-          form={form}
-          restartKeys={restartKeys}
-          secrets={secrets}
-          scope="private"
-          label="Private storage"
-          description="Files only the server reads: profile avatars, diagnostics bundles, and catalog seed artifacts. Optional on local disk, where they stay without one; S3 storage needs one for them."
-          checkKind="s3_private"
-          artworkLockedBackend={privateLocked ? artworkStorage?.backend : undefined}
-          locationFieldsDisabled={!storageStatusKnown}
-          optionalTitle={localDiskSelected ? "Keep private files in an S3 bucket" : undefined}
-        />
+        {showPrivateStorage && (
+          <S3Group
+            form={form}
+            restartKeys={restartKeys}
+            secrets={secrets}
+            scope="private"
+            label="Private storage"
+            description="Files only the server reads: profile avatars, diagnostics bundles, and catalog seed artifacts. S3 storage needs a bucket here for them; on local disk they stay in the local storage path unless a bucket is set."
+            checkKind="s3_private"
+            artworkLockedBackend={privateLocked ? artworkStorage?.backend : undefined}
+            locationFieldsDisabled={!storageStatusKnown}
+          />
+        )}
       </div>
 
       <SaveBar
