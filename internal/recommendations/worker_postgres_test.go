@@ -824,3 +824,41 @@ func TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres(t *testing.T) {
 		t.Fatalf("section anchor = %q, %v; want %q", source, err, liked)
 	}
 }
+
+// A job whose lock session dies stops instead of failing every remaining
+// profile without its cluster lock, which another server may now hold.
+func TestTasteProfileJobStopsWhenItsLockSessionDiesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	repo := NewRepo(pool)
+	for _, name := range []string{"lock-lost-a-", "lock-lost-b-"} {
+		userID, profile := newTasteTestAccount(t, pool, name)
+		if err := repo.UpsertTasteProfile(ctx, userID, profile, axisVector(1800, nil), map[string]int{}, "", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A key of its own, so the test never contends with a real job's lock.
+	const lockLostTestKey int64 = 0x53494C4F4C4F5354 // "SILOLOST"
+	held, acquired, err := pgJobLocker{pool: pool}.TryLock(ctx, lockLostTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryLock = (%v, %v), want acquired", acquired, err)
+	}
+	defer held.Release()
+	var pid int
+	if err := held.(pgClusterLock).lock.Conn().QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
+		t.Fatal(err)
+	}
+
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{})
+	res, err := w.doTasteProfiles(ctx, held)
+	if !errors.Is(err, errJobLockLost) {
+		t.Fatalf("taste job error = %v, want errJobLockLost", err)
+	}
+	if res.Profiles < 2 || res.Remaining != res.Profiles || res.Failed != 0 {
+		t.Fatalf("taste job = %+v, want it stopped at the first profile", res)
+	}
+}

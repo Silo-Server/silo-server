@@ -134,8 +134,16 @@ type pgClusterLock struct {
 	key  int64
 }
 
+// errJobLockLost reports that the session holding a job's cluster lock
+// closed, which released the lock: another server may start the job, so the
+// run stops.
+var errJobLockLost = errors.New("recommendation job lost its cluster lock")
+
 func (l pgClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, error) {
 	acquired, err := l.lock.AcquireAlso(ctx, key, 0)
+	if err != nil && !l.lock.Held() {
+		return nil, false, fmt.Errorf("%w: %w", errJobLockLost, err)
+	}
 	if err != nil || !acquired {
 		return nil, false, err
 	}

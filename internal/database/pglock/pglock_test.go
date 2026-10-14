@@ -406,3 +406,32 @@ func TestReleaseAlsoUnlocksOnlyThatKey(t *testing.T) {
 		t.Fatal("Release left a key held")
 	}
 }
+
+// A lock whose session dies is no longer held, and AcquireAlso on it fails.
+func TestHeldIsFalseAfterTheSessionDies(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	lock, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	defer func() { _ = lock.Release(ctx) }()
+	if !lock.Held() {
+		t.Fatal("Held = false for a fresh lock")
+	}
+	var pid int
+	if err := lock.conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err == nil {
+		t.Fatal("AcquireAlso succeeded on a dead session")
+	}
+	if lock.Held() {
+		t.Fatal("Held = true after the session died")
+	}
+}

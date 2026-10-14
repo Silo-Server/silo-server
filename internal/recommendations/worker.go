@@ -614,6 +614,10 @@ func (w *Worker) doTasteProfiles(ctx context.Context, held clusterLock) (tastePr
 		// A refresh that started reading after this job could otherwise be
 		// overwritten by it with older signals.
 		unlock, acquired, err := w.tryProfileLock(ctx, held, s.UserID, s.ProfileID)
+		if errors.Is(err, errJobLockLost) {
+			res.Remaining = len(subjects) - i
+			return res, err
+		}
 		if err == nil && !acquired {
 			res.Busy++
 			w.markBusyProfileStale(ctx, s.UserID, s.ProfileID)
@@ -815,6 +819,10 @@ func (w *Worker) doRecommendations(ctx context.Context, held clusterLock) (cache
 			return res, fmt.Errorf("cache refresh stopped after %d of %d profiles: %w", i, len(profiles), err)
 		}
 		unlock, acquired, err := w.tryProfileLock(ctx, held, p.UserID, p.ProfileID)
+		if errors.Is(err, errJobLockLost) {
+			res.Remaining = len(profiles) - i
+			return res, err
+		}
 		if err != nil {
 			res.Processed++
 			res.FailedProfiles++
@@ -1183,6 +1191,9 @@ func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock) (stal
 			res.Refreshed++
 		case errors.Is(err, errProfileRefreshElsewhere), errors.Is(err, errPolicyNotLoaded):
 			res.Deferred++
+		case errors.Is(err, errJobLockLost):
+			res.Failed++
+			return res, err
 		default:
 			res.Failed++
 		}

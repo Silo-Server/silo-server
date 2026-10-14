@@ -142,6 +142,12 @@ func (l *Lock) AcquireAlso(ctx context.Context, key int64, wait time.Duration) (
 	return locked, nil
 }
 
+// Held reports whether l's session is still open. An error in AcquireAlso
+// or ReleaseAlso closes it, which drops every lock l held.
+func (l *Lock) Held() bool {
+	return l != nil && l.conn != nil
+}
+
 // ReleaseAlso unlocks key, which AcquireAlso took on l's session, and keeps
 // l's other locks, so work that takes one key after another under a
 // longer-held lock does not hold them all to the end. When the unlock fails

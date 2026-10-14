@@ -265,6 +265,8 @@
 ./internal/recommendations TestRefreshWaitsForThePolicyChangePostgres
 ./internal/policy TestSystemAnnouncesAChangeLoadedByALaterReload
 ./internal/database/pglock TestReleaseAlsoUnlocksOnlyThatKey
+./internal/database/pglock TestHeldIsFalseAfterTheSessionDies
+./internal/recommendations TestTasteProfileJobStopsWhenItsLockSessionDiesPostgres
 ./internal/recommendations TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres
 ./internal/recommendations TestRefreshPurgesAProfileDeletedWhileItWritesPostgres
 ./internal/recommendations TestRefreshWritesNoTasteRowForADeletedProfilePostgres
