@@ -56,6 +56,11 @@ const stateReportIntervalMs = 1_500;
 const waitingReportIntervalMs = 500;
 const pendingCommandQuietPeriodMs = 250;
 const readySeekToleranceSeconds = 1;
+// A stream that lands past a seek target cannot pre-roll back to it. The
+// server holds the room's own seek to readySeekToleranceSeconds but accepts a
+// stalled viewer's own seek within this, so readiness is reported and the
+// server decides.
+const aheadReadySeekToleranceSeconds = 5;
 // The host's real position becomes the room anchor, so a rebuilt stream that
 // lands short of the target does not hold the room. Mirrors the server bound.
 const hostReadySeekToleranceSeconds = 15;
@@ -410,8 +415,13 @@ export function useWatchTogetherPlaybackSync({
     const positionSeconds = Math.max(0, toMediaTime(video.currentTime, streamOriginRef.current));
     // A canplay event can still belong to the stream a room seek replaces.
     if (roomPlaybackState === "waiting" && command.action === "seek") {
-      const delta = Math.abs(positionSeconds - command.position_seconds);
-      const tolerance = isHost ? hostReadySeekToleranceSeconds : readySeekToleranceSeconds;
+      const offset = positionSeconds - command.position_seconds;
+      const delta = Math.abs(offset);
+      const tolerance = isHost
+        ? hostReadySeekToleranceSeconds
+        : offset > 0
+          ? aheadReadySeekToleranceSeconds
+          : readySeekToleranceSeconds;
       if (delta > tolerance) {
         return {
           ok: false,

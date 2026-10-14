@@ -843,6 +843,47 @@ describe("VideoPlayer room catch-up", () => {
     expect(screen.getByText("Waiting for Alex")).toBeInTheDocument();
   });
 
+  it.each([
+    [1503, true],
+    [1497, false],
+  ])(
+    "reports readiness for a seek that landed at %s only when pre-roll cannot reach the target",
+    async (landed, reports) => {
+      const { connection, video, command, rerenderPlayer } = setup(100);
+      Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+      rerenderPlayer({
+        watchTogetherConnection: {
+          ...connection,
+          room: { ...connection.room!, playback_state: "waiting" as const },
+          transportCommand: {
+            ...command,
+            action: "seek" as const,
+            playback_state: "waiting" as const,
+            position_seconds: 1500,
+            execute_at: new Date(Date.now() + 500).toISOString(),
+          },
+        },
+      });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      // A rebuilt stream past the target cannot pre-roll back to it; the
+      // server decides whether that landing is close enough. One short of
+      // the target still pre-rolls up to it before it reports.
+      video.currentTime = landed;
+      fireEvent.seeked(video);
+      fireEvent.canPlay(video);
+      const ready = vi
+        .mocked(connection.sendRoomMessage)
+        .mock.calls.filter(([m]) => m.type === "ready");
+      expect(ready.length > 0).toBe(reports);
+      if (reports) {
+        expect(ready[0]?.[0]).toMatchObject({
+          command_id: command.command_id,
+          position_seconds: landed,
+        });
+      }
+    },
+  );
+
   it("reports readiness only after the current seek reaches buffered media", async () => {
     const { connection, video, command, rerenderPlayer } = setup(100);
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
