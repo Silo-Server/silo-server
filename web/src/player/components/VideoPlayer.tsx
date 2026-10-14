@@ -1,6 +1,6 @@
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import { skipTarget } from "../utils/skipTarget";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
 import { resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
@@ -170,6 +170,8 @@ interface VideoPlayerProps {
   shouldAutoPlay?: boolean;
   /** True while a replan is in flight, so the quality menu can show progress. */
   replanning?: boolean;
+  /** True while a fresh start replaces the session, such as a version switch. */
+  replacing?: boolean;
   /** Server-described replan error, if the last replan was refused. */
   replanError?: string | null;
   /** Title for the replan error, used when surfacing the refusal as a toast. */
@@ -273,6 +275,15 @@ const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
 // MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
 const MEDIA_ERR_NETWORK = 2;
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
+// A progressive remux is one forward-only response. A paused browser stops
+// reading it, and the server closes it once it has made no progress for its
+// stall window (180s by default, see internal/httpstream). The browser cannot
+// resume it where it was: Chromium fetches the stream again from its origin and
+// stalls while it re-reads everything up to its cursor; Firefox fails the
+// stream or jumps back to the origin. Playing again after this long reopens the
+// stream at the paused position instead. The value sits well inside the
+// default window.
+const PROGRESSIVE_REMUX_IDLE_REOPEN_MS = 60_000;
 // How often a rejected autoplay is retried, and how many times. A transport
 // swap tears the previous source down with `load()`, and the media element load
 // algorithm is required to reject any play that is still pending with an
@@ -369,6 +380,7 @@ export function VideoPlayer({
   nativeOriginalSupport,
   shouldAutoPlay = true,
   replanning = false,
+  replacing = false,
   replanError = null,
   replanErrorTitle = null,
   sessionId,
@@ -457,6 +469,9 @@ export function VideoPlayer({
   // that is a lost connection, not a route that cannot play. Reset whenever
   // the transport is rebuilt (see the hls.js lifecycle effect).
   const streamPlayedRef = useRef(false);
+  // When the current transport last stopped playing, or null while it plays.
+  // Only a transport that has opened, shown a frame, or settled paused counts.
+  const transportIdleSinceRef = useRef<number | null>(null);
   const connectionStatusRef = useRef(connectionStatus);
   connectionStatusRef.current = connectionStatus;
   const transportFailedForPlanRevisionRef = useRef<number | null>(null);
@@ -485,14 +500,19 @@ export function VideoPlayer({
   const appliedRoomCommandIdRef = useRef<string | null>(null);
   const roomCommandTimerRef = useRef<number | null>(null);
   // The advancing room position a playbackRate catch-up is converging toward,
-  // when one is active. Non-null means playbackRate is intentionally not 1.
+  // when one is active. Non-null means playbackRate is intentionally off the
+  // base rate.
   const roomCatchupTargetRef = useRef<RoomCatchupTarget | null>(null);
+  // The rate playback returns to when no room catch-up is active: the
+  // viewer's chosen speed, or 1x while a Watch Party room owns the rate.
+  const baseRateRef = useRef(1);
   // Bounds media reloads that room corrections trigger; see roomSyncCatchup.ts.
   const roomReloadBudgetRef = useRef(createRoomReloadBudget());
   // Sustained stalls reported to the room, for offering a lower quality.
   const roomStallTimesRef = useRef<number[]>([]);
   const lowerQualityOfferedRef = useRef(false);
   const performPlayerSeekRef = useRef<(seconds: number) => boolean | Promise<boolean>>(() => false);
+  const reopenIdleProgressiveRemuxRef = useRef<() => void>(() => {});
   const reportRoomReadyRef = useRef<() => { ok: boolean }>(() => ({ ok: false }));
 
   // Playback state
@@ -848,6 +868,10 @@ export function VideoPlayer({
     onSustainedStall: noteRoomStall,
   });
   const roomPlaybackActive = !!watchTogetherRoomId && !watchTogether.closedReason;
+  // The viewer's speed for this player session. A room plays everyone at 1x
+  // and nudges the rate itself to keep viewers together.
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const baseRate = roomPlaybackActive ? 1 : playbackSpeed;
   const roomSyncWaiting = watchTogether.room?.playback_state === "waiting";
   // Media events acknowledge readiness while the room waits and while this
   // viewer recovers from a stall the room did not wait for.
@@ -1146,14 +1170,53 @@ export function VideoPlayer({
   }, []);
 
   // Ends an active room catch-up nudge; any seek or local stop returns the
-  // element to 1x so a stale rate never survives a context change.
+  // element to the base rate so a stale rate never survives a context change.
   const resetRoomCatchupRate = useCallback(() => {
     roomCatchupTargetRef.current = null;
     const video = videoRef.current;
-    if (video && video.playbackRate !== 1) {
-      video.playbackRate = 1;
+    if (video && video.playbackRate !== baseRateRef.current) {
+      video.playbackRate = baseRateRef.current;
     }
   }, []);
+
+  // Runs before this commit's other effects, so a catch-up reset in them
+  // already returns to the committed rate. defaultPlaybackRate carries the
+  // speed across media reloads (quality switches, stream rebuilds), which
+  // reset playbackRate to it.
+  useLayoutEffect(() => {
+    baseRateRef.current = baseRate;
+    const video = videoRef.current;
+    if (!video) return;
+    video.defaultPlaybackRate = baseRate;
+    if (roomCatchupTargetRef.current === null) video.playbackRate = baseRate;
+  }, [baseRate]);
+
+  // Asks the server for a stream anchored at `seconds`. The replan decides
+  // whether that took: a refused or failed replan leaves playback where it
+  // was. With no handler it returns false.
+  const reanchorAt = useCallback(
+    (seconds: number): boolean | Promise<boolean> => {
+      if (!onReanchorSeek) return false;
+      rememberPendingSeek(seconds);
+      setCurrentTime(seconds);
+      const accepted = onReanchorSeek(seconds);
+      if (typeof accepted === "boolean") {
+        if (!accepted) releasePendingSeek(seconds);
+        return accepted;
+      }
+      return accepted.then(
+        (ok) => {
+          if (!ok) releasePendingSeek(seconds);
+          return ok;
+        },
+        (error: unknown) => {
+          releasePendingSeek(seconds);
+          throw error;
+        },
+      );
+    },
+    [onReanchorSeek, releasePendingSeek, rememberPendingSeek],
+  );
 
   // Reports whether the seek was taken up, which callers that show an
   // affordance for it (the intro prompt) need in order to know whether the
@@ -1182,37 +1245,98 @@ export function VideoPlayer({
 
       // Outside the server-anchored window: this is a timeline operation, not
       // a failure, so it asks for a reanchor rather than reporting a failure.
-      // The replan decides whether the seek took: a refused or failed replan
-      // leaves playback where it was. With no handler the seek is dropped.
-      if (!onReanchorSeek) return false;
-      rememberPendingSeek(seconds);
-      setCurrentTime(seconds);
-      const accepted = onReanchorSeek(seconds);
-      if (typeof accepted === "boolean") {
-        if (!accepted) releasePendingSeek(seconds);
-        return accepted;
-      }
-      return accepted.then(
-        (ok) => {
-          if (!ok) releasePendingSeek(seconds);
-          return ok;
-        },
-        (error: unknown) => {
-          releasePendingSeek(seconds);
-          throw error;
-        },
-      );
+      return reanchorAt(seconds);
     },
     [
       canSeekAnywhere,
       handleSeek,
       isHlsStream,
-      onReanchorSeek,
-      releasePendingSeek,
+      reanchorAt,
       rememberPendingSeek,
       resetRoomCatchupRate,
     ],
   );
+
+  // See PROGRESSIVE_REMUX_IDLE_REOPEN_MS. The element plays from its buffer
+  // until the reopened stream replaces it. A room keeps its own transport. A
+  // replan or fresh start already in flight replaces this stream when it lands
+  // a plan; the reopen waits for it and runs only if it does not.
+  const isProgressiveRemux = plan.delivery === "server_remux_progressive";
+  const planChangeInFlight = replanning || replacing;
+  const planChangeInFlightRef = useRef(planChangeInFlight);
+  planChangeInFlightRef.current = planChangeInFlight;
+  const planRevisionRef = useRef(planRevision);
+  planRevisionRef.current = planRevision;
+  // What to do once the plan change in flight settles without replacing the
+  // stream, and the plan revision it would replace.
+  const afterPlanChangeRef = useRef<{ revision: number; run: () => void } | null>(null);
+  const reopenIdleProgressiveRemux = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || !isProgressiveRemux || watchTogetherRoomId) return;
+    if (connectionStatusRef.current !== "connected") return;
+    // A seek inside the buffer that the element has not reached yet is where
+    // the viewer wants to be.
+    const position =
+      pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
+    // The session reads the play intent when a new plan lands, which can be
+    // before the effect that reports this play has run. That includes the
+    // plan of a change already in flight.
+    onPlaybackStateChange?.({
+      currentTime: position,
+      duration: durationRef.current,
+      playing: true,
+    });
+    const revision = planRevisionRef.current;
+    if (planChangeInFlightRef.current) {
+      afterPlanChangeRef.current = {
+        revision,
+        // A viewer who paused meanwhile is still on the idle stream; the next
+        // play reopens it.
+        run: () => {
+          if (videoRef.current?.paused) transportIdleSinceRef.current = 0;
+          else reopenIdleProgressiveRemuxRef.current();
+        },
+      };
+      return;
+    }
+    // When the reopen does not take, the session may have expired during the
+    // pause or the route may no longer be granted. The reconnect replans or
+    // starts a new attempt at the same position, unless another plan already
+    // replaced this stream or the viewer has left.
+    const reconnect = () => {
+      if (!isMountedRef.current) return;
+      if (planRevisionRef.current !== revision) return;
+      if (connectionStatusRef.current !== "connected") return;
+      onConnectionLost?.(position, !video.paused);
+    };
+    // A change can still look in flight here: this reopen's own replan until
+    // its answer renders, or a version switch that started meanwhile. The
+    // reconnect waits for it to settle, so a switch that lands a plan
+    // replaces the stream instead, and a failed reopen reconnects once rather
+    // than reopening again.
+    const fallBack = () => {
+      if (planChangeInFlightRef.current) afterPlanChangeRef.current = { revision, run: reconnect };
+      else reconnect();
+    };
+    const accepted = reanchorAt(position);
+    if (accepted === false) fallBack();
+    else if (accepted !== true) accepted.then((ok) => ok || fallBack(), fallBack);
+  }, [
+    isProgressiveRemux,
+    onConnectionLost,
+    onPlaybackStateChange,
+    reanchorAt,
+    watchTogetherRoomId,
+  ]);
+  reopenIdleProgressiveRemuxRef.current = reopenIdleProgressiveRemux;
+
+  useEffect(() => {
+    const waiting = afterPlanChangeRef.current;
+    if (waiting === null || planChangeInFlight) return;
+    afterPlanChangeRef.current = null;
+    // A change that landed a plan replaced the stream, which is not idle.
+    if (planRevision === waiting.revision) waiting.run();
+  }, [planChangeInFlight, planRevision]);
 
   const handlePlayerSeek = useCallback(
     (seconds: number): boolean | Promise<boolean> => {
@@ -2002,6 +2126,7 @@ export function VideoPlayer({
     // frame yet may be a route this browser cannot reach, so its network
     // failures go through startup recovery rather than the reconnect.
     streamPlayedRef.current = false;
+    transportIdleSinceRef.current = null;
     const video = videoRef.current;
     if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
 
@@ -2048,6 +2173,7 @@ export function VideoPlayer({
       playbackStarted = true;
       cleanupStartupListeners();
       hlsStartupGuardRef.current?.markPlaybackStarted();
+      transportIdleSinceRef.current = Date.now();
       setAwaitingFirstFrame(false);
       setPlaying(false);
     };
@@ -2434,10 +2560,21 @@ export function VideoPlayer({
         return;
       }
       setPlaying(true);
+      const idleSince = transportIdleSinceRef.current;
+      transportIdleSinceRef.current = null;
+      if (idleSince !== null && Date.now() - idleSince >= PROGRESSIVE_REMUX_IDLE_REOPEN_MS) {
+        reopenIdleProgressiveRemuxRef.current();
+      }
     };
     const onPause = () => {
       resetRoomCatchupRate();
       setPlaying(false);
+      // Only a stream that played or has opened. The pause a teardown queues
+      // arrives after the next transport has started over, before it has
+      // metadata.
+      if (streamPlayedRef.current || video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        transportIdleSinceRef.current ??= Date.now();
+      }
     };
     const clearBuffering = () => {
       if (bufferingTimerRef.current) {
@@ -2474,11 +2611,11 @@ export function VideoPlayer({
         setPendingSeekTime(resolved.pendingSeekTime);
       }
       // A rate-based room catch-up that reached the advancing room position
-      // returns to 1x.
+      // returns to the base rate.
       const catchupTarget = roomCatchupTargetRef.current;
       if (catchupTarget !== null && roomCatchupConverged(catchupTarget, nextTime, Date.now())) {
         roomCatchupTargetRef.current = null;
-        video.playbackRate = 1;
+        video.playbackRate = baseRateRef.current;
         settleRoomReloads(roomReloadBudgetRef.current);
       }
       // A correction's reloaded media is playing. How long it took to load
@@ -2580,6 +2717,8 @@ export function VideoPlayer({
       }
     };
     const onVideoEnded = () => {
+      // The stream finished, so there is nothing left to reopen.
+      transportIdleSinceRef.current = null;
       if (endedFiredRef.current) return;
       endedFiredRef.current = true;
       setHasEnded(true);
@@ -4409,6 +4548,8 @@ export function VideoPlayer({
               ? (fileId) => onSwitchVersion(fileId, currentTime)
               : undefined
           }
+          playbackSpeed={playbackSpeed}
+          onPlaybackSpeedChange={roomPlaybackActive ? undefined : setPlaybackSpeed}
           onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
           onPlayPause={handlePlayPause}
           onSeek={handlePlayerSeek}

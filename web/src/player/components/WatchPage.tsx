@@ -678,6 +678,7 @@ function WatchPagePlayer({
       nativeOriginalSupport={session.nativeOriginalSupport}
       shouldAutoPlay={session.shouldAutoPlay}
       replanning={session.replanning}
+      replacing={session.replacing}
       replanError={fallingBack ? null : session.error}
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}

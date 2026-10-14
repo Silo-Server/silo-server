@@ -101,6 +101,9 @@ interface PlayerControlsProps {
   versions?: VersionInfo[];
   versionLocked?: boolean;
   onSwitchVersion?: (fileId: number) => void;
+  // Speed. Omitted while something else owns the rate (a Watch Party room).
+  playbackSpeed?: number;
+  onPlaybackSpeedChange?: (rate: number) => void;
   // PiP
   onTogglePiP?: () => void;
   // Playback info
@@ -174,6 +177,8 @@ export function PlayerControls({
   versions,
   versionLocked,
   onSwitchVersion,
+  playbackSpeed,
+  onPlaybackSpeedChange,
   onTogglePiP,
   showPlaybackInfo,
   onTogglePlaybackInfo,
@@ -368,6 +373,8 @@ export function PlayerControls({
               versions={versions}
               versionLocked={versionLocked}
               onSwitchVersion={onSwitchVersion}
+              playbackSpeed={playbackSpeed}
+              onPlaybackSpeedChange={onPlaybackSpeedChange}
             />
             <button
               type="button"
@@ -548,6 +555,8 @@ export function PlayerControls({
                 versions={versions}
                 versionLocked={versionLocked}
                 onSwitchVersion={onSwitchVersion}
+                playbackSpeed={playbackSpeed}
+                onPlaybackSpeedChange={onPlaybackSpeedChange}
               />
 
               {markerEditAvailable && onToggleMarkerEdit && (

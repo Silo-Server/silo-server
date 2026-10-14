@@ -41,6 +41,12 @@ const MAX_COMPOSITIONS_PER_WINDOW = 20_000;
 // same, and the rest of a crafted list would only cost memory.
 const MAX_OBJECTS_PER_COMPOSITION = 2;
 const MAX_EPOCH_OBJECT_BYTES = 16 * 1024 * 1024;
+// The screens of one window keep their objects' data even after a later
+// definition replaces them; a real window holds a few megabytes of it.
+const MAX_WINDOW_OBJECT_BYTES = 32 * 1024 * 1024;
+// An object's 24-bit length fits in about 257 segments of 64 KiB; more
+// fragments than this are damaged or crafted.
+const MAX_OBJECT_FRAGMENTS = 512;
 const ODS_FIRST_IN_SEQUENCE = 0x80;
 const ODS_LAST_IN_SEQUENCE = 0x40;
 const OBJECT_CROPPED = 0x80;
@@ -83,6 +89,7 @@ interface PendingObject {
   expectedBytes: number;
   chunks: Uint8Array[];
   receivedBytes: number;
+  fragments: number;
 }
 
 interface ObjectDefinition {
@@ -213,6 +220,10 @@ export class PGSStreamParser {
   private received = -Infinity;
   private objectBytes = 0;
   private windowCompositions = 0;
+  private windowObjectBytes = 0;
+  // Object data already counted against a window, so a screen placed again
+  // doesn't count it twice.
+  private countedObjects = new WeakSet<Uint8Array>();
 
   /**
    * Source time, in seconds, of the latest complete segment read. Segments
@@ -232,6 +243,7 @@ export class PGSStreamParser {
     this.clearPending();
     this.presentation = null;
     this.windowCompositions = 0;
+    this.windowObjectBytes = 0;
   }
 
   push(chunk: Uint8Array): PGSComposition[] {
@@ -371,6 +383,7 @@ export class PGSStreamParser {
         expectedBytes,
         chunks: [],
         receivedBytes: 0,
+        fragments: 0,
       };
       this.pendingObjects.set(id, pending);
       data = body.subarray(11);
@@ -379,7 +392,13 @@ export class PGSStreamParser {
       if (!pending) return;
       data = body.subarray(4);
     }
-    pending.chunks.push(data);
+    pending.fragments += 1;
+    if (pending.fragments > MAX_OBJECT_FRAGMENTS) {
+      this.dropPending(id);
+      return;
+    }
+    // An empty fragment adds nothing to the object, only bookkeeping.
+    if (data.byteLength > 0) pending.chunks.push(data);
     pending.receivedBytes += data.byteLength;
     this.pendingBytes += data.byteLength;
     if (this.pendingBytes > MAX_EPOCH_OBJECT_BYTES) {
@@ -443,6 +462,11 @@ export class PGSStreamParser {
       });
     }
     if (this.windowCompositions >= MAX_COMPOSITIONS_PER_WINDOW) return null;
+    const newObjects = objects.filter((object) => !this.countedObjects.has(object.rle));
+    const newBytes = newObjects.reduce((sum, object) => sum + object.rle.byteLength, 0);
+    if (this.windowObjectBytes + newBytes > MAX_WINDOW_OBJECT_BYTES) return null;
+    for (const object of newObjects) this.countedObjects.add(object.rle);
+    this.windowObjectBytes += newBytes;
     this.windowCompositions += 1;
     if (palette) this.shownPalettes.add(palette);
     return {
