@@ -26,3 +26,13 @@ func (h *PlaybackHandler) captureNodeRecipeDeletionV3(ctx context.Context, work,
 		}
 	}
 }
+
+// capturePredecessorRecipeDeletionV3 captures a replaced transport's recipe
+// publication. A local predecessor published no node recipe, so local commits
+// skip the store round trip while they hold the session lifecycle lock.
+func (h *PlaybackHandler) capturePredecessorRecipeDeletionV3(ctx context.Context, work, nodeURL string) func() {
+	if nodeURL == "" {
+		return func() {}
+	}
+	return h.captureNodeRecipeDeletionV3(ctx, work, nodeURL)
+}

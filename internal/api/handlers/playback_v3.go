@@ -2840,7 +2840,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		nodeURL = transcodeNode.URL
 	}
 	adoptSuccessor := func() {
-		deletePreviousRecipe := h.captureNodeRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
+		deletePreviousRecipe := h.capturePredecessorRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 		h.tm.CloseTranscodeSession(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
@@ -3930,7 +3930,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			if committed {
 				return nil
 			}
-			deletePreviousRecipe := h.captureNodeRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
+			deletePreviousRecipe := h.capturePredecessorRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 			committed = true
 			previous, accepted := h.tm.SwapTranscodeSession(session.ID, ts)
 			if !accepted {
@@ -4180,7 +4180,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		egressNodeURL = nodePlan.ProxyNode.URL
 	}
 	adoptSuccessor := func() {
-		deletePreviousRecipe := h.captureNodeRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
+		deletePreviousRecipe := h.capturePredecessorRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 		h.tm.CloseTranscodeSession(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
