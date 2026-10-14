@@ -8,7 +8,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -18,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
@@ -61,26 +61,26 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	if rdb == nil {
 		// An enrolled worker must never receive the legacy source-path protocol,
 		// and its work cannot be fenced without the shared store.
-		configured, err := hasHTTPWorkers(ctx, pool)
+		configured, err := hasHTTPWorkerOrigins(ctx, pool)
 		if err != nil {
 			return nil, err
 		}
 		if configured {
 			return nil, errors.New("standalone workers are enrolled but Redis is unavailable")
 		}
-		return nil, nil
+		return nil, installLegacyWorkerGuard(ctx, pool, cipher)
 	}
 	origin, allowHTTP, err := workerCoreOrigin(cfg.Server.PublicURL)
 	if err != nil {
 		// Legacy deployments may use a prefixed public URL. The standalone
 		// protocol needs an exact origin, but must not break an installation
 		// that has no enrolled standalone worker.
-		configured, lookupErr := hasHTTPWorkers(ctx, pool)
+		configured, lookupErr := hasHTTPWorkerOrigins(ctx, pool)
 		if lookupErr != nil {
 			return nil, lookupErr
 		}
 		if !configured {
-			return nil, nil
+			return nil, installLegacyWorkerGuard(ctx, pool, cipher)
 		}
 		return nil, err
 	}
@@ -126,10 +126,39 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	if err != nil {
 		return nil, err
 	}
-	reportSink := &workerReportSink{rdb: rdb, nodes: registry, recipes: recipes, assignments: store, service: func() *workercontrolcore.Service { return service }}
+	reportSink := &workerReportSink{rdb: rdb, nodes: registry, recipes: recipes, assignments: store, plans: planstore.NewPostgres(pool), service: func() *workercontrolcore.Service { return service }}
 	outputAuthorities := workercontrolcore.NewRedisOutputAuthorities(rdb, "")
+	executionStatus := func(ctx context.Context, node workercontrolcore.Node, assignment workerwire.Assignment) (bool, error) {
+		if assignment.Path == workerPreparePath {
+			return workerDownloadStatus(ctx, pool, node.ID, assignment)
+		}
+		denied, err := deny.DeniedStatus(ctx, assignment.WorkID)
+		if err != nil || denied {
+			return false, err
+		}
+		card, found, err := recipes.GetStatus(ctx, assignment.WorkID)
+		if err != nil {
+			return false, err
+		}
+		if found && card != nil {
+			if !workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP) {
+				return false, nil
+			}
+			denied, err = deny.DeniedStatus(ctx, card.SessionID)
+			if err != nil || denied {
+				return false, err
+			}
+			return contentAuthority.checkRecipe(ctx, card, nil)
+		}
+		if service == nil {
+			return false, workercontrolcore.ErrUnavailable
+		}
+		return service.HasInFlightStatus(ctx, node.ID, assignment.WorkID)
+	}
 	service, err = workercontrolcore.New(workercontrolcore.Options{Origin: origin, AllowHTTP: allowHTTP, PrivateKey: key, Nodes: registry, Store: store, OutputAuthorities: outputAuthorities, Sources: coreSourceAdapter{sources}, SourceHandler: sources.Handler(), RecipeStore: recipes, VerifyToken: func(ctx context.Context, token string) (*streamtoken.Claims, error) {
 		return verifyWorkerOutputToken(ctx, pool, contentAuthority, token, liveConfig().Auth.JWTSecret)
+	}, VerifyTokens: func(ctx context.Context, tokens []string) ([]workercontrolcore.TokenVerification, error) {
+		return verifyWorkerOutputTokens(ctx, pool, contentAuthority, tokens, liveConfig().Auth.JWTSecret)
 	}, Admit: func(ctx context.Context, node workercontrolcore.Node, a workerwire.Assignment) error {
 		return admitWorkerDownload(ctx, pool, node, a)
 	}, ExecutionConfig: func(ctx context.Context, nodeID int) (workerwire.ExecutionConfig, error) {
@@ -145,7 +174,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 		digest := sha256.Sum256(encoded)
 		settings.Revision = hex.EncodeToString(digest[:])
 		return settings, settings.Validate()
-	}, ExecutionActive: func(ctx context.Context, node workercontrolcore.Node, assignment workerwire.Assignment) bool {
+	}, ExecutionStatus: executionStatus, ExecutionActive: func(ctx context.Context, node workercontrolcore.Node, assignment workerwire.Assignment) bool {
 		if assignment.Path == workerPreparePath {
 			return workerDownloadActive(ctx, pool, node.ID, assignment)
 		}
@@ -154,7 +183,8 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 		}
 		card, found := recipes.Get(ctx, assignment.WorkID)
 		if found && card != nil {
-			return workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP) && !deny.Denied(ctx, card.SessionID) && contentAuthority.allowed(ctx, card)
+			return workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP) &&
+				!deny.Denied(ctx, card.SessionID) && contentAuthority.allowed(ctx, card)
 		}
 		return service != nil && service.HasInFlight(node.ID, assignment.WorkID)
 	}, Report: reportSink.accept,
@@ -179,18 +209,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
 		return outputs.WrapOutputs(base, service.WrapTransport(base))
 	}, service.RequiresRecipe)
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				_ = registry.refresh(ctx)
-			}
-		}
-	}()
+	refreshWorkerRegistry(ctx, registry)
 	coreHandler := service.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/internal/workers/output-grant" {
@@ -229,39 +248,32 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 
 func initializeHTTPWorkerProxy(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, cfg *config.Config, live func() *config.Config) error {
 	registry := &coreWorkerRegistry{repo: workerregistration.New(pool, cipher)}
-	if err := registry.refresh(ctx); err != nil {
-		return err
+	refreshErr := registry.refresh(ctx)
+	if refreshErr != nil && !workerRegistrySchemaPending(refreshErr) {
+		return refreshErr
 	}
 	transport, err := workerproxy.New(cfg.Server.PublicURL, cfg.Auth.JWTSecret, registry)
 	if err != nil {
-		configured, lookupErr := hasHTTPWorkers(ctx, pool)
+		if workerRegistrySchemaPending(refreshErr) {
+			return installLegacyWorkerGuard(ctx, pool, cipher)
+		}
+		configured, lookupErr := hasHTTPWorkerOrigins(ctx, pool)
 		if lookupErr != nil {
 			return lookupErr
 		}
 		if !configured {
-			return nil
+			return installLegacyWorkerGuard(ctx, pool, cipher)
 		}
 		return err
 	}
 	transport.SecretValue = func() string { return live().Auth.JWTSecret }
 	nodehttp.Configure(transport.Wrap)
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				_ = registry.refresh(ctx)
-			}
-		}
-	}()
+	refreshWorkerRegistry(ctx, registry)
 	return nil
 }
 
-func hasHTTPWorkers(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
+func hasHTTPWorkerOrigins(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	var configured bool
-	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM worker_http_nodes)").Scan(&configured)
+	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM worker_http_nodes) OR EXISTS(SELECT 1 FROM worker_http_origin_history)").Scan(&configured)
 	return configured, err
 }

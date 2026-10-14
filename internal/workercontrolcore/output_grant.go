@@ -104,7 +104,9 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 	if s.options.OutputAuthorities == nil {
 		return GrantReply{}, ErrUnavailable
 	}
-	authorityID, err := s.registerOutputAuthority(ctx, node, OutputAuthorityRecord{Token: token, NodeID: node.ID, WorkID: work, Generation: generation, Epoch: workeridentity.OutputEpoch(proxySecret), ExpiresAt: claims.ExpiresAt.Unix()})
+	epoch := workeridentity.OutputEpoch(proxySecret)
+	lookupKey := OutputAuthorityLookupKey(*claims, node.ID, work, generation, epoch)
+	authorityID, err := s.registerOutputAuthority(ctx, node, OutputAuthorityRecord{Token: token, LookupKey: lookupKey, NodeID: node.ID, WorkID: work, Generation: generation, Epoch: epoch, ExpiresAt: claims.ExpiresAt.Unix()})
 	if err != nil {
 		return GrantReply{}, err
 	}

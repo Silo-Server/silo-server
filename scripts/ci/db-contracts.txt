@@ -244,13 +244,6 @@
 ./internal/catalog TestLetterIndexMatchesCursorPagesPostgres
 ./internal/catalog TestLetterIndexEpisodesMatchCursorPagesPostgres
 
-# Deleting a library removes its ID from access groups, account overrides and
-# invitations, without widening an emptied list; a write keeps only existing
-# libraries, even racing the delete; the migration repairs earlier deletes.
-./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
-./migrations TestLibraryDeleteRacingAccessWritePostgres
-./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
-
 # HTTP-only workers retain SQL-backed enrollment and current content/job authority.
 ./internal/workerregistration TestSigningKeyConcurrentCreationIsEncryptedAndStable
 ./internal/workerregistration TestEnrollmentRedeemsAtomicallyAndCannotReplay
@@ -270,6 +263,24 @@
 ./internal/workerregistration TestEditedEnrolledOriginNeverFallsBackToLegacyWire
 ./internal/workerregistration TestEnrolledCanonicalOriginsRefreshAndRouteCommandsAndOutput
 ./internal/workerregistration TestEnrolledCanonicalPortFormsAfterURLEdit
+
+# Malformed stored origins and startup before schema/configuration are safe
+# across later enrollment; migration rollback cannot deadlock with live DML.
+./cmd/silo TestWorkerRegistryUnclassifiableSnapshotRejectsCertificate
+./cmd/silo TestWorkerRegistryMalformedStoredSuffixNeverAllowsLegacyHTTP
+./cmd/silo TestWorkerStartupRetainedOriginsFailClosed
+./cmd/silo TestWorkerStartupFallbackGuardsFutureEnrollment
+./cmd/silo TestWorkerProxyStartupWaitsForMigrationWithGuardInstalled
+./internal/workerregistration TestRegistryMigrationDownAvoidsEnrollmentTableLockDeadlock
+./internal/workerregistration TestRegistryMigrationDownDoesNotHoldTablesWhileAwaitingSnapshotFence
+./internal/workerregistration TestRegistryMigrationDownContentionCancellationReleasesAllLocks
+
+# Prepared output relays must use bounded exact-authority lookup without
+# shortening viewer lifetime or accepting stale or mismatched index records.
+./cmd/silo TestWorkerPreparedRelayLookupRejectsUntrustedIndexRecords
+./cmd/silo TestWorkerPreparedRelayLookupRetainsFullDayAndFencesNewScopes
+./cmd/silo TestWorkerPreparedRelayLookupAcceptsCanonicalRetainedOrigin
+./cmd/silo TestWorkerPreparedRelayUsesTargetedAuthorityLookup
 
 # Database-fenced classification snapshots retain enrollment and retired origins
 # across replicas, cancellation, URL edits, process restart and migration rollback.
@@ -297,3 +308,10 @@
 ./internal/workerregistration TestRegistryAdminAndEnrollmentAcquireFenceBeforeRows
 ./internal/workerregistration TestRegistryAdminDeleteAcquiresFenceBeforeParentRow
 ./internal/workerregistration TestRegistrySavepointRollbackDoesNotReuseDrain
+
+# Deleting a library removes its ID from access groups, account overrides and
+# invitations, without widening an emptied list; a write keeps only existing
+# libraries, even racing the delete; the migration repairs earlier deletes.
+./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
+./migrations TestLibraryDeleteRacingAccessWritePostgres
+./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres

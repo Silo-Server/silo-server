@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -47,7 +46,7 @@ func (r workerOutputRelay) token(request *http.Request, node workercontrolcore.N
 	if secret == "" {
 		return "", workercontrolcore.ErrUnavailable
 	}
-	if len(parts) >= 2 && (parts[0] == workerTranscodeMode || parts[0] == "remux") {
+	if len(parts) >= 2 && (parts[0] == workerTranscodeMode || parts[0] == string(playback.PlayRemux)) {
 		if r.recipes == nil {
 			return "", workercontrolcore.ErrUnavailable
 		}
@@ -143,28 +142,28 @@ func (r workerOutputRelay) downloadToken(request *http.Request, node workercontr
 	if !found {
 		return "", workercontrolcore.ErrDenied
 	}
-	records, err := r.authorities.List(request.Context(), node.ID)
-	if err != nil {
-		return "", err
-	}
-	current := outputRelayClaimIdentity(claims)
-	for _, record := range records {
-		if record.WorkID != work || record.Generation != assignment.Generation || record.Epoch != workeridentity.OutputEpoch(secret) || record.ExpiresAt <= now.Add(5*time.Minute).Unix() {
-			continue
+	epoch := workeridentity.OutputEpoch(secret)
+	lookupKey := workercontrolcore.OutputAuthorityLookupKey(claims, node.ID, work, assignment.Generation, epoch)
+	if finder, ok := r.authorities.(workercontrolcore.OutputAuthorityFinder); ok {
+		record, found, err := finder.Find(request.Context(), node.ID, lookupKey)
+		if err != nil {
+			return "", err
 		}
-		retained, err := streamtoken.Verify(record.Token, secret)
-		if err == nil && retained.ExpiresAt != nil && retained.ExpiresAt.Unix() == record.ExpiresAt && bytes.Equal(current, outputRelayClaimIdentity(*retained)) {
-			return record.Token, nil
+		if found {
+			if !record.ValidForLookup(node.ID, lookupKey, now) || record.WorkID != work || record.Generation != assignment.Generation || record.Epoch != epoch {
+				return "", workercontrolcore.ErrDenied
+			}
+			if record.ExpiresAt > now.Add(5*time.Minute).Unix() {
+				retained, err := streamtoken.Verify(record.Token, secret)
+				if err != nil || retained.ExpiresAt == nil || retained.ExpiresAt.Unix() != record.ExpiresAt || retained.IssuedAt == nil || retained.IssuedAt.After(now) || workercontrolcore.OutputAuthorityLookupKey(*retained, node.ID, work, assignment.Generation, epoch) != lookupKey {
+					return "", workercontrolcore.ErrDenied
+				}
+				return record.Token, nil
+			}
 		}
 	}
 	// Whole-file relays reuse the exact source/row/work/generation token from
 	// the bounded registry, rather than minting one for every Range request.
 	// IssueOutputGrant still rechecks its live source and content authority.
 	return streamtoken.SignAt(claims, secret, now, playback.MaxTokenTTL)
-}
-
-func outputRelayClaimIdentity(claims streamtoken.Claims) []byte {
-	claims.IssuedAt, claims.ExpiresAt = nil, nil
-	encoded, _ := json.Marshal(claims)
-	return encoded
 }

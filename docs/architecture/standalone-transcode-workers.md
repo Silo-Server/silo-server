@@ -56,7 +56,9 @@ Core commands, worker control calls and source reads use separate signature
 domains. Signatures bind the destination, method, escaped path, query, body
 digest, timestamp and nonce, plus byte-range, source identity and output scope
 headers. Each verifier bounds its replay cache; the core shares worker-request
-replay protection across its API replicas.
+replay protection across its API replicas. Verification also requires the request
+Host to match the signed public audience; a reverse proxy that rewrites Host
+invalidates the worker proof.
 
 ## Source admission and execution
 
@@ -68,7 +70,9 @@ revision, size and strong ETag. Arbitrary URLs and `.strm` sources are rejected.
 
 The worker adapter presents each admitted source to FFmpeg through a private
 loopback HTTP URL. Its pooled HTTP client supplies the worker signature to the
-core; credentials and core filesystem paths never enter FFmpeg arguments.
+core. Worker signing keys and core filesystem paths do not enter FFmpeg
+arguments. The local URL contains a bearer handle and is visible to processes
+permitted to inspect FFmpeg arguments.
 FFmpeg and FFprobe inputs must be an admitted handle or a regular file under
 the worker's scratch root. Remote playlist/concat demuxers and unregistered
 network inputs are refused. Internally generated sampling concat members pass
@@ -201,6 +205,12 @@ check work generation, authorization epoch, viewer authority and customer-token
 expiry. The five-minute grant lifetime governs admission; it does not truncate
 an otherwise authorized long download.
 
+A refresh captures viewer records before one shared assignment snapshot, then
+batches exact credential ownership checks and reuses content decisions within
+that request. Distinct logins retain independent revocation and expiry checks.
+A failed dependency returns 503 without signing a partial allowlist or deleting
+records based on an incomplete check. The two-second snapshot lease is unchanged.
+
 Snapshot refreshes reclaim records only after an authoritative assignment lookup
 confirms stopped or superseded work, or credential verification confirms a revoked,
 expired or invalid source credential. Content and store errors withdraw snapshot
@@ -247,7 +257,10 @@ advertises `worker_protocol: http_only_v1`; capability warmup, snapshots and met
 use the existing transcode runtime hooks. Worker session and telemetry reports
 travel over signed HTTP. The core accepts only current work/generation scopes,
 supplies trusted ownership labels and sanitizes bounded log batches. The worker
-uses local telemetry storage rather than Redis.
+uses local telemetry storage rather than Redis. When old and replacement work
+report the same playback session, the core selects the transport recorded by the
+committed playback attempt. An unavailable or ambiguous attempt omits that
+session without rejecting unrelated sessions in the report.
 
 The public route inventory and the worker protocol extension describe the
 standalone execution and core control surfaces alongside the retained worker

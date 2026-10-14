@@ -146,8 +146,35 @@ FOR EACH STATEMENT EXECUTE FUNCTION reject_worker_registry_truncate();
 
 -- +goose Down
 -- Drain snapshots before removing the triggers which make their TTL safe.
-SELECT pg_advisory_xact_lock(1397312591, 1464816203);
-SELECT drain_worker_registry_snapshots();
+-- DML takes a table lock before its statement trigger waits for the fence.
+-- Never wait for those table locks while retaining the fence, or for the fence
+-- while retaining tables a snapshot reader still needs. Each failed attempt
+-- rolls both lock types back in its subtransaction before retrying.
+-- +goose StatementBegin
+DO $$
+DECLARE
+    deadline TIMESTAMPTZ := clock_timestamp() + INTERVAL '30 seconds';
+BEGIN
+    LOOP
+        BEGIN
+            IF NOT pg_try_advisory_xact_lock(1397312591, 1464816203) THEN
+                RAISE lock_not_available;
+            END IF;
+            LOCK TABLE stream_nodes, worker_http_nodes, worker_http_origin_history
+                IN ACCESS EXCLUSIVE MODE NOWAIT;
+            EXIT;
+        EXCEPTION WHEN lock_not_available THEN
+            IF clock_timestamp() >= deadline THEN
+                RAISE EXCEPTION 'worker registry rollback could not acquire configuration locks'
+                    USING ERRCODE='55P03';
+            END IF;
+        END;
+        PERFORM pg_sleep(0.05);
+    END LOOP;
+    PERFORM drain_worker_registry_snapshots();
+END;
+$$;
+-- +goose StatementEnd
 DROP TRIGGER worker_http_node_no_truncate ON worker_http_nodes;
 DROP TRIGGER stream_node_worker_registry_no_truncate ON stream_nodes;
 DROP TRIGGER worker_http_origin_history_append_only ON worker_http_origin_history;

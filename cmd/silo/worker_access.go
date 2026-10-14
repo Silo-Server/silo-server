@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync/atomic"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -16,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
+	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
 )
 
@@ -60,50 +63,94 @@ func (a *workerContentAuthority) allowedClaims(ctx context.Context, claims *stre
 }
 
 func (a *workerContentAuthority) allowedRecipe(ctx context.Context, card *playback.RecipeCard, preparedClaims *streamtoken.Claims) bool {
-	prepared := preparedClaims != nil
-	s := a.state.Load()
-	if s == nil || card == nil || card.UserID <= 0 {
-		return false
+	allowed, _ := a.checkRecipe(ctx, card, preparedClaims)
+	return allowed
+}
+
+func (a *workerContentAuthority) checkClaims(ctx context.Context, claims *streamtoken.Claims) (bool, error) {
+	if claims == nil {
+		return false, nil
 	}
+	card := playback.RecipeCardFromClaims(claims)
+	if claims.DownloadArtifactID != "" {
+		return a.checkRecipe(ctx, &card, claims)
+	}
+	return a.checkRecipe(ctx, &card, nil)
+}
+
+func (a *workerContentAuthority) checkRecipe(ctx context.Context, card *playback.RecipeCard, preparedClaims *streamtoken.Claims) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if card == nil || card.UserID <= 0 {
+		return false, nil
+	}
+	if a == nil {
+		return false, workercontrolcore.ErrUnavailable
+	}
+	s := a.state.Load()
+	if s == nil || s.resolver == nil {
+		return false, workercontrolcore.ErrUnavailable
+	}
+	prepared := preparedClaims != nil
 	user, err := s.users.GetByID(ctx, card.UserID)
-	if err != nil || user == nil || !user.Enabled {
-		return false
+	if err != nil {
+		return workerContentReadError(err)
+	}
+	if user == nil || !user.Enabled {
+		return false, nil
 	}
 	policy, err := access.EffectivePolicyForUser(ctx, user, s.groups)
-	if err != nil || prepared && !policy.DownloadAllowed {
-		return false
+	if err != nil {
+		return workerContentReadError(err)
+	}
+	if prepared && !policy.DownloadAllowed {
+		return false, nil
 	}
 	if !prepared {
 		method := string(card.PlayMethod)
 		videoEncode := (method == "" || strings.HasPrefix(method, "transcode")) && !card.AudioOnly && card.TargetCodecVideo != "copy"
 		if videoEncode && !policy.TranscodeAllowed || (card.TranscodeAudio || method == streamtoken.PlayMethodThemeAAC) && !policy.AudioTranscodeAllowed {
-			return false
+			return false, nil
 		}
 	}
 	scope, err := s.resolver.Resolve(ctx, access.ResolveInput{UserID: card.UserID, ProfileID: card.ProfileID, SkipPINVerification: true})
-	if err != nil || !scope.ProfileVerified || scope.PreferencesDegraded {
-		return false
+	if err != nil {
+		return workerContentReadError(err)
+	}
+	if scope.PreferencesDegraded {
+		return false, workercontrolcore.ErrUnavailable
+	}
+	if !scope.ProfileVerified {
+		return false, nil
 	}
 	filter := catalog.AccessFilter{AllowedLibraryIDs: scope.AllowedLibraryIDs, DisabledLibraryIDs: scope.DisabledLibraryIDs, MaturityLimits: scope.MaturityLimits, MaxPlaybackQuality: scope.MaxPlaybackQuality, UserID: card.UserID, ProfileID: card.ProfileID}
 	if card.MediaFileID == 0 {
 		var id int64
 		if err := s.pool.QueryRow(ctx, "SELECT id FROM item_theme_songs WHERE file_path=$1", card.InputPath).Scan(&id); err != nil {
-			return false
+			return workerContentReadError(err)
 		}
 		file, err := s.themes.Find(ctx, strconv.FormatInt(id, 10), filter)
-		return err == nil && file.Path == card.InputPath
+		if err != nil {
+			return workerContentReadError(err)
+		}
+		return file.Path == card.InputPath, nil
 	}
 	file, err := s.files.GetByID(ctx, card.MediaFileID)
-	if err != nil || file == nil || !prepared && file.MissingSince != nil {
-		return false
+	if err != nil {
+		return workerContentReadError(err)
+	}
+	if file == nil || !prepared && file.MissingSince != nil {
+		return false, nil
 	}
 	if prepared {
 		artifact, err := s.artifacts.GetByID(ctx, preparedClaims.DownloadArtifactRowID)
-		if err != nil || !workerPreparedArtifactMatches(artifact, preparedClaims) {
-			return false
+		if err != nil {
+			return workerContentReadError(err)
 		}
-		// Apply the quality ceiling to the bytes served, while retaining the
-		// source's library and catalog ownership restrictions.
+		if !workerPreparedArtifactMatches(artifact, preparedClaims) {
+			return false, nil
+		}
 		served := *file
 		if artifact.Resolution != "" {
 			served.Resolution = artifact.Resolution
@@ -111,28 +158,54 @@ func (a *workerContentAuthority) allowedRecipe(ctx context.Context, card *playba
 		file = &served
 	}
 	if !catalog.FileAllowedByAccess(file, filter) {
-		return false
+		return false, nil
 	}
 	var enabled bool
-	if err := s.pool.QueryRow(ctx, "SELECT enabled FROM media_folders WHERE id=$1", file.MediaFolderID).Scan(&enabled); err != nil || !enabled {
-		return false
+	if err := s.pool.QueryRow(ctx, "SELECT enabled FROM media_folders WHERE id=$1", file.MediaFolderID).Scan(&enabled); err != nil {
+		return workerContentReadError(err)
+	}
+	if !enabled {
+		return false, nil
 	}
 	owner := file.ContentID
 	if file.EpisodeID != "" {
 		episode, err := s.episodes.GetByID(ctx, file.EpisodeID)
-		if err != nil || episode == nil {
-			return false
+		if err != nil {
+			return workerContentReadError(err)
+		}
+		if episode == nil {
+			return false, nil
 		}
 		owner = episode.SeriesID
 	}
 	if file.ExtraID != "" {
 		extra, err := s.extras.GetByID(ctx, file.ExtraID)
-		if err != nil || extra == nil {
-			return false
+		if err != nil {
+			return workerContentReadError(err)
+		}
+		if extra == nil {
+			return false, nil
 		}
 		owner = extra.ParentID
 	}
-	return owner != "" && s.items.EnsureAccessible(ctx, owner, filter) == nil
+	if owner == "" {
+		return false, nil
+	}
+	if err := s.items.EnsureAccessible(ctx, owner, filter); err != nil {
+		return workerContentReadError(err)
+	}
+	return true, ctx.Err()
+}
+
+// Missing or out-of-scope rows are authoritative denials. Dependency errors
+// are unknown and must not mint a new signed worker authority lease.
+func workerContentReadError(err error) (bool, error) {
+	for _, missing := range []error{pgx.ErrNoRows, auth.ErrNotFound, scanner.ErrFileNotFound, catalog.ErrItemNotFound, catalog.ErrEpisodeNotFound, catalog.ErrExtraNotFound, downloads.ErrNotFound, themesongs.ErrNotFound, access.ErrProfileNotFound, access.ErrProfileUnverified, access.ErrGroupNotFound} {
+		if errors.Is(err, missing) {
+			return false, nil
+		}
+	}
+	return false, err
 }
 
 func workerPreparedArtifactMatches(artifact *downloads.Artifact, claims *streamtoken.Claims) bool {

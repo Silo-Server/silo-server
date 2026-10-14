@@ -81,7 +81,8 @@ func TestWorkerPreparedRelayReusesExactCredentialArtifactAndGeneration(t *testin
 	if claims.OriginLoginSessionID != loginA || claims.DownloadArtifactRowID != prepared.DownloadArtifactRowID || claims.DownloadArtifactID != prepared.DownloadArtifactID || claims.MediaFileID != f.file || claims.DownloadArtifactSize != 10 {
 		t.Fatalf("prepared relay lost original credential or row identity: %+v", claims)
 	}
-	if _, err := registry.Register(ctx, workercontrolcore.OutputAuthorityRecord{Token: first, NodeID: node.ID, WorkID: assignment.WorkID, Generation: assignment.Generation, Epoch: workeridentity.OutputEpoch(secret), ExpiresAt: claims.ExpiresAt.Unix()}); err != nil {
+	lookupKey := workercontrolcore.OutputAuthorityLookupKey(*claims, node.ID, assignment.WorkID, assignment.Generation, workeridentity.OutputEpoch(secret))
+	if _, err := registry.Register(ctx, workercontrolcore.OutputAuthorityRecord{Token: first, LookupKey: lookupKey, NodeID: node.ID, WorkID: assignment.WorkID, Generation: assignment.Generation, Epoch: workeridentity.OutputEpoch(secret), ExpiresAt: claims.ExpiresAt.Unix()}); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(2 * time.Minute)

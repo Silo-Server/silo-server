@@ -278,43 +278,58 @@ func (s *Store) PutTTL(ctx context.Context, sessionID string, card playback.Reci
 // error yields (nil, false) — because an absent recipe legitimately means the
 // node cannot reconstruct and should 404, never rebuild from a bad recipe.
 func (s *Store) Get(ctx context.Context, sessionID string) (*playback.RecipeCard, bool) {
-	if s == nil || s.rdb == nil || sessionID == "" {
+	card, found, err := s.GetStatus(ctx, sessionID)
+	if err != nil {
+		prefix := ""
+		if s != nil {
+			prefix = s.prefix
+		}
+		slog.WarnContext(ctx, "load node recipe failed", "component", "noderecipe", "key_prefix", prefix, "error", err, "playback_session_id", sessionID)
 		return nil, false
+	}
+	return card, found
+}
+
+// GetStatus distinguishes a missing or revoked recipe from unavailable storage.
+func (s *Store) GetStatus(ctx context.Context, sessionID string) (*playback.RecipeCard, bool, error) {
+	if sessionID == "" {
+		return nil, false, nil
+	}
+	if s == nil || s.rdb == nil {
+		return nil, false, errors.New("node recipe storage unavailable")
 	}
 	data, generation, stamped, err := s.loadStoredCard(ctx, sessionID)
 	if err != nil {
-		if !errors.Is(err, redis.Nil) {
-			slog.WarnContext(ctx, "load node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "error", err, "playback_session_id", sessionID)
+		if errors.Is(err, redis.Nil) {
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, err
 	}
+
 	card, ok := unmarshalCard(data)
 	if !ok {
-		slog.WarnContext(ctx, "decode node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "playback_session_id", sessionID)
-		return nil, false
+		return nil, false, errors.New("invalid stored node recipe")
 	}
 	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
 		if stamped {
 			currentGeneration, generationErr := s.currentNodeAuthorityGeneration(ctx, authorityKey)
 			if generationErr != nil {
-				slog.WarnContext(ctx, "load node authority generation failed", "component", "noderecipe", "error", generationErr, "playback_session_id", sessionID)
-				return nil, false
+				return nil, false, generationErr
 			}
 			if generation != currentGeneration {
-				return nil, false
+				return nil, false, nil
 			}
 		} else {
 			valid, validationErr := s.legacyRecipeIssuedAfterRevocation(ctx, sessionID, data, authorityKey)
 			if validationErr != nil {
-				slog.WarnContext(ctx, "validate legacy node recipe authority failed", "component", "noderecipe", "error", validationErr, "playback_session_id", sessionID)
-				return nil, false
+				return nil, false, validationErr
 			}
 			if !valid {
-				return nil, false
+				return nil, false, nil
 			}
 		}
 	}
-	return &card, true
+	return &card, true, nil
 }
 
 func (s *Store) loadStoredCard(ctx context.Context, sessionID string) ([]byte, int64, bool, error) {

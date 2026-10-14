@@ -65,12 +65,21 @@ type Options struct {
 	Store             AssignmentStore
 	Sources           SourceAuthority
 	VerifyToken       func(context.Context, string) (*streamtoken.Claims, error)
+	VerifyTokens      func(context.Context, []string) ([]TokenVerification, error)
 	RecipeStore       RecipeStore
 	Report            func(context.Context, int, json.RawMessage) error
 	ExecutionActive   func(context.Context, Node, workerwire.Assignment) bool
+	ExecutionStatus   func(context.Context, Node, workerwire.Assignment) (bool, error)
 	ExecutionConfig   func(context.Context, int) (workerwire.ExecutionConfig, error)
 	SourceHandler     http.Handler
 	Admit             func(context.Context, Node, workerwire.Assignment) error
+}
+
+// TokenVerification keeps definite revocation, content denial and unknown
+// dependency failures distinct during one worker snapshot refresh.
+type TokenVerification struct {
+	Claims *streamtoken.Claims
+	Err    error
 }
 
 type GrantReply struct {

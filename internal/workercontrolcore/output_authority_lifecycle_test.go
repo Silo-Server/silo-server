@@ -94,11 +94,11 @@ type outputLookupFailureStore struct {
 	err error
 }
 
-func (s *outputLookupFailureStore) Get(ctx context.Context, node int, work string) (workerwire.Assignment, bool, error) {
+func (s *outputLookupFailureStore) Snapshot(ctx context.Context, node int) (AuthoritySnapshot, error) {
 	if s.err != nil {
-		return workerwire.Assignment{}, false, s.err
+		return AuthoritySnapshot{}, s.err
 	}
-	return s.AssignmentStore.Get(ctx, node, work)
+	return s.AssignmentStore.Snapshot(ctx, node)
 }
 
 func TestOutputSweepPreservesRecoverableDenialAndLongResponse(t *testing.T) {
@@ -132,8 +132,9 @@ func TestOutputSweepPreservesRecoverableDenialAndLongResponse(t *testing.T) {
 	check := func(wantAllowed bool, wantRecords int) {
 		t.Helper()
 		outputs, err := service.currentOutputs(t.Context(), node)
-		if err != nil || outputs[id] != wantAllowed {
-			t.Fatalf("allowed=%v want=%v: %v", outputs[id], wantAllowed, err)
+		unknown := lookup.err != nil || failure != nil && !errors.Is(failure, ErrDenied) && !errors.Is(failure, ErrOutputRevoked)
+		if (err != nil) != unknown || outputs[id] != wantAllowed {
+			t.Fatalf("allowed=%v want=%v unknown=%v: %v", outputs[id], wantAllowed, unknown, err)
 		}
 		records, err := registry.List(t.Context(), node.ID)
 		if err != nil || len(records) != wantRecords {

@@ -13,13 +13,19 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+type workerReportPlanReader interface {
+	GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error)
+}
+
 type workerReportSink struct {
+	plans       workerReportPlanReader
 	rdb         *redis.Client
 	nodes       workercontrolcore.NodeRegistry
 	recipes     *noderecipe.Store
@@ -67,7 +73,8 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 		s.trackers[nodeID] = tracker
 	}
 	s.mu.Unlock()
-	infos := make([]nodesessions.SessionInfo, 0, len(batch.Sessions))
+	groups := make(map[string][]workerwire.SessionReport, len(batch.Sessions))
+	transports := make(map[string]struct{}, len(batch.Sessions))
 	for _, item := range batch.Sessions {
 		if !valid(item.WorkID, item.Generation) {
 			continue
@@ -107,7 +114,31 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 		}
 		info.NodeURL = node.URL
 		info.NodeName = "HTTP worker"
-		infos = append(infos, info)
+		if _, duplicate := transports[item.WorkID]; duplicate {
+			return errors.New("duplicate reported transport")
+		}
+		transports[item.WorkID] = struct{}{}
+		item.Info = info
+		groups[info.SessionID] = append(groups[info.SessionID], item)
+	}
+	sessions := make(map[string]workerwire.SessionReport, len(groups))
+	ambiguous := make(map[string]bool)
+	// Leave time to publish unrelated sessions if plan storage is unavailable.
+	planCtx, cancelPlans := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer cancelPlans()
+	for id, reports := range groups {
+		if len(reports) == 1 {
+			sessions[id] = reports[0]
+			continue
+		}
+		ambiguous[id] = true
+		if current, found := s.currentReportedTransport(planCtx, node, id, reports); found {
+			sessions[id] = current
+		}
+	}
+	infos := make([]nodesessions.SessionInfo, 0, len(sessions))
+	for _, item := range sessions {
+		infos = append(infos, item.Info)
 	}
 	lease, ok := ctx.Value(workerReportLeaseKey{}).(workerReportLease)
 	if !ok {
@@ -122,6 +153,10 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 	o := batch.Observations
 	scopes := make(map[string]workerwire.ObservationScope)
 	for _, scope := range o.Scopes {
+		selected, found := sessions[scope.SessionID]
+		if found && selected.WorkID != scope.WorkID || !found && ambiguous[scope.SessionID] {
+			continue
+		}
 		if valid(scope.WorkID, scope.Generation) {
 			scopes[scope.SessionID] = scope
 		}
@@ -194,6 +229,25 @@ func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawM
 		slog.InfoContext(ctx, "worker ffmpeg", "component", "ffmpeg", "node_id", strconv.Itoa(nodeID), "playback_session_id", line.WorkID, "ffmpeg_line", workerwire.SanitizeLogMessage(line.Message), "execution_mode", line.ExecutionMode, "restart_count", line.RestartCount, "line_index", line.LineIndex, "dropped_lines", line.DroppedLines)
 	}
 	return nil
+}
+
+// Worker timestamps cannot distinguish the committed live transport from a
+// prepared replacement or one being torn down. Resolve overlaps from the
+// durable attempt, shared by every API replica, after validating every entry.
+func (s *workerReportSink) currentReportedTransport(ctx context.Context, node workercontrolcore.Node, id string, reports []workerwire.SessionReport) (workerwire.SessionReport, bool) {
+	if s.plans == nil {
+		return workerwire.SessionReport{}, false
+	}
+	attempt, err := s.plans.GetAttempt(ctx, id)
+	if err != nil || attempt == nil || attempt.SessionID != id || attempt.StoppedAt != nil || !attempt.ExpiresAt.After(time.Now()) || !workeridentity.SameOrigin(attempt.FrozenRecipe.TranscodeNodeURL, node.URL, node.AllowHTTP) {
+		return workerwire.SessionReport{}, false
+	}
+	for _, report := range reports {
+		if report.WorkID == attempt.FrozenRecipe.TranscodeTransportID && report.Info.AuthUserID == attempt.UserID && report.Info.ProfileID == attempt.ProfileID && report.Info.MediaFileID == attempt.EffectiveMediaFileID {
+			return report, true
+		}
+	}
+	return workerwire.SessionReport{}, false
 }
 
 func workerObservationRoute(method, pattern string) bool {

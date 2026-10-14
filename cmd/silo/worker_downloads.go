@@ -44,6 +44,11 @@ func admitWorkerDownload(ctx context.Context, pool *pgxpool.Pool, node workercon
 }
 
 func workerDownloadActive(ctx context.Context, pool *pgxpool.Pool, node int, a workerwire.Assignment) bool {
+	active, err := workerDownloadStatus(ctx, pool, node, a)
+	return err == nil && active
+}
+
+func workerDownloadStatus(ctx context.Context, pool *pgxpool.Pool, node int, a workerwire.Assignment) (bool, error) {
 	var active bool
 	err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM worker_http_download_attempts p JOIN download_artifacts a ON a.id=p.artifact_id
 		WHERE p.node_id=$1 AND p.work_id=$2 AND p.generation=$3 AND (
@@ -51,5 +56,5 @@ func workerDownloadActive(ctx context.Context, pool *pgxpool.Pool, node int, a w
 		AND a.status IN ('running','tone_map_running','audio_v2_running','tracks_v1_running')) OR
 		(a.origin_node_id=$1 AND a.origin_artifact_id=$2 AND a.attempts=p.attempt
 		AND a.status IN ('ready','tone_map_ready','audio_v2_ready','tracks_v1_ready'))))`, node, a.WorkID, a.Generation).Scan(&active)
-	return err == nil && active
+	return active, err
 }

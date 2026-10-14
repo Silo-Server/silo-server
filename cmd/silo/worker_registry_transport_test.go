@@ -354,3 +354,37 @@ func TestWorkerRegistrySnapshotExpiryDoesNotCancelLegacyResponseBody(t *testing.
 		t.Fatalf("snapshot expiry interrupted an admitted legacy body: status=%d suffix=%q error=%v", response.StatusCode, suffix, err)
 	}
 }
+
+func TestWorkerRegistryMalformedStoredSuffixNeverAllowsLegacyHTTP(t *testing.T) {
+	f := newRegistryTransportFixture(t, nil)
+	if _, err := f.writer.Exec(t.Context(), "UPDATE stream_nodes SET url=$1 WHERE id=$2", f.origin+"/%ZZ", f.nodeID); err != nil {
+		t.Fatal(err)
+	}
+	f.enroll(t)
+	commands, outputs, _ := f.clients(t, f.registry)
+	for _, suffix := range []string{"/%ZZ", "/source#%ZZ"} {
+		t.Run(suffix, func(t *testing.T) {
+			if _, err := f.writer.Exec(t.Context(), "UPDATE stream_nodes SET url=$1 WHERE id=$2", f.origin+suffix, f.nodeID); err != nil {
+				t.Fatal(err)
+			}
+			// Force a complete refresh, including on a new process, rather than rely
+			// on a previous certificate that already knew the canonical origin.
+			restarted, _ := f.replica(t)
+			if err := restarted.refresh(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			currentCommands, currentOutputs, _ := f.clients(t, restarted)
+			f.denied(t, currentCommands, currentOutputs, f.origin)
+		})
+	}
+	if _, err := f.writer.Exec(t.Context(), "DELETE FROM worker_http_nodes WHERE node_id=$1", f.nodeID); err != nil {
+		t.Fatal(err)
+	}
+	restarted, _ := f.replica(t)
+	if err := restarted.refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	retiredCommands, retiredOutputs, _ := f.clients(t, restarted)
+	f.denied(t, retiredCommands, retiredOutputs, f.origin)
+	f.denied(t, commands, outputs, f.origin)
+}

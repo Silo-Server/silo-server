@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +53,9 @@ func (r *coreWorkerRegistry) refresh(ctx context.Context) error {
 				node.URL = canonical
 			}
 			origin := workerRegistryOrigin(node.URL)
+			if origin == "" {
+				return nil, workercontrolcore.ErrUnavailable
+			}
 			if previous, exists := nodes[origin]; exists && previous.ID != node.ID {
 				// Canonical aliases belonging to different rows are ambiguous.
 				// Keep a disabled sentinel so they cannot become legacy misses.
@@ -63,7 +65,11 @@ func (r *coreWorkerRegistry) refresh(ctx context.Context) error {
 		}
 		origins := make(map[string]struct{}, len(snapshot.Origins))
 		for _, raw := range snapshot.Origins {
-			origins[workerRegistryOrigin(raw)] = struct{}{}
+			origin := workerRegistryOrigin(raw)
+			if origin == "" {
+				return nil, workercontrolcore.ErrUnavailable
+			}
+			origins[origin] = struct{}{}
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -123,14 +129,20 @@ func (r *coreWorkerRegistry) ByURL(ctx context.Context, raw string) (workercontr
 	return workercontrolcore.Node{}, false, workercontrolcore.ErrUnavailable
 }
 
+// Classify the authority independently of the stored path/query/fragment: a
+// malformed suffix must never turn an enrolled or retained origin into a miss.
+// An unclassifiable authority invalidates the entire snapshot instead.
 func workerRegistryOrigin(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" {
-		return strings.TrimRight(raw, "/")
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok {
+		return ""
 	}
-	origin := parsed.Scheme + "://" + parsed.Host
-	if canonical, err := workeridentity.ValidateOrigin(origin, true); err == nil {
-		return canonical
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		rest = rest[:end]
+	}
+	origin, err := workeridentity.ValidateOrigin(scheme+"://"+rest, true)
+	if err != nil {
+		return ""
 	}
 	return origin
 }

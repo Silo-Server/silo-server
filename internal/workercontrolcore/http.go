@@ -111,22 +111,10 @@ func (s *Service) snapshot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid challenge", http.StatusBadRequest)
 		return
 	}
-	snapshot, err := s.options.Store.Snapshot(r.Context(), node.ID)
+	snapshot, err := s.readOutputSnapshot(r.Context(), node)
 	if err != nil {
 		http.Error(w, "worker authority unavailable", http.StatusServiceUnavailable)
 		return
-	}
-	active := map[string]uint64{}
-	pending := map[string]uint64{}
-	for work, a := range snapshot.Active {
-		if s.executionActive(r.Context(), node, a) {
-			active[work] = a.Generation
-		}
-	}
-	for work, a := range snapshot.Pending {
-		if s.pendingOwned(r.Context(), node.ID, work, a.Generation) {
-			pending[work] = a.Generation
-		}
 	}
 	var executionConfig *workerwire.ExecutionConfig
 	if s.options.ExecutionConfig != nil {
@@ -137,12 +125,12 @@ func (s *Service) snapshot(w http.ResponseWriter, r *http.Request) {
 		}
 		executionConfig = &settings
 	}
-	outputs, err := s.currentOutputs(r.Context(), node)
+	outputs, err := s.outputsForSnapshot(r.Context(), node, snapshot)
 	if err != nil {
 		http.Error(w, "worker output authorities unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	s.reply(w, node, workeridentity.DomainSnapshotGrant, "", 0, workerwire.Snapshot{Outputs: outputs, Version: 1, NodeID: node.ID, BootID: input.BootID, Nonce: input.Nonce, Sequence: input.Sequence + 1, Active: active, Pending: pending, ValidForMillis: 2000, ExecutionConfig: executionConfig})
+	s.reply(w, node, workeridentity.DomainSnapshotGrant, "", 0, workerwire.Snapshot{Outputs: outputs, Version: 1, NodeID: node.ID, BootID: input.BootID, Nonce: input.Nonce, Sequence: input.Sequence + 1, Active: snapshot.active, Pending: snapshot.pending, ValidForMillis: 2000, ExecutionConfig: executionConfig})
 }
 func (s *Service) report(w http.ResponseWriter, r *http.Request) {
 	node, ok := s.authenticate(w, r)
