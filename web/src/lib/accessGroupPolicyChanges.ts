@@ -1,4 +1,5 @@
 import type { AccessGroup } from "@/api/types";
+import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
 import { PLAYBACK_QUALITY_OPTIONS, playbackQualityPresetFromValue } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import {
@@ -69,9 +70,19 @@ function libraries(ids: number[] | null, names: ReadonlyMap<number, string>) {
   return ids.map((id) => names.get(id) ?? `#${id}`).join(", ");
 }
 
+// Names the group editor shows for the assignable permissions.
+const PERMISSION_LABELS: Record<string, string> = {
+  [PERMISSION_METADATA_CURATION]: "Metadata curation",
+  [PERMISSION_MARKER_EDIT]: "Marker editing",
+};
+
 function permissions(values: string[] | null) {
   if (values === null) return "All";
-  return values.length === 0 ? "None" : [...values].sort().join(", ");
+  if (values.length === 0) return "None";
+  return values
+    .map((value) => PERMISSION_LABELS[value] ?? value)
+    .sort()
+    .join(", ");
 }
 
 function quality(value: string) {

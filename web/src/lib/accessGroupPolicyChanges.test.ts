@@ -56,6 +56,17 @@ it("reports only the policies that differ, in member-facing terms", () => {
   ]);
 });
 
+it("names permissions as the group editor does", () => {
+  expect(
+    groupPolicyChanges(
+      { ...base, allowed_permissions: ["marker_edit"] },
+      { ...base, allowed_permissions: ["metadata_curation", "marker_edit"] },
+    ),
+  ).toEqual([
+    { label: "Permissions", from: "Marker editing", to: "Marker editing, Metadata curation" },
+  ]);
+});
+
 it("treats the same libraries in another order as unchanged", () => {
   expect(groupPolicyChanges(base, { ...base, library_ids: [3, 2] })).toEqual([]);
 });
