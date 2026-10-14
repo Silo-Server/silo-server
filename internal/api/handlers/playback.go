@@ -213,6 +213,10 @@ type PlaybackHandler struct {
 	// progressSideEffectLocks serializes v2 progress side effects per session
 	// (see persistProgressV2).
 	progressSideEffectLocks sync.Map
+	// realtimeResultQueues orders completed realtime command results per
+	// session off the socket reader (see runRealtimeResult).
+	realtimeResultMu     sync.Mutex
+	realtimeResultQueues map[string]*realtimeResultQueue
 	// ProxyGrantStore hands a proxy the recipe it serves a header-authenticated
 	// session from. Optional: without it (or without Redis behind it) an attempt
 	// that negotiated authorized_media_origins_v1 simply stays on the API origin.
@@ -1205,8 +1209,21 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	}
 	deleteRecipe := h.captureNodeRecipeDeletionV3(ctx, session.TranscodeTransportID, session.TranscodeNodeURL)
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
+	h.cleanupStoppedSessionTransport(ctx, session, deleteRecipe)
+	stopResult := h.recordStoppedSession(ctx, session, userInitiated)
+	if syncNow {
+		h.syncSessionsNow(ctx, syncReason)
+	}
+	return stopResult
+}
 
+func (h *PlaybackHandler) recordStoppedSession(ctx context.Context, session *playback.Session, userInitiated bool) watchstate.PlaybackStopResult {
 	stopResult := h.recordStopHistory(ctx, session)
+	h.notifyStoppedSession(ctx, session, stopResult, userInitiated)
+	return stopResult
+}
+
+func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *playback.Session, stopResult watchstate.PlaybackStopResult, userInitiated bool) {
 	if h.WatchScrobbler != nil {
 		if event, ok := h.scrobbleEventForStoppedSession(ctx, session, stopResult); ok && (userInitiated || stopResult.Completed) {
 			if err := h.WatchScrobbler.ScrobbleStop(ctx, event); err != nil {
@@ -1223,7 +1240,17 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 			slog.ErrorContext(ctx, "failed to delete synced session", "component", "api", "session", session.ID, "error", err)
 		}
 	}
+}
 
+// Ordinary stops capture recipe ownership before waiting for start effects.
+// Realtime stops enter directly and capture here before closing the producer.
+func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, session *playback.Session, capturedDeletion ...func()) {
+	var deleteRecipe func()
+	if len(capturedDeletion) > 0 {
+		deleteRecipe = capturedDeletion[0]
+	} else {
+		deleteRecipe = h.captureNodeRecipeDeletionV3(ctx, session.TranscodeTransportID, session.TranscodeNodeURL)
+	}
 	h.closeTranscodeForSession(session)
 	// A session that ends must stop egressing everywhere, not just here: the
 	// grant is a proxy's whole authority to serve these bytes, and unlike the
@@ -1234,10 +1261,6 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
 	// the node for a transport that no longer exists.
 	deleteRecipe()
-	if syncNow {
-		h.syncSessionsNow(ctx, syncReason)
-	}
-	return stopResult
 }
 
 // recordStopHistory writes a stopped session to watch history and the admin
@@ -1251,6 +1274,11 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 		return watchstate.PlaybackStopResult{}
 	}
 	result := h.persistStopAndHistory(ctx, session)
+	h.recordAdminStopHistory(ctx, session)
+	return result
+}
+
+func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *playback.Session) {
 	if entry, err := h.buildAdminHistoryEntry(ctx, session); err != nil {
 		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", err)
 	} else if entry != nil && h.AdminStore != nil {
@@ -1258,7 +1286,6 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 			slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
 		}
 	}
-	return result
 }
 
 // compatPlayHistoryNamespace derives a Jellyfin play's watch-history row ID
