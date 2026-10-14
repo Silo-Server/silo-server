@@ -8,6 +8,7 @@ import { catalogKeys, progressKeys } from "./keys";
 import { fetchCatalogItemDetail } from "./catalogRead";
 import {
   cancelItemDetailQueries,
+  dropInactiveWatchDetail,
   invalidateMediaSurfaceQueries,
   removeItemFromHomeSectionCaches,
   updateCatalogItemDetail,
@@ -157,10 +158,12 @@ export function useClearResumePosition() {
       removeItemFromHomeSectionCaches(queryClient, contentId, "continue_watching");
       bumpHomeRefreshSignal(queryClient);
       toast.success("Progress reset");
+      // The next play must start from the beginning, not the cached position.
+      const knownRelatedIds = dropInactiveWatchDetail(queryClient, contentId);
       await invalidateMediaSurfaceQueries(queryClient, {
         itemId: contentId,
         skipSimilarItems: true,
-        dropInactiveWatchDetail: true,
+        knownRelatedIds,
       });
       bumpHomeRefreshSignal(queryClient);
     },

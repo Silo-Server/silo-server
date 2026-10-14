@@ -913,11 +913,7 @@ describe("RealtimeEventsProvider", () => {
       });
     });
 
-    // Dropped by the coalesced surface refresh, after it has used the detail
-    // to find the episode's series.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
+    // Dropped at once: a play started now would use its resume position.
     expect(queryClient.getQueryData(watchKey)).toBeUndefined();
     expect(queryClient.getQueryData(otherKey)).toBeDefined();
   });

@@ -16,6 +16,7 @@ import {
 } from "./keys";
 import {
   cancelItemDetailQueries,
+  dropInactiveWatchDetail,
   getQueryKeyItemId,
   invalidateMediaSurfaceQueries,
   relatedItemIds,
@@ -522,7 +523,7 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(seasonsKey)?.isInvalidated).toBe(true);
   });
 
-  it("follows a closed player's watch detail to its series before dropping it", async () => {
+  it("drops a closed player's watch detail and keeps its link to the series", async () => {
     // The watch detail is the only link from the episode to its series, and
     // its cached resume position no longer holds.
     const queryClient = new QueryClient();
@@ -531,16 +532,14 @@ describe("invalidateMediaSurfaceQueries", () => {
     const seasonsKey = catalogKeys.seriesSeasons("series-1");
     queryClient.setQueryData(seasonsKey, { seasons: [] });
 
-    await invalidateMediaSurfaceQueries(queryClient, {
-      itemId: "episode-1",
-      dropInactiveWatchDetail: true,
-    });
-
-    expect(queryClient.getQueryState(seasonsKey)?.isInvalidated).toBe(true);
+    const knownRelatedIds = dropInactiveWatchDetail(queryClient, "episode-1");
     expect(queryClient.getQueryData(closedKey)).toBeUndefined();
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-1", knownRelatedIds });
+    expect(queryClient.getQueryState(seasonsKey)?.isInvalidated).toBe(true);
   });
 
-  it("keeps an open player's watch detail when dropping inactive ones", async () => {
+  it("keeps an open player's watch detail", () => {
     const queryClient = new QueryClient();
     const openKey = itemKeys.watchDetail("episode-1");
     queryClient.setQueryData(openKey, { content_id: "episode-1" });
@@ -551,11 +550,7 @@ describe("invalidateMediaSurfaceQueries", () => {
     });
     const unsubscribe = observer.subscribe(() => undefined);
 
-    await invalidateMediaSurfaceQueries(queryClient, {
-      itemId: "episode-1",
-      dropInactiveWatchDetail: true,
-    });
-
+    expect(dropInactiveWatchDetail(queryClient, "episode-1")).toBeUndefined();
     expect(queryClient.getQueryData(openKey)).toBeDefined();
     unsubscribe();
   });

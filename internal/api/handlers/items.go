@@ -2466,7 +2466,7 @@ func (h *ItemsHandler) lookupWatchedTarget(ctx context.Context, contentID string
 			return watchedTarget{}, err
 		}
 		switch item.Type {
-		case "movie", "ebook", "series":
+		case itemTypeMovie, itemTypeEbook, "series":
 			return watchedTarget{Type: item.Type, Item: item}, nil
 		default:
 			return watchedTarget{}, catalog.ErrItemNotFound
@@ -2499,7 +2499,7 @@ func (h *ItemsHandler) lookupWatchedTarget(ctx context.Context, contentID string
 	if err := h.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return watchedTarget{}, err
 	}
-	return watchedTarget{Type: "episode", Episode: episode}, nil
+	return watchedTarget{Type: itemTypeEpisode, Episode: episode}, nil
 }
 
 func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
@@ -2508,15 +2508,15 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 		return "", nil, err
 	}
 	switch target.Type {
-	case "movie":
-		return "movie", []watchedLeafTarget{{
+	case itemTypeMovie:
+		return itemTypeMovie, []watchedLeafTarget{{
 			ContentID:       target.Item.ContentID,
 			DurationSeconds: h.contentDurationSeconds(ctx, target.Item.ContentID, "", target.Item.Runtime),
 		}}, nil
-	case "ebook":
+	case itemTypeEbook:
 		// Ebooks have no playback duration; read state is keyed off
 		// ebook_reader_progress, so the leaf target only carries the ID.
-		return "ebook", []watchedLeafTarget{{ContentID: target.Item.ContentID}}, nil
+		return itemTypeEbook, []watchedLeafTarget{{ContentID: target.Item.ContentID}}, nil
 	case "series":
 		if h.episodeRepo == nil {
 			return "", nil, catalog.ErrItemNotFound
@@ -2536,7 +2536,7 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 		}
 		return "season", h.episodeTargets(ctx, episodes), nil
 	default:
-		return "episode", []watchedLeafTarget{{
+		return itemTypeEpisode, []watchedLeafTarget{{
 			ContentID:       target.Episode.ContentID,
 			DurationSeconds: h.contentDurationSeconds(ctx, "", target.Episode.ContentID, target.Episode.Runtime),
 		}}, nil

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   v2: vi.fn(),
   removeItemFromHomeSectionCaches: vi.fn(),
   cancelItemDetailQueries: vi.fn(),
+  dropInactiveWatchDetail: vi.fn(),
   updateCatalogItemDetail: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
   bumpHomeRefreshSignal: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("./mediaSurfaceRefresh", () => ({
   removeItemFromHomeSectionCaches: (...args: unknown[]) =>
     mocks.removeItemFromHomeSectionCaches(...args),
   cancelItemDetailQueries: (...args: unknown[]) => mocks.cancelItemDetailQueries(...args),
+  dropInactiveWatchDetail: (...args: unknown[]) => mocks.dropInactiveWatchDetail(...args),
   updateCatalogItemDetail: (...args: unknown[]) => mocks.updateCatalogItemDetail(...args),
   invalidateMediaSurfaceQueries: (...args: unknown[]) =>
     mocks.invalidateMediaSurfaceQueries(...args),
@@ -196,6 +198,7 @@ describe("useClearResumePosition", () => {
     mocks.removeItemFromHomeSectionCaches.mockReset();
     mocks.cancelItemDetailQueries.mockReset();
     mocks.cancelItemDetailQueries.mockResolvedValue(undefined);
+    mocks.dropInactiveWatchDetail.mockReset();
     mocks.updateCatalogItemDetail.mockReset();
     mocks.invalidateMediaSurfaceQueries.mockReset();
     mocks.invalidateMediaSurfaceQueries.mockResolvedValue(undefined);
@@ -217,6 +220,8 @@ describe("useClearResumePosition", () => {
   it("takes the item off Continue Watching and drops its cached resume point", async () => {
     const queryClient = {};
     mocks.useQueryClient.mockReturnValue(queryClient);
+    const related = new Set(["movie-8f2c1a"]);
+    mocks.dropInactiveWatchDetail.mockReturnValue(related);
     const options = useClearResumePosition() as unknown as ClearOptions;
 
     await options.onSuccess(undefined, { contentId: "movie-8f2c1a" });
@@ -228,12 +233,13 @@ describe("useClearResumePosition", () => {
       "movie-8f2c1a",
       "continue_watching",
     );
-    // The invalidation drops a closed player's cached watch detail once it
-    // has followed it to the series.
+    // A closed player's cached watch detail is dropped, and the series it led
+    // to still refreshes.
+    expect(mocks.dropInactiveWatchDetail).toHaveBeenCalledWith(queryClient, "movie-8f2c1a");
     expect(mocks.invalidateMediaSurfaceQueries).toHaveBeenCalledWith(queryClient, {
       itemId: "movie-8f2c1a",
       skipSimilarItems: true,
-      dropInactiveWatchDetail: true,
+      knownRelatedIds: related,
     });
     // Once at once from the patched cache, once after the server refresh.
     expect(mocks.bumpHomeRefreshSignal).toHaveBeenCalledTimes(2);
