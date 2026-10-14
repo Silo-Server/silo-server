@@ -41,10 +41,11 @@ password sign-in on Sign-in. Logging holds every log setting, the server log
 and the activity log retention alike. General holds what the whole server runs
 on: its name and address, the trusted proxies beside the public URL (as the
 setup wizard presents them), the database pool, and Redis. Storage holds where
-files go, including whether provider artwork is copied there; its public and
-private bucket sections show whatever the backend, because a local install
-that already holds artwork goes straight to the transition review when S3 is
-picked, so the buckets have to be filled in first. Search has its own page
+files go, including whether provider artwork is copied there. Public storage
+shows only for S3 and Automatic, and private storage folds into one optional
+row on Local disk, where a private bucket still works. Picking S3 stages the
+backend so the bucket can be filled in, and Save opens any transition review
+the move needs. Search has its own page
 because the engine serves every library and client, not one library's
 metadata. Skip markers are a playback feature, so their detection settings
 are on Playback › Settings and the marker history is Playback › Skip Markers;

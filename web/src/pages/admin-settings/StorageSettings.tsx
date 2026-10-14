@@ -243,6 +243,7 @@ function S3Group({
   artworkLockedBackend,
   publicBackendChangePending = false,
   locationFieldsDisabled = false,
+  optionalTitle,
 }: {
   form: SettingsForm;
   restartKeys: RestartKeyMatcher;
@@ -254,6 +255,8 @@ function S3Group({
   artworkLockedBackend?: string;
   publicBackendChangePending?: boolean;
   locationFieldsDisabled?: boolean;
+  /** When set, the fields fold into one closed row with this title. */
+  optionalTitle?: string;
 }) {
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
@@ -286,8 +289,8 @@ function S3Group({
     }
   }
 
-  return (
-    <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
+  const fields = (
+    <>
       <SettingField
         label="Endpoint"
         hint="https://s3.us-east-1.amazonaws.com"
@@ -455,6 +458,26 @@ function S3Group({
           )}
         </>
       )}
+    </>
+  );
+
+  return (
+    <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
+      {optionalTitle ? (
+        // Open while a bucket is saved or a field holds an unsaved edit, so a
+        // configured bucket or a pending change is never folded away.
+        <AdvancedSection
+          id={`storage.s3.${scope}.optional`}
+          title={optionalTitle}
+          forceOpen={
+            Boolean(form.getPersistedValue(key("bucket")).trim()) || countDirty(form, keys) > 0
+          }
+        >
+          {fields}
+        </AdvancedSection>
+      ) : (
+        fields
+      )}
     </FieldGroup>
   );
 }
@@ -495,6 +518,13 @@ export default function StorageSettings() {
   const latestTransitionResult = latestTransition?.result_payload as
     | StorageTransitionJobResult
     | undefined;
+  // What Backend shows: the running backend once storage is locked, unless a
+  // different choice is staged.
+  const selectedBackend =
+    artworkLocked && artworkStorage?.backend && !form.isDirty("artwork.storage_backend")
+      ? artworkStorage.backend
+      : form.getValue("artwork.storage_backend") || "auto";
+  const localDiskSelected = selectedBackend === "local";
   const draftEffectiveBackend = effectiveArtworkBackend(
     form.getValue("artwork.storage_backend"),
     form.getValue("s3.public_bucket"),
@@ -734,6 +764,13 @@ export default function StorageSettings() {
         toast.error("Managed storage transitions are not available on this server.");
         return;
       }
+      // A move to S3 is staged, which shows Public storage so the bucket can
+      // be filled in; Save then reads Review transition. A move back to local
+      // disk needs nothing more, so its review opens now.
+      if (requestedBackend === "s3") {
+        form.setValue("artwork.storage_backend", value);
+        return;
+      }
       setTransitionBackend(requestedBackend);
       setTransitionLocalPath(form.getValue("artwork.local_path"));
       setTransitionOpen(true);
@@ -823,11 +860,7 @@ export default function StorageSettings() {
           <SettingField
             label="Backend"
             type="select"
-            value={
-              artworkLocked && artworkStorage?.backend
-                ? artworkStorage.backend
-                : form.getValue("artwork.storage_backend") || "auto"
-            }
+            value={selectedBackend}
             onChange={handleArtworkBackendChange}
             disabled={!storageStatusKnown}
             options={[
@@ -839,7 +872,7 @@ export default function StorageSettings() {
               artworkLocked
                 ? artworkStorage?.backend === "s3"
                   ? "Choose Automatic or Local disk to review a managed transition from S3."
-                  : "Edit the local path, or fill in Public storage and choose S3 to review a managed transition."
+                  : "Edit the local path, or choose S3 and fill in Public storage. Saving opens a managed transition review."
                 : "Where Silo keeps artwork, subtitles, and other library assets."
             }
             restartRequired={restartKeys.has("artwork.storage_backend")}
@@ -1260,21 +1293,23 @@ export default function StorageSettings() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        {/* Both bucket groups show on every backend. On a local install that
-            already holds artwork, choosing S3 opens the transition review at
-            once, so the buckets have to be filled in before Backend changes. */}
-        <S3Group
-          form={form}
-          restartKeys={restartKeys}
-          secrets={secrets}
-          scope="public"
-          label="Public storage"
-          description="Files clients download directly: cached artwork, uploaded posters, and branding images. Used once Backend is S3, or Automatic with a bucket set here."
-          checkKind="s3_public"
-          artworkLockedBackend={artworkLocked ? artworkStorage?.backend : undefined}
-          publicBackendChangePending={publicBackendChangePending}
-          locationFieldsDisabled={!storageStatusKnown}
-        />
+        {/* Public storage only serves S3 and Automatic, so Local disk hides it
+            unless one of its fields holds an unsaved edit. Choosing S3 stages
+            the backend, which brings it back before any transition review. */}
+        {(!localDiskSelected || countDirty(form, PUBLIC_S3_KEYS) > 0) && (
+          <S3Group
+            form={form}
+            restartKeys={restartKeys}
+            secrets={secrets}
+            scope="public"
+            label="Public storage"
+            description="Files clients download directly: cached artwork, uploaded posters, and branding images. Used once Backend is S3, or Automatic with a bucket set here."
+            checkKind="s3_public"
+            artworkLockedBackend={artworkLocked ? artworkStorage?.backend : undefined}
+            publicBackendChangePending={publicBackendChangePending}
+            locationFieldsDisabled={!storageStatusKnown}
+          />
+        )}
         <S3Group
           form={form}
           restartKeys={restartKeys}
@@ -1285,6 +1320,7 @@ export default function StorageSettings() {
           checkKind="s3_private"
           artworkLockedBackend={privateLocked ? artworkStorage?.backend : undefined}
           locationFieldsDisabled={!storageStatusKnown}
+          optionalTitle={localDiskSelected ? "Keep private files in an S3 bucket" : undefined}
         />
       </div>
 

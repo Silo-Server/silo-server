@@ -404,13 +404,9 @@ describe("StorageSettings", () => {
     serverStatus.current = undefined;
   });
 
-  // Both bucket groups show on every backend, so an admin on local disk can
-  // fill in a bucket before choosing S3 opens the transition review.
   it.each([
-    ["Local disk", "local", ""],
     ["Automatic without a bucket", "", ""],
     ["Automatic without a bucket, saved as auto", "auto", ""],
-    ["Local disk with a leftover bucket", "local", "artwork"],
     ["S3", "s3", ""],
     ["Automatic with a saved bucket", "auto", "artwork"],
   ])("shows public and private storage for %s", (_, backend, savedBucket) => {
@@ -435,6 +431,48 @@ describe("StorageSettings", () => {
     expect(screen.queryByRole("group", { name: "S3 storage" })).not.toBeInTheDocument();
   });
 
+  // Public storage serves only S3 and Automatic. Private storage still works on
+  // local disk, so it folds into one optional row there.
+  it.each([
+    ["Local disk", ""],
+    ["Local disk with a leftover public bucket", "artwork"],
+  ])("hides public storage and folds private storage for %s", async (_, savedBucket) => {
+    mockForm({
+      getPersistedValue: (key: string) =>
+        key === "artwork.storage_backend" ? "local" : key === "s3.public_bucket" ? savedBucket : "",
+      getValue: (key: string) =>
+        key === "artwork.storage_backend"
+          ? "local"
+          : key === "s3.public_bucket"
+            ? savedBucket
+            : key === "s3.public_url_auth"
+              ? "presigned"
+              : "",
+    });
+    render(<StorageSettings />);
+
+    expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
+    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
+    expect(privateStorage.queryByLabelText("Bucket")).not.toBeInTheDocument();
+    await userEvent.click(
+      privateStorage.getByRole("button", { name: "Keep private files in an S3 bucket" }),
+    );
+    expect(privateStorage.getByLabelText("Bucket")).toBeVisible();
+  });
+
+  it("keeps a saved private bucket in view on Local disk", () => {
+    mockForm({
+      getPersistedValue: (key: string) =>
+        key === "artwork.storage_backend" ? "local" : key === "s3.private_bucket" ? "ops" : "",
+      getValue: (key: string) =>
+        key === "artwork.storage_backend" ? "local" : key === "s3.private_bucket" ? "ops" : "",
+    });
+    render(<StorageSettings />);
+
+    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
+    expect(privateStorage.getByLabelText("Bucket")).toHaveValue("ops");
+  });
+
   it("shows a staged public endpoint after the backend goes back to Local disk", () => {
     mockForm({
       dirtyCount: 2,
@@ -455,7 +493,9 @@ describe("StorageSettings", () => {
     ).toHaveValue("https://s3.example");
   });
 
-  it("keeps the public bucket fields in view while S3 is reviewed on a locked local install", async () => {
+  // Choosing S3 stages the backend instead of opening the review, so Public
+  // storage appears and its bucket can be filled in before Save.
+  it("stages S3 on a locked local install instead of opening the review", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
     const form = mockForm({
       getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
@@ -467,22 +507,14 @@ describe("StorageSettings", () => {
             : "",
     });
     render(<StorageSettings />);
-    expect(
-      within(screen.getByRole("group", { name: "Public storage" })).getByLabelText("Bucket"),
-    ).toBeEnabled();
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "S3" }));
-    const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
-      "Public bucket: not set",
-    );
-    // The review stages nothing; the bucket it needs stays on the page.
-    expect(form.setValue).not.toHaveBeenCalledWith("artwork.storage_backend", "s3");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
-    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
-    expect(publicStorage.getByLabelText("Bucket")).toBeEnabled();
+    expect(form.setValue).toHaveBeenCalledWith("artwork.storage_backend", "s3");
+    expect(
+      screen.queryByRole("dialog", { name: "Change artwork storage" }),
+    ).not.toBeInTheDocument();
     serverStatus.current = undefined;
   });
 
@@ -820,11 +852,13 @@ describe("StorageSettings", () => {
     expect(screen.getByRole("switch", { name: "Save provider artwork to storage" })).toBeEnabled();
     expect(screen.getByRole("combobox", { name: "Backend" })).toBeDisabled();
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();
-    for (const name of ["Public storage", "Private storage"]) {
-      const group = within(screen.getByRole("group", { name }));
-      expect(group.getByLabelText("Endpoint")).toBeDisabled();
-      expect(group.getByLabelText("Bucket")).toBeDisabled();
-    }
+    expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
+    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
+    await userEvent.click(
+      privateStorage.getByRole("button", { name: "Keep private files in an S3 bucket" }),
+    );
+    expect(privateStorage.getByLabelText("Endpoint")).toBeDisabled();
+    expect(privateStorage.getByLabelText("Bucket")).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(form.save).toHaveBeenCalledWith(["metadata.cache_images"]);
     expect(createStorageTransitionMock).not.toHaveBeenCalled();
@@ -1010,11 +1044,36 @@ describe("StorageSettings", () => {
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
     await userEvent.click(screen.getByRole("option", { name: "Automatic" }));
 
+    expect(form.setValue).toHaveBeenCalledWith("artwork.storage_backend", "auto");
+    expect(
+      screen.queryByRole("dialog", { name: "Change artwork storage" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reviews a staged Local to Automatic switch with a saved public bucket as an S3 move", async () => {
+    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
+    mockForm({
+      dirtyCount: 1,
+      dirtyKeys: ["artwork.storage_backend"],
+      isDirty: (key: string) => key === "artwork.storage_backend",
+      getPersistedValue: (key: string) =>
+        key === "artwork.storage_backend" ? "local" : key === "s3.public_bucket" ? "artwork" : "",
+      getValue: (key: string) => {
+        if (key === "artwork.storage_backend") return "auto";
+        if (key === "s3.public_bucket") return "artwork";
+        if (key === "s3.public_endpoint") return "https://s3.example";
+        if (key === "s3.public_url_auth") return "presigned";
+        return "";
+      },
+    });
+    render(<StorageSettings />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+
     const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
     expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
       "New S3 location",
     );
-    expect(form.setValue).not.toHaveBeenCalledWith("artwork.storage_backend", "auto");
   });
 
   it("routes Automatic S3 to local when its public bucket is cleared", async () => {
@@ -1097,6 +1156,9 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
     const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
+    await userEvent.click(
+      privateStorage.getByRole("button", { name: "Keep private files in an S3 bucket" }),
+    );
     expect(privateStorage.getByLabelText("Endpoint")).toBeEnabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -1185,8 +1247,12 @@ describe("StorageSettings", () => {
   it("warns that Start fresh leaves downloaded subtitles behind on local-to-S3 moves", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
     mockForm({
+      dirtyCount: 1,
+      dirtyKeys: ["artwork.storage_backend"],
+      isDirty: (key: string) => key === "artwork.storage_backend",
+      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
       getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
+        if (key === "artwork.storage_backend") return "s3";
         if (key === "s3.public_bucket") return "artwork";
         if (key === "s3.public_endpoint") return "https://s3.example";
         if (key === "s3.public_url_auth") return "presigned";
@@ -1195,8 +1261,7 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
-    await userEvent.click(screen.getByRole("option", { name: "S3" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
     const startFresh = screen.getByRole("radio", { name: /Start fresh/ }).closest("label");
     expect(startFresh).toHaveTextContent(/Downloaded subtitles.*unavailable after the switch/);
@@ -1305,8 +1370,12 @@ describe("StorageSettings", () => {
   it("requires private S3 before offering avatar-preserving copy policies", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
     mockForm({
+      dirtyCount: 1,
+      dirtyKeys: ["artwork.storage_backend"],
+      isDirty: (key: string) => key === "artwork.storage_backend",
+      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
       getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
+        if (key === "artwork.storage_backend") return "s3";
         if (key === "s3.public_bucket") return "public-artwork";
         if (key === "s3.public_url_auth") return "presigned";
         return "";
@@ -1314,8 +1383,7 @@ describe("StorageSettings", () => {
     });
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
-    await userEvent.click(screen.getByRole("option", { name: "S3" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
 
     expect(screen.getByRole("radio", { name: /Preserve personal uploads/ })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /Migrate everything/ })).toBeDisabled();
@@ -1769,13 +1837,14 @@ describe("StorageSettings", () => {
       realForm.enabled = false;
     });
 
-    it("saves a public bucket typed before S3 is picked", async () => {
+    it("shows public storage once S3 is picked and saves its bucket", async () => {
       render(<StorageSettings />);
-      const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
-      await userEvent.type(publicStorage.getByLabelText("Bucket"), "artwork");
+      expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
 
       await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
       await userEvent.click(screen.getByRole("option", { name: "S3" }));
+      const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+      await userEvent.type(publicStorage.getByLabelText("Bucket"), "artwork");
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() =>
@@ -1784,6 +1853,23 @@ describe("StorageSettings", () => {
           "s3.public_bucket": "artwork",
         }),
       );
+    });
+
+    it("opens the review on Save after S3 is picked on a locked local install", async () => {
+      serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
+      render(<StorageSettings />);
+
+      await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
+      await userEvent.click(screen.getByRole("option", { name: "S3" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
+      await userEvent.type(publicStorage.getByLabelText("Bucket"), "artwork");
+      await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Change artwork storage" });
+      expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent("artwork");
+      expect(updateSettingsMock).not.toHaveBeenCalled();
+      serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
     });
   });
 
