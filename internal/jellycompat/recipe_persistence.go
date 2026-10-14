@@ -91,8 +91,8 @@ func acknowledgeRecipe(ctx context.Context, work string, session *PlaybackSessio
 	}
 }
 
-// PublishRecipe runs once under the shared store mutex. It never reenters Get or
-// queues a recipe callback for replay after a failed publication.
+// PublishRecipe owns the canonical work and compat row across receipt I/O.
+// Only snapshot capture and authoritative assignment hold the shared map mutex.
 func (s *PlaybackSessionStore) PublishRecipe(ctx context.Context, id, work string, card playback.RecipeCard, recipes recipeNodePutter) error {
 	if card.SessionID == "" {
 		card.SessionID = work
@@ -105,9 +105,14 @@ func (s *PlaybackSessionStore) PublishRecipe(ctx context.Context, id, work strin
 	if recipeOwner(ctx, s, work) == nil {
 		return s.WithRemoteStart(ctx, work, func(owned context.Context) error { return s.PublishRecipe(owned, id, work, card, recipes) })
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release, err := s.lockSessionMutation(ctx, id)
+	if err != nil {
+		return errors.Join(err, noderecipe.ErrPublicationUncertain)
+	}
+	defer release()
+	s.mu.RLock()
 	session, ok := s.sessions[id]
+	s.mu.RUnlock()
 	if !ok {
 		return ErrSessionNotFound
 	}
@@ -115,13 +120,27 @@ func (s *PlaybackSessionStore) PublishRecipe(ctx context.Context, id, work strin
 		return err
 	}
 	publication, err := recipes.PublishWithUndo(ctx, work, card, acceptedRecipe(&session))
+	// Lifecycle writers share the row gate, but absolute expiry can advance
+	// during Redis I/O. Never acknowledge or restore expired source authority.
+	if validationErr := validateRecipeMutation(&session, work, s.now()); validationErr != nil {
+		if publication == nil {
+			return errors.Join(err, validationErr)
+		}
+		return retireRejectedRecipe(ctx, publication, errors.Join(err, validationErr))
+	}
 	if err != nil {
 		return undoRecipe(ctx, publication, err)
 	}
+	s.mu.Lock()
+	if validationErr := validateRecipeMutation(&session, work, s.now()); validationErr != nil {
+		s.mu.Unlock()
+		return retireRejectedRecipe(ctx, publication, validationErr)
+	}
 	assignRecipe(&session, card, publication, s.now())
 	s.sessions[id] = session
-	// The in-memory assignment is now authoritative. If acknowledgement is
-	// unavailable, retain it; a later locked mutation can reconcile the receipt.
+	s.mu.Unlock()
+	// The row gate keeps this accepted assignment authoritative through ack;
+	// other sessions continue to read and mutate while Redis is unavailable.
 	acknowledgeRecipe(ctx, work, &session, recipes, publication)
 	return nil
 }

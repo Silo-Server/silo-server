@@ -172,6 +172,11 @@ failure after proven acceptance does not stop the accepted transport. Detached
 database sessions have bounded, cancellable admission so this serialization
 does not exhaust the ordinary query pool.
 
+The in-memory store holds a per-session lifecycle gate through publication,
+compensation and acknowledgement. Its shared map mutex covers only snapshot
+capture and assignment, so Redis I/O does not block unrelated sessions. Bulk
+mutations own and revalidate their complete affected row set before assignment.
+
 An accepted compat row without a publication ID can reconstruct exact retained
 recipe bytes under that same lock. It must describe started work, match the
 retained card and have no active Redis publication owner. Reconstruction creates

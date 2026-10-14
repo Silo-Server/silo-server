@@ -251,6 +251,9 @@ type CompatPlaybackStore interface {
 // PlaybackSessionStore keeps compat playback sessions in memory. It is the
 // default CompatPlaybackStore implementation.
 type PlaybackSessionStore struct {
+	sessionMutationMu sync.Mutex
+	sessionMutations  map[string]*playbackSessionMutation
+
 	recipeWorkMu        sync.Mutex
 	recipeWorks         map[string]*recipeWorkGate
 	recipeAdmissionOnce sync.Once
@@ -305,8 +308,8 @@ func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) {
 // just assigned without a second Get (extra lock + copy). Put keeps the
 // no-return signature the CompatPlaybackStore interface requires.
 func (s *PlaybackSessionStore) putNormalized(session PlaybackSession) PlaybackSession {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(session.ID)
+	defer release()
 
 	session = s.normalizeSession(session)
 	s.sessions[session.ID] = session
@@ -314,8 +317,13 @@ func (s *PlaybackSessionStore) putNormalized(session PlaybackSession) PlaybackSe
 }
 
 func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) (PlaybackSession, []string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release, _ := s.lockSessionSetMap(context.Background(), []string{session.ID}, func(id string, existing PlaybackSession) bool {
+		return session.CompatToken != "" && session.ClientDeviceID != "" && session.RouteItemID != "" &&
+			id != session.ID && !existing.Terminal && existing.UpstreamSessionID == "" &&
+			existing.CompatToken == session.CompatToken && existing.ClientDeviceID == session.ClientDeviceID &&
+			mediaSourceIDsEqual(existing.RouteItemID, session.RouteItemID) && existing.NegotiationVariant == session.NegotiationVariant
+	})
+	defer release()
 
 	session = s.normalizeSession(session)
 	removed := make([]string, 0, 1)
@@ -370,8 +378,8 @@ func (s *PlaybackSessionStore) Get(id string) (*PlaybackSession, bool) {
 
 // Delete removes a playback session.
 func (s *PlaybackSessionStore) Delete(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(id)
+	defer release()
 	delete(s.sessions, id)
 }
 
@@ -384,8 +392,8 @@ func (s *PlaybackSessionStore) compatTokenForID(id string) string {
 // HideFromRouting marks a session terminal without requiring its provider event
 // to have been staged yet. Final-report lookups remain available for retries.
 func (s *PlaybackSessionStore) HideFromRouting(id, compatToken string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(id)
+	defer release()
 	session, ok := s.sessions[id]
 	if !ok || session.CompatToken != compatToken || !session.ExpiresAt.After(s.now()) {
 		return ErrSessionNotFound
@@ -397,10 +405,10 @@ func (s *PlaybackSessionStore) HideFromRouting(id, compatToken string) error {
 }
 
 func (s *PlaybackSessionStore) terminalIDsByCompatToken(compatToken string) map[string]struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	result := make(map[string]struct{})
 	now := s.now()
+	release := s.lockExpiredSessionMap(now)
+	defer release()
+	result := make(map[string]struct{})
 	for id, session := range s.sessions {
 		if !session.ExpiresAt.After(now) {
 			delete(s.sessions, id)
@@ -418,8 +426,17 @@ func (s *PlaybackSessionStore) replaceByCompatToken(
 	replacements []PlaybackSession,
 	preserveIDs map[string]struct{},
 ) []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	fixed := make([]string, 0, len(replacements))
+	for _, session := range replacements {
+		if _, preserve := preserveIDs[session.ID]; !preserve {
+			fixed = append(fixed, session.ID)
+		}
+	}
+	release, _ := s.lockSessionSetMap(context.Background(), fixed, func(id string, session PlaybackSession) bool {
+		_, preserve := preserveIDs[id]
+		return session.CompatToken == compatToken && !preserve
+	})
+	defer release()
 	affected := make(map[string]struct{}, len(replacements))
 	for id, session := range s.sessions {
 		_, preserve := preserveIDs[id]
@@ -457,8 +474,8 @@ func (s *PlaybackSessionStore) StageTerminal(
 	event watchsync.ScrobbleEvent,
 	authoritative bool,
 ) (*PlaybackSession, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(id)
+	defer release()
 
 	session, ok := s.sessions[id]
 	if !ok || session.CompatToken != compatToken {
@@ -484,8 +501,8 @@ func (s *PlaybackSessionStore) StageTerminal(
 // a process dies; a delivered fallback is skipped unless Stopped subsequently
 // staged an authoritative replacement.
 func (s *PlaybackSessionStore) ClaimTerminal(id, compatToken string, claimUntil time.Time) (*PlaybackSession, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(id)
+	defer release()
 
 	session, ok := s.sessions[id]
 	if !ok || session.CompatToken != compatToken || !session.Terminal || session.TerminalScrobbleEvent == nil {
@@ -514,8 +531,8 @@ func (s *PlaybackSessionStore) ReleaseTerminalClaim(
 	claimVersion int64,
 	fallbackSent bool,
 ) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(id)
+	defer release()
 
 	session, ok := s.sessions[id]
 	if !ok || session.CompatToken != compatToken || !session.TerminalClaimUntil.Equal(claimUntil) ||
@@ -534,8 +551,8 @@ func (s *PlaybackSessionStore) ReleaseTerminalClaim(
 // CompleteTerminal removes an authoritatively delivered event while protecting
 // a newer lease from a stale completion.
 func (s *PlaybackSessionStore) CompleteTerminal(id, compatToken string, claimUntil time.Time, claimVersion int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(id)
+	defer release()
 
 	session, ok := s.sessions[id]
 	if !ok || session.CompatToken != compatToken || !session.TerminalAuthoritative ||
@@ -549,13 +566,16 @@ func (s *PlaybackSessionStore) CompleteTerminal(id, compatToken string, claimUnt
 // ListPendingTerminals returns staged events that still need delivery. A
 // successfully sent fallback remains retained for a possible authoritative
 // replacement but is not itself pending.
-func (s *PlaybackSessionStore) ListPendingTerminals(_ context.Context, limit int) ([]PlaybackSession, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *PlaybackSessionStore) ListPendingTerminals(ctx context.Context, limit int) ([]PlaybackSession, error) {
+	now := s.now()
+	release, err := s.lockSessionSetMap(ctx, nil, func(_ string, row PlaybackSession) bool { return !row.ExpiresAt.After(now) })
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if limit <= 0 {
 		limit = 100
 	}
-	now := s.now()
 	eligible := make([]PlaybackSession, 0, len(s.sessions))
 	for id, session := range s.sessions {
 		if !session.ExpiresAt.After(now) {
@@ -585,9 +605,9 @@ func (s *PlaybackSessionStore) ListPendingTerminals(_ context.Context, limit int
 }
 
 func (s *PlaybackSessionStore) deleteExpired() map[string]string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	now := s.now()
+	release := s.lockExpiredSessionMap(now)
+	defer release()
 	removed := make(map[string]string)
 	for id, session := range s.sessions {
 		if !session.ExpiresAt.After(now) {
@@ -601,8 +621,8 @@ func (s *PlaybackSessionStore) deleteExpired() map[string]string {
 // GetFinalizable returns an active or terminal caller-owned session so a stop
 // report can validate its media fields before atomically consuming it.
 func (s *PlaybackSessionStore) GetFinalizable(id, compatToken string) (*PlaybackSession, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(id)
+	defer release()
 
 	session, ok := s.sessions[id]
 	if !ok || session.CompatToken != compatToken {
@@ -618,8 +638,8 @@ func (s *PlaybackSessionStore) GetFinalizable(id, compatToken string) (*Playback
 
 // Update modifies a playback session in place.
 func (s *PlaybackSessionStore) Update(id string, fn func(*PlaybackSession) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	release := s.lockSessionMap(id)
+	defer release()
 
 	session, ok := s.sessions[id]
 	if !ok || session.Terminal {

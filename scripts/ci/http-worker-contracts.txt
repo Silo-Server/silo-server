@@ -113,3 +113,13 @@
 ./internal/noderecipe TestRedisPublicationLegacyRebuildFencesLostModernReceipt
 ./internal/jellycompat TestRecipePublicationCanReplacePreReceiptVersion
 ./internal/jellycompat TestRecipePublicationLegacyRebuildUsesFreshRow
+
+# Receipt I/O owns its row while unrelated sessions continue to read and mutate.
+./internal/jellycompat TestMemoryRecipePublicationDoesNotBlockUnrelatedSessions
+./internal/jellycompat TestMemoryRecipeLifecycleMutationsSerializeWithReceipt
+./internal/jellycompat TestMemorySessionMutationCancellationAndBulkRevalidation
+./internal/jellycompat TestMemoryRecipeRedisReceiptsPreserveRollbackAndSuccessors
+./internal/jellycompat TestMemoryRecipeExpiredDuringRedisRetiresExactCandidate
+./internal/jellycompat TestMemoryRecipeAcknowledgementOutageKeepsAcceptedReceipt
+./internal/jellycompat TestMemoryRecipeBlockedRedisCommandAllowsUnrelatedSession
+./internal/jellycompat TestMemorySessionPendingScanCancellationKeepsRows
