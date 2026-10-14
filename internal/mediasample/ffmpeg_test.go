@@ -680,7 +680,7 @@ func TestRunSheetsAbandonsReorderedKeyframesWithRealFFmpeg(t *testing.T) {
 		t.Fatalf("lists %q, want a keyframe list and then a sample-time list", lists)
 	}
 	previous := lookupKeyframes
-	lookupKeyframes = func(string) []float64 { return nil }
+	lookupKeyframes = func(context.Context, string) []float64 { return nil }
 	t.Cleanup(func() { lookupKeyframes = previous })
 	want, _ := run(t)
 	if result.SheetFrames != want.SheetFrames || !bytes.Equal(result.Sheets[0].JPEG, want.Sheets[0].JPEG) {

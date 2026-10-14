@@ -2,6 +2,7 @@ package mediasample
 
 import (
 	"context"
+	"io"
 	"math"
 	"os"
 	"sort"
@@ -53,8 +54,13 @@ import (
 // storage, is left behind and the run lists sample times.
 const keyframeLookupTimeout = 10 * time.Second
 
+// keyframeLookups bounds the lookups in flight across the process, including
+// those left behind blocked. A run that finds every slot taken lists sample
+// times without reading the Cues.
+var keyframeLookups = make(chan struct{}, 16)
+
 // lookupKeyframes returns the video keyframe times of the Matroska file at
-// path; tests replace it.
+// path, stopping between reads once ctx ends; tests replace it.
 var lookupKeyframes = matroskaKeyframes
 
 // sheetKeyframes returns the video keyframe times, on the container's
@@ -65,23 +71,31 @@ func sheetKeyframes(ctx context.Context, req Request) []float64 {
 	if req.Sheets == nil || req.Samples == nil || req.Samples.ReadThrough {
 		return nil
 	}
+	select {
+	case keyframeLookups <- struct{}{}:
+	default:
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, keyframeLookupTimeout)
+	defer cancel()
+	lookup := lookupKeyframes
 	found := make(chan []float64, 1)
-	go func() { found <- lookupKeyframes(req.Input) }()
-	timer := time.NewTimer(keyframeLookupTimeout)
-	defer timer.Stop()
+	go func() {
+		defer func() { <-keyframeLookups }()
+		found <- lookup(ctx, req.Input)
+	}()
 	select {
 	case keyframes := <-found:
 		return keyframes
 	case <-ctx.Done():
-	case <-timer.C:
+		return nil
 	}
-	return nil
 }
 
 // matroskaKeyframes reads the keyframe times of the Matroska file at path
 // from its Cues and a few clusters' block headers (keyframes.ReadMatroska),
 // or returns nil. Only regular files are opened: opening a FIFO would block.
-func matroskaKeyframes(path string) []float64 {
+func matroskaKeyframes(ctx context.Context, path string) []float64 {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return nil
@@ -91,11 +105,24 @@ func matroskaKeyframes(path string) []float64 {
 		return nil
 	}
 	defer func() { _ = file.Close() }()
-	index, err := keyframes.ReadMatroska(file, info.Size())
+	index, err := keyframes.ReadMatroska(contextReaderAt{ctx: ctx, r: file}, info.Size())
 	if err != nil {
 		return nil
 	}
 	return index.Keyframes
+}
+
+// contextReaderAt stops reading once ctx ends.
+type contextReaderAt struct {
+	ctx context.Context
+	r   io.ReaderAt
+}
+
+func (c contextReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.ReadAt(p, off)
 }
 
 // listPlan is the list a Sheets run reads: its entries, the input start time

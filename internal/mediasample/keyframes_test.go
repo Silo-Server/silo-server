@@ -11,7 +11,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 func TestKeyframePlan(t *testing.T) {
@@ -109,7 +108,7 @@ func stubKeyframes(t *testing.T, keyframes []float64) *int {
 	t.Helper()
 	calls := 0
 	previous := lookupKeyframes
-	lookupKeyframes = func(string) []float64 {
+	lookupKeyframes = func(context.Context, string) []float64 {
 		calls++
 		return keyframes
 	}
@@ -136,25 +135,44 @@ func TestSheetKeyframesOnlyForSheetLists(t *testing.T) {
 	}
 }
 
-// TestSheetKeyframesStopsWaiting leaves a lookup blocked, as on stalled
-// storage: a canceled run goes on without keyframes at once.
+// TestSheetKeyframesStopsWaiting blocks a lookup, as stalled storage
+// would: a canceled run goes on without keyframes at once, and the lookup
+// sees its context end.
 func TestSheetKeyframesStopsWaiting(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
+	entered, exited := make(chan struct{}), make(chan struct{})
 	previous := lookupKeyframes
-	lookupKeyframes = func(string) []float64 {
-		<-release
+	lookupKeyframes = func(ctx context.Context, _ string) []float64 {
+		defer close(exited)
+		close(entered)
+		<-ctx.Done()
 		return []float64{0}
 	}
 	t.Cleanup(func() { lookupKeyframes = previous })
 	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	started := time.Now()
+	go func() {
+		<-entered
+		cancel()
+	}()
 	if got := sheetKeyframes(ctx, sheetsRequest([]float64{5}, 1, 1)); got != nil {
 		t.Fatalf("keyframes %v, want none", got)
 	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("waited %v for a blocked lookup", elapsed)
+	<-exited
+}
+
+// TestSheetKeyframesSkipsWhenLookupsAreFull holds every lookup slot, as
+// lookups left blocked would: a run lists sample times without another.
+func TestSheetKeyframesSkipsWhenLookupsAreFull(t *testing.T) {
+	calls := stubKeyframes(t, []float64{0})
+	for range cap(keyframeLookups) {
+		keyframeLookups <- struct{}{}
+	}
+	defer func() {
+		for range cap(keyframeLookups) {
+			<-keyframeLookups
+		}
+	}()
+	if got := sheetKeyframes(t.Context(), sheetsRequest([]float64{5}, 1, 1)); got != nil || *calls != 0 {
+		t.Fatalf("keyframes %v after %d lookups, want none", got, *calls)
 	}
 }
 
@@ -170,7 +188,7 @@ func TestMatroskaKeyframesSkipsOtherFiles(t *testing.T) {
 		t.Skipf("mkfifo: %v", err)
 	}
 	for _, path := range []string{text, fifo, filepath.Join(dir, "missing.mkv"), dir} {
-		if got := matroskaKeyframes(path); got != nil {
+		if got := matroskaKeyframes(t.Context(), path); got != nil {
 			t.Fatalf("%s: keyframes %v, want none", filepath.Base(path), got)
 		}
 	}

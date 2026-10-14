@@ -427,9 +427,12 @@ at the sample's keyframe and reads only it and the entry's span
   from the file's Cues with `keyframes.ReadMatroska`: the index the
   demuxer's seek uses, plus its spot check of a few clusters' block headers,
   in-process and without decoding. The read runs in a goroutine, and the run
-  stops waiting after 10 seconds or when its context ends; a read blocked on
-  stalled storage is left behind. A file that is not Matroska, has no Cues,
-  or whose Cues leave out keyframes gets sample-time entries.
+  stops waiting after 10 seconds or when its context ends, which also stops
+  the read at its next call; a read blocked on stalled storage is left
+  behind. At most 16 reads are in flight in a process, blocked ones
+  included, and a run that finds none free skips the read. A file that is not
+  Matroska, has no Cues, whose Cues leave out keyframes, or whose read is
+  skipped or stopped gets sample-time entries.
 - An entry starts at the last keyframe at or before the sample's inpoint
   (sample time plus container start, in the microseconds the list is
   written in), rounded up to the microsecond so the seek never lands on the
