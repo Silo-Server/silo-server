@@ -80,7 +80,7 @@ vi.mock("../hooks/useWatchProgress", () => ({
   useWatchProgress: () => vi.fn().mockResolvedValue(undefined),
 }));
 // Opted into per test: plans whose original the browser engine plays.
-const engineRoute = vi.hoisted(() => ({ chosen: false }));
+const engineRoute = vi.hoisted(() => ({ chosen: false, refused: false }));
 vi.mock("../engine/routing", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../engine/routing")>();
   return {
@@ -88,9 +88,14 @@ vi.mock("../engine/routing", async (importOriginal) => {
     resolveOriginalPlaybackRoute: (
       ...args: Parameters<typeof actual.resolveOriginalPlaybackRoute>
     ) =>
-      engineRoute.chosen
-        ? { kind: "engine", source: {} }
-        : actual.resolveOriginalPlaybackRoute(...args),
+      engineRoute.refused
+        ? {
+            kind: "unsupported",
+            failure: { classification: actual.ENGINE_UNSUPPORTED_SOURCE, message: "refused" },
+          }
+        : engineRoute.chosen
+          ? { kind: "engine", source: {} }
+          : actual.resolveOriginalPlaybackRoute(...args),
   };
 });
 const attachBrowserEngine = vi.hoisted(() => vi.fn(() => ({ destroy: vi.fn() })));
@@ -3086,6 +3091,37 @@ describe("VideoPlayer source timeline", () => {
     video.currentTime = 1.4;
     fireEvent.loadedMetadata(video);
     await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-1.4));
+  });
+
+  // A route refused before any media event has no position of its own yet;
+  // recovery must resume where this plan was starting, not at 0.
+  it("reports the resume point when the engine refuses a resumed original", async () => {
+    const onPlanFailure = vi.fn();
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300, timeline_offset_seconds: 0 },
+    });
+    engineRoute.refused = true;
+    try {
+      renderPlayer({
+        plan,
+        initialPosition: 1300,
+        onPlanFailure,
+        browserEngine: {
+          containers: ["mkv"],
+          videoCodecs: ["h264"],
+          audioCodecs: ["aac"],
+          hdr: false,
+        },
+      });
+      await waitFor(() => expect(onPlanFailure).toHaveBeenCalled());
+      expect(onPlanFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ classification: "browser_engine_unsupported_source" }),
+        1300,
+      );
+    } finally {
+      engineRoute.refused = false;
+    }
   });
 
   // The engine's audio follows playbackRate without keeping pitch, so it plays

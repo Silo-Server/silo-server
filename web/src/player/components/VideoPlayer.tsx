@@ -703,7 +703,12 @@ export function VideoPlayer({
       reportedPlanFailureKeyRef.current = failureKey;
       transportFailedForPlanRevisionRef.current = planRevision;
       setError(null);
-      onPlanFailure(failure, currentTimeRef.current);
+      // Until this transport has played, the player's position is the
+      // previous route's or 0; recovery resumes where this one was heading.
+      onPlanFailure(
+        failure,
+        streamPlayedRef.current ? currentTimeRef.current : subtitleFetchAnchorRef.current,
+      );
       return true;
     },
     [onPlanFailure, plan.plan_attempt_key, planRevision, sessionId],
