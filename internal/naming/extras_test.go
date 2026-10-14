@@ -76,6 +76,8 @@ func TestSeriesExtrasFolderBelongsToShow(t *testing.T) {
 		{"/tv/Documentaries/Interviews/Interviews E02.mkv", "/tv/Documentaries/Interviews", "Interviews", 0, 0},
 		{"/tv/Kids/Shorts/Shorts.2024-10-01.mkv", "/tv/Kids/Shorts", "Shorts", 0, 0},
 		{"/tv/Kids/Clips/Clips.2024-10-01.mkv", "/tv/Kids/Clips", "Clips", 0, 0},
+		{"/tv/Kids/Shorts/Shorts.2024.S01E01.mkv", "/tv/Kids/Shorts", "Shorts", 2024, 1},
+		{"/tv/Kids/Other/Other.2024.S01E02.mkv", "/tv/Kids/Other", "Other", 2024, 2},
 		// The folder holding Specials/ or Extras/ is the show when its name is
 		// a bare number or a Specials/Extras label: those are show titles.
 		{"/tv/Drama/1883/Specials/1883 S00E01.mkv", "/tv/Drama/1883", "1883", 0, 1},

@@ -449,7 +449,8 @@ func seriesRootAt(rootPath string) (*SeriesRoot, bool) {
 }
 
 // fileNamesFolder reports whether the series title a file name carries, before
-// its episode code or air date, names folder.
+// its episode code or air date, names folder. A release year after the title
+// (Shorts.2024.S01E01) still names a folder without one.
 func fileNamesFolder(fileStem, folder string) bool {
 	title := ""
 	if token, ok := parseEpisodeToken(fileStem, nil, false, false, true); ok {
@@ -460,7 +461,15 @@ func fileNamesFolder(fileStem, folder string) bool {
 			title = cleanEpisodeSeriesTitle(fileStem[:location[0]])
 		}
 	}
-	return title != "" && normalizeComparableTitle(title) == normalizeComparableTitle(folder)
+	if title == "" {
+		return false
+	}
+	if normalizeComparableTitle(title) == normalizeComparableTitle(folder) {
+		return true
+	}
+	folderTitle, folderYear := parseTitleYearCandidate(folder)
+	stem := parseInferMovieStem(title, folderTitle, folderYear)
+	return stem.Year != 0 && normalizeComparableTitle(stem.Title) == normalizeComparableTitle(folderTitle)
 }
 
 func deriveMovieRoot(filePath, libraryRoot string) (*CanonicalRoot, bool) {
