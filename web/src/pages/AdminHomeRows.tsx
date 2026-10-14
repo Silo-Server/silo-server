@@ -122,10 +122,15 @@ export default function AdminHomeRows() {
   >([]);
   // The page's rows and version as Restore read them: the dialog names what
   // this version holds, and the restore is checked against the same version.
+  // The page and the other library pages are fixed too, so Back or Forward
+  // while the dialog is open can't change what it restores.
   const [restoreSnapshot, setRestoreSnapshot] = useState<
     | (Awaited<ReturnType<typeof fetchAdminSections>> & {
         scope: typeof scope;
         libraryId: number | undefined;
+        page: PageRef;
+        pageLabel: string;
+        otherPages: LibraryPage[];
       })
     | null
   >(null);
@@ -319,11 +324,17 @@ export default function AdminHomeRows() {
 
   function openRestore() {
     const request = ++snapshotRequest.current;
+    const target = {
+      scope,
+      libraryId: activeLibraryId ?? undefined,
+      page: adapter.page,
+      pageLabel: currentPageLabel,
+      otherPages: otherLibraryPages,
+    };
     void prepareSnapshot(async () => {
-      const libraryId = activeLibraryId ?? undefined;
-      const snapshot = await fetchAdminSections(scope, libraryId);
+      const snapshot = await fetchAdminSections(target.scope, target.libraryId);
       if (request !== snapshotRequest.current) return;
-      setRestoreSnapshot({ ...snapshot, scope, libraryId });
+      setRestoreSnapshot({ ...snapshot, ...target });
       setRestoreConflict(false);
       setConfirmRestoreOpen(true);
     });
@@ -338,7 +349,8 @@ export default function AdminHomeRows() {
 
   function confirmRestore() {
     if (!restoreSnapshot) return;
-    const alsoPages = restoreAll ? otherLibraryPages : [];
+    const { page, pageLabel, otherPages } = restoreSnapshot;
+    const alsoPages = restoreAll ? otherPages : [];
     restoreDefaultsMutation.mutate(
       {
         scope: restoreSnapshot.scope,
@@ -349,7 +361,7 @@ export default function AdminHomeRows() {
       },
       {
         onSuccess: (failures) => {
-          reportRestore(adapter.page, currentPageLabel, alsoPages, failures);
+          reportRestore(page, pageLabel, alsoPages, failures);
           setConfirmRestoreOpen(false);
           setResetProfiles(false);
           setRestoreAll(false);
@@ -536,9 +548,11 @@ export default function AdminHomeRows() {
         />
         <RestoreDialog
           open={confirmRestoreOpen}
-          page={adapter.page}
-          pageLabel={currentPageLabel}
-          otherLibraryLabels={otherLibraryPages.map((page) => page.label)}
+          page={restoreSnapshot?.page ?? adapter.page}
+          pageLabel={restoreSnapshot?.pageLabel ?? currentPageLabel}
+          otherLibraryLabels={(restoreSnapshot?.otherPages ?? otherLibraryPages).map(
+            (page) => page.label,
+          )}
           rowCount={restoreSections.length}
           collectionRowTitles={restoreCollectionTitles}
           restoreAll={restoreAll}

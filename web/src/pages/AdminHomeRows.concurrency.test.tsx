@@ -328,6 +328,32 @@ describe("admin section captured snapshots", () => {
       "Restored the default rows on Home and 1 library page.",
     );
   });
+  it("restores the pages the dialog named even if the page changes while it is open", async () => {
+    await setup();
+    await chooseMoreAction("Restore defaults…");
+    const dialog = await screen.findByRole("dialog", { name: "Restore Home to the default rows?" });
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: "Also restore every library page" }),
+    );
+    // Back or Forward moves ?page= while the dialog stays open.
+    fireEvent.click(screen.getByRole("button", { name: "Movies", hidden: true }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Movies", hidden: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(dialog).toHaveAccessibleName("Restore Home and every library page to the default rows?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore defaults" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(writes.map(({ args }) => args.query)).toEqual([
+      { scope: "home", library_id: undefined },
+      { scope: "library", library_id: "7" },
+    ]);
+    expect(mocks.success).toHaveBeenCalledWith(
+      "Restored the default rows on Home and 1 library page.",
+    );
+  });
   it("leaves the library pages alone when this page changed since the dialog opened", async () => {
     await setup();
     await chooseMoreAction("Restore defaults…");
