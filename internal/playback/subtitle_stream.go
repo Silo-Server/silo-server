@@ -158,6 +158,12 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	seekApplied := opts.SeekSeconds > 0 && windowable
 	if seekApplied {
 		args = append(args, "-ss", strconv.FormatFloat(opts.SeekSeconds, 'f', 3, 64))
+		// ffmpeg offsets an input seek by the input's start time. A cached
+		// .sup's start time is its first cue, so the seek has to be taken
+		// as an absolute timestamp or the window starts that much late.
+		if opts.InputIsExtractedSup {
+			args = append(args, "-seek_timestamp", "1")
+		}
 	}
 
 	// A cached .sup input has no container magic worth probing and exactly
@@ -185,14 +191,14 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	// windows taken after a seek stay on the same clock as the first one
 	// instead of running late by the container's start time (seconds
 	// for TS remuxes). A cached .sup was already rebased when it was
-	// extracted, and its own start time is its first cue, so it must
-	// keep its timestamps as they are.
-	if seekApplied {
-		args = append(args, "-copyts")
-		if !opts.InputIsExtractedSup {
-			args = append(args, "-start_at_zero")
-		}
-		args = append(args, "-avoid_negative_ts", "disabled")
+	// extracted, and its own start time is its first cue, so it keeps its
+	// timestamps as they are, seeked or not; rebasing it would pull every
+	// cue early by the first cue's time.
+	switch {
+	case opts.InputIsExtractedSup:
+		args = append(args, "-copyts", "-avoid_negative_ts", "disabled")
+	case seekApplied:
+		args = append(args, "-copyts", "-start_at_zero", "-avoid_negative_ts", "disabled")
 	}
 	// Input -t does not bound subtitle-only output: ffmpeg keeps demuxing
 	// and emitting cues to EOF. Limit the output instead, using the window's

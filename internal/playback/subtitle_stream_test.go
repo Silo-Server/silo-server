@@ -254,6 +254,33 @@ func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	if !strings.Contains(joined, "-c:s copy") || !strings.Contains(joined, "-f sup pipe:1") {
 		t.Fatalf("cached sup extract should copy into a sup stream: %s", joined)
 	}
+	// ffmpeg offsets an input seek by the input's start time, which for a
+	// cached .sup is its first cue; the seek must be absolute instead.
+	if tsIdx := slices.Index(args, "-seek_timestamp"); tsIdx < 0 || tsIdx > inIdx || args[tsIdx+1] != "1" {
+		t.Fatalf("cached sup seek must be an absolute timestamp (-seek_timestamp 1 before -i): %s", joined)
+	}
+}
+
+// An unseeked window from a cached .sup keeps its stored timestamps too:
+// without -copyts ffmpeg rebases the stream onto its first cue.
+func TestStreamExtractArgs_ExtractedSupInputFromStart(t *testing.T) {
+	args := streamExtractArgs(StreamExtractOpts{
+		InputPath:           "/transcode/subtitle-cache/abc-s3-1-2.sup",
+		SourceCodec:         "hdmv_pgs_subtitle",
+		DurationSeconds:     600,
+		AllowWindow:         true,
+		InputIsExtractedSup: true,
+	})
+	joined := strings.Join(args, " ")
+	if !slices.Contains(args, "-copyts") || slices.Contains(args, "-start_at_zero") {
+		t.Fatalf("cached sup extract must keep its stored timestamps: %s", joined)
+	}
+	if slices.Contains(args, "-ss") || slices.Contains(args, "-seek_timestamp") {
+		t.Fatalf("an extract from the start must not seek: %s", joined)
+	}
+	if !strings.Contains(joined, "-to 600.000") {
+		t.Fatalf("the window still ends at its duration: %s", joined)
+	}
 }
 
 // AllowWindow must not truncate the script consumed by an ASS renderer that
