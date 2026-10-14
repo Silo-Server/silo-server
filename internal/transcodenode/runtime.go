@@ -148,22 +148,6 @@ func artifactDeleteAllowed(ctx context.Context, work string) (bool, error) {
 	return scope.allowed()
 }
 
-// StopWork retires expired local work without revoking a newer core generation.
-func (s *Server) StopWork(ctx context.Context, sessionID string) {
-	unlock := s.lockSessionLifecycle(sessionID)
-	defer unlock()
-	s.mu.Lock()
-	session := s.sessions[sessionID]
-	delete(s.sessions, sessionID)
-	delete(s.lastAccess, sessionID)
-	delete(s.progressiveRemuxes, sessionID)
-	s.mu.Unlock()
-	if session != nil {
-		_ = s.closeSessionOffGPU(session)
-	}
-	s.tracker.Remove(ctx, sessionID)
-}
-
 // StopWorkInputs cancels the exact revoked producer immediately. Directory and
 // accounting teardown then wait for lifecycle ownership, so a replacement can
 // neither inherit a directory being deleted nor lose its own job or files.
