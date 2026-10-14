@@ -51,7 +51,9 @@ export type SubtitleWindowAction =
  *     window from slightly before the playhead, so a skipped-over gap is never
  *     mistaken for covered range;
  *   - playback nearing the end of coverage and not at EOF → the next window,
- *     overlapping the previous one slightly;
+ *     overlapping the previous one slightly. It starts there even when the
+ *     playhead has already passed the end (a retry after a failed extend), so
+ *     nothing between the two windows is skipped;
  *   - a window already on the wire that covers the playhead, or a failure
  *     still inside its backoff → nothing.
  */
@@ -77,10 +79,7 @@ export function planSubtitleWindow(
     return fresh();
   }
   if (!state.atEOF && time > state.windowEnd - SUBTITLE_PREFETCH_LEAD_SECONDS) {
-    return {
-      kind: "extend",
-      start: Math.max(state.windowEnd - SUBTITLE_WINDOW_OVERLAP_SECONDS, time),
-    };
+    return { kind: "extend", start: state.windowEnd - SUBTITLE_WINDOW_OVERLAP_SECONDS };
   }
   return { kind: "none" };
 }

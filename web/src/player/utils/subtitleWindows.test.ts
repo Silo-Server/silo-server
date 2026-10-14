@@ -32,6 +32,10 @@ describe("planSubtitleWindow", () => {
     expect(planSubtitleWindow(covered, 300, 0, 2)).toEqual({ kind: "none" });
   });
 
+  it("extends from the end of coverage when the playhead has already passed it", () => {
+    expect(planSubtitleWindow(covered, 700.8, 0, 2)).toEqual({ kind: "extend", start: 695 });
+  });
+
   it("waits for a window on the wire that covers the playhead, and replaces one that does not", () => {
     expect(planSubtitleWindow({ ...covered, inflightStart: 695 }, 690, 0, 2)).toEqual({
       kind: "none",
