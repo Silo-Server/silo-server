@@ -343,9 +343,9 @@ func (h *RecommendationsHandler) ForYouRowCards(ctx context.Context, userID int,
 }
 
 // SimilarItems answers items similar to itemID; an unavailable engine, and
-// an anchor the viewer cannot see, answer an empty list. The similar items
-// themselves are not viewer-filtered: v1 filters them with keepAccessible and
-// v2 as it renders the cards.
+// an anchor the viewer cannot see, answer an empty list. The engine leaves out
+// titles the viewer cannot see before it ranks; v1 filters again with
+// keepAccessible and v2 as it renders the cards.
 func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	if h.engineUnavailable() {
 		return []recommendations.ScoredItem{}, nil

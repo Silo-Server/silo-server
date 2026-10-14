@@ -57,8 +57,8 @@ type Reader struct {
 	ratingsRepo itemRatingReader
 	refresh     ReadRefreshRequester
 	signals     *SignalReader
-	// now is the clock personal rows are rotated by; nil is time.Now. Its
-	// location sets the day a rotation lasts.
+	// now is the clock personal rows are rotated by; nil is time.Now. A
+	// rotation lasts one UTC day.
 	now func() time.Time
 	// personalOff serves no personal rows (see WithPersonalRows).
 	personalOff bool
@@ -104,7 +104,7 @@ func (r *Reader) WithPersonalRows(enabled bool) *Reader {
 	return r
 }
 
-// today is the time a read's rotation is for, in the server's time zone.
+// today is the time a read's rotation is for; its UTC date picks the day.
 func (r *Reader) today() time.Time {
 	if r.now != nil {
 		return r.now()

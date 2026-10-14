@@ -486,10 +486,6 @@ func (w *Worker) NotifyUnratedContentChanged(ctx context.Context, settle time.Du
 	time.AfterFunc(settle, mark)
 }
 
-// RequestReadRefresh queues a refresh for a profile whose cached rows a read
-// found missing, at most once per readRefreshInterval per profile on this
-// server. Signal changes go through NotifySignalsChanged, which is not
-// throttled.
 // ReadRefreshDue reports whether RequestReadRefresh would queue a refresh for
 // the profile now, so a read can skip checking whether one is worth asking
 // for.
@@ -500,6 +496,10 @@ func (w *Worker) ReadRefreshDue(userID int, profileID string) bool {
 	return w.readRefreshes.due(profileRefreshKey(userID, profileID), readRefreshInterval)
 }
 
+// RequestReadRefresh queues a refresh for a profile whose cached rows a read
+// found missing, at most once per readRefreshInterval per profile on this
+// server. Signal changes go through NotifySignalsChanged, which is not
+// throttled.
 func (w *Worker) RequestReadRefresh(ctx context.Context, userID int, profileID string) {
 	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
 		return
