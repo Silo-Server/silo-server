@@ -10,10 +10,6 @@ import {
 import { OverlayPreviewVariantToggle } from "@/components/overlays/OverlayPreviewVariantToggle";
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
-import { RawCssEditor } from "@/components/theme/RawCssEditor";
-import { ThemePreviewCard } from "@/components/theme/ThemePreviewCard";
-import { TokenEditor } from "@/components/theme/TokenEditor";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -26,8 +22,6 @@ import { useBranding } from "@/hooks/useBranding";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
-import { ACCENT_TOKENS, accentColorToTokens } from "@/lib/accentMapping";
-import { sanitizeCss } from "@/lib/cssSanitizer";
 import {
   buildDefaultPrefs,
   CATEGORY_META,
@@ -44,8 +38,6 @@ import {
   type OverlayPosition,
   type PresetId,
 } from "@/lib/overlays";
-import { parseVarsJson } from "@/lib/themeTokens";
-import type { ThemeToken, ThemeVarOverrides } from "@/lib/themeTokens";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
@@ -67,14 +59,19 @@ const ACCENT_PRESETS = [
 ];
 
 const ACCENT_KEY = "branding.accent_color";
-const THEME_VARS_KEY = "ui.admin_theme_vars";
-const CUSTOM_CSS_KEY = "ui.admin_custom_css";
 const OVERLAYS_ENABLED_KEY = "overlays.enabled";
 const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
 
-const THEME_KEYS = [ACCENT_KEY, THEME_VARS_KEY, CUSTOM_CSS_KEY];
-
+/**
+ * Every appearance key the page stages, saved as one batch by the shared
+ * SaveBar. Asset uploads keep their own upload/delete mutations because a file
+ * picker has no draft to batch.
+ *
+ * Server name and login subtitle deliberately live on the General page: they are
+ * server identity, not look and feel.
+ */
 const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
+const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS];
 
 /**
  * Silo's built-in overlay configuration, derived from the registry's own
@@ -83,35 +80,14 @@ const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
  */
 const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());
 
-/**
- * Every appearance key the page stages, saved as one batch by the shared
- * SaveBar. Theming used to autosave each keystroke through
- * `useUpdateServerSetting`; it now shares this form so the whole page has one
- * save model. Asset uploads keep their own upload/delete mutations because a
- * file picker has no draft to batch.
- *
- * Server name and login subtitle deliberately live on the General page: they are
- * server identity, not look and feel.
- */
-const KEYS = [...THEME_KEYS, ...OVERLAY_KEYS];
-
 export default function AppearanceSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const branding = useBranding();
   const restartKeys = useRestartKeys();
   const shownRatingSources = useShownRatingSources();
 
-  // The CSS box shows exactly what was typed while the staged value is the
-  // sanitized copy that will be saved, so stripping an external @import never
-  // rewrites the text under the cursor.
-  const [cssDraft, setCssDraft] = useState<string | null>(null);
-  // The accent picker and the style preset write the same keys as the advanced
-  // controls, so plain dirty state would pop the disclosure open on an
-  // essential edit. Track use of the advanced controls themselves instead.
-  const [tokensTouched, setTokensTouched] = useState(false);
   const [overlayItemsTouched, setOverlayItemsTouched] = useState(false);
   const [confirmRestoreOverlaysOpen, setConfirmRestoreOverlaysOpen] = useState(false);
-  const [confirmResetThemeOpen, setConfirmResetThemeOpen] = useState(false);
   // Which sample the badge preview stands in for. View state only — show-only
   // overlays (network, show status) are otherwise impossible to see here.
   const [previewVariant, setPreviewVariant] = useState<OverlayPreviewVariant>("movie");
@@ -120,13 +96,6 @@ export default function AppearanceSettings() {
   const customAccentActive =
     Boolean(accentColor) &&
     !ACCENT_PRESETS.some((hex) => hex.toLowerCase() === accentColor.toLowerCase());
-  const vars = parseVarsJson(form.getValue(THEME_VARS_KEY));
-  const savedCss = form.getValue(CUSTOM_CSS_KEY);
-  const rawCss = cssDraft ?? savedCss;
-  // Cinema Dark is the only base theme, so "no customization" is exactly
-  // Cinema Dark as shipped.
-  const hasThemeOverrides =
-    Object.keys(vars).length > 0 || rawCss.length > 0 || Boolean(accentColor);
 
   // s3.public_bucket is not staged here, but getValue falls back to the full
   // settings response so the uploads can still be gated on it.
@@ -139,53 +108,6 @@ export default function AppearanceSettings() {
   );
   const overlayDefaultsAreBuiltIn =
     serializeOverlayPrefs(overlayPrefs) === BUILT_IN_OVERLAY_DEFAULTS;
-
-  const setVars = (next: ThemeVarOverrides) => form.setValue(THEME_VARS_KEY, JSON.stringify(next));
-
-  // Accent recolors the primary action color, focus ring, and sidebar accent
-  // (ACCENT_TOKENS). It merges into the staged token overrides so a pick never
-  // clobbers the advanced editor and repeated picks compound correctly.
-  const applyAccent = (hex: string) => {
-    setVars({ ...vars, ...accentColorToTokens(hex) });
-    form.setValue(ACCENT_KEY, hex);
-  };
-
-  const clearAccent = () => {
-    const next = { ...vars };
-    for (const token of ACCENT_TOKENS) {
-      delete next[token];
-    }
-    setVars(next);
-    form.setValue(ACCENT_KEY, "");
-  };
-
-  const setToken = (token: ThemeToken, value: string) => {
-    setTokensTouched(true);
-    setVars({ ...vars, [token]: value });
-  };
-
-  const resetToken = (token: ThemeToken) => {
-    setTokensTouched(true);
-    const next = { ...vars };
-    delete next[token];
-    setVars(next);
-  };
-
-  const handleCssChange = (css: string) => {
-    setTokensTouched(true);
-    setCssDraft(css);
-    form.setValue(CUSTOM_CSS_KEY, sanitizeCss(css));
-  };
-
-  // Staged like any other edit: the admin still confirms the batch through the
-  // SaveBar, and Discard puts the previous customization back.
-  const resetToCinemaDark = () => {
-    setConfirmResetThemeOpen(false);
-    setCssDraft("");
-    setVars({});
-    form.setValue(CUSTOM_CSS_KEY, "");
-    form.setValue(ACCENT_KEY, "");
-  };
 
   const setOverlayPrefs = (next: CardOverlayPrefs) =>
     form.setValue(OVERLAY_DEFAULTS_KEY, serializeOverlayPrefs(next));
@@ -208,15 +130,6 @@ export default function AppearanceSettings() {
     setConfirmRestoreOverlaysOpen(false);
     form.setValue(OVERLAY_DEFAULTS_KEY, BUILT_IN_OVERLAY_DEFAULTS);
   };
-
-  // Discarding has to drop the untouched CSS draft too, otherwise the box would
-  // keep showing text that is no longer staged.
-  const discard = () => {
-    setCssDraft(null);
-    form.discard();
-  };
-
-  const themeAdvancedDirty = tokensTouched || form.isDirty(CUSTOM_CSS_KEY);
 
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
 
@@ -285,21 +198,7 @@ export default function AppearanceSettings() {
           </div>
         </FieldGroup>
 
-        <FieldGroup
-          label="Colors"
-          restartAll={allRestart(THEME_KEYS)}
-          actions={
-            <button
-              type="button"
-              onClick={() => setConfirmResetThemeOpen(true)}
-              disabled={!hasThemeOverrides}
-              className="text-muted-foreground hover:text-destructive inline-flex items-center gap-1.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-            >
-              <RotateCcw className="h-3 w-3" aria-hidden="true" />
-              Reset to Cinema Dark
-            </button>
-          }
-        >
+        <FieldGroup label="Colors" restartAll={restartKeys.has(ACCENT_KEY)}>
           <SettingFieldRow
             label="Accent color"
             description="Recolors buttons, focus outlines, and the sidebar."
@@ -311,7 +210,7 @@ export default function AppearanceSettings() {
                   matches no preset. */}
               <button
                 type="button"
-                onClick={clearAccent}
+                onClick={() => form.setValue(ACCENT_KEY, "")}
                 aria-label="Use theme default accent"
                 aria-pressed={!accentColor}
                 title="Theme default"
@@ -330,7 +229,7 @@ export default function AppearanceSettings() {
                   <button
                     key={hex}
                     type="button"
-                    onClick={() => applyAccent(hex)}
+                    onClick={() => form.setValue(ACCENT_KEY, hex)}
                     aria-label={`Use accent ${hex}`}
                     aria-pressed={selected}
                     className={cn(
@@ -359,7 +258,7 @@ export default function AppearanceSettings() {
                   type="color"
                   aria-label="Custom accent color"
                   value={accentColor || "#4f46e5"}
-                  onChange={(e) => applyAccent(e.target.value)}
+                  onChange={(e) => form.setValue(ACCENT_KEY, e.target.value)}
                   className="h-5 w-5 cursor-pointer border-0 bg-transparent p-0"
                 />
                 Custom
@@ -367,29 +266,6 @@ export default function AppearanceSettings() {
               </label>
             </div>
           </SettingFieldRow>
-
-          <AdvancedSection id="appearance.theme" count={2} forceOpen={themeAdvancedDirty}>
-            <div className="space-y-3 py-3.5">
-              <div className="space-y-1">
-                <Label className="text-sm font-medium">Individual colors and fonts</Label>
-                <p className="text-muted-foreground text-xs leading-relaxed">
-                  Applied on top of Cinema Dark for everyone.
-                </p>
-              </div>
-              <ThemePreviewCard vars={vars} />
-              <TokenEditor vars={vars} onSetVar={setToken} onResetVar={resetToken} />
-            </div>
-
-            <div className="space-y-2 py-3.5">
-              <div className="space-y-1">
-                <Label className="text-sm font-medium">Custom CSS</Label>
-                <p className="text-muted-foreground text-xs leading-relaxed">
-                  Applied to every page after the theme.
-                </p>
-              </div>
-              <RawCssEditor value={rawCss} onChange={handleCssChange} />
-            </div>
-          </AdvancedSection>
         </FieldGroup>
 
         <FieldGroup
@@ -525,16 +401,6 @@ export default function AppearanceSettings() {
       </div>
 
       <ConfirmDialog
-        open={confirmResetThemeOpen}
-        onOpenChange={setConfirmResetThemeOpen}
-        title="Reset to Cinema Dark"
-        description="Remove the accent color, individual color and font overrides, and custom CSS, so everyone sees Cinema Dark as shipped. Nothing is written until you save."
-        confirmLabel="Reset"
-        variant="destructive"
-        onConfirm={resetToCinemaDark}
-      />
-
-      <ConfirmDialog
         open={confirmRestoreOverlaysOpen}
         onOpenChange={setConfirmRestoreOverlaysOpen}
         title="Restore badge defaults"
@@ -546,17 +412,8 @@ export default function AppearanceSettings() {
 
       <SaveBar
         dirtyCount={form.dirtyCount}
-        onSave={() => {
-          // What persists is the SANITIZED css. Dropping the raw draft on
-          // success flips the editor to the canonical saved value, so stripped
-          // content (an external @import, say) never lingers on screen looking
-          // accepted. On failure the draft stays; the mutation already toasts.
-          void form.save().then(
-            () => setCssDraft(null),
-            () => {},
-          );
-        }}
-        onDiscard={discard}
+        onSave={form.save}
+        onDiscard={form.discard}
         isSaving={form.isSaving}
       />
     </div>
