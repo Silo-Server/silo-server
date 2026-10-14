@@ -34,8 +34,10 @@ var extraSuffixKinds = map[string]string{
 // Deliberately absent: the plural "others", which is in neither convention.
 // The same words also name content-scope folders ("movies/other/<Movie>/",
 // "tv/Kids/Shorts/"), so a name match alone never makes a folder an extras
-// folder; each caller adds structural evidence (see extrasClassifier in
-// internal/scanner and deriveSeriesRoot).
+// folder. extrasClassifier in internal/scanner also requires a title folder
+// that holds media; deriveSeriesRoot only checks the folder's position and the
+// file name, so a category folder below the library folder can still be read
+// as an extras folder there.
 var extrasDirKinds = map[string]models.ExtraKind{
 	"extra":             models.ExtraKindOther,
 	"extras":            models.ExtraKindOther,
