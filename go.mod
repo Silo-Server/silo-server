@@ -170,3 +170,5 @@ require (
 )
 
 replace github.com/zishang520/webtransport-go => ./internal/compat/zishang520-webtransport-go
+
+replace github.com/Silo-Server/silo-plugin-sdk => github.com/blurbery/silo-plugin-sdk v0.19.1-0.20261014034126-8336f8041811
