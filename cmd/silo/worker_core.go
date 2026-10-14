@@ -39,6 +39,16 @@ func (a coreSourceAdapter) Renew(ctx context.Context, node int, work string, gen
 	return a.authority.Renew(ctx, node, work, generation, grant)
 }
 
+// workerCoreOrigin canonicalizes the configured public URL. Admin settings keep
+// the operator's spelling, including host case and an explicit default port,
+// and every worker protocol component compares the canonical origin exactly.
+func workerCoreOrigin(publicURL string) (string, bool, error) {
+	raw := strings.TrimRight(publicURL, "/")
+	allowHTTP := strings.HasPrefix(strings.ToLower(raw), "http://")
+	origin, err := workeridentity.ValidateOrigin(raw, allowHTTP)
+	return origin, allowHTTP, err
+}
+
 func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, rdb *redis.Client, cfg *config.Config, contentAuthority *workerContentAuthority, live ...func() *config.Config) (http.Handler, error) {
 	liveConfig := func() *config.Config { return cfg }
 	if len(live) > 0 && live[0] != nil {
@@ -47,9 +57,8 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	if pool == nil || rdb == nil {
 		return nil, nil
 	}
-	origin := strings.TrimRight(cfg.Server.PublicURL, "/")
-	allowHTTP := strings.HasPrefix(origin, "http://")
-	if _, err := workeridentity.ValidateOrigin(origin, allowHTTP); err != nil {
+	origin, allowHTTP, err := workerCoreOrigin(cfg.Server.PublicURL)
+	if err != nil {
 		// Legacy deployments may use a prefixed public URL. The standalone
 		// protocol needs an exact origin, but must not break an installation
 		// that has no enrolled standalone worker.

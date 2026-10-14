@@ -72,7 +72,7 @@ func WithToken(ctx context.Context, token string) context.Context {
 }
 
 func New(origin, secret string, nodes workercontrolcore.NodeRegistry) (*Transport, error) {
-	allowHTTP := strings.HasPrefix(origin, "http://")
+	allowHTTP := strings.HasPrefix(strings.ToLower(origin), "http://")
 	canonical, err := workeridentity.ValidateOrigin(strings.TrimRight(origin, "/"), allowHTTP)
 	if err != nil || secret == "" || nodes == nil {
 		return nil, errors.New("proxy worker authority unavailable")
