@@ -82,6 +82,9 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 		return
 	}
 	selected.SetMarkers(file)
+	if h.MarkerImageURLs != nil {
+		selected.MarkerPreviews = catalog.BuildMarkerPreviews(ctx, file, h.MarkerImageURLs.ResolveURLs)
+	}
 	detail.Intro, detail.Credits, detail.Recap, detail.Preview = selected.Intro, selected.Credits, selected.Recap, selected.Preview
 	for i := range detail.PlaybackVariants {
 		for j := range detail.PlaybackVariants[i].Parts {
@@ -89,6 +92,7 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 				version := &detail.PlaybackVariants[i].Parts[j].Versions[k]
 				if version.FileID == selectedFileID {
 					version.SetMarkers(file)
+					version.MarkerPreviews = selected.MarkerPreviews
 				}
 			}
 		}
@@ -100,12 +104,21 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 // episodes and an ebook's read state lives in the reader-progress store. It
 // is the command behind v1 POST/DELETE /watched/{id} and the v2 operations.
 func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played bool, filter catalog.AccessFilter) (WatchedStateView, error) {
-	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, filter)
+	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, played, filter)
 	if err != nil {
 		if isNotFound(err) {
 			return WatchedStateView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
 		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
+	}
+	if !played && h.watchState != nil && (targetType == watchstate.ParentSeries || targetType == watchstate.ParentSeason) {
+		ids, err := h.watchState.ParentUnwatchTargets(ctx, userID, profileID, h.episodeRepo, targetType, contentID)
+		if err != nil {
+			return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
+		}
+		for _, id := range ids {
+			targets = append(targets, watchedLeafTarget{ContentID: id})
+		}
 	}
 
 	switch {

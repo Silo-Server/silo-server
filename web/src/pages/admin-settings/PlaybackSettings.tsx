@@ -23,7 +23,7 @@ import { PathSettingField } from "@/components/settings/PathSettingField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
-import { SaveBar } from "./SaveBar";
+import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
@@ -52,6 +52,7 @@ const TRANSCODING_ADVANCED_KEYS = [
   "playback.ffmpeg_path",
   "playback.transcode_dir",
   "playback.segment_retention_seconds",
+  "playback.copy_keyframe_playlist",
   "playback.hw_device",
   "playback.transcode_hardware_tone_map_enabled",
   "playback.transcode_software_tone_map_enabled",
@@ -146,7 +147,7 @@ function routePreview(execution: string, egress: string, workload: ExecutionWork
 // bytes (egress). The kind decides the choices offered and the value the server
 // applies while the row has never been set.
 const ROUTING_KINDS = {
-  execution: { options: executionOptions, serverDefault: "prefer_worker" },
+  execution: { options: executionOptions, serverDefault: "prefer_transcode" },
   egress: { options: egressOptions, serverDefault: "prefer_proxy" },
 };
 
@@ -305,7 +306,7 @@ export default function PlaybackSettings() {
       setConfirmRemake(true);
       return;
     }
-    void form.save();
+    return form.save();
   };
   const chapterExecution =
     form.getValue("playback.chapter_thumbnail_execution") || IMAGE_EXECUTION_DEFAULT;
@@ -518,7 +519,7 @@ export default function PlaybackSettings() {
               label="Enable Hardware HDR Tone Mapping"
               type="toggle"
               hint="Allows validated local or remote GPU executors to convert HDR video to SDR when transcoding."
-              value={form.getValue("playback.transcode_hardware_tone_map_enabled") || "false"}
+              value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
               onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
               restartRequired={restartKeys.has("playback.transcode_hardware_tone_map_enabled")}
             />
@@ -526,9 +527,17 @@ export default function PlaybackSettings() {
               label="Enable Software HDR Tone Mapping"
               type="toggle"
               hint="Allows the CPU to convert HDR video to SDR when transcoding. This can be very CPU-intensive."
-              value={form.getValue("playback.transcode_software_tone_map_enabled") || "false"}
+              value={form.getValue("playback.transcode_software_tone_map_enabled")}
               onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
               restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
+            />
+            <SettingField
+              label="Complete playlists for copied video"
+              type="toggle"
+              description="Experimental. When Silo copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. A seek ahead of what Silo has copied waits for it to get there."
+              value={form.getValue("playback.copy_keyframe_playlist") || "false"}
+              onChange={(v) => form.setValue("playback.copy_keyframe_playlist", v)}
+              restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}
             />
             <SettingField
               label="Throttle transcoding"
@@ -596,9 +605,7 @@ export default function PlaybackSettings() {
               label="Software HDR tone mapping"
               type="toggle"
               description="Slow, but works without graphics hardware."
-              value={
-                form.getValue("playback.chapter_thumbnail_software_tone_map_enabled") || "false"
-              }
+              value={form.getValue("playback.chapter_thumbnail_software_tone_map_enabled")}
               onChange={(v) =>
                 form.setValue("playback.chapter_thumbnail_software_tone_map_enabled", v)
               }
@@ -775,7 +782,9 @@ export default function PlaybackSettings() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void form.save()}>Save</AlertDialogAction>
+            <AlertDialogAction onClick={() => void form.save().catch(() => {})}>
+              Save
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

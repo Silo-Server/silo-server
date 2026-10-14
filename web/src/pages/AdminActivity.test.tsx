@@ -1,9 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminSession } from "@/api/types";
-import type { AdminDownloadPreparationList } from "@/api/v2/adminDownloadPreparations";
-import { makePreparation, makePreparationList } from "@/test/downloadPreparations";
 import { activityMethodMeta } from "./adminActivityPresentation";
 
 const mocks = vi.hoisted(() => ({
@@ -13,22 +11,11 @@ const mocks = vi.hoisted(() => ({
   rows: true,
   next: vi.fn(),
   restart: vi.fn(),
-  preparations: undefined as AdminDownloadPreparationList | undefined,
-  preparationsRefetch: vi.fn(),
-  logParams: [] as unknown[],
 }));
 
 vi.mock("@/hooks/queries/admin/stats", () => ({
   useAdminSessions: () => ({ data: mocks.sessions, isLoading: false, refetch: mocks.refresh }),
   useAdminStats: () => ({ data: undefined, isLoading: false }),
-}));
-vi.mock("@/hooks/queries/admin/downloadPreparations", () => ({
-  useAdminDownloadPreparations: () => ({
-    data: mocks.preparations,
-    isLoading: false,
-    isError: false,
-    refetch: mocks.preparationsRefetch,
-  }),
 }));
 vi.mock("@/components/realtimeEventsContext", () => ({
   useRealtimeEvents: () => ({ connectionState: "live" }),
@@ -58,23 +45,17 @@ vi.mock("@/hooks/queries/admin/ips", () => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/logs", () => ({
-  useOperationalLogs: (params: unknown, enabled: boolean) => {
-    if (enabled) mocks.logParams.push(params);
-    return { data: { entries: [] }, isLoading: false, isFetching: false };
-  },
+  useOperationalLogs: () => ({ data: { entries: [] }, isLoading: false, isFetching: false }),
 }));
 vi.mock("@/components/AdminSessionActions", () => ({ AdminSessionActions: () => null }));
 
 import AdminActivity from "./AdminActivity";
-import AdminStats from "./AdminStats";
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.sessions = [];
   mocks.error = false;
   mocks.rows = true;
-  mocks.preparations = undefined;
-  mocks.logParams = [];
 });
 afterEach(cleanup);
 
@@ -138,31 +119,6 @@ describe("activity playback scopes", () => {
 
     expect(screen.getAllByLabelText("Stream location: Local")).toHaveLength(2);
     expect(screen.getAllByLabelText("Stream location: Remote")).toHaveLength(2);
-  });
-
-  it("shows Direct Stream on desktop and mobile without a second audio-transcode badge", () => {
-    renderActivity();
-
-    const badges = screen.getAllByLabelText("Playback method: Direct Stream");
-    expect(badges).toHaveLength(2);
-    for (const badge of badges) {
-      expect(badge).toHaveTextContent("Direct Stream");
-      expect(badge).toHaveAttribute("title", activityMethodMeta("direct_stream").description);
-      expect(badge.className).toContain(activityMethodMeta("direct_stream").badgeClass);
-      expect(within(badge.parentElement!).getByRole("button", { name: "Details" })).toBeTruthy();
-    }
-    expect(screen.queryByText("Audio Transcode")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Playback method: Direct Play")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Copy", { exact: true })).toHaveLength(2);
-    expect(screen.getAllByText("Transcode", { exact: true })).toHaveLength(2);
-    expect(screen.getAllByText("AAC 5.1", { exact: true })).toHaveLength(2);
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Details" })[0]!);
-    expect(screen.getByText("Audio Transcode")).toBeInTheDocument();
-    expect(screen.getByText("Copied without re-encoding")).toBeInTheDocument();
-    expect(screen.getByText("MKV → fMP4 (HLS)")).toBeInTheDocument();
-    expect(screen.queryByText("Unknown output container")).not.toBeInTheDocument();
-    expect(screen.queryByText("MKV → Remux")).not.toBeInTheDocument();
   });
 
   it("uses the same four labels, counts and colors for the bar, filters and row badges", () => {
@@ -236,17 +192,6 @@ describe("activity playback scopes", () => {
     expect(screen.getByRole("button", { name: "Direct Stream 2" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Playback method: Direct Stream")).toHaveLength(4);
   });
-
-  it("uses the display label rather than the raw method key in System stats", () => {
-    render(
-      <MemoryRouter>
-        <AdminStats />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("cell", { name: "Direct Stream" })).toBeInTheDocument();
-    expect(screen.queryByText("direct_stream")).not.toBeInTheDocument();
-  });
 });
 
 describe("IP lookup", () => {
@@ -283,126 +228,20 @@ describe("IP lookup", () => {
   });
 });
 
-describe("download preparation tab", () => {
-  function renderActivity(path = "/admin/activity") {
+describe("old download preparation links", () => {
+  it("send the preparation view to the Downloads page", () => {
     render(
-      <MemoryRouter initialEntries={[path]}>
-        <AdminActivity />
+      <MemoryRouter initialEntries={["/admin/activity?view=preparations"]}>
+        <Routes>
+          <Route path="/admin/activity" element={<AdminActivity />} />
+          <Route path="/admin/downloads" element={<DownloadsProbe />} />
+        </Routes>
       </MemoryRouter>,
     );
-  }
-
-  it("summarizes preparation in the page subtitle and tab", () => {
-    mocks.preparations = makePreparationList([makePreparation()], { queued: 2, retrying: 1 });
-    renderActivity();
-    expect(
-      screen.getByText("No active streams · 1 download preparing, 2 queued, 1 retrying"),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Download preparation\s*4/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Streams/ })).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("opens from the URL and shows each job's state", () => {
-    mocks.preparations = makePreparationList([
-      makePreparation(),
-      makePreparation({
-        id: "art-q",
-        state: "queued",
-        queue_position: 1,
-        worker: undefined,
-        progress: undefined,
-        media_title: "Queued Movie",
-      }),
-      makePreparation({
-        id: "art-f",
-        state: "failed",
-        attempts: 3,
-        progress: undefined,
-        error: "ffmpeg: No space left on device",
-        failed_at: new Date(Date.now() - 12 * 60_000).toISOString(),
-        media_title: "Failed Movie",
-      }),
-      makePreparation({
-        id: "art-u",
-        progress: undefined,
-        progress_unavailable: true,
-        media_title: "Old Node Movie",
-      }),
-    ]);
-    renderActivity("/admin/activity?view=preparations");
-
-    expect(screen.getByRole("tab", { name: /Download preparation/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    // Desktop rows and mobile cards both render; CSS shows one.
-    for (const bar of screen.getAllByRole("progressbar", { name: "Example Movie progress" })) {
-      expect(bar).toHaveAttribute("aria-valuenow", "25");
-    }
-    expect(screen.getAllByText("2.0× · about 38 min left").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Queued · next in line").length).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText("After 3 attempts · 12 min ago · ffmpeg: No space left on device").length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText("This worker doesn't report progress").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Not assigned").length).toBeGreaterThan(0);
-  });
-
-  it("filters by state and search text", () => {
-    mocks.preparations = makePreparationList([
-      makePreparation(),
-      makePreparation({
-        id: "art-q",
-        state: "queued",
-        progress: undefined,
-        media_title: "Queued One",
-      }),
-    ]);
-    renderActivity("/admin/activity?view=preparations");
-
-    fireEvent.click(screen.getByRole("button", { name: /Queued\s*1/ }));
-    expect(screen.getByText("Showing 1 of 2 jobs")).toBeInTheDocument();
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Clear filters"));
-    fireEvent.change(screen.getByLabelText("Filter download preparation"), {
-      target: { value: "alex's iphone" },
-    });
-    expect(screen.getByText("Showing 2 of 2 jobs")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Filter download preparation"), {
-      target: { value: "nothing matches" },
-    });
-    expect(screen.getByText("No jobs match your filters")).toBeInTheDocument();
-  });
-
-  it("expands job details with the FFmpeg console and log link", () => {
-    mocks.preparations = makePreparationList([makePreparation()]);
-    renderActivity("/admin/activity?view=preparations");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Details for Example Movie" })[0]!);
-    expect(screen.getByText("All 2 tracks → stereo AAC")).toBeInTheDocument();
-    expect(screen.getByText("HDR → SDR (software)")).toBeInTheDocument();
-    expect(screen.getByText("25:00 of 1:40:00 (25%)")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /View logs/ })).toHaveAttribute(
-      "href",
-      "/admin/logs?playback_session_id=download-prepare-art-1&component=ffmpeg",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /FFmpeg/ }));
-    expect(mocks.logParams).toContainEqual({
-      playback_session_id: "download-prepare-art-1",
-      component: "ffmpeg",
-      limit: 12,
-    });
-    expect(screen.getByText(/No FFmpeg output for this job yet/)).toBeInTheDocument();
-  });
-
-  it("refreshes streams and preparations together", () => {
-    mocks.preparations = makePreparationList([]);
-    renderActivity("/admin/activity?view=preparations");
-    fireEvent.click(screen.getByRole("button", { name: /Refresh/ }));
-    expect(mocks.refresh).toHaveBeenCalled();
-    expect(mocks.preparationsRefetch).toHaveBeenCalled();
-    expect(screen.getByText("No downloads being prepared")).toBeInTheDocument();
+    expect(screen.getByTestId("downloads")).toHaveTextContent("?tab=preparation");
   });
 });
+
+function DownloadsProbe() {
+  return <div data-testid="downloads">{useLocation().search}</div>;
+}

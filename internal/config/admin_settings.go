@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/mail"
 	"net/url"
 	"path/filepath"
@@ -11,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -19,8 +23,11 @@ import (
 const (
 	cloudflareURLMode                  = "cloudflare_token"
 	playbackSegmentRetentionSettingKey = "playback.segment_retention_seconds"
-	chapterThumbnailSoftwareToneMapKey = "playback.chapter_thumbnail_software_tone_map_enabled"
 )
+
+// ChapterThumbnailSoftwareToneMapSettingKey lets chapter thumbnail extraction
+// tone-map HDR frames on the CPU when no hardware tone mapper is available.
+const ChapterThumbnailSoftwareToneMapSettingKey = "playback.chapter_thumbnail_software_tone_map_enabled"
 
 // PlaybackTranscodeHardwareToneMapSettingKey and
 // PlaybackTranscodeSoftwareToneMapSettingKey are server-wide execution policy
@@ -57,6 +64,13 @@ const (
 	AccessUnratedContentHide  = "hide"
 	AccessUnratedContentAllow = "allow"
 )
+
+// PlaybackKeyframePlaylistSettingKey serves copy-remux HLS as one complete
+// playlist planned from the source's keyframes, instead of FFmpeg's growing
+// one (#1466). It is off while restarts in the middle of such a stream are
+// still being built; a planned stream that has to restart starts again from
+// the beginning.
+const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
 
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
 // sources clients show in addition to IMDb and TMDB, which are always shown:
@@ -130,6 +144,13 @@ const ChapterThumbnailOriginalsCleanupKey = "chapter_thumbnails.originals_cleanu
 // MetadataImageWorkersSettingKey sizes the artwork encode pool. 0 means one
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"
+
+// MetadataPersonRefreshPerMinuteSettingKey caps how many background person
+// metadata lookups each API node makes per minute. Every lookup asks each
+// person-capable provider once, so it bounds each provider, and it leaves room
+// on provider limits a scan shares. On-demand lookups (a person page) aren't
+// counted.
+const MetadataPersonRefreshPerMinuteSettingKey = "metadata.person_refresh_per_minute"
 
 // PreviewImageWidthSettingKey is the width of the preview images the server
 // makes from video: chapter thumbnails and the thumbnails of seek-preview
@@ -230,8 +251,10 @@ func AuthRefreshTokenExpiry(raw string) time.Duration {
 	return parsed
 }
 
-// ServerSettingsMutationLock names the advisory lock every server_settings
-// mutation holds for its transaction. Writers of state that a setting's
+// ServerSettingsMutationLock names the advisory lock general settings
+// mutations hold for their transaction. Machine-managed credential values,
+// excluded from configuration validation, use their own key-specific lock.
+// Writers of state that a setting's
 // validation reads (such as the break-glass accounts that
 // AuthLocalPasswordLoginSettingKey requires) take it too, so the check and
 // the write cannot interleave.
@@ -296,6 +319,9 @@ var adminSettingDefaults = map[string]string{
 	"markers.detect_intros":                "true",
 	"markers.detect_credits":               "true",
 
+	// Background person metadata lookups per API node per minute.
+	MetadataPersonRefreshPerMinuteSettingKey: "120",
+
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
 	playbackSegmentRetentionSettingKey:               "600",
@@ -315,17 +341,17 @@ var adminSettingDefaults = map[string]string{
 	"playback.trickplay_interval_seconds":            "10",
 	"playback.trickplay_workers":                     "1",
 	"playback.trickplay_execution":                   "local",
-	chapterThumbnailSoftwareToneMapKey:               "false",
-	PlaybackTranscodeHardwareToneMapSettingKey:       "false",
-	PlaybackTranscodeSoftwareToneMapSettingKey:       "false",
+	ChapterThumbnailSoftwareToneMapSettingKey:        "true",
+	PlaybackTranscodeHardwareToneMapSettingKey:       "true",
+	PlaybackTranscodeSoftwareToneMapSettingKey:       "true",
 	CatalogScopeVersionsToLibrarySettingKey:          "false",
 	AccessUnratedContentSettingKey:                   AccessUnratedContentHide,
 	CatalogExtraRatingSourcesSettingKey:              "",
 	"playback.watched_threshold":                     "90",
 	"playback.min_resume_threshold":                  "5",
-	Allow4KTranscodeSettingKey:                       "false",
-	"enable_transcode_throttle":                      "false",
-	"transcode_throttle_seconds":                     "300",
+	Allow4KTranscodeSettingKey:                       "true",
+	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
+	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
 
 	"audiobookshelf_compat.enabled":           "true",
 	"jellyfin_compat.enabled":                 "true",
@@ -351,6 +377,8 @@ var adminSettingDefaults = map[string]string{
 	"recommendations.diversity_lambda":           "0.7",
 
 	"ai.base_url":                         "https://api.openai.com",
+	"ai.auth_mode":                        "api_key",
+	"ai.reasoning_effort":                 "",
 	"ai.chat_model":                       "gpt-4o-mini",
 	"ai.asr_model":                        "whisper-1",
 	"ai.max_concurrent_jobs":              "2",
@@ -378,6 +406,8 @@ var adminSettingDefaults = map[string]string{
 	DownloadLocalTranscodeFallbackSettingKey: "true",
 	"download.max_concurrent_prepares":       "2",
 	"download.artifact_max_bytes":            "0",
+	DownloadArtifactCacheHoursSettingKey:     "72",
+	DownloadArtifactDiskCeilingSettingKey:    "85",
 
 	"policy.editor_enabled":                 "false",
 	"policy.eval_timeout_ms":                "100",
@@ -448,6 +478,8 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.semantic_ratio":           "0.5",
 	"catalog.search.meilisearch.embedder":                 "silo_recommendations",
 	"catalog.search.meilisearch.binary_quantized":         "false",
+
+	PlaybackKeyframePlaylistSettingKey: "false",
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -514,6 +546,17 @@ func EffectiveAdminSettings(stored map[string]string) map[string]string {
 	return effective
 }
 
+// AdminSettingEnabled reads a stored boolean setting as the Admin UI shows
+// it: an absent or empty value is the setting's default, so a runtime reader
+// and an untouched settings form cannot disagree.
+func AdminSettingEnabled(key, stored string) bool {
+	value := strings.TrimSpace(stored)
+	if value == "" {
+		value = adminSettingDefaults[key]
+	}
+	return strings.EqualFold(value, "true")
+}
+
 func applyLegacyAdminSettingFallback(effective, stored map[string]string, canonical, legacy string) {
 	if stored[canonical] != "" {
 		return
@@ -553,9 +596,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	switch key {
 	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
-		chapterThumbnailSoftwareToneMapKey, PlaybackTranscodeHardwareToneMapSettingKey,
+		PlaybackKeyframePlaylistSettingKey,
+		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
-		Allow4KTranscodeSettingKey, "enable_transcode_throttle", "audiobookshelf_compat.enabled",
+		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
@@ -609,6 +653,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 100000)
 	case MetadataImageWorkersSettingKey:
 		return normalizeAdminInt(key, value, 0, 256)
+	case MetadataPersonRefreshPerMinuteSettingKey:
+		return normalizeAdminInt(key, value, 1, 6000)
 	case MarkersDetectionWorkersSettingKey:
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity", "subtitles.sync_node_capacity":
@@ -630,7 +676,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 100)
 	case "playback.min_resume_threshold":
 		return normalizeAdminInt(key, value, 1, 99)
-	case "transcode_throttle_seconds":
+	case playback.TranscodeThrottleSecondsSettingKey:
 		return normalizeAdminInt(key, value, 60, 86400)
 	case playbackSegmentRetentionSettingKey:
 		normalized, err := normalizeAdminInt(key, value, 0, 86400)
@@ -661,6 +707,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	case "download.max_concurrent_per_user", "download.max_per_period",
 		"download.max_concurrent_prepares", "download.artifact_max_bytes":
 		return normalizeAdminInt64(key, value, 0, math.MaxInt64)
+	case DownloadArtifactCacheHoursSettingKey:
+		return normalizeAdminInt(key, value, 0, MaxDownloadArtifactCacheHours)
+	case DownloadArtifactDiskCeilingSettingKey:
+		return normalizeAdminInt(key, value, MinDownloadArtifactDiskCeilingPercent, MaxDownloadArtifactDiskCeilingPercent)
 	case "policy.decision_log_scope_sample_rate", "policy.decision_log_retention_days":
 		return normalizeAdminInt(key, value, 1, math.MaxInt32)
 	case "policy.eval_timeout_ms":
@@ -748,6 +798,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
 	case "metadata_ai.on_view":
 		return normalizeAdminEnum(key, value, "off", "button", "auto")
+	case "ai.auth_mode":
+		return normalizeAdminEnum(key, value, "api_key", "chatgpt")
+	case "ai.reasoning_effort":
+		return normalizeAdminEnum(key, value, "", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 	case "subtitle_ai.transcribe_quota_period":
 		return normalizeAdminEnum(key, value, "day", "week", "month")
 	case "policy.decision_log_verbosity":
@@ -777,6 +831,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminURL(key, value)
 	case "redis.url":
 		return NormalizeRedisURL(value)
+	case RedisDBSettingKey:
+		return NormalizeRedisDB(value)
 	case "theme.catalog_url":
 		return normalizeAdminThemeURL(key, value)
 
@@ -844,6 +900,9 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 	}
 
 	effective := EffectiveAdminSettings(values)
+	if err := reasoning.Validate(effective["ai.chat_model"], effective["ai.reasoning_effort"]); err != nil {
+		return err
+	}
 	for _, prefix := range []string{"s3.public", "s3.private"} {
 		endpoint := strings.TrimSpace(effective[prefix+"_endpoint"])
 		bucket := strings.TrimSpace(effective[prefix+"_bucket"])
@@ -907,7 +966,7 @@ func ValidateRedisRateLimitTransport(values map[string]string, redisBootstrapAva
 	if strings.EqualFold(strings.TrimSpace(effective["ratelimit.backend"]), "redis") &&
 		redisURL == "" &&
 		!redisBootstrapAvailable {
-		return fmt.Errorf("redis.url or a bootstrap Redis/Sentinel transport is required when ratelimit.backend is redis")
+		return fmt.Errorf("redis.url or a bootstrap REDIS_URL is required when ratelimit.backend is redis")
 	}
 	return nil
 }
@@ -918,10 +977,209 @@ func NormalizeRedisURL(raw string) (string, error) {
 	if value == "" {
 		return "", nil
 	}
-	if _, err := redisv9.ParseURL(value); err != nil {
+	if _, _, err := ParseRedisURL(value); err != nil {
 		return "", fmt.Errorf("redis.url must be a valid redis://, rediss://, or unix:// URL: %w", err)
 	}
 	return value, nil
+}
+
+// RedisDBSettingKey is the setting that replaces the database number in
+// redis.url.
+const RedisDBSettingKey = "redis.db"
+
+// NormalizeRedisDB accepts an empty value, which leaves the database number
+// to redis.url, or a whole number of 0 or more.
+func NormalizeRedisDB(raw string) (string, error) {
+	db, set, err := parseRedisDB(raw)
+	if err != nil || !set {
+		return "", err
+	}
+	return strconv.Itoa(db), nil
+}
+
+// parseRedisDB reads a redis.db value and reports whether it names a number.
+func parseRedisDB(raw string) (db int, set bool, err error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, false, nil
+	}
+	db, err = strconv.Atoi(value)
+	if err != nil || db < 0 {
+		return 0, false, fmt.Errorf("%s must be a whole number, 0 or more", RedisDBSettingKey)
+	}
+	return db, true, nil
+}
+
+// Options returns the options every Redis client is built from: what
+// ParseRedisURL reads from URL, on database DB when DB is set. The error says
+// which of the two cannot be read.
+func (c RedisConfig) Options() (*redisv9.Options, *redisv9.FailoverOptions, error) {
+	options, failover, err := ParseRedisURL(c.URL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid redis URL: %w", err)
+	}
+	db, set, err := parseRedisDB(c.DB)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch {
+	case !set:
+	case failover != nil:
+		failover.DB = db
+	default:
+		options.DB = db
+	}
+	return options, failover, nil
+}
+
+// Database returns the database number the config's clients are on. It
+// reports false when there is no URL or the config cannot be parsed.
+func (c RedisConfig) Database() (int, bool) {
+	if strings.TrimSpace(c.URL) == "" {
+		return 0, false
+	}
+	options, failover, err := c.Options()
+	if err != nil {
+		return 0, false
+	}
+	var db int
+	if failover != nil {
+		db = failover.DB
+	} else {
+		db = options.DB
+	}
+	// go-redis accepts a negative number in a URL and leaves the connection
+	// on database 0.
+	return max(db, 0), true
+}
+
+// WithBootstrapURL returns the config of a process started with REDIS_URL.
+// The environment names the whole connection, database number included, so
+// the saved redis.db is not applied to it. An empty bootstrapURL changes
+// nothing.
+func (c RedisConfig) WithBootstrapURL(bootstrapURL string) RedisConfig {
+	if bootstrapURL == "" {
+		return c
+	}
+	return RedisConfig{URL: bootstrapURL}
+}
+
+// redisSentinelMasterParam is the query parameter that makes a redis.url name
+// a Sentinel deployment instead of one Redis server.
+const redisSentinelMasterParam = "master_name"
+
+// ParseRedisURL parses a redis.url value and returns exactly one set of
+// options. A URL with a master_name parameter names a Sentinel deployment:
+// its host and any addr parameters are Sentinel addresses, its user info
+// authenticates to Sentinel, and the username and password parameters
+// authenticate to the Redis servers. Any other URL names one Redis server.
+// The URL path is the database number, unless a db parameter overrides it.
+//
+// The URL can carry passwords and the errors are logged, so an error says
+// what is wrong without quoting any part of the URL.
+func ParseRedisURL(raw string) (*redisv9.Options, *redisv9.FailoverOptions, error) {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, nil, errors.New("redis: the URL is malformed" + redisURLEncodingHint)
+	}
+	query, queryErr := url.ParseQuery(u.RawQuery)
+	sentinel := query.Has(redisSentinelMasterParam)
+	mentioned := strings.Contains(percentDecoded(u.RawQuery), redisSentinelMasterParam) || strings.Contains(u.Fragment, redisSentinelMasterParam)
+	if mentioned && (queryErr != nil || strings.Contains(raw, "#")) {
+		// go-redis drops a pair it cannot parse and everything after a #. A
+		// dropped master_name would turn the URL into a single-server URL for
+		// the Sentinel port, and a dropped addr or password is just as silent.
+		return nil, nil, errors.New("redis: a parameter of the URL cannot be read" + redisURLEncodingHint)
+	}
+	if !sentinel {
+		options, err := redisv9.ParseURL(raw)
+		if err != nil {
+			return nil, nil, redisURLError(err)
+		}
+		if options.PoolSize < 0 {
+			return nil, nil, errRedisNegativePoolSize
+		}
+		return options, nil, nil
+	}
+
+	if strings.Contains(u.RawQuery, "+") {
+		// A + in a query string is a space, so a password with a + in it
+		// would reach Redis changed.
+		return nil, nil, errors.New("redis: a + in a Sentinel URL parameter means a space; write %2B for a plus sign")
+	}
+	failover, err := redisv9.ParseFailoverURL(raw)
+	if err != nil {
+		return nil, nil, redisURLError(err)
+	}
+	if strings.TrimSpace(failover.MasterName) == "" {
+		return nil, nil, fmt.Errorf("redis: %s must name the Sentinel master", redisSentinelMasterParam)
+	}
+	if failover.PoolSize < 0 {
+		return nil, nil, errRedisNegativePoolSize
+	}
+	if host, port, err := net.SplitHostPort(u.Host); err != nil || host == "" || port == "" {
+		// go-redis would fall back to port 6379, the Redis port.
+		return nil, nil, errors.New("redis: the Sentinel address needs a host and a port, for example sentinel-1:26379; name further Sentinels with addr parameters")
+	}
+	if failover.RouteByLatency || failover.RouteRandomly || failover.ReplicaOnly || failover.UseDisconnectedReplicas {
+		// These options are for reading from replicas. Silo's clients write,
+		// and go-redis panics when a single client is built with a routing
+		// option.
+		return nil, nil, errors.New("redis: route_by_latency, route_randomly, replica_only and use_disconnected_replicas are not supported; Silo reads and writes on the master")
+	}
+	if failover.DialTimeout < 0 || failover.ReadTimeout < 0 {
+		// go-redis reads a read timeout of 0 or less as no timeout. A
+		// subscription that redials into a frozen master would then wait for
+		// its answer for ever, and never move to the master Sentinel promotes.
+		// With a dial timeout of 0 or less every dial fails at once.
+		return nil, nil, errors.New("redis: dial_timeout and read_timeout must be more than 0 in a Sentinel URL; leave them out for the defaults")
+	}
+	if failover.DialTimeout == 0 {
+		// go-redis's Sentinel dialer reads the timeout from these options,
+		// where its 5 second default is not filled in, and a subscription's
+		// dial has no other limit. A dial to a master that is gone would wait
+		// until the kernel gives up.
+		failover.DialTimeout = 5 * time.Second
+	}
+	return nil, failover, nil
+}
+
+// errRedisNegativePoolSize refuses a negative pool_size. go-redis replaces
+// only 0 with its default and panics building a client from a negative size,
+// which the connection check and every start would then do.
+var errRedisNegativePoolSize = errors.New("redis: pool_size must be 0 or more; leave it out for the default")
+
+// percentDecoded decodes the escapes in s that are valid and keeps the rest as
+// they are. url.QueryUnescape gives up at the first invalid one.
+func percentDecoded(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			if value, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(value))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+const redisURLEncodingHint = "; percent-encode reserved characters in user names and passwords"
+
+// redisURLError keeps what is wrong with a URL and drops the value go-redis
+// quotes after it, which can be part of a password that was not
+// percent-encoded.
+func redisURLError(err error) error {
+	problem, _, _ := strings.Cut(strings.TrimPrefix(err.Error(), "redis: "), ": ")
+	switch problem {
+	case "unexpected option", "invalid database number", "invalid URL path":
+		// What a reserved character in a password turns into.
+		problem += redisURLEncodingHint
+	}
+	return errors.New("redis: " + problem)
 }
 
 func normalizeAdminBool(key, value string) (string, error) {

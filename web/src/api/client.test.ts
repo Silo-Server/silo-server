@@ -440,11 +440,3 @@ describe("session rejection", () => {
     expect(localStorage.getItem(storage.KEYS.REFRESH_TOKEN)).toBe("other-tab-refresh");
   });
 });
-
-describe("client helper inventory", () => {
-  it("does not expose the legacy person-items helper anymore", async () => {
-    const clientModule = await import("./client");
-
-    expect(clientModule).not.toHaveProperty("getPersonItems");
-  });
-});

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
-	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
@@ -96,14 +95,6 @@ func TestRecipeSampleTimes(t *testing.T) {
 	}
 }
 
-func TestRecipeBandwidth(t *testing.T) {
-	r := Recipe{Width: 300, IntervalMS: 10000}
-	// A 10x8 sheet covers 800 s: 250 kB is 2500 bits a second.
-	if got := r.Bandwidth([]int{100_000, 250_000, 90_000}); got != 2500 {
-		t.Errorf("bandwidth %d, want 2500", got)
-	}
-}
-
 func TestParseAspectRatio(t *testing.T) {
 	for value, want := range map[string]float64{"16:9": 16.0 / 9, "2.39:1": 2.39, "12:5": 2.4, " 4:3 ": 4.0 / 3} {
 		if got, ok := ParseAspectRatio(value); !ok || math.Abs(got-want) > 1e-9 {
@@ -113,22 +104,6 @@ func TestParseAspectRatio(t *testing.T) {
 	for _, value := range []string{"", "0:1", "N/A", "16/9", "a:b", "16:0"} {
 		if _, ok := ParseAspectRatio(value); ok {
 			t.Errorf("%q parsed", value)
-		}
-	}
-}
-
-// TestVideoLibraryTypesMatchLibraryKind keeps the SQL filter aligned with
-// the classification every other consumer uses.
-func TestVideoLibraryTypesMatchLibraryKind(t *testing.T) {
-	for _, libraryType := range videoLibraryTypes {
-		kinds := librarykind.Of(libraryType)
-		if !kinds.Movie && !kinds.TV && !kinds.Mixed {
-			t.Errorf("%q is not a video library type", libraryType)
-		}
-	}
-	for _, libraryType := range []string{"audiobooks", "ebooks", "podcasts", "manga", "music"} {
-		if slices.Contains(videoLibraryTypes, libraryType) {
-			t.Errorf("%q must not be a video library type", libraryType)
 		}
 	}
 }

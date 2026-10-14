@@ -77,7 +77,7 @@ func TestHandleMasterManifestReplansAfterRemoteSoftwareToneMapFailure(t *testing
 			}
 			// The node accepted the software job but did not confirm its promised
 			// output. The manifest path must stop that job before trying a sibling.
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{ThrottleSeconds: request.ThrottleSeconds})
 		case r.Method == http.MethodDelete && r.URL.Path == "/transcode/upstream-1":
 			failedNodeCleaned.Store(true)
 			w.WriteHeader(http.StatusNoContent)
@@ -105,7 +105,7 @@ func TestHandleMasterManifestReplansAfterRemoteSoftwareToneMapFailure(t *testing
 				return
 			}
 			fallbackModes.record(request.ToneMapMode)
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -274,7 +274,7 @@ func TestHandleMasterManifestFallsBackToValidatedLocalSoftwareAfterRemoteFailure
 		"mkdir -p \"$out\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestEnsureTranscodeSessionRequiredSoftwareReplacesExistingHardware(t *testi
 		"mkdir -p \"$out\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +488,7 @@ func TestEnsureTranscodeSessionReadyHardwareYieldsPublicationToSoftwareWinner(t 
 				"mkdir -p \"$out\"\n" +
 				"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 				"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-				"sleep 30\n"
+				"exec sleep 30\n"
 			if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 				t.Fatal(err)
 			}

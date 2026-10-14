@@ -195,17 +195,3 @@ func TestSchemaRejectsUncoveredCategory(t *testing.T) {
 		t.Fatalf("expected a missing-category problem, got %v", err)
 	}
 }
-
-func TestGroupSlug(t *testing.T) {
-	cases := map[string]string{
-		"/api/v1/auth":                    "api-v1-auth",
-		"/api/v1/auth/oauth/{install_id}": "api-v1-auth-oauth-install_id",
-		"/api/v1":                         "api-v1",
-		"/":                               "root",
-	}
-	for in, want := range cases {
-		if got := GroupSlug(in); got != want {
-			t.Errorf("GroupSlug(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

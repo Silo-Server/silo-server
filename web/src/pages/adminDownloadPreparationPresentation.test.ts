@@ -1,62 +1,17 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import { makePreparation } from "@/test/downloadPreparations";
 import {
-  formatAgo,
-  formatPreparationAudioOutput,
-  formatPreparationKind,
-  formatPreparationOutput,
-  formatPreparationSource,
+  cancelPreparationsPrompt,
   formatRemaining,
-  formatRetryIn,
   formatSpeed,
-  preparationCompactTitle,
   preparationPercent,
   preparationRemainingSeconds,
-  preparationSubtitle,
-  preparationTitle,
-  preparationWorker,
-  requesterDevice,
+  summarizePreparationAction,
 } from "./adminDownloadPreparationPresentation";
 
-const episode = makePreparation({
-  media_title: "Severance",
-  media_type: "series",
-  series_name: "Severance",
-  episode_name: "Hello, Ms. Cobel",
-  season_number: 2,
-  episode_number: 1,
-});
-
 describe("download preparation presentation", () => {
-  it("titles movies and episodes", () => {
-    expect(preparationTitle(makePreparation())).toBe("Example Movie");
-    expect(preparationSubtitle(makePreparation())).toBe("Movie");
-    expect(preparationTitle(episode)).toBe("Hello, Ms. Cobel");
-    expect(preparationSubtitle(episode)).toBe("S02E01 · Severance");
-    expect(preparationCompactTitle(episode)).toBe("Severance S02E01");
-  });
-
-  it("summarizes source and output", () => {
-    const prep = makePreparation();
-    expect(formatPreparationSource(prep)).toBe("MKV · 2160p HEVC HDR · 20.0 GB");
-    expect(formatPreparationOutput(prep)).toBe("1080p H.264 · 10 Mbps · HDR → SDR");
-    expect(formatPreparationKind(prep)).toBe("Transcode 1080p H.264");
-    expect(formatPreparationAudioOutput(prep)).toBe("All 2 tracks → stereo AAC");
-
-    const remux = makePreparation({
-      format: "remux",
-      output: {
-        container: "mp4",
-        video_codec: "copy",
-        audio_codec: "copy",
-        all_audio_tracks: true,
-      },
-    });
-    expect(formatPreparationOutput(remux)).toBe("MP4 · streams copied");
-    expect(formatPreparationKind(remux)).toBe("Remux");
-    expect(formatPreparationAudioOutput(remux)).toBe("All 2 tracks copied");
-  });
-
   it("derives percent and time left from the latest reading", () => {
     const prep = makePreparation();
     expect(preparationPercent(prep)).toBe(25);
@@ -82,29 +37,51 @@ describe("download preparation presentation", () => {
     expect(preparationPercent(over)).toBe(100);
   });
 
-  it("labels workers and requesters", () => {
-    expect(preparationWorker(makePreparation())).toEqual({
-      key: "node:9",
-      label: "Node",
-      name: "gpu-01",
-    });
-    expect(preparationWorker(makePreparation({ worker: { kind: "server", name: "" } }))).toEqual({
-      key: "server:",
-      label: "Server",
-      name: "Local server",
-    });
-    expect(preparationWorker(makePreparation({ worker: undefined }))).toBeNull();
+  it("summarizes each outcome of an action", () => {
     expect(
-      requesterDevice({ user_id: "1", username: "a", profile_id: "p", status: "preparing" }),
-    ).toBe("Web download");
+      summarizePreparationAction("pause", [
+        { id: "a", outcome: "applied" },
+        { id: "b", outcome: "applied" },
+        { id: "c", outcome: "unchanged" },
+        { id: "d", outcome: "not_applicable" },
+        { id: "e", outcome: "not_found" },
+      ]),
+    ).toBe(
+      "Paused 2 jobs. 1 job was already paused. Skipped 1 job that failed. 1 job had already finished or been canceled.",
+    );
+    expect(
+      summarizePreparationAction("resume", [
+        { id: "a", outcome: "unchanged" },
+        { id: "b", outcome: "unchanged" },
+      ]),
+    ).toBe("2 jobs weren't paused.");
+    expect(summarizePreparationAction("cancel", [{ id: "a", outcome: "applied" }])).toBe(
+      "Canceled 1 job.",
+    );
+    expect(summarizePreparationAction("cancel", [])).toBe("Nothing changed.");
   });
 
-  it("formats relative times", () => {
-    const now = Date.parse("2026-01-01T12:00:00.000Z");
-    expect(formatRetryIn("2026-01-01T12:00:45.000Z", now)).toBe("in 45 s");
-    expect(formatRetryIn("2026-01-01T12:03:00.000Z", now)).toBe("in 3 min");
-    expect(formatRetryIn("2026-01-01T11:59:00.000Z", now)).toBe("now");
-    expect(formatAgo("2026-01-01T11:48:00.000Z", now)).toBe("12 min ago");
-    expect(formatAgo("2026-01-01T09:00:00.000Z", now)).toBe("3 h ago");
+  it("names what canceling costs the requesters", () => {
+    const running = makePreparation();
+    expect(cancelPreparationsPrompt([running])).toEqual({
+      title: "Cancel preparing Example Movie?",
+      description:
+        'Encoding stops and its progress is lost. 1 waiting download fails with "Canceled by an administrator". Users can download again later, which starts a new job.',
+      confirmLabel: "Cancel job",
+    });
+    const failed = makePreparation({
+      id: "f",
+      state: "failed",
+      progress: undefined,
+      requesters: [],
+    });
+    expect(cancelPreparationsPrompt([failed])).toEqual({
+      title: "Remove the failed job for Example Movie?",
+      description: "No downloads are waiting on this job.",
+      confirmLabel: "Remove",
+    });
+    const queued = makePreparation({ id: "q", state: "queued", progress: undefined });
+    expect(cancelPreparationsPrompt([queued, failed]).title).toBe("Cancel 2 jobs?");
+    expect(cancelPreparationsPrompt([queued, failed]).confirmLabel).toBe("Cancel 2 jobs");
   });
 });

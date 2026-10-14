@@ -21,7 +21,7 @@ func TestSubmitTasteSeedCountsOnlyNewFavorites(t *testing.T) {
 	h := &RecommendationsHandler{storeProvider: testUserStoreProvider{store: store}, RecWorker: refresher, Fetcher: stubDiscoverFetcher{items: []*models.MediaItem{{ContentID: "movie:heat-1995"}, {ContentID: "movie:already"}, {ContentID: "movie:collateral-2004"}}}}
 	ctx := context.Background()
 
-	if err := store.AddFavorite(ctx, "p1", "movie:already"); err != nil {
+	if _, err := store.AddFavorite(ctx, "p1", "movie:already"); err != nil {
 		t.Fatal(err)
 	}
 

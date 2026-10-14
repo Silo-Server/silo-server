@@ -2,7 +2,7 @@ package auth
 
 import (
 	"errors"
-	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -83,38 +83,26 @@ func TestValidateDeviceLoginDecisionTerminalStates(t *testing.T) {
 	}
 }
 
-func TestRandomUserCodeIsEightGroupedDigits(t *testing.T) {
-	t.Parallel()
-
-	shape := regexp.MustCompile(`^[0-9]{4}-[0-9]{4}$`)
-	seen := map[byte]int{}
-	for range 500 {
-		code, err := randomUserCode()
+// TestQuickConnectCodeIsTheSecretsCode: a Quick Connect code is fixed by its
+// secret, so the app can be told it again on every poll, and it is always
+// six digits without a leading zero.
+func TestQuickConnectCodeIsTheSecretsCode(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		secret, err := randomQuickConnectSecret()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !shape.MatchString(code) {
-			t.Fatalf("code %q is not eight grouped digits", code)
+		code := QuickConnectCode(secret)
+		if len(code) != 6 || code[0] == '0' || strings.Trim(code, "0123456789") != "" {
+			t.Fatalf("code %q for %q is not six digits without a leading zero", code, secret)
 		}
-		for _, c := range []byte(normalizeUserCode(code)) {
-			seen[c]++
+		if again := QuickConnectCode(" " + secret + " "); again != code {
+			t.Fatalf("code changed with surrounding space: %q, %q", code, again)
 		}
+		seen[code] = true
 	}
-	// 4,000 draws: every digit turns up.
-	if len(seen) != 10 {
-		t.Fatalf("digits seen = %v", seen)
-	}
-}
-
-func TestNormalizeUserCodeIgnoresSeparators(t *testing.T) {
-	t.Parallel()
-
-	for _, in := range []string{"48217730", "4821-7730", "4821 7730", " 4821 - 7730 "} {
-		if got := normalizeUserCode(in); got != "48217730" {
-			t.Fatalf("normalizeUserCode(%q) = %q", in, got)
-		}
-	}
-	if got := formatUserCode("48217730"); got != "4821-7730" {
-		t.Fatalf("formatUserCode = %q", got)
+	if len(seen) < 190 {
+		t.Fatalf("200 secrets gave only %d distinct codes", len(seen))
 	}
 }

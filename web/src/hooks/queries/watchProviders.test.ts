@@ -67,6 +67,17 @@ describe("watch provider v2 queries", () => {
       headers: { "If-Match": '"version-1"' },
       onResponse: expect.any(Function),
     });
+    await updateWatchProviderConnection(
+      "simkl",
+      { connection_settings: { track_rewatches: true } },
+      '"version-2"',
+    );
+    expect(v2).toHaveBeenLastCalledWith("PATCH /api/v2/watch-providers/{provider}/connection", {
+      path: { provider: "simkl" },
+      body: { connection_settings: { track_rewatches: true } },
+      headers: { "If-Match": '"version-2"' },
+      onResponse: expect.any(Function),
+    });
     await deleteWatchProviderConnection("trakt");
     expect(v2).toHaveBeenLastCalledWith("DELETE /api/v2/watch-providers/{provider}/connection", {
       path: { provider: "trakt" },
@@ -82,6 +93,7 @@ describe("syncRunFinished", () => {
     ({ id, status }) as WatchProviderSyncRun;
 
   it("fires when a watched run leaves queued or running", () => {
+    expect(syncRunFinished(undefined, run("a", "success"))).toBe(false);
     expect(syncRunFinished(run("a", "running"), run("a", "success"))).toBe(true);
     expect(syncRunFinished(run("a", "queued"), run("a", "warning"))).toBe(true);
     expect(syncRunFinished(run("a", "queued"), run("a", "running"))).toBe(false);
@@ -93,9 +105,5 @@ describe("syncRunFinished", () => {
     expect(syncRunFinished(run("a", "success"), run("b", "success"))).toBe(true);
     expect(syncRunFinished(run("a", "running"), run("b", "failed"))).toBe(true);
     expect(syncRunFinished(run("a", "success"), run("b", "running"))).toBe(false);
-  });
-
-  it("does not fire on the first read", () => {
-    expect(syncRunFinished(undefined, run("a", "success"))).toBe(false);
   });
 });

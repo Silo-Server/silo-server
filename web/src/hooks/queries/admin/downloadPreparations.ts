@@ -1,9 +1,11 @@
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { captureProfileRequestContext, StaleApiRequestContextError } from "@/api/client";
 import {
   adminDownloadPreparationsKey,
   listAdminDownloadPreparations,
+  runAdminDownloadPreparationAction,
+  type AdminDownloadPreparationAction,
   type AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
 
@@ -14,7 +16,7 @@ const ADMIN_DOWNLOAD_PREPARATIONS_STALE_TIME = 30_000;
 // requesters (a profile or device purge, a subscription cleanup) announces
 // itself. While work is in flight, re-read the list on this cadence so those
 // changes still appear.
-export const ADMIN_DOWNLOAD_PREPARATIONS_ACTIVE_REFRESH = 60_000;
+const ADMIN_DOWNLOAD_PREPARATIONS_ACTIVE_REFRESH = 60_000;
 
 /** The offline-download preparation queue, kept live by the admin channel. */
 export function useAdminDownloadPreparations() {
@@ -31,13 +33,34 @@ export function useAdminDownloadPreparations() {
 }
 
 /**
+ * Pauses, resumes or cancels preparation jobs, then re-reads the list. The
+ * realtime channel announces each change too; the re-read covers a missed
+ * event and settles the list for the caller's toast.
+ */
+export function useAdminDownloadPreparationAction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, ids }: { action: AdminDownloadPreparationAction; ids: string[] }) => {
+      const context = captureProfileRequestContext();
+      if (!context) throw new StaleApiRequestContextError();
+      return runAdminDownloadPreparationAction(context, action, ids);
+    },
+    retry: false,
+    onSettled: () =>
+      queryClient.invalidateQueries({
+        queryKey: adminDownloadPreparationsKey(captureProfileRequestContext()),
+      }),
+  });
+}
+
+/**
  * How long the server lists a failed job (its PreparationFailedWindow). Failures
  * age out silently, with no realtime event.
  */
-export const ADMIN_DOWNLOAD_PREPARATION_FAILED_WINDOW = 24 * 60 * 60 * 1000;
+const ADMIN_DOWNLOAD_PREPARATION_FAILED_WINDOW = 24 * 60 * 60 * 1000;
 
 /** When the first listed failure leaves the server's list, or null. */
-export function nextFailureExpiry(list: AdminDownloadPreparationList | undefined): number | null {
+function nextFailureExpiry(list: AdminDownloadPreparationList | undefined): number | null {
   let next: number | null = null;
   for (const item of list?.items ?? []) {
     if (item.state !== "failed" || !item.failed_at) continue;

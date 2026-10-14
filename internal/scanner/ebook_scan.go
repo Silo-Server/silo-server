@@ -102,7 +102,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots, libraryRoot
 			rules, ignored, scan.rootErr = scanRootIgnoreRules(cleanRoot, libraryRoots)
 		}
 		if scan.rootErr == nil && !ignored {
-			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, rules, &scan.files, &scan.walkFailures, os.ReadDir); err != nil {
+			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, rules, &scan.files, &scan.walkFailures, nil, os.ReadDir); err != nil {
 				return nil, err
 			}
 		}
@@ -1408,13 +1408,6 @@ func mergeEbookPeople(existing []models.ItemPerson, authors []ebookResolvedAutho
 	return people
 }
 
-func ebookPeopleForReplace(existing []models.ItemPerson, getErr error, authors []ebookResolvedAuthor) ([]models.ItemPerson, error) {
-	if getErr != nil {
-		return nil, fmt.Errorf("get ebook people: %w", getErr)
-	}
-	return mergeEbookPeople(existing, authors), nil
-}
-
 // ebookPeopleWriteAllowed reports whether file-embedded authors may be written
 // for the item. Curated (provider-matched) items are fill-empty only: file
 // metadata may supply authors when the item has none, but must never replace
@@ -1468,11 +1461,7 @@ func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book 
 		}
 		authors = append(authors, ebookResolvedAuthor{ID: personID, Name: c.Name})
 	}
-	people, err := ebookPeopleForReplace(existing, nil, authors)
-	if err != nil {
-		return err
-	}
-	return s.itemRepo.ReplacePeople(ctx, contentID, people)
+	return s.itemRepo.ReplacePeople(ctx, contentID, mergeEbookPeople(existing, authors))
 }
 
 func (s *Scanner) upsertEbookSeries(ctx context.Context, contentID string, book *parsedEbook, curated bool) error {

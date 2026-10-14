@@ -158,6 +158,8 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 	if configurable, ok := provider.(connectionConfigProvider); ok {
 		status.ConnectionConfigSchema = configurable.ConnectionConfigSchema()
 	}
+	status.ConnectionSettings = providerConnectionSettings(provider)
+	status.ConnectionSettingValues = connectionSettingValues(status.ConnectionSettings, conn.ConnectionSettings)
 	if connected {
 		status.Version = ConnectionVersion{ID: conn.ID, UpdatedAt: conn.UpdatedAt}
 		status.ProviderUsername = conn.ProviderUsername
@@ -199,6 +201,15 @@ func (s *Service) UpdateConnectionConditional(ctx context.Context, userID int, p
 }
 
 func (s *Service) updateConnectionSettings(ctx context.Context, userID int, profileID, providerKey string, expected *ConnectionVersion, update ConnectionUpdate) (ConnectionStatus, error) {
+	if len(update.ConnectionSettings) > 0 {
+		provider, ok := s.registry.Get(providerKey)
+		if !ok {
+			return ConnectionStatus{}, UnknownProviderError{Key: providerKey}
+		}
+		if err := validateConnectionSettingsUpdate(providerConnectionSettings(provider), update.ConnectionSettings); err != nil {
+			return ConnectionStatus{}, err
+		}
+	}
 	_, err := s.repo.UpdateConnectionSettings(ctx, providerKey, userID, profileID, expected, update, func(current Connection) error {
 		if current.SyncWatchlistOrderEnabled && update.SyncWatchlistOrderEnabled != nil && !*update.SyncWatchlistOrderEnabled {
 			// The selected user store can share the connection repository's
@@ -379,6 +390,9 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 	conns, err := s.repo.ListLocalWatchEventConnections(ctx, event.UserID, event.ProfileID, event.Kind)
 	if err != nil {
 		return err
+	}
+	if len(conns) > 0 {
+		event.Plays = s.withPlayTitles(ctx, event.Plays)
 	}
 	for _, conn := range conns {
 		provider, ok := s.registry.Get(conn.Provider)
@@ -1641,6 +1655,7 @@ func (s *Service) ExportWatched(
 			continue
 		}
 		pendingPlays, singleBatch := limitWatchedExportBatch(exporter, pendingPlays)
+		pendingPlays = s.withPlayTitles(ctx, pendingPlays)
 		exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
 		_, limited := AsRateLimited(err)
 		retryable := isRetryableProviderError(err)
@@ -2095,6 +2110,14 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 	if confirm && len(conns) == 0 {
 		return nil
 	}
+	// The title lookup starts with the first dispatch and is shared by all.
+	var titled func() ScrobbleEvent
+	startTitles := func() func() ScrobbleEvent {
+		if titled == nil {
+			titled = s.startScrobbleTitles(ctx, event)
+		}
+		return titled
+	}
 	var dispatchErrors []error
 	var confirmedTargets []confirmedScrobbleTarget
 	for _, conn := range conns {
@@ -2162,9 +2185,10 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 			_ = s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, err.Error(), nil)
 			continue
 		}
-		s.dispatchScrobbleAsync(scrobbler, cfg, conn, event, action)
+		s.dispatchScrobbleAsync(scrobbler, cfg, conn, event, startTitles(), action)
 	}
 	if len(confirmedTargets) > 0 {
+		confirmedTitles := startTitles()
 		results := make(chan error, len(confirmedTargets))
 		for _, target := range confirmedTargets {
 			go func() {
@@ -2176,6 +2200,7 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 					target.scrobbler,
 					target.connection,
 					event,
+					confirmedTitles,
 				)
 			}()
 		}
@@ -2220,13 +2245,13 @@ func (s *Service) persistCompletedScrobbleExport(ctx context.Context, conn Conne
 	}})
 }
 
-func (s *Service) dispatchScrobbleAsync(scrobbler Scrobbler, cfg ServerConfig, conn Connection, event ScrobbleEvent, action string) {
+func (s *Service) dispatchScrobbleAsync(scrobbler Scrobbler, cfg ServerConfig, conn Connection, event ScrobbleEvent, titled func() ScrobbleEvent, action string) {
 	s.enqueueOrderedScrobble(scrobbleDispatchKey(scrobbler, conn, event), func() {
-		_ = s.dispatchScrobble(context.Background(), scrobbler, cfg, conn, event, action, nil)
+		_ = s.dispatchScrobble(context.Background(), scrobbler, cfg, conn, titled(), action, nil)
 	})
 }
 
-func (s *Service) dispatchScrobbleConfirmed(ctx context.Context, provider Provider, scrobbler Scrobbler, conn Connection, event ScrobbleEvent) error {
+func (s *Service) dispatchScrobbleConfirmed(ctx context.Context, provider Provider, scrobbler Scrobbler, conn Connection, event ScrobbleEvent, titled func() ScrobbleEvent) error {
 	dispatch := func() error {
 		preparation, claimVersion, err := s.repo.PrepareConfirmedScrobbleStop(
 			ctx, event, conn.ID, s.now().Add(-confirmedStopLease),
@@ -2257,7 +2282,7 @@ func (s *Service) dispatchScrobbleConfirmed(ctx context.Context, provider Provid
 			)
 			return err
 		}
-		return s.dispatchScrobble(ctx, scrobbler, cfg, refreshedConn, event, "stop", &claimVersion)
+		return s.dispatchScrobble(ctx, scrobbler, cfg, refreshedConn, titledWithin(ctx, titled, event), "stop", &claimVersion)
 	}
 	result := make(chan error, 1)
 	s.enqueueOrderedScrobble(scrobbleDispatchKey(scrobbler, conn, event), func() {
@@ -2368,6 +2393,15 @@ func (s *Service) SweepOpenScrobbles(ctx context.Context) error {
 	if err != nil {
 		return errors.Join(reconciliationErr, err)
 	}
+	// One title lookup covers every open session, so a slow catalog costs the
+	// sweep one timeout, not one per session.
+	mediaItemIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session.MediaItemID != "" {
+			mediaItemIDs = append(mediaItemIDs, session.MediaItemID)
+		}
+	}
+	titles := s.mediaTitles(ctx, mediaItemIDs)
 	for _, session := range sessions {
 		conn, ok, err := s.repo.GetConnectionByID(ctx, session.ConnectionID)
 		if err != nil {
@@ -2394,7 +2428,8 @@ func (s *Service) SweepOpenScrobbles(ctx context.Context) error {
 			_ = s.repo.UpdateScrobbleSession(ctx, session.PlaybackSessionID, session.ConnectionID, "stop", session.LastProgress, session.HistoryID, err.Error(), nil)
 			continue
 		}
-		_ = s.dispatchScrobble(ctx, scrobbler, cfg, conn, scrobbleEventFromSession(session, conn, s.now()), "stop", nil)
+		event := scrobbleWithTitles(scrobbleEventFromSession(session, conn, s.now()), titles)
+		_ = s.dispatchScrobble(ctx, scrobbler, cfg, conn, event, "stop", nil)
 	}
 	return reconciliationErr
 }

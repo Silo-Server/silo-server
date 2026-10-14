@@ -27,9 +27,16 @@ type PlaybackSession struct {
 	// request for the same play before it starts either response; the newer
 	// negotiation replaces an older, still-unstarted one from the same device.
 	ClientDeviceID string
+	// ClientName and ClientVersion come from the MediaBrowser header of the
+	// PlaybackInfo request. Players that open the stream URL directly (a
+	// <video> element authenticated by api_key, or a client that sends no
+	// credentials) don't send that header, so the native session falls back
+	// to these; see withNegotiatedClientInfo.
+	ClientName    string
+	ClientVersion string
 	// ClientIP is the resolved address that negotiated this play. Static
 	// streams from clients that send no credentials (Jellyfin for Android TV,
-	// Findroid) are granted only to the same address; see FindStreamGrant.
+	// Findroid) are granted only to the same address; see FindStreamGrants.
 	ClientIP string
 	// ClientPeer is the transport peer host of that request, before forwarding
 	// headers were applied.
@@ -126,6 +133,10 @@ type PlaybackMediaSource struct {
 	// clients whose Dolby Vision decoder requires MPEG-TS.
 	HLSRemux       bool
 	HLSRemuxMPEGTS bool
+	// KeyframePlaylist records, for the life of the play session, that an
+	// HLS copy stream is served from a keyframe-planned playlist
+	// (playback.copy_keyframe_playlist when the session started).
+	KeyframePlaylist bool
 	// DOVIVariant marks a copy remux of Dolby Vision without a compatible base
 	// layer (HEVC profile 5, AV1 profile 10) for a client whose device profile
 	// explicitly lists DOVI. As in Jellyfin 12, the fMP4 master playlist then
@@ -219,11 +230,12 @@ type CompatPlaybackStore interface {
 	// FindByUpstreamSessionID resolves the local upstream session that owns a
 	// compat play. It is used for process-local failure lifecycle handling.
 	FindByUpstreamSessionID(upstreamSessionID string) (*PlaybackSession, bool)
-	// FindStreamGrant returns the most recently active live negotiation, from
-	// any caller, for the route item and media source that clientIP negotiated
-	// through the transport peer clientPeer, and that was active within maxIdle.
-	// It authorizes credential-less static streams; see PlaybackSessionAuth.
-	FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) (*PlaybackSession, bool)
+	// FindStreamGrants returns the live negotiations, from any caller, for the
+	// route item and media source that clientIP negotiated through the
+	// transport peer clientPeer, and that were active within maxIdle, most
+	// recently active first. They authorize credential-less static streams;
+	// see PlaybackSessionAuth.
+	FindStreamGrants(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) []*PlaybackSession
 }
 
 // PlaybackSessionStore keeps compat playback sessions in memory. It is the
@@ -688,24 +700,31 @@ func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string)
 	return nil, false
 }
 
-// FindStreamGrant implements CompatPlaybackStore.
-func (s *PlaybackSessionStore) FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) (*PlaybackSession, bool) {
+// FindStreamGrants implements CompatPlaybackStore.
+func (s *PlaybackSessionStore) FindStreamGrants(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) []*PlaybackSession {
 	if routeItemID == "" || mediaSourceID == "" || clientIP == "" || clientPeer == "" {
-		return nil, false
+		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	now := s.now()
 	activeSince := now.Add(-maxIdle)
-	var match *PlaybackSession
+	var matches []*PlaybackSession
 	for _, session := range s.sessions {
-		if streamGrantMatches(&session, routeItemID, mediaSourceID, clientIP, clientPeer, activeSince, now) && (match == nil || session.UpdatedAt.After(match.UpdatedAt)) {
+		if streamGrantMatches(&session, routeItemID, mediaSourceID, clientIP, clientPeer, activeSince, now) {
 			copy := session
-			match = &copy
+			matches = append(matches, &copy)
 		}
 	}
-	return match, match != nil
+	return newestStreamGrantsFirst(matches)
+}
+
+// newestStreamGrantsFirst orders stream grants by their last activity, most
+// recent first.
+func newestStreamGrantsFirst(grants []*PlaybackSession) []*PlaybackSession {
+	sort.SliceStable(grants, func(i, j int) bool { return grants[i].UpdatedAt.After(grants[j].UpdatedAt) })
+	return grants
 }
 
 // sameStreamPath reports whether a stream reached the server the way its

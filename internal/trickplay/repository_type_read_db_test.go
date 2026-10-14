@@ -6,7 +6,7 @@ import (
 )
 
 func TestLibraryTypeChangeSuppressesAndRetiresTrickplayDB(t *testing.T) {
-	for _, kind := range []string{"audiobooks", "ebooks", "podcasts", "manga", "unknown"} {
+	for _, kind := range []string{"audiobooks", "ebooks", "podcasts", "manga", "music", "unknown"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newFixture(t)
 			folder := f.library(t, "movies", true)

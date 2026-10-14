@@ -7,25 +7,45 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsync"
 )
 
-// SubtitleSyncService aligns stored subtitles to their file's audio.
+// SubtitleSyncService aligns stored subtitles and sidecars to their file's
+// audio.
 type SubtitleSyncService interface {
 	Request(ctx context.Context, subtitleID int, trigger string, requestedBy *int) (*subsync.Job, error)
+	RequestExternal(ctx context.Context, mediaFileID int, sidecar models.ExternalSubtitle, trigger string, requestedBy *int) (*subsync.Job, error)
 	Latest(ctx context.Context, subtitleID int) (*subsync.Job, error)
+	LatestExternal(ctx context.Context, timingID int64) (*subsync.Job, error)
 	LatestForSubtitles(ctx context.Context, subtitleIDs []int) (map[int]*subsync.Job, error)
+	LatestForExternal(ctx context.Context, timingIDs []int64) (map[int64]*subsync.Job, error)
 	AutoSyncEnabled(ctx context.Context) bool
-	TimingChanged(ctx context.Context, mediaFileID, subtitleID int)
+	TimingChanged(ctx context.Context, target subtitles.SyncTarget)
+}
+
+// ExternalTimingStore keeps sidecar timing corrections.
+type ExternalTimingStore interface {
+	subtitles.ExternalTimingLookup
+	ExternalTimings(ctx context.Context, mediaFileID int) (map[string]*subtitles.ExternalTiming, error)
+	SetExternalTiming(ctx context.Context, mediaFileID int, contentSHA256, path string, format subtitles.SubtitleFormat, timing subtitles.Timing, revision int64) (*subtitles.ExternalTiming, error)
 }
 
 // SetSyncService enables subtitle sync, including automatic sync of new
-// downloads and uploads.
-func (h *SubtitleSearchHandler) SetSyncService(sync SubtitleSyncService) { h.sync = sync }
+// downloads and uploads. external stores sidecar corrections; nil leaves
+// sidecars out of sync.
+func (h *SubtitleSearchHandler) SetSyncService(sync SubtitleSyncService, external ExternalTimingStore) {
+	h.sync, h.external = sync, external
+}
 
 // SyncAvailable reports whether subtitle sync is configured.
 func (h *SubtitleSearchHandler) SyncAvailable() bool { return h != nil && h.sync != nil }
+
+// ExternalSyncAvailable reports whether sidecars can be synced and retimed.
+func (h *SubtitleSearchHandler) ExternalSyncAvailable() bool {
+	return h.SyncAvailable() && h.external != nil
+}
 
 // AutoSyncEnabled reports whether new subtitles are synced automatically.
 func (h *SubtitleSearchHandler) AutoSyncEnabled(ctx context.Context) bool {
@@ -43,13 +63,30 @@ func (h *SubtitleSearchHandler) requestAutoSync(ctx context.Context, sub *subtit
 	}
 }
 
-// RequestStoredSubtitleSync starts a manual sync. It requires the authority
-// of viewer deletion: the new timing applies to everyone watching the file.
-func (h *SubtitleSearchHandler) RequestStoredSubtitleSync(ctx context.Context, access catalog.AccessFilter, id int) (*subsync.Job, error) {
-	if !h.SyncAvailable() {
+// storedSubtitleForSync reads a stored subtitle the viewer can play. Anyone
+// with access to the file may sync or retime it: the stored bytes never
+// change, and the correction can always be reset.
+func (h *SubtitleSearchHandler) storedSubtitleForSync(ctx context.Context, access catalog.AccessFilter, id int) (*subtitles.DownloadedSubtitle, error) {
+	if !h.SyncAvailable() || h.repo == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "dependency_unavailable", "Subtitle sync is not configured")
 	}
-	row, err := h.GetViewerSubtitleForDeletion(ctx, access, id)
+	row, err := h.repo.GetDownloadedSubtitle(ctx, id)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Unable to read stored subtitle")
+	}
+	if row == nil {
+		return nil, subtitles.ErrSubtitleNotFound
+	}
+	if err := h.authorizeSubtitleRead(ctx, access, row.MediaFileID); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// RequestStoredSubtitleSync starts a manual sync of a subtitle the viewer
+// can play.
+func (h *SubtitleSearchHandler) RequestStoredSubtitleSync(ctx context.Context, access catalog.AccessFilter, id int) (*subsync.Job, error) {
+	row, err := h.storedSubtitleForSync(ctx, access, id)
 	if err != nil {
 		return nil, err
 	}
@@ -69,17 +106,8 @@ func (h *SubtitleSearchHandler) RequestStoredSubtitleSync(ctx context.Context, a
 // StoredSubtitleSync reads a stored subtitle and its latest sync job with
 // file access.
 func (h *SubtitleSearchHandler) StoredSubtitleSync(ctx context.Context, access catalog.AccessFilter, id int) (*subtitles.DownloadedSubtitle, *subsync.Job, error) {
-	if !h.SyncAvailable() {
-		return nil, nil, apiError(http.StatusServiceUnavailable, "dependency_unavailable", "Subtitle sync is not configured")
-	}
-	row, err := h.repo.GetDownloadedSubtitle(ctx, id)
+	row, err := h.storedSubtitleForSync(ctx, access, id)
 	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Unable to read stored subtitle")
-	}
-	if row == nil {
-		return nil, nil, subtitles.ErrSubtitleNotFound
-	}
-	if err := h.authorizeSubtitleRead(ctx, access, row.MediaFileID); err != nil {
 		return nil, nil, err
 	}
 	job, err := h.sync.Latest(ctx, row.ID)
@@ -104,12 +132,15 @@ func (h *SubtitleSearchHandler) SubtitleSyncJobs(ctx context.Context, ids []int)
 }
 
 // SetStoredSubtitleTiming replaces a stored subtitle's timing correction at
-// the given revision, with the authority of viewer deletion.
+// the given revision. File access is enough, as for sync.
 func (h *SubtitleSearchHandler) SetStoredSubtitleTiming(ctx context.Context, access catalog.AccessFilter, id int, revision int64, timing subtitles.Timing) (*subtitles.DownloadedSubtitle, error) {
 	if err := subtitles.ValidateTiming(timing); err != nil {
 		return nil, apiError(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	}
-	row, err := h.GetViewerSubtitleForDeletion(ctx, access, id)
+	if h.manager == nil {
+		return nil, apiError(http.StatusServiceUnavailable, "dependency_unavailable", "Subtitle sync is not configured")
+	}
+	row, err := h.storedSubtitleForSync(ctx, access, id)
 	if err != nil {
 		return nil, err
 	}
@@ -128,8 +159,6 @@ func (h *SubtitleSearchHandler) SetStoredSubtitleTiming(ctx context.Context, acc
 		slog.ErrorContext(ctx, "subtitle timing update failed", "component", "api", "subtitle_id", id, "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Unable to update subtitle timing")
 	}
-	if h.SyncAvailable() {
-		h.sync.TimingChanged(context.WithoutCancel(ctx), updated.MediaFileID, updated.ID)
-	}
+	h.sync.TimingChanged(context.WithoutCancel(ctx), subtitles.SyncTarget{MediaFileID: updated.MediaFileID, StoredID: updated.ID})
 	return updated, nil
 }

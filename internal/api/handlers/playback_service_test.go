@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -484,15 +485,15 @@ func TestReplayedStopFinishesAnUnfinalizedStop(t *testing.T) {
 // feeding progress.
 func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
 	t.Run("already stopped elsewhere", func(t *testing.T) {
-		f := newPlaybackServiceFixture(t)
-		store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-		remoteStop := uuid.NewString()
-		if _, _, err := store.StopAttempt(context.Background(), f.session.ID, remoteStop, &playback.ProgressSampleV3{Sequence: 9, Position: 900}); err != nil {
-			t.Fatal(err)
-		}
-		f.handler.handleExpiredSession(f.session)
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
+		synctest.Test(t, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+			remoteStop := uuid.NewString()
+			if _, _, err := store.StopAttempt(context.Background(), f.session.ID, remoteStop, &playback.ProgressSampleV3{Sequence: 9, Position: 900}); err != nil {
+				t.Fatal(err)
+			}
+			f.handler.handleExpiredSession(f.session)
+			synctest.Wait()
 			receipt, _, err := store.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil)
 			if err != nil {
 				t.Fatal(err)
@@ -500,20 +501,19 @@ func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
 			if receipt.StopID != remoteStop || receipt.Accepted == nil || receipt.Accepted.Position != 900 {
 				t.Fatalf("expiry overwrote the remote stop: %+v", receipt)
 			}
-			time.Sleep(20 * time.Millisecond)
-		}
+		})
 	})
 	t.Run("active elsewhere", func(t *testing.T) {
-		f := newPlaybackServiceFixture(t)
-		store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-		// The local copy went idle before the row's last accepted sample.
-		f.session.LastActivityAt = time.Now().Add(-time.Hour)
-		if _, err := store.ApplyProgress(context.Background(), f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
-			t.Fatal(err)
-		}
-		f.handler.handleExpiredSession(f.session)
-		deadline := time.Now().Add(500 * time.Millisecond)
-		for time.Now().Before(deadline) {
+		synctest.Test(t, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+			// The local copy went idle before the row's last accepted sample.
+			f.session.LastActivityAt = time.Now().Add(-time.Hour)
+			if _, err := store.ApplyProgress(context.Background(), f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+				t.Fatal(err)
+			}
+			f.handler.handleExpiredSession(f.session)
+			synctest.Wait()
 			record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -521,8 +521,7 @@ func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
 			if record.StoppedAt != nil {
 				t.Fatalf("expiry stopped an attempt that is live on another replica: %+v", record)
 			}
-			time.Sleep(20 * time.Millisecond)
-		}
+		})
 	})
 }
 
@@ -727,4 +726,88 @@ func TestReplanRefusesAStoppedAttempt(t *testing.T) {
 	}
 	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
 	assertPlaybackOperationError(t, err, http.StatusNotFound, "session_not_found")
+}
+
+// An attempt an administrator ended answers 410 on progress and replan, so the
+// player exits; an expired attempt keeps answering 404 so the player renews.
+func TestStoppedAttemptAnswersGoneOnlyWhenAnAdministratorEndedIt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stop   func(*PlaybackHandler, string)
+		status int
+		code   string
+	}{
+		{"administrator", func(h *PlaybackHandler, id string) { h.markAttemptStoppedByAdmin(context.Background(), id) }, http.StatusGone, "playback_session_ended"},
+		{"expiry", func(h *PlaybackHandler, id string) { h.markAttemptStoppedServerSide(context.Background(), id) }, http.StatusNotFound, "session_not_found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.stop(f.handler, f.session.ID)
+			_, err = f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
+			assertPlaybackOperationError(t, err, tc.status, tc.code)
+			_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
+			assertPlaybackOperationError(t, err, tc.status, tc.code)
+		})
+	}
+}
+
+// A client that stopped first keeps its own receipt: a later administrator
+// stop of the same attempt does not turn its progress into 410.
+func TestAdministratorStopKeepsAClientStopReceipt(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	stopID := uuid.NewString()
+	if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: stopID}); err != nil {
+		t.Fatal(err)
+	}
+	f.handler.markAttemptStoppedByAdmin(context.Background(), f.session.ID)
+	record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
+	if err != nil || record.StopID != stopID {
+		t.Fatalf("record = %+v, %v", record, err)
+	}
+	_, err = f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
+	assertPlaybackOperationError(t, err, http.StatusNotFound, "session_not_found")
+}
+
+// stopAfterFirstReadPlanStoreV3 runs stop once the first attempt read
+// returns, the window between the replan precheck and the replan itself.
+type stopAfterFirstReadPlanStoreV3 struct {
+	*playback.MemoryPlanStoreV3
+	stop func()
+	done bool
+}
+
+func (s *stopAfterFirstReadPlanStoreV3) GetAttempt(ctx context.Context, sessionID string) (*playback.AttemptRecordV3, error) {
+	record, err := s.MemoryPlanStoreV3.GetAttempt(ctx, sessionID)
+	if !s.done {
+		s.done = true
+		s.stop()
+	}
+	return record, err
+}
+
+// An administrator stop that lands after the replan precheck still answers
+// 410, not the 404 the player would renew from.
+func TestReplanAnswersGoneWhenAnAdministratorStopLandsMidReplan(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	start := v3HandlerStartRequest()
+	memory, ok := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
+	if !ok {
+		t.Fatalf("plan store = %T", f.handler.PlanStoreV3)
+	}
+	record, err := memory.GetAttempt(context.Background(), f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.handler.PlanStoreV3 = &stopAfterFirstReadPlanStoreV3{MemoryPlanStoreV3: memory, stop: func() {
+		if err := f.manager.StopSession(f.session.ID); err != nil {
+			t.Fatal(err)
+		}
+		f.handler.markAttemptStoppedByAdmin(context.Background(), f.session.ID)
+	}}
+	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"})
+	assertPlaybackOperationError(t, err, http.StatusGone, "playback_session_ended")
 }

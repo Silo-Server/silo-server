@@ -7,10 +7,7 @@ import (
 )
 
 func TestKeyAuthorityUsageSelector(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	selected, err := KeyAuthorityUsageAcceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)

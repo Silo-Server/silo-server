@@ -14,6 +14,15 @@ import (
 // MediaSources) later never triggered the detail path and came back without
 // MediaSources. parseItemsQuery must join all repeated values before splitting.
 func TestRepeatedFieldsParamTriggersDetail(t *testing.T) {
+	browseFields := "MediaSourceCount,PrimaryImageAspectRatio,Genres,Studios,Taglines,BasicSyncInfo," +
+		"CanDelete,CanResume,Container,CriticRating,DisplayPreferencesId,EndDate,Etag,ItemCounts," +
+		"OriginalTitle,Overview,ParentId,Path,PremiereDate,Prefix,ProductionLocations,ProductionYear,SortName,Status,Tags"
+	for _, target := range []string{"/Items", "/Items?Fields=" + browseFields, "/Items?Fields=UnknownField"} {
+		query := parseItemsQuery(httptest.NewRequest("GET", target, nil), NewResourceIDCodec())
+		if query.needsDetailFields {
+			t.Fatalf("%s unexpectedly requires full detail hydration", target)
+		}
+	}
 	url := "/Shows/abc/Episodes?Fields=PrimaryImageAspectRatio&Fields=SeasonUserData" +
 		"&Fields=ChildCount&Fields=Overview&Fields=Trickplay&Fields=SortName" +
 		"&Fields=Chapters&Fields=MediaSources&Fields=MediaSourceCount" +

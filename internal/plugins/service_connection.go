@@ -36,7 +36,7 @@ func (e *ConnectionTestError) Unwrap() error {
 	return e.Cause
 }
 
-var runPluginConnectionCheck = func(
+func runPluginConnectionCheck(
 	ctx context.Context,
 	client pluginClient,
 	manifest *pluginv1.PluginManifest,

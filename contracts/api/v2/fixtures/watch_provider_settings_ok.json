@@ -13,5 +13,6 @@
   "scrobble_enabled": false,
   "import_ratings_enabled": false,
   "export_ratings_enabled": false,
-  "sync_dropped_enabled": false
+  "sync_dropped_enabled": false,
+  "connection_settings": {}
 }

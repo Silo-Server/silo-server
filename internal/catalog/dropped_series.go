@@ -87,6 +87,34 @@ func (r *DroppedSeriesRepo) ResolveDropSeries(ctx context.Context, itemID string
 	return *seriesID, true, nil
 }
 
+// EpisodeSeriesIDs returns the series of each of the given episodes, in one
+// query per thousand IDs. IDs that are not episodes are absent.
+func (r *DroppedSeriesRepo) EpisodeSeriesIDs(ctx context.Context, episodeIDs []string) (map[string]string, error) {
+	seriesOf := make(map[string]string, len(episodeIDs))
+	for start := 0; start < len(episodeIDs); start += 1000 {
+		chunk := episodeIDs[start:min(len(episodeIDs), start+1000)]
+		rows, err := r.pool.Query(ctx,
+			`SELECT content_id, series_id FROM episodes WHERE content_id = ANY($1) AND series_id IS NOT NULL AND series_id <> ''`,
+			chunk)
+		if err != nil {
+			return nil, fmt.Errorf("resolving episode series: %w", err)
+		}
+		for rows.Next() {
+			var episodeID, seriesID string
+			if err := rows.Scan(&episodeID, &seriesID); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scanning episode series: %w", err)
+			}
+			seriesOf[episodeID] = seriesID
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterating episode series: %w", err)
+		}
+	}
+	return seriesOf, nil
+}
+
 // Drop drops a series for a profile now. Dropping an already dropped series
 // refreshes dropped_at, which re-drops a series the profile watched since.
 func (r *DroppedSeriesRepo) Drop(ctx context.Context, userID int, profileID, seriesID string) error {

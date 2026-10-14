@@ -131,11 +131,12 @@ func TestArtworkRevisionGCBatchRechecksClaimedState(t *testing.T) {
 		}
 	}
 	var nextAttempt *time.Time
-	if err := pool.QueryRow(ctx, `SELECT next_attempt_at FROM artwork_revision_gc_candidates WHERE original_path = $1`, paths[0]).Scan(&nextAttempt); err != nil {
+	var lockedBy string
+	if err := pool.QueryRow(ctx, `SELECT next_attempt_at, locked_by FROM artwork_revision_gc_candidates WHERE original_path = $1`, paths[0]).Scan(&nextAttempt, &lockedBy); err != nil {
 		t.Fatal(err)
 	}
-	if nextAttempt != nil {
-		t.Errorf("referenced revision was not parked: %v", nextAttempt)
+	if nextAttempt != nil || lockedBy != "" {
+		t.Errorf("referenced revision was not parked with its lease released: next_attempt_at=%v locked_by=%q", nextAttempt, lockedBy)
 	}
 }
 

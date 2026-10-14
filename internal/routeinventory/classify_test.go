@@ -45,10 +45,7 @@ func TestAnalyzeHandlerHelperKinds(t *testing.T) {
 			}
 		})
 	}
-}
 
-func TestAnalyzeHelperConstantDelegate(t *testing.T) {
-	inv := analyzeFixture(t, "handler_kinds")
 	checked := 0
 	for _, route := range inv.Routes {
 		var want string

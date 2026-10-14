@@ -4,11 +4,18 @@ import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EpisodeCarousel from "./EpisodeCarousel";
 
+vi.mock("@/lib/thumbhash", () => ({ decodeThumbhash: () => "data:image/png;base64,fixture" }));
+
 const capturedMenuProps: Record<string, unknown>[] = [];
 const prefetchEpisodeDetail = vi.hoisted(() => vi.fn());
+const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
   usePrefetchCatalogItemDetail: () => prefetchEpisodeDetail,
+}));
+
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => spoilerPrefs,
 }));
 
 vi.mock("@/hooks/useOverlayPrefs", () => ({
@@ -32,6 +39,61 @@ vi.mock("@/hooks/useCarouselEmbla", () => ({
     scrollNext: () => {},
   }),
 }));
+
+it("suppresses a protected still placeholder until the image loads", () => {
+  spoilerPrefs.hideImages = true;
+  const { container, rerender } = render(
+    <MemoryRouter>
+      <EpisodeCarousel
+        currentEpisodeNumber={0}
+        episodes={[
+          {
+            content_id: "ep-protected",
+            season_number: 1,
+            episode_number: 1,
+            title: "Protected",
+            overview: "",
+            air_date: null,
+            runtime: 42,
+            still_url: "https://example.invalid/still.jpg",
+            still_thumbhash: "fixture",
+            files: [],
+            still_is_episode_still: true,
+          },
+        ]}
+      />
+    </MemoryRouter>,
+  );
+  const image = container.querySelector("img")!;
+  expect(image.parentElement!.style.backgroundImage).toBe("");
+  expect(image.className).toContain("blur");
+  spoilerPrefs.hideImages = false;
+  rerender(
+    <MemoryRouter>
+      <EpisodeCarousel
+        currentEpisodeNumber={0}
+        episodes={[
+          {
+            content_id: "ep-protected",
+            season_number: 1,
+            episode_number: 1,
+            title: "Protected",
+            overview: "",
+            air_date: null,
+            runtime: 42,
+            still_url: "https://example.invalid/still.jpg",
+            still_thumbhash: "fixture",
+            files: [],
+            still_is_episode_still: true,
+          },
+        ]}
+      />
+    </MemoryRouter>,
+  );
+  expect(container.querySelector("img")!.parentElement!.style.backgroundImage).toContain(
+    "data:image/png",
+  );
+});
 
 describe("EpisodeCarousel", () => {
   beforeEach(() => {
@@ -82,102 +144,11 @@ describe("EpisodeCarousel", () => {
     }
   });
 
-  it("passes partial-progress restart eligibility to episode menus", () => {
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <EpisodeCarousel
-          currentEpisodeNumber={1}
-          episodes={[
-            {
-              content_id: "ep-1",
-              season_number: 1,
-              episode_number: 1,
-              title: "Pilot",
-              overview: "",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-              user_data: {
-                played: false,
-                position_seconds: 120,
-                duration_seconds: 1800,
-              },
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(capturedMenuProps[0]).toMatchObject({
-      contentId: "ep-1",
-      mediaType: "episode",
-      hasPartialProgress: true,
-    });
-  });
-
-  it("places the watched circle-check beside the episode label instead of over the artwork", () => {
-    render(
-      <MemoryRouter>
-        <EpisodeCarousel
-          currentEpisodeNumber={2}
-          episodes={[
-            {
-              content_id: "ep-1",
-              season_number: 1,
-              episode_number: 1,
-              title: "Pilot",
-              overview: "",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-              user_data: {
-                played: true,
-                position_seconds: 1800,
-                duration_seconds: 1800,
-              },
-            },
-            {
-              content_id: "ep-2",
-              season_number: 1,
-              episode_number: 2,
-              title: "Next",
-              overview: "",
-              air_date: null,
-              runtime: 43,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-              user_data: {
-                played: false,
-                position_seconds: 0,
-                duration_seconds: 1800,
-              },
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    const episodeLabel = screen.getByText("Episode 1");
-    const watchedIndicator = screen.getByLabelText("Watched");
-
-    expect(episodeLabel.parentElement).toContainElement(watchedIndicator);
-    expect(watchedIndicator).toHaveAttribute("data-watched-indicator", "icon-only");
-    expect(watchedIndicator.querySelector(".lucide-circle-check")).toBeTruthy();
-    expect(watchedIndicator.closest(".surface-panel-subtle")).toBeNull();
-    expect(screen.getByText("Episode 2").parentElement).not.toContainElement(watchedIndicator);
-    expect(screen.getAllByLabelText("Watched")).toHaveLength(1);
-  });
-
   it("enables unwatched shortcuts without losing partial-progress restart eligibility", () => {
     renderToStaticMarkup(
       <MemoryRouter>
         <EpisodeCarousel
-          currentEpisodeNumber={1}
+          currentEpisodeNumber={2}
           episodes={[
             {
               content_id: "ep-1",
@@ -228,6 +199,7 @@ describe("EpisodeCarousel", () => {
     });
     expect(capturedMenuProps[1]).toMatchObject({
       contentId: "ep-2",
+      mediaType: "episode",
       userState: {
         played: false,
         is_favorite: false,

@@ -147,11 +147,3 @@ func TestAccountIdentityNetworkLink(t *testing.T) {
 		}
 	}
 }
-
-func TestExternalSignInCapabilitiesReportNetworkSignIn(t *testing.T) {
-	rec := do(t, newTestHandler(t, externalSignInDeps(&fakeExternalSignIn{})), http.MethodGet, Prefix+"/auth/external-sign-in/capabilities", "", nil)
-	var body ExternalSignInCapabilities
-	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil || !body.NetworkSignIn {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-}

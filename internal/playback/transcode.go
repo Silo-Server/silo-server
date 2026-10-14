@@ -47,12 +47,21 @@ type TranscodeOpts struct {
 	SourceVideoCodec     string
 	SourceVideoProfile   string
 	SourceVideoBitDepth  int
-	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_rpu=strip=1
+	VideoBitstreamFilter string // validated copy-mode BSF: DV7ToHDR10BitstreamFilter
 	VideoSampleEntry     string // allowlisted copy-HLS sample entry: dvh1 or hvc1
 	// CopyVideoMPEGTS packages copied video in MPEG-TS instead of fMP4. It is
 	// durable because the segment extension and bytes must survive restarts.
 	CopyVideoMPEGTS bool
-	SeekSeconds     float64
+	// KeyframePlaylist serves a copy-video stream that starts at the
+	// beginning as one complete VOD playlist planned from the source's
+	// keyframe index, instead of FFmpeg's growing playlist (#1466). It is
+	// durable because a reconstructed session must keep serving the playlist
+	// the player already has.
+	KeyframePlaylist bool
+	// Reconstructed marks a session rebuilt from its recipe after its server
+	// or node lost it. It isn't durable: each rebuild sets it.
+	Reconstructed bool
+	SeekSeconds   float64
 	// StreamOriginSeconds is the keyframe timestamp at which a copy-video
 	// stream actually begins. SeekSeconds remains the client-requested -ss so
 	// FFmpeg performs exactly one demuxer seek; this origin keeps response and
@@ -152,9 +161,12 @@ type TranscodeOpts struct {
 	PrepareProgressSink PrepareProgressSink
 }
 
-// DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a
-// copy-mode HLS remux; the enhancement layer is dropped by stream mapping.
-const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1"
+// DV7ToHDR10BitstreamFilter turns a Dolby Vision stream into its plain HDR10
+// base layer during a copy-mode remux. dovi_rpu removes the Dolby Vision
+// configuration and RPUs. A single-track Profile 7 stream also interleaves its
+// enhancement layer as NAL unit type 63 in the same video stream, which stream
+// mapping cannot separate, so filter_units removes those units.
+const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1,filter_units=remove_types=63"
 
 // CopyFMP4RecipeVersion identifies the byte-affecting copy-video HLS recipe.
 // Remote starts attest it so rolling clusters never silently mix the old
@@ -252,6 +264,9 @@ type TranscodeSession struct {
 	// reacquires this same device rather than re-running selection, so a restart
 	// keeps its GPU affinity and stays visible in per-device reporting.
 	hwWorkloadDevice string
+	// copyPlan is the planned segment list served instead of FFmpeg's
+	// playlist, or nil. It is fixed when the session starts.
+	copyPlan *copySegmentPlan
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -298,6 +313,9 @@ type SegmentRecoveryDecision struct {
 	Reason           string
 	Progress         SegmentProgress
 }
+
+// segmentReasonRestarting is the recovery reason while a restart is in flight.
+const segmentReasonRestarting = "transcode_restarting"
 
 // defaultSegmentDuration is the segment length when not specified. Short
 // segments (2s) allow the player to start quickly while still maintaining
@@ -405,6 +423,16 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
+	copyPlan := resolveCopyPlan(ctx, opts)
+	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
+		// Rebuilding without the plan would serve FFmpeg's playlist to a
+		// player that may hold the planned one; a later request rebuilds.
+		releaseHWDevice()
+		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", ctx.Err())
+	}
+	if copyPlan != nil {
+		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
+	}
 
 	// The synchronous source guard above is bounded by the caller's startup
 	// context. Once it succeeds, keep the established behavior where the
@@ -423,6 +451,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		lastPruneHighWater:   opts.StartSegmentNumber - 1,
 		segmentIncarnation:   uuid.NewString(),
 		hwWorkloadDevice:     hwWorkloadDevice,
+		copyPlan:             copyPlan,
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -647,6 +676,9 @@ func validateToneMapOpts(opts TranscodeOpts) error {
 	default:
 		return fmt.Errorf("unsupported tone-map mode %q", opts.ToneMapMode)
 	}
+	if opts.ToneMapSourceKind == tonemap.SourceDolbyVision && !tonemap.FilterAppliesDolbyVision(opts.ToneMapFilter) {
+		return fmt.Errorf("tone-map filter %q cannot apply a Dolby Vision RPU", opts.ToneMapFilter)
+	}
 	return nil
 }
 
@@ -741,6 +773,18 @@ func classifyToneMapPreflightError(err error) error {
 	}
 	return fmt.Errorf("tone-map source preflight failed: %w", err)
 }
+
+// hlsMuxMaxDelayMicros is the -max_delay, in microseconds, of every HLS
+// transcode. Jellyfin uses the same value.
+const hlsMuxMaxDelayMicros = 5_000_000
+
+// HLSMPEGTSTimestampOffset90k is how far, in 90 kHz ticks, ffmpeg's MPEG-TS
+// muxer shifts every PTS and DTS of an HLS MPEG-TS segment: twice
+// -max_delay, 10 s for hlsMuxMaxDelayMicros. With -copyts a segment's video
+// PTS is the source time plus this offset, so a WebVTT X-TIMESTAMP-MAP for
+// those segments must add it too or players show cues that much early.
+// fMP4 segments carry no such shift.
+const HLSMPEGTSTimestampOffset90k = 2 * hlsMuxMaxDelayMicros * 90_000 / 1_000_000
 
 // buildFFmpegArgs constructs the full ffmpeg argument list from TranscodeOpts.
 func buildFFmpegArgs(opts TranscodeOpts) []string {
@@ -851,7 +895,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 	args = append(args,
 		"-max_muxing_queue_size", "2048",
-		"-max_delay", "5000000",
+		"-max_delay", strconv.Itoa(hlsMuxMaxDelayMicros),
 		"-f", "hls",
 		"-hls_time", fmt.Sprintf("%d", opts.SegmentDuration),
 		// Bound real playlists as well as synthetic ones. Segment files remain on
@@ -1401,7 +1445,8 @@ func toneMapScaleFilter(opts TranscodeOpts) string {
 	case tonemap.ModeHardware:
 		switch opts.HWAccel {
 		case transcodeHWQSV:
-			return softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind) + "," + qsvToneMapScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
+			height, _ := scaleTargetHeight(opts.TargetResolution)
+			return softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind, height) + "," + tonemap.QSVInteropFilter() + "," + tonemap.HDRMetadataRemovalFilter()
 		case transcodeHWVAAPI:
 			return softwareToneMapUploadFilter(opts) + tonemap.VAAPIFilter(opts.ToneMapSourceKind) + "," + vaapiScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
 		case transcodeHWNVENC:
@@ -1412,7 +1457,7 @@ func toneMapScaleFilter(opts TranscodeOpts) string {
 				}
 				return filter + ",format=nv12,hwupload_cuda"
 			}
-			return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter() + "," + nvencScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
+			return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + "," + nvencScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
 		case transcodeHWVideoToolbox:
 			return videoToolboxToneMapCPUFilter(opts) + "," + tonemap.HDRMetadataRemovalFilter()
 		}
@@ -1439,14 +1484,14 @@ func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
 	}
 	switch opts.HWAccel {
 	case transcodeHWQSV:
-		return softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload,hwmap=derive_device=qsv:mode=read+write,format=qsv," + tonemap.HDRMetadataRemovalFilter()
+		return softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind, 0) + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload,hwmap=derive_device=qsv:mode=read+write,format=qsv," + tonemap.HDRMetadataRemovalFilter()
 	case transcodeHWVAAPI:
 		return softwareToneMapUploadFilter(opts) + tonemap.VAAPIFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload," + tonemap.HDRMetadataRemovalFilter()
 	case transcodeHWNVENC:
 		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
 			return nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "," + cpuTail + ",format=nv12,hwupload_cuda"
 		}
-		return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter() + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter()
+		return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter()
 	case transcodeHWVideoToolbox:
 		return videoToolboxToneMapCPUFilter(opts) + "," + subFilter + "," + tonemap.HDRMetadataRemovalFilter()
 	default:
@@ -1471,9 +1516,13 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 
 	switch opts.HWAccel {
 	case transcodeHWQSV:
-		graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind) + "[vmain];" +
-			subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
-			qsvToneMapScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
+			graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.QSVFilter(opts.ToneMapSourceKind, 0) + "[vmain];" +
+				subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
+				qsvToneMapScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		} else {
+			graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + qsvOpenCLBitmapSubtitleGraph(opts, subInput)
+		}
 	case transcodeHWVAAPI:
 		graph = "[0:v:0]" + softwareToneMapUploadFilter(opts) + tonemap.VAAPIFilter(opts.ToneMapSourceKind) + "[vmain];" +
 			subInput + "format=bgra,hwupload[sub];[vmain][sub]overlay_vaapi=eof_action=pass," +
@@ -1482,7 +1531,7 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
 			graph = "[0:v:0]" + nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "[vmain];[vmain]" + subInput + "overlay=eof_action=pass"
 		} else {
-			graph = "[0:v:0]" + tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter() + ",hwdownload,format=nv12[vmain];[vmain]" +
+			graph = "[0:v:0]" + tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12[vmain];[vmain]" +
 				subInput + "overlay=eof_action=pass"
 		}
 		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
@@ -1497,6 +1546,28 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 		return args
 	}
 	return append(args, "-filter_complex", graph)
+}
+
+// qsvOpenCLBitmapSubtitleGraph composites a bitmap subtitle onto an HDR frame
+// while it is still on the OpenCL device after tone mapping, then scales it
+// there. overlay_vaapi reading the tone-mapped surface corrupts frames the
+// same way a scale_vaapi does (see tonemap.QSVFilter). The subtitle goes on at
+// the source resolution before the scale, as with overlay_vaapi, and its RGB
+// frames are converted with the BT.709 matrix of the tone-mapped frame.
+//
+// scale_opencl, overlay_opencl's eof_action and YUVA overlays, and a shared
+// OpenCL device for both hwupload and hwmap come from Jellyfin FFmpeg, which
+// the QSV tone-map path already requires for tonemap_opencl's bt2390 curve.
+// The QSV probe's listing gate checks that both filters exist.
+func qsvOpenCLBitmapSubtitleGraph(opts TranscodeOpts, subInput string) string {
+	scale := ""
+	if height, ok := scaleTargetHeight(opts.TargetResolution); ok {
+		scale = fmt.Sprintf("scale_opencl=w=-2:h=%d,", height)
+	}
+	return tonemap.QSVOpenCLToneMapFilter(opts.ToneMapSourceKind, 0) + "[vmain];" +
+		subInput + "scale=out_color_matrix=bt709:out_range=tv,format=yuva420p,hwupload=derive_device=opencl[sub];" +
+		"[vmain][sub]overlay_opencl=eof_action=pass," + scale +
+		tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 }
 
 // softwareToneMapUploadFilter moves CPU-decoded frames onto the configured
@@ -2147,6 +2218,9 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 // longer media uses FFmpeg's real sliding playlist.
 func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
 	opts := s.Opts()
+	if s.copyPlan != nil {
+		return s.copyPlan.manifest(opts, segPrefix, rawQuery), nil
+	}
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		// Copy-video, unknown-duration, or oversized sessions must use FFmpeg's
@@ -2227,6 +2301,11 @@ const SourceTimelineQueryParam = "source_timeline"
 // first produced segment retains its source-time position. Synthetic manifests
 // already cover the full source timeline and need no adjustment.
 func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
+	if s.copyPlan != nil {
+		// A planned playlist starts at the source's beginning and doesn't
+		// depend on FFmpeg's progress or restarts.
+		return s.BuildPlaybackManifest(segPrefix, rawQuery)
+	}
 	s.mu.Lock()
 	opts, generation, restarting := s.opts, s.segmentGeneration, s.restarting != nil
 	s.mu.Unlock()
@@ -2709,6 +2788,9 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 		RestartOnTimeout: true,
 		Progress:         progress,
 	}
+	if s.copyPlan != nil {
+		return s.plannedSegmentRecoveryDecision(segNum, decision)
+	}
 
 	switch {
 	// Restarting must be checked before Running: the restart window runs
@@ -2720,7 +2802,7 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 		decision.Wait = true
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = false
-		decision.Reason = "transcode_restarting"
+		decision.Reason = segmentReasonRestarting
 	case !progress.Running:
 		decision.Reason = "transcode_not_running"
 	case segNum < progress.StartSegmentNumber:
@@ -3179,6 +3261,14 @@ func (s *TranscodeSession) restart(
 		<-done
 	}
 
+	// A planned stream's segments only match its playlist when FFmpeg cuts
+	// them from the beginning, so it always restarts there. The requested
+	// segment stays the throttler's target, so FFmpeg runs on to reach it.
+	requestedSegment := startSegment
+	if s.copyPlan != nil {
+		seekSeconds, startSegment, streamOriginSeconds, copySeekAnchorResolved = 0, 0, 0, true
+	}
+
 	s.mu.Lock()
 	s.running = false
 	s.waitErr = nil
@@ -3289,7 +3379,7 @@ func (s *TranscodeSession) restart(
 	s.running = true
 	s.restarting = nil
 	s.stdinPipe = stdinPipe
-	s.lastRequestedSegment = startSegment
+	s.lastRequestedSegment = requestedSegment
 	s.lastCompletedSegment = startSegment - 1
 	s.generationStartedAt = startedAt
 	s.inheritedManifest = inheritedManifest
@@ -3668,6 +3758,10 @@ type SegmentRecoveryTarget struct {
 // ResolveSegmentRecoveryTarget preserves the existing manifest's
 // URI-to-source-time mapping across a missing-segment restart.
 func (s *TranscodeSession) ResolveSegmentRecoveryTarget(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
+	if s.copyPlan != nil {
+		// restart regenerates a planned stream from the beginning.
+		return SegmentRecoveryTarget{StartSegmentNumber: segNum, CopySeekAnchorResolved: true}, true, nil
+	}
 	seekSeconds, ok, err := s.RestartSeekTarget(segNum)
 	if err != nil || !ok {
 		return SegmentRecoveryTarget{}, ok, err

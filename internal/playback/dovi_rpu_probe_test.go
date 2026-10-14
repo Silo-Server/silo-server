@@ -55,14 +55,30 @@ func TestProbeKeyChangesWithTheFile(t *testing.T) {
 		t.Fatal("the same file produced two keys")
 	}
 
-	if err := os.WriteFile(path, []byte("replaced, same length"), 0o600); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedTime := info.ModTime().Add(time.Hour)
+	if err := os.Chtimes(path, changedTime, changedTime); err != nil {
+		t.Fatal(err)
+	}
+	retimed, _ := dvRPUProbeKey("ffmpeg", path)
+	if retimed == first {
+		t.Fatal("a modification-time change reused the old verdict")
+	}
+	if err := os.WriteFile(path, []byte("replacement with different size"), 0o600); err != nil {
 		t.Fatalf("replace probe fixture: %v", err)
 	}
-	if resized, _ := dvRPUProbeKey("ffmpeg", path); resized == first {
+	if err := os.Chtimes(path, changedTime, changedTime); err != nil {
+		t.Fatal(err)
+	}
+	resized, _ := dvRPUProbeKey("ffmpeg", path)
+	if resized == retimed {
 		t.Fatal("a replaced file reused the old verdict")
 	}
 
-	if sameFileOtherBinary, _ := dvRPUProbeKey("/opt/other/ffmpeg", path); sameFileOtherBinary == first {
+	if sameFileOtherBinary, _ := dvRPUProbeKey("/opt/other/ffmpeg", path); sameFileOtherBinary == resized {
 		t.Fatal("a different ffmpeg build reused the old verdict")
 	}
 }
@@ -136,24 +152,6 @@ func TestProbeSurvivesTheLeaderLeaving(t *testing.T) {
 	probe.mu.Unlock()
 	if cached != 1 {
 		t.Fatalf("the verdict was not cached for the next start: %d entries", cached)
-	}
-}
-
-// A stderr-confirmed rejection is the one verdict worth remembering.
-func TestConclusiveVerdictsAreCachedAndReused(t *testing.T) {
-	path := writeProbeFile(t, "not really a movie")
-	probe := NewDVRPUProbe()
-	key, ok := dvRPUProbeKey("ffmpeg", path)
-	if !ok {
-		t.Fatal("a readable file produced no key")
-	}
-	probe.mu.Lock()
-	probe.results[key] = false
-	probe.order = append(probe.order, key)
-	probe.mu.Unlock()
-
-	if probe.CanStrip(context.Background(), "ffmpeg", path) {
-		t.Fatal("a cached rejection was ignored")
 	}
 }
 

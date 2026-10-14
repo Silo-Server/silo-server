@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchlist"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -230,8 +231,9 @@ func (h *PersonalDataHandler) GetFavorite(ctx context.Context, viewer PersonalLi
 }
 
 // AddFavorite adds an item the viewer may see to the profile's favorites.
-// Adding an item that is already a favorite is a no-op that still notifies
-// the same listeners, so a retried add converges.
+// Listeners hear only about an add that inserted the row: adding an item
+// that is already a favorite succeeds and notifies nobody, so a retried add
+// repeats no side effect.
 func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
@@ -240,34 +242,33 @@ func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalLi
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
-	if err := store.AddFavorite(ctx, viewer.ProfileID, itemID); err != nil {
+	added, err := store.AddFavorite(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add favorite")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
-		IsFavorite: boolPtr(true),
-	})
+	if added {
+		h.notifyListChange(ctx, watchsync.ListKindFavorites, watchsync.ListChangeAdded, viewer, itemID)
+	}
 	return nil
 }
 
 // RemoveFavorite removes an item from the profile's favorites. Removing an
-// item that is not a favorite succeeds, so a retried remove converges. No
-// access check runs: the item may have left the viewer's scope since it was
-// added, and the profile must still be able to drop it.
+// item that is not a favorite succeeds and notifies nobody, so a retried
+// remove converges and repeats no side effect. No access check runs: the
+// item may have left the viewer's scope since it was added, and the profile
+// must still be able to drop it.
 func (h *PersonalDataHandler) RemoveFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	if err := store.RemoveFavorite(ctx, viewer.ProfileID, itemID); err != nil {
+	removed, err := store.RemoveFavorite(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove favorite")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
-		IsFavorite: boolPtr(false),
-	})
+	if removed {
+		h.notifyListChange(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer, itemID)
+	}
 	return nil
 }
 
@@ -323,6 +324,29 @@ func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *htt
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// listChangeNoticeTimeout bounds the notices for one committed favorites or
+// watchlist change, which no longer end with the request.
+const listChangeNoticeTimeout = 30 * time.Second
+
+// notifyListChange tells every listener about a favorites or watchlist row a
+// write inserted or deleted: connected watch providers, the profile's
+// recommendations, and the profile's clients. The row is already committed,
+// so the notices run on a context the request's cancellation does not reach.
+// A client that disconnects now would retry, and its retry changes no row and
+// sends nothing.
+func (h *PersonalDataHandler) notifyListChange(ctx context.Context, list watchsync.ListKind, change watchsync.ListChange, viewer PersonalListViewer, itemID string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), listChangeNoticeTimeout)
+	defer cancel()
+	h.dispatchLocalListEvent(ctx, list, change, viewer.UserID, viewer.ProfileID, itemID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	member := change == watchsync.ListChangeAdded
+	state, stateChange := userStateEventState{IsFavorite: &member}, "favorite"
+	if list == watchsync.ListKindWatchlist {
+		state, stateChange = userStateEventState{InWatchlist: &member}, "watchlist"
+	}
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", stateChange, state)
 }
 
 func (h *PersonalDataHandler) dispatchLocalListEvent(ctx context.Context, list watchsync.ListKind, change watchsync.ListChange, userID int, profileID string, itemID string) {
@@ -479,8 +503,9 @@ func (h *PersonalDataHandler) GetWatchlistEntry(ctx context.Context, viewer Pers
 }
 
 // AddToWatchlist adds an item the viewer may see to the profile's
-// watchlist. Adding an item that is already on it is a no-op that still
-// notifies the same listeners, so a retried add converges.
+// watchlist. Listeners hear only about an add that inserted the row: adding
+// an item that is already on it succeeds and notifies nobody, so a retried
+// add repeats no side effect.
 func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
@@ -489,34 +514,33 @@ func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer Persona
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
-	if err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+	added, err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(true),
-	})
+	if added {
+		h.notifyListChange(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer, itemID)
+	}
 	return nil
 }
 
 // RemoveFromWatchlist removes an item from the profile's watchlist.
-// Removing an item that is not on it succeeds, so a retried remove
-// converges. No access check runs: the item may have left the viewer's
-// scope since it was added, and the profile must still be able to drop it.
+// Removing an item that is not on it succeeds and notifies nobody, so a
+// retried remove converges and repeats no side effect. No access check
+// runs: the item may have left the viewer's scope since it was added, and
+// the profile must still be able to drop it.
 func (h *PersonalDataHandler) RemoveFromWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	if err := store.RemoveFromWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+	removed, err := store.RemoveFromWatchlist(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(false),
-	})
+	if removed {
+		h.notifyListChange(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer, itemID)
+	}
 	return nil
 }
 
@@ -726,15 +750,8 @@ func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, pro
 
 	mediaItemSet := make(map[string]struct{})
 	mediaItemIDs := make([]string, 0, len(targets))
-	for _, target := range targets {
-		resolvedIDs, resolveErr := h.resolveHistoryRemovalMediaItemIDs(ctx, target, filter)
-		if resolveErr != nil {
-			if isNotFound(resolveErr) {
-				return apiError(http.StatusNotFound, "not_found", "History target not found")
-			}
-			return fieldError("targets", resolveErr.Error())
-		}
-		for _, mediaItemID := range resolvedIDs {
+	addMediaItems := func(ids []string) {
+		for _, mediaItemID := range ids {
 			if _, ok := mediaItemSet[mediaItemID]; ok {
 				continue
 			}
@@ -742,6 +759,23 @@ func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, pro
 			mediaItemIDs = append(mediaItemIDs, mediaItemID)
 		}
 	}
+	var filelessIDs []string
+	for _, target := range targets {
+		resolvedIDs, fileless, resolveErr := h.resolveHistoryRemovalMediaItemIDs(ctx, target, filter)
+		if resolveErr != nil {
+			if isNotFound(resolveErr) {
+				return apiError(http.StatusNotFound, "not_found", "History target not found")
+			}
+			return fieldError("targets", resolveErr.Error())
+		}
+		addMediaItems(resolvedIDs)
+		filelessIDs = append(filelessIDs, fileless...)
+	}
+	watchedFileless, err := watchstate.WatchedItemIDs(ctx, store, profileID, filelessIDs)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove history")
+	}
+	addMediaItems(watchedFileless)
 
 	if err := store.RemoveHistoryItems(ctx, profileID, mediaItemIDs, time.Now().UTC()); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove history")
@@ -949,22 +983,25 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 	return result, nil
 }
 
+// resolveHistoryRemovalMediaItemIDs returns the media item IDs a target
+// hides and, for a series or season, its file-less episodes as candidates
+// (see seriesEpisodeIDs).
 func (h *PersonalDataHandler) resolveHistoryRemovalMediaItemIDs(
 	ctx context.Context,
 	target historyRemovalTargetRequest,
 	filter catalog.AccessFilter,
-) ([]string, error) {
+) ([]string, []string, error) {
 	contentID := strings.TrimSpace(target.ContentID)
 	scope := strings.TrimSpace(target.Scope)
 	if contentID == "" {
-		return nil, errors.New("content_id is required")
+		return nil, nil, errors.New("content_id is required")
 	}
 	switch scope {
 	case "", historyRemovalScopeItem:
 		scope = historyRemovalScopeItem
 	case historyRemovalScopeShow:
 	default:
-		return nil, errors.New("scope must be \"item\" or \"show\"")
+		return nil, nil, errors.New("scope must be \"item\" or \"show\"")
 	}
 
 	if h.itemRepo != nil {
@@ -972,7 +1009,7 @@ func (h *PersonalDataHandler) resolveHistoryRemovalMediaItemIDs(
 		switch {
 		case err == nil && item != nil:
 			if err := h.itemRepo.EnsureAccessible(ctx, item.ContentID, filter); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			switch item.Type {
 			case "movie", "ebook":
@@ -980,12 +1017,12 @@ func (h *PersonalDataHandler) resolveHistoryRemovalMediaItemIDs(
 				// user_history_hidden_items (updated_at <= hidden_before)
 				// without deleting the progress row, so the reader position
 				// survives: hidden is not the same as unread.
-				return []string{item.ContentID}, nil
+				return []string{item.ContentID}, nil, nil
 			case "series":
 				return h.seriesEpisodeIDs(ctx, item.ContentID)
 			}
 		case err != nil && !errors.Is(err, catalog.ErrItemNotFound):
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -994,65 +1031,52 @@ func (h *PersonalDataHandler) resolveHistoryRemovalMediaItemIDs(
 		switch {
 		case err == nil && season != nil:
 			if err := h.itemRepo.EnsureAccessible(ctx, season.SeriesID, filter); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if scope == historyRemovalScopeShow {
 				return h.seriesEpisodeIDs(ctx, season.SeriesID)
 			}
 			return h.seasonEpisodeIDs(ctx, season.ContentID)
 		case err != nil && !errors.Is(err, catalog.ErrSeasonNotFound):
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
 	if h.episodeRepo == nil {
-		return nil, catalog.ErrItemNotFound
+		return nil, nil, catalog.ErrItemNotFound
 	}
 
 	episode, err := h.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := h.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if scope == historyRemovalScopeShow {
 		return h.seriesEpisodeIDs(ctx, episode.SeriesID)
 	}
-	return []string{episode.ContentID}, nil
+	return []string{episode.ContentID}, nil, nil
 }
 
-func (h *PersonalDataHandler) seriesEpisodeIDs(ctx context.Context, seriesID string) ([]string, error) {
+// seriesEpisodeIDs returns the series' episodes that have a library file,
+// and separately the ones that don't. History shows a watch of either kind
+// on the series card, so removal must reach both; RemoveHistory keeps only
+// the file-less episodes the profile has watched, since a long-running show
+// can have thousands of them.
+func (h *PersonalDataHandler) seriesEpisodeIDs(ctx context.Context, seriesID string) ([]string, []string, error) {
 	if h.episodeRepo == nil {
-		return nil, catalog.ErrItemNotFound
+		return nil, nil, catalog.ErrItemNotFound
 	}
-	episodes, err := h.episodeRepo.ListBySeries(ctx, seriesID)
-	if err != nil {
-		return nil, err
-	}
-	return historyEpisodeIDs(episodes), nil
+	return h.episodeRepo.PartitionIDsBySeries(ctx, seriesID)
 }
 
-func (h *PersonalDataHandler) seasonEpisodeIDs(ctx context.Context, seasonID string) ([]string, error) {
+// seasonEpisodeIDs is seriesEpisodeIDs for one season.
+func (h *PersonalDataHandler) seasonEpisodeIDs(ctx context.Context, seasonID string) ([]string, []string, error) {
 	if h.episodeRepo == nil {
-		return nil, catalog.ErrItemNotFound
+		return nil, nil, catalog.ErrItemNotFound
 	}
-	episodes, err := h.episodeRepo.ListBySeasonID(ctx, seasonID)
-	if err != nil {
-		return nil, err
-	}
-	return historyEpisodeIDs(episodes), nil
-}
-
-func historyEpisodeIDs(episodes []*models.Episode) []string {
-	ids := make([]string, 0, len(episodes))
-	for _, episode := range episodes {
-		if episode == nil || strings.TrimSpace(episode.ContentID) == "" {
-			continue
-		}
-		ids = append(ids, episode.ContentID)
-	}
-	return ids
+	return h.episodeRepo.PartitionIDsBySeason(ctx, seasonID)
 }
 
 func (h *PersonalDataHandler) userStoreFor(ctx context.Context, userID int, profileID string) (userstore.UserStore, string, bool) {

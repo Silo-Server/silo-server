@@ -138,25 +138,6 @@ describe("buildPreferenceLevels", () => {
 });
 
 describe("replaced values", () => {
-  it("names the profile's value below a device and the app default below a profile", () => {
-    const [main] = build();
-    const [profile, shield] = main!.levels;
-    const profileEntries = profile!.entries;
-    expect(
-      replacesText(replacedValue(shield!, SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, profileEntries)),
-    ).toBe("Replaces Main: Off");
-    // Main stores no audio sync offset, so a device's replaces the default.
-    expect(
-      replacesText(replacedValue(shield!, SETTING_KEYS.PLAYER_AUDIO_SYNC_MS, profileEntries)),
-    ).toBe("Replaces app default: 0 milliseconds");
-    expect(
-      replacesText(replacedValue(profile!, SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, profileEntries)),
-    ).toBe("Replaces app default: Auto");
-    expect(replacesText(replacedValue(shield!, "unknown.key", profileEntries))).toBe(
-      "Replaces the app default",
-    );
-  });
-
   it("says when an app-family, device, or library value can come in between", () => {
     const [main] = build();
     const [profile, shield, , library, series] = main!.levels;

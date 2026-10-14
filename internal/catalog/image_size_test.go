@@ -52,23 +52,6 @@ func TestCachedImageVariantKeyMatchesPreImageSizeBehavior(t *testing.T) {
 	}
 }
 
-// "large" is the one genuinely new size; it must reach the widest cached rung
-// short of the original.
-func TestCachedImageVariantKeyLarge(t *testing.T) {
-	want := map[string]string{
-		"backdrop": "w1920",
-		"logo":     "w1280",
-		"poster":   "w780",
-		"still":    "w780",
-		"profile":  "w500",
-	}
-	for imageType, wantVariant := range want {
-		if got := cachedImageVariantKey(imageType, "large"); got != wantVariant {
-			t.Errorf("cachedImageVariantKey(%q, large) = %q, want %q", imageType, got, wantVariant)
-		}
-	}
-}
-
 // An unparseable hint must degrade to the historical default rather than
 // producing an empty variant, which would leave the object key on "original".
 func TestCachedImageVariantKeyUnknownSize(t *testing.T) {

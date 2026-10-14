@@ -5,19 +5,6 @@ import (
 	"testing"
 )
 
-func TestCustomRecipesRegistered(t *testing.T) {
-	for _, typ := range []string{"genre", "custom_filter"} {
-		rec, ok := Get(typ)
-		if !ok {
-			t.Errorf("recipe %q not registered", typ)
-			continue
-		}
-		if rec.Definition().Category != CategoryCustom {
-			t.Errorf("%q category = %v want custom", typ, rec.Definition().Category)
-		}
-	}
-}
-
 func TestCustomFilterValidatesFilterShape(t *testing.T) {
 	rec, _ := Get("custom_filter")
 	good := json.RawMessage(`{"filter":{"match":"all","groups":[]}}`)

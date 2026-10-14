@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 )
 
 func TestClaimRecordsAlgorithmVersionDB(t *testing.T) {
@@ -73,13 +72,6 @@ func TestExpiredLeaseRejectsCompletionBeforeReconcileDB(t *testing.T) {
 	}
 }
 
-func TestCleanErrorRetainsValidUTF8(t *testing.T) {
-	message := cleanError(strings.Repeat("a", 999) + "é")
-	if !utf8.ValidString(message) || len(message) > 1000 {
-		t.Fatalf("invalid bounded message: %q", message)
-	}
-}
-
 func TestFinishAcceptsTruncatedUTF8ErrorDB(t *testing.T) {
 	f := newFixture(t)
 	folder := f.library(t, "movies", true)
@@ -96,6 +88,9 @@ func TestFinishAcceptsTruncatedUTF8ErrorDB(t *testing.T) {
 	row, _ := f.row(t, file)
 	if row.state != statePending || row.failures != 1 {
 		t.Fatalf("failure was not recorded: %+v", row)
+	}
+	if row.lastError != strings.Repeat("a", 999) {
+		t.Fatalf("stored error = %q, want 999 ASCII bytes without a split UTF-8 character", row.lastError)
 	}
 }
 

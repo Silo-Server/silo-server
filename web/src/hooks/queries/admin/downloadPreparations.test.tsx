@@ -20,12 +20,10 @@ vi.mock("@/api/v2/adminDownloadPreparations", () => ({
   listAdminDownloadPreparations: mocks.list,
 }));
 
-import {
-  ADMIN_DOWNLOAD_PREPARATION_FAILED_WINDOW,
-  ADMIN_DOWNLOAD_PREPARATIONS_ACTIVE_REFRESH,
-  nextFailureExpiry,
-  useAdminDownloadPreparationsRefresh,
-} from "./downloadPreparations";
+import { useAdminDownloadPreparationsRefresh } from "./downloadPreparations";
+
+const ADMIN_DOWNLOAD_PREPARATIONS_ACTIVE_REFRESH = 60_000;
+const ADMIN_DOWNLOAD_PREPARATION_FAILED_WINDOW = 24 * 60 * 60 * 1000;
 
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -75,8 +73,16 @@ describe("useAdminDownloadPreparationsRefresh", () => {
   });
 
   it("re-reads once when the oldest listed failure ages out", async () => {
-    const failedAt = new Date(Date.now() - ADMIN_DOWNLOAD_PREPARATION_FAILED_WINDOW + 10 * 60_000);
+    const failedAt = new Date(Date.now() - ADMIN_DOWNLOAD_PREPARATION_FAILED_WINDOW + 10_000);
+    const laterFailure = new Date(Date.now() - ADMIN_DOWNLOAD_PREPARATION_FAILED_WINDOW + 50_000);
     const withFailure = makePreparationList([
+      makePreparation({ id: "running" }),
+      makePreparation({
+        id: "later",
+        state: "failed",
+        progress: undefined,
+        failed_at: laterFailure.toISOString(),
+      }),
       makePreparation({
         id: "f1",
         state: "failed",
@@ -89,11 +95,11 @@ describe("useAdminDownloadPreparationsRefresh", () => {
     await act(async () => {});
     expect(mocks.list).toHaveBeenCalledTimes(1);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(9 * 60_000);
+      await vi.advanceTimersByTimeAsync(9_000);
     });
     expect(mocks.list).toHaveBeenCalledTimes(1);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await vi.advanceTimersByTimeAsync(2_000);
     });
     expect(mocks.list).toHaveBeenCalledTimes(2);
     // The emptied list schedules nothing further.
@@ -181,20 +187,5 @@ describe("useAdminDownloadPreparationsRefresh with clock skew", () => {
       await vi.advanceTimersByTimeAsync(ADMIN_DOWNLOAD_PREPARATIONS_ACTIVE_REFRESH + 1_000);
     });
     expect(mocks.list).toHaveBeenCalledTimes(3);
-  });
-});
-
-describe("nextFailureExpiry", () => {
-  it("returns the earliest expiry among failed jobs", () => {
-    const list = makePreparationList([
-      makePreparation({ id: "r" }),
-      makePreparation({ id: "a", state: "failed", failed_at: "2026-01-02T00:00:00.000Z" }),
-      makePreparation({ id: "b", state: "failed", failed_at: "2026-01-01T00:00:00.000Z" }),
-    ]);
-    expect(nextFailureExpiry(list)).toBe(
-      Date.parse("2026-01-01T00:00:00.000Z") + ADMIN_DOWNLOAD_PREPARATION_FAILED_WINDOW,
-    );
-    expect(nextFailureExpiry(makePreparationList([makePreparation()]))).toBeNull();
-    expect(nextFailureExpiry(undefined)).toBeNull();
   });
 });

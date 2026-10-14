@@ -10,8 +10,9 @@ values use the 300-second default. Negative request values return HTTP 400.
 The start response echoes `throttle_seconds` after arming the throttler.
 When throttling is enabled, the API rejects a missing or mismatched echo and
 stops the rejected remote transport. Disabled requests remain compatible with
-nodes that omit this field. Deploy updated transcode nodes before enabling
-throttling on API servers that require this attestation.
+nodes that omit this field. Throttling is on unless an administrator turns it
+off, so update transcode nodes before the API servers that require this
+attestation.
 
 Recipe cards and signed reconstruction claims preserve the resolved threshold.
 Remote reconstruction and FFmpeg restarts re-arm the same policy. Local native
@@ -28,6 +29,15 @@ transport at the requested source position.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.
+
+When the API relays a transcode whose node it can no longer reach, it moves
+the transcode to another node with an ordinary `POST /transcode/start`: the
+same `session_id` (transport id), the recorded recipe, `throttle_seconds` from
+that recipe, `require_ready`, and a start position resumed at the requested
+segment. The response is checked with the same attestations as a fresh start,
+and a node that fails them is stopped and skipped. The API then sends a
+best-effort `DELETE /transcode/{session_id}` to the node it left. See
+[Transcode node lost under the API relay](architecture/restart-resilient-playback.md#transcode-node-lost-under-the-api-relay).
 
 The start response also reports `hw_accel`, the backend retained for video
 decoding and tone mapping, and optional `encoder_hw_accel`, the actual video

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import { trickplayTile, type PlayerTrickplay } from "./trickplay";
 import { trickplayFromV2 } from "@/api/v2/trickplay";

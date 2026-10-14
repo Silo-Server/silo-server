@@ -44,7 +44,7 @@ with this migrated database merely because it is available for download.
 
 Historical migrations remain intact and run before the drop on a fresh database.
 In particular, the webhook data copy and content-ID remap still see the old
-schema. The runtime `silo_rename_content_id` function discovers existing reference
+schema. The runtime `silo_rename_content_ids` function discovers existing reference
 columns through PostgreSQL catalogs, so it stops visiting the removed columns.
 The drop uses child-before-parent ordering without `CASCADE`; an unexpected
 schema dependency aborts the migration instead of silently deleting it.

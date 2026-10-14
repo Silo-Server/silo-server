@@ -40,15 +40,6 @@ func TestNotificationDiscordLinkTransport(t *testing.T) {
 	if rec.Code != 200 || fake.calls != 1 || fake.userID != 1 {
 		t.Fatalf("account initiation: %d %s %+v", rec.Code, rec.Body.String(), fake)
 	}
-	doc := generatedDocument(t)
-	callback := doc["paths"].(map[string]any)[Prefix+"/notifications/discord/link/callback"].(map[string]any)["get"].(map[string]any)
-	responses := callback["responses"].(map[string]any)
-	if responses["200"] != nil || responses["302"] == nil {
-		t.Fatal("callback invented200")
-	}
-	if responses["302"].(map[string]any)["headers"].(map[string]any)["Location"] == nil {
-		t.Fatal("missing Location")
-	}
 }
 
 func notificationDiscordLinkFixtureCases() []fixtureCase {

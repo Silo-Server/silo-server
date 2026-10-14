@@ -135,13 +135,6 @@ func TestBuildTreatsAZeroIMDbOrTMDBRowAsUnrated(t *testing.T) {
 	}
 }
 
-func TestBuildIgnoresUnknownSources(t *testing.T) {
-	item := Item{Sources: map[string]float64{"kinopoisk": 72}}
-	if got := Build(item, NewSelection("kinopoisk")); len(got) != 0 {
-		t.Fatalf("Build = %+v, want nothing for a source without a definition, even when the setting names it", got)
-	}
-}
-
 func TestFormat(t *testing.T) {
 	imdb, tmdb := models.RatingSourceDefinitions()[0], models.RatingSourceDefinitions()[1]
 	cases := []struct {

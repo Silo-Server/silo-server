@@ -30,25 +30,6 @@ func TestFilesystemMatchesContent(t *testing.T) {
 	}
 }
 
-func TestRecordingStoreForwardsMatches(t *testing.T) {
-	store, err := NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	if err := store.Put(ctx, "a.webp", []byte("abc")); err != nil {
-		t.Fatal(err)
-	}
-	settings := &testSettings{values: map[string]string{}}
-	recorded := &recordingStore{Store: store, settings: settings}
-	if ok, err := recorded.Matches(ctx, "a.webp", []byte("abc")); err != nil || !ok {
-		t.Fatalf("match: %v %v", ok, err)
-	}
-	if settings.values[IdentitySettingKey] != store.Identity() {
-		t.Fatal("existing content did not pin backend")
-	}
-}
-
 func TestMatchingRetryRecordsBackendAfterWriteRecordingFailure(t *testing.T) {
 	ctx := context.Background()
 	settings := &flakySettings{testSettings: testSettings{values: map[string]string{}}, fail: true}

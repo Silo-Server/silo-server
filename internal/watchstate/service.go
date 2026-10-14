@@ -313,6 +313,17 @@ func (s *Service) RecordImportedMarkUnplayed(
 	return store.RemoveHistoryItems(ctx, profileID, []string{targetID}, updatedAt)
 }
 
+// Progress returns the profile's watch progress for targetID, or nil when it
+// has none, read from the same user store watch-state writes go to. User
+// stores report UpdatedAt as RFC 3339 in UTC, whole seconds.
+func (s *Service) Progress(ctx context.Context, userID int, profileID, targetID string) (*userstore.WatchProgress, error) {
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return store.GetProgress(ctx, profileID, targetID)
+}
+
 func (s *Service) SetFavorite(
 	ctx context.Context,
 	userID int,
@@ -324,9 +335,11 @@ func (s *Service) SetFavorite(
 		return err
 	}
 	if favorite {
-		return store.AddFavorite(ctx, profileID, targetID)
+		_, err = store.AddFavorite(ctx, profileID, targetID)
+		return err
 	}
-	return store.RemoveFavorite(ctx, profileID, targetID)
+	_, err = store.RemoveFavorite(ctx, profileID, targetID)
+	return err
 }
 
 func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, targetID string) (bool, error) {
@@ -340,9 +353,11 @@ func (s *Service) ToggleFavorite(ctx context.Context, userID int, profileID, tar
 	}
 	next := !current
 	if next {
-		return next, store.AddFavorite(ctx, profileID, targetID)
+		_, err = store.AddFavorite(ctx, profileID, targetID)
+	} else {
+		_, err = store.RemoveFavorite(ctx, profileID, targetID)
 	}
-	return next, store.RemoveFavorite(ctx, profileID, targetID)
+	return next, err
 }
 
 func (s *Service) RecordJellycompatMarkPlayed(ctx context.Context, userID int, profileID, targetID string, watchedAt time.Time) error {
@@ -598,23 +613,6 @@ func (s *Service) recordMarkUnwatchedBatch(
 		return err
 	}
 	return store.RemoveHistoryItems(ctx, profileID, targetIDs, time.Now().UTC())
-}
-
-// buildMarkPlayedBatchSQL returns the upsert that marks every media_item_id in
-// the unnest($3) array as completed for a given (user, profile). Extracted into
-// a helper so a SQL-shape unit test can pin the structure without standing up
-// Postgres.
-func buildMarkPlayedBatchSQL() (string, []any) {
-	return `
-        INSERT INTO user_watch_progress
-            (user_id, profile_id, media_item_id, completed, position_seconds, duration_seconds, updated_at)
-        SELECT $1, $2, mid, TRUE, 0, 0, $4
-        FROM unnest($3::text[]) AS mid
-        ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
-        SET completed = TRUE,
-            updated_at = EXCLUDED.updated_at
-        WHERE user_watch_progress.completed IS DISTINCT FROM TRUE
-           OR user_watch_progress.updated_at < EXCLUDED.updated_at`, nil
 }
 
 func (s *Service) addImportedHistoryIfMissing(

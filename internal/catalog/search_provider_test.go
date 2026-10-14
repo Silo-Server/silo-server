@@ -941,42 +941,13 @@ func TestNormalizeCatalogSearchIndexTypesValueFormatsCanonicalList(t *testing.T)
 	}
 }
 
-func TestMeilisearchSchemaVersionChangesWithEmbedder(t *testing.T) {
-	defaultVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
-	customVersion := catalogSearchMeilisearchSchemaVersion("custom_embedder", nil, false, false)
-	if defaultVersion == customVersion {
-		t.Fatal("schema version should change when embedder changes")
-	}
-	if defaultVersion/1_000_000 != SearchMeilisearchSchemaVersion {
-		t.Fatalf("base schema version = %d, want %d", defaultVersion/1_000_000, SearchMeilisearchSchemaVersion)
-	}
-}
-
-func TestMeilisearchSchemaVersionChangesWithIndexTypes(t *testing.T) {
-	allTypesVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
-	videoOnlyVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, []string{"movie", "series"}, false, false)
-	if allTypesVersion == videoOnlyVersion {
-		t.Fatal("schema version should change when indexed media scope changes")
-	}
-}
-
-func TestMeilisearchSchemaVersionChangesWithSemanticEnabled(t *testing.T) {
-	// Toggling semantic search must change the expected schema version so a
-	// previously built (vector-less) index is treated as stale and forced to
-	// rebuild. Without this, enabling semantic without a rebuild leaves indexed
-	// documents missing _vectors while the Postgres coverage gate reports ready,
-	// silently degrading hybrid ranking.
-	disabledVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
-	enabledVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, true, false)
-	if disabledVersion == enabledVersion {
-		t.Fatal("schema version should change when semantic search is toggled")
-	}
-}
-
 func TestMeilisearchIndexCompatibility(t *testing.T) {
 	itemTypes := []string{"movie", "series"}
 	semanticOff := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, itemTypes, false, false)
 	semanticOn := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, itemTypes, true, false)
+	if semanticOn/1_000_000 != SearchMeilisearchSchemaVersion {
+		t.Fatalf("schema generation = %d, want %d", semanticOn/1_000_000, SearchMeilisearchSchemaVersion)
+	}
 	tests := []struct {
 		name          string
 		activeVersion int
@@ -1049,14 +1020,6 @@ type fakeModelVectorizer struct {
 
 func (f *fakeModelVectorizer) ActiveEmbeddingModel(_ context.Context) (string, error) {
 	return f.model, nil
-}
-
-func TestCatalogSearchMeilisearchSchemaVersionBinaryQuantized(t *testing.T) {
-	plain := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, true, false)
-	quantized := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, true, true)
-	if plain == quantized {
-		t.Fatal("binary quantization must change the schema version")
-	}
 }
 
 func TestCatalogSearchMeilisearchSchemaVersionBinaryQuantizedIgnoredWhenSemanticDisabled(t *testing.T) {

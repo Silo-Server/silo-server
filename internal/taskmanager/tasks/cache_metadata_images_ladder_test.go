@@ -100,22 +100,6 @@ func TestLadderBackfillRunsOnceAndRecordsTheVersion(t *testing.T) {
 	}
 }
 
-// The ordinary queue drain has to happen first — a user waiting on freshly
-// scanned artwork must not queue behind a library-wide regeneration.
-func TestLadderBackfillRunsAfterTheDrain(t *testing.T) {
-	runner := &ladderRunner{complete: true}
-	state := &fakeLadderState{}
-
-	runLadderTask(t, runner, state, 2)
-
-	if runner.drainCalls != 1 {
-		t.Fatalf("drain runs = %d, want 1", runner.drainCalls)
-	}
-	if runner.ladderCalls != 1 {
-		t.Fatalf("ladder runs = %d, want 1", runner.ladderCalls)
-	}
-}
-
 func TestLadderBackfillNotRecordedWhenIncomplete(t *testing.T) {
 	runner := &ladderRunner{complete: false}
 	runner.ladderStats = metadata.ImageCacheRunStats{Succeeded: 4}
@@ -151,6 +135,9 @@ func TestLadderBackfillSurvivesRunnerFailure(t *testing.T) {
 
 	progress := runLadderTask(t, runner, state, 2)
 
+	if state.attempts != 1 {
+		t.Fatalf("attempts = %d, want the failed sweep recorded", state.attempts)
+	}
 	if len(state.recorded) != 0 {
 		t.Fatalf("recorded versions = %v, want none after a failure", state.recorded)
 	}
@@ -245,22 +232,6 @@ func TestLadderBackfillPacesRepeatedScans(t *testing.T) {
 	runLadderTask(t, runner, state, 2)
 	if runner.ladderCalls != 2 {
 		t.Fatalf("ladder runs = %d, want the sweep to resume after the interval", runner.ladderCalls)
-	}
-}
-
-// The attempt is recorded before the pass, so a crash mid-sweep still paces the
-// next one rather than letting every restart re-scan the catalog.
-func TestLadderBackfillRecordsAttemptBeforeRunning(t *testing.T) {
-	runner := &ladderRunner{ladderErr: errors.New("boom")}
-	state := &fakeLadderState{}
-
-	runLadderTask(t, runner, state, 2)
-
-	if state.attempts != 1 {
-		t.Fatalf("attempts = %d, want the attempt recorded even though the pass failed", state.attempts)
-	}
-	if len(state.recorded) != 0 {
-		t.Fatalf("recorded versions = %v, want none", state.recorded)
 	}
 }
 

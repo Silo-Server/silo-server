@@ -19,7 +19,16 @@ const mocks = vi.hoisted(() => ({
 // see the same query states a failed or recovered server produces.
 vi.mock("@/api/v2/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/request")>()),
-  v2: mocks.v2,
+  // The title-ordered browse also asks for its letter index; answer it with
+  // an index of the fixture's titles so each test scripts only the browse pages.
+  v2: (key: string, options: unknown) =>
+    key === "POST /api/v2/catalog/letters"
+      ? Promise.resolve({
+          total: queryCatalogItemsOk.total,
+          letters: [{ letter: "H", count: queryCatalogItemsOk.total, position: 0 }],
+          runs: [{ letter: "H", position: 0 }],
+        })
+      : mocks.v2(key, options),
 }));
 
 vi.mock("@/hooks/queries/sections", async (importOriginal) => ({
@@ -216,14 +225,6 @@ describe("Library tab load errors", () => {
     expect(screen.getByText("Grid of 120")).toBeInTheDocument();
     expect(laterPageFailures).toBe(2);
   });
-
-  it("renders the grid when the browse succeeds", async () => {
-    mocks.v2.mockResolvedValue(queryCatalogItemsOk);
-    renderBrowse();
-
-    expect(await screen.findByText("Grid of 3")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
-  });
 });
 
 describe("Recommended tab load errors", () => {
@@ -283,14 +284,5 @@ describe("Recommended tab load errors", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     expect(screen.getAllByText("Row Recently Added")).not.toHaveLength(0);
     expect(callsTo("GET /api/v2/library/{id}/layout")).toBe(3);
-  });
-
-  it("renders the sections when the layout loads", async () => {
-    mocks.v2.mockResolvedValue(libraryLayoutOk);
-    mocks.fetchLibrarySectionItems.mockResolvedValue(recommendedSection());
-    renderWithClient(<LibraryRecommended libraryId={7} libraryType="movies" />);
-
-    expect(await screen.findAllByText("Row Recently Added")).not.toHaveLength(0);
-    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 });

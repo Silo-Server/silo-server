@@ -71,6 +71,10 @@ func TestDownloadCreateTransport(t *testing.T) {
 	if rec.Code != 202 || svc.after == nil || svc.after.ContentID != "no-file" {
 		t.Fatalf("cursor %d %+v", rec.Code, svc)
 	}
+	rec = do(t, h, "POST", path, `{"content_id":"series","series":true,"batch_id":"intent","quality":"5mbps"}`, device)
+	if rec.Code != 202 || svc.req.Quality != "5mbps" || !svc.req.BulkQuality {
+		t.Fatalf("batch quality %d %s %+v", rec.Code, rec.Body.String(), svc.req)
+	}
 	rec = do(t, h, "POST", path+"?cursor="+page.Page.NextCursor, `{"content_id":"other","series":true,"batch_id":"intent"}`, device)
 	if rec.Code != 400 {
 		t.Fatalf("scope %d", rec.Code)

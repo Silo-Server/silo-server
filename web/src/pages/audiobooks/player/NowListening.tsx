@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { SeekBar, formatTime } from "@/player/components/SeekBar";
+import { SeekBar } from "@/player/components/SeekBar";
+import { formatTime } from "@/player/utils/formatTime";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
 import { CircleButton } from "@/player/components/CircleButton";
 import { SleepTimerMenu } from "@/player/components/SleepTimerMenu";

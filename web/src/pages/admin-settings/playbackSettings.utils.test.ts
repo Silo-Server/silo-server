@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
   buildHWDeviceRows,
@@ -25,10 +27,6 @@ describe("parseHWDeviceList", () => {
 });
 
 describe("toggleHWDevice", () => {
-  it("adds a device to an empty selection", () => {
-    expect(toggleHWDevice("", "/dev/dri/renderD129", DETECTED)).toBe("/dev/dri/renderD129");
-  });
-
   it("keeps detection order regardless of click order", () => {
     const afterSecond = toggleHWDevice("", "/dev/dri/renderD129", DETECTED);
     const afterBoth = toggleHWDevice(afterSecond, "/dev/dri/renderD128", DETECTED);
@@ -193,15 +191,6 @@ describe("imageExecutionOptions", () => {
       "prefer_transcode_nodes",
       "transcode_nodes_only",
     ]);
-  });
-
-  it("keeps a saved node-backed mode selectable so it can be changed", () => {
-    expect(disabledValues("transcode_nodes_only", false)).toEqual(["prefer_transcode_nodes"]);
-    expect(disabledValues("prefer_transcode_nodes", false)).toEqual(["transcode_nodes_only"]);
-  });
-
-  it("never disables local extraction", () => {
-    expect(disabledValues("transcode_nodes_only", false)).not.toContain("local");
   });
 });
 

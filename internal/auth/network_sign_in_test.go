@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -212,40 +213,37 @@ func TestNetworkPreviewBoundsThePluginCall(t *testing.T) {
 // the shared lookup while the first call is still in the plugin, so none can
 // pass by finding its answer cached.
 func TestNetworkPreviewSharesConcurrentLookups(t *testing.T) {
-	const callers = 8
-	plugin := &peerPlugin{
-		peers: map[string]*pluginv1.AuthenticateResponse{
-			"100.64.0.7": {ExternalSubject: "controlplane.tailscale.com|42", DisplayName: "Alice Example"},
-		},
-		entered: make(chan struct{}, callers),
-		release: make(chan struct{}),
-	}
-	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
-		nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
-	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
-	joined := make(chan struct{}, callers)
-	svc.previews.joined = func() { joined <- struct{}{} }
-	ctx := overlayContext(t.Context(), 5, "100.64.0.7")
-	previews := make(chan *NetworkIdentityPreview, callers)
-	lookup := func() { previews <- svc.networkPreview(ctx, provider) }
-	go lookup()
-	<-joined
-	<-plugin.entered
-	for range callers - 1 {
-		go lookup()
-	}
-	for range callers - 1 {
-		<-joined
-	}
-	close(plugin.release)
-	for range callers {
-		if preview := <-previews; preview == nil || preview.DisplayName != "Alice Example" {
-			t.Fatalf("preview = %+v", preview)
+	synctest.Test(t, func(t *testing.T) {
+		const callers = 8
+		plugin := &peerPlugin{
+			peers: map[string]*pluginv1.AuthenticateResponse{
+				"100.64.0.7": {ExternalSubject: "controlplane.tailscale.com|42", DisplayName: "Alice Example"},
+			},
+			entered: make(chan struct{}, callers),
+			release: make(chan struct{}),
 		}
-	}
-	if plugin.askedCount() != 1 {
-		t.Fatalf("plugin asked %d times, want 1", plugin.askedCount())
-	}
+		provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
+			nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
+		svc := NewService(nil, nil, nil, nil, nil, nil, nil)
+		ctx := overlayContext(t.Context(), 5, "100.64.0.7")
+		previews := make(chan *NetworkIdentityPreview, callers)
+		for range callers {
+			go func() { previews <- svc.networkPreview(ctx, provider) }()
+		}
+		// Every caller has reached its blocked lookup before any answer can
+		// enter the cache. Count actual plugin entries, then release them all.
+		synctest.Wait()
+		entered := len(plugin.entered)
+		close(plugin.release)
+		for range callers {
+			if preview := <-previews; preview == nil || preview.DisplayName != "Alice Example" {
+				t.Errorf("preview = %+v", preview)
+			}
+		}
+		if entered != 1 || plugin.askedCount() != 1 {
+			t.Fatalf("plugin entered %d times and answered %d times, want 1", entered, plugin.askedCount())
+		}
+	})
 }
 
 // A cache miss drops expired answers, including those of a provider instance

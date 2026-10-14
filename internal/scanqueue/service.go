@@ -138,22 +138,25 @@ func (s *Service) EnqueueScan(ctx context.Context, folderID int, mode, path, tri
 }
 
 func (s *Service) EnqueueScans(ctx context.Context, targets []scantrigger.Target) error {
-	_, _, err := s.enqueueScans(ctx, targets, nil)
+	_, err := s.enqueueScans(ctx, targets, nil)
 	return err
 }
 
-func (s *Service) EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) (int, int, error) {
+// EnqueueAutoscanScans enqueues targets linked to an autoscan event and
+// reports, per target and in order, which run covers it and whether that run
+// was created or an existing queued/running run for the same scope was reused.
+func (s *Service) EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) ([]scantrigger.EnqueueOutcome, error) {
 	return s.enqueueScans(ctx, targets, &eventID)
 }
 
-func (s *Service) enqueueScans(ctx context.Context, targets []scantrigger.Target, autoscanEventID *int64) (int, int, error) {
+func (s *Service) enqueueScans(ctx context.Context, targets []scantrigger.Target, autoscanEventID *int64) ([]scantrigger.EnqueueOutcome, error) {
 	if s == nil || s.repo == nil {
-		return 0, 0, fmt.Errorf("scan queue is not configured")
+		return nil, fmt.Errorf("scan queue is not configured")
 	}
 	inputs := make([]CreateInput, 0, len(targets))
 	for _, target := range targets {
 		if target.Folder == nil {
-			return 0, 0, fmt.Errorf("scan queue: target is missing folder")
+			return nil, fmt.Errorf("scan queue: target is missing folder")
 		}
 		inputs = append(inputs, CreateInput{
 			LibraryID:       target.Folder.ID,
@@ -165,19 +168,23 @@ func (s *Service) enqueueScans(ctx context.Context, targets []scantrigger.Target
 	}
 	runs, created, err := s.repo.CreateBatch(ctx, inputs)
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
-	createdCount := 0
-	reusedCount := 0
+	outcomes := make([]scantrigger.EnqueueOutcome, 0, len(runs))
 	for i, run := range runs {
-		if i < len(created) && created[i] {
-			createdCount++
-			s.publish(ctx, "scan.accepted", run)
-		} else {
-			reusedCount++
+		outcome := scantrigger.EnqueueOutcome{Created: i < len(created) && created[i]}
+		if run != nil {
+			outcome.RunID = run.ID
+			// coalesceIntoActive owes a running run's scope one follow-up scan
+			// for queue-claimed triggers; that scan, not this run, covers it.
+			outcome.FollowUp = !outcome.Created && run.Status == StatusRunning && !isDirectTrigger(targets[i].Trigger)
 		}
+		if outcome.Created {
+			s.publish(ctx, "scan.accepted", run)
+		}
+		outcomes = append(outcomes, outcome)
 	}
-	return createdCount, reusedCount, nil
+	return outcomes, nil
 }
 
 func (s *Service) CancelAcceptedByLibrary(ctx context.Context, libraryID int) (int, error) {
@@ -612,9 +619,6 @@ func scanResultFromIngest(result *libraryingest.Result) *evt.ScanRunResult {
 		MatchedFiles:           result.MatchedFiles,
 		RetriedItems:           result.RetriedItems,
 		StillUnmatchedWarnings: result.StillUnmatchedWarnings,
-	}
-	if result.Skipped {
-		resp.Skipped = 1
 	}
 	if result.ScanResult != nil {
 		resp.New = result.ScanResult.New

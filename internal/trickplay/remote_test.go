@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -19,7 +20,7 @@ func (n fixedNodes) ReserveTranscodeWorkWith(workID string, eligible func(*nodep
 	return plannerForNodes(n...).ReserveTranscodeWorkWith(workID, eligible)
 }
 
-var trickplayCapabilities = []byte(`{"transport_features":["prepared_tracks_v1","trickplay_extract_v1"]}`)
+var trickplayCapabilities = []byte(`{"transport_features":["prepared_tracks_v1","trickplay_extract_v1","trickplay_extract_v2"]}`)
 
 // fakeNode answers /trickplay/extract with status and body, counting calls.
 func fakeNode(t *testing.T, status int, body any) (*nodepool.Node, *atomic.Int32) {
@@ -27,7 +28,7 @@ func fakeNode(t *testing.T, status int, body any) (*nodepool.Node, *atomic.Int32
 	calls := &atomic.Int32{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/trickplay/extract" || r.Header.Get("Authorization") != "Bearer secret" {
+		if r.URL.Path != "/trickplay/extract" || !nodeauthtest.Signed(r, "secret") {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -105,12 +106,11 @@ func TestNodeExtractorModes(t *testing.T) {
 	t.Run("a failure on a node is final", func(t *testing.T) {
 		broken, _ := fakeNode(t, http.StatusUnprocessableEntity, ExtractError{Reason: "invalid_data", Permanent: true, Message: "moov atom not found"})
 		other, otherCalls := fakeNode(t, http.StatusOK, ok)
-		_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{broken}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
+		_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{broken, other}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
 		failure, isNode := errors.AsType[*ExtractError](err)
 		if !isNode || !failure.Permanent || failure.Reason != "invalid_data" || otherCalls.Load() != 0 {
 			t.Fatalf("err %v", err)
 		}
-		_ = other
 		if outcome, _ := (&Service{}).classify(t.Context(), err); outcome != Unusable {
 			t.Fatalf("a permanent node failure classifies as %v", outcome)
 		}
@@ -119,7 +119,9 @@ func TestNodeExtractorModes(t *testing.T) {
 
 func TestMakesTrickplay(t *testing.T) {
 	for report, want := range map[string]bool{
-		`{"transport_features":["trickplay_extract_v1"]}`: true,
+		`{"transport_features":["trickplay_extract_v1","trickplay_extract_v2"]}`: true,
+		// An older node would ignore the tone-map source signal.
+		`{"transport_features":["trickplay_extract_v1"]}`: false,
 		`{"transport_features":["prepared_tracks_v1"]}`:   false,
 		`{}`: false,
 		``:   false,

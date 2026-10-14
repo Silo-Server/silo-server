@@ -36,11 +36,13 @@ type AdminDashboardTimeseriesPoint struct {
 	DownloadEgressKbps int64   `json:"download_egress_kbps"`
 }
 type AdminDashboardTimeseries struct {
-	ResolutionSeconds int                             `json:"resolution_seconds"`
-	From              Instant                         `json:"from"`
-	To                Instant                         `json:"to"`
-	OldestSampleAt    NullableInstant                 `json:"oldest_sample_at"`
-	Points            []AdminDashboardTimeseriesPoint `json:"points"`
+	ResolutionSeconds   int                             `json:"resolution_seconds"`
+	From                Instant                         `json:"from"`
+	To                  Instant                         `json:"to"`
+	OldestSampleAt      NullableInstant                 `json:"oldest_sample_at"`
+	EgressBytes         int64                           `json:"egress_bytes"`
+	DownloadEgressBytes int64                           `json:"download_egress_bytes"`
+	Points              []AdminDashboardTimeseriesPoint `json:"points"`
 }
 type AdminDashboardTimeseriesOutput struct{ Body AdminDashboardTimeseries }
 type AdminDashboardPlaybackBucket struct {
@@ -111,7 +113,7 @@ func registerAdminDashboardInsights(reg *Registry) {
 		if err != nil || s == nil {
 			return nil, adminDashboardInsightProblem(err)
 		}
-		body := AdminDashboardTimeseries{ResolutionSeconds: s.ResolutionSeconds, From: NewInstant(s.From), To: NewInstant(s.To), Points: make([]AdminDashboardTimeseriesPoint, 0, len(s.Points))}
+		body := AdminDashboardTimeseries{ResolutionSeconds: s.ResolutionSeconds, From: NewInstant(s.From), To: NewInstant(s.To), EgressBytes: s.EgressBytes, DownloadEgressBytes: s.DownloadEgressBytes, Points: make([]AdminDashboardTimeseriesPoint, 0, len(s.Points))}
 		if s.OldestSampleAt != nil {
 			body.OldestSampleAt = NullableInstant{Valid: true, Time: NewInstant(*s.OldestSampleAt)}
 		}
@@ -184,7 +186,7 @@ type AdminTopTitle struct {
 	MediaType   string `json:"media_type"`
 	Plays       int64  `json:"plays"`
 	// TotalSeconds is watched time summed from finalized playback sessions, not
-	// the runtime of the titles played. A title that was only ever marked
-	// watched has no sessions and reports 0.
+	// the runtime of the titles played. A title with no finalized session in
+	// the window reports 0.
 	TotalSeconds int64 `json:"total_seconds"`
 }

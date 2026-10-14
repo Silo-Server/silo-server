@@ -237,11 +237,8 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: adminKeys.catalogSearchStatus() }),
         );
       }
-      if (keys.some((key) => key.startsWith("branding.") || key.startsWith("ui.admin_"))) {
-        invalidations.push(
-          queryClient.invalidateQueries({ queryKey: themeKeys.adminCss() }),
-          queryClient.invalidateQueries({ queryKey: themeKeys.branding() }),
-        );
+      if (keys.some((key) => key.startsWith("branding."))) {
+        invalidations.push(queryClient.invalidateQueries({ queryKey: themeKeys.branding() }));
       }
       if (keys.some(affectsOverlayConfig)) {
         invalidations.push(
@@ -280,7 +277,13 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       }
     },
     mutateAsync: async (values: SettingsValues) => {
-      const intent = capture(values);
+      let intent;
+      try {
+        intent = capture(values);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        throw error;
+      }
       const result = await mutation.mutateAsync(intent);
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
@@ -338,15 +341,11 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: adminKeys.catalogSearchStatus() }),
         );
       }
-      // Branding and admin theme settings are served live by public endpoints
-      // (`/theme/branding`, `/theme/admin-css`) and require no restart. Refresh
-      // those caches so saved changes apply immediately instead of waiting out
-      // the 60s / 5min stale windows.
-      if (variables.key.startsWith("branding.") || variables.key.startsWith("ui.admin_")) {
-        invalidations.push(
-          queryClient.invalidateQueries({ queryKey: themeKeys.adminCss() }),
-          queryClient.invalidateQueries({ queryKey: themeKeys.branding() }),
-        );
+      // Branding settings are served live by the public `/theme/branding`
+      // endpoint and require no restart. Refresh that cache so saved changes
+      // apply immediately instead of waiting out its stale window.
+      if (variables.key.startsWith("branding.")) {
+        invalidations.push(queryClient.invalidateQueries({ queryKey: themeKeys.branding() }));
       }
       if (affectsOverlayConfig(variables.key)) {
         invalidations.push(

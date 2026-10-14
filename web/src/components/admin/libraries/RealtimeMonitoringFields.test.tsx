@@ -74,15 +74,6 @@ describe("RealtimeMonitoringFields", () => {
     monitoring.mockReturnValue(status());
   });
 
-  it("shows the library copy and the folder count while monitoring", () => {
-    render(<Harness library={library} />);
-
-    expect(screen.getByText("Scan this library automatically when its files change.")).toBeTruthy();
-    expect(screen.getByText("Status: Monitoring 4,812 folders (inotify)")).toBeTruthy();
-    expect(monitoringSwitch().getAttribute("aria-checked")).toBe("true");
-    expect(monitoringSwitch().hasAttribute("disabled")).toBe(false);
-  });
-
   it("shows the state and the server's detail when monitoring is not working", () => {
     monitoring.mockReturnValue(
       status({
@@ -132,15 +123,6 @@ describe("RealtimeMonitoringFields", () => {
     expect(screen.queryByText(/^Status:/)).toBeNull();
   });
 
-  it("hides the saved status while the switch holds an unsaved change", async () => {
-    render(<Harness library={library} />);
-
-    await userEvent.click(monitoringSwitch());
-
-    expect(monitoringSwitch().getAttribute("aria-checked")).toBe("false");
-    expect(screen.queryByText(/^Status:/)).toBeNull();
-  });
-
   it("shows no status line for a new library", () => {
     render(<Harness library={null} />);
 
@@ -151,7 +133,15 @@ describe("RealtimeMonitoringFields", () => {
   it("sends the switch with the update", async () => {
     render(<Harness library={library} />);
 
+    expect(screen.getByText("Scan this library automatically when its files change.")).toBeTruthy();
+    expect(screen.getByText("Status: Monitoring 4,812 folders (inotify)")).toBeTruthy();
+    expect(monitoringSwitch().getAttribute("aria-checked")).toBe("true");
+    expect(monitoringSwitch().hasAttribute("disabled")).toBe(false);
+
     await userEvent.click(monitoringSwitch());
+
+    expect(monitoringSwitch().getAttribute("aria-checked")).toBe("false");
+    expect(screen.queryByText(/^Status:/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(mutate.mock.calls[0]![0]).toMatchObject({

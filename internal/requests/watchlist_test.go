@@ -44,6 +44,10 @@ func TestWatchlistAddRequestsTitleWithWatchlistSource(t *testing.T) {
 	if state.RequestID != req.ID || !state.RequestedByViewer || !state.Following || state.Requestable {
 		t.Fatalf("state = %+v, want the viewer's own new request", state)
 	}
+	repeated, err := svc.RequestFromWatchlist(context.Background(), testViewer(1), heatTitle())
+	if err != nil || len(store.created) != 1 || repeated.RequestID != req.ID {
+		t.Fatalf("repeated add = %+v, %v; created %d requests, want the same request", repeated, err, len(store.created))
+	}
 }
 
 func TestWatchlistAddFollowsSomeoneElsesRequest(t *testing.T) {
@@ -170,19 +174,6 @@ func TestWatchlistAddRefusesWhenRequestsDisabled(t *testing.T) {
 	store.settings.RequestsEnabled = false
 	if _, err := svc.RequestFromWatchlist(context.Background(), testViewer(1), heatTitle()); !errors.Is(err, ErrRequestsDisabled) {
 		t.Fatalf("err = %v, want ErrRequestsDisabled", err)
-	}
-}
-
-func TestWatchlistAddRepeatedCreatesOneRequest(t *testing.T) {
-	store := newFakeStore()
-	svc := newWatchlistTestService(store)
-	for range 3 {
-		if _, err := svc.RequestFromWatchlist(context.Background(), testViewer(1), heatTitle()); err != nil {
-			t.Fatalf("RequestFromWatchlist: %v", err)
-		}
-	}
-	if len(store.created) != 1 {
-		t.Fatalf("created %d requests, want 1", len(store.created))
 	}
 }
 

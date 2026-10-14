@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, waitFor } from "@testing-library/react";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { mediaSurfaceKeys, sectionKeys } from "./keys";
+import { libraryKeys, mediaSurfaceKeys, sectionKeys } from "./keys";
 import { storage } from "@/utils/storage";
 import {
   effectiveSettingsQueryKey,
@@ -84,12 +84,6 @@ describe("useSettingValuesRealtime", () => {
     storage.set(storage.KEYS.PROFILE_ID, "profile-1");
   });
 
-  it("subscribes the user_settings channel", () => {
-    const { wrapper } = createHarness();
-    render(<Subscriber />, { wrapper });
-    expect(subscriptions.map((entry) => entry.channel)).toContain("user_settings");
-  });
-
   it.each(["profile-1", "profile-2"])(
     "refreshes Home only for its active profile (%s)",
     async (profileId) => {
@@ -115,6 +109,23 @@ describe("useSettingValuesRealtime", () => {
       });
     },
   );
+
+  it("refetches the library list when another device hides or shows a library", async () => {
+    const { queryClient, wrapper } = createHarness();
+    const librariesKey = libraryKeys.user("profile-1");
+    queryClient.setQueryData(librariesKey, [{ id: 1 }]);
+    render(<Subscriber />, { wrapper });
+    subscriptions
+      .find((entry) => entry.channel === "user_settings")
+      ?.handlers?.onEvent?.(
+        changedFrame({
+          key: SETTING_KEYS.UI_DISABLED_LIBRARY_IDS,
+          scope: "profile",
+          profile_id: "profile-1",
+        }),
+      );
+    await waitFor(() => expect(queryClient.getQueryState(librariesKey)?.isInvalidated).toBe(true));
+  });
 
   it("refetches a mounted reader when another device changes this profile", async () => {
     const { wrapper } = createHarness();
@@ -194,7 +205,8 @@ describe("useSettingValuesRealtime", () => {
 
   it("costs one invalidation pass per event without a manual refetch", () => {
     const { queryClient, wrapper } = createHarness();
-    seedEffective(queryClient, "dark");
+    const effectiveKey = seedEffective(queryClient, "dark");
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     render(<Subscriber />, { wrapper });
     const handlers = subscriptions.find((entry) => entry.channel === "user_settings")?.handlers;
 
@@ -205,6 +217,8 @@ describe("useSettingValuesRealtime", () => {
       handlers?.onEvent?.(changedFrame({ key, scope: "profile", profile_id: "profile-1" }));
     }
 
+    expect(invalidate.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(queryClient.getQueryState(effectiveKey)?.isInvalidated).toBe(true);
     expect(v2Mock).not.toHaveBeenCalled();
   });
 });

@@ -27,7 +27,7 @@ func TestPersonalCollectionManualMutationGuards(t *testing.T) {
 	for _, kind := range []string{"manual", "smart", "mdblist", "trakt", ""} {
 		for _, visible := range []bool{true, false} {
 			t.Run(kind+"/"+map[bool]string{true: "visible", false: "missing-or-hidden"}[visible], func(t *testing.T) {
-				store := &lifecycleStore{collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", AllowedProfileIDs: []string{"owner"}, CollectionType: kind}}
+				store := &lifecycleStore{collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", CollectionType: kind}}
 				reader := &collectionGuardReader{}
 				if visible {
 					reader.items = []*models.MediaItem{{ContentID: "item"}}

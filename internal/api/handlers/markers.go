@@ -17,6 +17,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -60,12 +61,15 @@ type MarkerAuditLister interface {
 // (see maybeContribute) so corrected markers reach enabled providers.
 type MarkersHandler struct {
 	Files            MarkerFileResolver
+	Libraries        libraryLookup
 	Writer           ManualMarkerWriter
 	Contributor      MarkerContributor
 	Contributions    MarkerContributionLister
 	AuditHistory     MarkerAuditLister
 	Notifier         PlaybackMarkerUpdateNotifier
 	MarkerPopulation MarkerPopulationService
+	MarkerImageURLs  artworkurl.Resolver
+	ThumbnailQueuer  catalog.ChapterThumbnailQueuer
 	// Authorizer enforces per-item access on file lookups so a viewer can only
 	// edit markers for content they can actually watch. When nil (tests) the
 	// handler falls back to an unchecked lookup.
@@ -110,12 +114,13 @@ type segmentMarker struct {
 }
 
 type fileMarkersResponse struct {
-	FileID         int                    `json:"file_id"`
-	Intro          segmentMarker          `json:"intro"`
-	Credits        segmentMarker          `json:"credits"`
-	Recap          segmentMarker          `json:"recap"`
-	Preview        segmentMarker          `json:"preview"`
-	MarkerSegments []models.MarkerSegment `json:"-"`
+	FileID         int                            `json:"file_id"`
+	Intro          segmentMarker                  `json:"intro"`
+	Credits        segmentMarker                  `json:"credits"`
+	Recap          segmentMarker                  `json:"recap"`
+	Preview        segmentMarker                  `json:"preview"`
+	MarkerSegments []models.MarkerSegment         `json:"-"`
+	MarkerPreviews []catalog.VersionMarkerPreview `json:"-"`
 }
 
 type contributionOutcomeResponse struct {
@@ -395,6 +400,15 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 	segment := chi.URLParam(r, "segment")
 	if !isMarkerSegment(segment) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Unknown marker segment")
+		return
+	}
+	if err := h.ensureMarkerEditable(r.Context(), file); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check marker library")
+		}
 		return
 	}
 	if _, err := h.Writer.ClearMarkers(h.auditContext(r), file.ID, []string{segment}); err != nil {

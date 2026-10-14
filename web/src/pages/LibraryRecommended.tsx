@@ -1,6 +1,8 @@
 import { buildLibraryCollectionCatalogHref } from "./catalogSearchParams";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router";
+import { LayoutDashboard } from "lucide-react";
 import type { HomeSectionItemsResponse, ResolvedSection } from "@/api/types";
 import { useLibraryHasItems } from "@/hooks/queries/catalog";
 import { useLibraryCollectionItems } from "@/hooks/queries/libraryCollections";
@@ -26,6 +28,7 @@ import { isAudiobookLibraryType } from "./libraryPageSearchParams";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { useSectionRefreshSignal } from "./homeSurfaceRefresh";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 
 interface LibraryRecommendedProps {
   libraryId: number;
@@ -257,6 +260,11 @@ export default function LibraryRecommended({
           />
         </div>
       ) : null}
+      {layout.length === 0 && libraryHasItems ? (
+        <div className="px-4 py-4 sm:px-6 sm:py-6 lg:px-10 xl:px-12">
+          <NoSectionsState />
+        </div>
+      ) : null}
       {viewModel.rows.map((slot) => {
         if (slot.state === "empty") {
           return null;
@@ -333,6 +341,39 @@ function renderHeroSlot(
   }
 
   return <Skeleton className={`w-full rounded-none ${HERO_BANNER_SIZE_TALL}`} />;
+}
+
+// The library has media but this page has no sections. Settings > Home Screen
+// edits a library page once that library is picked as its scope.
+function NoSectionsState() {
+  const actingAdmin = useIsActingAdmin();
+
+  return (
+    <div className="surface-panel flex min-h-64 flex-col items-center justify-center gap-3 rounded-[1.8rem] border-0 px-6 py-10 text-center">
+      <LayoutDashboard className="text-muted-foreground h-10 w-10" aria-hidden="true" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium">No sections yet</p>
+        <p className="text-muted-foreground max-w-sm text-sm">
+          {actingAdmin
+            ? "Add sections for everyone in Admin Sections, or just for you in Home Screen settings."
+            : "Add sections to this library page in Home Screen settings."}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-4">
+        {actingAdmin ? (
+          <Link to="/admin/sections" className="text-primary text-sm font-medium hover:underline">
+            Manage sections
+          </Link>
+        ) : null}
+        <Link
+          to="/settings/home-screen"
+          className="text-primary text-sm font-medium hover:underline"
+        >
+          Customize Home Screen
+        </Link>
+      </div>
+    </div>
+  );
 }
 
 function SectionLoadingRow({ title }: { title: string }) {

@@ -85,8 +85,9 @@ func registerAuth(reg *Registry) {
 	login := humaOp(http.MethodPost, Prefix+"/auth/login", "login", "auth",
 		"Authenticate with a username and password and open a login session.")
 	// Wrong credentials are 401 invalid_token; a disabled account, turned-off
-	// local password sign-in (local_login_disabled) or a directory refusal
-	// (not_permitted, password_expired) is 403, and so is a directory sign-in
+	// local password sign-in (local_login_disabled), a directory refusal
+	// (not_permitted, password_expired) or a network provider's refusal of
+	// the account's person (not_permitted) is 403, and so is a directory sign-in
 	// with no account while account creation is off (account_required); an
 	// account a directory sign-in cannot create or link is 409 (email_in_use,
 	// identity_linked_elsewhere).
@@ -137,7 +138,7 @@ func (reg *Registry) login(ctx context.Context, in *LoginInput) (*LoginOutput, e
 	if r := requestFrom(ctx); r != nil {
 		input.DeviceName = r.UserAgent()
 	}
-	view, err := reg.deps.Sessions.Login(ctx, input)
+	view, err := reg.deps.Sessions.Login(withClientDevice(ctx), input)
 	if err != nil {
 		return nil, loginProblem(err)
 	}
@@ -159,7 +160,7 @@ func (reg *Registry) signInWithNetworkIdentity(ctx context.Context, in *NetworkS
 	if r := requestFrom(ctx); r != nil {
 		input.DeviceName = r.UserAgent()
 	}
-	view, err := reg.deps.Sessions.NetworkSignIn(ctx, input)
+	view, err := reg.deps.Sessions.NetworkSignIn(withClientDevice(ctx), input)
 	if err != nil {
 		return nil, loginProblem(err)
 	}
@@ -208,7 +209,7 @@ func (reg *Registry) completeOAuthLogin(ctx context.Context, in *CompleteOAuthLo
 	if reg.deps.OAuth == nil || reg.deps.Accounts == nil {
 		return nil, unavailable("oauth login")
 	}
-	c, err := reg.deps.OAuth.Complete(ctx, in.Body.Code, in.Body.CodeVerifier, in.Browser)
+	c, err := reg.deps.OAuth.Complete(withClientDevice(ctx), in.Body.Code, in.Body.CodeVerifier, in.Browser)
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrOAuthCompletionUnavailable):

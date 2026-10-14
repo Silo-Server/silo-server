@@ -2,6 +2,7 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import {
   getAdminUser,
+  getAdminUserSnapshot,
   updateAdminUser,
   deleteAdminUser,
   createAdminUser,
@@ -63,6 +64,18 @@ beforeEach(() => {
   setProfileToken(null);
 });
 afterEach(() => vi.unstubAllGlobals());
+it("allows inspection without a proxy-stripped ETag while refusing guarded writes", async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValue(response(v2User("7", "Initial")));
+  vi.stubGlobal("fetch", fetch);
+  const snapshot = await getAdminUserSnapshot(7);
+  expect(snapshot.user.username).toBe("Initial");
+  expect(snapshot.etag).toBe("");
+  await expect(updateAdminUser(snapshot, { enabled: false })).rejects.toThrow("strong ETag");
+  await expect(deleteAdminUser(snapshot)).rejects.toThrow("strong ETag");
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
 it.each([
   { name: "unrestricted", wire: null, expected: null },
   { name: "deny all", wire: [], expected: [] },

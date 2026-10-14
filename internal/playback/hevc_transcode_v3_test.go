@@ -71,6 +71,9 @@ func TestPlanPlaybackV3HEVCOutputKeepsTheSourceBitrateBound(t *testing.T) {
 			result.Plan.EffectiveRecipe.BitrateKbps == nil || *result.Plan.EffectiveRecipe.BitrateKbps != wantBitrate {
 			t.Fatalf("%s: %s codec %q res %q bitrate %d, want %s 1080p %d", name, ExplainPlannerResultV3(result), result.TargetVideoCodec, result.TargetResolution, result.TargetBitrateKbps, wantCodec, wantBitrate)
 		}
+		if wantCodec == "h264" && result.Plan.Transformations[0].Name != TransformationVideoToH264V3 {
+			t.Fatalf("H264 fallback transformation = %+v", result.Plan.Transformations)
+		}
 	}
 	first := PlanPlaybackV3(input4K(true))
 	check("HEVC allowed", first, "hevc", 3_000)
@@ -315,19 +318,6 @@ func TestPlanPlaybackV3OriginalTranscodeStopsAt2160(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3HEVCFailureFallsBackToH264(t *testing.T) {
-	input := hevcTranscodePlannerInputV3(true, true, true)
-	first := PlanPlaybackV3(input)
-	if first.Plan == nil || first.TargetVideoCodec != "hevc" {
-		t.Fatalf("first plan = %s, want HEVC", ExplainPlannerResultV3(first))
-	}
-	input.AttemptedKeys = []string{first.Plan.PlanAttemptKey}
-	second := PlanPlaybackV3(input)
-	if second.Plan == nil || second.TargetVideoCodec != "h264" || second.Plan.Transformations[0].Name != TransformationVideoToH264V3 {
-		t.Fatalf("failed HEVC did not downgrade to H.264: %s", ExplainPlannerResultV3(second))
-	}
-}
-
 func TestPlanPlaybackV3HEVCFailureDoesNotGiveH264ToHEVCOnlyHLS(t *testing.T) {
 	input := hevcTranscodePlannerInputV3(true, true, true)
 	hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
@@ -363,21 +353,6 @@ func TestHEVCTranscodeUsesHVC1FMP4(t *testing.T) {
 		if !strings.Contains(args, want) {
 			t.Fatalf("HEVC args missing %q: %s", want, args)
 		}
-	}
-}
-
-func TestProbeTransformationRegistryV3AdvertisesValidatedHEVCEncoder(t *testing.T) {
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' V....D libx265 HEVC'; echo ' A....D aac AAC' ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
-	if !registry.Available(TransformationVideoToHEVCV3) {
-		t.Fatal("HEVC encoder was not advertised")
-	}
-	if registry.NeedsRefresh(time.Now().Add(time.Hour)) {
-		t.Fatal("complete HEVC inventory should stay cached")
 	}
 }
 

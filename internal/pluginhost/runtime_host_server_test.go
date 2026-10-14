@@ -103,21 +103,29 @@ func TestRuntimeHostServer_PublishEventTo_RejectsEmptyTarget(t *testing.T) {
 }
 
 func TestRuntimeHostServer_ListLibraries_PassesUserID(t *testing.T) {
-	libs := &fakeLibLister{libs: []pluginhost.LibraryRecord{
-		{ID: "lib-1", Name: "Movies", MediaType: "movie"},
-		{ID: "lib-2", Name: "Shows", MediaType: "tv"},
-	}}
-	srv := pluginhost.NewRuntimeHostServer(&fakeHub{}, libs, "silo.example")
-
-	resp, err := srv.ListLibraries(context.Background(), &pluginv1.ListLibrariesRequest{UserId: "u1"})
-	if err != nil {
-		t.Fatalf("ListLibraries: %v", err)
-	}
-	if len(resp.GetLibraries()) != 2 {
-		t.Errorf("got %d libraries, want 2", len(resp.GetLibraries()))
-	}
-	if resp.GetLibraries()[0].GetId() != "lib-1" {
-		t.Errorf("first lib id = %q", resp.GetLibraries()[0].GetId())
+	for _, userID := range []string{"", "u1"} {
+		t.Run("user="+userID, func(t *testing.T) {
+			source := pluginhost.LibraryDataSourceFunc(func(_ context.Context, gotUserID string) ([]pluginhost.LibraryRecord, error) {
+				if gotUserID != userID {
+					t.Errorf("data source userID = %q, want %q", gotUserID, userID)
+				}
+				return []pluginhost.LibraryRecord{
+					{ID: "lib-1", Name: "Movies", MediaType: "movie"},
+					{ID: "lib-2", Name: "Shows", MediaType: "tv"},
+				}, nil
+			})
+			srv := pluginhost.NewRuntimeHostServer(&fakeHub{}, pluginhost.NewLibraryLister(source), "silo.example")
+			resp, err := srv.ListLibraries(context.Background(), &pluginv1.ListLibrariesRequest{UserId: userID})
+			if err != nil {
+				t.Fatalf("ListLibraries: %v", err)
+			}
+			if len(resp.GetLibraries()) != 2 {
+				t.Fatalf("got %d libraries, want 2", len(resp.GetLibraries()))
+			}
+			if resp.GetLibraries()[0].GetId() != "lib-1" {
+				t.Errorf("first lib id = %q", resp.GetLibraries()[0].GetId())
+			}
+		})
 	}
 }
 

@@ -131,7 +131,7 @@ export function PlaybackStep() {
           type="toggle"
           description="Fast. Uses a validated hardware tone mapper on this server or a transcode node."
           status={statusLine(gpuToneMapStatus)}
-          value={form.getValue("playback.transcode_hardware_tone_map_enabled") || "false"}
+          value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
           onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
           disabled={!transcodeEnabled}
         />
@@ -139,7 +139,7 @@ export function PlaybackStep() {
           label="On the CPU"
           type="toggle"
           description="Works everywhere, but a single stream can max out several cores."
-          value={form.getValue("playback.transcode_software_tone_map_enabled") || "false"}
+          value={form.getValue("playback.transcode_software_tone_map_enabled")}
           onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
           disabled={!transcodeEnabled}
         />

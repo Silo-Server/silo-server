@@ -140,11 +140,11 @@ func (s stubStore) UpsertHomeDismissal(context.Context, userstore.HomeItemDismis
 func (s stubStore) DeleteHomeDismissal(context.Context, string, string, string) error {
 	panic("unused")
 }
-func (s stubStore) AddFavorite(context.Context, string, string) error { panic("unused") }
+func (s stubStore) AddFavorite(context.Context, string, string) (bool, error) { panic("unused") }
 func (s stubStore) AddFavoriteAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
-func (s stubStore) RemoveFavorite(context.Context, string, string) error {
+func (s stubStore) RemoveFavorite(context.Context, string, string) (bool, error) {
 	panic("unused")
 }
 func (s stubStore) ListFavorites(context.Context, string, int, int) ([]userstore.Favorite, error) {
@@ -163,14 +163,16 @@ func (s stubStore) GetFavorite(context.Context, string, string) (*userstore.Favo
 func (s stubStore) GetWatchlistEntry(context.Context, string, string) (*userstore.WatchlistEntry, error) {
 	panic("unused")
 }
-func (s stubStore) AddToWatchlist(context.Context, string, string) error { panic("unused") }
+func (s stubStore) AddToWatchlist(context.Context, string, string) (bool, error) { panic("unused") }
 func (s stubStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
 func (s stubStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {
 	return true, nil
 }
-func (s stubStore) RemoveFromWatchlist(context.Context, string, string) error { panic("unused") }
+func (s stubStore) RemoveFromWatchlist(context.Context, string, string) (bool, error) {
+	panic("unused")
+}
 func (s stubStore) ReplaceWatchlistOrder(context.Context, string, []string) error {
 	panic("unused")
 }
@@ -210,7 +212,7 @@ func (s stubStore) ReplaceCollectionItems(context.Context, string, []userstore.C
 func (s stubStore) ReorderCollectionItems(context.Context, string, []string) error {
 	panic("unused")
 }
-func (s stubStore) ReorderCollections(context.Context, string, *string, []string) error {
+func (s stubStore) ReorderCollections(context.Context, string, []string) error {
 	panic("unused")
 }
 func (s stubStore) UpdateCollectionSyncState(context.Context, userstore.UpdateCollectionSyncStateInput) error {
@@ -832,4 +834,51 @@ func (p stubGroupProvider) GetPolicyForUser(context.Context, int) (*GroupPolicy,
 
 func (s stubStore) LatestHistoryIDs(context.Context, string, map[string][]string) (map[string]string, error) {
 	return nil, nil
+}
+
+// A content-only resolve answers what a profile may access, not what it
+// browses: the profile's hidden libraries are a browsing preference, so they
+// neither shrink a restricted allow list nor ride along as disabled libraries.
+func TestResolver_ContentAccessOnlyIgnoresHiddenLibraries(t *testing.T) {
+	hidden := []userstore.SettingValue{{
+		SettingIdentity: userstore.SettingIdentity{
+			Key:       settingskeys.UiDisabledLibraryIds,
+			Scope:     settingscontract.ScopeProfile,
+			ProfileID: "prof-1",
+		},
+		Value: json.RawMessage(`[2,4]`),
+	}}
+	cases := []struct {
+		name        string
+		libraries   []int
+		wantAllowed []int
+	}{
+		{"unrestricted account", nil, nil},
+		{"restricted account", []int{1, 2, 3, 4}, []int{1, 2, 3, 4}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := NewResolver(
+				stubUserRepo{user: &models.User{ID: 1, LibraryIDs: tc.libraries, AccessPolicyRevision: 5}},
+				stubStoreProvider{store: stubStore{
+					profile:       &userstore.Profile{ID: "prof-1", MaxContentRating: "PG", PINHash: "locked"},
+					settingValues: hidden,
+				}},
+				nil,
+			)
+			scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1, ProfileID: "prof-1", SkipPINVerification: true, ContentAccessOnly: true})
+			if err != nil {
+				t.Fatalf("Resolve() error: %v", err)
+			}
+			if !reflect.DeepEqual(scope.AllowedLibraryIDs, tc.wantAllowed) {
+				t.Fatalf("AllowedLibraryIDs = %#v, want %#v", scope.AllowedLibraryIDs, tc.wantAllowed)
+			}
+			if scope.DisabledLibraryIDs != nil {
+				t.Fatalf("DisabledLibraryIDs = %v, want none", scope.DisabledLibraryIDs)
+			}
+			if scope.MaxContentRating != "PG" {
+				t.Fatalf("MaxContentRating = %q, want the profile's ceiling", scope.MaxContentRating)
+			}
+		})
+	}
 }

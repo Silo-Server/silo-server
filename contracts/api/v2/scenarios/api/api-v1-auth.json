@@ -160,7 +160,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ],
                   "why": "impersonation is omitted when absent"
                 },
@@ -1438,7 +1439,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ],
                   "why": "impersonation is omitted when absent"
                 },
@@ -5608,6 +5610,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
                     "opened_signal"
@@ -5690,6 +5693,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
                     "opened_signal"
@@ -5793,6 +5797,7 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
+                    "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
                     "opened_signal"
@@ -5999,7 +6004,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ],
                   "why": "impersonation is omitted when absent"
                 },
@@ -6955,7 +6961,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {
@@ -7147,7 +7154,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ],
                   "why": "impersonation is omitted when absent"
                 },
@@ -8103,7 +8111,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {
@@ -9024,7 +9033,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {
@@ -9216,7 +9226,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {
@@ -9516,7 +9527,8 @@
                     "email",
                     "role",
                     "permissions",
-                    "download_allowed"
+                    "download_allowed",
+                    "password_change_required"
                   ]
                 },
                 {

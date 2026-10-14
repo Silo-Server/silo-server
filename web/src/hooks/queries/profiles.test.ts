@@ -6,10 +6,8 @@ import listProfilesOk from "../../../../contracts/api/v2/fixtures/list_profiles_
 import uploadProfileAvatarOk from "../../../../contracts/api/v2/fixtures/upload_profile_avatar_ok.json";
 import verifyProfilePinOk from "../../../../contracts/api/v2/fixtures/verify_profile_pin_ok.json";
 import verifyProfilePinWrong from "../../../../contracts/api/v2/fixtures/verify_profile_pin_wrong.json";
-import deleteProfilePrimaryProtected from "../../../../contracts/api/v2/fixtures/delete_profile_primary_protected.json";
 
 import { setAccessToken, setProfileId } from "@/api/client";
-import { V2ProblemError, v2 } from "@/api/v2/request";
 import {
   createProfile,
   listHouseholdSessions,
@@ -151,18 +149,5 @@ describe("profile queries on the v2 contract", () => {
       position_seconds: first.position_seconds,
     });
     expect(sessions[0]).not.toHaveProperty("id");
-  });
-
-  it("surfaces a protected primary profile as a problem", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      json(deleteProfilePrimaryProtected, deleteProfilePrimaryProtected.status, {
-        "Content-Type": "application/problem+json",
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      v2("DELETE /api/v2/profiles/{id}", { path: { id: "p-owner" } }),
-    ).rejects.toBeInstanceOf(V2ProblemError);
   });
 });

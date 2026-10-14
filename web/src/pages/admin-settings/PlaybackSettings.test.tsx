@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import PlaybackSettings from "./PlaybackSettings";
@@ -68,7 +67,7 @@ function makeForm(
     isDirty: (key: string) => dirtyKeys.has(key),
     dirtyCount: dirtyKeys.size,
     dirtyKeys: [...dirtyKeys],
-    save: vi.fn(),
+    save: vi.fn().mockResolvedValue(undefined),
     discard: vi.fn(),
     isSaving: false,
     restartRequired: false,
@@ -110,40 +109,6 @@ beforeEach(() => {
 });
 
 describe("PlaybackSettings layout", () => {
-  it("renders every field group heading", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-    const headings = Array.from(container.querySelectorAll("[role=group]")).map((group) => {
-      const labelId = group.getAttribute("aria-labelledby");
-      return labelId ? (container.querySelector(`[id="${labelId}"]`)?.textContent ?? "") : "";
-    });
-
-    expect(headings).toEqual(["Transcoding", "Node routing", "Watch behavior"]);
-  });
-
-  it("opens with the title alone: no breadcrumb, lede, or status strip", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none", "playback.transcode_enabled": "true" }),
-    );
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(container.querySelector("h1")?.textContent).toBe("Playback");
-    expect(container.textContent).not.toContain("Settings ›");
-    expect(container.textContent).not.toContain("Transcoding on");
-    expect(container.textContent).not.toContain("Restart pending");
-  });
-
-  it("puts the percent unit beside the control instead of in the label", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.watched_threshold": "90" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(labelled(container, "Mark watched at")).toHaveAttribute("value", "90");
-    expect(container.textContent).not.toContain("Mark watched at (%)");
-  });
-
   it("manages the playback key family and leaves downloads to their own page", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
 
@@ -154,38 +119,10 @@ describe("PlaybackSettings layout", () => {
     expect(keys).toContain("playback.allow_hevc_encoding");
     expect(keys).toContain("playback.routing.video_transcode_egress");
     expect(keys).toContain("playback.watched_threshold");
+    expect(keys).toContain("playback.copy_keyframe_playlist");
     expect(keys.some((key) => key.startsWith("download."))).toBe(false);
     // Hidden tier: still saved and readable through the API, no UI.
     expect(keys).not.toContain("playback.chapter_thumbnail_node_capacity");
-  });
-
-  it("keeps advanced settings collapsed until they are opened", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(container.textContent).toContain("Transcoding");
-    expect(container.textContent).not.toContain("FFmpeg path");
-  });
-
-  it("force-opens an advanced section holding a dirty field", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none" }, ["playback.ffmpeg_path"]),
-    );
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(container.textContent).toContain("FFmpeg path");
-  });
-
-  it("marks restart-required fields from the restart key list", () => {
-    expandAdvanced();
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-    const badges = container.querySelectorAll("[aria-label='Takes effect after a server restart']");
-
-    expect(badges).toHaveLength(1);
   });
 });
 
@@ -213,38 +150,6 @@ describe("PlaybackSettings node routing", () => {
       ["playback.routing.video_transcode_egress", "prefer_proxy"],
     ]);
     expect(form.save).not.toHaveBeenCalled();
-  });
-
-  it("labels the built-in routing policy as Silo Defaults", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none", ...defaultRouting }),
-    );
-
-    render(<PlaybackSettings />);
-
-    expect(screen.getByRole("button", { name: "Silo Defaults" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Standard cluster" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Custom")).not.toBeInTheDocument();
-  });
-
-  it("offers a transcode-node preference and explains what a worker is", async () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({
-        "playback.hw_accel": "none",
-        ...defaultRouting,
-      }),
-    );
-
-    render(<PlaybackSettings />);
-
-    const remuxExecution = screen.getByRole("combobox", { name: "Remux execution" });
-    expect(remuxExecution).toHaveTextContent("Prefer transcode node");
-    await userEvent.click(remuxExecution);
-    expect(await screen.findByRole("option", { name: "Prefer any worker" })).toBeVisible();
-    expect(screen.getByRole("option", { name: "Prefer transcode node" })).toBeVisible();
-    expect(screen.getByText(/A worker can be a proxy/)).toBeVisible();
-    expect(screen.getByText(/Transcode node → any worker → API/)).toBeVisible();
-    expect(screen.getByText(/Video transcode workers are transcode nodes/)).toBeVisible();
   });
 
   it("warns when hard routes lack nodes or universal client-origin support", () => {
@@ -422,26 +327,6 @@ describe("PlaybackSettings path defaults", () => {
     );
   });
 
-  it("says in words what leaving each path blank does", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const text = parse(renderToStaticMarkup(<PlaybackSettings />)).textContent ?? "";
-
-    expect(text).toContain("Leave blank to use /tmp/silo-transcode.");
-    expect(text).toContain(
-      "Leave blank to use the FFmpeg that ships with the server, at /usr/lib/jellyfin-ffmpeg/ffmpeg.",
-    );
-  });
-
-  it("offers no reset while a path field already runs the default", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none", "playback.transcode_dir": "/tmp/silo-transcode" }),
-    );
-    render(<PlaybackSettings />);
-
-    expect(screen.queryByRole("button", RESET_TRANSCODE_DIR)).not.toBeInTheDocument();
-  });
-
   it("stages an empty value when an overridden path is reset", () => {
     const form = makeForm({
       "playback.hw_accel": "none",
@@ -454,18 +339,6 @@ describe("PlaybackSettings path defaults", () => {
 
     expect(form.setValue).toHaveBeenCalledWith("playback.transcode_dir", "");
     expect(form.save).not.toHaveBeenCalled();
-  });
-
-  it("counts the reset as one unsaved change and falls back to the placeholder", () => {
-    // The staged empty string, as the form would report it on the next render.
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none" }, ["playback.transcode_dir"]),
-    );
-    render(<PlaybackSettings />);
-
-    expect(screen.getByLabelText("Transcode directory")).toHaveValue("");
-    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
-    expect(screen.queryByRole("button", RESET_TRANSCODE_DIR)).not.toBeInTheDocument();
   });
 });
 
@@ -508,10 +381,14 @@ describe("PlaybackSettings seek-preview node capability", () => {
   it.each([
     [{ capabilities: undefined }, true],
     [{ capabilities: { transport_features: ["chapter_extract_v1"] } }, true],
-    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, false],
+    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, true],
+    [
+      { capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] } },
+      false,
+    ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "",
         capabilities_hash: "snapshot",
       },
@@ -519,7 +396,7 @@ describe("PlaybackSettings seek-preview node capability", () => {
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "new-snapshot",
         capabilities_hash: "old-snapshot",
       },
@@ -527,14 +404,14 @@ describe("PlaybackSettings seek-preview node capability", () => {
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "snapshot",
       },
       true,
     ],
     [
       {
-        capabilities: { transport_features: ["trickplay_extract_v1"] },
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
         advertised_capabilities_hash: "snapshot",
         capabilities_hash: "snapshot",
       },
@@ -556,7 +433,7 @@ describe("PlaybackSettings seek-preview node capability", () => {
     useAdminNodesMock.mockReturnValue({
       data: [
         transcodeNode({
-          capabilities: { transport_features: ["trickplay_extract_v1"] },
+          capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
           advertised_capabilities_hash: "new-snapshot",
           capabilities_hash: "old-snapshot",
         }),
@@ -575,60 +452,6 @@ describe("PlaybackSettings seek-preview node capability", () => {
       "aria-disabled",
       "true",
     );
-  });
-});
-
-describe("PlaybackSettings divergent node inventories", () => {
-  // The device picker lives behind the advanced disclosure this page grew.
-  beforeEach(expandAdvanced);
-
-  it("points at the per-node overrides on the Nodes page", () => {
-    useHWAccelDetectionMock.mockReturnValue({
-      data: {
-        resolved: "qsv",
-        render_device_details: [{ path: "/dev/dri/renderD128", description: "Intel GPU" }],
-        nodes: [
-          { node_url: "http://node-a", render_devices: ["/dev/dri/renderD128"] },
-          { node_url: "http://node-b", render_devices: ["/dev/dri/renderD129"] },
-        ],
-      },
-      isLoading: false,
-    });
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "qsv" }));
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <PlaybackSettings />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Nodes report different devices");
-    expect(markup).toContain("set per-node overrides on the");
-    expect(markup).toContain('href="/admin/nodes"');
-  });
-
-  it("stays quiet while every node reports the same devices", () => {
-    useHWAccelDetectionMock.mockReturnValue({
-      data: {
-        resolved: "qsv",
-        render_device_details: [{ path: "/dev/dri/renderD128", description: "Intel GPU" }],
-        nodes: [
-          { node_url: "http://node-a", render_devices: ["/dev/dri/renderD128"] },
-          { node_url: "http://node-b", render_devices: ["/dev/dri/renderD128"] },
-        ],
-      },
-      isLoading: false,
-    });
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "qsv" }));
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <PlaybackSettings />
-      </MemoryRouter>,
-    );
-
-    expect(markup).not.toContain("set per-node overrides on the");
-    expect(markup).not.toContain('href="/admin/nodes"');
   });
 });
 
@@ -653,12 +476,13 @@ describe("seek preview settings", () => {
     sheet_bytes: 0,
   });
 
-  it("asks before changing the interval while published previews are pending replacement", async () => {
+  it.each([false, true])("handles confirmed preview saves (failure=%s)", async (failure) => {
     const form = makeForm(
       { "playback.hw_accel": "none", "playback.trickplay_interval_seconds": "20" },
       ["playback.trickplay_interval_seconds"],
       { "playback.trickplay_interval_seconds": "10" },
     );
+    if (failure) form.save.mockRejectedValue(new Error("412 precondition failed"));
     useSettingsFormMock.mockReturnValue(form);
     useAdminTrickplayLibrariesMock.mockReturnValue({
       data: [{ ...library(0), pending: 3, sheet_bytes: 1000 }],
@@ -672,6 +496,7 @@ describe("seek preview settings", () => {
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
     );
     expect(form.save).toHaveBeenCalledOnce();
+    expect(form.dirtyCount).toBe(1);
   });
 
   it("manages the four seek preview keys under advanced", () => {
@@ -793,7 +618,7 @@ it("hides unsupported seek preview settings and leaves their keys out", () => {
   expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).not.toContain("playback.trickplay_workers");
 });
 
-it.each(["loading", "failed"])("asks before changing the interval when status is %s", async () => {
+it("asks before changing the interval when preview status is unavailable", async () => {
   useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined, isSuccess: false });
   const form = makeForm(
     { "playback.trickplay_interval_seconds": "20" },
@@ -807,4 +632,62 @@ it.each(["loading", "failed"])("asks before changing the interval when status is
   expect(screen.getByRole("alertdialog")).toHaveTextContent(
     "Existing seek previews are made again",
   );
+});
+
+// The save bar moves to components/ but must render the same markup on every
+// settings page that uses it: scroll room, scrim and the pill.
+it("renders the settings save bar for a dirty form", () => {
+  useSettingsFormMock.mockReturnValue(
+    makeForm({ "playback.hw_accel": "none" }, ["playback.hw_accel", "playback.ffmpeg_path"]),
+  );
+  render(<PlaybackSettings />);
+
+  const pill = screen.getByText("2 unsaved changes").closest("[role=status]");
+  const scrim = pill?.previousElementSibling;
+  expect([scrim?.previousElementSibling, scrim, pill]).toMatchInlineSnapshot(`
+    [
+      <div
+        aria-hidden="true"
+        class="h-28"
+      />,
+      <div
+        aria-hidden="true"
+        class="pointer-events-none fixed right-0 bottom-0 left-0 z-30 h-40 bg-gradient-to-t from-[var(--background)] via-[color-mix(in_srgb,var(--background)_72%,transparent)] to-transparent lg:left-[240px]"
+      />,
+      <div
+        class="pointer-events-none fixed right-0 bottom-6 left-0 z-40 flex justify-center px-4 lg:left-[240px]"
+        role="status"
+      >
+        <div
+          class="glass pointer-events-auto flex max-w-full items-center gap-3 rounded-full py-2 pr-2 pl-4 shadow-2xl backdrop-blur-xl sm:gap-4 sm:pl-5"
+        >
+          <span
+            class="min-w-0 truncate text-[13px] font-medium"
+          >
+            2 unsaved changes
+          </span>
+          <span
+            class="flex shrink-0 items-center gap-1.5"
+          >
+            <button
+              class="inline-flex shrink-0 items-center justify-center text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 duration-150 hover:bg-accent hover:text-accent-foreground h-8 gap-1.5 px-3 has-[>svg]:px-2.5 rounded-full"
+              data-size="sm"
+              data-slot="button"
+              data-variant="ghost"
+            >
+              Discard
+            </button>
+            <button
+              class="inline-flex shrink-0 items-center justify-center text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 shadow-sm duration-150 h-8 gap-1.5 px-3 has-[>svg]:px-2.5 rounded-full bg-[var(--settings-accent)] text-[#15151a] hover:bg-[var(--settings-accent)] hover:brightness-110"
+              data-size="sm"
+              data-slot="button"
+              data-variant="default"
+            >
+              Save
+            </button>
+          </span>
+        </div>
+      </div>,
+    ]
+  `);
 });

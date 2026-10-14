@@ -341,14 +341,19 @@ func TestAnalyzeMovieTailAfterProbeRepair(t *testing.T) {
 }
 
 func TestAnalyzeMovieWithoutVisualsUsesChaptersOnly(t *testing.T) {
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+	chapterCandidate := movieCandidate(11, 7200)
+	chapterCandidate.Chapters = []models.MediaChapter{{Title: "End Credits", StartSeconds: 6900, EndSeconds: 7200}}
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200), chapterCandidate}}
 	sampler := &fakeMovieSampler{preflight: errors.New("ffmpeg lacks signalstats")}
 	summary, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sampler.tailCount() != 0 || summary.MovieCreditsMarkersWritten != 0 {
-		t.Fatalf("%d tail passes, summary %+v", sampler.tailCount(), summary)
+	if sampler.tailCount() != 0 || summary.MovieCreditsMarkersWritten != 1 || len(repo.patches) != 1 {
+		t.Fatalf("%d tail passes, summary %+v, patches %+v", sampler.tailCount(), summary, repo.patches)
+	}
+	if patch := repo.patches[0]; patch.FileID != 11 || patch.Start != 6900 || patch.End != 7200 || patch.Algorithm != CreditsChapterAlgorithm {
+		t.Fatalf("chapter credits patch = %+v, want file 11 at 6900–7200", patch)
 	}
 }
 

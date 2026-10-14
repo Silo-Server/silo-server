@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { buildPlayerChapters, nextChapterStart, prevChapterStart } from "./chapters";

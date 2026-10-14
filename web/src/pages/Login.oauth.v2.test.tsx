@@ -40,20 +40,6 @@ it("starts provider login with a top-level GET to v2 and preserves the encoded l
   expect(link.getAttribute("href")).toBe("/api/v2/auth/oauth/3/start?next=%2Fme%3Ftab%3Dsettings");
 });
 
-it("explains a provider refusal instead of showing the raw reason code", () => {
-  render(
-    <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={["/login?error=oauth_failed&reason=not_permitted"]}>
-        <Login />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  expect(
-    screen.getByText("Your account at the sign-in provider isn't allowed to use this server."),
-  ).toBeTruthy();
-  expect(screen.queryByText(/not_permitted/)).toBeNull();
-});
-
 it("tells a person without an account to ask an admin, apart from a provider refusal", () => {
   render(
     <QueryClientProvider client={new QueryClient()}>

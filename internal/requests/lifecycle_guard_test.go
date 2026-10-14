@@ -318,6 +318,10 @@ func TestReplaceFailedIsScopedToRequesterDatabase(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE media_requests SET outcome = 'failed', tmdb_id = 303`); err != nil {
 		t.Fatal(err)
 	}
+	insertLifecycleRequest(t, repo, "mine-other-title", 1, 505, StatusApproved)
+	if _, err := pool.Exec(ctx, `UPDATE media_requests SET outcome = 'failed' WHERE id = 'mine-other-title'`); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := repo.CreateRequest(ctx, CreateRequestRecord{
 		ID:            "mine-again",
@@ -335,6 +339,9 @@ func TestReplaceFailedIsScopedToRequesterDatabase(t *testing.T) {
 	}
 	if _, err := repo.GetRequest(ctx, "theirs-failed"); err != nil {
 		t.Fatalf("other account's failed row: %v, want kept", err)
+	}
+	if _, err := repo.GetRequest(ctx, "mine-other-title"); err != nil {
+		t.Fatalf("other title's failed row: %v, want kept", err)
 	}
 }
 

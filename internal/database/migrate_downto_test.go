@@ -43,14 +43,17 @@ ON CONFLICT (username) DO UPDATE SET email=EXCLUDED.email RETURNING id`).Scan(&u
 
 	const key = "jellycompat:displayprefs:usersettings:emby"
 	const blob = `{"SortBy":"SortName"}`
+	// Seed the current storage after migrating. The old binary's row must be
+	// absent so only the registered down migration can restore it.
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO user_settings (user_id,key,value) VALUES ($1,$2,$3)
-		 ON CONFLICT (user_id,key) DO UPDATE SET value=EXCLUDED.value`, userID, key, blob); err != nil {
-		t.Fatalf("seed legacy row: %v", err)
+		`DELETE FROM user_settings WHERE user_id=$1 AND key=$2`, userID, key); err != nil {
+		t.Fatalf("clear legacy fixture: %v", err)
 	}
-	// Apply the move by re-running it (the migration already ran before the seed).
-	if err := RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
-		t.Fatalf("re-up: %v", err)
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO jellycompat_displayprefs (user_id,prefs_id,client,value)
+		 VALUES ($1,'usersettings','emby',$2)
+		 ON CONFLICT (user_id,prefs_id,client) DO UPDATE SET value=EXCLUDED.value`, userID, blob); err != nil {
+		t.Fatalf("seed moved row: %v", err)
 	}
 
 	// The narrow rollback the spec recommends: revert only the

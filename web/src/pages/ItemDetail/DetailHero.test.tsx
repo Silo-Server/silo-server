@@ -18,72 +18,31 @@ describe("DetailHero title", () => {
     titleArt.show = true;
   });
 
-  it("names the title with its logo while title art is on", () => {
-    const { container } = render(<DetailHero title="Blade Runner" logoUrl="/logo.webp" />);
+  it("holds a logo title without fetching art until the profile's choice loads", () => {
+    titleArt.show = undefined;
+    const { container, rerender } = render(
+      <DetailHero title="Blade Runner" logoUrl="/logo.webp" />,
+    );
 
+    expect(container.querySelector('img[src="/logo.webp"]')).toBeNull();
+    expect(screen.getByTestId("detail-hero-title-pending")).toHaveClass("h-20", "lg:h-28");
+    expect(screen.getByRole("heading", { level: 1, name: "Blade Runner" })).toHaveClass("sr-only");
+
+    titleArt.show = true;
+    rerender(<DetailHero title="Blade Runner" logoUrl="/logo.webp" />);
     expect(container.querySelector('img[src="/logo.webp"]')).not.toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Blade Runner" })).toHaveClass("sr-only");
-  });
 
-  it("names the title in text when the profile turned title art off", () => {
     titleArt.show = false;
-    const { container } = render(<DetailHero title="Blade Runner" logoUrl="/logo.webp" />);
-
+    rerender(<DetailHero title="Blade Runner" logoUrl="/logo.webp" />);
     expect(container.querySelector('img[src="/logo.webp"]')).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Blade Runner" })).not.toHaveClass(
       "sr-only",
     );
   });
-
-  it("holds a logo title without fetching art until the profile's choice loads", () => {
-    titleArt.show = undefined;
-    const { container } = render(<DetailHero title="Blade Runner" logoUrl="/logo.webp" />);
-
-    expect(container.querySelector('img[src="/logo.webp"]')).toBeNull();
-    expect(screen.getByTestId("detail-hero-title-pending")).toHaveClass("h-20", "lg:h-28");
-    expect(screen.getByRole("heading", { level: 1, name: "Blade Runner" })).toHaveClass("sr-only");
-  });
-
-  it("puts the type and network on one eyebrow line", () => {
-    const { container } = render(
-      <DetailHero title="Game of Thrones" context="Series" studioLabel="HBO" />,
-    );
-
-    const eyebrows = container.querySelectorAll(".detail-hero-context");
-    expect(eyebrows).toHaveLength(1);
-    expect(eyebrows[0]).toHaveTextContent(/^SeriesHBO$/);
-  });
-
-  it("keeps a breadcrumb context on its own row", () => {
-    const { container } = render(
-      <DetailHero title="Pilot" context={<nav aria-label="Breadcrumb">Show / Season 1</nav>} />,
-    );
-
-    const context = container.querySelector(".detail-hero-context");
-    expect(context?.tagName).toBe("DIV");
-    expect(context).toContainElement(screen.getByRole("navigation", { name: "Breadcrumb" }));
-  });
 });
 
 describe("DetailHero artwork revisions", () => {
-  it("keeps the above-fold primary content on one bounded reveal surface", () => {
-    const { container } = render(<DetailHero title="Blade Runner" />);
-
-    expect(container.querySelector(".detail-hero-primary-content")).not.toBeNull();
-  });
-
-  it("reserves the logo box before the image decodes", () => {
-    const { container } = render(
-      <DetailHero title="Blade Runner" logoUrl="/blade-runner-logo.rev-a.webp" />,
-    );
-
-    const logo = container.querySelector<HTMLImageElement>(
-      'img[src="/blade-runner-logo.rev-a.webp"]',
-    );
-    expect(logo).toHaveClass("h-20", "w-full", "lg:h-28");
-    expect(logo).not.toHaveClass("max-h-20", "lg:max-h-28");
-  });
-
   it("treats a changed poster URL as unloaded until that revision finishes loading", () => {
     const { rerender } = render(<DetailHero title="Blade Runner" posterUrl="/poster.rev-a.webp" />);
 
@@ -195,29 +154,5 @@ describe("DetailHero artwork revisions", () => {
     expect(screen.getByRole("img", { name: "Blade Runner" })).toHaveClass("opacity-0");
     expect(screen.getByTestId("detail-hero-poster-placeholder")).toHaveClass("opacity-100");
     expect(container.querySelector(".hero-backdrop-artwork img")).toHaveClass("opacity-0");
-  });
-
-  it("keeps the backdrop placeholder behind the image throughout its fade", () => {
-    const { container } = render(
-      <DetailHero
-        title="Blade Runner"
-        backdropUrl="/backdrop.rev-a.webp"
-        backdropThumbhash="placeholder"
-      />,
-    );
-
-    const artwork = container.querySelector<HTMLElement>(".hero-backdrop-artwork");
-    const backdrop = container.querySelector<HTMLImageElement>('img[src="/backdrop.rev-a.webp"]');
-    expect(artwork).toHaveStyle({
-      backgroundImage: 'url("data:image/png;base64,placeholder")',
-    });
-    expect(backdrop).toHaveClass("opacity-0", "transition-opacity", "duration-300");
-
-    fireEvent.load(backdrop!);
-
-    expect(backdrop).toHaveClass("opacity-100", "transition-opacity", "duration-300");
-    expect(artwork).toHaveStyle({
-      backgroundImage: 'url("data:image/png;base64,placeholder")',
-    });
   });
 });

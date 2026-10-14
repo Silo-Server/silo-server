@@ -54,7 +54,8 @@ type itemsQuery struct {
 	audioLanguages         []string
 	subtitleLanguages      []string
 	hasRootFilter          bool // a Jellyfin 12 HasFilters parameter was sent; see jellyfinRootFilterParams
-	unmatchedIDFilter      bool // GenreIds or PersonIds was sent but no value names a genre or person
+	unmatchedIDFilter      bool // GenreIds, PersonIds, or StudioIds was sent but no value names a genre, person, or studio
+	unmatchedItemIDs       bool // Ids was sent but no value names an item, collection, season, library view, or the Collections view
 	mediaTypes             []string
 	mediaTypesSet          map[string]bool
 	mediaTypesExplicit     bool
@@ -102,10 +103,12 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 			result.seasonNumber = new(n)
 		}
 	}
-	if raw := q.Get("EnableImageTypes"); raw != "" {
+	// Jellyfin Web repeats the parameter once per type, so every value counts.
+	// A list with no types means every type, as in Jellyfin.
+	if kinds := splitCommaValues(q.Values("EnableImageTypes")); len(kinds) > 0 {
 		result.enableImageTypes = map[string]bool{}
-		for kind := range strings.SplitSeq(raw, ",") {
-			result.enableImageTypes[strings.ToLower(strings.TrimSpace(kind))] = true
+		for _, kind := range kinds {
+			result.enableImageTypes[strings.ToLower(kind)] = true
 		}
 	}
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
@@ -123,16 +126,29 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		}
 	}
 
-	if ids := strings.TrimSpace(q.Get("Ids")); ids != "" {
-		parts := strings.SplitSeq(ids, ",")
-		for part := range parts {
-			raw := strings.TrimSpace(part)
+	// Every repeated Ids value counts, as in idsRequestCollectionsView.
+	if ids := splitCommaValues(q.Values("Ids")); len(ids) > 0 {
+		keepsRouting := false
+		for _, raw := range ids {
 			if decoded, err := decodeItemID(codec, raw); err == nil && decoded != "" {
 				result.specificIDs = append(result.specificIDs, decoded)
 			} else if collectionID, collErr := codec.DecodeStringID(EncodedIDCollection, raw); collErr == nil && collectionID != "" {
 				result.specificCollectionIDs = append(result.specificCollectionIDs, collectionID)
+			} else if _, libErr := codec.DecodeIntID(EncodedIDLibrary, raw); libErr == nil || isCollectionsViewID(raw) {
+				// A library or Collections view ID is routed as it was
+				// before unmatched Ids returned empty.
+				keepsRouting = true
+			} else if seasonID, seasonErr := codec.DecodeStringID(EncodedIDSeason, raw); seasonErr == nil && seasonID != "" {
+				// The Ids filter does not serve season IDs, so a request
+				// that names a season keeps its earlier routing too (a
+				// series ParentId still lists its seasons).
+				keepsRouting = true
 			}
 		}
+		// A repeated ID would otherwise come back twice.
+		result.specificIDs = normalizeContentIDs(result.specificIDs)
+		result.specificCollectionIDs = normalizeContentIDs(result.specificCollectionIDs)
+		result.unmatchedItemIDs = len(result.specificIDs) == 0 && len(result.specificCollectionIDs) == 0 && !keepsRouting
 	}
 	if genreIDs := strings.TrimSpace(firstNonEmpty(q.Get("GenreIds"), q.Get("GenreItems"))); genreIDs != "" {
 		matched := false
@@ -744,8 +760,16 @@ func parseRequestedFields(raw string) map[string]bool {
 // (catalog SQL performance overhaul plan §3.2 part b), it can be removed.
 var fieldsRequiringDetail = parseRequestedFields("RemoteTrailers,ProviderIds,People,Chapters,MediaStreams,MediaSources")
 
+// Lowercased Fields keys for the list path's file-backed video size.
+const (
+	fieldWidth  = "width"
+	fieldHeight = "height"
+	fieldIsHD   = "ishd"
+)
+
 // fieldsServedByList enumerates Fields values that mapping.go's itemFromList
-// can populate — gated by `if allFields || fields[X]` blocks. Anything outside
+// can populate — gated by `if allFields || fields[X]` blocks — plus the
+// file-backed ones applyListFileFields fills in afterwards. Anything outside
 // this set AND outside fieldsRequiringDetail is silently dropped from
 // list-path responses (no detail fetch is triggered to fill it).
 //
@@ -762,6 +786,9 @@ var fieldsServedByList = map[string]struct{}{
 	"productionlocations": {},
 	"criticrating":        {},
 	"mediasourcecount":    {},
+	fieldWidth:            {},
+	fieldHeight:           {},
+	fieldIsHD:             {},
 	"providerids":         {},
 }
 
@@ -906,6 +933,23 @@ func parsePremiereDateBound(raw string, isMin bool) string {
 // rails can discard filters. Unfiltered rails keep their episode-aware semantics.
 func (q itemsQuery) hasIntersectingFilters() bool {
 	return len(q.genres) > 0 || len(q.years) > 0 || q.hasCompatBrowseFilters() || q.genreName != "" || q.personID > 0 || q.requireBackdrop || len(q.audioLanguages) > 0 || len(q.subtitleLanguages) > 0 || q.maxOfficialRating != "" || q.namePrefix != "" || (q.searchTerm != "" && (q.isFavorite || q.isPlayed != nil || q.isResumable || q.sortExplicit)) || (q.isFavorite && (q.isPlayed != nil || q.isResumable)) || (q.isResumable && q.isPlayed != nil)
+}
+
+// matchesNothing reports whether an ID filter names nothing, so the request
+// returns an empty page rather than an unfiltered browse. An unresolvable Ids
+// with no other filter still lists the library views, as Jellyfin does for an
+// Ids value that is not a GUID.
+func (q itemsQuery) matchesNothing() bool {
+	return q.unmatchedIDFilter || (q.unmatchedItemIDs && !q.listsUserRootViews())
+}
+
+// listsUserRootViews reports whether a /Items request with no parent, type,
+// user-state, search, or Jellyfin 12 HasFilters parameter lists the user's
+// library views rather than searching the catalog.
+func (q itemsQuery) listsUserRootViews() bool {
+	return q.parentLibraryID == 0 && q.parentCollectionID == "" && q.parentSeasonID == "" && q.parentItemID == "" &&
+		!q.hasItemTypeFilter && len(q.itemTypes) == 0 && !q.recursive && !q.hasRootFilter &&
+		!q.hasMemberFilters()
 }
 
 // hasMemberFilters reports whether the request narrows results by catalog

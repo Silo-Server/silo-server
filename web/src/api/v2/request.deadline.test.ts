@@ -1,3 +1,7 @@
+// TODO: this file uses ReadableStream, which VM contexts do not provide, so it
+// runs on the threads pool (THREADS_TESTS in vite.config.ts). Make it VM-safe
+// and drop it from that list.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import authenticationRequired from "../../../../contracts/api/v2/fixtures/authentication_required.json";
@@ -84,6 +88,16 @@ describe("v2 request deadline", () => {
     vi.stubGlobal("fetch", hungFetch());
 
     const outcome = v2("POST /api/v2/catalog/query", { body: {} }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(API_READ_TIMEOUT_MS);
+    expect(await outcome).toBeInstanceOf(V2TimeoutError);
+  });
+
+  it("bounds the admin Home row preview, a read sent as POST", async () => {
+    vi.stubGlobal("fetch", hungFetch());
+
+    const outcome = v2("POST /api/v2/admin/sections/preview", {
+      body: { section_type: "recently_added", config: {} },
+    }).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(API_READ_TIMEOUT_MS);
     expect(await outcome).toBeInstanceOf(V2TimeoutError);
   });

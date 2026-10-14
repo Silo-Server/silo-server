@@ -61,6 +61,7 @@ describe("ServerActivity task progress", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Server activity: 1 active" }));
 
+    expect(screen.queryByText("Preparing downloads")).not.toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Cache Metadata Images" })).toHaveAttribute(
@@ -79,11 +80,6 @@ describe("ServerActivity download preparation", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: `Server activity: ${activeCount} active` }));
   }
-
-  it("hides the section when the server has no preparation queue", () => {
-    openPopover(1);
-    expect(screen.queryByText("Preparing downloads")).not.toBeInTheDocument();
-  });
 
   it("counts running and queued jobs and shows live progress", () => {
     mocks.preparations = makePreparationList(
@@ -118,7 +114,7 @@ describe("ServerActivity download preparation", () => {
     expect(screen.getByText("2 failed in the last 24 hours")).toBeInTheDocument();
     for (const link of screen.getAllByRole("link", { name: /View all|Example Movie/ })) {
       if (link.textContent?.includes("Example Movie")) {
-        expect(link).toHaveAttribute("href", "/admin/activity?view=preparations");
+        expect(link).toHaveAttribute("href", "/admin/downloads?tab=preparation");
       }
     }
   });

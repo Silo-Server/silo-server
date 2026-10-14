@@ -26,6 +26,40 @@ export async function listAdminDownloadPreparations(
   return list;
 }
 
+/** An administrator action on preparation jobs. */
+export type AdminDownloadPreparationAction = "pause" | "resume" | "cancel";
+export type AdminDownloadPreparationActionResult =
+  V2Result<"POST /api/v2/admin/downloads/preparations/pause">["results"][number];
+
+const ACTION_OPERATIONS = {
+  pause: "POST /api/v2/admin/downloads/preparations/pause",
+  resume: "POST /api/v2/admin/downloads/preparations/resume",
+  cancel: "POST /api/v2/admin/downloads/preparations/cancel",
+} as const;
+
+/** Most job ids one action request may carry. */
+export const ADMIN_DOWNLOAD_PREPARATION_ACTION_MAX_IDS = 500;
+
+/** Pauses, resumes or cancels jobs; returns one result per distinct id. */
+export async function runAdminDownloadPreparationAction(
+  context: ProfileRequestContextSnapshot,
+  action: AdminDownloadPreparationAction,
+  ids: readonly string[],
+): Promise<AdminDownloadPreparationActionResult[]> {
+  requireAdminAuthority(context);
+  const results: AdminDownloadPreparationActionResult[] = [];
+  for (let start = 0; start < ids.length; start += ADMIN_DOWNLOAD_PREPARATION_ACTION_MAX_IDS) {
+    const response = await v2(ACTION_OPERATIONS[action], {
+      profileContext: context,
+      body: { ids: ids.slice(start, start + ADMIN_DOWNLOAD_PREPARATION_ACTION_MAX_IDS) },
+      retryAuthentication: false,
+    });
+    results.push(...response.results);
+  }
+  requireAdminAuthority(context);
+  return results;
+}
+
 /** Payload of a download_preparation.progress realtime event. */
 export interface DownloadPreparationProgressEvent {
   id: string;

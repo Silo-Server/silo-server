@@ -35,18 +35,6 @@ func TestRotationIndexAdvancesOnWeekBoundary(t *testing.T) {
 	}
 }
 
-func TestRotationKeyIsValueBased(t *testing.T) {
-	// Simulate two process runs that both scope to library 42. The fetcher
-	// builds the key from the integer value (not the *int pointer), so the
-	// rotation must be stable across restarts.
-	keyA := "director|42"
-	keyB := "director|42"
-	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
-	if RotationIndex(now, keyA, 12, 7) != RotationIndex(now, keyB, 12, 7) {
-		t.Fatal("rotation must be stable for the same value-based key")
-	}
-}
-
 func TestRotationIndexBoundsByCandidateCount(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		idx := RotationIndex(time.Now().Add(time.Duration(i)*24*time.Hour), "director", 5, 0)
@@ -58,50 +46,7 @@ func TestRotationIndexBoundsByCandidateCount(t *testing.T) {
 
 // --- Recipe registration and definition tests ---
 
-func TestEditorialSpotlightRecipeRegistered(t *testing.T) {
-	rec, ok := Get("editorial_spotlight")
-	if !ok {
-		t.Fatal("editorial_spotlight not registered")
-	}
-	if !rec.Definition().SupportsRotation {
-		t.Error("editorial_spotlight should advertise rotation support")
-	}
-}
-
-func TestEditorialSpotlightDefinition(t *testing.T) {
-	rec, ok := Get("editorial_spotlight")
-	if !ok {
-		t.Fatal("editorial_spotlight not registered")
-	}
-	def := rec.Definition()
-	if def.Category != CategoryEditorial {
-		t.Errorf("category = %v, want editorial", def.Category)
-	}
-	if !def.SupportsRotation {
-		t.Error("SupportsRotation should be true")
-	}
-	if len(def.Presets) < 4 {
-		t.Errorf("expected at least 4 presets, got %d", len(def.Presets))
-	}
-}
-
 // --- Validate tests ---
-
-func TestEditorialSpotlightAcceptsDirectorAutoRotate(t *testing.T) {
-	rec, _ := Get("editorial_spotlight")
-	raw := json.RawMessage(`{"subject_type":"director","auto_rotate":true,"rotation_cadence":"weekly"}`)
-	if err := rec.Validate(raw); err != nil {
-		t.Errorf("valid params rejected: %v", err)
-	}
-}
-
-func TestEditorialSpotlightAcceptsEraWithSubject(t *testing.T) {
-	rec, _ := Get("editorial_spotlight")
-	raw := json.RawMessage(`{"subject_type":"era","subject":"1980s"}`)
-	if err := rec.Validate(raw); err != nil {
-		t.Errorf("valid params rejected: %v", err)
-	}
-}
 
 func TestEditorialSpotlightRejectsFranchise(t *testing.T) {
 	rec, _ := Get("editorial_spotlight")

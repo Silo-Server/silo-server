@@ -91,11 +91,12 @@ export function fetchAdminLibraries(signal?: AbortSignal): Promise<Library[]> {
   return v2("GET /api/v2/libraries", { signal }).then(librariesFromV2);
 }
 
-export function useAdminLibraries() {
+export function useAdminLibraries({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: adminKeys.libraries(),
     queryFn: ({ signal }) => fetchAdminLibraries(signal),
     staleTime: ADMIN_STALE_TIME,
+    enabled,
   });
 }
 
@@ -349,23 +350,6 @@ export function flattenStaleMediaIDs(
   return data?.pages.flatMap((page) => page.staleIDs) ?? [];
 }
 
-export function useRematchStaleMediaID() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (contentId: string) =>
-      v2("POST /api/v2/libraries/stale-ids/{content_id}/rematch", {
-        path: { content_id: contentId },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() });
-      toast.success("Re-match started");
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Re-match failed");
-    },
-  });
-}
-
 export function useCreateLibrary() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -593,24 +577,6 @@ export function useRetryLibraryMetadataMatchQueue() {
       toast.error(
         err instanceof Error ? err.message : "Failed to rebuild metadata matcher backlog",
       );
-    },
-  });
-}
-
-export function useCancelLibraryMetadataMatchQueue() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) =>
-      v2("POST /api/v2/libraries/{id}/metadata-match-queue/cancel", {
-        path: { id: String(id) },
-      }),
-    onSuccess: (_data, id) => {
-      toast.success("Metadata matcher backlog cancelled");
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueDetail(id) });
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to cancel metadata matcher backlog");
     },
   });
 }

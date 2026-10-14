@@ -6,8 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -136,7 +137,13 @@ type OfflineManifest struct {
 		Poster   string `json:"poster,omitempty"`
 		Backdrop string `json:"backdrop,omitempty"`
 		Logo     string `json:"logo,omitempty"`
+		// SeriesPoster is v2-only; see SeriesPosterThumbhash.
+		SeriesPoster string `json:"-"`
 	} `json:"artwork_urls"`
+	// An episode's poster is its still, so episode manifests also name the
+	// parent series poster for series-level offline screens. Only the v2
+	// manifest carries the series poster; the frozen v1 manifest omits it.
+	SeriesPosterThumbhash string `json:"-"`
 
 	Container               string              `json:"container"`
 	CodecVideo              string              `json:"codec_video"`
@@ -170,6 +177,9 @@ type ManifestBuilder struct {
 	subs             SubtitleSource
 	fileRepo         FileResolver
 	MarkerPopulation MarkerPopulationService
+	// externalTimings applies sidecar timing corrections to the revisions
+	// and sizes of external subtitles; nil describes them as they are on disk.
+	externalTimings subtitles.ExternalTimingLookup
 	// artifact resolves a download's linked prepared artifact so artifact-backed
 	// manifests can describe the delivered file instead of the catalog source.
 	artifact func(ctx context.Context, id string) (*Artifact, error)
@@ -192,6 +202,17 @@ func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalo
 	return b.build(ctx, dl, filter, nil, true)
 }
 
+// episodeSeriesID returns the parent series of an episode entry, or "" for
+// anything else. Series extras and manga chapters also carry a SeriesID, so
+// the entry's EpisodeID decides. The manifest's series_poster and the artwork
+// route that serves it both use this rule.
+func episodeSeriesID(dl *Download, detail *catalog.ItemDetail) string {
+	if dl.EpisodeID == "" {
+		return ""
+	}
+	return detail.SeriesID
+}
+
 // build is Build with an optional per-batch series-detail cache: a season
 // batch shares one series, so the batch endpoint resolves its detail once
 // instead of once per episode.
@@ -202,13 +223,13 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 	file := b.lookupFile(ctx, dl.MediaFileID)
 	var seriesDetail *catalog.ItemDetail
-	if dl.EpisodeID != "" && detail.SeriesID != "" {
-		if cached, ok := seriesCache[detail.SeriesID]; ok {
+	if seriesID := episodeSeriesID(dl, detail); seriesID != "" {
+		if cached, ok := seriesCache[seriesID]; ok {
 			seriesDetail = cached
-		} else if sd, err := b.detail.GetItemDetail(ctx, detail.SeriesID, filter); err == nil {
+		} else if sd, err := b.detail.GetItemDetail(ctx, seriesID, filter); err == nil {
 			seriesDetail = sd
 			if seriesCache != nil {
-				seriesCache[detail.SeriesID] = sd
+				seriesCache[seriesID] = sd
 			}
 		}
 	}
@@ -256,6 +277,12 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 	if detail.LogoURL != "" {
 		m.ArtworkURLs.Logo = artworkProxyURL(dl.ID, "logo")
+	}
+	if seriesDetail != nil {
+		m.SeriesPosterThumbhash = seriesDetail.PosterThumbhash
+		if seriesDetail.PosterURL != "" {
+			m.ArtworkURLs.SeriesPoster = artworkProxyURL(dl.ID, "series_poster")
+		}
 	}
 
 	if v := pickVersion(detail, dl.MediaFileID); v != nil {
@@ -343,15 +370,22 @@ func applyArtifactParams(m *OfflineManifest, a *Artifact, file *models.MediaFile
 
 // applyPreparedAudioTracks describes a multi-track prepared file from the
 // audio inventory frozen when it became ready, falling back to the current
-// source probe for an artifact that is not ready yet. Output positions equal
-// the prepared source's positions, so the viewer's catalog selection stays
-// valid unless the source has since changed at that position.
+// source probe for an artifact that is not ready yet. The viewer's catalog
+// selection is a source position; it is carried to the output position the
+// prepared plan gave that track, and stays valid unless the source has since
+// changed at that position.
 func applyPreparedAudioTracks(m *OfflineManifest, a *Artifact, file *models.MediaFile) {
+	// A nil inventory was never frozen; an empty one froze a prepared file
+	// with no audio and must not be rebuilt from a later probe.
 	tracks := a.PreparedAudioTracks
-	if len(tracks) == 0 {
+	if tracks == nil {
 		tracks = preparedAudioTracks(file, a)
 	}
 	if len(tracks) == 0 {
+		if file != nil || a.PreparedAudioTracks != nil {
+			// No source track was decodable, so the prepared file has no audio.
+			m.AudioTracks, m.SelectedAudioTrackIndex, m.CodecAudio = nil, nil, ""
+		}
 		return
 	}
 	m.AudioTracks = tracks
@@ -363,31 +397,42 @@ func applyPreparedAudioTracks(m *OfflineManifest, a *Artifact, file *models.Medi
 		}
 	}
 	m.CodecAudio = tracks[fileDefault].Codec
-	if selected := m.SelectedAudioTrackIndex; selected != nil && *selected >= 0 && *selected < len(tracks) &&
-		file != nil && *selected < len(file.AudioTracks) && file.AudioTracks[*selected].Language == tracks[*selected].Language {
-		return
+	if selected := m.SelectedAudioTrackIndex; selected != nil && file != nil && *selected >= 0 && *selected < len(file.AudioTracks) {
+		// The frozen inventory records no source positions, so the current
+		// plan supplies them. A plan of a different length means the source
+		// was re-probed into another layout and cannot be mapped.
+		plan := playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
+		output := slices.IndexFunc(plan.Audio, func(track playback.PreparedAudioTrack) bool { return track.SourceIndex == *selected })
+		if output >= 0 && len(plan.Audio) == len(tracks) && file.AudioTracks[*selected].Language == tracks[output].Language {
+			m.SelectedAudioTrackIndex = &output
+			return
+		}
 	}
 	m.SelectedAudioTrackIndex = &fileDefault
 }
 
 // preparedAudioTracks describes the audio streams a multi-track prepared file
-// built from file contains: every source track in source order, with encoded
-// tracks reporting the AAC output layout.
+// built from file contains, in output order, with encoded tracks reporting the
+// AAC output layout.
 func preparedAudioTracks(file *models.MediaFile, a *Artifact) []OfflineAudioTrack {
 	if file == nil || a == nil || a.TrackRecipeVersion == "" {
 		return nil
 	}
 	plan := playback.PlanPreparedTracks(file, a.CodecAudio, a.AudioTrackIndex)
-	tracks := toOfflineAudioTracks(file.AudioTracks)
+	source := toOfflineAudioTracks(file.AudioTracks)
+	tracks := make([]OfflineAudioTrack, 0, len(plan.Audio))
 	channels, bitrateKbps := playback.ResolveAACOutputV3(0, 0)
-	for i, track := range plan.Audio {
-		tracks[i].Default = track.Default
-		if track.Codec == playback.PreparedAudioAAC {
-			tracks[i].Codec = playback.PreparedAudioAAC
-			tracks[i].Channels = channels
-			tracks[i].Layout = preparedAudioLayoutStereo
-			tracks[i].Bitrate = bitrateKbps
+	for i, planned := range plan.Audio {
+		track := source[planned.SourceIndex]
+		track.Index = i
+		track.Default = planned.Default
+		if planned.Codec == playback.PreparedAudioAAC {
+			track.Codec = playback.PreparedAudioAAC
+			track.Channels = channels
+			track.Layout = preparedAudioLayoutStereo
+			track.Bitrate = bitrateKbps
 		}
+		tracks = append(tracks, track)
 	}
 	return tracks
 }
@@ -403,9 +448,18 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 
 	if file != nil {
 		for i, ext := range file.ExternalSubtitles {
+			// The revision follows the delivered bytes: the file on disk and
+			// its timing correction. An unreadable sidecar is still listed;
+			// fetching it reports the error.
 			var size int64
-			if info, statErr := os.Stat(ext.Path); statErr == nil {
-				size = info.Size()
+			var revision string
+			if data, err := playback.LoadExternalSubtitleRaw(ext.Path); err == nil {
+				timed, rev, timingErr := subtitles.ExternalDelivery(ctx, b.externalTimings, file.ID, subtitles.SubtitleFormat(strings.ToLower(ext.Format)), data)
+				if timingErr != nil {
+					slog.WarnContext(ctx, "download sidecar timing lookup failed", "file_id", file.ID, "error", timingErr)
+				} else {
+					size, revision = int64(len(timed)), rev
+				}
 			}
 			out = append(out, OfflineSubtitle{
 				Language:        ext.Language,
@@ -416,6 +470,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 				External:        true,
 				FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("external:%d", i)),
 				FileSize:        size,
+				Revision:        revision,
 			})
 		}
 		if prepared != nil && prepared.TrackRecipeVersion != "" {

@@ -93,7 +93,10 @@ node create one account:
    `access_denied`).
 
 Linking by any path turns the account's local password sign-in off unless it
-is a break-glass account.
+is a break-glass account or the identity is a network identity. The OIDC or
+LDAP provider then answers for the account, so a password must not outlive
+the provider's removal of the person. A network identity keeps the password
+and gates it instead ([Network identity](#network-identity)).
 
 ## Role sync
 
@@ -174,7 +177,9 @@ sign-in with a new session after its credentials were retired.
 Jellyfin's `password#PIN` convention (a profile PIN after the last `#`)
 applies to local accounts only: a name routed to the directory gets one
 attempt with the password as typed, so a PIN is never sent to the directory
-and a failed Jellyfin sign-in counts once toward its lockout. A Jellyfin
+and a failed Jellyfin sign-in counts once toward its lockout. The PIN part
+counts toward the profile's PIN lockout shared with `verifyProfilePIN` (see
+[Profile PINs](../auth-api.md#profile-pins)). A Jellyfin
 sign-in refused by the sign-in policy (`local_login_disabled`,
 `not_permitted`, `email_in_use`, `identity_linked_elsewhere`, an expired
 directory password) answers 401 `InvalidUsernameOrPassword` with the reason
@@ -535,7 +540,26 @@ the SDK's `NetworkIdentityAuth`.
   `POST /account/identities/link-network`) works like directory linking: the
   account re-enters its local password, then the peer's identity is linked as
   a linking flow. The owner of an existing account uses it, because a first
-  network sign-in would otherwise meet `email_in_use`.
+  network sign-in would otherwise meet `email_in_use`. Unlike directory
+  linking, the account keeps its local password sign-in and its open local
+  sessions stay local: the password still works where the overlay does not
+  reach (a public URL, Jellyfin-compatible apps). An account that network
+  sign-in created has no usable password until an administrator sets one.
+- **The overlay still gates the password.** While an enabled network
+  provider's latest answer about the account's identity is a refusal
+  (`networkRefused`, `pending_refusal` included), every password surface
+  refuses the account with `not_permitted`, after checking the password;
+  break-glass accounts are exempt. The refusal itself ends every session and
+  API key of the account, as for any provider that answers for it. The block
+  lifts only when the provider vouches again, at a network sign-in or an
+  active re-check: an unavailable or unsupported answer keeps a refusal on
+  record as the identity's status (`recordIdentityCheck`);
+  the scheduled pass re-checks the network identity of an account with local
+  password sign-in on even when it holds no credential to bound, so a person
+  removed from the overlay is found and one added back is let in. It is not
+  the account's disabled flag, which stays the administrator's. To let a
+  person keep only their password, unlink the network identity; turning the
+  network provider off also lifts every block.
 - **Re-check** is the ordinary provider re-check: the plugin answers
   `CheckAccount` from its own view of the overlay (Tailscale: the person
   still has an untagged device in the node's peer list, and still holds a

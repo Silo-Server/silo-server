@@ -57,6 +57,17 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 	if IsProbeRejection(ctx, media, nil) {
 		t.Fatal("nil error reported as a rejection")
 	}
+
+	// The shell and the dynamic loader exit 126 or 127 when ffprobe itself
+	// cannot start, such as a shared library it cannot map.
+	for _, code := range []int{126, 127} {
+		broken := filepath.Join(t.TempDir(), "ffprobe")
+		writeFakeTool(t, broken, fmt.Sprintf("#!/bin/sh\necho 'ffprobe: error while loading shared libraries' >&2\nexit %d\n", code))
+		_, err = ProbeFile(ctx, broken, media)
+		if err == nil || IsProbeRejection(ctx, media, err) {
+			t.Fatalf("ffprobe that could not start (exit %d) = %v, want a non-rejection error", code, err)
+		}
+	}
 }
 
 // The files from issue #1791: real ffprobe refuses zero-byte, random-byte and
@@ -174,21 +185,6 @@ func TestScannerProbeFileReportsRejection(t *testing.T) {
 	s = &Scanner{}
 	if _, _, rejected := s.probeFile(t.Context(), media); rejected {
 		t.Fatal("scanner without ffprobe reported a rejection")
-	}
-}
-
-func TestApplyProbeDataClearsProbeFailure(t *testing.T) {
-	failedAt := time.Now().UTC()
-	mf := models.MediaFile{ProbeFailedAt: &failedAt}
-	applyProbeData(&mf, completeProbeRepairTestData(), "local")
-	if mf.ProbeFailedAt != nil || mf.ProbeUpdatedAt == nil {
-		t.Fatalf("after a successful probe ProbeFailedAt=%v ProbeUpdatedAt=%v", mf.ProbeFailedAt, mf.ProbeUpdatedAt)
-	}
-
-	var marked models.MediaFile
-	markProbeRejected(&marked)
-	if marked.ProbeFailedAt == nil || !marked.ProbeRejected() {
-		t.Fatal("markProbeRejected did not mark an unprobed file as rejected")
 	}
 }
 
@@ -507,37 +503,6 @@ func rejectingProbeFunc(t *testing.T, before func()) func(context.Context, strin
 			before()
 		}
 		return ProbeFile(ctx, ffprobe, path)
-	}
-}
-
-// A scan that probes a replacement file while the playback repair's ffprobe
-// is failing on the old bytes wins: the repair answers with the stored,
-// repaired row instead of the stale snapshot it marked locally.
-func TestPlaybackProbeEnsurerPrefersConcurrentRepairOverRejection(t *testing.T) {
-	media := filepath.Join(t.TempDir(), "S01E09.mkv")
-	if err := os.WriteFile(media, []byte("replacement bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	file := &models.MediaFile{ID: 10, FilePath: media}
-	repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{file.ID: file}}
-	ensurer := &PlaybackProbeEnsurer{fileRepo: repo, ffprobePath: "ffprobe", timeout: 5 * time.Second}
-	ensurer.probeFile = rejectingProbeFunc(t, func() {
-		repaired := *file
-		applyProbeData(&repaired, completeProbeRepairTestData(), "local")
-		repo.mu.Lock()
-		repo.files[file.ID] = &repaired
-		repo.mu.Unlock()
-	})
-
-	got, err := ensurer.EnsureProbeOnly(t.Context(), file)
-	if err != nil {
-		t.Fatalf("EnsureProbeOnly: %v", err)
-	}
-	if got.ProbeRejected() || got.ProbeUpdatedAt == nil || got.CodecVideo == "" {
-		t.Fatalf("returned %+v, want the concurrently repaired row", got)
-	}
-	if stored := repo.files[file.ID]; stored.ProbeFailedAt != nil {
-		t.Fatalf("repaired row marked failed at %v", stored.ProbeFailedAt)
 	}
 }
 

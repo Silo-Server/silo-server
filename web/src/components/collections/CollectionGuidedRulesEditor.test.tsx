@@ -399,16 +399,9 @@ describe("CollectionGuidedRulesEditor original language field", () => {
       />,
     );
 
+    expect(markup).toContain("Media Type");
     expect(markup).toContain("Original Language");
     expect(markup).toContain("English");
-  });
-
-  it("renders the media type control", () => {
-    const markup = renderToStaticMarkup(
-      <CollectionGuidedRulesEditor value={createEmptyQueryDefinition()} onChange={() => {}} />,
-    );
-
-    expect(markup).toContain("Media Type");
   });
 
   it("renders ebook book-native filters without audiobook narrator or video-only filters", () => {

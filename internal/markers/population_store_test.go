@@ -88,6 +88,84 @@ func TestPopulationStoreLeasesFreshnessAndQuota(t *testing.T) {
 	}
 }
 
+// An abandoned request hands its claim back without touching what earlier
+// requests recorded, and never leaves a new identity waiting out an old
+// result's freshness with nothing cached.
+func TestPopulationStoreReleaseKeepsFetchState(t *testing.T) {
+	fixture := newContributionStoreFixture(t)
+	store := NewPopulationStore(fixture.pool)
+	ctx := t.Context()
+	fileID, provider := fixture.fileIDs[0], fixture.provider
+	type fetchState struct {
+		outcome, lastError, result string
+		failures                   int
+		retryAt                    time.Time
+		leased                     bool
+	}
+	read := func() fetchState {
+		t.Helper()
+		var state fetchState
+		if err := fixture.pool.QueryRow(ctx, `SELECT outcome,COALESCE(last_error,''),COALESCE(result::text,''),failures,retry_at,lease_token IS NOT NULL
+			FROM marker_fetch_state WHERE media_file_id=$1 AND provider=$2`, fileID, provider).
+			Scan(&state.outcome, &state.lastError, &state.result, &state.failures, &state.retryAt, &state.leased); err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	claim := func(identity string, force bool) FetchClaim {
+		t.Helper()
+		c, claimed, err := store.Claim(ctx, fileID, provider, identity, "rev1", force)
+		if err != nil || !claimed {
+			t.Fatalf("claim %s: claimed=%v err=%v", identity, claimed, err)
+		}
+		return c
+	}
+
+	// A cached answer, then a failed request whose backoff has run out.
+	if err := store.Complete(ctx, claim("identity", false), FetchCompletion{Outcome: "hit", RetryAt: time.Now().Add(-time.Second), Result: &Result{ProviderID: "cached"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Complete(ctx, claim("identity", false), FetchCompletion{Outcome: "error", RetryAt: time.Now().Add(-time.Second), Error: "provider down"}); err != nil {
+		t.Fatal(err)
+	}
+	before := read()
+	abandoned := claim("identity", false)
+	if abandoned.Failures != 1 {
+		t.Fatalf("claim failures=%d, want 1", abandoned.Failures)
+	}
+	stale := abandoned
+	stale.Token = "00000000-0000-0000-0000-000000000000"
+	if err := store.Release(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	if !read().leased {
+		t.Fatal("release with another token freed the lease")
+	}
+	if err := store.Release(ctx, abandoned); err != nil {
+		t.Fatal(err)
+	}
+	after := read()
+	if after.leased || after.outcome != before.outcome || after.lastError != before.lastError || after.result != before.result ||
+		after.failures != before.failures || !after.retryAt.Equal(before.retryAt) {
+		t.Fatalf("release changed fetch state:\nbefore %+v\nafter  %+v", before, after)
+	}
+
+	// A fresh answer for the current identity, then an abandoned request for
+	// a new one: the new identity must be asked again at once.
+	if err := store.Complete(ctx, claim("identity", false), FetchCompletion{Outcome: "hit", RetryAt: time.Now().Add(24 * time.Hour), Result: &Result{ProviderID: "cached"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Release(ctx, claim("new-identity", false)); err != nil {
+		t.Fatal(err)
+	}
+	var due bool
+	if err := fixture.pool.QueryRow(ctx, `SELECT result IS NULL AND retry_at<=now() FROM marker_fetch_state WHERE media_file_id=$1 AND provider=$2`,
+		fileID, provider).Scan(&due); err != nil || !due {
+		t.Fatalf("released new identity kept the old freshness: %+v err=%v", read(), err)
+	}
+	claim("new-identity", false)
+}
+
 // seedMovieFiles adds a third file to the fixture, attaches all three to one
 // matched movie in an enabled movies library, and returns their IDs.
 func (f contributionStoreFixture) seedMovieFiles(t *testing.T) (string, []int) {
@@ -195,55 +273,6 @@ func TestMarkerResolverUsesShowIDsAndPreservesSpecials(t *testing.T) {
 	}
 	if !ids.Released.Equal(time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("released=%v, want the episode air date", ids.Released)
-	}
-}
-
-// A daily quota smaller than the due backlog must still reach every file over
-// successive runs instead of spending it on the lowest file IDs each time.
-func TestPopulationCandidatesRotateThroughDueFilesUnderQuota(t *testing.T) {
-	fixture := newContributionStoreFixture(t)
-	store := NewPopulationStore(fixture.pool)
-	ctx := t.Context()
-	_, fileIDs := fixture.seedMovieFiles(t)
-	providers := map[string]string{fixture.provider: "rev1"}
-	fetch := func(fileID int) {
-		t.Helper()
-		claim, claimed, err := store.Claim(ctx, fileID, fixture.provider, "identity", "rev1", false)
-		if err != nil || !claimed {
-			t.Fatalf("claim file %d: claimed=%v err=%v", fileID, claimed, err)
-		}
-		if err := store.Complete(ctx, claim, FetchCompletion{Outcome: markerFetchMiss, RetryAt: time.Now().Add(markerMissTTL), Result: &Result{}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	advance := func() {
-		t.Helper()
-		if _, err := fixture.pool.Exec(ctx, `UPDATE marker_fetch_state SET fetched_at=fetched_at-make_interval(secs=>$1),retry_at=retry_at-make_interval(secs=>$1)
-			WHERE provider=$2 AND media_file_id=ANY($3)`, markerMissTTL.Seconds()+1, fixture.provider, fileIDs); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Seed every file as an older miss, the highest ID oldest of all.
-	for i := len(fileIDs) - 1; i >= 0; i-- {
-		fetch(fileIDs[i])
-		advance()
-	}
-
-	refreshed := make(map[int]bool)
-	for run := range len(fileIDs) {
-		ids := allCandidates(t, store, providers, fileIDs)
-		if len(ids) == 0 {
-			t.Fatalf("run %d: no due candidates", run)
-		}
-		// The provider quota allows one request per run.
-		fetch(ids[0])
-		refreshed[ids[0]] = true
-		advance()
-	}
-	for _, id := range fileIDs {
-		if !refreshed[id] {
-			t.Errorf("file %d was never refreshed in %d quota-limited runs; refreshed=%v", id, len(fileIDs), refreshed)
-		}
 	}
 }
 

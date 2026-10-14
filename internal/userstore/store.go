@@ -137,10 +137,11 @@ type UserStore interface {
 	UpsertHomeDismissal(ctx context.Context, dismissal HomeItemDismissal) error
 	DeleteHomeDismissal(ctx context.Context, profileID, surface, mediaItemID string) error
 
-	// Favorites & Watchlist
-	AddFavorite(ctx context.Context, profileID, mediaItemID string) error
+	// Favorites & Watchlist. Each add and remove reports whether it changed
+	// a row: false for an item already on the list or already absent.
+	AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
-	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	ListFavorites(ctx context.Context, profileID string, limit, offset int) ([]Favorite, error)
 	// ListFavoritesPage is the keyset form of ListFavorites: ordered by
 	// (added_at DESC, media_item_id DESC), returning at most limit rows
@@ -151,9 +152,9 @@ type UserStore interface {
 	// GetFavorite answers the profile's favorite entry for the item, nil when
 	// the item is not a favorite.
 	GetFavorite(ctx context.Context, profileID, mediaItemID string) (*Favorite, error)
-	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
-	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	// ReplaceWatchlistOrder mirrors a provider's watchlist order: the given ids
 	// get sort_index 0..N-1 in order; all other rows reset to added_at ordering.
 	ReplaceWatchlistOrder(ctx context.Context, profileID string, orderedMediaItemIDs []string) error
@@ -185,9 +186,9 @@ type UserStore interface {
 	ListCollectionItems(ctx context.Context, collectionID string) ([]CollectionItem, error)
 	ReplaceCollectionItems(ctx context.Context, collectionID string, items []CollectionItemReplacement) error
 	ReorderCollectionItems(ctx context.Context, collectionID string, orderedMediaItemIDs []string) error
-	// ReorderCollections scopes to the supplied group_id. A nil groupID means
-	// the implicit Ungrouped bucket.
-	ReorderCollections(ctx context.Context, profileID string, groupID *string, orderedIDs []string) error
+	// ReorderCollections replaces profileID's order of its own collections;
+	// orderedIDs must name each of them exactly once.
+	ReorderCollections(ctx context.Context, profileID string, orderedIDs []string) error
 	UpdateCollectionSyncState(ctx context.Context, input UpdateCollectionSyncStateInput) error
 	ListCollectionGroups(ctx context.Context) ([]CollectionGroup, error)
 	EnsureCollectionGroup(ctx context.Context, id string) error

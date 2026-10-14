@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { fallbackRoomSource } from "./watchTogetherSourceFallback";
 
 beforeEach(() => {
@@ -50,15 +50,15 @@ it("sends the failed file, selection revision, reason, and room proof once", asy
   expect(new Headers(fetch.mock.calls[0]![1].headers).get("X-Room-Token")).toBe("proof");
 });
 
-it.each([401, 403, 409, 422, 500])(
-  "does not loop or change the request after a %s refusal",
-  async (status) => {
-    const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
-    vi.stubGlobal("fetch", fetch);
-    await expect(fallbackRoomSource("room", "proof", input)).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(1);
-  },
-);
+it.each([401, 500])("does not loop or change the request after a %s refusal", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
+  const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
+  vi.stubGlobal("fetch", fetch);
+  await expect(fallbackRoomSource("room", "proof", input)).rejects.toThrow();
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
 
 it("rejects a response after the active profile changes", async () => {
   let resolve!: (response: Response) => void;

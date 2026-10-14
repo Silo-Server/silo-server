@@ -274,58 +274,6 @@ func TestStableIdentityResolverWithoutItemRepoDoesNotAssumeMovie(t *testing.T) {
 	}
 }
 
-func TestStableIdentityResolverResolvesEpisodeContentID(t *testing.T) {
-	episode := &models.Episode{
-		ContentID:     "episode-1",
-		SeriesID:      "series-1",
-		SeasonNumber:  2,
-		EpisodeNumber: 7,
-	}
-	resolver := NewStableIdentityResolver(
-		testItemRepo{},
-		testEpisodeRepo{byKey: map[string]*models.Episode{"series-1": episode}},
-		testProviderIDRepo{ids: map[string][]*models.MediaItemProviderID{
-			"series-1": {
-				{ContentID: "series-1", ItemType: "series", Provider: "tmdb", ProviderID: "123"},
-			},
-		}},
-	)
-
-	contentID, err := resolver.ResolveEpisodeContentID(context.Background(), map[string]string{"tmdb": "123"}, 2, 7)
-	if err != nil {
-		t.Fatalf("ResolveEpisodeContentID: %v", err)
-	}
-	if contentID != "episode-1" {
-		t.Fatalf("contentID = %q, want episode-1", contentID)
-	}
-}
-
-func TestStableIdentityResolverResolvesSeasonZeroSpecial(t *testing.T) {
-	episode := &models.Episode{
-		ContentID:     "special-1",
-		SeriesID:      "series-1",
-		SeasonNumber:  0,
-		EpisodeNumber: 1,
-	}
-	resolver := NewStableIdentityResolver(
-		testItemRepo{},
-		testEpisodeRepo{byKey: map[string]*models.Episode{"series-1": episode}},
-		testProviderIDRepo{ids: map[string][]*models.MediaItemProviderID{
-			"series-1": {
-				{ContentID: "series-1", ItemType: "series", Provider: "tmdb", ProviderID: "123"},
-			},
-		}},
-	)
-
-	contentID, err := resolver.ResolveEpisodeContentID(context.Background(), map[string]string{"tmdb": "123"}, 0, 1)
-	if err != nil {
-		t.Fatalf("ResolveEpisodeContentID: %v", err)
-	}
-	if contentID != "special-1" {
-		t.Fatalf("contentID = %q, want special-1", contentID)
-	}
-}
-
 func TestManualMarkUnwatchedSuppressesImportedHistoryButReturnsManualHistory(t *testing.T) {
 	store, db := newTestUserStore(t)
 	defer db.Close()

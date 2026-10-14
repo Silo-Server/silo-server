@@ -46,7 +46,7 @@ func TestPluginContentDynamicRegistration(t *testing.T) {
 			t.Fatal(rec.Code, rec.Header())
 		}
 	}
-	data, err := GenerateOpenAPI()
+	data, err := generatedOpenAPIBytes()
 	if err != nil {
 		t.Fatal(err)
 	}

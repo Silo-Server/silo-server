@@ -5,9 +5,7 @@ import {
   groupForDeviceSetting,
   hiddenDeviceSettingKeys,
   manifestPlatformFor,
-  settingAppliesToPlatform,
 } from "@/lib/deviceSettingGroups";
-import type { SettingKey } from "@/lib/settingsContract";
 import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
 
 describe("deviceSettingGroups", () => {
@@ -30,44 +28,9 @@ describe("deviceSettingGroups", () => {
     expect(duplicated).toEqual([]);
   });
 
-  it("puts each setting where someone would look for it", () => {
-    expect(groupForDeviceSetting("player.hdr_enabled")).toBe("picture");
-    expect(groupForDeviceSetting("player.audio_sync_ms")).toBe("sound");
-    expect(groupForDeviceSetting("playback.audio_language")).toBe("sound");
-    expect(groupForDeviceSetting("playback.subtitle_mode")).toBe("subtitles");
-    expect(groupForDeviceSetting("player.subtitle_sync_ms")).toBe("subtitles");
-    expect(groupForDeviceSetting("playback.auto_play_next")).toBe("episodes");
-  });
-
   it("keeps appearance settings off the device screen", () => {
     expect(groupForDeviceSetting("ui.theme")).toBeNull();
     expect(groupForDeviceSetting("ui.library_page_state")).toBeNull();
-  });
-
-  it("shows only the three-way intro mode while the compatibility mirror is live", () => {
-    expect(groupForDeviceSetting("playback.intro_skip_mode")).toBe("episodes");
-    expect(groupForDeviceSetting("playback.auto_skip_intro")).toBeNull();
-  });
-
-  // A server older than revision 7 cannot store the enum, so the deprecated
-  // boolean is the only intro control it has — and the only way to see or clear
-  // an override already stored on the device.
-  it("keeps the legacy intro switch on a server without the replacement key", () => {
-    const legacyKeys: SettingKey[] = ["playback.auto_skip_intro", "playback.auto_play_next"];
-    expect(groupForDeviceSetting("playback.auto_skip_intro", legacyKeys)).toBe("episodes");
-    expect(hiddenDeviceSettingKeys(legacyKeys)).not.toContain("playback.auto_skip_intro");
-
-    const keys = groupDeviceSettings(legacyKeys).flatMap((group) => group.keys);
-    expect(keys).toContain("playback.auto_skip_intro");
-  });
-
-  it("drops the legacy intro switch once the server offers the replacement", () => {
-    const modernKeys: SettingKey[] = ["playback.auto_skip_intro", "playback.intro_skip_mode"];
-    expect(groupForDeviceSetting("playback.auto_skip_intro", modernKeys)).toBeNull();
-    expect(hiddenDeviceSettingKeys(modernKeys)).toContain("playback.auto_skip_intro");
-
-    const keys = groupDeviceSettings(modernKeys).flatMap((group) => group.keys);
-    expect(keys).toEqual(["playback.intro_skip_mode"]);
   });
 
   it("returns groups in reading order and omits empty ones", () => {
@@ -91,34 +54,44 @@ describe("deviceSettingGroups", () => {
     expect(manifestPlatformFor(undefined)).toBeNull();
   });
 
-  it("hides settings the manifest marks as not applying to the device", () => {
-    // Screen orientation is ios/android only; audio sync is native-only.
-    expect(settingAppliesToPlatform("player.orientation_mode", "web")).toBe(false);
-    expect(settingAppliesToPlatform("player.orientation_mode", "ios")).toBe(true);
-    expect(settingAppliesToPlatform("player.audio_sync_ms", "web")).toBe(false);
-    expect(settingAppliesToPlatform("player.audio_sync_ms", "tvos")).toBe(true);
-    // An untagged setting is expected everywhere.
-    expect(settingAppliesToPlatform("playback.subtitle_mode", "web")).toBe(true);
-    // An unrecognized platform hides nothing.
-    expect(settingAppliesToPlatform("player.orientation_mode", null)).toBe(true);
+  // The web player never reads these: speed is set in the player per session,
+  // subtitle timing has no offset control, and HDR comes from what the browser
+  // reports it can display. Offering them for a browser saves a value that
+  // changes nothing.
+  const NATIVE_ONLY_PLAYER_KEYS = [
+    "player.playback_speed",
+    "player.subtitle_sync_ms",
+    "player.hdr_enabled",
+    "player.audio_sync_ms",
+  ] as const;
 
-    const keys = groupDeviceSettings(undefined, { devicePlatform: "macOS Web" }).flatMap(
-      (group) => group.keys,
-    );
-    expect(keys).not.toContain("player.orientation_mode");
-    expect(keys).not.toContain("player.match_frame_rate");
-    expect(keys).not.toContain("player.audio_sync_ms");
-    expect(keys).toContain("playback.subtitle_mode");
-  });
+  function shownKeys(devicePlatform: string, stored: string[] = []) {
+    return groupDeviceSettings(undefined, {
+      devicePlatform,
+      keysWithStoredValues: new Set(stored),
+    }).flatMap((group) => group.keys as string[]);
+  }
 
-  // A stale override on a now-inapplicable setting must stay visible, or it
-  // can never be cleared from this screen.
-  it("keeps a platform-hidden setting visible while the device stores a value", () => {
-    const keys = groupDeviceSettings(undefined, {
-      devicePlatform: "macOS Web",
-      keysWithStoredValues: new Set(["player.audio_sync_ms"]),
-    }).flatMap((group) => group.keys);
-    expect(keys).toContain("player.audio_sync_ms");
-    expect(keys).not.toContain("player.orientation_mode");
+  it.each(["Windows Web", "macOS Web", "iOS Web", "Android Web", "Linux Web", "Web"])(
+    "does not offer player settings the web player ignores on %s",
+    (platform) => {
+      const shown = shownKeys(platform);
+      for (const key of NATIVE_ONLY_PLAYER_KEYS) expect(shown).not.toContain(key);
+      // Settings the web player does honour stay.
+      expect(shown).toContain("playback.audio_language");
+      expect(shown).toContain("playback.auto_play_next");
+    },
+  );
+
+  it.each(["tvOS", "iOS", "iPadOS", "macOS", "android", "android-tv"])(
+    "still offers them on the native %s app",
+    (platform) => {
+      const shown = shownKeys(platform);
+      for (const key of NATIVE_ONLY_PLAYER_KEYS) expect(shown).toContain(key);
+    },
+  );
+
+  it("keeps a value a browser already stores visible so it can be cleared", () => {
+    expect(shownKeys("Windows Web", ["player.playback_speed"])).toContain("player.playback_speed");
   });
 });

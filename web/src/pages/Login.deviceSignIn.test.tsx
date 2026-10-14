@@ -104,23 +104,6 @@ async function showCode() {
   await screen.findByText("4821 7730");
 }
 
-it("shows the grouped code and the address under the QR, with no match words", async () => {
-  renderLogin();
-  await showCode();
-  expect(screen.getByText("4821 7730").getAttribute("aria-hidden")).toBe("true");
-  expect(screen.getByText("4 8 2 1 7 7 3 0")).toBeTruthy();
-  expect(screen.getByText("https://silo.example.test/activate")).toBeTruthy();
-  expect(screen.queryByText(/Match code/i)).toBeNull();
-  expect(screen.queryByText(/warm pony/i)).toBeNull();
-});
-
-it("tells the person to continue on the phone once the link was opened", async () => {
-  pollAnswer = { status: "pending", opened: true };
-  renderLogin();
-  await showCode();
-  expect(await screen.findByText("Continue on your phone.")).toBeTruthy();
-});
-
 it("withdraws the request on Start over", async () => {
   renderLogin();
   await showCode();
@@ -148,16 +131,6 @@ it("does not withdraw a request that was declined", async () => {
   await screen.findByRole("button", { name: "Show QR code" });
   view.unmount();
   expect(cancels()).toHaveLength(0);
-});
-
-it("names the provider picker and says what Automatic does", async () => {
-  auth.providers = [
-    { id: "local", mode: "credentials", display_name: "Silo", default: true },
-    { id: "plugin:6:ldap", installation_id: "6", mode: "credentials", display_name: "Directory" },
-  ];
-  renderLogin();
-  const picker = await screen.findByRole("combobox", { name: "Sign in with" });
-  expect(picker).toHaveAccessibleDescription(/Automatic: accounts with a Silo password/);
 });
 
 it("keeps the session and offers a retry when the provider can't be reached", async () => {

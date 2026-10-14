@@ -142,11 +142,11 @@ func TestRawRejectsUndocumentedAndJSONPorts(t *testing.T) {
 					t.Fatal("invalid raw registration accepted")
 				}
 			}()
-			NewHandler(Dependencies{testRegister: func(reg *Registry) {
+			registerTestOperations(func(reg *Registry) {
 				r := rawFixture(http.MethodGet, ClassPublic)
 				change(&r)
 				RegisterRaw(reg, r, http.NotFoundHandler())
-			}})
+			})
 		})
 	}
 }

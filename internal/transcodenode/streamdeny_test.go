@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -30,7 +31,7 @@ func unreachableStreamDeny(t *testing.T) *playback.StreamDeny {
 func nodeRequest(t *testing.T, server *Server, method, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
-	req.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, req, testSecret)
 	if token != "" {
 		req.Header.Set("X-Silo-Stream-Token", token)
 	}

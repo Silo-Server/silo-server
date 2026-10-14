@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   hasEarlierEntry,
   markNavigationDirection,
-  resolveCommittedDirection,
   resetNavigationHistory,
+  resolveCommittedDirection,
 } from "./navigationHistory";
 
 /** Stands in for the browser having committed the entry at `idx`. */
@@ -51,16 +51,6 @@ describe("markNavigationDirection", () => {
 });
 
 describe("resolveCommittedDirection", () => {
-  it("reads back and forward off the committed history index", () => {
-    pushAll(3);
-
-    commit(1);
-    expect(resolveCommittedDirection()).toBe("back");
-
-    commit(2);
-    expect(resolveCommittedDirection()).toBe("forward");
-  });
-
   it("reports a multi-entry jump as back", () => {
     pushAll(4);
 

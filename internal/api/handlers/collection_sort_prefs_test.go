@@ -355,18 +355,3 @@ func TestNormalizeCollectionSortConfigForCreators(t *testing.T) {
 		})
 	}
 }
-
-func TestNormalizeCollectionSortConfigPreservesManualPinsAcrossUpdates(t *testing.T) {
-	const manualPins = `{"mode":"manual_pins"}`
-	created, err := NormalizeCollectionSortConfig(json.RawMessage(manualPins), false)
-	if err != nil {
-		t.Fatalf("normalize on create: %v", err)
-	}
-	updated, err := NormalizeCollectionSortConfig(json.RawMessage(created), false)
-	if err != nil {
-		t.Fatalf("normalize on update: %v", err)
-	}
-	if updated != manualPins {
-		t.Fatalf("manual pins config changed across create/read/update: got %s, want %s", updated, manualPins)
-	}
-}

@@ -232,6 +232,7 @@ func TestCopySafetyNotifierIgnoresNonCopyRoutes(t *testing.T) {
 	}}
 	notifier := NewCopySafetyNotifier(sessions, attempts, NewCommandDispatcher(sessions, hub, tracker), control)
 
+	notifier.settle = 0
 	notifier.VideoCopyUnsafe(context.Background(), 100)
 
 	if stopped := control.stoppedSessions(); len(stopped) != 0 {

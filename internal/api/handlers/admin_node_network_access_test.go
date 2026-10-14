@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
@@ -40,7 +41,7 @@ func (f *fakeProxyNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, r.Method+" "+r.URL.Path)
-	if r.Header.Get("Authorization") != "Bearer "+f.secret {
+	if !nodeauthtest.Signed(r, f.secret) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -131,11 +132,11 @@ func TestNodeHandlerFansNetworkAccessOutToProxies(t *testing.T) {
 		t.Fatalf("proxy calls = %v, want %v", calls, want)
 	}
 
-	// A wrong node secret is reported as the proxy refusing the bearer, not as
-	// an unknown provider.
+	// A wrong node secret is reported as the proxy refusing the signed
+	// request, not as an unknown provider.
 	wrong := NewNodeHandler(repo, nil, nil, nil, nil, nil, "other-secret")
-	if _, err := wrong.NodeNetworkAccessStatus(ctx, node, "stub"); err == nil || errors.Is(err, plugins.ErrNetworkAccessProviderNotFound) || !strings.Contains(err.Error(), "bearer") {
-		t.Fatalf("wrong bearer err = %v", err)
+	if _, err := wrong.NodeNetworkAccessStatus(ctx, node, "stub"); err == nil || errors.Is(err, plugins.ErrNetworkAccessProviderNotFound) || !strings.Contains(err.Error(), "refused the signed request") {
+		t.Fatalf("wrong secret err = %v", err)
 	}
 
 	// An unreachable proxy is an error the service turns into unavailable.

@@ -154,7 +154,7 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	}
 	raceEditorWrites(t, func() error {
 		edit := *row
-		edit.APIKeyRef = ""
+		edit.APIKeyRef = "   "
 		_, err := repo.UpdateIntegrationConditional(ctx, edit, row.Revision)
 		return err
 	}, 1)
@@ -169,6 +169,14 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	var stored string
 	if err = repo.pool.QueryRow(ctx, `SELECT api_key_ref FROM request_integrations WHERE id=$1`, in.ID).Scan(&stored); err != nil || stored == in.APIKeyRef {
 		t.Fatalf("key not encrypted: %v", err)
+	}
+	// Startup backfill uses this table and column binding independently.
+	plaintext, err := repo.cipher.Decrypt(stored, secret.RowAAD("request_integrations", "api_key_ref", in.ID))
+	if err != nil || plaintext != in.APIKeyRef {
+		t.Fatalf("stored key under backfill AAD = %q, %v", plaintext, err)
+	}
+	if _, err := repo.cipher.Decrypt(stored, apiKeyAAD(other.ID)); err == nil {
+		t.Fatal("stored key decrypted with another row's AAD")
 	}
 	router := &fakeRouterProvider{}
 	service := NewService(repo, nil, nil)
@@ -198,6 +206,12 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	}
 	if err = repo.DeleteIntegrationConditional(ctx, in.ID, current.Revision); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("live target protection: %v", err)
+	}
+	if _, err = repo.pool.Exec(ctx, `UPDATE media_request_targets SET status='downloading'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.DeleteIntegrationConditional(ctx, in.ID, current.Revision); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("downloading target protection: %v", err)
 	}
 	if _, err = repo.pool.Exec(ctx, `DELETE FROM media_request_targets`); err != nil {
 		t.Fatal(err)

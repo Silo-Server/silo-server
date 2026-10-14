@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
 import type { PluginAdminForm } from "@/api/types";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { SchemaForm } from "./SchemaForm";
 
 const descriptor: PluginAdminForm = {
@@ -64,10 +64,6 @@ describe("SchemaForm", () => {
   it("shows a field whose show_when is met", () => {
     renderForm({ service_kind: "sonarr" });
     expect(screen.getByText("Season folder")).toBeTruthy();
-  });
-  it("renders dynamic options for a dynamic_options select", () => {
-    renderForm({}, { dynamicOptions: { root_folder: [{ value: "/movies", label: "/movies" }] } });
-    expect(screen.getByText("Root folder")).toBeTruthy();
   });
   it("renders a server field error", () => {
     renderForm({ service_kind: "radarr" }, { errors: { service_kind: "bad service" } });
@@ -146,16 +142,28 @@ describe("SchemaForm", () => {
         onValidityChange={onValidityChange}
       />,
     );
-    expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    expect(onValidityChange).toHaveBeenCalledExactlyOnceWith(false);
+    const replacementCallback = vi.fn();
+    rerender(
+      <SchemaForm
+        descriptor={d}
+        values={{}}
+        onChange={vi.fn()}
+        onValidityChange={replacementCallback}
+      />,
+    );
+    expect(onValidityChange).toHaveBeenCalledTimes(1);
+    expect(replacementCallback).not.toHaveBeenCalled();
     rerender(
       <SchemaForm
         descriptor={d}
         values={{ name: "ok" }}
         onChange={vi.fn()}
-        onValidityChange={onValidityChange}
+        onValidityChange={replacementCallback}
       />,
     );
-    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+    expect(replacementCallback).toHaveBeenCalledExactlyOnceWith(true);
+    expect(onValidityChange).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -256,36 +264,6 @@ describe("SchemaForm collapsible sections", () => {
     expect(screen.getByText("Advanced options")).toBeTruthy();
     expect(screen.getByText("Endpoint")).toBeTruthy();
   });
-});
-
-it("marks a show_when-gated field as nested when it is revealed", () => {
-  const d: PluginAdminForm = {
-    fields: [
-      {
-        key: "service_kind",
-        label: "Service",
-        control: "SELECT",
-        required: false,
-        secret: false,
-        multiline: false,
-        options: [{ value: "sonarr", label: "Sonarr" }],
-      },
-      {
-        key: "series_type",
-        label: "Series type",
-        control: "SELECT",
-        required: false,
-        secret: false,
-        multiline: false,
-        show_when: [{ field: "service_kind", equals: ["sonarr"] }],
-        options: [{ value: "standard", label: "Standard" }],
-      },
-    ],
-  };
-  const { container } = render(
-    <SchemaForm descriptor={d} values={{ service_kind: "sonarr" }} onChange={vi.fn()} />,
-  );
-  expect(container.querySelector('[data-nested="true"]')).not.toBeNull();
 });
 
 describe("SchemaForm host-owned fields", () => {

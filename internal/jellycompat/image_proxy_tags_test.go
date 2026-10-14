@@ -19,6 +19,7 @@ func TestCompatImageProxyTagVariantMiddlewareSuffixesInfuseImageTags(t *testing.
 				SeriesPrimaryImageTag:   "series-tag",
 				ParentBackdropImageTags: []string{"parent-backdrop-tag"},
 				ParentThumbImageTag:     "parent-thumb-tag",
+				ParentLogoImageTag:      "parent-logo-tag",
 				ImageBlurHashes: map[string]map[string]string{
 					"Primary": {"primary-tag": "thumbhash"},
 				},
@@ -61,6 +62,9 @@ func TestCompatImageProxyTagVariantMiddlewareSuffixesInfuseImageTags(t *testing.
 	}
 	if item.ParentThumbImageTag != "parent-thumb-tag-p" {
 		t.Fatalf("parent thumb tag = %q, want parent-thumb-tag-p", item.ParentThumbImageTag)
+	}
+	if item.ParentLogoImageTag != "parent-logo-tag-p" {
+		t.Fatalf("parent logo tag = %q, want parent-logo-tag-p", item.ParentLogoImageTag)
 	}
 	if _, ok := item.ImageBlurHashes["Primary"]["primary-tag-p"]; !ok {
 		t.Fatalf("blurhash keys = %#v, want suffixed primary tag", item.ImageBlurHashes["Primary"])

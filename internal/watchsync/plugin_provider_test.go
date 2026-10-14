@@ -270,8 +270,38 @@ func TestPluginProviderValidatesAndOverlaysConnectionConfig(t *testing.T) {
 	if len(views) != 1 || views[0].AdminForm == nil || views[0].AdminForm.Fields[0].Control != "TEXT" {
 		t.Fatalf("connection config schema = %#v", views)
 	}
-	if _, _, err := provider.ConnectWithAPIKeyConfig(context.Background(), "token", nil); err == nil || !strings.Contains(err.Error(), "required") {
-		t.Fatalf("missing config error = %v", err)
+	_, _, err = provider.ConnectWithAPIKeyConfig(context.Background(), "token", nil)
+	if invalid, ok := errors.AsType[InvalidConnectionInputError](err); !ok || !strings.Contains(invalid.Message, "required") {
+		t.Fatalf("missing config error = %#v", err)
+	}
+}
+
+// A connect fault that means the supplied input can't work becomes
+// InvalidConnectionInputError with the plugin's redacted safe message; other
+// faults keep their classification.
+func TestPluginProviderClassifiesConnectFaults(t *testing.T) {
+	for _, tc := range []struct {
+		code         pluginv1.WatchSyncFaultCode
+		invalidInput bool
+	}{
+		{pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_REQUEST, true},
+		{pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMANENT, true},
+		{pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL, false},
+		{pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_TEMPORARY, false},
+	} {
+		t.Run(tc.code.String(), func(t *testing.T) {
+			client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{Fault: &pluginv1.WatchSyncFault{
+				Code: tc.code, SafeMessage: "server URL rejected for key input-token",
+			}}}
+			_, _, err := testPluginProvider(t, client).ConnectWithAPIKey(context.Background(), "input-token")
+			invalid, ok := errors.AsType[InvalidConnectionInputError](err)
+			if ok != tc.invalidInput {
+				t.Fatalf("error = %#v, invalid input = %v", err, ok)
+			}
+			if ok && invalid.Message != "server URL rejected for key [REDACTED]" {
+				t.Fatalf("message = %q", invalid.Message)
+			}
+		})
 	}
 }
 
@@ -279,7 +309,7 @@ func TestPluginProviderClassifiesAndRedactsConnectionSecrets(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
 		Fault: &pluginv1.WatchSyncFault{
 			Code:        pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
-			SafeMessage: "credentials " + testSecretValue + " were rejected",
+			SafeMessage: "credentials " + testSecretValue + ", admin-app-key-7Q and nested-admin-key-9Z were rejected",
 		},
 	}}
 	schema := &pluginv1.ConfigSchema{
@@ -307,6 +337,13 @@ func TestPluginProviderClassifiesAndRedactsConnectionSecrets(t *testing.T) {
 		}},
 		ConnectionConfigSchema: []*pluginv1.ConfigSchema{schema},
 		ResolveClient:          func(context.Context, int, string) (WatchSyncPluginClient, error) { return client, nil },
+		ResolveConfig: func(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error) {
+			// An admin secret field holding an object is stored JSON-encoded.
+			return &pluginv1.WatchSyncProviderConfig{SecretValues: map[string]string{
+				"app.client_secret": "admin-app-key-7Q",
+				"app.tokens":        `{"token":"nested-admin-key-9Z"}`,
+			}}, nil
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +365,7 @@ func TestPluginProviderClassifiesAndRedactsConnectionSecrets(t *testing.T) {
 	if _, exposed := config.GetValues()["account.client_secret"]; exposed {
 		t.Fatal("JSON-schema password was exposed as a public provider value")
 	}
-	if strings.Contains(err.Error(), testSecretValue) || !strings.Contains(err.Error(), "[REDACTED]") {
+	if strings.Contains(err.Error(), testSecretValue) || strings.Contains(err.Error(), "admin-app-key-7Q") || strings.Contains(err.Error(), "nested-admin-key-9Z") || !strings.Contains(err.Error(), "[REDACTED]") {
 		t.Fatalf("connection secrets were not redacted: %q", err)
 	}
 }

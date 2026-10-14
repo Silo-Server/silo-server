@@ -2735,16 +2735,10 @@ func (s *Service) VoteWinner(ctx context.Context, roomID string) (Suggestion, er
 	if err != nil {
 		return Suggestion{}, err
 	}
-	return winnerFrom(suggestions)
-}
-
-// winnerFrom picks the winner out of an already-ordered suggestion list. Split
-// out so the rule can be tested without a database.
-func winnerFrom(ordered []Suggestion) (Suggestion, error) {
-	if len(ordered) == 0 || ordered[0].VoteCount <= 0 {
+	if len(suggestions) == 0 || suggestions[0].VoteCount <= 0 {
 		return Suggestion{}, ErrNoVotesCast
 	}
-	return ordered[0], nil
+	return suggestions[0], nil
 }
 
 func (s *Service) prepareSuggestionDispatchesLocked(live *liveRoom, suggestions []Suggestion) []snapshotDispatch {

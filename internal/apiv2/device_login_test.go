@@ -37,7 +37,7 @@ func TestGetDeviceLoginCapability(t *testing.T) {
 	if rec.Code != 200 || rec.Header().Get("Cache-Control") != cachePrivateNoCache {
 		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
 	}
-	want := `{"revision":"1","state":"available","remote_playback_handoff":true,"protocol_versions":[2],"cancel":true,"opened_signal":true}` + "\n"
+	want := `{"revision":"1","state":"available","remote_playback_handoff":true,"jellyfin_quick_connect":true,"protocol_versions":[2],"cancel":true,"opened_signal":true}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -63,21 +63,23 @@ func TestStartDeviceLogin(t *testing.T) {
 	// A configured public URL wins over the address the device used, so a
 	// phone off the TV's network can still open the link.
 	pub := pilotDeps(nil, nil)
-	pub.ServerConnections.PublicURL = func() string { return "https://media.example.test/" }
-	rec = do(t, newTestHandler(t, pub), http.MethodPost, "/api/v2/auth/device/start", `{}`,
+	publicURL := "https://media.example.test/"
+	pub.ServerConnections.PublicURL = func() string { return publicURL }
+	public := newTestHandler(t, pub)
+	rec = do(t, public, http.MethodPost, "/api/v2/auth/device/start", `{}`,
 		map[string]string{"X-Forwarded-Proto": "http", "X-Forwarded-Host": "192.168.1.20:8090"})
 	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri_complete":"https://media.example.test/activate?code=48217730"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	// A public URL with a path keeps it.
-	pub.ServerConnections.PublicURL = func() string { return "https://Example.test/silo/" }
-	rec = do(t, newTestHandler(t, pub), http.MethodPost, "/api/v2/auth/device/start", `{}`, nil)
+	publicURL = "https://Example.test/silo/"
+	rec = do(t, public, http.MethodPost, "/api/v2/auth/device/start", `{}`, nil)
 	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri":"https://example.test/silo/activate"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	// An unusable public URL falls back to the device's origin.
-	pub.ServerConnections.PublicURL = func() string { return "not a url" }
-	rec = do(t, newTestHandler(t, pub), http.MethodPost, "/api/v2/auth/device/start", `{}`,
+	publicURL = "not a url"
+	rec = do(t, public, http.MethodPost, "/api/v2/auth/device/start", `{}`,
 		map[string]string{"X-Forwarded-Proto": "http", "X-Forwarded-Host": "192.168.1.20:8090"})
 	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri":"http://192.168.1.20:8090/activate"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
@@ -199,6 +201,51 @@ func TestGetDeviceLogin(t *testing.T) {
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/auth/device", "", nil), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.code" {
 		t.Fatalf("errors = %+v", p.Errors)
+	}
+}
+
+// TestQuickConnectLookupNeedsSession: a six-digit Quick Connect code is looked
+// up only for the account's own signed-in session, which the public lookup
+// reads without requiring: a missing, expired or API-key credential is 401 for
+// every six-digit code, so a client refreshes instead of reading the code as
+// unknown, and an impersonation session is 403. Decisions pass the deciding
+// account, and the request is approved for a profile through approve-handoff.
+func TestQuickConnectLookupNeedsSession(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	for _, hdr := range []map[string]string{nil, bearer(expiredToken), bearer(apiKeyToken)} {
+		for _, code := range []string{"482177", "999999"} {
+			requireProblem(t, do(t, h, http.MethodGet, "/api/v2/auth/device?code="+code, "", hdr), TypeAuthenticationRequired)
+		}
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/auth/device?code=482177", "", bearer(impersonatedToken)), TypePermissionDenied)
+	rec := do(t, h, http.MethodGet, "/api/v2/auth/device?code=482177", "", bearer(memberToken))
+	if rec.Code != 200 || !contains(rec.Body.String(), `"client_purpose":"jellyfin_quick_connect"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	// An eight-digit code still needs nothing, and a bad token doesn't hurt it.
+	if rec := do(t, h, http.MethodGet, "/api/v2/auth/device?code=4821-7730", "", bearer(expiredToken)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	rec = do(t, h, http.MethodPost, "/api/v2/auth/device/approve-handoff", `{"code":"482177"}`, owner)
+	if rec.Code != 200 || rec.Body.String() != `{"status":"approved"}`+"\n" {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/approve", `{"code":"482177"}`, bearer(memberToken)), TypeConflict)
+	if rec := do(t, h, http.MethodPost, "/api/v2/auth/device/deny", `{"code":"482177"}`, bearer(memberToken)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestQuickConnectAttemptsRateLimited: a spent Quick Connect code budget is
+// 429 rate_limited with Retry-After.
+func TestQuickConnectAttemptsRateLimited(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.Devices = fakeDevices{configured: true, err: &handlers.APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "Too many Quick Connect codes tried. Try again later.", RetryAfter: 90}}
+	rec := do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/auth/device?code=482177", "", bearer(memberToken))
+	requireProblem(t, rec, TypeRateLimited)
+	if rec.Header().Get("Retry-After") != "90" {
+		t.Fatalf("Retry-After = %q", rec.Header().Get("Retry-After"))
 	}
 }
 

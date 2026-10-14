@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -62,7 +63,7 @@ func TestProxyCapabilitiesPublishCapabilityHash(t *testing.T) {
 	server := newCapabilityProxyServer(t, secret)
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+secret)
+	nodeauthtest.Sign(t, request, secret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -106,7 +107,7 @@ func TestProxyCapabilitiesRejectsIncompleteProbeWithoutPublishing(t *testing.T) 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil).WithContext(canceled)
-	request.Header.Set("Authorization", "Bearer "+secret)
+	nodeauthtest.Sign(t, request, secret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -190,7 +191,7 @@ func newCapabilityProxyServerRecordingFFmpeg(t *testing.T, secret string, aacAva
 func fetchProxyCapabilities(t *testing.T, server *Server, secret string) playback.HWAccelInfo {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+secret)
+	nodeauthtest.Sign(t, request, secret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -238,6 +239,11 @@ func TestProxyCapabilitiesReportNoHardware(t *testing.T) {
 	}
 	if len(info.Transformations) == 0 {
 		t.Fatal("no transformations advertised; the report has nothing the planner can use")
+	}
+	for _, transformation := range info.Transformations {
+		if transformation.Name == "" || transformation.RecipeVersion == "" {
+			t.Fatalf("advertised transformation is missing identity: %#v", transformation)
+		}
 	}
 
 	// The walk's smoke encodes are what this change exists to stop paying for,

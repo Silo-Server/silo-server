@@ -128,8 +128,6 @@ const (
 	opDeleteWatchlistTitle = "deleteWatchlistTitle"
 )
 
-var watchlistTitleOperationIDs = []string{opListWatchlistTitles, opAddWatchlistTitle, opDeleteWatchlistTitle}
-
 func registerWatchlistTitles(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 
@@ -165,7 +163,10 @@ func (reg *Registry) watchlistTitleViewer(ctx context.Context) (handlers.Persona
 	if p != nil {
 		return handlers.PersonalListViewer{}, mediarequests.Viewer{}, "", p
 	}
-	rv := lifecycleViewer(ctx)
+	rv, p := lifecycleViewer(ctx)
+	if p != nil {
+		return handlers.PersonalListViewer{}, mediarequests.Viewer{}, "", p
+	}
 	ceiling, err := reg.deps.WatchlistRequests.WatchlistCeiling(ctx, rv)
 	if err != nil {
 		return handlers.PersonalListViewer{}, mediarequests.Viewer{}, "", requestProblem(err)

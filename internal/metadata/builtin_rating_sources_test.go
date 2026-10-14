@@ -38,17 +38,3 @@ func TestBuiltinRatingSources(t *testing.T) {
 		t.Fatalf("an unregistered capability = %+v, want nil", got)
 	}
 }
-
-func TestJoinNames(t *testing.T) {
-	cases := map[string][]string{
-		"":                      nil,
-		"MDBList":               {"MDBList"},
-		"NFO Files and MDBList": {"NFO Files", "MDBList"},
-		"A, B and C":            {"A", "B", "C"},
-	}
-	for want, names := range cases {
-		if got := joinNames(names); got != want {
-			t.Errorf("joinNames(%q) = %q, want %q", names, got, want)
-		}
-	}
-}

@@ -91,18 +91,19 @@ func TestAdminProviderConfigurationGuardedTransport(t *testing.T) {
 	}
 }
 func TestAdminProviderConfigurationMissingAndOutcomes(t *testing.T) {
+	f := fixtureAdminProviderConfiguration()
+	deps := requestDeps(fixtureRequests())
+	deps.AdminSubtitleProviderConfiguration = f
+	h := newTestHandler(t, deps)
 	for _, local := range []handlers.SubtitleProviderLocalApply{handlers.SubtitleProviderLocalApplied, handlers.SubtitleProviderLocalFailed, handlers.SubtitleProviderLocalNotConfigured, handlers.SubtitleProviderLocalUnsupported} {
 		t.Run(string(local), func(t *testing.T) {
-			f := fixtureAdminProviderConfiguration()
+			*f = *fixtureAdminProviderConfiguration()
 			f.revision = 0
 			f.result.LocalApply = local
 			f.result.LocalAppliedRevision = nil
 			if local == handlers.SubtitleProviderLocalApplied {
 				f.result.LocalAppliedRevision = new(int64(0))
 			}
-			deps := requestDeps(fixtureRequests())
-			deps.AdminSubtitleProviderConfiguration = f
-			h := newTestHandler(t, deps)
 			path := Prefix + "/admin/subtitle-providers/subdl"
 			read := do(t, h, http.MethodGet, path, "", actingRequestAdmin)
 			tag := read.Header().Get("ETag")
@@ -121,12 +122,13 @@ func TestAdminProviderConfigurationMissingAndOutcomes(t *testing.T) {
 	}
 }
 func TestAdminProviderConfigurationUncertaintyAndDependencies(t *testing.T) {
+	f := fixtureAdminProviderConfiguration()
+	deps := requestDeps(fixtureRequests())
+	deps.AdminSubtitleProviderConfiguration = f
+	h := newTestHandler(t, deps)
 	for _, saveErr := range []error{errors.New("PRIVATE lost successful commit"), &handlers.APIError{Status: 500, Message: "PRIVATE"}, &handlers.APIError{Status: 503, Message: "PRIVATE"}, &handlers.APIError{Status: 400, Message: "PRIVATE"}} {
-		f := fixtureAdminProviderConfiguration()
+		*f = *fixtureAdminProviderConfiguration()
 		f.saveErr = saveErr
-		deps := requestDeps(fixtureRequests())
-		deps.AdminSubtitleProviderConfiguration = f
-		h := newTestHandler(t, deps)
 		path := Prefix + "/admin/subtitle-providers/subdl"
 		tag := do(t, h, http.MethodGet, path, "", actingRequestAdmin).Header().Get("ETag")
 		out := do(t, h, http.MethodPut, path, `{"enabled":false}`, with(actingRequestAdmin, "If-Match", tag))
@@ -134,8 +136,8 @@ func TestAdminProviderConfigurationUncertaintyAndDependencies(t *testing.T) {
 			t.Fatalf("uncertainty: %d %s reads=%d writes=%d", out.Code, out.Body, f.reads, f.writes)
 		}
 	}
-	deps := requestDeps(fixtureRequests())
-	h := newTestHandler(t, deps)
+	deps.AdminSubtitleProviderConfiguration = nil
+	h = newTestHandler(t, deps)
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/subtitle-providers/subdl", "", actingRequestAdmin), TypeDependencyUnavailable)
 }
 func adminProviderConfigurationFixtureCases() []fixtureCase {

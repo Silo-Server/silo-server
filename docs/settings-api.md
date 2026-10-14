@@ -450,13 +450,12 @@ Branding remains public so it can render before sign-in:
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/v2/theme/capabilities` | Branding, CSS-override, and asset-storage availability |
+| GET | `/api/v2/theme/capabilities` | Branding and asset-storage availability |
 | GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent color and asset URLs, storage availability |
-| GET | `/api/v2/theme/admin-css` | JSON object with `vars` and `raw_css` strings |
 | GET / HEAD | `/api/v2/branding/assets/{kind}` | Image bytes or matching headers without a body |
 
-Discovery uses the existing branding service and theme settings. When dependencies
-are absent, configuration returns default branding and empty overrides; capabilities
+Discovery uses the existing branding service. When dependencies are absent,
+configuration returns default branding; capabilities
 report availability explicitly. Discovery responses are not cached. The bundled web
 uses these v2 reads. Native server-identity discovery must adopt the same public
 endpoint through its negotiated API-version handling.
@@ -472,14 +471,20 @@ A valid kind without a configured asset returns `404`; missing asset storage ret
 
 The frozen v1 routes and administrator asset upload/delete operations are unchanged.
 
-The web client has one theme, Cinema Dark. Only an administrator customizes it, with
-the accent color and the overrides `admin-css` returns (`ui.admin_theme_vars` and
-`ui.admin_custom_css`), layered on that theme. The v2 branding document therefore
-has no default theme and no light-theme logo URLs, and v2 has no theme catalog.
-The frozen v1 `/theme/branding` response is unchanged: it still reports a stored
-`default_theme` and light logo URLs. The server keeps those settings for v1 alone. The v1
-`/theme/catalog`, `/theme/catalog/refresh` and `/theme/download` routes keep their
-behavior, and `theme.catalog_url` its default, until v1 retires.
+The web client has one theme, Cinema Dark. The only customization is the
+administrator's accent color (`branding.accent_color`), which the web client
+reads from the branding document and applies to the primary action color, the
+focus ring and the sidebar accent, turning the labels on those surfaces white
+when white reads better on the accent. A stored value that is not a `#rgb` or
+`#rrggbb` hex color is ignored, as email ignores it. Email buttons, the shell's `theme-color` and
+the web app manifest use it too. The v2 branding document has no default theme
+or light-theme logo URLs, and v2 has no theme overrides or theme catalog.
+The frozen v1 routes are unchanged: `/theme/branding` still reports a stored
+`default_theme` and light logo URLs, and `/theme/admin-css` still reports the
+stored `ui.admin_theme_vars` and `ui.admin_custom_css`. The server keeps those
+settings for v1 alone; nothing else reads them. The v1 `/theme/catalog`,
+`/theme/catalog/refresh` and `/theme/download` routes keep their behavior, and
+`theme.catalog_url` its default, until v1 retires.
 
 ### Retired theme settings
 
@@ -504,6 +509,17 @@ Without a profile, the existing account-policy fallback applies. Library rows
 with `enabled=false` are excluded in both cases. An explicitly empty library
 allowlist returns `items: []`. Optional poster signing uses the existing expiry
 and omits the URL on signing failure.
+
+By default, libraries the profile hid itself (`ui.disabled_library_ids`) appear
+for an unrestricted scope but not for a scope with a library limit (account,
+profile, or policy override). `include_hidden=true` lists them for a limited
+scope too, for a screen that shows a hidden library again; the web
+Settings → Libraries page sends it, and navigation should not. Libraries outside
+the account's or the profile's library limit, or removed by a policy override,
+stay out either way: the viewer scope reports the hidden libraries the policy
+would otherwise allow (`hidden_library_ids` in the scope decision), and the list
+adds only those. `supports_include_hidden` on the capability response advertises
+the parameter. The frozen v1 route keeps the default behavior.
 
 `GET /api/v2/user/libraries/capabilities` exposes `available` under the same
 authority rules. Both operations remain registered when the service is absent;
@@ -569,15 +585,45 @@ No browser Origin is required for these server-to-server deliveries.
 
 V2 limits the complete body to 10 MiB before provider parsing or watch-state
 side effects, including bodies with unknown or understated lengths. Oversize
-requests return a 413 `payload_too_large` problem. Multipart resources are cleaned
-up after parsing. The shared application processor retains explicit profile
+requests return a 413 `payload_too_large` problem. The bridge receivers
+(`/api/v1/webhook-sync/webhooks/{secret}` and `/api/v1/plex-sync/webhooks/{secret}`)
+enforce the same 10 MiB limit and answer an oversize delivery with 413
+`payload_too_large`. Multipart resources are cleaned up after parsing. The shared application processor retains explicit profile
 mapping, provider normalization, watch-state behavior and delivery logging with
 bounded sanitized body excerpts. A processed delivery returns bodyless 204,
 including ignored, skipped or unmatched events. Malformed payloads return 400,
 unknown secrets 404, and internal failures a safe 500 problem. Known-connection
-rejections retain delivery logs. This synchronous operation is non-retryable;
-existing provider ordering and duplicate-handling behavior is unchanged and does
-not provide an exactly-once guarantee.
+rejections retain delivery logs. This synchronous operation is non-retryable.
+Missing required fields or trailing data after the JSON document count as malformed;
+a well-formed notification of a type Silo does not use is ignored.
+
+Watch-state rules, shared by the v2 and bridge receivers:
+
+- An event changes only the Silo profile explicitly mapped to its external user.
+  An unmapped user's event is skipped and is not replayed after mapping.
+- Plex: `media.scrobble` marks the item watched; `media.pause` and `media.stop`
+  record the event's `viewOffset`. The server's item metadata supplies identity
+  and runtime only, because its view state belongs to the connection token's
+  owner. Plex events carry no timestamp, so Silo uses the receipt time, and a
+  resent `media.pause` or `media.stop` counts as a new event that rewrites its
+  position. After a scrobble, including one that newer Silo progress kept from
+  applying, further events for the same user and item (a repeated scrobble, a
+  stop in the credits) are ignored until a `media.play` starts a new playback. A
+  `media.play` needs no metadata lookup or catalog match. Plex sends no webhook
+  for manual watched or unwatched marks.
+- Jellyfin: `PlaybackStop` records position and `played_to_completion`.
+  `UserDataSaved` with save reason `TogglePlayed` marks the item played or
+  unplayed by its `played` boolean, and is malformed without one; other save
+  reasons are ignored. The payload `timestamp` orders events and must parse.
+- For one external user and item, an event older than the last applied one is
+  dropped, and an event with the same timestamp applies only if it completes the
+  item or advances the position by at least five seconds. A replayed delivery
+  with its original timestamp (Jellyfin, Emby) therefore has no further effect,
+  and a replayed completion cannot undo a later unplayed mark. Silo progress for
+  the profile at least as recent as the event, compared in whole seconds, also
+  wins, including over an unplayed mark, unless it is the write of the last
+  event applied for that external user and item, recognized by its time and
+  position. There is no exactly-once guarantee beyond these rules.
 
 A Plex connection's `base_url` follows the history import rule for server
 addresses: it must be on the public internet unless the account is an admin or
@@ -591,7 +637,10 @@ Responses set `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 `GET /api/v2/webhook-sync/capabilities` exposes `available` and `max_body_bytes`.
 V2 connection list/create/update and secret rotation emit v2 receiver URLs.
 Existing external configurations continue to use their bridge URLs until updated;
-frozen v1 URL generation, response shapes and provider parsing remain unchanged.
+frozen v1 URL generation and response shapes remain unchanged. The bridge
+receiver runs the same provider parsing and watch-state rules as v2 (see above),
+so it rejects the same malformed deliveries and applies the same Jellyfin played
+marks.
 The web management screen consumes the emitted URL. No native receiver or
 management caller was found; no Jellyfin-protocol endpoint needs migration.
 
@@ -896,6 +945,30 @@ family so like-device preferences participate in resolution. Each response
 includes its source scope and source context; `client_family` is included for a
 family-scoped winner.
 
+### Device registry
+
+The device registry lists each device a profile uses, with its name, platform
+and `last_seen_at`. `GET /api/v2/devices` and the administrator device reads
+list it. The server registers the device named by `X-Silo-Device-Id`, with the
+optional `X-Silo-Device-Name` and `X-Silo-Device-Platform`, for the acting
+profile when the device:
+
+- resolves effective values (`GET` or `POST` of the effective route, v1 or v2);
+- starts playback (see [Playback API](playback-api.md#start));
+- writes one of its own `profile_device` values, or uses a legacy
+  device-setting route;
+- creates a download.
+
+A request that names another device with `device_id`, or another profile with
+`profile_id`, registers nothing: inspecting a device's settings does not show
+that the profile is using it. Settings and playback requests made in an
+administrator's view-as (impersonation) session register nothing either: the
+device is the administrator's, not the profile's. Settings and playback
+requests refresh a given profile and device at most once every five minutes per
+server process, so `last_seen_at` can trail actual use by that long. On those
+requests a failed registration is logged and does not fail the request, and the
+device's next request retries it.
+
 ### Admin projection
 
 Admin routes are mounted behind the normal acting-admin authorization:
@@ -954,7 +1027,9 @@ Selecting `s3` without a configured `s3.public_bucket`, or clearing the bucket
 while `s3` is selected, is rejected as `invalid_settings`.
 
 `metadata.image_workers` sizes the pool that downloads and encodes provider
-artwork, in parallel encodes. `0`, the default, runs one encode per CPU core.
+artwork in parallel. The same per-server limit also covers manual refreshes
+and copies of local artwork found next to media files. `0`, the default, runs
+one encode per CPU core.
 Each encode is single-threaded in libvips, so the pool is the only source of
 parallelism; a lower value keeps a shared household server responsive during a
 first scan, a higher one finishes the backlog sooner. The value is capped by the
@@ -962,7 +1037,11 @@ process memory limit at one worker per 512 MiB and applies to the next run
 without a restart.
 
 `metadata.cache_images` defaults to `true` on fresh installations. It no longer
-requires a public S3 bucket because local artwork storage is available.
+requires a public S3 bucket because local artwork storage is available. It
+governs provider artwork only: local sidecar artwork found next to media files
+is copied into artwork storage and served whatever its value, because clients
+cannot load it any other way. An image URL an NFO file names is downloaded like
+provider artwork, so it is used only while the setting is on.
 
 `catalog.scope_versions_to_library` (default `false`) makes a library-scoped v2
 catalog read return only the versions stored in the `library_id` it was given.

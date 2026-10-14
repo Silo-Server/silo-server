@@ -100,7 +100,7 @@ func TestHandleCreateProfile_EnforcesUserProfileLimit(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 1},
+		user: &models.User{ID: 1, MaxProfiles: new(1)},
 	}
 
 	req := newAuthorizedProfileRequestWithRole(
@@ -139,13 +139,13 @@ func TestHandleCreateProfile_AllowsNonAdminUpToCap(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
+		user: &models.User{ID: 1, MaxProfiles: new(5)},
 	}
 
 	req := newAuthorizedProfileRequestWithRole(
 		http.MethodPost,
 		"/profiles",
-		`{"name":"Kids"}`,
+		`{"name":" Kids "}`,
 		"user",
 		"profile-1",
 	)
@@ -163,6 +163,57 @@ func TestHandleCreateProfile_AllowsNonAdminUpToCap(t *testing.T) {
 	}
 	if len(profiles) != 2 {
 		t.Fatalf("profile count = %d, want 2", len(profiles))
+	}
+	found := false
+	for _, profile := range profiles {
+		if profile.Name == "Kids" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("created profile name was not trimmed: %+v", profiles)
+	}
+
+}
+
+// profileLimitGroups serves one access group's policy for every account.
+type profileLimitGroups struct{ policy access.GroupPolicy }
+
+func (g profileLimitGroups) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
+	policy := g.policy
+	return &policy, nil
+}
+
+func TestHandleCreateProfile_EnforcesInheritedGroupProfileLimit(t *testing.T) {
+	groupID := int64(4)
+	tests := []struct {
+		name     string
+		override *int
+		want     int
+	}{
+		{name: "inherits the group's limit", want: http.StatusConflict},
+		{name: "an override above the group's limit wins", override: new(2), want: http.StatusCreated},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newProfileTestStore(t)
+			handler := NewProfileHandler(testUserStoreProvider{store: store})
+			handler.UserRepo = testProfileUserRepo{
+				user: &models.User{ID: 1, Role: models.RoleUser, AccessGroupID: &groupID, MaxProfiles: tt.override},
+			}
+			handler.AccessGroups = profileLimitGroups{policy: access.GroupPolicy{ID: groupID, MaxProfiles: 1}}
+
+			req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles", `{"name":"Kids"}`, "user", "profile-1")
+			rr := httptest.NewRecorder()
+			handler.HandleCreateProfile(rr, req)
+
+			if rr.Code != tt.want {
+				t.Fatalf("status = %d, want %d, body = %s", rr.Code, tt.want, rr.Body.String())
+			}
+			if tt.want == http.StatusConflict && !strings.Contains(rr.Body.String(), "profile limit (1)") {
+				t.Fatalf("body = %s, want the group's limit in the message", rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -232,37 +283,6 @@ func TestHandleCreateProfile_RejectsWhitespaceOnlyName(t *testing.T) {
 	}
 }
 
-func TestHandleCreateProfile_TrimsStoredName(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPost,
-		"/profiles",
-		`{"name":" Laura "}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	for _, p := range profiles {
-		if p.Name == "Laura" {
-			return
-		}
-	}
-	t.Fatalf("no profile stored with trimmed name, profiles: %+v", profiles)
-}
-
 func TestHandleCreateProfile_BlocksNonPrimaryNonAdmin(t *testing.T) {
 	store := newProfileTestStore(t)
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
@@ -270,7 +290,7 @@ func TestHandleCreateProfile_BlocksNonPrimaryNonAdmin(t *testing.T) {
 	}
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
+		user: &models.User{ID: 1, MaxProfiles: new(5)},
 	}
 
 	req := newAuthorizedProfileRequestWithRole(
@@ -299,7 +319,7 @@ func TestHandleCreateProfile_RequiresVerifiedPrimaryPINWhenPrimaryHasPIN(t *test
 
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5, AccessPolicyRevision: 7},
+		user: &models.User{ID: 1, MaxProfiles: new(5), AccessPolicyRevision: 7},
 	}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret", time.Minute)
 
@@ -333,15 +353,15 @@ func TestHandleCreateProfile_AllowsVerifiedPrimaryPIN(t *testing.T) {
 
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5, AccessPolicyRevision: 7},
+		user: &models.User{ID: 1, MaxProfiles: new(5), AccessPolicyRevision: 7},
 	}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret", time.Minute)
 
 	token, _, err := handler.ProfileTokens.Mint(access.ProfileTokenClaims{
-		UserID:         1,
-		SessionID:      "sess-1",
-		ProfileID:      "profile-1",
-		PolicyRevision: 7,
+		UserID:      1,
+		SessionID:   "sess-1",
+		ProfileID:   "profile-1",
+		PINRevision: pinRevision(t, store, "profile-1"),
 	})
 	if err != nil {
 		t.Fatalf("mint profile token: %v", err)
@@ -369,7 +389,7 @@ func TestHandleCreateProfile_BlocksAdminOnlyFieldsForNonAdmin(t *testing.T) {
 	store := newEmptyProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
+		user: &models.User{ID: 1, MaxProfiles: new(5)},
 	}
 
 	req := newAuthorizedProfileRequest(`{"name":"Kids","is_child":true}`)
@@ -485,7 +505,7 @@ func TestHandleUpdateProfile_AllowsSelfServiceFieldsForNonAdmin(t *testing.T) {
 	req := newAuthorizedProfileRequestWithRole(
 		http.MethodPut,
 		"/profiles/profile-1",
-		`{"subtitle_mode":"always","pin":"1234"}`,
+		`{"name":"Main","subtitle_mode":"always","pin":"1234"}`,
 		"user",
 		"profile-1",
 	)
@@ -522,7 +542,7 @@ func TestHandleUpdateProfile_AllowsNonAdminToUpdateAnyOwnedProfile(t *testing.T)
 	req := newAuthorizedProfileRequestWithRole(
 		http.MethodPut,
 		"/profiles/profile-2",
-		`{"subtitle_mode":"always"}`,
+		`{"name":" Guest ","subtitle_mode":"always"}`,
 		"user",
 		"profile-1",
 	)
@@ -533,6 +553,11 @@ func TestHandleUpdateProfile_AllowsNonAdminToUpdateAnyOwnedProfile(t *testing.T)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
+	profile, err := store.GetProfile(context.Background(), "profile-2")
+	if err != nil || profile == nil || profile.Name != "Guest" || profile.SubtitleMode != "always" {
+		t.Fatalf("updated profile = %+v, err = %v", profile, err)
+	}
+
 }
 
 func TestHandleUpdateProfile_RejectsDuplicateNameOnRename(t *testing.T) {
@@ -574,28 +599,6 @@ func TestHandleUpdateProfile_RejectsDuplicateNameOnRename(t *testing.T) {
 	}
 }
 
-func TestHandleUpdateProfile_AllowsKeepingOwnNameOnUpdate(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	// Saving a profile without renaming resubmits its own name; the
-	// conflict check must exclude the profile being updated.
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-1",
-		`{"name":"Main","subtitle_mode":"always"}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-1"))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
 func TestHandleUpdateProfile_RejectsWhitespaceOnlyName(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
@@ -624,40 +627,16 @@ func TestHandleUpdateProfile_RejectsWhitespaceOnlyName(t *testing.T) {
 	}
 }
 
-func TestHandleUpdateProfile_TrimsStoredNameOnRename(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-1",
-		`{"name":" Laura "}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-1"))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profile, err := store.GetProfile(context.Background(), "profile-1")
-	if err != nil {
-		t.Fatalf("get profile: %v", err)
-	}
-	if profile == nil || profile.Name != "Laura" {
-		t.Fatalf("stored name not trimmed: %+v", profile)
-	}
-}
-
 func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	store := newProfileTestStore(t)
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
 		t.Fatalf("create profile: %v", err)
 	}
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	purger := &recordingProfilePurger{}
+	withdrawer := &recordingWatchlistRequestWithdrawer{}
+	handler.WatchlistTitlesPurger = purger
+	handler.WatchlistRequestWithdrawer = withdrawer
 
 	req := newAuthorizedProfileRequestWithRole(
 		http.MethodDelete,
@@ -675,9 +654,16 @@ func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	}
 
 	profile, err := store.GetProfile(context.Background(), "profile-2")
-	if err == nil && profile != nil {
+	if err != nil || profile != nil {
 		t.Fatal("expected profile to be deleted")
 	}
+	if len(purger.calls) != 1 || purger.calls[0] != "1/profile-2" {
+		t.Fatalf("purge calls = %v, want [1/profile-2]", purger.calls)
+	}
+	if len(withdrawer.calls) != 1 || withdrawer.calls[0] != "1/profile-2" {
+		t.Fatalf("withdraw calls = %v, want [1/profile-2]", withdrawer.calls)
+	}
+
 }
 
 type recordingProfilePurger struct {
@@ -689,27 +675,6 @@ func (p *recordingProfilePurger) PurgeProfile(_ context.Context, userID int, pro
 	return nil
 }
 
-func TestHandleDeleteProfile_PurgesWatchlistTitles(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	purger := &recordingProfilePurger{}
-	handler.WatchlistTitlesPurger = purger
-
-	req := newAuthorizedProfileRequestWithRole(http.MethodDelete, "/profiles/profile-2", "", "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleDeleteProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if len(purger.calls) != 1 || !strings.HasSuffix(purger.calls[0], "/profile-2") {
-		t.Fatalf("purge calls = %v, want one for profile-2", purger.calls)
-	}
-}
-
 type recordingWatchlistRequestWithdrawer struct {
 	calls []string
 }
@@ -717,29 +682,6 @@ type recordingWatchlistRequestWithdrawer struct {
 func (w *recordingWatchlistRequestWithdrawer) WithdrawProfileWatchlistRequests(_ context.Context, userID int, profileID string) error {
 	w.calls = append(w.calls, fmt.Sprintf("%d/%s", userID, profileID))
 	return nil
-}
-
-// A deleted profile's watchlist requests are withdrawn, as removing each title
-// would; the requests name the profile, so no watchlist entry is needed.
-func TestHandleDeleteProfile_WithdrawsWatchlistRequests(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	withdrawer := &recordingWatchlistRequestWithdrawer{}
-	handler.WatchlistRequestWithdrawer = withdrawer
-
-	req := newAuthorizedProfileRequestWithRole(http.MethodDelete, "/profiles/profile-2", "", "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleDeleteProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if len(withdrawer.calls) != 1 || !strings.HasSuffix(withdrawer.calls[0], "/profile-2") {
-		t.Fatalf("withdraw calls = %v, want one for profile-2", withdrawer.calls)
-	}
 }
 
 func TestHandleDeleteProfile_BlocksPrimaryDeletion(t *testing.T) {

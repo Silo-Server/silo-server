@@ -67,6 +67,7 @@ import {
   resolveRequestTerms,
 } from "@/lib/requestAccess";
 import { useStagedDraft } from "@/pages/admin-settings/useStagedDraft";
+import { parseWholeNumber } from "@/pages/admin-users/detail/access/policySources";
 import {
   PLAYBACK_QUALITY_OPTIONS,
   playbackQualityPresetFromValue,
@@ -114,6 +115,7 @@ function storedGroupBody(group: AccessGroup): AccessGroupInput {
     max_transcodes: group.max_transcodes,
     max_remote_stream_bitrate_kbps: group.max_remote_stream_bitrate_kbps,
     max_local_stream_bitrate_kbps: group.max_local_stream_bitrate_kbps,
+    max_profiles: group.max_profiles,
     allowed_permissions: group.allowed_permissions,
     requests_allowed: group.requests_allowed,
     is_default: group.is_default,
@@ -473,6 +475,9 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
   );
   const bitrateLimitsValid =
     maxRemoteStreamBitrateKbps !== null && maxLocalStreamBitrateKbps !== null;
+  // Kept as typed so a cleared box is an unsaved edit; Save waits for a valid limit.
+  const [maxProfilesText, setMaxProfilesText] = useState(String(group.max_profiles));
+  const maxProfiles = parseWholeNumber(maxProfilesText, 1);
   const [permissions, setPermissions] = useState<string[] | null>(group.allowed_permissions);
   const [requestsAllowed, setRequestsAllowed] = useState(group.requests_allowed);
   const [isDefault, setIsDefault] = useState(group.is_default);
@@ -515,7 +520,12 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
 
   async function save() {
     if (busy.current || conflict || limitBlocksSave) return;
-    if (maxRemoteStreamBitrateKbps === null || maxLocalStreamBitrateKbps === null) return;
+    if (
+      maxRemoteStreamBitrateKbps === null ||
+      maxLocalStreamBitrateKbps === null ||
+      maxProfiles === null
+    )
+      return;
     busy.current = true;
     setError("");
     setLimitError("");
@@ -534,6 +544,7 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       max_transcodes: maxTranscodes,
       max_remote_stream_bitrate_kbps: maxRemoteStreamBitrateKbps,
       max_local_stream_bitrate_kbps: maxLocalStreamBitrateKbps,
+      max_profiles: maxProfiles,
       allowed_permissions: permissions,
       requests_allowed: requestsAllowed,
       is_default: isDefault,
@@ -797,6 +808,32 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
         />
       </section>
 
+      <section className="surface-panel space-y-2 rounded-2xl border-0 p-5">
+        <h2 className="text-sm font-semibold">Profiles</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between">
+              <Label htmlFor="group-profiles">Max profiles</Label>
+              <span className="text-muted-foreground text-xs">At least 1</span>
+            </div>
+            <Input
+              id="group-profiles"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={maxProfilesText}
+              aria-invalid={maxProfiles === null ? true : undefined}
+              onChange={(event) => setMaxProfilesText(event.target.value)}
+            />
+          </div>
+        </div>
+        <p className="text-muted-foreground text-xs">
+          Each member account can have up to this many profiles, unless the account sets its own
+          limit. Existing profiles over a lowered limit are kept.
+        </p>
+      </section>
+
       <section className="surface-panel space-y-3 rounded-2xl border-0 p-5">
         <div className="flex items-center justify-between">
           <div>
@@ -861,6 +898,7 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
             conflict ||
             reloading ||
             !bitrateLimitsValid ||
+            maxProfiles === null ||
             limitBlocksSave
           }
         >

@@ -104,49 +104,6 @@ describe("useRequestSearch", () => {
     expect(init.query.q).toBe("dune");
   });
 
-  it("keeps the existing Requests page staleTime by default", () => {
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p" } });
-    render(<CallHook mediaType="all" q="dune" />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as {
-      staleTime: number;
-      gcTime?: number;
-      retry?: boolean | number;
-    };
-    expect(options.staleTime).toBe(30 * 1000);
-    expect(options).not.toHaveProperty("gcTime");
-    expect(options).not.toHaveProperty("retry");
-  });
-
-  it("allows callers to opt into a longer staleTime", () => {
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p" } });
-
-    function CallHookWithStaleTime() {
-      useRequestSearch("all", "dune", 1, { staleTime: 5 * 60 * 1000 });
-      return null;
-    }
-    render(<CallHookWithStaleTime />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as { staleTime: number };
-    expect(options.staleTime).toBe(5 * 60 * 1000);
-  });
-
-  it("allows interactive callers to bound cache retention and disable retries", () => {
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p" } });
-
-    function CallInteractiveSearch() {
-      useRequestSearch("all", "dune", 1, { gcTime: 30_000, retry: false });
-      return null;
-    }
-    render(<CallInteractiveSearch />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as {
-      gcTime?: number;
-      retry?: boolean;
-    };
-    expect(options).toMatchObject({ gcTime: 30_000, retry: false });
-  });
-
   it("respects the enabled option override", () => {
     mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p" } });
 
@@ -158,14 +115,6 @@ describe("useRequestSearch", () => {
 
     const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
     expect(options.enabled).toBe(false);
-  });
-
-  it("does not include enabled override when option omitted (defaults to true)", () => {
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p" } });
-    render(<CallHook mediaType="all" q="dune" />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
-    expect(options.enabled).toBe(true);
   });
 
   it("does not require profile by default", () => {

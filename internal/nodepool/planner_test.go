@@ -1103,3 +1103,53 @@ func TestClientURLPrefersThePublicURL(t *testing.T) {
 		}
 	}
 }
+
+// A node the caller found unreachable counts as unhealthy for the request: it
+// is not selected and it degrades its group, so a group whose only proxy died
+// moves the route to another group instead of crossing LANs.
+func TestPlanRouteUnreachableNodeDegradesItsGroup(t *testing.T) {
+	deadProxyA := map[string]struct{}{"http://proxy-a": {}}
+	f := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-a", strPtr("rack-a")), proxyNode(2, "http://proxy-b", strPtr("rack-b"))},
+		[]*Node{
+			transcodeNode(3, "http://tc-a", strPtr("rack-a"), 0),
+			transcodeNode(4, "http://tc-b", strPtr("rack-b"), 0),
+		},
+	)
+	plan := f.planner.PlanRoute(RouteRequest{
+		SessionID: "s1", CurrentTranscodeURL: "http://tc-a",
+		NeedsTranscode: true, NeedsProxy: true, Unreachable: deadProxyA,
+	})
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" ||
+		plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-b" {
+		t.Fatalf("plan = %+v / %+v, want rack-b's tc-b and proxy-b", plan.TranscodeNode, plan.ProxyNode)
+	}
+
+	// With only rack-a and an ungrouped proxy, tc-a is never paired with the
+	// ungrouped proxy while its own group's proxy is down.
+	g := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-a", strPtr("rack-a")), proxyNode(2, "http://proxy-1", nil)},
+		[]*Node{transcodeNode(3, "http://tc-a", strPtr("rack-a"), 0)},
+	)
+	plan = g.planner.PlanRoute(RouteRequest{
+		SessionID: "s2", CurrentTranscodeURL: "http://tc-a",
+		NeedsTranscode: true, NeedsProxy: true, Unreachable: deadProxyA,
+	})
+	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
+		t.Fatalf("plan = %+v / %+v, want no proxy route for rack-a without its proxy", plan.TranscodeNode, plan.ProxyNode)
+	}
+
+	// An unreachable transcode node degrades its group on the API-egress route too.
+	h := newFixture(nil, []*Node{
+		transcodeNode(3, "http://tc-a1", strPtr("rack-a"), 0),
+		transcodeNode(4, "http://tc-a2", strPtr("rack-a"), 0),
+		transcodeNode(5, "http://tc-1", nil, 3),
+	})
+	plan = h.planner.PlanRoute(RouteRequest{
+		SessionID: "s3", CurrentTranscodeURL: "http://tc-a1",
+		NeedsTranscode: true, Unreachable: map[string]struct{}{"http://tc-a1": {}},
+	})
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-1" {
+		t.Fatalf("plan = %+v, want ungrouped tc-1 while rack-a is degraded", plan.TranscodeNode)
+	}
+}

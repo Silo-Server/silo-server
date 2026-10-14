@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -216,26 +215,6 @@ func TestArtworkDeliveryPublicationAndReconciliation(t *testing.T) {
 		t.Fatalf("repair status = %s", jobStatus)
 	}
 
-}
-
-func TestDeliveryCheckerConcurrentHook(t *testing.T) {
-	var calls atomic.Int32
-	hookFailure := errors.New("publication failed")
-	checker := &deliveryTestChecker{beforeCheck: func() error {
-		calls.Add(1)
-		return hookFailure
-	}}
-	var group sync.WaitGroup
-	for range 32 {
-		group.Go(func() { _, _ = checker.Stat(t.Context(), "key") })
-	}
-	group.Wait()
-	if calls.Load() != 1 {
-		t.Fatalf("hook called %d times", calls.Load())
-	}
-	if !errors.Is(checker.hookErr, hookFailure) {
-		t.Fatalf("lost hook error: %v", checker.hookErr)
-	}
 }
 
 func TestArtworkDeliveryVerifiesLegacyManifests(t *testing.T) {

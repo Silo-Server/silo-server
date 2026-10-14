@@ -86,18 +86,6 @@ describe("DashboardGrid collapse", () => {
     mocks.useAdminSessions.mockReset();
   });
 
-  it("gives back rows when a collapsible widget reports it is empty", async () => {
-    mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
-
-    const { container } = renderGrid();
-
-    expect(await screen.findByText("Nothing playing right now")).toBeTruthy();
-    expect(rowsOf(container)).toBe("1");
-    expect(
-      container.querySelector('[data-widget-id="now-playing"]')?.getAttribute("data-collapsed"),
-    ).toBe("true");
-  });
-
   it("keeps its full height while loading and after a failure", () => {
     mocks.useAdminSessions.mockReturnValue({ data: undefined, isLoading: true, error: null });
     const loading = renderGrid();
@@ -130,7 +118,11 @@ describe("DashboardGrid collapse", () => {
     mocks.useAdminSessions.mockReturnValue({ data: [], isLoading: false, error: null });
 
     const { container, rerender } = renderGrid();
+    expect(await screen.findByText("Nothing playing right now")).toBeTruthy();
     expect(rowsOf(container)).toBe("1");
+    expect(
+      container.querySelector('[data-widget-id="now-playing"]')?.getAttribute("data-collapsed"),
+    ).toBe("true");
 
     mocks.useAdminSessions.mockReturnValue({
       data: [session()],

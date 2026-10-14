@@ -72,6 +72,7 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     source_bitrate_kbps: overrides.source_bitrate_kbps ?? 9000,
     source_video_codec: overrides.source_video_codec ?? "h264",
     source_video_resolution: overrides.source_video_resolution ?? "1080p",
+    source_video_height: overrides.source_video_height,
     video_decision: overrides.video_decision,
     target_video_codec: overrides.target_video_codec ?? "h264",
     target_resolution: overrides.target_resolution ?? "1080p",
@@ -101,16 +102,6 @@ describe("adminActivityPresentation", () => {
     expect(classifyActivityMethod(session)).toBe("direct_stream");
   });
 
-  it("does not carry a previous output container into direct play", () => {
-    const session = makeSession({
-      play_method: "direct",
-      output_container: "fmp4",
-      output_protocol: "hls",
-    });
-    expect(formatDeliveredContainerSummary(session)).toBe("MKV");
-    expect(formatContainerDetail(session)).toBe("Original container");
-  });
-
   it("presents the four Jellyfin-style session scopes distinctly", () => {
     expect(
       ["direct", "remux", "direct_stream", "transcode"].map(
@@ -127,51 +118,17 @@ describe("adminActivityPresentation", () => {
     expect(decisionBadgeClass("copy")).toBe(activityMethodMeta("remux").badgeClass);
     expect(normalizeStreamDecision("copy")).toBe("copy");
     expect(normalizeStreamDecision("remux")).toBe("copy");
-    expect(
-      classifyActivityMethod(
-        makeSession({
-          play_method: "remux",
-          video_decision: "copy",
-          audio_decision: "copy",
-          transcode_audio: false,
-        }),
-      ),
-    ).toBe("remux");
+    const copied = makeSession({
+      play_method: "remux",
+      video_decision: "copy",
+      audio_decision: "remux",
+      transcode_audio: false,
+    });
+    expect(classifyActivityMethod(copied)).toBe("remux");
+    expect(formatPlaybackDecisionSummary(copied)).toBe("copy");
+    expect(formatAudioDetail(copied)).toBe("Copied without re-encoding");
     expect(formatDecisionLabel("remux")).toBe("Remux");
     expect(decisionBadgeClass("remux")).toBe(activityMethodMeta("remux").badgeClass);
-  });
-
-  it("does not present a remux operation as the name of the delivered container", () => {
-    const session = makeSession({ play_method: "remux", source_container: "mkv" });
-
-    expect(formatDecisionLabel(normalizeContainerDecision(session.play_method))).toBe("Remux");
-    expect(formatDeliveredContainerSummary(session)).toBe("Unknown output container");
-    expect(formatContainerDetail(session)).toBe(
-      "Repackaged for streaming; output container not reported",
-    );
-  });
-
-  it("keeps copied streams explicit in component summaries", () => {
-    expect(
-      formatPlaybackDecisionSummary(
-        makeSession({
-          play_method: "remux",
-          video_decision: "copy",
-          audio_decision: "copy",
-          transcode_audio: false,
-        }),
-      ),
-    ).toBe("copy");
-    expect(
-      formatPlaybackDecisionSummary(
-        makeSession({
-          play_method: "remux",
-          video_decision: "remux",
-          audio_decision: "remux",
-          transcode_audio: false,
-        }),
-      ),
-    ).toBe("copy");
   });
 
   it("uses the effective source as the primary video summary", () => {
@@ -221,6 +178,30 @@ describe("adminActivityPresentation", () => {
     expect(formatTranscodeModeSummary(session)).toBe("HW/SW unknown");
   });
 
+  it("labels a full-resolution transcode like its source and keeps a downscale's label", () => {
+    const scope4K = {
+      play_method: "transcode",
+      video_decision: "transcode",
+      source_video_codec: "hevc",
+      source_video_resolution: "2160p",
+      source_video_height: 1600,
+      target_video_codec: "hevc",
+    } as const;
+    const fullSize = makeSession({ ...scope4K, target_resolution: "1600p" });
+    expect(formatVideoSummary(fullSize)).toBe("HEVC · 2160p");
+    expect(formatDeliveredVideoSummary(fullSize)).toBe("HEVC · 2160p");
+    expect(formatVideoDetail(fullSize)).toBe("Output → HEVC · 2160p");
+
+    expect(
+      formatDeliveredVideoSummary(makeSession({ ...scope4K, target_resolution: "720p" })),
+    ).toBe("HEVC · 720p");
+    expect(
+      formatDeliveredVideoSummary(
+        makeSession({ ...scope4K, source_video_height: undefined, target_resolution: "1600p" }),
+      ),
+    ).toBe("HEVC · 1600p");
+  });
+
   it("does not infer an output container from HLS or an unknown route", () => {
     for (const play_method of ["transcode", "remux", "", "future-route"]) {
       const session = makeSession({ play_method, output_container: undefined });
@@ -228,6 +209,11 @@ describe("adminActivityPresentation", () => {
       expect(formatDeliveredContainerSummary({ ...session, output_protocol: "hls" })).toBe(
         "Unknown output container (HLS)",
       );
+      if (play_method === "remux") {
+        expect(formatContainerDetail(session)).toBe(
+          "Repackaged for streaming; output container not reported",
+        );
+      }
     }
   });
 
@@ -244,6 +230,8 @@ describe("adminActivityPresentation", () => {
       source_audio_codec: "eac3",
       source_audio_channels: 6,
       target_audio_codec: "aac",
+      output_container: "fmp4",
+      output_protocol: "hls",
     });
 
     expect(formatPlaybackDecisionSummary(session)).toBe("direct");
@@ -619,18 +607,6 @@ describe("adminActivityPresentation", () => {
     expect(formatDeliveredContainerSummary(session)).toBe("Unknown output container");
     expect(formatDecisionLabel(normalizeStreamDecision(session.video_decision))).toBe("Copy");
     expect(formatVideoDetail(session)).toBe("Copied without re-encoding");
-  });
-
-  it("keeps copied audio explicit in the stream details", () => {
-    const copied = makeSession({
-      play_method: "remux",
-      video_decision: "remux",
-      audio_decision: "remux",
-      transcode_audio: false,
-    });
-
-    expect(formatDecisionLabel(normalizeStreamDecision(copied.audio_decision))).toBe("Copy");
-    expect(formatAudioDetail(copied)).toBe("Copied without re-encoding");
   });
 
   it("keeps exact client build/channel and tone-map mode in expanded activity details", () => {

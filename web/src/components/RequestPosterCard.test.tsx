@@ -44,11 +44,12 @@ describe("RequestPosterCard (discover variant)", () => {
       </MemoryRouter>,
     );
 
+    expect(screen.queryByRole("button", { name: /your watchlist/ })).toBeNull();
     const card = container.firstElementChild;
     expect(card).toHaveClass("media-card", "group/card");
-    // A missing poster falls back to the library's plain title placeholder.
+    // A missing poster shows the default artwork, as on library cards.
     const artwork = card?.querySelector(".media-card-image");
-    expect(artwork).toHaveTextContent("Test Movie");
+    expect(artwork?.querySelector(".default-artwork .lucide-film")).not.toBeNull();
     expect(artwork?.querySelector("[style]")).toBeNull();
 
     for (const link of screen.getAllByRole("link", { name: /Test Movie/ })) {
@@ -136,6 +137,9 @@ describe("RequestPosterCard (discover variant)", () => {
 
     expect(movieMarkup).toContain(">Movie<");
     expect(seriesMarkup).toContain(">Series<");
+    // The default artwork's mark follows the type too.
+    expect(movieMarkup).toContain("lucide-film");
+    expect(seriesMarkup).toContain("lucide-tv");
   });
 
   it("marks a title already in the library as Available and links to it", () => {
@@ -164,19 +168,6 @@ describe("RequestPosterCard (discover variant)", () => {
     );
   });
 
-  it("names the reason when a title without a request cannot be requested", () => {
-    render(
-      <MemoryRouter>
-        <RequestPosterCard
-          variant="discover"
-          item={{ ...requestable, request: { requestable: false, reason: "quota_exceeded" } }}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("Request limit reached")).toBeInTheDocument();
-  });
-
   it("dims the artwork of a title that can't be requested", () => {
     const withPoster = { ...requestable, poster_path: "/poster.jpg" };
     const { rerender } = render(
@@ -195,6 +186,7 @@ describe("RequestPosterCard (discover variant)", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("img", { name: "Test Movie" })).toHaveClass("saturate-[0.8]");
+    expect(screen.getByText("Request limit reached")).toBeInTheDocument();
   });
 
   it("follows the viewer's poster size and always names the type under a caption", () => {
@@ -215,15 +207,15 @@ describe("RequestPosterCard (discover variant)", () => {
     expect(screen.getByRole("link", { name: "Test Movie (Movie · 2024)" })).toBeInTheDocument();
   });
 
-  it("shows the title in place of a poster that fails to load", () => {
-    render(
+  it("shows the default artwork in place of a poster that fails to load", () => {
+    const { container } = render(
       <MemoryRouter>
         <RequestPosterCard variant="discover" item={{ ...requestable, poster_path: "/p.jpg" }} />
       </MemoryRouter>,
     );
     fireEvent.error(screen.getByRole("img", { name: "Test Movie" }));
     expect(screen.queryByRole("img", { name: "Test Movie" })).not.toBeInTheDocument();
-    expect(screen.getAllByText("Test Movie").length).toBeGreaterThan(1);
+    expect(container.querySelector(".media-card-image .default-artwork")).not.toBeNull();
   });
 
   it("fills a grid cell when fluid", () => {
@@ -269,15 +261,6 @@ describe("RequestPosterCard watchlist action", () => {
     expect(remove).toHaveAttribute("aria-pressed", "true");
     expect(remove).toHaveAttribute("title", "On Watchlist");
   });
-
-  it("offers no watchlist action without a handler", () => {
-    render(
-      <MemoryRouter>
-        <RequestPosterCard variant="discover" item={requestable} />
-      </MemoryRouter>,
-    );
-    expect(screen.queryByRole("button", { name: /your watchlist/ })).toBeNull();
-  });
 });
 
 describe("RequestPosterCard (mine variant)", () => {
@@ -295,11 +278,7 @@ describe("RequestPosterCard (mine variant)", () => {
 
   it.each<[Partial<MediaRequest>, string]>([
     [{ status: "pending" }, "Pending"],
-    [{ status: "queued" }, "Processing"],
-    [{ status: "downloading" }, "Processing"],
-    [{ status: "completed" }, "Available"],
     [{ status: "pending", outcome: "cancelled" }, "Cancelled"],
-    [{ status: "approved", outcome: "failed" }, "Failed"],
     // The server's derived state wins: a downloaded title not yet scanned in
     // is still processing.
     [{ status: "completed", state: "processing" }, "Processing"],

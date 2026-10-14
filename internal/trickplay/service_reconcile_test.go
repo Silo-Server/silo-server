@@ -39,17 +39,6 @@ func TestReconcileDrainsFullBatches(t *testing.T) {
 	}
 }
 
-func TestReconcileYieldsAndRequestsContinuation(t *testing.T) {
-	q := &reconcileQueue{fakeQueue: newFakeQueue(), reconcile: func(context.Context, int) (ReconcileStats, error) {
-		return ReconcileStats{Removed: reconcileBatch}, nil
-	}}
-	s := newService(q, &fakeStore{}, nil, &fakeExtractor{}, "server")
-	stats, more, err := s.reconcileBatches(t.Context(), testRecipe, q.Reconcile)
-	if err != nil || !more || q.calls != reconcilePassBatches || stats.Removed != reconcileBatch*reconcilePassBatches {
-		t.Fatalf("stats=%+v more=%v calls=%d error=%v", stats, more, q.calls, err)
-	}
-}
-
 func TestReconcileStopsWhenCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

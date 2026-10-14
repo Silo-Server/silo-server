@@ -41,7 +41,7 @@ dev-frontend:
 
 # Run the Go backend (integrated mode)
 dev-backend:
-	go run ./cmd/silo/
+	SILO_SHUTDOWN_DELAY=$${SILO_SHUTDOWN_DELAY:-0} go run ./cmd/silo/
 
 # Run a proxy node (stateless stream proxy, no DB required)
 dev-proxy:
@@ -66,8 +66,7 @@ lint-changed:
 # an entry along with its fix, and never extend it to land a change. The Go
 # suite has no equivalent — a Go test that cannot pass yet carries a t.Skip and
 # its reason in the source, where whoever reads the test finds it.
-WEBTEST_KNOWN_FAILURES := \
-	--exclude src/pages/Catalog.test.tsx
+WEBTEST_KNOWN_FAILURES :=
 
 # The Go binary embeds the built frontend, so every Go build and test needs
 # web/dist to exist. Tests never serve it, so a placeholder is enough; `make
@@ -82,14 +81,22 @@ test: test-go test-web
 test-go: embed-stub
 	go test ./...
 
-# Run the DB-backed query-budget pins listed in $(DB_PINS) against the
-# migrated, disposable database named by SILO_TEST_DATABASE_URL. Unlike
-# test-go, a listed test that skips (no URL, unmigrated schema) or is missing
-# fails the run. Migrate a fresh database first with
+# Run the DB-backed query-budget pins listed in $(DB_PINS), then the database
+# contracts, against the migrated, disposable database named by
+# SILO_TEST_DATABASE_URL. Unlike test-go, a listed test that skips (no URL,
+# unmigrated schema) or is missing fails the run. Migrate a fresh database first with
 # DATABASE_URL=<url> SECRET_KEY=<32+ chars> go run ./cmd/silo/ --migrate-only.
 DB_PINS := scripts/ci/db-pins.txt
 test-db-pins: embed-stub
 	go run ./scripts/ci/dbpins -list $(DB_PINS)
+	$(MAKE) test-db-contracts
+
+.PHONY: test-db-contracts
+# Existing database boundary tests own assertions retired from unit tests.
+# Use the same runner so a missing or skipped keeper fails validation.
+test-db-contracts: embed-stub
+	SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL="$${SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL:-$$SILO_TEST_DATABASE_URL}" \
+		go run ./scripts/ci/dbpins -list scripts/ci/db-contracts.txt
 
 # WEBTEST_ARGS passes extra vitest flags through; CI uses it to shard the
 # suite across runners (--shard=N/M).
@@ -208,8 +215,9 @@ verify-route-inventory:
 # only changed lines. It is the one gocritic check the repo enables (see
 # .golangci.yml), and the tree passes it today, so this can gate CI while the
 # rest of `make lint` cannot.
+# Tests are excluded from this rule, so do not analyze their package variants.
 lint-router-recovery:
-	golangci-lint run --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
+	golangci-lint run --tests=false --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
 MIGRATION_LEDGER := contracts/api/v2/migration.json
 
 # CI gives test-go ownership of these Go assertions and passes 0 to avoid

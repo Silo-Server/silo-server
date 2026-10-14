@@ -51,6 +51,14 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 	"subtitles": true,
 }
 
+// extraDirLabel and extrasDirLabel are the normalized names of an Extras/
+// folder, the one extras folder where an episode code can keep a file an
+// episode (see keepsEpisodeToken).
+const (
+	extraDirLabel  = "extra"
+	extrasDirLabel = "extras"
+)
+
 // extrasDirKinds classifies supplemental directory names (normalized via
 // normalizeScannerDirLabel) into the shared extra-kind vocabulary. The set
 // mirrors the Jellyfin/Plex extras folder convention ("other" included: both
@@ -60,11 +68,11 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 // Convention labels can also appear as content-scope folder names ("movies/
 // other/<Movie>/<file>", "movies/shorts/..."); those never classify as extras
 // because extrasClassifier only honors a convention-named dir owned by a
-// title folder — one that holds media of its own, which library roots and
-// organizational folders do not.
+// title folder — one that holds media of its own or belongs to a show, which
+// library roots and organizational folders do not.
 var extrasDirKinds = map[string]models.ExtraKind{
-	"extra":             models.ExtraKindOther,
-	"extras":            models.ExtraKindOther,
+	extraDirLabel:       models.ExtraKindOther,
+	extrasDirLabel:      models.ExtraKindOther,
 	"other":             models.ExtraKindOther,
 	"featurette":        models.ExtraKindFeaturette,
 	"featurettes":       models.ExtraKindFeaturette,
@@ -150,6 +158,8 @@ type Scanner struct {
 	// emptying trash hard-deletes its row. Missing files are hidden from
 	// clients immediately; the grace only delays losing per-file state so a
 	// file that reappears (flapping mount, reverted upgrade) restores cheaply.
+	// Membership reconciliation also holds an orphaned item for as long, so a
+	// replacement file relinks to it (see catalog WithRemovalGrace).
 	fileRemovalGrace     time.Duration
 	markerFetcher        func(context.Context, string) *IntroCreditsMarkers
 	markerPrefix         markerPrefixCache
@@ -240,7 +250,7 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, artworkStore blobs
 		locationRepo:         NewObservedLocationRepository(fileRepo.Pool()),
 		groupLocationRepo:    NewGroupLocationRepository(fileRepo.Pool()),
 		folderRepo:           catalog.NewFolderRepository(fileRepo.Pool()),
-		libraryRepo:          catalog.NewLibraryItemRepository(fileRepo.Pool()),
+		libraryRepo:          catalog.NewLibraryItemRepository(fileRepo.Pool()).WithRemovalGrace(fileRemovalGrace),
 		episodeLibraryRepo:   catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
 		itemRepo:             catalog.NewItemRepository(fileRepo.Pool()),
 		personRepo:           catalog.NewPersonRepository(fileRepo.Pool()),
@@ -540,6 +550,7 @@ func walkLogicalTree(
 	ignoreRulesStack []ignoreRules,
 	filePaths *[]string,
 	walkFailures *[]string,
+	sidecars SidecarListing,
 	readDir func(string) ([]os.DirEntry, error),
 ) error {
 	if ctx != nil {
@@ -569,7 +580,7 @@ func walkLogicalTree(
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, ignoreRulesStack, filePaths, walkFailures, readDir)
+			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, ignoreRulesStack, filePaths, walkFailures, sidecars, readDir)
 		}
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
@@ -613,6 +624,9 @@ func walkLogicalTree(
 		recordWalkFailure(walkFailures, logicalPath)
 		return nil
 	}
+	if sidecars != nil {
+		sidecars.record(logicalPath, entries)
+	}
 
 	childRules, skip := dirIgnoreRules(ignoreRulesStack, logicalPath, physicalPath, entries)
 	if skip {
@@ -649,7 +663,7 @@ func walkLogicalTree(
 				if ignoreRulesMatch(childRules, logicalChild, true) {
 					continue
 				}
-				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, readDir); err != nil {
+				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
 					return err
 				}
 				continue
@@ -662,7 +676,7 @@ func walkLogicalTree(
 		}
 
 		if entry.IsDir() {
-			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, readDir); err != nil {
+			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
 				return err
 			}
 			continue
@@ -693,15 +707,27 @@ func walkLogicalTree(
 // matters: a dangling symlink is permanent, and protecting its entire library
 // root would suppress missing-file reconciliation there on every future scan.
 func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string, libraryRoots []string) ([]string, []string, error) {
+	filePaths, walkFailures, _, err := collectLogicalFilePathsAndSidecars(ctx, walkRoots, libraryType, libraryRoots)
+	return filePaths, walkFailures, err
+}
+
+// collectLogicalFilePathsAndSidecars is collectLogicalFilePaths that also
+// returns the local metadata sidecars in every directory a video walk read
+// (nil for other library types).
+func collectLogicalFilePathsAndSidecars(ctx context.Context, walkRoots []string, libraryType string, libraryRoots []string) ([]string, []string, SidecarListing, error) {
 	filePaths := make([]string, 0)
 	visitedPhysicalDirs := make(map[string]struct{})
 	mode := walkModeFor(libraryType)
 	walkFailures := make([]string, 0)
+	var sidecars SidecarListing
+	if mode == walkModeVideo || mode == walkModeMovie {
+		sidecars = make(SidecarListing)
+	}
 
 	for _, rootPath := range walkRoots {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 		cleanRoot := filepath.Clean(rootPath)
@@ -717,12 +743,12 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 		if ignored {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, os.ReadDir); err != nil {
-			return nil, nil, err
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, sidecars, os.ReadDir); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 
-	return filePaths, walkFailures, nil
+	return filePaths, walkFailures, sidecars, nil
 }
 
 func (s *Scanner) scanPaths(
@@ -764,10 +790,11 @@ func (s *Scanner) scanPaths(
 		Message:      "Discovering media files",
 		CurrentScope: firstScope(reconcileRoots),
 	})
-	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
+	filePaths, walkFailures, sidecars, walkErr := collectLogicalFilePathsAndSidecars(ctx, walkRoots, folder.Type, folder.Paths)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots: %w", walkErr)
 	}
+	result.Sidecars = sidecars
 	slog.InfoContext(ctx, "scanner: discovered files", "component", "scanner",
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
@@ -794,7 +821,7 @@ func (s *Scanner) scanPaths(
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
-	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths)
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths, walkRoots)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
@@ -1680,10 +1707,11 @@ func (s *Scanner) scanScope(
 		return nil, fmt.Errorf("loading item statuses for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
 
-	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
+	filePaths, walkFailures, sidecars, walkErr := collectLogicalFilePathsAndSidecars(ctx, walkRoots, folder.Type, folder.Paths)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots for %q: %w", reconcileRoots[0], walkErr)
 	}
+	result.Sidecars = sidecars
 	slog.InfoContext(ctx, "scanner: discovered files", "component", "scanner",
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
@@ -1706,7 +1734,7 @@ func (s *Scanner) scanScope(
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
-	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths)
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths, walkRoots)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
@@ -1938,6 +1966,12 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.RootObservations = append(dst.RootObservations, src.RootObservations...)
 	dst.EmptyRootGuarded = dst.EmptyRootGuarded || src.EmptyRootGuarded
+	if src.Sidecars != nil {
+		if dst.Sidecars == nil {
+			dst.Sidecars = make(SidecarListing, len(src.Sidecars))
+		}
+		dst.Sidecars.merge(src.Sidecars)
+	}
 }
 
 // markMissingExcludingProtected marks every cataloged file the walk did not
@@ -1967,16 +2001,18 @@ func (s *Scanner) markMissingExcludingProtected(
 			result.MissingSkippedProtected++
 			continue
 		}
-		// Only mark as missing if not already marked.
-		if existing.MissingSince == nil {
-			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
-				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
-					"path", existing.FilePath,
-					"error", err,
-				)
-				result.Errors++
-				continue
-			}
+		// A file already marked by an earlier scan is waiting out the removal
+		// grace period; it is not news to this scan, so it is not counted.
+		if existing.MissingSince != nil {
+			continue
+		}
+		if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
+			slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
+				"path", existing.FilePath,
+				"error", err,
+			)
+			result.Errors++
+			continue
 		}
 		result.Missing++
 	}
@@ -2873,6 +2909,10 @@ func (s *Scanner) watchFolderContext(ctx context.Context, folderID int) (context
 				return
 			case <-ticker.C:
 				enabled, err := s.folderEnabledState(watchCtx, folderID)
+				if watchCtx.Err() != nil {
+					// The scan finished while the check ran.
+					return
+				}
 				if err != nil {
 					slog.WarnContext(ctx, "scanner: failed to refresh folder state", "component", "scanner", "folder_id", folderID, "error", err)
 					continue
@@ -3029,7 +3069,8 @@ func (s *Scanner) processFile(
 
 		// Try to get probe data.
 		probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
-		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe) {
+		rejectionStands := probeRejectionStands(existing, fileSize, fileModifiedAt)
+		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe, rejectionStands) {
 			if probeRejected {
 				// Nothing else about the row changes here, so the rejection
 				// is recorded on its own. The repository only marks rows with
@@ -3039,8 +3080,10 @@ func (s *Scanner) processFile(
 				}
 			}
 			// Leave the migrated row's probe_updated_at NULL so a later scan
-			// retries without replacing valid metadata with zero values.
-			if len(updateReasons) > 1 {
+			// retries without replacing valid metadata with zero values. A
+			// standing rejection has no probe_repair reason, so every reason
+			// it has is an identity or subtitle change to write.
+			if rejectionStands || len(updateReasons) > 1 {
 				mf := models.MediaFile{MediaFolderID: folder.ID, FilePath: filePath}
 				populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
 				mf.ExternalSubtitles = externalSubtitleModels(loadExternalSubs())
@@ -3328,7 +3371,7 @@ func scanStateUpdateReasons(
 	if existing.MissingSince != nil {
 		reasons = append(reasons, "was_missing")
 	}
-	if canRepairProbe && needsCriticalProbeRepairScanState(existing) {
+	if scanStateNeedsProbeRepair(existing, fileSize, fileModifiedAt, canRepairProbe) {
 		reasons = append(reasons, "probe_repair")
 	}
 	if externalSubtitlesChecked {
@@ -3421,7 +3464,7 @@ func shouldSkipStableConfirmedScanState(
 	if existing.MissingSince != nil {
 		return false
 	}
-	if canRepairProbe && needsCriticalProbeRepairScanState(existing) {
+	if scanStateNeedsProbeRepair(existing, fileSize, fileModifiedAt, canRepairProbe) {
 		return false
 	}
 	if len(updateReasons) > 0 {
@@ -3508,6 +3551,28 @@ func normalizeFileModifiedAt(ts time.Time) time.Time {
 	return models.NormalizeFileModifiedAt(ts)
 }
 
+// scanStateNeedsProbeRepair reports whether a scan should probe an unchanged
+// file again to fill in playback-critical metadata. ffprobe has already
+// rejected a file marked probe_failed_at that never probed successfully, and
+// the mark only stands while its size and modification time are the ones that
+// were probed, so probing the same bytes again would only fail again. Changed
+// bytes drop the mark and are probed as usual. Playback still probes a marked
+// file when it is played.
+func scanStateNeedsProbeRepair(existing *scanStateFile, fileSize int64, fileModifiedAt time.Time, canRepairProbe bool) bool {
+	if !canRepairProbe || probeRejectionStands(existing, fileSize, fileModifiedAt) {
+		return false
+	}
+	return needsCriticalProbeRepairScanState(existing)
+}
+
+// probeRejectionStands reports that ffprobe rejected the bytes the row still
+// describes: it is marked probe_failed_at, never probed successfully, and its
+// size and modification time match the file on disk.
+func probeRejectionStands(existing *scanStateFile, fileSize int64, fileModifiedAt time.Time) bool {
+	return existing != nil && existing.ProbeFailedAt != nil && existing.ProbeUpdatedAt == nil &&
+		existing.FileSize == fileSize && sameFileModifiedAt(existing.FileModifiedAt, fileModifiedAt)
+}
+
 func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	if file == nil {
 		return true
@@ -3558,11 +3623,15 @@ func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	return false
 }
 
-func shouldPreserveExistingProbeAfterProbeFailure(updateReasons []string, probe *ProbeData) bool {
+// shouldPreserveExistingProbeAfterProbeFailure reports whether a failed probe
+// must leave the row's stored probe metadata alone: the scan was there to
+// repair it, alongside at most identity and subtitle changes. A standing
+// rejection skips the repair reason but is the same case.
+func shouldPreserveExistingProbeAfterProbeFailure(updateReasons []string, probe *ProbeData, rejectionStands bool) bool {
 	if probe != nil || len(updateReasons) == 0 {
 		return false
 	}
-	foundRepair := false
+	foundRepair := rejectionStands
 	for _, reason := range updateReasons {
 		switch reason {
 		case "probe_repair":

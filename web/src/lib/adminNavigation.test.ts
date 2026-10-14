@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import { filterSettingsSearchGroups } from "@/components/settings/settingsSearch";
@@ -17,6 +19,10 @@ describe("admin command palette", () => {
       expect(hrefsFor(query)).toContain("/admin/settings/requests");
     },
   );
+
+  it.each(["home rows", "sections", "rows", "rails"])("finds Sections for %s", (query) => {
+    expect(hrefsFor(query)).toContain("/admin/sections");
+  });
 
   it("still finds the request queue", () => {
     expect(hrefsFor("approvals")).toContain("/admin/requests");

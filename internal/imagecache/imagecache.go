@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	maxDownloadBytes = 25 * 1024 * 1024 // allow oversized provider originals; cached variants are dimension-capped
+	maxDownloadBytes = metadata.MaxArtworkSourceBytes // allow oversized provider originals; cached variants are dimension-capped
 	downloadTimeout  = 30 * time.Second
 )
 
@@ -107,13 +107,6 @@ func (c *Cacher) SetArtworkRevisionTracker(tracker ArtworkRevisionTracker) {
 	if c != nil {
 		c.revisionTracker = tracker
 	}
-}
-
-func newWithHTTPClient(s3 ObjectPutter, client *http.Client) *Cacher {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &Cacher{s3: s3, httpClient: client}
 }
 
 // CacheImage implements metadata.ImageCacher using the internal Cache method.
@@ -458,6 +451,14 @@ func imageTypeName(t metadata.ImageType) string {
 		return "still"
 	case metadata.ImageProfile:
 		return "profile"
+	case metadata.ImageBanner:
+		return "banner"
+	case metadata.ImageThumb:
+		return "thumb"
+	case metadata.ImageClearArt:
+		return "clearart"
+	case metadata.ImageDisc:
+		return "disc"
 	default:
 		return "unknown"
 	}

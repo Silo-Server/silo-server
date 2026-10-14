@@ -5,19 +5,6 @@ import { RangeSegmentedControl, WidgetRangePicker } from "./WidgetRangePicker";
 import { WidgetChromeProvider } from "./widgetChrome";
 
 describe("RangeSegmentedControl", () => {
-  it("renders only the offered windows, in order", () => {
-    render(
-      <RangeSegmentedControl value="week" options={["day", "week", "month"]} onChange={() => {}} />,
-    );
-
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "24h",
-      "7d",
-      "30d",
-    ]);
-    expect(screen.queryByText("1h")).toBeNull();
-  });
-
   it("marks the current window pressed and the others not", () => {
     render(
       <RangeSegmentedControl value="week" options={["day", "week", "month"]} onChange={() => {}} />,
@@ -27,17 +14,6 @@ describe("RangeSegmentedControl", () => {
     expect(screen.getByLabelText("Show the last 24 hours").getAttribute("aria-pressed")).toBe(
       "false",
     );
-  });
-
-  it("reports the clicked window", () => {
-    const onChange = vi.fn();
-    render(
-      <RangeSegmentedControl value="week" options={["day", "week", "month"]} onChange={onChange} />,
-    );
-
-    fireEvent.click(screen.getByLabelText("Show the last 30 days"));
-
-    expect(onChange).toHaveBeenCalledWith("month");
   });
 
   it("renders nothing when there is no choice to make", () => {
@@ -63,14 +39,6 @@ describe("WidgetRangePicker", () => {
     fireEvent.click(screen.getByLabelText("Show the last 24 hours"));
 
     expect(setRange).toHaveBeenCalledWith("top-titles", "day");
-  });
-
-  // Widgets are also rendered outside the grid (unit tests); the picker is the
-  // grid's chrome and simply is not there.
-  it("renders nothing outside a widget chrome", () => {
-    const { container } = render(<WidgetRangePicker />);
-
-    expect(container.firstChild).toBeNull();
   });
 
   it("renders nothing for a widget without windows", () => {

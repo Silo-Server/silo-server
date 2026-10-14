@@ -625,8 +625,6 @@ func (reg *Registry) loadAdminRequestOptions(ctx context.Context, in *AdminReque
 	return &AdminRequestOptionsOutput{Body: AdminRequestOptions{Options: options}}, nil
 }
 
-var adminRequestOperationIDs = []string{opGetAdminRequestCapabilities, opListAdminRequests, opAdminApproveRequest, opAdminDeclineRequest, opAdminCancelRequest, opAdminRetryRequest, opGetAdminRequestSettings, opUpdateAdminRequestSettings, opGetAdminRequestUserLimit, opUpdateAdminRequestUserLimit, opListRequestIntegrations, opGetRequestIntegration, opCreateRequestIntegration, opUpdateRequestIntegration, opDeleteRequestIntegration, opLoadRequestIntegrationOptions}
-
 func (c AdminRequestCapabilitiesOutputBody) capabilityState() string {
 	return configuredCapabilityState(c.Available)
 }

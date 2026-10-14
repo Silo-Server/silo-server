@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { AdminUser } from "@/api/types";
 import { canChangeAccessPolicy, canManageAccount, canTransferOwnership } from "./accountOwner";

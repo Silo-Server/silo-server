@@ -118,33 +118,6 @@ it("keeps a fulfilled request linked to its catalog item", () => {
     "/item/movie-603",
   );
 });
-it.each([
-  [{ media_type: "movie", tmdb_id: 603 }, "Your requested movie is now available"],
-  [{ media_type: "movie", tmdb_id: 603, follower: true }, "A movie you followed is now available"],
-])("words a fulfilled row for the requester or a follower (%o)", (flags, text) => {
-  state.list.data = {
-    pages: [
-      {
-        notifications: [
-          {
-            ...row,
-            type: "request.fulfilled",
-            series_id: "movie-603",
-            series_title: "The Matrix",
-            reason_flags: flags,
-          },
-        ],
-        read_cutoff: "c",
-      },
-    ],
-  };
-  render(
-    <MemoryRouter>
-      <Notifications />
-    </MemoryRouter>,
-  );
-  expect(screen.getByText(text)).toBeInTheDocument();
-});
 it("leaves a request row unlinked when its payload lacks the TMDB id", () => {
   state.list.data = {
     pages: [

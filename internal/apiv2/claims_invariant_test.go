@@ -8,12 +8,17 @@ import (
 )
 
 func TestAuthenticatedClassesRejectInvalidClaims(t *testing.T) {
-	for _, claims := range []*auth.Claims{nil, {TokenType: auth.TokenTypeAccess, SessionID: "s1"}, {UserID: -1, TokenType: auth.TokenTypeAccess, SessionID: "s1"}} {
-		deps := parityDeps(false)
-		deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{"invalid": claims}}, fakeSessions{map[string]string{"s1": "user"}}, nil, nil)
-		h := newTestHandler(t, deps)
+	claims := map[string]*auth.Claims{
+		"nil":      nil,
+		"zero":     {TokenType: auth.TokenTypeAccess, SessionID: "s1"},
+		"negative": {UserID: -1, TokenType: auth.TokenTypeAccess, SessionID: "s1"},
+	}
+	deps := parityDeps(false)
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user"}}, nil, nil)
+	h := newTestHandler(t, deps)
+	for token := range claims {
 		for _, class := range []string{"authenticated", "profile_scoped", "acting_admin", "permission_gated"} {
-			rec := do(t, h, "POST", Prefix+"/probe/"+class, `{"name":"x","cleared":null}`, bearer("invalid"))
+			rec := do(t, h, "POST", Prefix+"/probe/"+class, `{"name":"x","cleared":null}`, bearer(token))
 			requireProblem(t, rec, TypeInvalidToken)
 		}
 	}

@@ -3,9 +3,11 @@ package sections
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 )
 
 const GeneratedHomeLibraryRecentSource = "home_library_recent"
@@ -187,4 +189,56 @@ func GeneratedHomeLibraryRecentSyncedTitle(s *PageSection, libraryName string) s
 	}
 	kind := generatedHomeLibraryRecentKindForSection(s)
 	return generatedHomeLibraryRecentTitle(kind, s.SectionType, libraryName)
+}
+
+// homeRecentlyAddedCoversItemType reports whether s is a home Recently
+// Added row that shows itemType ("movie" or "series") from every library:
+// no library filter and no narrower type filter. A combined row from older
+// defaults (media scope video or none) covers both types; the split
+// default rows cover one each.
+func homeRecentlyAddedCoversItemType(s *PageSection, itemType string) bool {
+	if s == nil || s.Scope != "home" || s.LibraryID != nil || s.SectionType != SectionRecentlyAdded {
+		return false
+	}
+	if _, generated := ParseGeneratedHomeLibraryRecentConfig(s.Config); generated {
+		return false
+	}
+	filters := recentlyAddedConfigFilters(s.Config)
+	if len(filters.LibraryIDs()) > 0 {
+		return false
+	}
+	if filters.FilterType != "" {
+		return filters.FilterType == itemType
+	}
+	def, err := ParseQueryDefinition(s.Config)
+	if err != nil {
+		return true
+	}
+	return catalog.MediaScopeMatchesItemType(def.MediaScope, itemType)
+}
+
+// hasEnabledHomeRecentlyAddedCovering reports whether home has enabled
+// Recently Added rows covering every item type a library of the given type
+// holds, so the library needs no per-library rows of its own. A mixed
+// library needs both types covered.
+func hasEnabledHomeRecentlyAddedCovering(home []*PageSection, libraryType string) bool {
+	kinds := librarykind.Of(libraryType)
+	var needed []string
+	if kinds.Movie || kinds.Mixed {
+		needed = append(needed, "movie")
+	}
+	if kinds.TV || kinds.Mixed {
+		needed = append(needed, "series")
+	}
+	if len(needed) == 0 {
+		return false
+	}
+	for _, itemType := range needed {
+		if !slices.ContainsFunc(home, func(s *PageSection) bool {
+			return s.Enabled && homeRecentlyAddedCoversItemType(s, itemType)
+		}) {
+			return false
+		}
+	}
+	return true
 }

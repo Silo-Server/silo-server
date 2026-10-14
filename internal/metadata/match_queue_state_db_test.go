@@ -97,11 +97,11 @@ func TestSeriesMatchQueueFingerprintIncludesEpisodePathShape(t *testing.T) {
 			t.Fatalf("series fingerprint expression %q does not contain %q", expression, required)
 		}
 	}
-	if movieMatcherRevision != 11 {
-		t.Fatalf("movie matcher revision = %d, want flexible filename matching revision 11", movieMatcherRevision)
+	if movieMatcherRevision != 12 {
+		t.Fatalf("movie matcher revision = %d, want provider title alias revision 12", movieMatcherRevision)
 	}
-	if seriesMatcherRevision != 11 {
-		t.Fatalf("series matcher revision = %d, want naming parity revision 11", seriesMatcherRevision)
+	if seriesMatcherRevision != 12 {
+		t.Fatalf("series matcher revision = %d, want provider title alias revision 12", seriesMatcherRevision)
 	}
 }
 

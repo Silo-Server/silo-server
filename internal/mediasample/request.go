@@ -198,12 +198,25 @@ func (r Request) Validate() error {
 		if err := r.Images.validate(); err != nil {
 			return err
 		}
+		if r.Images.ToneMap != nil && r.Images.ToneMap.Source != "" {
+			return errors.New("images keep their tone-map chains and take no source signal")
+		}
 	}
 	if r.Sheets != nil {
 		if r.Samples == nil || r.Stats != nil {
 			return errors.New("sheets need samples and no other output")
 		}
 		if err := r.Sheets.validate(); err != nil {
+			return err
+		}
+		run := *r.Sheets
+		if run.UseInputAspect {
+			// The probe sets the tile height, and samples checks the run
+			// again with it before any tile is decoded. Until then, only a
+			// run too large at any height is refused.
+			run.TileHeight = minSheetTile
+		}
+		if err := run.validateRun(len(r.Samples.Seconds)); err != nil {
 			return err
 		}
 	}

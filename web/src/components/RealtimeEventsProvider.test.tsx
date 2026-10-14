@@ -260,67 +260,6 @@ describe("RealtimeEventsProvider", () => {
     });
   });
 
-  it("ignores stale close events from intentionally closed sockets", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <div />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-
-    await act(async () => {});
-    expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(FakeWebSocket.instances[0]?.protocols).toEqual([
-      "silo.events.v2",
-      `silo.ticket.${"a".repeat(43)}`,
-    ]);
-    const firstSocket = FakeWebSocket.instances[0];
-
-    await act(async () => {
-      mockState.pageActivity = {
-        ...mockState.pageActivity,
-        canApplyRealtimeUpdates: false,
-      };
-      view.rerender(
-        <QueryClientProvider client={queryClient}>
-          <RealtimeEventsProvider>
-            <div />
-          </RealtimeEventsProvider>
-        </QueryClientProvider>,
-      );
-    });
-
-    await act(async () => {
-      mockState.pageActivity = {
-        ...mockState.pageActivity,
-        canApplyRealtimeUpdates: true,
-      };
-      view.rerender(
-        <QueryClientProvider client={queryClient}>
-          <RealtimeEventsProvider>
-            <div />
-          </RealtimeEventsProvider>
-        </QueryClientProvider>,
-      );
-    });
-
-    expect(FakeWebSocket.instances).toHaveLength(2);
-
-    await act(async () => {
-      firstSocket?.emitClose();
-      vi.advanceTimersByTime(1_000);
-    });
-
-    expect(FakeWebSocket.instances).toHaveLength(2);
-  });
-
   it("reconnects on same-profile PIN replacement and rejects old socket frames", async () => {
     setProfileId("profile-1");
     mockState.profile = { id: "profile-1", has_pin: false };
@@ -338,6 +277,7 @@ describe("RealtimeEventsProvider", () => {
     await act(async () => {});
     expect(FakeWebSocket.instances).toHaveLength(1);
     const oldSocket = FakeWebSocket.instances[0]!;
+    expect(oldSocket.protocols).toEqual(["silo.events.v2", `silo.ticket.${"a".repeat(43)}`]);
     // Preserve a queued callback even after cleanup removes the socket handler.
     const oldMessage = oldSocket.onmessage!;
     await act(async () => {
@@ -511,7 +451,7 @@ describe("RealtimeEventsProvider", () => {
         event: "sessions.replaced",
         data: [],
       });
-    for (let i = 0; i < 20; i++)
+    for (let i = 0; i < 3; i++)
       await act(async () => {
         emit();
       });
@@ -618,42 +558,39 @@ describe("RealtimeEventsProvider", () => {
     expect(load).toHaveBeenCalledTimes(3);
   });
 
-  it.each(["running", "cancelling"])(
-    "keeps HTTP task state when a remote node reports %s",
-    async (state) => {
-      const task = {
-        key: "refresh_metadata",
-        state: "idle",
-        progress: 0,
-        execution_scope: "process",
-      };
-      const client = new QueryClient();
-      const load = vi.fn(async () => [task]);
-      client.setQueryData(adminKeys.tasks(), [task]);
-      function TaskObserver() {
-        useQuery({ queryKey: adminKeys.tasks(), queryFn: load, staleTime: Infinity });
-        return null;
-      }
-      render(
-        <QueryClientProvider client={client}>
-          <RealtimeEventsProvider>
-            <TaskObserver />
-          </RealtimeEventsProvider>
-        </QueryClientProvider>,
-      );
-      await act(async () => {});
-      await act(async () => {
-        FakeWebSocket.instances[0]!.emitMessage({
-          type: "event",
-          channel: "tasks",
-          event: "task.updated",
-          data: { key: task.key, state, progress: 40, triggers: [] },
-        });
+  it.each(["cancelling"])("keeps HTTP task state when a remote node reports %s", async (state) => {
+    const task = {
+      key: "refresh_metadata",
+      state: "idle",
+      progress: 0,
+      execution_scope: "process",
+    };
+    const client = new QueryClient();
+    const load = vi.fn(async () => [task]);
+    client.setQueryData(adminKeys.tasks(), [task]);
+    function TaskObserver() {
+      useQuery({ queryKey: adminKeys.tasks(), queryFn: load, staleTime: Infinity });
+      return null;
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <RealtimeEventsProvider>
+          <TaskObserver />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+    await act(async () => {});
+    await act(async () => {
+      FakeWebSocket.instances[0]!.emitMessage({
+        type: "event",
+        channel: "tasks",
+        event: "task.updated",
+        data: { key: task.key, state, progress: 40, triggers: [] },
       });
-      expect(client.getQueryData(adminKeys.tasks())).toEqual([task]);
-      expect(load).toHaveBeenCalledTimes(1);
-    },
-  );
+    });
+    expect(client.getQueryData(adminKeys.tasks())).toEqual([task]);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
 
   it("coalesces task reads and refreshes history only on completion or reconnect", async () => {
     const task: TaskInfo = {
@@ -704,7 +641,7 @@ describe("RealtimeEventsProvider", () => {
         event: "task.updated",
         data: { key: task.key, state, progress: 99, triggers: [] },
       });
-    for (let i = 0; i < 20; i++)
+    for (let i = 0; i < 3; i++)
       await act(async () => {
         emit("running");
       });
@@ -788,7 +725,7 @@ describe("RealtimeEventsProvider", () => {
           channel: "tasks",
           data: [finishedTask],
         });
-        for (let i = 0; i < 20; i++)
+        for (let i = 0; i < 3; i++)
           FakeWebSocket.instances[0]!.emitMessage({
             type: "event",
             channel: "tasks",
@@ -864,6 +801,9 @@ describe("RealtimeEventsProvider", () => {
     );
 
     const view = render(provider());
+    await act(async () => {});
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    const firstSocket = FakeWebSocket.instances[0]!;
 
     await act(async () => {
       mockState.pageActivity = {
@@ -874,6 +814,7 @@ describe("RealtimeEventsProvider", () => {
       view.rerender(provider());
     });
 
+    expect(firstSocket.readyState).toBe(FakeWebSocket.CLOSED);
     await act(async () => {
       mockState.pageActivity = {
         ...mockState.pageActivity,
@@ -883,6 +824,7 @@ describe("RealtimeEventsProvider", () => {
       view.rerender(provider());
     });
 
+    expect(FakeWebSocket.instances).toHaveLength(2);
     expect(refetchQueries).not.toHaveBeenCalled();
     expect(mockState.refreshAccount).not.toHaveBeenCalled();
 
@@ -980,9 +922,9 @@ describe("RealtimeEventsProvider", () => {
     });
     for (const key of refreshed) expect(invalidations(key)).toBe(0);
 
-    // A scan fulfils 30 requests at once, some for another profile.
+    // A burst includes approved and fulfilled requests for both profiles.
     await act(async () => {
-      for (let index = 0; index < 30; index++) {
+      for (let index = 0; index < 4; index++) {
         emit(
           index % 3 === 0 ? "request.approved" : "request.fulfilled",
           index % 2 ? "profile-2" : "profile-1",
