@@ -39,6 +39,8 @@ const controls = vi.hoisted(() => ({
     onSubtitleJobAccepted?: (jobId: string) => void;
     onMutedChange?: (muted: boolean) => void;
     onVolumeChange?: (volume: number) => void;
+    playbackSpeed?: number;
+    onPlaybackSpeedChange?: (rate: number) => void;
   },
 }));
 const playerV2Mock = vi.hoisted(() => vi.fn());
@@ -2142,6 +2144,50 @@ describe("VideoPlayer room catch-up", () => {
 
     fireEvent.pause(video);
     expect(video.playbackRate).toBe(1);
+  });
+});
+
+describe("VideoPlayer playback speed", () => {
+  beforeEach(() => {
+    playerSeek.mockClear();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the chosen speed through a pause and a seek", () => {
+    const { container } = renderPlayer({ shouldAutoPlay: false });
+    const video = container.querySelector("video")!;
+
+    act(() => controls.current!.onPlaybackSpeedChange!(1.5));
+    expect(controls.current!.playbackSpeed).toBe(1.5);
+    expect(video.playbackRate).toBe(1.5);
+    // A media reload resets playbackRate to defaultPlaybackRate.
+    expect(video.defaultPlaybackRate).toBe(1.5);
+
+    fireEvent.pause(video);
+    expect(video.playbackRate).toBe(1.5);
+
+    act(() => controls.current!.onSeek(50));
+    expect(video.playbackRate).toBe(1.5);
+  });
+
+  it("leaves the rate to the room in a Watch Party", () => {
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: roomConnection(),
+    });
+    const video = container.querySelector("video")!;
+
+    expect(controls.current!.onPlaybackSpeedChange).toBeUndefined();
+    expect(video.playbackRate).toBe(1);
+    expect(video.defaultPlaybackRate).toBe(1);
   });
 });
 
