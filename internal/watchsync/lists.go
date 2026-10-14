@@ -393,10 +393,12 @@ func (s *Service) applyRemoteListTombstone(
 		if err := b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID); err != nil {
 			return err
 		}
+		// Counted once the local list changed, so a failed bookkeeping
+		// write below still reports the change.
+		result.Removed++
 		if err := s.repo.MarkListItemLocalRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
 			return err
 		}
-		result.Removed++
 		state.LocalPresent = false
 	}
 	if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
@@ -421,10 +423,10 @@ func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Conn
 			if err := b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID); err != nil {
 				return err
 			}
+			result.Removed++
 			if err := s.repo.MarkListItemLocalRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
 				return err
 			}
-			result.Removed++
 		}
 		if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
 			return err
