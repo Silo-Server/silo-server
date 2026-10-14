@@ -72,7 +72,7 @@ var lookupKeyframes = matroskaKeyframes
 // start entries at. Run calls it once, before any attempt and its timeout
 // start, and stops waiting when ctx ends or keyframeLookupTimeout passes.
 func sheetKeyframes(ctx context.Context, req Request) []float64 {
-	if req.Sheets == nil || req.Samples == nil || req.Samples.ReadThrough {
+	if req.Sheets == nil || req.Samples == nil || req.Samples.ReadThrough || ctx.Err() != nil {
 		return nil
 	}
 	select {

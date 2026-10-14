@@ -159,6 +159,17 @@ func TestSheetKeyframesStopsWaiting(t *testing.T) {
 	<-exited
 }
 
+// TestSheetKeyframesLeavesACanceledRunAlone never touches the input of a
+// run canceled before it starts.
+func TestSheetKeyframesLeavesACanceledRunAlone(t *testing.T) {
+	calls := stubKeyframes(t, []float64{0})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if got := sheetKeyframes(ctx, sheetsRequest([]float64{5}, 1, 1)); got != nil || *calls != 0 {
+		t.Fatalf("keyframes %v after %d lookups, want none", got, *calls)
+	}
+}
+
 // TestSheetKeyframesSkipsWhenLookupsAreFull holds every lookup slot, as
 // lookups left blocked would: a run lists sample times without another.
 func TestSheetKeyframesSkipsWhenLookupsAreFull(t *testing.T) {
