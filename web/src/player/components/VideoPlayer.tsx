@@ -94,6 +94,7 @@ import {
   beginRoomReload,
   createRoomReloadBudget,
   decideRoomCommand,
+  expireRoomReload,
   isNativePositionInRanges,
   landRoomReload,
   nextRoomNudgeRate,
@@ -3760,7 +3761,7 @@ export function VideoPlayer({
       const nowMs = Date.now();
       if (reloadBudget.targetSeconds !== null && !roomReloadInFlight(reloadBudget, nowMs)) {
         // A reload that never landed; stop waiting for it.
-        abandonRoomReload(reloadBudget, nowMs);
+        expireRoomReload(reloadBudget, nowMs);
       }
       if (
         roomCommandTimerRef.current !== null ||

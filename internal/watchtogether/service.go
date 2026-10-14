@@ -1153,7 +1153,7 @@ func (s *Service) acceptReadyLocked(
 	if !isHost {
 		// The member's own seek after a stall (moveStalledMemberLocked), which
 		// its client confirms it ran by naming it.
-		if live.command != nil && command.CommandID != live.command.CommandID && report.CommandID == command.CommandID {
+		if isStallSeekLocked(live, command) && report.CommandID == command.CommandID {
 			return delta <= stallSeekToleranceSeconds
 		}
 		return delta <= readySeekToleranceSeconds
@@ -1383,15 +1383,24 @@ func (s *Service) waitingCommandForLocked(live *liveRoom, sessionID string) *Tra
 		return nil
 	}
 	for _, member := range live.members {
-		if member == nil || member.sessionID != sessionID {
-			continue
-		}
-		if own := member.waitingCommand; own != nil && own.Action == TransportActionSeek &&
-			own.SelectionRevision == live.command.SelectionRevision && own.IssuedAt == live.command.IssuedAt {
-			return own
+		if member != nil && member.sessionID == sessionID && isStallSeekLocked(live, member.waitingCommand) {
+			return member.waitingCommand
 		}
 	}
 	return live.command
+}
+
+// isStallSeekLocked reports whether command is the seek a stalled member was
+// sent for the room's current wait. Only a stall wait sends one: the room is
+// waiting on a pause, and the seek shares that pause's issue time. Any other
+// room command, including the resume that ends the wait, is every member's.
+// Must be called with s.mu held.
+func isStallSeekLocked(live *liveRoom, command *TransportCommand) bool {
+	room := live.command
+	return command != nil && room != nil &&
+		live.room.PlaybackState == RoomPlaybackStateWaiting && room.Action == TransportActionPause &&
+		command.Action == TransportActionSeek && command.CommandID != room.CommandID &&
+		command.SelectionRevision == room.SelectionRevision && command.IssuedAt == room.IssuedAt
 }
 
 // bufferingMayPauseRoomLocked reports whether a member's stall while the room

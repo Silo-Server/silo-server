@@ -6,6 +6,7 @@ import {
   beginRoomReload,
   createRoomReloadBudget,
   decideRoomCommand,
+  expireRoomReload,
   isNativePositionInRanges,
   landRoomReload,
   nextRoomNudgeRate,
@@ -337,6 +338,30 @@ describe("room rebuild budget", () => {
     beginRoomReload(budget, 100, 1_000);
     expect(roomReloadInFlight(budget, 1_000 + roomReloadStaleMs - 1)).toBe(true);
     expect(roomReloadInFlight(budget, 1_000 + roomReloadStaleMs)).toBe(false);
+  });
+
+  it("lets a replacement start as soon as a stale reload expires", () => {
+    const budget = createRoomReloadBudget();
+    beginRoomReload(budget, 100, 0);
+    noteRoomReloadLoading(budget);
+    const generation = budget.generation;
+    expireRoomReload(budget, roomReloadStaleMs);
+    expect(budget.targetSeconds).toBeNull();
+    expect(budget.generation).toBe(generation + 1);
+    expect(roomReloadAllowed(budget, roomReloadStaleMs)).toBe(true);
+    // The failed attempt still counts toward the next backoff.
+    beginRoomReload(budget, 130, roomReloadStaleMs);
+    landRoomReload(budget, roomReloadStaleMs);
+    expect(budget.nextAllowedAtMs - roomReloadStaleMs).toBe(2 * roomReloadMinIntervalMs);
+  });
+
+  it("leaves a budget without a reload untouched on expiry", () => {
+    const budget = createRoomReloadBudget();
+    beginRoomReload(budget, 100, 0);
+    abandonRoomReload(budget, 1_000);
+    const before = { ...budget };
+    expireRoomReload(budget, 2_000);
+    expect(budget).toEqual(before);
   });
 
   it("bounds the lead and stops an unlanded rebuild from blocking forever", () => {

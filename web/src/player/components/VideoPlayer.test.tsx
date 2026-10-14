@@ -2420,6 +2420,22 @@ describe("VideoPlayer room correction reloads", () => {
     expect(playerSeek).toHaveBeenCalledOnce();
   });
 
+  it("starts a replacement reload right after a stale one expires", async () => {
+    const { connection, command, rerenderPlayer } = await startUnlandedReload();
+    // The loop expires the reload once it is stale.
+    await act(() => vi.advanceTimersByTimeAsync(30_500));
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: command("c2", { position_seconds: 140 }),
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // No backoff holds the viewer behind: the correction loads at once.
+    expect(playerSeek).toHaveBeenCalledTimes(2);
+    expect(playerSeek).toHaveBeenLastCalledWith(140);
+  });
+
   it("drops a reload that a room pause replaces", async () => {
     const { connection, video, command, rerenderPlayer } = await startUnlandedReload();
     const paused = { ...connection.room!, playback_state: "paused" as const, is_paused: true };

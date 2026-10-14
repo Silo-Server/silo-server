@@ -345,6 +345,19 @@ export function abandonRoomReload(budget: RoomReloadBudget, nowMs: number): void
   budget.nextAllowedAtMs = nowMs + roomReloadBackoffMs(budget.attempts);
 }
 
+/**
+ * A reload that never landed within `roomReloadStaleMs` is given up. Unlike a
+ * refused or superseded reload this earns no backoff: the staleness wait was
+ * the backoff, and `roomReloadAllowed` already admits a replacement by now.
+ * Attempts are kept, so a replacement that lands still backs off further.
+ */
+export function expireRoomReload(budget: RoomReloadBudget, nowMs: number): void {
+  if (budget.targetSeconds === null) return;
+  budget.generation += 1;
+  budget.targetSeconds = null;
+  budget.nextAllowedAtMs = nowMs;
+}
+
 /** The viewer reached the room; the next drift starts a fresh backoff. */
 export function settleRoomReloads(budget: RoomReloadBudget): void {
   budget.attempts = 0;

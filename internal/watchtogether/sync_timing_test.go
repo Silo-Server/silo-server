@@ -103,11 +103,31 @@ func TestBufferingPauseMovesOnlyTheStalledMember(t *testing.T) {
 		t.Fatal("the room did not resume once the stalled member ran its seek")
 	}
 
-	// A reconnect during a later wait gets that wait's command, not this seek.
-	f.member("ann").waitingCommand = &seek
-	f.s.rooms[f.repo.room.ID].command = &TransportCommand{CommandID: "later", SelectionRevision: seek.SelectionRevision,
+	// A stall seek left over from an earlier wait earns no extra tolerance.
+	stale := seek
+	live0 := f.s.rooms[f.repo.room.ID]
+	savedRoom, savedCommand := live0.room, live0.command
+	live0.room.PlaybackState = RoomPlaybackStateWaiting
+	live0.command = &TransportCommand{CommandID: "next-wait", SelectionRevision: seek.SelectionRevision,
 		Action: TransportActionPause, IssuedAt: f.now.Add(time.Minute).Format(time.RFC3339Nano)}
-	if got := f.s.waitingCommandForLocked(f.s.rooms[f.repo.room.ID], "ann-session"); got.CommandID != "later" {
+	if isStallSeekLocked(live0, &stale) {
+		t.Fatal("a stall seek from an earlier wait counted as this wait's")
+	}
+	live0.room, live0.command = savedRoom, savedCommand
+
+	// Once the room resumes, its play is the member's command, even when the
+	// clock has not moved since the wait began.
+	live := f.s.rooms[f.repo.room.ID]
+	f.member("ann").waitingCommand = &seek
+	if got := f.s.waitingCommandForLocked(live, "ann-session"); got.CommandID != live.command.CommandID || got.Action != TransportActionPlay {
+		t.Fatalf("after the resume, waiting command = %+v, want the room's play", got)
+	}
+
+	// A reconnect during a later wait gets that wait's command, not this seek.
+	live.room.PlaybackState = RoomPlaybackStateWaiting
+	live.command = &TransportCommand{CommandID: "later", SelectionRevision: seek.SelectionRevision,
+		Action: TransportActionPause, IssuedAt: f.now.Add(time.Minute).Format(time.RFC3339Nano)}
+	if got := f.s.waitingCommandForLocked(live, "ann-session"); got.CommandID != "later" {
 		t.Fatalf("waiting command = %+v, want the current wait's", got)
 	}
 }
