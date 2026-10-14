@@ -50,6 +50,9 @@ export function PlaybackSpeedTrack({ value, onChange, itemRef }: PlaybackSpeedTr
   };
   const handlePointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
+    // A press between stops would otherwise move focus out of the menu,
+    // which closes it.
+    if (!(e.target instanceof HTMLButtonElement)) e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pickAt(e.clientX);
   };

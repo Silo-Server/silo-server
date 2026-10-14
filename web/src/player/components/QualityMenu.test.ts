@@ -281,6 +281,16 @@ describe("playback speed", () => {
     expect(half).toHaveFocus();
   });
 
+  it("keeps focus in the menu when the track is pressed between stops", () => {
+    render(createElement(QualityMenu, menuProps({ onPlaybackSpeedChange: vi.fn() })));
+    fireEvent.click(screen.getByRole("button", { name: "Playback settings" }));
+    const track = screen.getByRole("menuitemradio", { name: "1×" }).parentElement!;
+    expect(fireEvent.pointerDown(track, { button: 0 })).toBe(false);
+    expect(
+      fireEvent.pointerDown(screen.getByRole("menuitemradio", { name: "2×" }), { button: 0 }),
+    ).toBe(true);
+  });
+
   it("badges the gear with a speed other than 1x", () => {
     const props = menuProps({
       options: [auto, original],
