@@ -741,3 +741,42 @@ func TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres(t *testing.T) {
 		t.Fatalf("highly rated = %+v, want only the title the profile has not rated", row)
 	}
 }
+
+// A cached row holding a series leaves it out once the profile rates one of
+// its episodes, before the refresh the rating asks for rebuilds the row.
+func TestCachedRowsLeaveOutASeriesRatedThroughAnEpisodePostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tcached-rated-episode-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	lib := newTestLibrary(t, pool, prefix+"lib")
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+
+	series := seedTitle(t, pool, prefix+"series", "series", lib, "rating_imdb = 8.0")
+	episode := prefix + "series-s1e1"
+	if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, 1, 'Pilot')`, episode, series); err != nil {
+		t.Fatal(err)
+	}
+	other := seedTitle(t, pool, prefix+"movie", "movie", lib, "rating_imdb = 7.0")
+	repo := NewRepo(pool)
+	if err := repo.UpsertTasteProfile(ctx, userID, profile, axisVector(2500, nil), map[string]int{"rated_5": 1}, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Now().Add(time.Hour).Format(time.RFC3339)
+	if err := repo.UpsertRecommendationCache(ctx, userID, profile, RecTypeForYouMain, "", []ScoredItem{{MediaItemID: series, Score: 2}, {MediaItemID: other, Score: 1}}, expires); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES ($1, $2, $3, 5)`, userID, profile, episode); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewReader(repo, catalog.NewRatingsRepo(pool), nil, nil)
+	filter := catalog.AccessFilter{UserID: userID, ProfileID: profile, AllowedLibraryIDs: []int{lib}}
+	row, err := r.GetForYouMain(ctx, userID, profile, 20, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row == nil || !slices.Equal(itemIDs(row.Items), []string{other}) {
+		t.Fatalf("main row = %+v, want only the title whose series the profile has not rated", row)
+	}
+}

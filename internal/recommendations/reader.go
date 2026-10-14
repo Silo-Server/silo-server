@@ -631,11 +631,7 @@ func (rr *rowRead) defaultRow(ctx context.Context, kind string, limit int) (ForY
 		return ForYouRow{}, err
 	}
 	if rr.excludedIDs == nil {
-		ratedIDs, err := rr.reader.repo.ListRatedItemIDs(ctx, rr.userID, rr.profileID)
-		if err != nil {
-			return ForYouRow{}, err
-		}
-		rated, err := rr.reader.signalReader().canonicalRatedItemIDs(ctx, ratedIDs)
+		rated, err := rr.ratedSet(ctx)
 		if err != nil {
 			return ForYouRow{}, err
 		}
@@ -859,7 +855,11 @@ type rowRead struct {
 	profileID string
 	access    catalog.AccessFilter
 	excluded  map[string]struct{}
-	// excludedIDs is excluded as a list, built when a live row needs it.
+	// rated is every title the profile rated, a rated episode as its series,
+	// loaded on first use.
+	rated map[string]struct{}
+	// excludedIDs is what a live row leaves out as a list, built when one
+	// needs it.
 	excludedIDs []string
 }
 
@@ -883,6 +883,24 @@ func (rr *rowRead) exclusionSet(ctx context.Context) (map[string]struct{}, error
 	return rr.excluded, nil
 }
 
+// ratedSet is every title the profile rated, a rated episode as its series.
+func (rr *rowRead) ratedSet(ctx context.Context) (map[string]struct{}, error) {
+	if rr.rated == nil {
+		ratedIDs, err := rr.reader.repo.ListRatedItemIDs(ctx, rr.userID, rr.profileID)
+		if err != nil {
+			return nil, err
+		}
+		rated := map[string]struct{}{}
+		if len(ratedIDs) > 0 {
+			if rated, err = rr.reader.signalReader().canonicalRatedItemIDs(ctx, ratedIDs); err != nil {
+				return nil, err
+			}
+		}
+		rr.rated = rated
+	}
+	return rr.rated, nil
+}
+
 // filter is filterRows for this read.
 func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, error) {
 	if len(rows) == 0 {
@@ -903,9 +921,15 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 	}
 
 	rated := map[string]int{}
+	// ratedSeries holds the series of the episodes the profile rated: cached
+	// rows hold series, and a rating since the build leaves its series out.
+	var ratedSeries map[string]struct{}
 	if len(itemIDs) > 0 && r.ratingsRepo != nil {
 		rated, err = r.ratingsRepo.ListForItems(ctx, userID, profileID, itemIDs)
 		if err != nil {
+			return nil, err
+		}
+		if ratedSeries, err = rr.ratedSet(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -929,6 +953,9 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 				continue
 			}
 			if _, ok := rated[item.MediaItemID]; ok {
+				continue
+			}
+			if _, ok := ratedSeries[item.MediaItemID]; ok {
 				continue
 			}
 			filteredItems = append(filteredItems, item)
