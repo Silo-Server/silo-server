@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"regexp"
 	"slices"
@@ -41,7 +42,7 @@ type WatchSyncPluginConfigResolver func(context.Context, int) (*pluginv1.WatchSy
 type WatchSyncPluginConfigReady func(context.Context, int) (bool, error)
 
 type PluginCredentialRepository interface {
-	UpsertConnection(context.Context, Connection) (Connection, error)
+	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 }
 
 type PluginProviderOptions struct {
@@ -1180,12 +1181,28 @@ func (p *PluginProvider) persistUpdatedCredentials(
 	if err != nil {
 		return Connection{}, err
 	}
-	conn = connectionWithTokens(conn, tokens)
-	persisted, err := p.repository.UpsertConnection(ctx, conn)
-	if err != nil {
+	updated := connectionWithTokens(conn, tokens)
+	if conn.ID == "" {
+		// Nothing is saved yet, so there is nothing to update.
+		return updated, nil
+	}
+	// Compare and set against the credentials this call started with: a
+	// disconnect, reconnect or token refresh made meanwhile is not undone.
+	persisted, err := p.repository.UpdateConnectionTokens(ctx, conn, updated)
+	switch {
+	case err == nil:
+		return persisted, nil
+	case errors.Is(err, ErrStaleConnection):
+		// The stored credentials changed during the call and win; this call
+		// finishes with the ones the plugin just handed back.
+		slog.WarnContext(ctx, "watch sync plugin rotated credentials that changed meanwhile; keeping the stored ones",
+			"component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID)
+		return updated, nil
+	case errors.Is(err, ErrConnectionNotFound):
+		return Connection{}, retryableProviderError{message: "watch sync connection was removed during the plugin call"}
+	default:
 		return Connection{}, retryableProviderError{message: "watch sync plugin credential update could not be persisted"}
 	}
-	return persisted, nil
 }
 
 func watchEventFromLocalPlay(play LocalPlay, origin pluginv1.WatchSyncOrigin) *pluginv1.WatchSyncEvent {

@@ -168,8 +168,62 @@ func (r *serviceFakeRepo) UpdateConnectionTokens(ctx context.Context, expected, 
 		return Connection{}, ErrStaleConnection
 	}
 	current = connectionWithTokens(current, storedTokens(updated))
-	current.LastError = updated.LastError
+	if updated.LastError != expected.LastError {
+		current.LastError = updated.LastError
+	}
 	return r.UpsertConnection(ctx, current)
+}
+
+func (r *serviceFakeRepo) UpdateConnectionSyncState(_ context.Context, id string, update ConnectionSyncUpdate) error {
+	if id == "" {
+		return nil
+	}
+	for key, conn := range r.connections {
+		if conn.ID == id {
+			r.connections[key] = applyConnectionSyncUpdateForTest(conn, update)
+		}
+	}
+	for i, conn := range r.scrobbleConnections {
+		if conn.ID == id {
+			r.scrobbleConnections[i] = applyConnectionSyncUpdateForTest(conn, update)
+		}
+	}
+	return nil
+}
+
+// applyConnectionSyncUpdateForTest mirrors UpdateConnectionSyncState's SQL.
+func applyConnectionSyncUpdateForTest(conn Connection, update ConnectionSyncUpdate) Connection {
+	conn = cloneConnectionForTest(conn)
+	for _, field := range []struct {
+		dst **time.Time
+		src *time.Time
+	}{
+		{&conn.LastInboundSyncAt, update.LastInboundSyncAt},
+		{&conn.LastProgressSyncAt, update.LastProgressSyncAt},
+		{&conn.LastOutboundSyncAt, update.LastOutboundSyncAt},
+		{&conn.LastFavoritesSyncAt, update.LastFavoritesSyncAt},
+		{&conn.LastWatchlistSyncAt, update.LastWatchlistSyncAt},
+	} {
+		if field.src != nil {
+			at := *field.src
+			*field.dst = &at
+		}
+	}
+	deferred := update.ClearRateLimitBy != nil && conn.RateLimitedUntil != nil &&
+		conn.RateLimitedUntil.After(*update.ClearRateLimitBy)
+	if update.LastError != nil && (*update.LastError != "" || !deferred) {
+		conn.LastError = *update.LastError
+	}
+	switch {
+	case update.RateLimitedUntil != nil:
+		until := *update.RateLimitedUntil
+		conn.RateLimitedUntil = &until
+	case update.ClearRateLimitBy != nil && conn.RateLimitedUntil != nil &&
+		!conn.RateLimitedUntil.After(*update.ClearRateLimitBy):
+		conn.RateLimitedUntil = nil
+	}
+	conn.SyncCursors = mergeSyncCursors(conn.SyncCursors, update.SyncCursors)
+	return conn
 }
 
 func (r *serviceFakeRepo) DeferConnectionsForAccount(
@@ -2164,6 +2218,7 @@ func TestServiceSyncConnectionTreatsMatcherWarningsAsSuccess(t *testing.T) {
 		AccessToken:          testAccessToken,
 		ImportWatchedEnabled: true,
 	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
 
 	if err := service.SyncConnection(context.Background(), conn, "scheduled"); err != nil {
 		t.Fatalf("SyncConnection: %v", err)
@@ -2350,13 +2405,16 @@ func TestServiceImportWatchedPersistsBatchCursorsAndWarnings(t *testing.T) {
 		WithWatchState(noOpWatchState{})
 	service.now = func() time.Time { return now }
 
-	result, err := service.ImportWatched(context.Background(), Connection{
+	conn := Connection{
 		ID:          "conn-1",
 		Provider:    "simkl",
 		UserID:      7,
 		ProfileID:   "profile-1",
 		SyncCursors: map[string]string{"existing": "cursor"},
-	}, ServerConfig{}, provider)
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+
+	result, err := service.ImportWatched(context.Background(), conn, ServerConfig{}, provider)
 	if err != nil {
 		t.Fatalf("ImportWatched: %v", err)
 	}
@@ -2381,12 +2439,15 @@ func TestServiceImportWatchedLegacyImporterStillSetsLastSyncTimestamp(t *testing
 		WithWatchState(noOpWatchState{})
 	service.now = func() time.Time { return now }
 
-	_, err := service.ImportWatched(context.Background(), Connection{
+	conn := Connection{
 		ID:        "conn-1",
 		Provider:  "trakt",
 		UserID:    7,
 		ProfileID: "profile-1",
-	}, ServerConfig{}, watchedImporterStub{})
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+
+	_, err := service.ImportWatched(context.Background(), conn, ServerConfig{}, watchedImporterStub{})
 	if err != nil {
 		t.Fatalf("ImportWatched: %v", err)
 	}
@@ -2413,13 +2474,16 @@ func TestServiceImportProgressPersistsBatchCursorsAndWarnings(t *testing.T) {
 		},
 	}
 
-	result, err := service.ImportProgress(context.Background(), Connection{
+	conn := Connection{
 		ID:          "conn-1",
 		Provider:    "simkl",
 		UserID:      7,
 		ProfileID:   "profile-1",
 		SyncCursors: map[string]string{"existing": "cursor"},
-	}, ServerConfig{}, provider)
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+
+	result, err := service.ImportProgress(context.Background(), conn, ServerConfig{}, provider)
 	if err != nil {
 		t.Fatalf("ImportProgress: %v", err)
 	}
@@ -4470,6 +4534,7 @@ func TestServiceAppliesIncrementalFavoriteTombstone(t *testing.T) {
 		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
 		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
 	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
 	repo.listItemStates = []ListItemState{{
 		ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: testMovieMediaID,
 		ProviderItemKey: testMovieProviderItemKey, RemotePresent: true, LocalPresent: true,

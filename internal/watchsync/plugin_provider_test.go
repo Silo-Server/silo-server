@@ -113,12 +113,18 @@ type fakePluginCredentialRepository struct {
 	err   error
 }
 
-func (r *fakePluginCredentialRepository) UpsertConnection(_ context.Context, conn Connection) (Connection, error) {
+func (r *fakePluginCredentialRepository) UpdateConnectionTokens(_ context.Context, expected, updated Connection) (Connection, error) {
 	if r.err != nil {
 		return Connection{}, r.err
 	}
-	r.saved = conn
-	return conn, nil
+	if r.saved.ID != expected.ID {
+		return Connection{}, ErrConnectionNotFound
+	}
+	if !connectionCredentialsMatch(r.saved, expected) {
+		return Connection{}, ErrStaleConnection
+	}
+	r.saved = updated
+	return updated, nil
 }
 
 func testPluginProvider(t *testing.T, client WatchSyncPluginClient) *PluginProvider {
@@ -1243,7 +1249,11 @@ func TestPluginProviderPaginatesRemoteStateAndPersistsRotatedCredentials(t *test
 		},
 		{Items: []*pluginv1.WatchSyncRemoteState{remote("two", "tt2")}, NextCursor: "cursor-2", CompleteSnapshot: true},
 	}}
-	repository := &fakePluginCredentialRepository{}
+	conn := Connection{
+		ID: "connection", Provider: testPluginProviderKey, UserID: 1, ProfileID: "profile",
+		AccessToken: "old", SyncCursors: map[string]string{pluginWatchedCursorKey: testCursorOne},
+	}
+	repository := &fakePluginCredentialRepository{saved: conn}
 	provider, err := NewPluginProvider(PluginProviderOptions{
 		InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
 		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
@@ -1256,10 +1266,7 @@ func TestPluginProviderPaginatesRemoteStateAndPersistsRotatedCredentials(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := provider.FetchWatchedBatch(context.Background(), ServerConfig{}, Connection{
-		ID: "connection", Provider: testPluginProviderKey, UserID: 1, ProfileID: "profile",
-		AccessToken: "old", SyncCursors: map[string]string{pluginWatchedCursorKey: testCursorOne},
-	})
+	batch, err := provider.FetchWatchedBatch(context.Background(), ServerConfig{}, conn)
 	if err != nil {
 		t.Fatal(err)
 	}
