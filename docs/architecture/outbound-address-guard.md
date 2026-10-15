@@ -122,8 +122,8 @@ download artwork, and collection collages. Each uses a netguard transport, and
   prefix (bucket and key prefix, or the read endpoint's path) of the URLs the
   store's `DirectURL` issues, with no dot segments in its path.
 - Any other URL is Public only. A refused proxy request answers 502 and a
-  refused download asset reports the asset unavailable; neither returns
-  anything from the refused address.
+  refused download asset reports the asset not found, so clients don't retry
+  it; neither returns anything from the refused address.
 
 Local artwork storage serves signed `/api/` routes on this server, which the
 proxy redirects to and downloads read from the store, so neither goes over
