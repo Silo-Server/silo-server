@@ -293,3 +293,7 @@
 # Server collection counts for a restricted viewer: one statement for stored
 # members and at most four for smart collections, however many are listed.
 ./internal/catalog TestViewerCollectionCountsStatementBudgetDB
+
+# Person lookups reuse their resolved metadata providers: later lookups in the
+# window issue no statements, and a plugin change drops them.
+./internal/metadata TestPersonRefreshReusesResolvedProvidersDB
