@@ -1,10 +1,12 @@
 package apiv2
 
 import (
+	"io"
 	"net/http"
 	"reflect"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -20,32 +22,82 @@ const (
 	// on this server. A client needs one at a time; the request rate limiter
 	// counts requests, not the bytes each one streams.
 	bandwidthProbeMaxInFlight = 2
+	// bandwidthProbeWindowBytes bounds the probe bytes one account may draw
+	// from this server per bandwidthProbeWindow. The web client sends at most
+	// 40 MB about every 30 minutes, so the budget only stops an account that
+	// probes back to back.
+	bandwidthProbeWindowBytes = 400_000_000
+	bandwidthProbeWindow      = 10 * time.Minute
 )
 
-// bandwidthProbeLimiter counts the probes each account has in flight.
+// bandwidthProbeLimiter bounds each account's probes on this server: how many
+// run at once and how many bytes they send per window. It is per node on
+// purpose; what it protects (sockets, goroutines, the random-byte work) is
+// per node too.
 type bandwidthProbeLimiter struct {
 	mu       sync.Mutex
-	inFlight map[int]int
+	accounts map[int]*bandwidthProbeAccount
 }
 
-func (l *bandwidthProbeLimiter) acquire(userID int) bool {
+type bandwidthProbeAccount struct {
+	inFlight    int
+	windowStart time.Time
+	// windowBytes is what the window has granted: sizes reserved by running
+	// probes plus bytes finished probes actually sent.
+	windowBytes int
+}
+
+// acquire reserves a probe slot and size bytes of the account's window. It
+// returns how long to wait before retrying when the account is over either
+// limit.
+func (l *bandwidthProbeLimiter) acquire(userID, size int, now time.Time) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.inFlight[userID] >= bandwidthProbeMaxInFlight {
-		return false
+	account := l.accounts[userID]
+	if account == nil {
+		account = &bandwidthProbeAccount{windowStart: now}
+		l.accounts[userID] = account
 	}
-	l.inFlight[userID]++
-	return true
+	if now.Sub(account.windowStart) >= bandwidthProbeWindow {
+		account.windowStart, account.windowBytes = now, 0
+	}
+	if account.inFlight >= bandwidthProbeMaxInFlight {
+		return false, 5 * time.Second
+	}
+	if account.windowBytes+size > bandwidthProbeWindowBytes {
+		return false, account.windowStart.Add(bandwidthProbeWindow).Sub(now)
+	}
+	account.inFlight++
+	account.windowBytes += size
+	return true, 0
 }
 
-func (l *bandwidthProbeLimiter) release(userID int) {
+// release frees the slot and refunds the bytes a probe reserved but did not
+// send, as when the client closed the connection once it had timed enough.
+func (l *bandwidthProbeLimiter) release(userID, unsent int, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.inFlight[userID] <= 1 {
-		delete(l.inFlight, userID)
+	account := l.accounts[userID]
+	if account == nil {
 		return
 	}
-	l.inFlight[userID]--
+	account.inFlight--
+	account.windowBytes = max(0, account.windowBytes-unsent)
+	if account.inFlight <= 0 && now.Sub(account.windowStart) >= bandwidthProbeWindow {
+		delete(l.accounts, userID)
+	}
+}
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	w io.Writer
+	n int
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += n
+	return n, err
 }
 
 // registerPlaybackBandwidthProbe serves random bytes a client times to
@@ -64,12 +116,12 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 		"422": {Description: http.StatusText(http.StatusUnprocessableEntity), Content: map[string]*huma.MediaType{problemContentType: {Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[Problem](), true, "")}}},
 	}
 	op := humaOp(http.MethodGet, Prefix+"/playback/bandwidth-probe", opGetPlaybackBandwidthProbe, playbackTag,
-		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. An account may run two probes at once on a server; a third is refused with 429.")
+		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. An account may run two probes at once on a server and draw up to 400 MB from it per 10 minutes; beyond either it gets 429 with Retry-After.")
 	op.Parameters = params
 	op.Responses = responses
 	raw := RawOperation{Operation: Operation{Operation: op, Class: ClassAuthenticated}, Protocol: "bandwidth-probe",
 		Reason: "A throughput measurement needs an unbuffered, uncompressible byte stream the client can time and abandon mid-transfer."}
-	limiter := &bandwidthProbeLimiter{inFlight: map[int]int{}}
+	limiter := &bandwidthProbeLimiter{accounts: map[int]*bandwidthProbeAccount{}}
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		size := bandwidthProbeDefaultSize
 		if value := r.URL.Query().Get(bandwidthProbeSizeParam); value != "" {
@@ -85,18 +137,20 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 			writeProblem(w, r, NewProblem(TypeAuthenticationRequired, "Authentication is required."))
 			return
 		}
-		if !limiter.acquire(claims.UserID) {
-			writeProblem(w, r, NewProblem(TypeRateLimited, "This account already has bandwidth probes running.").WithRetryAfter(5))
+		admitted, wait := limiter.acquire(claims.UserID, size, time.Now())
+		if !admitted {
+			writeProblem(w, r, NewProblem(TypeRateLimited, "This account has reached its bandwidth probe limit on this server.").WithRetryAfter(max(1, int(wait.Round(time.Second)/time.Second))))
 			return
 		}
-		defer limiter.release(claims.UserID)
+		sent := &countingWriter{w: w}
+		defer func() { limiter.release(claims.UserID, size-sent.n, time.Now()) }()
 		streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID),
 			StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
 		w.Header().Set("Content-Type", playbackMediaBinary)
 		w.Header().Set(playbackContentLength, strconv.Itoa(size))
 		w.Header().Set(playbackCacheControlHeader, "no-store")
 		w.WriteHeader(http.StatusOK)
-		_ = bandwidthprobe.Write(w, size)
+		_ = bandwidthprobe.Write(sent, size)
 	})
 	if reg.deps.ObserveBandwidthProbe != nil {
 		handler = reg.deps.ObserveBandwidthProbe(handler)
