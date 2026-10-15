@@ -68,8 +68,15 @@ function clampKbps(kbps: number): number | undefined {
   return Math.min(Math.round(kbps), MAX_ESTIMATE_KBPS);
 }
 
+/**
+ * The entry this page last wrote. localStorage can be full or unavailable,
+ * and its writes then fail silently; this copy keeps a just-recorded limit
+ * in effect for the replan that reads it straight back.
+ */
+let pageEntry: string | undefined;
+
 function readStored(now: number): StoredEstimate | undefined {
-  const raw = storage.get(storage.KEYS.BANDWIDTH_ESTIMATE);
+  const raw = pageEntry ?? storage.get(storage.KEYS.BANDWIDTH_ESTIMATE);
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw) as Partial<StoredEstimate>;
@@ -88,7 +95,14 @@ function writeStored(kbps: number, now: number, observed = false): void {
   const entry: StoredEstimate = observed
     ? { kbps, measuredAt: now, observed }
     : { kbps, measuredAt: now };
-  storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, JSON.stringify(entry));
+  pageEntry = JSON.stringify(entry);
+  storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, pageEntry);
+}
+
+/** Drops the cached estimate, in this page and in localStorage. */
+export function forgetBandwidthEstimate(): void {
+  pageEntry = undefined;
+  storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
 }
 
 /** The cached measurement in kbps, or undefined when none is fresh. */

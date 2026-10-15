@@ -8,6 +8,7 @@ vi.mock("@/api/client", () => ({
 import {
   BANDWIDTH_ESTIMATE_TTL_MS,
   cancelBandwidthProbe,
+  forgetBandwidthEstimate,
   measureBandwidthKbps,
   readMeasuredBandwidthKbps,
   readObservedBandwidthLimitKbps,
@@ -40,7 +41,7 @@ function timedBody(chunks: number, chunkBytes: number, stepMs: number) {
 }
 
 beforeEach(() => {
-  storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
+  forgetBandwidthEstimate();
   fetchWithSession.mockReset();
 });
 
@@ -179,6 +180,16 @@ describe("measured bandwidth cache", () => {
     recordObservedBandwidthLimitKbps(4_200, now);
     expect(readMeasuredBandwidthKbps(now)).toBe(3_000);
     expect(readObservedBandwidthLimitKbps(now)).toBe(3_000);
+  });
+
+  it("keeps a recorded limit when localStorage refuses the write", () => {
+    const set = vi.spyOn(storage, "set").mockImplementation(() => undefined);
+    try {
+      recordObservedBandwidthLimitKbps(14_000);
+      expect(readObservedBandwidthLimitKbps()).toBe(14_000);
+    } finally {
+      set.mockRestore();
+    }
   });
 
   it("records a limit when nothing was measured", () => {
