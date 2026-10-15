@@ -70,6 +70,17 @@ func TestBandwidthProbeLimiterForgetsIdleAccounts(t *testing.T) {
 	if len(limiter.accounts) != 0 {
 		t.Fatalf("idle account still tracked: %v", limiter.accounts)
 	}
+
+	// A probe that finishes inside its window is swept by a later admission.
+	limiter.acquire(2, 1000, now)
+	limiter.release(2, 0, now)
+	limiter.acquire(3, 1000, now.Add(bandwidthProbeWindow))
+	if _, tracked := limiter.accounts[2]; tracked {
+		t.Fatal("account whose window passed is still tracked")
+	}
+	if _, tracked := limiter.accounts[3]; !tracked {
+		t.Fatal("the admitted account is not tracked")
+	}
 }
 
 func TestPlaybackBandwidthProbe(t *testing.T) {
