@@ -218,3 +218,35 @@ func TestLoadKeepsTheCheckWhileAnotherPlaybackHoldsIt(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// A playback that starts right after the last one stopped queues its own
+// check, which the stopped check's worker doesn't remove as it exits.
+func TestLoadRequeuesAfterTheLastPlaybackStops(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "restarted.mkv")
+	if err := os.WriteFile(path, file(layout{}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	release := holdSlot(t)
+	first, stopFirst := context.WithCancel(t.Context())
+	if _, err := Load(first, path); !errors.Is(err, ErrUnverified) {
+		t.Fatalf("first Load err = %v, want ErrUnverified", err)
+	}
+	stopFirst()
+	deadline := time.Now().Add(5 * time.Second)
+	for checksQueued() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the stopped check stayed queued")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := Load(t.Context(), path); !errors.Is(err, ErrUnverified) {
+		t.Fatalf("Load after the restart err = %v, want ErrUnverified", err)
+	}
+	time.Sleep(50 * time.Millisecond) // let the stopped worker exit
+	if checksQueued() != 1 {
+		t.Fatal("the stopped check's worker removed the new check")
+	}
+	release()
+	got, err := LoadVerified(t.Context(), path)
+	wantIndex(t, got, err)
+}

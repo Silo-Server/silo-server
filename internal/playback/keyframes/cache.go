@@ -62,15 +62,19 @@ type check struct {
 	holders int // guarded by indexCache
 }
 
-// holdLocked keeps c running until holder is done. Call with indexCache held.
-func (c *check) holdLocked(holder context.Context) {
+// holdLocked keeps c, the check for key, running until holder is done. Call
+// with indexCache held.
+func (c *check) holdLocked(key cacheKey, holder context.Context) {
 	c.holders++
 	context.AfterFunc(holder, func() {
 		indexCache.Lock()
 		defer indexCache.Unlock()
 		c.holders--
 		if c.holders == 0 {
+			// End it now, so a playback that starts while the worker unwinds
+			// queues a new check rather than holding this one.
 			c.cancel()
+			c.endLocked(key)
 		}
 	})
 }
@@ -192,9 +196,17 @@ func startCheck(key cacheKey, holder context.Context) *check {
 	}
 	c := &check{}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
-	c.holdLocked(holder)
+	c.holdLocked(key, holder)
 	indexCache.inFlight[key] = c
 	return c
+}
+
+// endLocked removes c from the checks in flight, unless a newer check for key
+// has replaced it. Call with indexCache held.
+func (c *check) endLocked(key cacheKey) {
+	if indexCache.inFlight[key] == c {
+		delete(indexCache.inFlight, key)
+	}
 }
 
 func verifyInBackground(key cacheKey, c *check) {
@@ -202,10 +214,8 @@ func verifyInBackground(key cacheKey, c *check) {
 	select {
 	case verifySlots <- struct{}{}:
 	case <-c.ctx.Done():
-		// Everyone who wanted it left while it waited for a slot.
-		indexCache.Lock()
-		delete(indexCache.inFlight, key)
-		indexCache.Unlock()
+		// Everyone who wanted it left while it waited for a slot; the last
+		// one ended it.
 		return
 	}
 	defer func() { <-verifySlots }()
@@ -233,7 +243,7 @@ func verifyInBackground(key cacheKey, c *check) {
 			slog.Warn("keyframe index: check file", "component", "playback", "path", key.path, "error", err)
 		}
 		indexCache.Lock()
-		delete(indexCache.inFlight, key) // a later playback tries again
+		c.endLocked(key) // a later playback tries again
 		indexCache.Unlock()
 		return
 	}
@@ -242,7 +252,7 @@ func verifyInBackground(key cacheKey, c *check) {
 	// neither and queues the file again.
 	indexCache.Lock()
 	storeLocked(key, idx, err)
-	delete(indexCache.inFlight, key)
+	c.endLocked(key)
 	indexCache.Unlock()
 }
 
@@ -252,7 +262,7 @@ func cachedHolding(key cacheKey, holder context.Context) (Index, error, bool) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
 	if c, ok := indexCache.inFlight[key]; ok {
-		c.holdLocked(holder)
+		c.holdLocked(key, holder)
 		return Index{}, ErrUnverified, true
 	}
 	return cachedLocked(key)
