@@ -557,7 +557,7 @@ function DeviceDetail({
           setAppearanceOpen(false);
         }}
         resetLabel={`Use ${ownerLabel} style`}
-        eyebrow={displayName}
+        eyebrow={device.custom_name || device.device_name || "This device"}
         status={setValue.isPending ? "Saving…" : "Changes saved automatically"}
       />
 
@@ -622,7 +622,8 @@ function DeviceNameEditor({
         placeholder={device.device_name || "Device name"}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Escape") onDone();
+          // Closing mid-save would drop the result, error included.
+          if (event.key === "Escape" && !rename.isPending) onDone();
         }}
         className="h-11 sm:h-8 sm:max-w-xs"
       />

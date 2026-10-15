@@ -22399,7 +22399,7 @@ export interface components {
     };
     DeviceUpdate: {
       /**
-       * @description Name to show for the device in place of the name it reports; leading and trailing spaces and control characters are removed. null removes it. The reported device_name is kept
+       * @description Name to show for the device in place of the name it reports. Control characters and bidirectional overrides are removed and runs of spaces collapse; a name with no visible character is rejected. null removes it. The reported device_name is kept
        * @example Living Room
        */
       custom_name?: string | null;

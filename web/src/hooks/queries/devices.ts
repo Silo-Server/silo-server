@@ -75,9 +75,9 @@ export function useRenameDevice() {
         query: { profile_id: device.profileId },
         body: { custom_name: name },
       }),
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: deviceKeys.all });
-    },
+    // Awaited, so the mutation settles only once the list carries the new
+    // name and an editor that closes on success never shows the old one.
+    onSettled: () => qc.invalidateQueries({ queryKey: deviceKeys.all }),
   });
 }
 

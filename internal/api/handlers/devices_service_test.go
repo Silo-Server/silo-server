@@ -119,8 +119,10 @@ func TestUpdateDeviceRename(t *testing.T) {
 	if got := status(h.UpdateDevice(ctx, member, "profile-1", "tv", rename("Den"))); got != http.StatusForbidden {
 		t.Fatalf("member renaming another profile's device: %d", got)
 	}
-	if got := status(h.UpdateDevice(ctx, member, "", "tv", rename("\t\x00 "))); got != http.StatusBadRequest {
-		t.Fatalf("blank name: %d", got)
+	for _, blank := range []string{"\t\x00 ", "\u200b\u2060", "\u202e"} {
+		if got := status(h.UpdateDevice(ctx, member, "", "tv", rename(blank))); got != http.StatusBadRequest {
+			t.Fatalf("blank name %q: %d", blank, got)
+		}
 	}
 	for _, update := range []DeviceUpdate{rename("Den"), {}} {
 		if got := status(h.UpdateDevice(ctx, member, "", "missing", update)); got != http.StatusNotFound {
@@ -138,5 +140,19 @@ func TestUpdateDeviceRename(t *testing.T) {
 	}
 	if got := names(); got["profile-2"] != "Apple TV|" || got["profile-1"] != "Apple TV|" {
 		t.Fatalf("after clear: %v", got)
+	}
+}
+
+func TestDeviceCustomName(t *testing.T) {
+	for in, want := range map[string]string{
+		"  Living\r\n\tRoom  ":    "Living Room",
+		"Den\u202e\u2066vT elppA": "DenvT elppA",
+		"Kids\x00 TV":             "Kids TV",
+		"👨\u200d👩\u200d👧 room":    "👨\u200d👩\u200d👧 room",
+		"\u200b":                  "",
+	} {
+		if got := deviceCustomName(in); got != want {
+			t.Errorf("deviceCustomName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

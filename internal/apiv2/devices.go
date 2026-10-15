@@ -55,7 +55,7 @@ type DeviceUpdateInput struct {
 
 // DeviceUpdate is the updateDevice body. Omitted members are unchanged.
 type DeviceUpdate struct {
-	CustomName Patch[string] `json:"custom_name,omitzero" minLength:"1" maxLength:"120" doc:"Name to show for the device in place of the name it reports; leading and trailing spaces and control characters are removed. null removes it. The reported device_name is kept" example:"Living Room"`
+	CustomName Patch[string] `json:"custom_name,omitzero" minLength:"1" maxLength:"120" doc:"Name to show for the device in place of the name it reports. Control characters and bidirectional overrides are removed and runs of spaces collapse; a name with no visible character is rejected. null removes it. The reported device_name is kept" example:"Living Room"`
 }
 
 func registerDeviceSettings(reg *Registry) {

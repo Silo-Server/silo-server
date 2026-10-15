@@ -168,20 +168,26 @@ func (h *DeviceHandler) UpdateDevice(ctx context.Context, actor DeviceSettingsAc
 	return nil
 }
 
-// deviceCustomName removes control characters, which a JSON body can carry but
-// a header cannot (and Postgres text rejects NUL): a tab or line break becomes
-// a space and the rest are dropped. It then trims and bounds the name like a
-// reported one.
+// deviceCustomName normalizes a chosen device name. Control characters, which
+// a JSON body can carry but a header cannot (and Postgres text rejects NUL),
+// and bidirectional overrides, which could make the name read as other text,
+// are removed; a tab or line break counts as a space. Runs of spaces collapse
+// to one, and the name is bounded like a reported one. It returns "" when no
+// visible character remains, such as a name of only zero-width spaces.
 func deviceCustomName(name string) string {
 	name = strings.Map(func(r rune) rune {
 		switch {
-		case !unicode.IsControl(r):
-			return r
-		case unicode.IsSpace(r):
+		case unicode.IsControl(r) && unicode.IsSpace(r):
 			return ' '
-		default:
+		case unicode.IsControl(r), unicode.Is(unicode.Bidi_Control, r):
 			return -1
+		default:
+			return r
 		}
 	}, name)
-	return clampHeaderValue(name, MaxDeviceNameRunes)
+	name = clampHeaderValue(strings.Join(strings.Fields(name), " "), MaxDeviceNameRunes)
+	if strings.IndexFunc(name, func(r rune) bool { return !unicode.IsSpace(r) && !unicode.Is(unicode.Cf, r) }) < 0 {
+		return ""
+	}
+	return name
 }
