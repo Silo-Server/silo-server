@@ -384,7 +384,7 @@ func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs 
 		"e.media_item_id != ALL($2)",
 		"($4 = '' OR mi.type = $4)",
 	}
-	args := []any{pgvector.NewVector(embedding), excludeIDs, limit, mediaType}
+	args := []any{pgvector.NewHalfVector(embedding), excludeIDs, limit, mediaType}
 	argIdx := len(args) + 1
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
@@ -483,7 +483,7 @@ func (r *Repo) findTasteProfileCandidates(
 		"mi.type = ANY($3)",
 		"e.media_item_id != ALL($2)",
 	}
-	args := []any{pgvector.NewVector(embedding), excludeIDs, mediaTypes}
+	args := []any{pgvector.NewHalfVector(embedding), excludeIDs, mediaTypes}
 	argIdx := 4
 	genreMatchCountSQL := "0"
 	annLimit := limit
@@ -986,7 +986,7 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 			  AND  ($3 OR COALESCE(p.max_content_rating, '') = '' OR p.max_content_rating = ANY($4::text[]))
 			ORDER  BY p.embedding::halfvec(3072) <=> $1::halfvec(3072)
 			LIMIT  $5
-		`, pgvector.NewVector(embedding), userID, maxContentRating == "", allowedPeerRatings, limit)
+		`, pgvector.NewHalfVector(embedding), userID, maxContentRating == "", allowedPeerRatings, limit)
 		if err != nil {
 			return err
 		}
