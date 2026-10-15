@@ -25,24 +25,15 @@ import (
 // and refuses anything else. It reads no file: tests run fake FFmpeg on
 // paths that do not exist.
 type grantPathSources struct {
-	// relay opens every source as core access: FFmpeg's input is a relay
-	// URL rather than the path.
-	relay  bool
 	mu     sync.Mutex
 	opened []*testInput
 }
-
-// testRelayURL is a relay URL no handle serves.
-const testRelayURL = "http://127.0.0.1:1/src/0123456789abcdef0123456789abcdef"
 
 func (g *grantPathSources) OpenSource(_ context.Context, grant string) (SourceInput, error) {
 	if !filepath.IsAbs(grant) {
 		return nil, &nodesource.StatusError{Op: "open", Status: http.StatusForbidden}
 	}
 	input := newTestInput(grant)
-	if g.relay {
-		input.path = testRelayURL
-	}
 	g.mu.Lock()
 	g.opened = append(g.opened, input)
 	g.mu.Unlock()
@@ -170,98 +161,6 @@ func TestWithdrawnSourceEndsItsSession(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-}
-
-// A text subtitle burned in from a relayed source is refused before FFmpeg
-// runs, with a 422 that names the limitation, so the core moves the session
-// to another node or the API server: the subtitles filter cannot be given a
-// relay URL. Bitmap burn-in reads the decoded stream and starts.
-func TestCoreAccessRefusesTextSubtitleBurnIn(t *testing.T) {
-	server := newLoopingFFmpegServer(t)
-	sources := &grantPathSources{relay: true}
-	server.sources = sources
-	body, _ := json.Marshal(TranscodeStartRequest{
-		SessionID: "burn-in", SourceGrant: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
-		SubtitleBurnIn: true, SubtitleTrackIndex: 0, SubtitleCodec: "subrip",
-	})
-	rr := httptest.NewRecorder()
-	server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	if rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), errRemoteTextBurnIn) {
-		t.Fatalf("text burn-in from a relayed source = %d %s", rr.Code, rr.Body.String())
-	}
-	if opened := sources.openInputs(); len(opened) != 1 || !opened[0].closed() {
-		t.Fatalf("refused start left its source open: %v", opened)
-	}
-	if server.hostsSession("burn-in") || server.activeJobs.Load() != 0 {
-		t.Fatal("a refused start registered its session")
-	}
-
-	body, _ = json.Marshal(TranscodeStartRequest{
-		SessionID: "bitmap", SourceGrant: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
-		SubtitleBurnIn: true, SubtitleTrackIndex: 0, SubtitleCodec: "hdmv_pgs_subtitle",
-	})
-	rr = httptest.NewRecorder()
-	server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("bitmap burn-in from a relayed source = %d %s", rr.Code, rr.Body.String())
-	}
-	stopSession(t, server, "bitmap")
-
-	// The same text burn-in from the node's own mount starts.
-	server.sources = &grantPathSources{}
-	body, _ = json.Marshal(TranscodeStartRequest{
-		SessionID: "local", SourceGrant: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
-		SubtitleBurnIn: true, SubtitleTrackIndex: 0, SubtitleCodec: "subrip",
-	})
-	rr = httptest.NewRecorder()
-	server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("text burn-in from a local source = %d %s", rr.Code, rr.Body.String())
-	}
-	stopSession(t, server, "local")
-}
-
-// A lost session whose recipe burns in a text subtitle is not rebuilt from a
-// relayed source: it answers 404, a refused rebuild, so the client's next
-// plan puts the session elsewhere, and the source is released.
-func TestCoreAccessRefusesToRebuildATextSubtitleBurnIn(t *testing.T) {
-	const sessionID = "sess-burn-in"
-	const transportID = sessionID + "-plan1234-abcd1234"
-	server := newLoopingFFmpegServer(t)
-	sources := &grantPathSources{relay: true}
-	server.sources = sources
-	card := nativeTransportCard(sessionID, transportID)
-	card.SubtitleBurnIn, card.SubtitleTrackIndex, card.SubtitleCodec = true, 0, "subrip"
-	store := &stubRecipeStore{ok: true, card: card}
-	server.useCoreRecipes(store)
-
-	session, err := server.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
-	if session != nil {
-		_ = session.CloseProcess()
-		t.Fatal("rebuilt a text burn-in from a relayed source")
-	}
-	if !errors.Is(err, errReconstructTextBurnIn) {
-		t.Fatalf("rebuild error = %v", err)
-	}
-	rr := httptest.NewRecorder()
-	writeReconstructFailure(rr, err)
-	if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), errRemoteTextBurnIn) {
-		t.Fatalf("refused rebuild = %d %s", rr.Code, rr.Body.String())
-	}
-	if opened := sources.openInputs(); len(opened) != 1 || !opened[0].closed() {
-		t.Fatalf("refused rebuild left its source open: %v", opened)
-	}
-
-	bitmap := *card
-	bitmap.SubtitleCodec = "hdmv_pgs_subtitle"
-	store.mu.Lock()
-	store.card = &bitmap
-	store.mu.Unlock()
-	session, err = server.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
-	if err != nil || session == nil {
-		t.Fatalf("bitmap burn-in rebuild = %v, %v", session, err)
-	}
-	stopSession(t, server, transportID)
 }
 
 // countingSources is a source opener that counts its calls and answers each

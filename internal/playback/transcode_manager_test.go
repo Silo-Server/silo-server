@@ -760,3 +760,42 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 		t.Fatalf("starts = %d, want 1", starts)
 	}
 }
+
+// Shutdown cleanup closes each session under its lifecycle lock, so a
+// restart in flight, which holds it, finishes before the close.
+func TestStartShutdownCleanup_ClosesUnderTheLifecycleLock(t *testing.T) {
+	m := NewTranscodeManager()
+	dir := t.TempDir()
+	m.RegisterTranscodeSession("held", &TranscodeSession{outputDir: dir})
+	unlock := m.LockSessionLifecycle("held")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := m.StartShutdownCleanup(ctx)
+	cancel()
+	waiting := func() bool {
+		m.lifecycleMu.Lock()
+		defer m.lifecycleMu.Unlock()
+		lk := m.lifecycleLocks["held"]
+		return lk != nil && lk.refs == 2
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for !waiting() {
+		select {
+		case <-done:
+			unlock()
+			t.Fatal("shutdown cleanup closed the session without its lifecycle lock")
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shutdown cleanup never waited for the lifecycle lock")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("the session closed while its lifecycle lock was held: %v", err)
+	}
+	unlock()
+	<-done
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the session's output survived shutdown: %v", err)
+	}
+}

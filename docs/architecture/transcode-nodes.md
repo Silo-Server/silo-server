@@ -556,7 +556,7 @@ the node's mount.
   that source while its handle lives. The URLs are redacted wherever the node
   logs: `RedactLoopback` replaces each with `source <etag>` (or
   `source (released)`), and the node's slog handler, FFmpeg argv logs, the
-  FFmpeg log sink and error responses all apply it.
+  FFmpeg log sink, subtitle staging stderr and error responses all apply it.
   The design assumes the node host runs no untrusted local users or processes;
   `/proc/<pid>/cmdline` exposure is accepted on that basis.
 - **Close.** `Handle.Close` fails the handle with `ErrClosed`, cancels in-flight
@@ -622,8 +622,8 @@ nanoseconds.
 loopback URL; `RestrictProbeArgs` does the same for ffprobe, whose input is
 positional. Any argument matching the loopback pattern is restricted, whether
 or not its handle is registered. The subtitle filter never takes a relay URL:
-`checkSubtitleFilterInput` refuses one, since that filter has no protocol
-whitelist (see [text subtitle burn-in](#text-subtitle-burn-in)).
+`checkSubtitleFilterInput` refuses one that was not staged (below), since that
+filter has no protocol whitelist.
 
 ## Consumers
 
@@ -634,37 +634,51 @@ whitelist (see [text subtitle burn-in](#text-subtitle-burn-in)).
 | Keyframe index cache | Keyed on identity and size. |
 | DV RPU probe | Keyed on `binary|nodesource.Identity(input)`; the probe now runs on relayed inputs instead of failing open. |
 | Copy-seek anchor and auto-transcode fallback caches | Keyed on `nodesource.InputKey`. |
-| Text subtitle burn-in | Refused; see below. Bitmap burn-in is unchanged. |
+| Text subtitle burn-in | Staged on the node; see below. Bitmap burn-in is unchanged. |
 | Trickplay sample concat | Relayed concat; see below. |
 
-### Text subtitle burn-in
+### Relayed text subtitle staging
 
-FFmpeg's `subtitles=` filter opens its file itself, with no protocol whitelist,
-so it must not be given a loopback URL. A core-mode node therefore refuses a
-text subtitle burn-in (`playback.RelayedTextBurnIn`: a text track burned into
-an encoded video whose input is a relay URL):
+FFmpeg's `subtitles=` filter opens its file with no protocol whitelist, so it
+must not be given a loopback URL. For a core-mode source the node extracts the
+selected embedded text track to `selected.ass` (with `-copyts`) and its fonts
+(`-dump_attachment`) into a node-level staging cache
+(`playback.RelayedSubtitleStaging`, in `<transcode_dir>/subtitle-staging`). A local source keeps the symlink alias it always
+used. `escapeFilterPath` escapes `' [ ] ; , :`.
 
-- **Start.** `POST /transcode/start` answers `422 text subtitle burn-in needs
-  local source access on this node` before FFmpeg runs and releases the source.
-  The native v3 and Jellyfin-compatible dispatchers treat it like any failed
-  start: they exclude the node and try the next candidate, or the API server
-  when the routing policy allows local execution. The API server and local-mode
-  nodes burn the subtitle in through the symlink alias as before.
-- **Rebuild.** A lost session whose recipe asks for it is not rebuilt; the
-  manifest or segment request answers `404` with the same message, a refused
-  rebuild, and the client's next plan moves the session.
-- **Backstop.** `checkSubtitleFilterInput` refuses the same case in
-  `StartTranscode` and in seek restarts (`ErrRelayedTextBurnIn`), so no path
-  hands the filter a relay URL.
+- **Cache.** Entries are keyed by `(source identity, track, codec)`, so starts
+  and rebuilds of the same source and track share one staging. A staging runs
+  detached from the request on its own reopened handle and commits by rename.
+- **Admission.** Two stagings run at once per node; up to eight more wait in a
+  queue. Each in-progress staging reserves 256 MiB for its script and 32 MiB for
+  fonts against a 1 GiB cache bound. A full queue, a full cache or a cancelled
+  wait is `ErrSubtitleStagingBusy`, which a start answers with `503 subtitle
+  staging is busy; retry shortly` and a rebuild with `503`.
+- **Leases.** Every session using a staging holds a lease; a leased entry is
+  never evicted. When the last lease on an unfinished staging is released, the
+  staging is cancelled after 30 idle seconds. A failed staging is kept for a
+  minute so a burst of retries does not read the source again; a failure that
+  follows from the source's own bytes is kept until the sweep, which removes
+  entries after 24 hours.
+- **Timeout.** Two minutes plus the file size at 4 MiB/s, at most four hours.
+- **Fonts.** Only attachments with font magic bytes are kept, at most 32 of
+  them and 32 MiB in total; other attachments and those past the limits are
+  skipped, not fatal.
+- **Preparing sessions.** A start whose staging is not done registers the
+  session as preparing, and FFmpeg launches when staging completes. Without
+  `RequireReady` the start returns `202` at once; a `RequireReady` start still
+  waits for the manifest, and fails like any readiness failure if staging
+  outlasts that wait.
+  Meanwhile segment requests wait up to 12 seconds and `init.mp4` up to
+  10 seconds, then answer `404`, and the player retries.
 
-Bitmap burn-in reads the decoded stream through FFmpeg's input and is not
-refused. `escapeFilterPath` escapes `' [ ] ; , :`.
-
-**Known limitation.** A cold text burn-in start of a large file can fail its
-first attempt on a local-mode node that mounts the library over NFS or SMB: the
-subtitles filter reads the whole file for its track before FFmpeg writes a
-manifest, at the network's speed, and `RequireReady` waits for that manifest
-for a bounded time.
+**Known limitation.** A cold burn-in start of a large file over a slow link can
+fail its first attempt in either mode: `RequireReady` waits for a manifest for
+a bounded time, and reading the whole file for the subtitle track can take
+longer. A local node mounting the library over NFS or SMB reads at the same
+network speed inside that wait. In core mode the staging survives the failed
+start, and the retry joins it, so a later attempt succeeds without starting
+over.
 
 ### Keyframe plan records
 

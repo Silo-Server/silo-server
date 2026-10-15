@@ -102,14 +102,6 @@ The caller treats `409` like any node fault: it tries another node or falls
 back. `input_path` is informational. See
 [source access](transcode-nodes.md#source-access).
 
-A node that reads a start's source through the core refuses a text subtitle
-burn-in with plain-text `422` (`text subtitle burn-in needs local source access
-on this node`) before FFmpeg runs, since the subtitles filter would open the
-relay URL itself. The caller treats it like any failed start and tries another
-node or the API server. Bitmap burn-in, and text burn-in from a node's own
-mount, are not refused. See
-[text subtitle burn-in](transcode-nodes.md#text-subtitle-burn-in).
-
 `POST /chapter-thumbnails/extract` on the transcode listener takes the existing
 `chapterthumbs.RemoteExtractRequest` JSON shape and returns an `image/jpeg` frame.
 Omitted seek/tone-map options keep their zero values and unknown JSON keys are
@@ -506,9 +498,8 @@ stored recipe, which the core refuses for a denied, stopped or foreign session
 ([resolve](transcode-nodes.md#resolve)). For a lost HLS session the node
 answers `410` when the core reports the session denied, and when a copy-video
 rebuild's recorded keyframe plan names another revision of the source, since no
-rebuild can serve that playlist. A 404 can represent an unknown transport or a refused rebuild,
-including a recipe that burns in a text subtitle from a source the node reads
-through the core; a transient resolve failure answers 503. A relay never passes a node's `401` to
+rebuild can serve that playlist. A 404 can represent an unknown transport or a refused rebuild;
+a transient resolve failure answers 503. A relay never passes a node's `401` to
 its client: it authenticated the client itself before signing the node request,
 so the node is refusing the relay (a key mid-rotation, or the token the relay
 forwarded). The relay answers it as the node being unavailable, `502` in its

@@ -372,6 +372,11 @@ type Server struct {
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
 	// session may register after the shutdown drain has taken its snapshot.
 	shuttingDown bool
+	// subtitleStaging is the node's cache of staged text subtitles for
+	// burn-in of relayed sources, under its transcode directory; see
+	// subtitleStagingCache.
+	subtitleStagingOnce sync.Once
+	subtitleStaging     *playback.RelayedSubtitleStaging
 	// sampleCapabilities is a test seam; production uses
 	// mediasample.LoadCapabilities (relayedSamplesUnsupported).
 	sampleCapabilities func(ctx context.Context, ffmpegPath string) (mediasample.Capabilities, error)
@@ -628,6 +633,7 @@ func (s *Server) StartOrphanSweeper(ctx context.Context) {
 			keep[copyPlanRecordName(id)] = struct{}{}
 		}
 		removed += playback.SweepCopyPlanRecords(filepath.Join(dir, playback.CopyPlanRecordDirName), keep, playback.MaxTokenTTL)
+		removed += s.subtitleStagingCache().Sweep(playback.MaxTokenTTL)
 		return removed, err
 	}, playback.OrphanCleanupInterval)
 }
@@ -1178,6 +1184,24 @@ func copyPlanRecordName(sessionID string) string {
 	return hex.EncodeToString(sum[:16]) + ".json"
 }
 
+// subtitleStagingCache is the node's staging cache, created on first use
+// under the transcode directory; nil when it cannot be created, which fails
+// only text burn-in of a relayed source.
+func (s *Server) subtitleStagingCache() *playback.RelayedSubtitleStaging {
+	s.subtitleStagingOnce.Do(func() {
+		if s.transcodeDir == "" {
+			return
+		}
+		staging, err := playback.NewRelayedSubtitleStaging(filepath.Join(s.transcodeDir, playback.SubtitleStagingDirName))
+		if err != nil {
+			slog.Error("create the subtitle staging cache", "component", "transcodenode", "error", err)
+			return
+		}
+		s.subtitleStaging = staging
+	})
+	return s.subtitleStaging
+}
+
 func (s *Server) removeCopyPlanRecord(sessionID string) {
 	if err := os.Remove(s.copyPlanRecordPath(sessionID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("remove keyframe plan record", "component", "transcodenode", "session", sessionID, "error", err)
@@ -1671,6 +1695,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SourceIdentity:             input.Identity(),
 		OutputDir:                  outputDir,
 		CopyPlanRecordPath:         s.copyPlanRecordPath(req.SessionID),
+		SubtitleStaging:            s.subtitleStagingCache(),
 		SessionID:                  req.SessionID,
 		SourceVideoCodec:           req.SourceVideoCodec,
 		SourceVideoProfile:         req.SourceVideoProfile,
@@ -1722,12 +1747,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
 		opts.HWAccel = cfg.Playback.HWAccel
-	}
-	if playback.RelayedTextBurnIn(opts) {
-		slog.WarnContext(r.Context(), "refusing text subtitle burn-in from a core-access source", "component", "transcodenode",
-			"session", req.SessionID, "source", input.Identity())
-		http.Error(w, errRemoteTextBurnIn, http.StatusUnprocessableEntity)
-		return
 	}
 	if toneMapRecipeRequested(opts) {
 		if err := s.resolveToneMapRecipe(r.Context(), &opts); err != nil {
@@ -1811,6 +1830,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case isToneMapRecipeError(err):
 			writeToneMapRecipeError(w, err)
+		case errors.Is(err, playback.ErrSubtitleStagingBusy):
+			http.Error(w, "subtitle staging is busy; retry shortly", http.StatusServiceUnavailable)
 		default:
 			http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		}
@@ -1890,12 +1911,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 // its playback session ended.
 var errReconstructDenied = errors.New("transcode session denied")
 
-// errReconstructTextBurnIn is a lost session whose recipe burns in a text
-// subtitle from a core-access source, which this node refuses as it refuses
-// the start (errRemoteTextBurnIn). It answers 404 like any refused rebuild,
-// so the client's next plan puts the session elsewhere.
-var errReconstructTextBurnIn = errors.New(errRemoteTextBurnIn)
-
 // errReconstructUnavailable is a lost session the node could not ask the core
 // about: the core was unreachable, failing, or not wired. It is retryable, so
 // it must not read as the session not existing.
@@ -1912,12 +1927,11 @@ var errReconstructUnavailable = errors.New("recipe authority unavailable")
 // integrated server's token-carried reconstruct.
 //
 // Returns nil and errReconstructDenied when the core reports the session
-// denied, nil and errReconstructTextBurnIn for a text burn-in this node cannot
-// run from a core-access source, and nil and no error when the core refuses it
-// otherwise (no recipe, or a recipe that is not this node's); the caller
-// renders the last two as a not-found. Anything short of a refusal — a core
-// the node cannot reach, one that times out or fails — returns
-// errReconstructUnavailable, which the caller renders as a retryable 503.
+// denied, and nil and no error when the core refuses it otherwise (no recipe,
+// or a recipe that is not this node's), which the caller renders as a genuine
+// not-found. Anything short of a refusal — a core the node cannot reach, one
+// that times out or fails — returns errReconstructUnavailable, which the
+// caller renders as a retryable 503.
 //
 // requestedSegment is the segment the client is fetching, or negative on the
 // manifest path. Reconstruction is single-flighted per session id so
@@ -2006,6 +2020,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	opts.InputPath = input.Input()
 	opts.SourceIdentity = input.Identity()
 	opts.CopyPlanRecordPath = s.copyPlanRecordPath(sessionID)
+	opts.SubtitleStaging = s.subtitleStagingCache()
 	opts.SessionID = sessionID
 	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but reconstruction must
@@ -2019,11 +2034,6 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	opts.SegmentRetentionSeconds = cfg.Playback.SegmentRetentionSeconds
 	opts.NodeType = "transcode"
 	opts.ExecutionMode = "transcode_node"
-	if playback.RelayedTextBurnIn(opts) {
-		slog.WarnContext(r.Context(), "refusing to rebuild a text subtitle burn-in from a core-access source", "component", "transcodenode",
-			"session", sessionID, "source", input.Identity())
-		return nil, errReconstructTextBurnIn
-	}
 	if toneMapRecipeRequested(opts) {
 		err := s.resolveToneMapRecipe(context.WithoutCancel(r.Context()), &opts)
 		if err != nil {
@@ -2116,6 +2126,10 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 			if session.IsRunning() {
 				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
 					"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
+			} else if errors.Is(session.WaitError(), playback.ErrSubtitleStaging) {
+				// Software encoding would need the same staged subtitle.
+				_ = session.Close()
+				return nil, session.WaitError()
 			} else {
 				// Keep the shared output directory: the retry writes into it.
 				_ = session.CloseProcess()
@@ -2185,11 +2199,12 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 }
 
 // reconstructStartError classifies a rebuild's failed start. One that may
-// succeed on a later request (the keyframe plan could not be worked out now)
-// is errReconstructUnavailable, a retryable 503, not a missing session;
-// ErrCopyPlanSourceChanged and the rest pass unchanged.
+// succeed on a later request (the keyframe plan could not be worked out now,
+// or the node's subtitle staging is busy) is errReconstructUnavailable, a
+// retryable 503, not a missing session; ErrCopyPlanSourceChanged and the rest
+// pass unchanged.
 func reconstructStartError(err error) error {
-	if errors.Is(err, playback.ErrCopyPlanUnavailable) {
+	if errors.Is(err, playback.ErrCopyPlanUnavailable) || errors.Is(err, playback.ErrSubtitleStagingBusy) {
 		return fmt.Errorf("%w: %w", errReconstructUnavailable, err)
 	}
 	return err
@@ -2238,12 +2253,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)
 		}
+		// Under the session's lifecycle lock, as every other teardown: a
+		// restart in flight, which holds it, finishes before the close, and
+		// none starts after it (the session is gone from the map).
+		unlock := s.lockSessionLifecycle(victim.id)
 		if err := s.closeSessionOffGPU(victim.session); err != nil {
 			errs = append(errs, fmt.Errorf("close session %s: %w", victim.id, err))
 		}
 		if s.tracker != nil {
 			s.tracker.Remove(ctx, victim.id)
 		}
+		unlock()
 	}
 	waitCtx, cancelWait := context.WithTimeout(ctx, progressiveRemuxShutdownTimeout)
 	defer cancelWait()
@@ -2530,8 +2550,6 @@ func writeReconstructFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errReconstructDenied):
 		writeStreamDenied(w)
-	case errors.Is(err, errReconstructTextBurnIn):
-		http.Error(w, errRemoteTextBurnIn, http.StatusNotFound)
 	case errors.Is(err, errReconstructUnavailable):
 		http.Error(w, "recipe authority unavailable", http.StatusServiceUnavailable)
 	case err != nil && isToneMapRecipeError(err):
@@ -2709,6 +2727,9 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		} else if session.IsRunning() {
 			// Non-numbered segment (e.g., init.mp4 for fMP4 HLS).
 			// Wait briefly — the init segment is written almost immediately.
+			// A session preparing its subtitle has not started FFmpeg: this
+			// waits 10 s and answers 404 if the staging runs on, as a
+			// numbered segment waits 12 s (SegmentRecoveryDecision).
 			segmentLease, err = session.WaitForOpenSegment(name, 10*time.Second)
 		}
 	}

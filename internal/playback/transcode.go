@@ -48,9 +48,17 @@ type TranscodeOpts struct {
 	// removed with it. A transcode node keeps it in a node-level directory, so
 	// an idle reap, which removes the output, leaves it for the rebuild.
 	CopyPlanRecordPath string
-	// subtitleFilterInputPath is a parser-safe local alias used only by the
-	// libass subtitles filter. FFmpeg still opens InputPath as the media input.
+	// subtitleFilterInputPath is what the libass subtitles filter opens: a
+	// parser-safe local alias of InputPath, or for a relayed source the
+	// selected track extracted to an ASS script with its fonts in
+	// subtitleFilterFontsDir (relayed_subtitles.go). FFmpeg still opens
+	// InputPath as the media input.
 	subtitleFilterInputPath string
+	subtitleFilterFontsDir  string
+	// SubtitleStaging is a transcode node's cache of staged text subtitles,
+	// where a text burn-in of a relayed source stages its track before
+	// FFmpeg starts (relayed_subtitles.go). Nil anywhere else.
+	SubtitleStaging *RelayedSubtitleStaging
 	// OutputSubdir is the signed, root-relative reconstruction directory. Empty
 	// retains the legacy flat {session_id} layout.
 	OutputSubdir         string
@@ -283,6 +291,16 @@ type TranscodeSession struct {
 	// made, not yet published over its transport's record, or "" (see
 	// CommitCopyPlanRecord). Closing the session discards it.
 	copyPlanCandidate string
+	// preparing is a generation whose FFmpeg waits for its subtitle staging
+	// (launchWhenStaged). The session counts as running; requests for it
+	// wait as for a slow FFmpeg start.
+	preparing bool
+	// subtitle is the session's lease on its staged subtitle, or nil.
+	subtitle *subtitleLease
+	// closing is set once Close or CloseProcess begins. It is terminal: from
+	// then on no restart publishes a generation, no pending launch starts
+	// FFmpeg, and no throttler is armed.
+	closing bool
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -311,10 +329,13 @@ type SegmentProgress struct {
 	// output directory was spawned. It is the zero time for sessions that never
 	// started a process. Output stamped before it belongs to an earlier
 	// generation and must not be read as this process's progress.
-	GenerationStartedAt  time.Time
-	HasManifest          bool
-	Running              bool
-	Restarting           bool
+	GenerationStartedAt time.Time
+	HasManifest         bool
+	Running             bool
+	Restarting          bool
+	// Preparing is a generation waiting for its subtitle staging before
+	// FFmpeg starts.
+	Preparing            bool
 	StartSegmentNumber   int
 	SegmentDuration      int
 	LastRequestedSegment int
@@ -435,11 +456,16 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
-	if err := prepareSubtitleFilterInput(&opts); err != nil {
-		releaseHWDevice()
-		return nil, err
-	}
-	if err := checkSubtitleFilterInput(opts); err != nil {
+	// A relayed source's text subtitle is staged by the node, outside this
+	// start; the session launches FFmpeg once the staging is complete.
+	var staging *subtitleLease
+	if stagesRelayedSubtitle(opts) {
+		var err error
+		if staging, err = leaseStagedSubtitle(ctx, opts); err != nil {
+			releaseHWDevice()
+			return nil, err
+		}
+	} else if err := prepareSubtitleFilterInput(&opts); err != nil {
 		releaseHWDevice()
 		return nil, err
 	}
@@ -447,6 +473,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if err != nil {
 		// Rebuilding without the plan would serve FFmpeg's playlist to a
 		// player that may hold the planned one; a later request rebuilds.
+		staging.release()
 		releaseHWDevice()
 		if !errors.Is(err, ErrCopyPlanSourceChanged) {
 			err = fmt.Errorf("%w: %w", ErrCopyPlanUnavailable, err)
@@ -476,8 +503,63 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		hwWorkloadDevice:     hwWorkloadDevice,
 		copyPlan:             copyPlan,
 		copyPlanCandidate:    copyPlanCandidate,
+		subtitle:             staging,
+	}
+	if staging != nil && !staging.ready() {
+		// Return now with a preparing session: the staging reads the whole
+		// source and must not hold this start, which would cancel and
+		// restart it on every retry. Requests wait for the session as they
+		// do for a slow FFmpeg start. The device stays selected, but is
+		// reserved only when FFmpeg launches: a staging can take minutes.
+		releaseHWDevice()
+		s.preparing = true
+		// A stream.m3u8 an earlier session left in this directory is not
+		// this generation's (getManifest).
+		s.inheritedManifest = statManifest(opts.OutputDir)
+		log.Printf("playback: session %s starts ffmpeg once its subtitle is staged", opts.SessionID)
+		go s.launchWhenStaged(ctx, staging, s.done, hwWorkloadDevice)
+		return s, nil
+	}
+	if staging != nil {
+		dir, _ := staging.result()
+		useStagedSubtitle(&opts, dir)
+		s.opts = opts
 	}
 
+	proc, err := s.startProcess(ctx, opts)
+	if err != nil {
+		cancel()
+		releaseHWDevice()
+		staging.release()
+		removeCopyPlanCandidate(copyPlanCandidate)
+		return nil, err
+	}
+	s.cmd = proc.cmd
+	s.stdinPipe = proc.stdin
+	s.generationStartedAt = proc.startedAt
+	s.inheritedManifest = proc.inheritedManifest
+
+	// Monitor ffmpeg in background. The process-specific reservation is released
+	// before done closes, so waiters can safely launch a replacement process.
+	go s.monitorFFmpeg(ctx, proc.cmd, s.done, releaseHWDevice)
+
+	return s, nil
+}
+
+// ffmpegProcess is a started FFmpeg generation.
+type ffmpegProcess struct {
+	cmd               *exec.Cmd
+	stdin             io.WriteCloser
+	startedAt         time.Time
+	inheritedManifest os.FileInfo
+}
+
+// startProcess starts FFmpeg for opts, a session's first generation, under
+// ctx, which ends it. It does not record the process on the session.
+func (s *TranscodeSession) startProcess(ctx context.Context, opts TranscodeOpts) (ffmpegProcess, error) {
+	if err := checkSubtitleFilterInput(opts); err != nil {
+		return ffmpegProcess{}, err
+	}
 	args := nodesource.RestrictArgs(buildFFmpegArgs(opts))
 	bin := opts.FFmpegPath
 	if bin == "" {
@@ -490,10 +572,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	cmd := exec.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		cancel()
-		releaseHWDevice()
-		removeCopyPlanCandidate(copyPlanCandidate)
-		return nil, fmt.Errorf("create stdin pipe: %w", err)
+		return ffmpegProcess{}, fmt.Errorf("create stdin pipe: %w", err)
 	}
 	cmd.Dir = opts.OutputDir
 	cmd.Stderr = s.newStderrWriter(ctx)
@@ -505,55 +584,101 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
 		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
-		cancel()
-		releaseHWDevice()
-		removeCopyPlanCandidate(copyPlanCandidate)
 		s.logFFmpegEvent(ctx, "ffmpeg process exit error", err.Error())
-		return nil, fmt.Errorf("start ffmpeg: %w", err)
+		return ffmpegProcess{}, fmt.Errorf("start ffmpeg: %w", err)
 	}
-	s.cmd = cmd
-	s.stdinPipe = stdinPipe
-	s.generationStartedAt = startedAt
-	s.inheritedManifest = inheritedManifest
 	s.logFFmpegEvent(ctx, "ffmpeg process started", "")
-
-	// Monitor ffmpeg in background. The process-specific reservation is released
-	// before done closes, so waiters can safely launch a replacement process.
-	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
-
-	return s, nil
-}
-
-// ErrRelayedTextBurnIn refuses a text subtitle burn-in of a relayed source.
-// The libass subtitles filter opens its file itself, outside FFmpeg's input
-// and its protocol and format restrictions, so it must never be given a
-// transcode node's loopback URL. A node refuses such a start before it
-// reaches FFmpeg (RelayedTextBurnIn); a node with the library mounted, or the
-// API server, burns the subtitle in.
-var ErrRelayedTextBurnIn = errors.New("text subtitle burn-in needs local source access")
-
-// textSubtitleBurnIn reports a burn-in of a text subtitle track, which the
-// libass subtitles filter renders by opening the subtitle's file itself.
-func textSubtitleBurnIn(opts TranscodeOpts) bool {
-	return opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0 && !NeedsBurnIn(opts.SubtitleCodec)
-}
-
-// RelayedTextBurnIn reports a text subtitle burn-in whose input is a relay
-// URL, which this build cannot run (ErrRelayedTextBurnIn). Copied video
-// renders no subtitle, and bitmap burn-in reads the decoded stream, so
-// neither is one.
-func RelayedTextBurnIn(opts TranscodeOpts) bool {
-	return textSubtitleBurnIn(opts) && !strings.EqualFold(opts.TargetCodecVideo, "copy") && nodesource.IsRelayURL(opts.InputPath)
+	return ffmpegProcess{cmd: cmd, stdin: stdinPipe, startedAt: startedAt, inheritedManifest: inheritedManifest}, nil
 }
 
 // checkSubtitleFilterInput refuses a text burn-in whose subtitles filter
 // would open a relay URL: the filter opens its file outside FFmpeg's input
-// restrictions.
+// restrictions, so a relayed source's track must be staged first.
 func checkSubtitleFilterInput(opts TranscodeOpts) error {
-	if RelayedTextBurnIn(opts) {
-		return ErrRelayedTextBurnIn
+	if textSubtitleBurnIn(opts) && !strings.EqualFold(opts.TargetCodecVideo, "copy") &&
+		opts.subtitleFilterInputPath == "" && nodesource.IsRelayURL(opts.InputPath) {
+		return fmt.Errorf("%w: a relayed source's subtitle is not staged", ErrSubtitleStaging)
 	}
 	return nil
+}
+
+// launchWhenStaged starts the generation whose done is done once its
+// subtitle staging completes. ctx ends the generation: a stop, idle reap,
+// force reload or restart cancels the pending launch, and done closes
+// without FFmpeg having started. A staging that failed ends the generation
+// with that failure as the session's WaitError, which manifest and segment
+// requests then answer as they do any failed FFmpeg. hwWorkloadDevice, when
+// set, is the GPU the session was assigned; it is reserved only for the
+// process, as a restart reserves it.
+func (s *TranscodeSession) launchWhenStaged(ctx context.Context, staging *subtitleLease, done chan struct{}, hwWorkloadDevice string) {
+	noRelease := func() {}
+	select {
+	case <-staging.Done():
+	case <-ctx.Done():
+		s.endLaunch(done, ctx.Err(), noRelease)
+		return
+	}
+	dir, err := staging.result()
+	if err != nil {
+		s.mu.Lock()
+		sessionID := s.opts.SessionID
+		s.mu.Unlock()
+		slog.ErrorContext(ctx, "transcode session ends: its subtitle could not be staged", "component", "playback",
+			"playback_session_id", sessionID, "error", nodesource.RedactLoopback(err.Error()))
+		s.endLaunch(done, err, noRelease)
+		return
+	}
+	s.mu.Lock()
+	if s.done != done || s.closing || ctx.Err() != nil {
+		s.mu.Unlock()
+		s.endLaunch(done, context.Canceled, noRelease)
+		return
+	}
+	opts := s.opts
+	useStagedSubtitle(&opts, dir)
+	s.opts = opts
+	s.mu.Unlock()
+
+	releaseHWDevice := noRelease
+	if hwWorkloadDevice != "" {
+		releaseHWDevice = reserveConcreteHWDevice(hwWorkloadDevice)
+	}
+	// A Close from here on cancels ctx and waits for done, which this
+	// launch closes (endLaunch) or hands to monitorFFmpeg: a process started
+	// under a canceled ctx is killed and reaped there.
+	proc, err := s.startProcess(ctx, opts)
+	if err != nil {
+		s.endLaunch(done, err, releaseHWDevice)
+		return
+	}
+	s.mu.Lock()
+	s.cmd = proc.cmd
+	s.stdinPipe = proc.stdin
+	s.generationStartedAt = proc.startedAt
+	s.inheritedManifest = proc.inheritedManifest
+	s.preparing = false
+	hook := s.restartHook
+	s.mu.Unlock()
+	go s.monitorFFmpeg(ctx, proc.cmd, done, releaseHWDevice)
+	// The restart hook re-arms what the session's owner attached to its
+	// process, such as the throttler, which a preparing session lacked.
+	if hook != nil {
+		hook(ctx)
+	}
+}
+
+// endLaunch ends a generation that never started FFmpeg, as monitorFFmpeg
+// ends one whose FFmpeg exited.
+func (s *TranscodeSession) endLaunch(done chan struct{}, err error, releaseHWDevice func()) {
+	releaseHWDevice()
+	s.mu.Lock()
+	if s.done == done {
+		s.running = false
+		s.preparing = false
+		s.waitErr = err
+	}
+	s.mu.Unlock()
+	close(done)
 }
 
 func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func()) {
@@ -1526,11 +1651,7 @@ func toneMapScaleFilter(opts TranscodeOpts) string {
 // toneMappedTextSubtitleFilter places CPU subtitle rendering after conversion
 // and downloads or uploads frames only where the selected backend requires it.
 func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
-	subtitleInputPath := opts.InputPath
-	if opts.subtitleFilterInputPath != "" {
-		subtitleInputPath = opts.subtitleFilterInputPath
-	}
-	subFilter := fmt.Sprintf("subtitles='%s':si=%d", escapeFilterPath(subtitleInputPath), opts.SubtitleTrackIndex)
+	subFilter := subtitleBurnInFilter(opts, false)
 	scale := resolutionToScale(opts.TargetResolution)
 	cpuTail := subFilter
 	if scale != "" {
@@ -1888,12 +2009,7 @@ func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv b
 // [scale,] subtitles → hwupload → hwmap.
 func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 	scale := resolutionToScale(opts.TargetResolution)
-	subtitleInputPath := opts.InputPath
-	if opts.subtitleFilterInputPath != "" {
-		subtitleInputPath = opts.subtitleFilterInputPath
-	}
-	subFilter := fmt.Sprintf("subtitles=filename='%s':si=%d",
-		escapeFilterPath(subtitleInputPath), opts.SubtitleTrackIndex)
+	subFilter := subtitleBurnInFilter(opts, true)
 
 	// Build the CPU filter portion: scale (if any) then subtitle overlay.
 	// Scale must come before subtitles so text is rendered at target resolution.
@@ -2057,12 +2173,36 @@ func escapeFilterPath(path string) string {
 
 const subtitleFilterAliasName = "subtitle-source.media"
 
+// subtitleBurnInFilter is the libass subtitles filter of a text burn-in,
+// naming its file with the filename option when filenameKeyword is set. A
+// staged script holds the selected track alone, with the source's fonts in
+// its fontsdir.
+func subtitleBurnInFilter(opts TranscodeOpts, filenameKeyword bool) string {
+	path, index := opts.InputPath, opts.SubtitleTrackIndex
+	if opts.subtitleFilterInputPath != "" {
+		path = opts.subtitleFilterInputPath
+	}
+	if opts.subtitleFilterFontsDir != "" {
+		index = 0
+	}
+	name := "subtitles="
+	if filenameKeyword {
+		name += "filename="
+	}
+	filter := fmt.Sprintf("%s'%s':si=%d", name, escapeFilterPath(path), index)
+	if opts.subtitleFilterFontsDir != "" {
+		filter += ":fontsdir='" + escapeFilterPath(opts.subtitleFilterFontsDir) + "'"
+	}
+	return filter
+}
+
 // prepareSubtitleFilterInput avoids passing the library filename through
 // FFmpeg's nested filter parsers. In particular, an apostrophe can be consumed
 // by the filtergraph parser even after it was escaped for the subtitles filter.
 // A stable alias in the session directory keeps the media input unchanged and
-// is retained for seek restarts with the rest of TranscodeOpts. A relay URL
-// gets no alias: the filter must not open it (checkSubtitleFilterInput).
+// is retained for seek restarts with the rest of TranscodeOpts. A transcode
+// node's relayed source, which the filter cannot open, has its track staged
+// instead (leaseStagedSubtitle).
 func prepareSubtitleFilterInput(opts *TranscodeOpts) error {
 	if !textSubtitleBurnIn(*opts) || nodesource.IsRelayURL(opts.InputPath) {
 		return nil
@@ -2138,7 +2278,9 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 
 	manifestPath := filepath.Join(s.outputDir, "stream.m3u8")
 	data, info, err := readManifestFile(manifestPath)
-	if err == nil && currentGeneration && s.inheritedManifest != nil && sameManifestFile(info, s.inheritedManifest) {
+	if err == nil && currentGeneration && (s.preparing || s.inheritedManifest != nil && sameManifestFile(info, s.inheritedManifest)) {
+		// A preparing generation has started no FFmpeg, so no playlist is
+		// its own, whatever an earlier one left in a reused directory.
 		data, err = nil, os.ErrNotExist
 	}
 	if err != nil {
@@ -2796,6 +2938,7 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		ProducedHead:         opts.StartSegmentNumber - 1,
 		Running:              s.running,
 		Restarting:           s.restarting != nil,
+		Preparing:            s.preparing,
 		StartSegmentNumber:   opts.StartSegmentNumber,
 		SegmentDuration:      opts.SegmentDuration,
 		LastRequestedSegment: s.lastRequestedSegment,
@@ -2866,6 +3009,16 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = false
 		decision.Reason = segmentReasonRestarting
+	case progress.Preparing:
+		// FFmpeg starts once the subtitle is staged; a restart now would
+		// only wait for the same staging. The request waits activeSegmentWait
+		// (12 s) and then answers 404, as for a slow FFmpeg start; the
+		// transcode node's init.mp4 request waits 10 s the same way. A
+		// staging that outlasts those waits makes the client retry.
+		decision.Wait = true
+		decision.WaitTimeout = activeSegmentWait
+		decision.RestartOnTimeout = false
+		decision.Reason = "transcode_preparing"
 	case !progress.Running:
 		decision.Reason = "transcode_not_running"
 	case segNum < progress.StartSegmentNumber:
@@ -3062,24 +3215,44 @@ func (s *TranscodeSession) CloseProcess() error {
 // shutdown kills the ffmpeg process and, when removeOutput is true, removes the
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
+	// Closing is terminal: a restart that has not published its generation
+	// yet publishes none, and a pending launch starts no FFmpeg. A restart
+	// in flight swaps the generation's cancel and done, so wait for it
+	// before reading them.
+	s.mu.Lock()
+	s.closing = true
+	flight := s.restarting
+	s.mu.Unlock()
 	s.StopThrottler()
-	// Cancel the context to kill the process (no mutex needed for cancel).
-	if s.cancel != nil {
-		s.cancel()
+	if flight != nil {
+		<-flight.done
+	}
+	s.mu.Lock()
+	cancel, done := s.cancel, s.done
+	s.mu.Unlock()
+
+	// Cancel the context to kill the process.
+	if cancel != nil {
+		cancel()
 	}
 
 	// Wait for the monitor goroutine to finish reaping the process.
 	// This avoids a deadlock: the goroutine needs s.mu to mark running=false,
 	// so we must not hold s.mu while waiting.
 	// done is nil when no process was started (e.g. test-only sessions).
-	if s.done != nil {
-		<-s.done
+	if done != nil {
+		<-done
 	}
 
 	s.mu.Lock()
+	subtitle := s.subtitle
+	s.subtitle = nil
 	candidate := s.copyPlanCandidate
 	s.copyPlanCandidate = ""
 	s.mu.Unlock()
+	// Outside the session's mutex: the last lease's release may evict the
+	// staging, removing its directory.
+	subtitle.release()
 	// A start that did not succeed leaves its transport's record as it was.
 	removeCopyPlanCandidate(candidate)
 
@@ -3087,6 +3260,7 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	defer s.mu.Unlock()
 
 	s.running = false
+	s.preparing = false
 	s.segmentGeneration++
 	s.segmentPruneRunning = false
 
@@ -3297,6 +3471,10 @@ func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (Segm
 	return target, true, err
 }
 
+// errSessionClosing is a restart of a session whose Close has begun. It is
+// ErrSessionSuperseded to callers: the handle is no longer the live session.
+var errSessionClosing = fmt.Errorf("%w: the session is closing", ErrSessionSuperseded)
+
 // restartFlight carries the outcome of an in-flight restart so a concurrent
 // caller waits for it and receives the result instead of assuming success and
 // falling through to a stream the failed restart never produced.
@@ -3327,6 +3505,10 @@ func (s *TranscodeSession) restart(
 		s.mu.Unlock()
 		<-flight.done
 		return flight.err
+	}
+	if s.closing {
+		s.mu.Unlock()
+		return errSessionClosing
 	}
 	flight := &restartFlight{done: make(chan struct{})}
 	s.restarting = flight
@@ -3416,9 +3598,22 @@ func (s *TranscodeSession) restart(
 			startSegment, previousOpts.TargetCodecVideo, opts.TargetCodecVideo)
 	}
 
-	// A text burn-in of a relayed source is refused here as at the start
-	// (checkSubtitleFilterInput).
-	if err := checkSubtitleFilterInput(opts); err != nil {
+	// A relayed source's staged subtitle carries over; one whose staging
+	// has not completed makes this generation wait for it too.
+	// Readiness is read once: a staging completing between separate checks
+	// would launch FFmpeg directly without the staged subtitle and without
+	// the check that keeps a relay URL out of the subtitles filter.
+	staging, err := s.restartSubtitleStaging(ctx, opts)
+	staged := err == nil && staging != nil && staging.ready()
+	pending := err == nil && staging != nil && !staged
+	if staged {
+		dir, _ := staging.result()
+		useStagedSubtitle(&opts, dir)
+	}
+	if err == nil && !pending {
+		err = checkSubtitleFilterInput(opts)
+	}
+	if err != nil {
 		s.mu.Lock()
 		flight.err = err
 		s.restarting = nil
@@ -3426,6 +3621,52 @@ func (s *TranscodeSession) restart(
 		s.mu.Unlock()
 		close(flight.done)
 		return fmt.Errorf("restart: %w", err)
+	}
+
+	// As on initial start, the caller bounds synchronous validation; the new
+	// FFmpeg process keeps running after the segment request completes.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+
+	if pending {
+		done := make(chan struct{})
+		inheritedManifest := statManifest(opts.OutputDir)
+		s.mu.Lock()
+		if s.closing {
+			cancel()
+			flight.err = errSessionClosing
+			s.restarting = nil
+			s.mu.Unlock()
+			close(flight.done)
+			return flight.err
+		}
+		if s.stdinPipe != nil {
+			_ = s.stdinPipe.Close()
+		}
+		s.cmd = nil
+		s.stdinPipe = nil
+		s.cancel = cancel
+		s.opts = opts
+		s.running = true
+		s.preparing = true
+		s.restarting = nil
+		s.lastRequestedSegment = requestedSegment
+		s.lastCompletedSegment = startSegment - 1
+		s.generationStartedAt = time.Time{}
+		s.inheritedManifest = inheritedManifest
+		s.done = done
+		s.mu.Unlock()
+		close(flight.done)
+		log.Printf("playback: session %s restarts ffmpeg once its subtitle is staged", opts.SessionID)
+		go s.launchWhenStaged(ctx, staging, done, hwWorkloadDevice)
+		return nil
+	}
+
+	// The previous process released its reservation before closing done. Keep
+	// this session on the same concrete GPU while accounting for the replacement
+	// process as a new active workload.
+	releaseHWDevice := func() {}
+	if hwWorkloadDevice != "" {
+		releaseHWDevice = reserveConcreteHWDevice(hwWorkloadDevice)
 	}
 
 	args := nodesource.RestrictArgs(buildFFmpegArgs(opts))
@@ -3437,13 +3678,11 @@ func (s *TranscodeSession) restart(
 	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, nodesource.RedactLoopback(strings.Join(args, " ")))
 	s.logFFmpegEvent(ctx, "ffmpeg process restart", "")
 
-	// As on initial start, the caller bounds synchronous validation; the new
-	// FFmpeg process keeps running after the segment request completes.
-	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	cmd := exec.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
+		releaseHWDevice()
 		s.mu.Lock()
 		flight.err = err
 		s.restarting = nil
@@ -3455,14 +3694,6 @@ func (s *TranscodeSession) restart(
 	cmd.Dir = opts.OutputDir
 	cmd.Stderr = s.newStderrWriter(ctx)
 	cmd.WaitDelay = 3 * time.Second
-
-	// The previous process released its reservation before closing done. Keep
-	// this session on the same concrete GPU while accounting for the replacement
-	// process as a new active workload.
-	releaseHWDevice := func() {}
-	if hwWorkloadDevice != "" {
-		releaseHWDevice = reserveConcreteHWDevice(hwWorkloadDevice)
-	}
 
 	// As in StartTranscode, stamp the generation before the process can write.
 	inheritedManifest := statManifest(opts.OutputDir)
@@ -3482,6 +3713,20 @@ func (s *TranscodeSession) restart(
 	}
 
 	s.mu.Lock()
+	if s.closing {
+		// Close began while this generation started: end it here, before
+		// the flight lets Close read the session's generation.
+		s.mu.Unlock()
+		cancel()
+		_ = cmd.Wait()
+		releaseHWDevice()
+		s.mu.Lock()
+		flight.err = errSessionClosing
+		s.restarting = nil
+		s.mu.Unlock()
+		close(flight.done)
+		return flight.err
+	}
 	if s.stdinPipe != nil {
 		s.stdinPipe.Close()
 	}
@@ -3489,6 +3734,7 @@ func (s *TranscodeSession) restart(
 	s.cancel = cancel
 	s.opts = opts
 	s.running = true
+	s.preparing = false
 	s.restarting = nil
 	s.stdinPipe = stdinPipe
 	s.lastRequestedSegment = requestedSegment
@@ -3507,6 +3753,30 @@ func (s *TranscodeSession) restart(
 	}
 
 	return nil
+}
+
+// restartSubtitleStaging is the staging a restart of opts burns in: the
+// session's own, or a new one when that staging failed. Nil when the session
+// stages nothing.
+func (s *TranscodeSession) restartSubtitleStaging(ctx context.Context, opts TranscodeOpts) (*subtitleLease, error) {
+	s.mu.Lock()
+	current := s.subtitle
+	s.mu.Unlock()
+	if current != nil && !current.failed() {
+		return current, nil
+	}
+	if !stagesRelayedSubtitle(opts) {
+		return nil, nil
+	}
+	fresh, err := leaseStagedSubtitle(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.subtitle = fresh
+	s.mu.Unlock()
+	current.release()
+	return fresh, nil
 }
 
 // WaitForSegment polls until the named segment file exists on disk or the
@@ -4003,13 +4273,19 @@ func (s *TranscodeSession) LastRequestedSegment() int {
 // No-op if thresholdSeconds <= 0 or stdinPipe is nil.
 func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	s.mu.Lock()
-	if s.stdinPipe == nil || thresholdSeconds <= 0 {
+	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing {
 		s.mu.Unlock()
 		return
 	}
 	t := NewTranscodeThrottler(s, s.stdinPipe, thresholdSeconds, s.opts.SegmentDuration)
+	// A preparing session's owner may arm it both directly and through the
+	// restart hook its launch runs: the later one replaces the earlier.
+	previous := s.throttler
 	s.throttler = t
 	s.mu.Unlock()
+	if previous != nil {
+		previous.Stop()
+	}
 	t.Start()
 }
 

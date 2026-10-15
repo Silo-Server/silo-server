@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -149,7 +150,8 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 
 		failedDevice := session.Opts().HWDevice
 		next := false
-		if !wasRunning {
+		// A subtitle that could not be staged fails every path alike.
+		if !wasRunning && !errors.Is(session.WaitError(), ErrSubtitleStaging) {
 			if pipeline.AdvanceAfterFailure(failedDevice) {
 				attempt = pipeline.Current()
 				next = true
