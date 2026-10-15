@@ -456,6 +456,7 @@ type MetadataService struct {
 	observedLocationRepo    metadataObservedLocationRepo
 	localSidecars           localSidecarStore
 	dbPool                  *pgxpool.Pool
+	recsStaler              RecommendationStaler
 
 	dedupLocks      keyedDedupLocks
 	onDemandRefresh keyedRefreshSet
@@ -679,7 +680,7 @@ func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*Pro
 	}
 
 	if req.Mode != ModeIdentify {
-		pinned, err := s.pinnedUnmatchedBySplit(ctx, req.ContentID)
+		pinned, err := s.pinnedUnmatched(ctx, req.ContentID)
 		if err != nil {
 			return nil, err
 		}
@@ -3272,6 +3273,17 @@ func (s *MetadataService) refreshItemTarget(ctx context.Context, contentID strin
 		s.recordRefreshFailure(ctx, contentID, err, incrementDebtAttempt)
 		return err
 	}
+	if result != nil && result.Pinned {
+		// An admin left the item unmatched on purpose: there is nothing to
+		// refresh, and that is not a failure. Settle its debt row as a
+		// successful refresh would, or a claimed row keeps coming back.
+		if syncErr := s.syncRefreshDebtForItem(ctx, contentID); syncErr != nil {
+			slog.WarnContext(ctx, "metadata: failed to sync refresh debt after a pinned item refresh", "component", "metadata",
+				"content_id", contentID,
+				"error", syncErr)
+		}
+		return nil
+	}
 	if result == nil || !result.Updated {
 		s.recordRefreshFailure(ctx, contentID, ErrMetadataNotFound, incrementDebtAttempt)
 		return ErrMetadataNotFound
@@ -4041,6 +4053,20 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 		return err
 	}
 	now := time.Now().UTC()
+	// A series row that keeps episode debt must wake when its episodes' recent
+	// window closes, like the season and episode rows that hold the same debt.
+	var actionable []*models.Episode
+	if hasRefreshDebtReason(reasonMask, RefreshDebtReasonEpisodeIncomplete) && s.episodeRepo != nil {
+		episodes, err := s.episodeRepo.ListBySeries(ctx, contentID)
+		if err != nil {
+			return err
+		}
+		for _, episode := range episodes {
+			if EpisodeHasActionableMetadataDebt(episode, now) {
+				actionable = append(actionable, episode)
+			}
+		}
+	}
 	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount,
 		refreshAttemptCounted(ctx, RefreshTargetItem, contentID))
 	return s.refreshDebtRepo.MarkSuccess(
@@ -4048,7 +4074,7 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 		contentID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, actionable...),
 	)
 }
 
@@ -4081,10 +4107,11 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 	}
 	reasonMask := int64(0)
 	now := time.Now().UTC()
+	var actionable []*models.Episode
 	for _, episode := range episodes {
 		if EpisodeHasActionableMetadataDebt(episode, now) {
 			reasonMask = RefreshDebtReasonEpisodeIncomplete
-			break
+			actionable = append(actionable, episode)
 		}
 	}
 	if reasonMask == 0 {
@@ -4102,7 +4129,7 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 		seasonID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, actionable...),
 	)
 }
 
@@ -4137,7 +4164,7 @@ func (s *MetadataService) syncRefreshDebtForEpisode(ctx context.Context, episode
 		episodeID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, episode),
 	)
 }
 
@@ -4342,6 +4369,13 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		return err
 	}
 	if !strings.EqualFold(strings.TrimSpace(series.Type), "series") {
+		return ErrMetadataNotFound
+	}
+	// A season or episode refresh searches providers for the series too, so
+	// it must not run for a series an admin ignored.
+	if ignored, err := s.matchIgnored(ctx, seriesID); err != nil {
+		return err
+	} else if ignored {
 		return ErrMetadataNotFound
 	}
 
@@ -4924,6 +4958,17 @@ func flattenEpisodeResults(accumulator map[episodeResultKey]*EpisodeResult) []Ep
 	return results
 }
 
+// dropAIText clears localized text an AI translation wrote before provider
+// text is merged in, so provider text replaces it in either merge mode. With
+// no provider text the field goes out empty, and the localization repository
+// keeps the stored AI text and its ai source; carrying it forward would label
+// it provider.
+func dropAIText(value *string, source string) {
+	if source == models.LocalizationSourceAI {
+		*value = ""
+	}
+}
+
 func buildItemLocalizationRecord(
 	existing *models.MediaItemLocalization,
 	contentID string,
@@ -4943,6 +4988,9 @@ func buildItemLocalizationRecord(
 		*loc = *existing
 		loc.ContentID = contentID
 		loc.Language = language
+		// AI text is not dropped here, unlike seasons and episodes: a refresh
+		// in a non-canonical language passes the canonical-language result as
+		// accumulator, so a dropped field would fill with canonical text.
 	}
 
 	mergeScalar(&loc.Title, accumulator.Title, mergeMode)
@@ -5006,6 +5054,7 @@ func buildSeasonLocalizationRecord(
 		*loc = *existing
 		loc.SeasonContentID = seasonContentID
 		loc.Language = language
+		dropAIText(&loc.Overview, loc.OverviewSource)
 	}
 
 	previousPosterPath := loc.PosterPath
@@ -5052,6 +5101,7 @@ func buildEpisodeLocalizationRecord(
 		*loc = *existing
 		loc.EpisodeContentID = episodeContentID
 		loc.Language = language
+		dropAIText(&loc.Overview, loc.OverviewSource)
 	}
 
 	mergeScalar(&loc.Title, episode.Title, mergeMode)
@@ -6821,7 +6871,7 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 		episode.ContentID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now.UTC()),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now.UTC(), episode),
 	)
 }
 
@@ -7963,7 +8013,7 @@ func (s *MetadataService) recoverProviderIDConflict(
 			return "", fmt.Errorf("loading source status for provider conflict recovery: %w", statusErr)
 		}
 		if isProvisionalOwnershipStatus(sourceStatus) && isConfirmedOwnershipStatus(existing.Status) {
-			canonicalID, err := canonicalizeProviderIDDuplicateInto(ctx, s.dbPool, sourceContentID, existing.ContentID, false, markIdentity)
+			canonicalID, err := canonicalizeProviderIDDuplicateInto(ctx, s.dbPool, s.recsStaler, sourceContentID, existing.ContentID, false, markIdentity)
 			if err != nil {
 				return "", err
 			}
@@ -8083,6 +8133,21 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 			`,
 			args: []any{fromContentID, toContentID},
 		},
+		// A target with no embedding keeps the source's until the backfill
+		// re-embeds it from the target's own text, as the provider-ID merge
+		// does. The source's row goes with the source item (ON DELETE
+		// CASCADE), and stays when the source item survives.
+		{
+			name: "merge embeddings",
+			sql: `
+				INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text, created_at, updated_at)
+				SELECT $2, embedding, model, canonical_text, created_at, updated_at
+				FROM media_item_embeddings
+				WHERE media_item_id = $1
+				ON CONFLICT (media_item_id) DO NOTHING
+			`,
+			args: []any{fromContentID, toContentID},
+		},
 		{
 			// An admin's Identify choice survives the merge (identify_sticky.go).
 			name: "keep identity choice",
@@ -8115,12 +8180,13 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 	if err != nil {
 		return err
 	}
-	if _, err := reattribute.Run(ctx, tx, reattribute.Options{
+	report, err := reattribute.Run(ctx, tx, reattribute.Options{
 		FromContentID: fromContentID,
 		ToContentID:   toContentID,
 		WholeItem:     true,
 		EpisodePairs:  episodePairs,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("reattributing user state %s -> %s: %w", fromContentID, toContentID, err)
 	}
 
@@ -8145,6 +8211,7 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit skeleton rebind transaction: %w", err)
 	}
+	MarkRecommendationsStale(ctx, s.recsStaler, MovedStateTargets(report, toContentID, episodePairs)...)
 	return nil
 }
 

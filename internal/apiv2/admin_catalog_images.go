@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
 type AdminCatalogImagesService interface {
@@ -86,9 +87,21 @@ func registerAdminCatalogImages(reg *Registry) {
 			}
 			choices = append(choices, choice{string(raw), row})
 		}
-		// Keep the metadata service's rating-first presentation. The stable
-		// identity breaks ties without letting expiring display URLs affect pages.
+		// Local sidecar artwork leads in discovery order, which puts the file a
+		// refresh would pick first. Provider choices follow, highest rated
+		// first; the stable identity breaks their ties without letting expiring
+		// display URLs affect pages.
 		slices.SortStableFunc(choices, func(a, b choice) int {
+			aLocal := a.row.ProviderID == metadata.LocalImageProviderID
+			bLocal := b.row.ProviderID == metadata.LocalImageProviderID
+			switch {
+			case aLocal && bLocal:
+				return 0
+			case aLocal:
+				return -1
+			case bLocal:
+				return 1
+			}
 			if order := cmp.Compare(b.row.Rating, a.row.Rating); order != 0 {
 				return order
 			}

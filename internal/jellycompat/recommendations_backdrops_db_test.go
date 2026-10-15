@@ -13,15 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
-type fakeForYouRecommender struct {
-	recommendations.Recommender
-	rows []recommendations.ForYouRow
-}
-
-func (f fakeForYouRecommender) ForYou(context.Context, int, string, int) (*recommendations.ForYouResponse, error) {
-	return &recommendations.ForYouResponse{Rows: f.rows}, nil
-}
-
 // TestRecommendationsListEveryBackdropDB: /Movies/Recommendations lists a
 // movie's backdrops after the primary in BackdropImageTags, as the other list
 // paths do, so Backdrop/{index} names the same image everywhere.
@@ -39,10 +30,10 @@ func TestRecommendationsListEveryBackdropDB(t *testing.T) {
 	itemRepo := catalog.NewItemRepository(pool)
 	codec := NewResourceIDCodec()
 	h := NewRecommendationsHandler(
-		fakeForYouRecommender{rows: []recommendations.ForYouRow{{Type: "top_picks", Items: []recommendations.ScoredItem{{MediaItemID: movie}}}}},
+		&fakeRowReader{rows: []recommendations.ForYouRow{{Type: clusterRowType, Subject: "Drama", ClusterIndex: 1, Items: []recommendations.ScoredItem{{MediaItemID: movie}}}}},
 		itemRepo,
 		catalog.NewDetailService(itemRepo, catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool), catalog.NewPersonRepository(pool), nil),
-		nil, &mockUserDataService{}, codec, &config.Config{}, nil,
+		&mockUserDataService{}, codec, &config.Config{}, nil,
 	)
 	req := httptest.NewRequest(http.MethodGet, "/Movies/Recommendations", nil)
 	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1"}))

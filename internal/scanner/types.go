@@ -132,11 +132,12 @@ type SubtitleTrackInfo struct {
 
 // ExternalSubtitleInfo describes a discovered sidecar subtitle file.
 type ExternalSubtitleInfo struct {
-	Path     string
-	Language string
-	Format   string // srt, vtt, ass, ssa, sub
-	Title    string
-	Forced   bool
+	Path            string
+	Language        string
+	Format          string // srt, vtt, ass, ssa, sub
+	Title           string
+	Forced          bool
+	HearingImpaired bool
 }
 
 // ChapterInfo describes an embedded chapter extracted from ffprobe.

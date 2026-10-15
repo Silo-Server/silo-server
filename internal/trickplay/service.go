@@ -55,9 +55,10 @@ const (
 	// maxChunkSheets bounds the sheets one ffmpeg run makes, which bounds
 	// the memory of a run and the size of a transcode node's answer.
 	maxChunkSheets = 16
-	// Bound decoded output as well as sheet count. The first sheet learns
-	// actual display geometry before batching subsequent sheets.
-	maxChunkPixels = 64 << 20
+	// Bound decoded output as well as sheet count: a run holds every tile it
+	// decodes, about 1.5 bytes a pixel, until its repairs are done. The first
+	// sheet learns actual display geometry before batching subsequent sheets.
+	maxChunkPixels = 32 << 20
 	// runThreads caps each ffmpeg run's decoder and filter threads. Work
 	// runs at idle priority, so more parallelism comes from more workers.
 	runThreads = 2
@@ -296,7 +297,7 @@ func (s *Service) process(ctx context.Context, job *Job) {
 	log := s.logger.With("file_id", job.FileID, "duration", s.now().Sub(started).Round(time.Millisecond))
 	if err == nil {
 		log.InfoContext(ctx, "trickplay sheets published", "thumbnails", published.Count, "sheets", len(published.SheetBytes),
-			"decoder", published.Decoder, "filled", published.Filled)
+			"decoder", published.Decoder, "filled", published.Filled, "refined", published.Refined)
 		// A reconcile run while this job held its lease skipped the row, so
 		// sheets made to settings that changed meanwhile are requeued now
 		// rather than at the periodic pass.
@@ -396,9 +397,7 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 	columns, rows := recipe.Grid()
 	perSheet := columns * rows
 	sheets := &mediasample.SheetsOutput{TileWidth: recipe.Width, TileHeight: height, Columns: columns, Rows: rows, Quality: Quality, UseInputAspect: true}
-	if tonemap.NeedsToneMap(&models.MediaFile{HDR: job.HDR, VideoTracks: job.VideoTracks}) {
-		sheets.ToneMap = &mediasample.ToneMap{AllowSoftware: true}
-	}
+	sheets.ToneMap = sheetsToneMap(&models.MediaFile{HDR: job.HDR, VideoTracks: job.VideoTracks})
 	published := Published{Recipe: recipe, StoreIdentity: s.store.Identity(), Height: height, Count: len(times)}
 	var revision int64
 	chunkSheets := 1
@@ -444,6 +443,7 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 			published.SheetBytes = append(published.SheetBytes, len(sheet.JPEG))
 		}
 		published.Filled += result.SheetFrames.Filled
+		published.Refined += result.SheetFrames.Refined
 		published.Decoder = result.Decoder
 		start += len(chunk)
 	}
@@ -455,6 +455,26 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 		return Published{}, errLeaseLost
 	}
 	return published, nil
+}
+
+// sheetsToneMap is how a file's sheets convert HDR: nil for SDR, else
+// software tone mapping allowed, since it only handles thumbnail-sized
+// frames, with the base signal playback classifies the file's catalog facts
+// as. A candidate that playback would confirm by decoding frames first is
+// taken as it is, as thumbnails always have been best effort. A file the
+// facts cannot classify, such as a legacy row without Dolby Vision presence
+// flags, keeps the best-effort chains, except a Profile 5 one: its base is
+// not a signal any chain without its RPU can show, so it takes the Dolby
+// Vision signal and an RPU-applying executor.
+func sheetsToneMap(file *models.MediaFile) *mediasample.ToneMap {
+	if !tonemap.NeedsToneMap(file) {
+		return nil
+	}
+	source := tonemap.ResolveSource(tonemap.MetadataForFile(file)).Kind
+	if source == "" && file.PrimaryDVProfile() == 5 {
+		source = tonemap.SourceDolbyVision
+	}
+	return &mediasample.ToneMap{AllowSoftware: true, Source: source}
 }
 
 // leaseAware reports a lost lease rather than the error it caused.

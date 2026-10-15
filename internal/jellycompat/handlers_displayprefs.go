@@ -257,7 +257,7 @@ func (h *DisplayPreferencesHandler) seedFromProfile(r *http.Request, session *Se
 }
 
 func profilePreferencesID(profileID, id string) string {
-	return fmt.Sprintf("profile:%d:%s:%s", len(profileID), profileID, id)
+	return userstore.ProfileDisplayPrefsID(profileID, id)
 }
 
 func validateOptionalUser(w http.ResponseWriter, r *http.Request, session *Session) bool {

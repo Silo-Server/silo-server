@@ -72,6 +72,8 @@ import {
   serverInstallation,
   serverKind,
   serverDeleteBlockers,
+  serverNeedsAPIKey,
+  serverNeedsBaseURL,
   serverReady,
   serverRouteUsage,
   serverTypeLabel,
@@ -160,7 +162,7 @@ function ServerTile({
   onEdit: () => void;
 }) {
   const type = serverTypeLabel(server, installations);
-  const ready = serverReady(server);
+  const ready = serverReady(server, installations);
   const usage =
     routing?.mode === "standard"
       ? standardServerUsage(server.id, routing)
@@ -361,6 +363,10 @@ function useServerOptions(
     installation_id?: number;
     capability_id: string;
     plugin_config: Record<string, unknown>;
+    /** The server type needs a URL (see serverNeedsBaseURL). */
+    needs_base_url: boolean;
+    /** The server type needs an API key (see serverNeedsAPIKey). */
+    needs_api_key: boolean;
   },
 ) {
   const load = useLoadRequestIntegrationOptions();
@@ -373,10 +379,10 @@ function useServerOptions(
   const connRef = useRef(0);
 
   const canLoad =
-    draft.base_url.trim().length > 0 &&
+    (draft.base_url.trim().length > 0 || !draft.needs_base_url) &&
     Boolean(draft.installation_id) &&
     draft.capability_id.trim().length > 0 &&
-    Boolean(draft.api_key_ref.trim() || draft.has_api_key);
+    (Boolean(draft.api_key_ref.trim() || draft.has_api_key) || !draft.needs_api_key);
 
   const sig = JSON.stringify({
     u: draft.base_url,
@@ -526,6 +532,16 @@ export function RequestServerEditor({
     form.capability_id,
   );
   const { descriptor, jsonSchema } = serverConfigSchema(selected);
+  const needsBaseURL = serverNeedsBaseURL(selected);
+  const needsAPIKey = serverNeedsAPIKey(selected);
+  const connectionFields =
+    needsBaseURL && needsAPIKey
+      ? "the URL and API key"
+      : needsBaseURL
+        ? "the URL"
+        : needsAPIKey
+          ? "the API key"
+          : "the server's settings";
   const fieldTypes = useMemo(() => parseFieldTypes(jsonSchema), [jsonSchema]);
   // The Sonarr/Radarr plugin's "4K instance" switch. Routing owns the
   // plugin's other default switches, so the editor shows this one itself.
@@ -547,6 +563,8 @@ export function RequestServerEditor({
     installation_id: hasInstallation ? installationID : undefined,
     capability_id: selected?.capability.id ?? "",
     plugin_config: pluginConfig,
+    needs_base_url: needsBaseURL,
+    needs_api_key: needsAPIKey,
   });
 
   // Once the server's choices arrive, fill each empty single choice with the
@@ -680,8 +698,8 @@ export function RequestServerEditor({
     !conflict &&
     (isNew || Boolean(etag)) &&
     form.name.trim().length > 0 &&
-    form.base_url.trim().length > 0 &&
-    hasKey &&
+    (form.base_url.trim().length > 0 || !needsBaseURL) &&
+    (hasKey || !needsAPIKey) &&
     hasInstallation &&
     (!descriptor || schemaValid);
 
@@ -811,7 +829,11 @@ export function RequestServerEditor({
             className={SETTINGS_CONTROL_WIDTH}
           />
         </SettingFieldRow>
-        <SettingFieldRow label="URL" htmlFor={urlId} status={<FieldError>{urlError}</FieldError>}>
+        <SettingFieldRow
+          label={needsBaseURL ? "URL" : "URL (optional)"}
+          htmlFor={urlId}
+          status={<FieldError>{urlError}</FieldError>}
+        >
           <Input
             id={urlId}
             value={form.base_url}
@@ -826,14 +848,16 @@ export function RequestServerEditor({
           />
         </SettingFieldRow>
         <SecretField
-          label="API key"
+          label={needsAPIKey ? "API key" : "API key (optional)"}
           value={form.api_key_ref}
           configured={form.has_api_key}
           onChange={(value) => patch({ api_key_ref: value })}
           hint={
             form.has_api_key
               ? "Saved. Type a new key to replace it; leave blank to keep it."
-              : "From the server's Settings › General."
+              : needsAPIKey
+                ? "From the server's Settings › General."
+                : "This server type works without one."
           }
           status={<FieldError>{keyError}</FieldError>}
         />
@@ -888,7 +912,7 @@ export function RequestServerEditor({
           (probeError?.message || Object.keys(probeError?.fields ?? {}).length === 0) ? (
             <p className="text-xs text-amber-600 dark:text-amber-400">
               {probeError?.message ||
-                "Couldn't read root folders and profiles from the server. Check the URL and API key, then Test."}
+                `Couldn't read root folders and profiles from the server. Check ${connectionFields}, then Test.`}
             </p>
           ) : null}
           {optionsStatus === "idle" && detected && !test && !kindMismatch ? (

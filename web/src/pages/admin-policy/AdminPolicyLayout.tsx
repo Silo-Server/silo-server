@@ -1,6 +1,7 @@
 import { ArrowRight, PackageCheck, PenLine, ScrollText } from "lucide-react";
 import { useSearchParams } from "react-router";
 
+import { PageHeader } from "@/components/page/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -81,15 +82,11 @@ export default function AdminPolicyLayout() {
     capability.data?.editor_available === false;
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Policy</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Household access rules: what Silo allows by default, and where you tighten it.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="Policy"
+        subtitle="Household access rules: what Silo allows by default, and where you tighten it."
+      />
 
       {capability.isLoading && (
         <p className="text-muted-foreground text-sm">Loading policy capability...</p>

@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -107,7 +109,47 @@ func (h *AdminJobsHandler) RequestAdminTaskJobCancellation(ctx context.Context, 
 	if !ok {
 		return nil, fmt.Errorf("admin job cancellation unavailable")
 	}
-	return repo.RequestCancellation(ctx, id)
+	job, err := repo.RequestCancellation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if job.JobType != adminjob.JobTypeImageCacheCleanup {
+		return job, nil
+	}
+	switch job.Status {
+	case adminjob.StatusRunning:
+		// The flag reaches a cleanup running on any node at its next cancel
+		// poll. When it runs in this process, stop it now instead of one poll
+		// later.
+		if h.CancelRegistry != nil {
+			h.CancelRegistry.Cancel(job.ID)
+		}
+	case adminjob.StatusQueued:
+		// A queued cleanup, new or yielded between slices, holds nothing to
+		// release, so end it now rather than when a runner next claims it,
+		// which can be hours away behind other cleanups. If a runner claims it
+		// first, the claim sees the flag and ends it.
+		canceled, cancelErr := h.repo.CancelQueued(ctx, job.ID,
+			adminjob.QueuedImageCacheCleanupCanceledMessage(job.ProgressCurrent, job.ProgressTotal),
+			time.Now().UTC().Add(7*24*time.Hour))
+		if cancelErr != nil {
+			if !errors.Is(cancelErr, adminjob.ErrJobNotCancellable) {
+				slog.WarnContext(ctx, "admin jobs: failed to cancel queued image cache cleanup", "component", "api", "job_id", job.ID, "error", cancelErr)
+				return job, nil
+			}
+			// A runner claimed the job first. Report its current state: the
+			// claim may already have ended it from the flag.
+			if advanced, loadErr := h.repo.GetByID(ctx, job.ID); loadErr == nil {
+				return advanced, nil
+			}
+			return job, nil
+		}
+		if h.RealtimeHub != nil {
+			publishEventJob(ctx, h.RealtimeHub.EventsHub(), string(notifications.TypeJobCancelled), canceled)
+		}
+		return canceled, nil
+	}
+	return job, nil
 }
 func (h *AdminJobsHandler) AdminTaskJobDownload(ctx context.Context, job *models.AdminJob) (string, *time.Time) {
 	if h.store == nil || job.Status != adminjob.StatusCompleted || job.ArtifactBucket == "" || job.ArtifactKey == "" {

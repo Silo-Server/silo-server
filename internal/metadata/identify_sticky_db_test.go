@@ -165,12 +165,11 @@ func TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres(t *testing.T) {
 // owns the chosen IDs, and only on it: the generic merge may keep the item
 // being identified, which still has its old IDs.
 func TestIdentifyConflictMergeMarksTheSurvivorPostgres(t *testing.T) {
-	t.Skip("duplicate merges fail at the personal collection step until #2299 is fixed")
 	pool := chainBuiltinTestPool(t)
 	ctx := context.Background()
 	t.Run("into the owner", func(t *testing.T) {
 		checkIdentifyMoveMarks(t, pool, true, func(from, to, _ string, markIdentity bool) error {
-			_, err := canonicalizeProviderIDDuplicateInto(ctx, pool, from, to, true, markIdentity)
+			_, err := canonicalizeProviderIDDuplicateInto(ctx, pool, nil, from, to, true, markIdentity)
 			return err
 		})
 	})
@@ -185,7 +184,7 @@ func TestIdentifyConflictMergeMarksTheSurvivorPostgres(t *testing.T) {
 				t.Fatalf("seed %s: %v", id, err)
 			}
 		}
-		survivor, err := canonicalizeProviderIDDuplicate(ctx, pool, from, to, true, true)
+		survivor, err := canonicalizeProviderIDDuplicate(ctx, pool, nil, from, to, true, true)
 		if err != nil {
 			t.Fatalf("merge: %v", err)
 		}

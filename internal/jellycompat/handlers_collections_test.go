@@ -388,6 +388,11 @@ func TestHandleItems_SpecificIdsIncludeBoxSets(t *testing.T) {
 	if len(result.Items) != 1 || result.Items[0].Type != "BoxSet" || result.Items[0].Name != "Marvel" {
 		t.Fatalf("expected the BoxSet DTO for Ids= re-hydration, got %+v", result.Items)
 	}
+
+	repeated := performItemsRequest(t, h, "/Items?Ids="+url.QueryEscape(boxSetID)+"&Ids="+url.QueryEscape(boxSetID))
+	if len(repeated.Items) != 1 || repeated.TotalRecordCount != 1 {
+		t.Fatalf("expected a repeated BoxSet ID once, got %d items (total %d)", len(repeated.Items), repeated.TotalRecordCount)
+	}
 }
 
 func TestParseItemsQuery_BoxSetFlags(t *testing.T) {
@@ -516,6 +521,27 @@ func TestHandleItems_CollectionsViewRehydratedByIds(t *testing.T) {
 	}
 	if result.Items[0].ID != collectionsViewID || result.Items[0].Type != "CollectionFolder" {
 		t.Fatalf("unexpected re-hydrated view: %+v", result.Items[0])
+	}
+}
+
+// An Ids value that names nothing empties a Collections view browse too, and
+// a repeated Ids value can still name the view itself.
+func TestHandleItems_CollectionsViewWithUnmatchedIDs(t *testing.T) {
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible"},
+		},
+	}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+
+	empty := performItemsRequest(t, h, "/Items?ParentId="+collectionsViewID+"&Ids=not-an-id&IncludeItemTypes=BoxSet")
+	if empty.TotalRecordCount != 0 || len(empty.Items) != 0 {
+		t.Fatalf("expected no items for an unresolvable Ids, got %+v", empty.Items)
+	}
+
+	view := performItemsRequest(t, h, "/Items?Ids=not-an-id&Ids="+collectionsViewID+"&IncludeItemTypes=CollectionFolder")
+	if len(view.Items) != 1 || view.Items[0].ID != collectionsViewID {
+		t.Fatalf("expected the Collections view from a repeated Ids, got %+v", view.Items)
 	}
 }
 

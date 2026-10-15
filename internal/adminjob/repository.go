@@ -66,6 +66,11 @@ type CompleteJobInput struct {
 	ArtifactKey       string
 	ArtifactSizeBytes int64
 	ExpiresAt         time.Time
+	// CanceledMessage, when set, is recorded instead of Message if a
+	// cancellation was requested before this write. The result payload is
+	// then kept rather than cleared, so partial totals survive a cancel that
+	// races completion.
+	CanceledMessage string
 }
 
 type FailJobInput struct {
@@ -480,8 +485,8 @@ func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobI
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
 		SET status = CASE WHEN cancel_requested THEN 'cancelled' ELSE $2 END,
-			result_payload = CASE WHEN cancel_requested THEN '{}'::jsonb ELSE $3 END,
-			message = $4,
+			result_payload = CASE WHEN cancel_requested AND $12 = '' THEN '{}'::jsonb ELSE $3 END,
+			message = CASE WHEN cancel_requested AND $12 <> '' THEN $12 ELSE $4 END,
 			error_message = '',
 			progress_current = $5,
 			progress_total = $6,
@@ -504,6 +509,7 @@ func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobI
 		input.ArtifactSizeBytes,
 		input.ExpiresAt,
 		r.claim,
+		input.CanceledMessage,
 	)
 	if err != nil {
 		return fmt.Errorf("completing admin job: %w", err)
@@ -648,6 +654,42 @@ func (r *Repository) Cancel(ctx context.Context, id, message string, expiresAt t
 	return nil, ErrJobNotFound
 }
 
+// CancelWithResult ends a running job as canceled and records its final
+// progress and result in the same claim-fenced update, so a canceled job can
+// never be left without the totals it reached.
+func (r *Repository) CancelWithResult(ctx context.Context, id string, current, total int, message string, result any, expiresAt time.Time) (*models.AdminJob, error) {
+	payload, err := marshalPayload(result)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling admin job result payload: %w", err)
+	}
+	return scanAdminJob(r.pool.QueryRow(ctx, `
+		UPDATE admin_jobs
+		SET status = $2,
+			message = $3,
+			error_message = '',
+			progress_current = $4,
+			progress_total = $5,
+			result_payload = $6,
+			completed_at = NOW(),
+			heartbeat_at = NOW(),
+			expires_at = GREATEST($7, NOW() + INTERVAL '24 hours'),
+			updated_at = NOW()
+		WHERE id = $1
+		  AND status = $8
+		  AND ($9::bigint IS NULL OR claim_generation = $9)
+		RETURNING `+adminJobColumns,
+		id, StatusCancelled, message, current, total, payload, expiresAt, StatusRunning, r.claim,
+	))
+}
+
+// CancelState reads only whether cancellation was requested and the current
+// claim generation, for watchers that poll a long-running job.
+func (r *Repository) CancelState(ctx context.Context, id string) (cancelRequested bool, claimGeneration int64, err error) {
+	err = r.pool.QueryRow(ctx, `SELECT cancel_requested, claim_generation FROM admin_jobs WHERE id = $1`, id).
+		Scan(&cancelRequested, &claimGeneration)
+	return cancelRequested, claimGeneration, err
+}
+
 func (r *Repository) CancelQueued(ctx context.Context, id, message string, expiresAt time.Time) (*models.AdminJob, error) {
 	if message == "" {
 		message = "Admin job cancelled"
@@ -691,23 +733,30 @@ func (r *Repository) CancelQueued(ctx context.Context, id, message string, expir
 // next claim reads both back and resumes from them. requested_at is kept: the
 // admin job list sorts and pages by it, and among queued jobs of one type the
 // oldest still finishes first.
-func (r *Repository) Yield(ctx context.Context, id string, current, total int, message string, result any) error {
+// Yield returns a running job to the queue with its progress and result.
+// When canceledMessage is set and a cancellation was requested before this
+// write, the same write ends the job as canceled with that message instead,
+// so a cancel cannot slip in between a separate check and the requeue.
+func (r *Repository) Yield(ctx context.Context, id string, current, total int, message string, result any, canceledMessage string, expiresAt time.Time) error {
 	payload, err := marshalPayload(result)
 	if err != nil {
 		return fmt.Errorf("marshaling admin job result payload: %w", err)
 	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
-		SET status = $2,
+		SET status = CASE WHEN cancel_requested AND $9 <> '' THEN $10 ELSE $2 END,
 			progress_current = $3,
 			progress_total = $4,
-			message = $5,
+			message = CASE WHEN cancel_requested AND $9 <> '' THEN $9 ELSE $5 END,
 			result_payload = $6,
-			started_at = NULL,
-			heartbeat_at = NULL,
+			started_at = CASE WHEN cancel_requested AND $9 <> '' THEN started_at ELSE NULL END,
+			completed_at = CASE WHEN cancel_requested AND $9 <> '' THEN NOW() ELSE completed_at END,
+			heartbeat_at = CASE WHEN cancel_requested AND $9 <> '' THEN NOW() ELSE NULL END,
+			expires_at = CASE WHEN cancel_requested AND $9 <> '' THEN GREATEST($11, NOW() + INTERVAL '24 hours') ELSE expires_at END,
 			updated_at = NOW()
 		WHERE id = $1 AND status = $7 AND ($8::bigint IS NULL OR claim_generation = $8)`,
 		id, StatusQueued, current, total, message, payload, StatusRunning, r.claim,
+		canceledMessage, StatusCancelled, expiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("yielding admin job: %w", err)
@@ -797,7 +846,7 @@ func (r *Repository) RequestCancellation(ctx context.Context, id string) (*model
 	job, err := scanAdminJob(r.pool.QueryRow(ctx, `UPDATE admin_jobs
  SET cancel_requested = true, updated_at = CASE WHEN cancel_requested THEN updated_at ELSE NOW() END
  WHERE id = $1 AND job_type = ANY($2) AND status IN ('queued', 'running')
-	 RETURNING `+adminJobColumns, id, []string{JobTypeLibraryRefresh, JobTypeStorageTransition}))
+	 RETURNING `+adminJobColumns, id, []string{JobTypeLibraryRefresh, JobTypeStorageTransition, JobTypeImageCacheCleanup}))
 	if err == nil {
 		return job, nil
 	}
@@ -808,7 +857,7 @@ func (r *Repository) RequestCancellation(ctx context.Context, id string) (*model
 	if err != nil {
 		return nil, err
 	}
-	if (job.JobType == JobTypeLibraryRefresh || job.JobType == JobTypeStorageTransition) && job.Status == StatusCancelled {
+	if (job.JobType == JobTypeLibraryRefresh || job.JobType == JobTypeStorageTransition || job.JobType == JobTypeImageCacheCleanup) && job.Status == StatusCancelled {
 		return job, nil
 	}
 	return nil, ErrJobNotCancellable

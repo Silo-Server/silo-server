@@ -151,7 +151,7 @@ type AdminRequestOptionsInput struct {
 		Name           string         `json:"name,omitempty"`
 		CapabilityID   string         `json:"capability_id,omitempty"`
 		InstallationID *ID            `json:"installation_id,omitempty" pattern:"^[1-9][0-9]*$"`
-		BaseURL        string         `json:"base_url,omitempty"`
+		BaseURL        *string        `json:"base_url,omitempty"`
 		APIKey         string         `json:"api_key_ref,omitempty" writeOnly:"true"`
 		PluginConfig   map[string]any `json:"plugin_config,omitempty"`
 	}
@@ -451,10 +451,11 @@ func adminIntegrationOf(r mediarequests.Integration) AdminRequestIntegration {
 
 // adminRequestBaseURL is the address a v2 probe or save sends on: http://
 // assumed and no trailing slash, so the probe and the saved row agree. A blank
-// address stays blank; the service then uses the saved one.
+// address, spaces included, is "": the save stores it blank, and a probe that
+// sends it blank tests no address for a router that needs none.
 func adminRequestBaseURL(raw string) (string, *Problem) {
 	if strings.TrimSpace(raw) == "" {
-		return raw, nil
+		return "", nil
 	}
 	normalized, err := mediarequests.NormalizeIntegrationBaseURL(raw)
 	if err != nil {
@@ -611,11 +612,16 @@ func (reg *Registry) loadAdminRequestOptions(ctx context.Context, in *AdminReque
 		}
 		install = &id
 	}
-	baseURL, p := adminRequestBaseURL(b.BaseURL)
-	if p != nil {
-		return nil, p
+	// An omitted base_url tests the saved address; a blank one tests none,
+	// for a router that needs none.
+	var baseURL string
+	if b.BaseURL != nil {
+		if baseURL, p = adminRequestBaseURL(*b.BaseURL); p != nil {
+			return nil, p
+		}
 	}
-	options, err := s.LoadIntegrationOptions(ctx, adminRequestViewer(ctx), mediarequests.Integration{ID: string(in.ID), Name: b.Name, CapabilityID: b.CapabilityID, InstallationID: install, BaseURL: baseURL, APIKeyRef: b.APIKey, PluginConfig: b.PluginConfig})
+	cleared := b.BaseURL != nil && baseURL == ""
+	options, err := s.LoadIntegrationOptions(ctx, adminRequestViewer(ctx), mediarequests.Integration{ID: string(in.ID), Name: b.Name, CapabilityID: b.CapabilityID, InstallationID: install, BaseURL: baseURL, BaseURLCleared: cleared, APIKeyRef: b.APIKey, PluginConfig: b.PluginConfig})
 	if err != nil {
 		return nil, requestProblem(err)
 	}

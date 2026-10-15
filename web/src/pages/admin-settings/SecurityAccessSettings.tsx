@@ -6,7 +6,6 @@ import type {
   RateLimitConfig,
   RateLimitTierConfig,
 } from "@/api/types";
-import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Input } from "@/components/ui/input";
@@ -34,15 +33,14 @@ import {
   SettingFieldStatus,
 } from "./SettingField";
 
-// Sign-in lifetimes, proxy trust, and local media server access go through the
-// batched settings endpoint. Rate limits do not: they live behind
-// /admin/rate-limits/config and the batch endpoint rejects those keys, so this
-// page drives two writers behind one save bar rather than showing the admin two
-// different Save buttons.
-const SESSION_KEYS = ["auth.access_token_expiry", "auth.refresh_token_expiry"];
+// Local media server access goes through the batched settings endpoint. Rate
+// limits do not: they live behind /admin/rate-limits/config and the batch
+// endpoint rejects those keys, so this page drives two writers behind one save
+// bar rather than showing the admin two different Save buttons. Token lifetimes
+// live on Sign-in, with the rest of what decides how long a sign-in lasts, and
+// trusted proxies on General, beside the public URL.
 const LOCAL_MEDIA_SERVERS_KEY = "media_servers.allow_private_destinations";
-const NETWORK_KEYS = ["clientip.trusted_proxies", LOCAL_MEDIA_SERVERS_KEY];
-const KEYS = [...SESSION_KEYS, ...NETWORK_KEYS];
+const LOCAL_NETWORK_KEYS = [LOCAL_MEDIA_SERVERS_KEY];
 
 const DEFAULT_TIER: RateLimitTierConfig = {
   requests_per_second: 10,
@@ -113,7 +111,7 @@ function RateBox({
 }) {
   return (
     <span className="flex flex-col items-end gap-1">
-      <Label htmlFor={id} className="text-muted-foreground text-[11px] font-normal">
+      <Label htmlFor={id} className="text-muted-foreground text-xs font-normal">
         {caption}
       </Label>
       <Input
@@ -170,13 +168,12 @@ function RateTriadRow({
 }
 
 export default function SecurityAccessSettings() {
-  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const form = useSettingsForm({ keys: useMemo(() => LOCAL_NETWORK_KEYS, []) });
   const restartKeys = useRestartKeys();
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   const { data: serverConfig, isLoading: rateLimitsLoading } = useRateLimitConfig();
   const updateConfig = useUpdateRateLimitConfig();
 
-  const trustedProxiesManaged = form.sensitiveManagedByEnv.includes("clientip.trusted_proxies");
   const localMediaServersAllowed = form.getValue(LOCAL_MEDIA_SERVERS_KEY) === "true";
 
   // The save endpoint rejects the Redis backend unless Redis is configured, so
@@ -279,13 +276,6 @@ export default function SecurityAccessSettings() {
   // itself to the unsaved-changes registry on its own — otherwise the
   // navigation guard and the reload prompt only know about the batched keys.
   useReportUnsavedChanges(rateLimitsDirty);
-  // Everything except the on/off switch lives in the disclosure, so compare the
-  // two with `enabled` normalised away to decide whether to force it open.
-  const advancedDirty =
-    JSON.stringify({ ...config, enabled: true }) !==
-    JSON.stringify({ ...hydratedConfig, enabled: true });
-  const advancedCount =
-    2 + 3 + Object.keys(TIER_LABELS).length * 3 + Object.keys(AUTH_ENDPOINT_LABELS).length * 2;
 
   /**
    * One Save, two writers — and they are ordered, not concurrent. The
@@ -342,42 +332,10 @@ export default function SecurityAccessSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Security & Access" className="mb-8" />
+      <SettingsPageHeader title="Security" />
 
       <div className="flex-1 space-y-5">
-        <FieldGroup label="Sign-in sessions" restartAll={allRestart(SESSION_KEYS)}>
-          <SettingField
-            label="Access token expiry"
-            type="duration"
-            description="How long before an app silently renews, e.g. 30m."
-            value={form.getValue("auth.access_token_expiry")}
-            onChange={(v) => form.setValue("auth.access_token_expiry", v)}
-            restartRequired={restartKeys.has("auth.access_token_expiry")}
-          />
-          <SettingField
-            label="Refresh token expiry"
-            type="duration"
-            description="How long someone stays signed in, e.g. 30d. Also how long an account whose sign-in provider can't re-check it keeps its API keys and Audiobookshelf sessions without signing in through the provider."
-            value={form.getValue("auth.refresh_token_expiry")}
-            onChange={(v) => form.setValue("auth.refresh_token_expiry", v)}
-            restartRequired={restartKeys.has("auth.refresh_token_expiry")}
-          />
-        </FieldGroup>
-
-        <FieldGroup label="Network" restartAll={allRestart(NETWORK_KEYS)}>
-          <SettingField
-            label="Trusted proxies"
-            description={
-              trustedProxiesManaged
-                ? "Managed by SILO_TRUSTED_PROXIES."
-                : "Comma-separated proxy ranges; empty keeps the private defaults."
-            }
-            hint="172.16.0.0/12, 203.0.113.7/32"
-            value={form.getValue("clientip.trusted_proxies")}
-            onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
-            disabled={trustedProxiesManaged}
-            restartRequired={restartKeys.has("clientip.trusted_proxies")}
-          />
+        <FieldGroup label="Local network" restartAll={allRestart(LOCAL_NETWORK_KEYS)}>
           <SettingField
             label="Local servers for every account"
             description="Lets every account import history from, and sync with, Plex, Emby, and Jellyfin servers at local network addresses such as 192.168.x.x or localhost. Admins always can."
@@ -414,145 +372,134 @@ export default function SecurityAccessSettings() {
             }
           />
 
-          <AdvancedSection
-            id="security.rate-limits"
-            count={advancedCount}
-            forceOpen={advancedDirty}
+          <SettingFieldRow
+            label="Where counters are kept"
+            htmlFor="rate-limit-backend"
+            description={
+              redisSelectable
+                ? "Redis shares counters across servers, after a restart."
+                : "Redis shares counters across servers, after a restart. Set up Redis on the General page first."
+            }
+            status={
+              runningBackendDiffers ? (
+                <SettingFieldStatus tone="warn">
+                  The running limiter is using {backendNoun(runningBackend)} counters, not the saved{" "}
+                  {backendNoun(savedBackend)} backend. If a restart does not fix it, check that the
+                  saved backend is reachable.
+                </SettingFieldStatus>
+              ) : undefined
+            }
           >
-            <SettingFieldRow
-              label="Where counters are kept"
-              htmlFor="rate-limit-backend"
-              description={
-                redisSelectable
-                  ? "Redis shares counters across servers, after a restart."
-                  : "Redis shares counters across servers, after a restart. Configure Redis under Storage & Database first."
-              }
-              status={
-                runningBackendDiffers ? (
-                  <SettingFieldStatus tone="warn">
-                    The running limiter is using {backendNoun(runningBackend)} counters, not the
-                    saved {backendNoun(savedBackend)} backend. If a restart does not fix it, check
-                    that the saved backend is reachable.
-                  </SettingFieldStatus>
-                ) : undefined
-              }
-            >
-              <Select
-                value={config.backend}
-                onValueChange={(value) =>
-                  updateConfigState((prev) => ({ ...prev, backend: value }))
-                }
-                disabled={savingRateLimits}
-              >
-                <SelectTrigger id="rate-limit-backend" className={SETTINGS_CONTROL_WIDTH}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="memory">This server only</SelectItem>
-                  <SelectItem value="redis" disabled={!redisSelectable}>
-                    Shared via Redis
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </SettingFieldRow>
-
-            <SettingFieldRow
-              label="Whole-server limit"
-              htmlFor="global-rps"
-              description="Ceiling across every rate-limited route."
-              // The row's unit slot rather than a span beside the input: the
-              // triad rows below have no unit, and an inline one here would
-              // push this box off the column they share.
-              unit="per second"
-            >
-              <Input
-                id="global-rps"
-                type="number"
-                min={1}
-                value={config.global_requests_per_second}
-                onChange={(e) =>
-                  setNumber((num) =>
-                    updateConfigState((prev) => ({ ...prev, global_requests_per_second: num })),
-                  )(e.target.value)
-                }
-                disabled={savingRateLimits}
-                className={cn("text-right tabular-nums", SETTINGS_NUMBER_WIDTH)}
-              />
-            </SettingFieldRow>
-
-            <RateTriadRow
-              label="Per client address"
-              description="Budget one IP address gets."
+            <Select
+              value={config.backend}
+              onValueChange={(value) => updateConfigState((prev) => ({ ...prev, backend: value }))}
               disabled={savingRateLimits}
-              perSecond={{
-                value: config.ip_requests_per_second,
-                onChange: setNumber((num) =>
-                  updateConfigState((prev) => ({ ...prev, ip_requests_per_second: num })),
-                ),
-              }}
-              perMinute={{
-                value: config.ip_requests_per_minute,
-                onChange: setNumber((num) =>
-                  updateConfigState((prev) => ({ ...prev, ip_requests_per_minute: num })),
-                ),
-              }}
-              burst={{
-                value: config.ip_burst,
-                onChange: setNumber((num) =>
-                  updateConfigState((prev) => ({ ...prev, ip_burst: num })),
-                ),
-              }}
+            >
+              <SelectTrigger id="rate-limit-backend" className={SETTINGS_CONTROL_WIDTH}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="memory">This server only</SelectItem>
+                <SelectItem value="redis" disabled={!redisSelectable}>
+                  Shared via Redis
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingFieldRow>
+
+          <SettingFieldRow
+            label="Whole-server limit"
+            htmlFor="global-rps"
+            description="Ceiling across every rate-limited route."
+            // The row's unit slot rather than a span beside the input: the
+            // triad rows below have no unit, and an inline one here would
+            // push this box off the column they share.
+            unit="per second"
+          >
+            <Input
+              id="global-rps"
+              type="number"
+              min={1}
+              value={config.global_requests_per_second}
+              onChange={(e) =>
+                setNumber((num) =>
+                  updateConfigState((prev) => ({ ...prev, global_requests_per_second: num })),
+                )(e.target.value)
+              }
+              disabled={savingRateLimits}
+              className={cn("text-right tabular-nums", SETTINGS_NUMBER_WIDTH)}
             />
+          </SettingFieldRow>
 
-            {Object.keys(TIER_LABELS).map((tier) => {
-              const tierConfig = config.tiers[tier] ?? DEFAULT_TIER;
-              return (
-                <RateTriadRow
-                  key={tier}
-                  label={TIER_LABELS[tier]!}
-                  disabled={savingRateLimits}
-                  perSecond={{
-                    value: tierConfig.requests_per_second,
-                    onChange: setNumber((num) =>
-                      handleTierChange(tier, "requests_per_second", num),
-                    ),
-                  }}
-                  perMinute={{
-                    value: tierConfig.requests_per_minute,
-                    onChange: setNumber((num) =>
-                      handleTierChange(tier, "requests_per_minute", num),
-                    ),
-                  }}
-                  burst={{
-                    value: tierConfig.burst,
-                    onChange: setNumber((num) => handleTierChange(tier, "burst", num)),
-                  }}
-                />
-              );
-            })}
+          <RateTriadRow
+            label="Per client address"
+            description="Budget one IP address gets."
+            disabled={savingRateLimits}
+            perSecond={{
+              value: config.ip_requests_per_second,
+              onChange: setNumber((num) =>
+                updateConfigState((prev) => ({ ...prev, ip_requests_per_second: num })),
+              ),
+            }}
+            perMinute={{
+              value: config.ip_requests_per_minute,
+              onChange: setNumber((num) =>
+                updateConfigState((prev) => ({ ...prev, ip_requests_per_minute: num })),
+              ),
+            }}
+            burst={{
+              value: config.ip_burst,
+              onChange: setNumber((num) =>
+                updateConfigState((prev) => ({ ...prev, ip_burst: num })),
+              ),
+            }}
+          />
 
-            <SettingsSubheading>Sign-in and webhook endpoints</SettingsSubheading>
-            {Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => {
-              const epConfig = config.auth_endpoints[endpoint] ?? DEFAULT_AUTH_ENDPOINT;
-              return (
-                <RateTriadRow
-                  key={endpoint}
-                  label={AUTH_ENDPOINT_LABELS[endpoint]!}
-                  disabled={savingRateLimits}
-                  perMinute={{
-                    value: epConfig.requests_per_minute,
-                    onChange: setNumber((num) =>
-                      handleAuthEndpointChange(endpoint, "requests_per_minute", num),
-                    ),
-                  }}
-                  burst={{
-                    value: epConfig.burst,
-                    onChange: setNumber((num) => handleAuthEndpointChange(endpoint, "burst", num)),
-                  }}
-                />
-              );
-            })}
-          </AdvancedSection>
+          <SettingsSubheading>API key tiers</SettingsSubheading>
+          {Object.keys(TIER_LABELS).map((tier) => {
+            const tierConfig = config.tiers[tier] ?? DEFAULT_TIER;
+            return (
+              <RateTriadRow
+                key={tier}
+                label={TIER_LABELS[tier]!}
+                disabled={savingRateLimits}
+                perSecond={{
+                  value: tierConfig.requests_per_second,
+                  onChange: setNumber((num) => handleTierChange(tier, "requests_per_second", num)),
+                }}
+                perMinute={{
+                  value: tierConfig.requests_per_minute,
+                  onChange: setNumber((num) => handleTierChange(tier, "requests_per_minute", num)),
+                }}
+                burst={{
+                  value: tierConfig.burst,
+                  onChange: setNumber((num) => handleTierChange(tier, "burst", num)),
+                }}
+              />
+            );
+          })}
+
+          <SettingsSubheading>Sign-in and webhook endpoints</SettingsSubheading>
+          {Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => {
+            const epConfig = config.auth_endpoints[endpoint] ?? DEFAULT_AUTH_ENDPOINT;
+            return (
+              <RateTriadRow
+                key={endpoint}
+                label={AUTH_ENDPOINT_LABELS[endpoint]!}
+                disabled={savingRateLimits}
+                perMinute={{
+                  value: epConfig.requests_per_minute,
+                  onChange: setNumber((num) =>
+                    handleAuthEndpointChange(endpoint, "requests_per_minute", num),
+                  ),
+                }}
+                burst={{
+                  value: epConfig.burst,
+                  onChange: setNumber((num) => handleAuthEndpointChange(endpoint, "burst", num)),
+                }}
+              />
+            );
+          })}
         </FieldGroup>
       </div>
 

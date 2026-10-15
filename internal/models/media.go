@@ -716,6 +716,10 @@ type MediaItem struct {
 	// PlayContentID is transient presentation metadata populated by resolvers
 	// whose displayed item differs from the leaf item that should play.
 	PlayContentID string
+	// MachineTranslatedFields is transient presentation metadata set by
+	// localization: the fields ("overview", "tagline") whose localized text
+	// came from AI translation rather than a provider or a person.
+	MachineTranslatedFields []string `json:"-"`
 	// PosterIsEpisodeStill and BackdropIsEpisodeStill are transient provenance
 	// set by the query that picks an episode card's artwork: true when the
 	// path is the episode's own still, false for season or series artwork, nil
@@ -775,6 +779,8 @@ type Season struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // Episode represents a row in the episodes table.
@@ -802,6 +808,12 @@ type Episode struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
+	// PendingTranslationLanguage is transient presentation metadata set by
+	// batch localization: the viewer's language this episode's description is
+	// missing, so an episode list can start on-view translation.
+	PendingTranslationLanguage string `json:"-"`
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.
@@ -840,8 +852,8 @@ type EpisodeLibrary struct {
 
 // Localization field provenance values. Precedence when writing:
 // manual beats provider beats ai — a provider refresh may overwrite an AI
-// translation but never a manual edit, and AI never overwrites either
-// (except provider, when the admin explicitly forces a re-translation).
+// translation but never a manual edit, and AI never overwrites either, not
+// even when the admin forces a re-translation.
 const (
 	LocalizationSourceProvider = "provider"
 	LocalizationSourceAI       = "ai"

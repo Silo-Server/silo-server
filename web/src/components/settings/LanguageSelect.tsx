@@ -162,7 +162,7 @@ export function LanguageSelect({
             </Button>
           </div>
           <p
-            className="text-muted-foreground text-[11px] leading-tight"
+            className="text-muted-foreground text-xs leading-tight"
             role={draftInvalid ? "alert" : undefined}
           >
             {draftInvalid

@@ -216,7 +216,7 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 	if input.Role != nil && *input.Role != roleAdmin && *input.Role != models.RoleUser {
 		return 0, fieldError("role", "Role must be admin or user")
 	}
-	if input.MaxProfiles != nil && *input.MaxProfiles < 1 {
+	if input.MaxProfiles.Value != nil && *input.MaxProfiles.Value < 1 {
 		return 0, fieldError("max_profiles", "Must be at least 1")
 	}
 	if err := validateStreamLimits(input.MaxStreams.Value, input.MaxTranscodes.Value); err != nil {
@@ -280,6 +280,9 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 	}
 	if revoked && h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(ctx, id)
+	}
+	if accountScopeChanged(input) {
+		notifyAccountsScopeChanged(ctx, h.RecWorker, id)
 	}
 	return snapshot.Revision, nil
 }

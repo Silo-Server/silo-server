@@ -61,6 +61,9 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 		if req.Stats == nil {
 			return nil, nil, errors.New("hardware decode needs a video output")
 		}
+		if !SupportsHardwareDecode(hw.Accel) {
+			return nil, nil, fmt.Errorf("hardware decode does not support %q", hw.Accel)
+		}
 		var err error
 		if decode, err = hardwareDecodeArgs(hw, true); err != nil {
 			return nil, nil, err
@@ -81,7 +84,7 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 		return buildSamplesArgs(req, attempt, hw, append(args, decode...), inputStart)
 	}
 	if req.Window.KeyframesOnly {
-		args = append(args, "-skip_frame:v", "nokey")
+		args = append(args, skipFrameOption, keyframeSkipFrame)
 	}
 	args = append(args, decode...)
 	args = append(args,
@@ -156,12 +159,13 @@ func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []st
 }
 
 // buildSheetsArgs builds the arguments of a Sheets request whose video chain
-// is graph (see buildSheetsGraph). A Samples request reads its list as
-// buildSamplesArgs does and returns the list for stdin; a Window request,
-// which a Samples request becomes for inputs the list cannot seek in, decodes
-// the window's keyframes. Either way the frames go to stdout raw, and hardware
+// is graph (see buildSheetsGraph). A Samples request reads a list of entries
+// as buildSamplesArgs does, each lasting and its decoder skipping frames as
+// list says, and returns the list for stdin; a Window request, which a
+// Samples request becomes for inputs the list cannot seek in, decodes the
+// window's keyframes. Either way the frames go to stdout raw, and hardware
 // attempts leave VideoToolbox frames in system memory, as images do.
-func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64, graph, packetTimingPath string) ([]string, []byte, error) {
+func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []listEntry, graph, packetTimingPath string, list sheetsList) ([]string, []byte, error) {
 	if (req.Window == nil) == (req.Samples == nil) || req.Sheets == nil {
 		return nil, nil, errors.New("sheets need exactly one sampling mode")
 	}
@@ -178,19 +182,26 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart
 		args = append(args, "-threads", threads, "-filter_threads", threads)
 	}
 	if req.Samples != nil {
-		list, err := buildConcatListSpan(req.Input, req.Samples.Seconds, inputStart, sheetSampleSpanSeconds)
+		concat, err := buildConcatListSpan(req.Input, entries, list.span)
 		if err != nil {
 			return nil, nil, err
 		}
 		args = append(args, decode...)
-		args = append(args, concatInputArgs...)
+		args = append(args, req.keyframeInputArgs(list.skip)...)
+		args = append(args, concatDemuxerArgs...)
 		args = append(args, "-i", concatListInput)
-		return append(args, sheetsOutputArgs(graph)...), list, nil
+		return append(args, sheetsOutputArgs(graph)...), concat, nil
 	}
 	// The window's duration bounds the input, not the output: an output -t
 	// drops frames after the filters logged them, and the log would no
 	// longer count the frames on stdout.
-	args = append(args, "-skip_frame:v", "nokey")
+	skip := keyframeSkipFrame
+	if req.Window.referencePictures {
+		// Non-keyframes are decoded only to keep the decoder's state; the
+		// graph still sees just the keyframes a keyframes-only read gives.
+		skip, graph = exactSkipFrame, "select=key,"+graph
+	}
+	args = append(args, req.keyframeInputArgs(skip)...)
 	args = append(args, decode...)
 	args = append(args,
 		"-ss", formatSeconds(req.Window.StartSeconds),

@@ -1755,9 +1755,36 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, loginSessionFixtureCases()...)
 	cases = append(cases, adminDownloadStorageFixtureCases()...)
 	cases = append(cases, homeLayoutItemsFixtureCases()...)
+	cases = append(cases, resumePositionFixtureCases()...)
 	cases = append(cases, catalogLettersFixtureCases()...)
 	cases = append(cases, pushRegistrationReceiptFixtureCases()...)
-	return append(cases, adminNotificationPushDeliveryFixtureCases()...)
+	cases = append(cases, adminNotificationPushDeliveryFixtureCases()...)
+	return append(cases, unmatchedItemIgnoreFixtureCases()...)
+}
+
+// resumePositionFixtureCases pin clearing a resume position and the progress
+// capability document that advertises it.
+func resumePositionFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	return []fixtureCase{
+		{name: "get_progress_capabilities_ok", operationID: "getProgressCapabilities",
+			scenario: "The progress capability document: clearResumePosition is served.",
+			method:   http.MethodGet, path: "/api/v2/progress/capabilities", headers: owner,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/ProgressCapabilities"},
+		{name: "clear_resume_position_ok", operationID: "clearResumePosition",
+			scenario: "Clearing a movie's resume position: 204 with no body; its watched state and history stay.",
+			method:   http.MethodDelete, path: "/api/v2/progress/movie:heat-1995/position", headers: owner,
+			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
+		{name: "clear_resume_position_not_leaf", operationID: "clearResumePosition",
+			scenario: "A season or series has no single resume position: a validation failure naming the path parameter.",
+			method:   http.MethodDelete, path: "/api/v2/progress/series:heat/position", headers: owner,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "clear_resume_position_not_found", operationID: "clearResumePosition",
+			scenario: "An item outside the viewer's catalog has no resume position to clear.",
+			method:   http.MethodDelete, path: "/api/v2/progress/movie:missing/position", headers: owner,
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
@@ -1928,7 +1955,12 @@ func fixtureDeps() Dependencies {
 	deps.OrderedAndroidPush = new(fakeOrderedPush)
 	fixtureProviders := netaccess.NewStatusCache()
 	fixtureProviders.Report(netaccess.Status{InstallationID: 7, Provider: "stub", State: netaccess.StateConnected, Origin: "https://silo.overlay.example.test"})
-	deps.ServerConnections = ServerConnections{PublicURL: func() string { return "https://silo.example.test" }, Providers: fixtureProviders}
+	deps.ServerConnections = ServerConnections{
+		PublicURL:   func() string { return "https://silo.example.test" },
+		LocalURL:    func() string { return "http://silo.lan.example.test:8080" },
+		Providers:   fixtureProviders,
+		LocalTLSPin: "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
+	}
 	deps.SubtitleAIReads = &fakeSubtitleAIReads{}
 	deps.Downloads = &fakeDownloadRegistry{}
 	deps.DownloadCreation = &fakeDownloadCreation{row: &downloads.Download{ID: "entry", ContentID: "movie", MediaFileID: 42, Revision: 1, CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Status: downloads.StatusReady, Quality: downloads.QualityOriginal, EffectiveQuality: downloads.QualityOriginal, Format: downloads.FormatOriginal, DeviceID: "device-one"}, page: downloads.CreatePage{BatchID: "intent", Skipped: []downloads.SkippedDownload{{EpisodeID: "missing", Reason: "no_file"}}}}

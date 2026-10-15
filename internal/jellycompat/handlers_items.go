@@ -193,6 +193,13 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := parseItemsQuery(r, h.codec)
+	if query.matchesNothing() {
+		// A genre, person, studio, or item filter whose IDs name nothing
+		// matches nothing, rather than falling back to an unfiltered browse
+		// or the Collections view's BoxSet list.
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
 
 	// Browsing the synthetic Collections view lists its BoxSets. The view ID is
 	// a fixed Jellyfin sentinel (not a codec-encoded ID), so it is matched here
@@ -214,10 +221,6 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
-	case query.unmatchedIDFilter:
-		// A genre or person filter whose IDs name nothing matches nothing,
-		// rather than falling back to an unfiltered browse.
-		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0 || idsRequestCollectionsView(r):
 		h.handleSpecificItems(w, r, session, query)
 	case query.parentCollectionID != "":
@@ -253,7 +256,7 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleSearchItems(w, r, session, query)
 	case query.isFavorite:
 		h.handleFavoriteItems(w, r, session, query)
-	case query.parentLibraryID == 0 && len(query.itemTypes) == 0 && !query.recursive && !query.hasRootFilter:
+	case query.listsUserRootViews():
 		// No ParentId and no filter: return top-level library views.
 		// Jellyfin clients (e.g. Findroid "My Media") call GET /Items?userId=...
 		// and expect CollectionFolder items representing the user's libraries.
@@ -622,18 +625,40 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Tier 1: embedding-based recommendations.
-	if h.recommender != nil {
-		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit)
-		if recErr == nil && len(scored) > 0 {
-			if h.writeSimilarFromScored(w, r, session, scored, limit) {
-				return
-			}
+	// Tier 1: embedding-based recommendations, anchored only on an item the
+	// viewer can see. A hidden anchor goes to the genre path, which answers
+	// it as an unknown item, so the list cannot show what a hidden title
+	// resembles.
+	if h.recommender != nil && h.similarAnchorVisible(r.Context(), session, contentID) {
+		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit, h.resolveAccessFilter(r.Context(), session))
+		if recErr != nil {
+			slog.WarnContext(r.Context(), "jellycompat: similar items failed; falling back to genre", "component", "jellycompat",
+				"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", recErr)
+		} else if len(scored) > 0 && h.writeSimilarFromScored(w, r, session, scored, limit) {
+			return
 		}
 	}
 
 	// Tier 2: genre-based fallback.
 	h.writeSimilarFromGenre(w, r, session, contentID, limit)
+}
+
+// similarAnchorVisible reports whether the session's viewer can see the
+// catalog item a Similar list is anchored on. A failed check counts as not
+// visible.
+func (h *ItemsHandler) similarAnchorVisible(ctx context.Context, session *Session, contentID string) bool {
+	items, err := h.loadCompatItemsByContentIDs(ctx, session, []string{contentID}, nil)
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat: similar anchor access check failed", "component", "jellycompat",
+			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", err)
+		return false
+	}
+	for _, item := range items {
+		if item.ContentID == contentID {
+			return true
+		}
+	}
+	return false
 }
 
 // writeSimilarFromScored converts recommender ScoredItem results into a Jellyfin query result.
@@ -647,6 +672,8 @@ func (h *ItemsHandler) writeSimilarFromScored(w http.ResponseWriter, r *http.Req
 
 	itemsByID, err := h.fetchCompatItemsByContentIDs(r.Context(), session, contentIDs, nil)
 	if err != nil {
+		slog.WarnContext(r.Context(), "jellycompat: similar items lookup failed", "component", "jellycompat",
+			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "error", err)
 		writeJSON(w, http.StatusOK, queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: 0})
 		return true
 	}
@@ -3427,6 +3454,7 @@ func (h *ItemsHandler) rememberCompatEpisodeImages(dto baseItemDTO, stillURL str
 	if dto.SeriesID != "" {
 		h.images.RememberSized(dto.SeriesID, "Primary", series.PosterURL, compatCardImageSize)
 		h.images.RememberSized(dto.SeriesID, "Backdrop", series.BackdropURL, compatCardImageSize)
+		h.images.RememberSized(dto.SeriesID, "Logo", series.LogoURL, compatCardImageSize)
 	}
 }
 
@@ -3765,6 +3793,8 @@ func (h *ItemsHandler) enrichEpisodeSeriesImages(ctx context.Context, session *S
 				BackdropURL:       detail.BackdropURL,
 				BackdropPath:      detail.BackdropPath,
 				BackdropThumbhash: detail.BackdropThumbhash,
+				LogoURL:           detail.LogoURL,
+				LogoPath:          detail.LogoPath,
 				UpdatedAt:         detail.UpdatedAt,
 			}
 			h.rememberDetailImages(*detail)
@@ -3894,6 +3924,10 @@ func applyItemsResponseOptions(items []baseItemDTO, query itemsQuery) {
 		if !allowed("thumb") {
 			dto.ParentThumbImageTag = ""
 			dto.ParentThumbItemID = ""
+		}
+		if !allowed("logo") {
+			dto.ParentLogoImageTag = ""
+			dto.ParentLogoItemID = ""
 		}
 		if imagesOff {
 			dto.ImageBlurHashes = nil

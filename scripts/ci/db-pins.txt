@@ -53,6 +53,11 @@
 # re-id can rename an item whatever child rows it has (#933).
 ./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
 
+# Watch detail artwork: movies, episodes and extras carry the poster and
+# backdrop clients publish to system media controls (#803).
+./internal/catalog TestGetWatchDetailArtwork
+./internal/catalog TestGetWatchDetailOmitsArtworkResolution
+
 # Detail and versions: localization and folder reads per detail build, and the
 # versions endpoint issuing fewer queries than full detail with no image work.
 ./internal/catalog TestBuildMediaItemDetailSharesLocalization
@@ -172,6 +177,11 @@
 ./internal/scanner TestEbookScanBatchesSkipQueries
 ./internal/scanner TestEbookSkipPreloadPreservesEligibility
 
+# Variant finalization: one narrow scope load, one owner lookup, and one
+# batched write of the variant columns alone.
+./internal/scanner TestFinalizeVariantsBatchesQueriesDB
+./internal/scanner TestFinalizeVariantsLoadsMovieDiscsOutsideTheScopeDB
+
 # ID-less direct ranges reuse full session payloads while checking identities.
 ./internal/jellycompat TestWebOSDurableRangeDoesNotReloadSnapshots
 
@@ -209,6 +219,10 @@
 
 ./internal/chapterthumbs TestWidthBackfillDefersCatalogScansUntilRetryDB
 ./internal/scanner TestChapterLockReusesHealthySessionsDB
+# Discover's default rows read each media type from its own index, however
+# large the catalog.
+./internal/recommendations TestDefaultRowQueriesWalkTypeIndexesPostgres
+
 # Seek preview workers stop after a library or file becomes ineligible.
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB

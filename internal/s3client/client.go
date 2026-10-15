@@ -686,7 +686,9 @@ func (c *Client) DeletePrefix(ctx context.Context, bucket, prefix string) (int, 
 }
 
 // DeleteObjects deletes the given keys in batches of up to 1000 (the S3 API
-// limit). Returns the total number of successfully deleted objects.
+// limit). Returns the total number of successfully deleted objects. Missing
+// keys count as deleted; any other failure is returned as an error alongside
+// the count, and a canceled context stops the deletion with its error.
 func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string) (int, error) {
 	if err := c.mutations.Acquire(ctx, 1); err != nil {
 		return 0, err
@@ -698,8 +700,19 @@ func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string
 func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string) (int, error) {
 	const batchSize = 1000
 	deleted := 0
+	failed := 0
+	var firstErr error
+	recordFailure := func(err error) {
+		failed++
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	for i := 0; i < len(keys); i += batchSize {
+		if err := ctx.Err(); err != nil {
+			return deleted, err
+		}
 		end := i + batchSize
 		if end > len(keys) {
 			end = len(keys)
@@ -719,10 +732,28 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 			},
 		})
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return deleted, ctxErr
+			}
+			if !isBatchDeleteUnsupported(err) {
+				// Several callers discard the error, so log it here as the
+				// per-key failures below are.
+				code := s3ErrorCode(err)
+				slog.WarnContext(ctx, "s3 DeleteObjects: batch request failed", "component", "s3client",
+					"keys", len(batch), "code", code)
+				return deleted, fmt.Errorf("s3 DeleteObjects %s: %s", bucket, code)
+			}
 			// Fall back to individual deletes if batch is not supported.
 			for _, key := range batch {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return deleted, ctxErr
+				}
 				if delErr := c.deleteObject(ctx, bucket, key); delErr != nil {
-					slog.WarnContext(ctx, "s3 DeleteObjects fallback: failed to delete", "component", "s3client", "key", key, "error", delErr)
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						return deleted, ctxErr
+					}
+					slog.WarnContext(ctx, "s3 DeleteObjects fallback: failed to delete", "component", "s3client", "key", key, "code", s3ErrorCode(delErr))
+					recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s", bucket, key, s3ErrorCode(delErr)))
 					continue
 				}
 				deleted++
@@ -731,19 +762,103 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 		}
 
 		deleted += len(batch)
-		if out != nil {
+		if out != nil && len(out.Errors) > 0 {
+			// Name each failure by the key the caller asked for. The key in the
+			// response comes from the backend, like its message, so one that
+			// matches no requested key is never logged or returned.
+			requested := make(map[string]string, len(batch))
+			for _, key := range batch {
+				requested[c.prefixedKey(key)] = key
+			}
 			for _, e := range out.Errors {
 				if isMissingObjectCode(aws.ToString(e.Code)) {
 					continue
 				}
 				deleted--
+				key, ok := requested[aws.ToString(e.Key)]
+				if !ok {
+					key = "unrecognized key"
+				}
+				code := safeErrorCode(aws.ToString(e.Code))
 				slog.WarnContext(ctx, "s3 DeleteObjects: partial failure", "component", "s3client",
-					"key", aws.ToString(e.Key), "code", aws.ToString(e.Code), "message", aws.ToString(e.Message))
+					"key", key, "code", code)
+				// The backend's free-form message is omitted from both the log
+				// and the returned error: it may echo credentials or signed URLs.
+				recordFailure(fmt.Errorf("s3 DeleteObjects %s/%s: %s", bucket, key, code))
 			}
 		}
 	}
 
+	if failed > 0 {
+		return deleted, fmt.Errorf("s3 DeleteObjects %s: %d of %d objects not deleted: %w", bucket, failed, len(keys), firstErr)
+	}
 	return deleted, nil
+}
+
+// s3ErrorCode returns the backend error code for err without its free-form
+// message, which may echo credentials or signed URLs.
+func s3ErrorCode(err error) string {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
+		return safeErrorCode(apiErr.ErrorCode())
+	}
+	return "request failed"
+}
+
+const unrecognizedErrorCode = "unrecognized error code"
+
+// safeErrorCode returns code when it looks like an S3 error code (a short
+// identifier such as "AccessDenied") and a fixed placeholder otherwise. The code
+// comes from the backend, so an unexpected value is never logged or returned.
+func safeErrorCode(code string) string {
+	if code == "" || len(code) > 64 {
+		return unrecognizedErrorCode
+	}
+	for _, r := range code {
+		if !isErrorCodeRune(r) {
+			return unrecognizedErrorCode
+		}
+	}
+	return code
+}
+
+// isErrorCodeRune reports whether r may appear in an S3 error code.
+func isErrorCodeRune(r rune) bool {
+	switch {
+	case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		return true
+	case r == '.', r == '_', r == '-':
+		return true
+	}
+	return false
+}
+
+// isBatchDeleteUnsupported reports whether a DeleteObjects error means the
+// endpoint does not accept batch deletes as the SDK sends them, so per-object
+// deletes should be used instead. Besides an unimplemented operation, that
+// covers the checksum: the SDK sends a CRC32 checksum on batch deletes, and
+// S3-compatible backends that still require Content-MD5 (older MinIO releases
+// among them) reject the batch with one of the codes below, while single
+// deletes need no checksum. Any other error, such as a wrong region, a bad
+// bucket name, or an auth failure, would fail every per-object delete the same
+// way, so it is returned instead.
+func isBatchDeleteUnsupported(err error) bool {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
+		switch apiErr.ErrorCode() {
+		case "NotImplemented", "MissingContentMD5", "InvalidRequest", "InvalidDigest", "BadDigest":
+			return true
+		}
+	}
+	type httpResponseError interface {
+		HTTPStatusCode() int
+	}
+	var httpErr httpResponseError
+	if errors.As(err, &httpErr) {
+		switch httpErr.HTTPStatusCode() {
+		case http.StatusNotImplemented, http.StatusMethodNotAllowed:
+			return true
+		}
+	}
+	return false
 }
 
 func isMissingObjectCode(code string) bool {

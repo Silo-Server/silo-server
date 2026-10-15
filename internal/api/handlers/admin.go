@@ -179,6 +179,9 @@ type AdminHandler struct {
 	WatchlistTitlesSweeper interface {
 		SweepOrphanTitles(ctx context.Context) error
 	}
+	// RecWorker is told when an account update changes its profiles' access
+	// scope, so their recommendations are rebuilt. Optional.
+	RecWorker AccountsScopeNotifier
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -307,7 +310,7 @@ type updateUserRequest struct {
 	MaxTranscodes            optionalField[int]     `json:"max_transcodes,omitempty"`
 	TranscodeAllowed         optionalField[bool]    `json:"transcode_allowed,omitempty"`
 	AudioTranscodeAllowed    optionalField[bool]    `json:"audio_transcode_allowed,omitempty"`
-	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
+	MaxProfiles              optionalField[int]     `json:"max_profiles,omitempty"`
 	DownloadAllowed          optionalField[bool]    `json:"download_allowed,omitempty"`
 	DownloadTranscodeAllowed optionalField[bool]    `json:"download_transcode_allowed,omitempty"`
 	RequestsAllowed          optionalField[bool]    `json:"requests_allowed,omitempty"`
@@ -332,7 +335,9 @@ func (r *updateUserRequest) libraryIDsOptional() models.Optional[[]int] {
 // The policy fields carry the account's stored overrides: null means the
 // field is inherited from the access group. EffectivePolicy is the resolved
 // value the server enforces (override when set, otherwise the group's value,
-// otherwise the permissive no-group default).
+// otherwise the permissive no-group default). MaxProfiles is the exception:
+// the frozen v1 body has no inherit state for it, so it carries the limit that
+// applies, and the v2-only MaxProfilesOverride carries the stored override.
 type AdminUserView struct {
 	ID                         int                 `json:"id"`
 	Username                   string              `json:"username"`
@@ -349,6 +354,7 @@ type AdminUserView struct {
 	TranscodeAllowed           *bool               `json:"transcode_allowed"`
 	AudioTranscodeAllowed      *bool               `json:"audio_transcode_allowed"`
 	MaxProfiles                int                 `json:"max_profiles"`
+	MaxProfilesOverride        *int                `json:"-"`
 	DownloadAllowed            *bool               `json:"download_allowed"`
 	DownloadTranscodeAllowed   *bool               `json:"download_transcode_allowed"`
 	RequestsAllowed            *bool               `json:"requests_allowed"`
@@ -375,6 +381,7 @@ type EffectivePolicyView struct {
 	MaxTranscodes              int      `json:"max_transcodes"`
 	MaxRemoteStreamBitrateKbps int      `json:"-"`
 	MaxLocalStreamBitrateKbps  int      `json:"-"`
+	MaxProfiles                int      `json:"-"`
 	TranscodeAllowed           bool     `json:"transcode_allowed"`
 	AudioTranscodeAllowed      bool     `json:"audio_transcode_allowed"`
 	DownloadAllowed            bool     `json:"download_allowed"`
@@ -445,7 +452,8 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		MaxLocalStreamBitrateKbps:  clonePtr(u.MaxLocalStreamBitrateKbps),
 		TranscodeAllowed:           clonePtr(u.TranscodeAllowed),
 		AudioTranscodeAllowed:      clonePtr(u.AudioTranscodeAllowed),
-		MaxProfiles:                u.MaxProfiles,
+		MaxProfiles:                effective.MaxProfiles,
+		MaxProfilesOverride:        clonePtr(u.MaxProfiles),
 		DownloadAllowed:            clonePtr(u.DownloadAllowed),
 		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:            clonePtr(u.RequestsAllowed),
@@ -461,6 +469,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 			MaxTranscodes:              effective.MaxTranscodes,
 			MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
 			MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
+			MaxProfiles:                effective.MaxProfiles,
 			TranscodeAllowed:           effective.TranscodeAllowed,
 			AudioTranscodeAllowed:      effective.AudioTranscodeAllowed,
 			DownloadAllowed:            effective.DownloadAllowed,
@@ -973,7 +982,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		}
 		maxPlaybackQuality.Value = &normalized
 	}
-	if req.MaxProfiles != nil && *req.MaxProfiles < 1 {
+	if req.MaxProfiles.Value != nil && *req.MaxProfiles.Value < 1 {
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
 		return
 	}
@@ -1028,7 +1037,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		MaxTranscodes:            req.MaxTranscodes.Optional(),
 		TranscodeAllowed:         req.TranscodeAllowed.Optional(),
 		AudioTranscodeAllowed:    req.AudioTranscodeAllowed.Optional(),
-		MaxProfiles:              req.MaxProfiles,
+		MaxProfiles:              req.MaxProfiles.Optional(),
 		DownloadAllowed:          req.DownloadAllowed.Optional(),
 		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed.Optional(),
 		RequestsAllowed:          req.RequestsAllowed.Optional(),
@@ -1051,6 +1060,9 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	}
 	revoked := false
 	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
+		if err := h.keepInheritedProfileLimit(r.Context(), tx, current, &updateInput); err != nil {
+			return false, err
+		}
 		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
 			return false, ownerError(err)
 		}
@@ -1085,6 +1097,9 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	if revoked && h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
 	}
+	if accountScopeChanged(updateInput) {
+		notifyAccountsScopeChanged(r.Context(), h.RecWorker, id)
+	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
 	if err != nil {
@@ -1098,6 +1113,51 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, toAdminUserResponse(user, updatedGroupPolicy))
+}
+
+// keepInheritedProfileLimit drops a v1 max_profiles equal to the limit that
+// applies to an account that inherits it. The frozen v1 body reports that
+// limit rather than an inherit state, so a client that sends back what it read
+// would otherwise pin the inherited limit as an override and, for an admin
+// editing its own account, be refused for changing its access policy. The
+// reported limit belongs to the role and group the account had when the
+// client read it, so a request that moves either in the same call is sending
+// an explicit override for the new context, not an echo. The group is read
+// through tx, the transaction that updates the account: a pool read here
+// would take a second connection while that transaction holds its own. A nil
+// tx (test fakes) falls back to the pool.
+func (h *AdminHandler) keepInheritedProfileLimit(ctx context.Context, tx pgx.Tx, current *models.User, input *models.UpdateUserInput) error {
+	if !input.MaxProfiles.Set || input.MaxProfiles.Value == nil || current.MaxProfiles != nil {
+		return nil
+	}
+	if profileLimitContextChanges(current, input) {
+		return nil
+	}
+	var group *access.GroupPolicy
+	var err error
+	if tx != nil {
+		group, err = access.GroupPolicyInTransaction(ctx, tx, current.ID)
+	} else {
+		group, err = h.groupPolicyFor(ctx, current)
+	}
+	if err != nil {
+		return err
+	}
+	if *input.MaxProfiles.Value == access.ApplyGroupPolicy(current, group).MaxProfiles {
+		input.MaxProfiles = models.Optional[int]{}
+	}
+	return nil
+}
+
+func profileLimitContextChanges(current *models.User, input *models.UpdateUserInput) bool {
+	if input.Role != nil && *input.Role != current.Role {
+		return true
+	}
+	if !input.AccessGroupID.Set {
+		return false
+	}
+	next, now := input.AccessGroupID.Value, current.AccessGroupID
+	return (next == nil) != (now == nil) || (next != nil && now != nil && *next != *now)
 }
 
 // HandleDeleteUser handles DELETE /admin/users/{id}.

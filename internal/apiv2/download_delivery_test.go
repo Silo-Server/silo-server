@@ -172,3 +172,55 @@ func TestDownloadRawAssetFailureBoundaries(t *testing.T) {
 		t.Fatalf("appended problem: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestDownloadRawDeliveryObserved pins the routes handed to stream telemetry.
+// The patterns must match the API's declared native media routes, and artwork
+// stays unobserved as it does on v1.
+func TestDownloadRawDeliveryObserved(t *testing.T) {
+	domain := &downloadDeliveryDomain{}
+	deps := pilotDeps(nil, nil)
+	deps.DownloadDelivery = handlers.NewDownloadHandler(domain)
+	wrapped := map[string]bool{}
+	var served []string
+	deps.ObserveDownloadDelivery = func(method, pattern string, next http.Handler) http.Handler {
+		key := method + " " + pattern
+		wrapped[key] = true
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			served = append(served, key)
+			next.ServeHTTP(w, r)
+		})
+	}
+	h := newTestHandler(t, deps)
+	want := []string{
+		"GET " + Prefix + "/downloads/{id}/file",
+		"HEAD " + Prefix + "/downloads/{id}/file",
+		"GET " + Prefix + "/downloads/{id}/file-proxy",
+		"HEAD " + Prefix + "/downloads/{id}/file-proxy",
+		"GET " + Prefix + "/downloads/{id}/subtitles/{ref}",
+	}
+	if len(wrapped) != len(want) {
+		t.Fatalf("observed routes = %v, want %v", wrapped, want)
+	}
+	for _, key := range want {
+		if !wrapped[key] {
+			t.Fatalf("route %q not observed; observed %v", key, wrapped)
+		}
+	}
+
+	viewer := with(with(bearer(memberToken), "X-Profile-Id", "p-owner"), "X-Silo-Device-Id", "device-one")
+	rec := do(t, h, "GET", Prefix+"/downloads/entry/file", "", viewer)
+	if rec.Code != 200 || rec.Body.String() != "0123456789" {
+		t.Fatalf("file through observer: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, "GET", Prefix+"/downloads/entry/subtitles/external:0", "", viewer)
+	if rec.Code != 200 || rec.Body.String() != "WEBVTT" {
+		t.Fatalf("subtitle through observer: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, "GET", Prefix+"/downloads/entry/artwork/poster", "", viewer)
+	if rec.Code != 200 {
+		t.Fatalf("artwork: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := strings.Join(served, ", "); got != want[0]+", "+want[4] {
+		t.Fatalf("served through observer: %s", got)
+	}
+}

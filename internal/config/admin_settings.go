@@ -65,6 +65,13 @@ const (
 	AccessUnratedContentAllow = "allow"
 )
 
+// PlaybackKeyframePlaylistSettingKey serves copy-remux HLS as one complete
+// playlist planned from the source's keyframes, instead of FFmpeg's growing
+// one (#1466). It is off while restarts in the middle of such a stream are
+// still being built; a planned stream that has to restart starts again from
+// the beginning.
+const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
+
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
 // sources clients show in addition to IMDb and TMDB, which are always shown:
 // sources metadata plugins declare, such as rt_critic. Empty, the
@@ -178,6 +185,14 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // takes effect on restart.
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
 
+// ServerLocalURLSettingKey is the API server's address on the local network,
+// for a deployment whose LAN advertisement cannot reach the network or names
+// the wrong port (Docker bridge networking). Signed-in clients read it from the
+// connections document and use it, over TLS pinned to the deployment key, while
+// they can reach it (docs/architecture/server-identity.md, "Local network TLS").
+// Read per request, so a change applies without restart.
+const ServerLocalURLSettingKey = "server.local_url"
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
@@ -274,6 +289,7 @@ var adminSettingDefaults = map[string]string{
 	"theme.catalog_url":         DefaultThemeCatalogURL,
 
 	ServerLANDiscoverySettingKey:              "true",
+	ServerLocalURLSettingKey:                  "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
@@ -358,7 +374,6 @@ var adminSettingDefaults = map[string]string{
 	"jellyfin_compat.playback_session_ttl":    "6h",
 
 	"recommendations.enabled":                    "false",
-	"recommendations.embedding_provider":         "ollama",
 	"recommendations.embeddings_job_timeout":     "24h",
 	"recommendations.embedding_base_url":         "http://ollama:11434",
 	"recommendations.embedding_model":            "all-minilm",
@@ -471,6 +486,8 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.semantic_ratio":           "0.5",
 	"catalog.search.meilisearch.embedder":                 "silo_recommendations",
 	"catalog.search.meilisearch.binary_quantized":         "false",
+
+	PlaybackKeyframePlaylistSettingKey: "false",
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -587,6 +604,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	switch key {
 	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
+		PlaybackKeyframePlaylistSettingKey,
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
@@ -819,6 +837,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"s3.public_endpoint", "s3.public_read_endpoint", "s3.private_endpoint",
 		"s3.user_db_endpoint", "catalog.search.meilisearch.url":
 		return normalizeAdminURL(key, value)
+	case ServerLocalURLSettingKey:
+		return normalizeLocalURL(value)
 	case "redis.url":
 		return NormalizeRedisURL(value)
 	case RedisDBSettingKey:
@@ -1246,6 +1266,23 @@ func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s must be one of: %s", key, strings.Join(allowed, ", "))
+}
+
+// normalizeLocalURL accepts an http(s) origin: clients reach the API at its
+// root, and the connections document publishes origins only.
+func normalizeLocalURL(value string) (string, error) {
+	normalized, err := normalizeAdminURL(ServerLocalURLSettingKey, value)
+	if err != nil || normalized == "" {
+		return normalized, err
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", fmt.Errorf("%s must include a URL scheme and host", ServerLocalURLSettingKey)
+	}
+	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return "", fmt.Errorf("%s must be a scheme, host and optional port, such as http://192.168.1.20:8080", ServerLocalURLSettingKey)
+	}
+	return normalized, nil
 }
 
 func normalizeAdminURL(key, value string) (string, error) {

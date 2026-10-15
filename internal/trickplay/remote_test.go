@@ -20,7 +20,7 @@ func (n fixedNodes) ReserveTranscodeWorkWith(workID string, eligible func(*nodep
 	return plannerForNodes(n...).ReserveTranscodeWorkWith(workID, eligible)
 }
 
-var trickplayCapabilities = []byte(`{"transport_features":["prepared_tracks_v1","trickplay_extract_v1"]}`)
+var trickplayCapabilities = []byte(`{"transport_features":["prepared_tracks_v1","trickplay_extract_v1","trickplay_extract_v2"]}`)
 
 // fakeNode answers /trickplay/extract with status and body, counting calls.
 func fakeNode(t *testing.T, status int, body any) (*nodepool.Node, *atomic.Int32) {
@@ -119,7 +119,9 @@ func TestNodeExtractorModes(t *testing.T) {
 
 func TestMakesTrickplay(t *testing.T) {
 	for report, want := range map[string]bool{
-		`{"transport_features":["trickplay_extract_v1"]}`: true,
+		`{"transport_features":["trickplay_extract_v1","trickplay_extract_v2"]}`: true,
+		// An older node would ignore the tone-map source signal.
+		`{"transport_features":["trickplay_extract_v1"]}`: false,
 		`{"transport_features":["prepared_tracks_v1"]}`:   false,
 		`{}`: false,
 		``:   false,

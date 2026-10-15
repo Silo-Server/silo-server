@@ -637,7 +637,10 @@ path does not inherit evidence from a different playback engine.
 `original_http` never receives normalized-remux evidence. An HDR10 claim can
 carry `hdr10_max_width`, `hdr10_max_height`, `hdr10_max_frame_rate`, and
 `hdr10_max_bitrate_kbps`; these ceilings keep a successful format probe from
-admitting an untested stream class.
+admitting an untested stream class. When the viewer turns on the web player's
+browser decode engine, `original_http` instead carries
+`client_managed_dynamic_range_v1` (with WebGPU) and the engine tone-maps the
+original itself; see [web-decode-engine.md](web-decode-engine.md).
 
 ---
 
@@ -660,6 +663,18 @@ inventory, so selecting a non-default audio track does not by itself require
 the server to remux the file. Without the claim, the historical default-track
 gate remains. A claiming client that cannot honor the identity reports a typed
 playback failure so the bounded replan ladder can choose a packaged route.
+
+A `server_remux_progressive` stream is forward-only: it has no byte ranges, and
+a request for it always starts at the plan's position. The server closes it
+after it makes no write progress for the stream stall window (see
+[streaming write deadlines](streaming-write-deadline.md)), which a paused
+client causes once its buffer is full. A client cannot resume such a stream
+where it stopped and has to open a new one at that position. The web player
+does this with a `seek_reanchor` replan (§6) when playback resumes after a
+minute idle, and falls back to its reconnect (§6.2) when the replan is refused.
+It does not do this in a watch-together room, whose transport the room
+controls; a room member who pauses past the stall window is not recovered this
+way.
 
 `client_playback_context.deliveries` is keyed by **class**, because a client's
 answer to "can you play HLS" does not differ between a remux and a transcode —
@@ -893,6 +908,19 @@ Three shapes exist:
 `stream_origin` and `timeline_offset` are `0`, `player_start` is the requested
 position, `can_seek_anywhere` is true when the runtime is known, and
 `seek_restoration` is `player_position` — the client seeks locally.
+
+Source positions count from the start of the file: the container's first
+timestamp is position 0. Most files start at timestamp zero, but MPEG-TS
+recordings and files remuxed from them can start seconds (or more) in. Plan positions, playlist time,
+subtitle tracks, and subtitle windows (`?position=&duration=`) are all on this
+container-relative timeline. Encoded HLS segments can still carry the source's
+own timestamps, so place them by playlist time, not by their PTS.
+A direct-play engine may keep the container's own timestamps instead:
+Chrome does for Matroska, reporting `currentTime` equal to the container start
+time at its first frame. Such a client must subtract that origin as part of its
+timeline offset, or subtitles, seeks, and reported positions drift by it. The
+web player reads the origin from `currentTime` at `loadedmetadata`, before it
+seeks to `player_start`.
 
 **Copy remux over HLS** is served from FFmpeg's live, still-growing playlist,
 which starts at the preceding keyframe selected by FFmpeg's input seek.
@@ -1202,6 +1230,20 @@ route, so a direct-play viewer would come back on a transcode. The web player
 5. Any adopted plan ends the cycle. When the budget runs out, the client says
    the connection was lost and offers to try again. Leaving the player or
    starting other playback cancels the cycle.
+
+Keeping the current route eligible does not mean keeping a dead node. Every
+replan except `seek_reanchor` first asks the session's transcode node and egress
+proxy whether they answer, with a two-second bound. A node that does not answer
+is left out of that replan's plan and route: its capabilities don't count, its
+running transport is not reused even by a `track_change` that changes nothing,
+and the replacement starts elsewhere. A `failure_recovery` or
+`seek_failure_recovery` from such a node doesn't exclude the failed plan's key
+either: the node failed, not the recipe, so the same recipe can run on another
+node. If the dead node was the only proxy a progressive remux could use, the
+remux has no route left and is planned as HLS on a transcode node instead. The
+pool's health flag cannot be trusted for this: it changes only at the next health
+sweep, up to 30 seconds after the node went away, and until then the node still
+looks healthy.
 
 A network failure before a transport's own first frame stays on the ordinary
 failure path, even when an earlier transport of the same viewing played: the
@@ -1666,6 +1708,8 @@ or older node advertisement is rejected instead of silently changing modes.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
+A plain HLG source resolves to BT.2100 HLG, or to the BT.709-gamut HLG kind
+when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
 resolve to the `dolby_vision` source kind. Only executors that apply the RPU
 advertise it: software `tonemapx`, QSV `tonemap_opencl`, and NVENC
