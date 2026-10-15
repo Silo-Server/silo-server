@@ -266,6 +266,34 @@ describe("useAutoQualityDownshift", () => {
     expect(onDownshift).toHaveBeenCalledTimes(2);
   });
 
+  it("watches a plan an unrelated replan raised after a successful step down", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    const { rerender } = renderHook(
+      ({ plan, kbps }: { plan: number; kbps: number }) =>
+        useAutoQualityDownshift({
+          videoRef: { current: video as unknown as HTMLVideoElement },
+          enabled: true,
+          sessionId: "s1",
+          planIdentity: plan,
+          deliveredKbps: kbps,
+          onDownshift,
+        }),
+      { initialProps: { plan: 1, kbps: 80_000 } },
+    );
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+
+    rerender({ plan: 2, kbps: 20_000 }); // the step down worked
+    rerender({ plan: 3, kbps: 80_000 }); // an audio change raised it again later
+    fire(video, "playing", 100_000);
+    fire(video, "waiting", 130_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(2);
+  });
+
   it("leaves an explicit quality alone", () => {
     const video = fakeVideo();
     const onDownshift = vi.fn();

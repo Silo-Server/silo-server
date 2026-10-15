@@ -61,8 +61,11 @@ interface StoredEstimate {
    * applies on a metered connection.
    */
   observed?: boolean;
-  /** Set when the observed limit was recorded on a metered link. */
-  metered?: boolean;
+  /**
+   * The metered link an observed limit was recorded on (see meteredLink), or
+   * absent for an unmetered one.
+   */
+  link?: string;
 }
 
 function clampKbps(kbps: number): number | undefined {
@@ -90,7 +93,7 @@ function parseStored(raw: string | null | undefined, now: number): StoredEstimat
       kbps,
       measuredAt: parsed.measuredAt,
       observed: parsed.observed === true,
-      metered: parsed.metered === true,
+      ...(typeof parsed.link === "string" ? { link: parsed.link } : {}),
     };
   } catch {
     return undefined;
@@ -110,7 +113,8 @@ function writeStored(kbps: number, now: number, observed = false): void {
   const entry: StoredEstimate = { kbps, measuredAt: now };
   if (observed) {
     entry.observed = true;
-    if (onMeteredConnection()) entry.metered = true;
+    const link = meteredLink();
+    if (link) entry.link = link;
   }
   pageEntry = JSON.stringify(entry);
   storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, pageEntry);
@@ -139,19 +143,32 @@ export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now())
   // Nothing to add when a lower limit is already recorded for this kind of
   // link. Otherwise keep the lower value but record it for the current link,
   // so a metered link honors it.
-  const sameLink = current?.metered === true || !onMeteredConnection();
+  const sameLink = current?.link === meteredLink();
   if (current?.observed && sameLink && current.kbps <= observed) return;
   writeStored(Math.min(observed, current?.kbps ?? observed), now, true);
 }
 
 /**
- * The cached limit playback observed on a metered link, for planning on a
- * metered link. A limit observed on Wi-Fi does not describe cellular, and a
- * probe result never applies there.
+ * Names the kind of metered link the viewer is on, from what the browser
+ * reports: its connection type and whether Data Saver is on. Undefined on an
+ * unmetered link. Not a network identity, but enough to keep a limit seen on
+ * cellular from steering a Data Saver Wi-Fi network, and the reverse.
+ */
+function meteredLink(): string | undefined {
+  if (!onMeteredConnection()) return undefined;
+  const connection = networkInformation();
+  return `${connection?.type ?? "unknown"}:${connection?.saveData === true ? "save-data" : "full"}`;
+}
+
+/**
+ * The cached limit playback observed on this kind of metered link, for
+ * planning on it. A limit observed on Wi-Fi or another kind of metered link
+ * does not describe this one, and a probe result never applies here.
  */
 export function readMeteredObservedLimitKbps(now = Date.now()): number | undefined {
+  const link = meteredLink();
   const stored = readStored(now);
-  return stored?.observed && stored.metered ? stored.kbps : undefined;
+  return link && stored?.observed && stored.link === link ? stored.kbps : undefined;
 }
 
 /**

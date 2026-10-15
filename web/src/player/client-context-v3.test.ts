@@ -285,7 +285,12 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 8, saveData: true } });
     localStorage.setItem(
       "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 4_200, measuredAt: Date.now(), observed: true, metered: true }),
+      JSON.stringify({
+        kbps: 4_200,
+        measuredAt: Date.now(),
+        observed: true,
+        link: "unknown:save-data",
+      }),
     );
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBe(4_200);
@@ -303,6 +308,24 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
       expect(detectMeteredV3()).toBe(true);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("does not carry a limit observed on cellular onto Data Saver Wi-Fi", () => {
+    vi.stubGlobal("navigator", { connection: { type: "wifi", saveData: true, downlink: 3 } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({
+        kbps: 20_000,
+        measuredAt: Date.now(),
+        observed: true,
+        link: "cellular:full",
+      }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBe(3_000);
     } finally {
       localStorage.removeItem("silo-bandwidth-estimate");
     }

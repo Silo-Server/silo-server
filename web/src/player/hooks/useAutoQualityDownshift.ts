@@ -119,26 +119,35 @@ export function useAutoQualityDownshift({
   useEffect(() => {
     onDownshiftRef.current = onDownshift;
   }, [onDownshift]);
-  // The plan the last downshift left and its bitrate. When a replan was
-  // adopted and is no lower, the ladder has nothing further down, so asking
-  // again would only loop. The same plan still playing means the replan was
-  // not adopted, and it stays eligible.
+  // The plan the last downshift left and its bitrate, until the next plan is
+  // adopted. The same plan still playing means the replan was not adopted,
+  // and it stays eligible.
   const lastDownshiftFromRef = useRef<
     { sessionId: string; planIdentity: unknown; kbps: number } | undefined
   >(undefined);
+  // A plan adopted after a downshift that turned out no lower.
+  const exhaustedPlanRef = useRef<{ sessionId: string; planIdentity: unknown } | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     const video = videoRef.current;
     if (!enabled || !video || deliveredKbps === undefined) return;
     const estimate = downshiftEstimateKbps(deliveredKbps);
     if (estimate === undefined) return;
+    const exhausted = exhaustedPlanRef.current;
+    if (exhausted?.sessionId === sessionId && exhausted.planIdentity === planIdentity) return;
+    // The first plan adopted after a downshift settles it. No lower than the
+    // plan that stalled means the ladder has nothing further down: leave that
+    // plan alone. Lower means the step worked, and any later plan, even one
+    // an unrelated replan raised again, is watched as usual.
     const previous = lastDownshiftFromRef.current;
-    if (
-      previous?.sessionId === sessionId &&
-      previous.planIdentity !== planIdentity &&
-      deliveredKbps >= previous.kbps
-    ) {
-      return;
+    if (previous?.sessionId === sessionId && previous.planIdentity !== planIdentity) {
+      lastDownshiftFromRef.current = undefined;
+      if (deliveredKbps >= previous.kbps) {
+        exhaustedPlanRef.current = { sessionId, planIdentity };
+        return;
+      }
     }
 
     // Where playback stood when the current stall began; undefined when not

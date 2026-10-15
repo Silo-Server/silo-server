@@ -1619,8 +1619,9 @@ caused by a seek, pause or source reload is not a stall. It sends 70% of the
 delivered bitrate, so the next stream targets about 56% of the one that
 stalled. It keeps that lower estimate for the next 30 minutes and stops when a
 replan delivers no lower bitrate. On a metered link it uses the estimate only if
-the stall was also observed on a metered link, since probe results and Wi-Fi
-observations do not describe that link.
+the stall was observed on the same kind of metered link, by the browser's
+connection type and Data Saver setting, since probe results and observations
+from other links do not describe it.
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
