@@ -149,10 +149,9 @@ func withoutAnsweredRateLimit(person *models.Person, err error) (*models.Person,
 
 // resolveProviders returns the enabled providers. Every person a sweep looks
 // up asks for the same list, so it is resolved once and reused for
-// personProvidersTTL. A failed resolution is not kept, nor one whose context
-// ended, since resolution skips a capability it could not read. The nil
-// checker reads installations from the database rather than the plugins
-// service's cache, which other replicas do not refresh on a plugin change.
+// personProvidersTTL. A failed resolution is not kept. Resolution reads the
+// database rather than the plugins service's installation cache, which other
+// replicas do not refresh on a plugin change.
 func (s *PersonRefreshService) resolveProviders(ctx context.Context) ([]Provider, error) {
 	s.providersMu.Lock()
 	if s.providers != nil && time.Now().Before(s.providersExpiresAt) {
@@ -163,13 +162,13 @@ func (s *PersonRefreshService) resolveProviders(ctx context.Context) ([]Provider
 	generation := s.providersGeneration
 	s.providersMu.Unlock()
 
-	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool, nil)
+	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool)
 	if err != nil {
 		return nil, fmt.Errorf("resolve person providers: %w", err)
 	}
 
 	s.providersMu.Lock()
-	if generation == s.providersGeneration && ctx.Err() == nil {
+	if generation == s.providersGeneration {
 		s.providers = providers
 		s.providersExpiresAt = time.Now().Add(personProvidersTTL)
 	}

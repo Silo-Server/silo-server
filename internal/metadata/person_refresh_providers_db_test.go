@@ -45,10 +45,10 @@ func (t *personProviderTracer) statements() int {
 }
 
 // TestPersonRefreshReusesResolvedProvidersDB pins what finding the providers
-// costs a person lookup. The first lookup in a window resolves them; later
-// lookups issue no statements until a plugin change drops them. A resolution
-// that a plugin change overtook is not kept. Before, every lookup ran the
-// capability listing and three statements per capability.
+// costs a person lookup. The first lookup in a window resolves them with the
+// capability listing alone; later lookups issue no statements until a plugin
+// change drops them. A resolution that a plugin change overtook is not kept.
+// Before, every lookup ran the listing and three statements per capability.
 func TestPersonRefreshReusesResolvedProvidersDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -84,11 +84,9 @@ func TestPersonRefreshReusesResolvedProvidersDB(t *testing.T) {
 		return tracer.statements()
 	}
 
-	first := resolve("first lookup", nil)
-	if first == 0 {
-		t.Fatal("first lookup issued no statements; want the providers resolved")
+	if n := resolve("first lookup", nil); n != 1 {
+		t.Fatalf("first lookup issued %d statements, want 1: the capability listing", n)
 	}
-	t.Logf("first lookup: %d statements", first)
 	for i := range 3 {
 		if n := resolve("later lookup", nil); n != 0 {
 			t.Fatalf("lookup %d after the first issued %d statements, want 0", i+2, n)
@@ -103,11 +101,11 @@ func TestPersonRefreshReusesResolvedProvidersDB(t *testing.T) {
 			service.InvalidateProviders()
 		}
 	}
-	if n := resolve("lookup a plugin change overtakes", overtaken); n == 0 {
-		t.Fatal("lookup after a plugin change issued no statements; want the providers resolved again")
+	if n := resolve("lookup a plugin change overtakes", overtaken); n != 1 {
+		t.Fatalf("lookup after a plugin change issued %d statements, want 1: the providers resolved again", n)
 	}
-	if n := resolve("lookup after the overtaken one", nil); n == 0 {
-		t.Fatal("a resolution a plugin change overtook was kept; want it resolved again")
+	if n := resolve("lookup after the overtaken one", nil); n != 1 {
+		t.Fatalf("lookup after an overtaken resolution issued %d statements, want 1: it must not have been kept", n)
 	}
 	if n := resolve("lookup after that", nil); n != 0 {
 		t.Fatalf("lookup after a kept resolution issued %d statements, want 0", n)
