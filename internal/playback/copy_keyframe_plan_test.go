@@ -21,7 +21,7 @@ import (
 func stubKeyframeIndex(t *testing.T, idx keyframes.Index, err error) {
 	t.Helper()
 	previous := loadKeyframeIndex
-	loadKeyframeIndex = func(string) (keyframes.Index, error) { return idx, err }
+	loadKeyframeIndex = func(context.Context, string) (keyframes.Index, error) { return idx, err }
 	t.Cleanup(func() { loadKeyframeIndex = previous })
 }
 
@@ -42,7 +42,7 @@ func TestPlanCopySegments(t *testing.T) {
 	// video at 10s.
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, Duration: 12, VideoEnd: 10}, nil)
 
-	plan := planCopySegments(t.Context(), plannedOpts())
+	plan := planCopySegments(t.Context(), t.Context(), plannedOpts())
 	if plan == nil {
 		t.Fatal("no plan for an eligible session")
 	}
@@ -62,7 +62,7 @@ func TestPlanCopySegments(t *testing.T) {
 // A source whose timestamps start later than zero plans the same segments.
 func TestPlanCopySegmentsForALaterStart(t *testing.T) {
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{7, 8, 9.6, 14.0, 14.4, 16.0}, VideoEnd: 17}, nil)
-	plan := planCopySegments(t.Context(), plannedOpts())
+	plan := planCopySegments(t.Context(), t.Context(), plannedOpts())
 	if plan == nil {
 		t.Fatal("no plan for a source starting at 7s")
 	}
@@ -86,7 +86,7 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			opts := plannedOpts()
 			change(&opts)
-			if plan := planCopySegments(t.Context(), opts); plan != nil {
+			if plan := planCopySegments(t.Context(), t.Context(), opts); plan != nil {
 				t.Fatalf("plan = %v, want none", plan.durations)
 			}
 		})
@@ -94,19 +94,19 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 
 	t.Run("unknown video end", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}}, nil)
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planCopySegments(t.Context(), t.Context(), plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("no index", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrNoIndex)
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planCopySegments(t.Context(), t.Context(), plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("unreadable source", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, errors.New("permission denied"))
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planCopySegments(t.Context(), t.Context(), plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
@@ -119,25 +119,25 @@ func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 	opts.OutputDir = t.TempDir()
 
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
+	if plan := resolveCopyPlan(t.Context(), t.Context(), opts); plan != nil {
 		t.Fatal("planned while the index is being checked")
 	}
 	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
 	stubKeyframeIndex(t, verified, nil)
-	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
+	if plan := resolveCopyPlan(t.Context(), t.Context(), opts); plan != nil {
 		t.Fatal("a rebuilt session switched to a keyframe playlist")
 	}
 
 	planned := plannedOpts()
 	planned.OutputDir = t.TempDir()
-	first := resolveCopyPlan(t.Context(), planned)
+	first := resolveCopyPlan(t.Context(), t.Context(), planned)
 	if first == nil {
 		t.Fatal("no plan with a verified index")
 	}
 	// The record stands in for the index, which a cold process may not have
 	// verified yet.
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	again := resolveCopyPlan(t.Context(), planned)
+	again := resolveCopyPlan(t.Context(), t.Context(), planned)
 	if again == nil || !slices.Equal(again.durations, first.durations) {
 		t.Fatalf("rebuilt plan = %+v, want the recorded %+v", again, first)
 	}
@@ -151,7 +151,7 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 	stubKeyframeIndex(t, verified, nil)
 	first := plannedOpts()
 	first.OutputDir = t.TempDir()
-	original := resolveCopyPlan(t.Context(), first)
+	original := resolveCopyPlan(t.Context(), t.Context(), first)
 	if original == nil {
 		t.Fatal("no plan with a verified index")
 	}
@@ -167,7 +167,7 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 	rebuilt := plannedOpts()
 	rebuilt.OutputDir = t.TempDir()
 	rebuilt.Reconstructed = true
-	again := resolveCopyPlan(t.Context(), rebuilt)
+	again := resolveCopyPlan(t.Context(), t.Context(), rebuilt)
 	if again == nil || !slices.Equal(again.durations, original.durations) || verifiedLoads != 1 {
 		t.Fatalf("rebuilt plan = %+v after %d verified loads, want the original %+v", again, verifiedLoads, original)
 	}
@@ -175,7 +175,7 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 	// A first start still doesn't wait for the check.
 	fresh := plannedOpts()
 	fresh.OutputDir = t.TempDir()
-	if plan := resolveCopyPlan(t.Context(), fresh); plan != nil || verifiedLoads != 1 {
+	if plan := resolveCopyPlan(t.Context(), t.Context(), fresh); plan != nil || verifiedLoads != 1 {
 		t.Fatalf("a first start planned (%v) or waited for the check (%d loads)", plan != nil, verifiedLoads)
 	}
 }
@@ -199,13 +199,13 @@ func TestResolveCopyPlanLeavesNoRecordWhenTheRebuildIsCanceled(t *testing.T) {
 	rebuilt.Reconstructed = true
 	gone, cancel := context.WithCancel(t.Context())
 	cancel()
-	if plan := resolveCopyPlan(gone, rebuilt); plan != nil {
+	if plan := resolveCopyPlan(gone, t.Context(), rebuilt); plan != nil {
 		t.Fatal("planned without the keyframe check")
 	}
 	if _, err := os.Stat(filepath.Join(rebuilt.OutputDir, copyPlanRecordFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a canceled rebuild left a plan record: %v", err)
 	}
-	if plan := resolveCopyPlan(t.Context(), rebuilt); plan == nil {
+	if plan := resolveCopyPlan(t.Context(), t.Context(), rebuilt); plan == nil {
 		t.Fatal("the next rebuild didn't plan")
 	}
 }

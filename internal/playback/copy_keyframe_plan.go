@@ -30,7 +30,8 @@ type copySegmentPlan struct {
 	durations []float64
 }
 
-// loadKeyframeIndex reads a source's keyframe index, and
+// loadKeyframeIndex reads a source's keyframe index, starting its full check
+// in the background for as long as holder lasts, and
 // loadVerifiedKeyframeIndex waits for its full check, stopping when ctx is
 // done; tests replace both.
 var (
@@ -42,14 +43,17 @@ var (
 // session keeps FFmpeg's real playlist: the setting is off, the video isn't
 // copied, the stream doesn't start at the beginning, or the source has no
 // keyframe index.
-func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
+//
+// holder is the session's lifetime: a background keyframe check this start
+// queues stops reading once no session holding it is left.
+func planCopySegments(ctx, holder context.Context, opts TranscodeOpts) *copySegmentPlan {
 	if !opts.KeyframePlaylist ||
 		!strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		opts.SeekSeconds > 0 || opts.StartSegmentNumber > 0 ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		return nil
 	}
-	load := loadKeyframeIndex
+	load := func(path string) (keyframes.Index, error) { return loadKeyframeIndex(holder, path) }
 	if opts.Reconstructed {
 		load = func(path string) (keyframes.Index, error) { return loadVerifiedKeyframeIndex(ctx, path) }
 		// A rebuilt session that lost its plan record (a clean shutdown
@@ -106,9 +110,9 @@ type copyPlanRecord struct {
 // start had fallen back to FFmpeg's playlist, the rebuilt session now plans:
 // a planned session copies from the beginning, where FFmpeg cuts the same
 // segments, so the player's earlier segments still match.
-func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
+func resolveCopyPlan(ctx, holder context.Context, opts TranscodeOpts) *copySegmentPlan {
 	if !opts.KeyframePlaylist || opts.OutputDir == "" {
-		return planCopySegments(ctx, opts)
+		return planCopySegments(ctx, holder, opts)
 	}
 	path := filepath.Join(opts.OutputDir, copyPlanRecordFile)
 	if data, err := os.ReadFile(path); err == nil {
@@ -128,7 +132,7 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 	// Record the decision whatever the start's fate: StartTranscode launches
 	// FFmpeg even if its caller has gone, and that session serves this
 	// playlist.
-	plan := planCopySegments(ctx, opts)
+	plan := planCopySegments(ctx, holder, opts)
 	if plan == nil && opts.Reconstructed && ctx.Err() != nil {
 		// The rebuild's request went away during the keyframe check. Its
 		// outcome says nothing about the file, so don't record it:

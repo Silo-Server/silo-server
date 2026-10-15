@@ -423,10 +423,15 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(ctx, opts)
+	// The session's lifetime: the transcode process outlives a disconnected
+	// manifest request, and a background keyframe check the plan starts
+	// reads only while a session that wants it lasts (#2453).
+	sessionCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	copyPlan := resolveCopyPlan(ctx, sessionCtx, opts)
 	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
 		// Rebuilding without the plan would serve FFmpeg's playlist to a
 		// player that may hold the planned one; a later request rebuilds.
+		cancel()
 		releaseHWDevice()
 		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", ctx.Err())
 	}
@@ -437,7 +442,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// The synchronous source guard above is bounded by the caller's startup
 	// context. Once it succeeds, keep the established behavior where the
 	// transcode process outlives a disconnected manifest request.
-	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	ctx = sessionCtx
 	s := &TranscodeSession{
 		cancel:               cancel,
 		opts:                 opts,
