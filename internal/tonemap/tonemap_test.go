@@ -91,6 +91,38 @@ func TestResolveSourceClassifiesDolbyOnlyAndPreflightsAmbiguousMetadata(t *testi
 	}
 }
 
+// TestResolveSourceClassifiesHLGByPrimaries verifies an HLG source tagged
+// with BT.709 primaries and matrix converts as BT.709 without a preflight,
+// while missing or mixed tags keep the BT.2020 kind and its preflight.
+func TestResolveSourceClassifiesHLGByPrimaries(t *testing.T) {
+	tests := []struct {
+		name          string
+		primaries     string
+		matrix        string
+		want          SourceKind
+		wantPreflight bool
+	}{
+		{name: "BT.2020 primaries", primaries: "bt2020", matrix: "bt2020nc", want: SourceHLG},
+		{name: "BT.709 primaries", primaries: "bt709", matrix: "bt709", want: SourceHLGBT709},
+		{name: "BT.709 primaries with untagged matrix", primaries: "bt709", matrix: "", want: SourceHLG, wantPreflight: true},
+		{name: "BT.709 primaries with BT.2020 matrix", primaries: "bt709", matrix: "bt2020nc", want: SourceHLG, wantPreflight: true},
+		{name: "BT.709 primaries with BT.601 matrix", primaries: "bt709", matrix: "smpte170m", want: SourceHLG, wantPreflight: true},
+		{name: "untagged primaries", primaries: "", matrix: "bt2020nc", want: SourceHLG, wantPreflight: true},
+		{name: "unknown primaries", primaries: "unknown", matrix: "bt709", want: SourceHLG, wantPreflight: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveSource(SourceMetadata{
+				DynamicRange: DynamicRangeHLG,
+				ColorRange:   "tv", ColorPrimaries: tt.primaries, ColorTransfer: ColorTransferHLG, ColorSpace: tt.matrix,
+			})
+			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
+				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
+			}
+		})
+	}
+}
+
 // TestPolicyKeepsHardwareAndSoftwareIndependent verifies each executor can be enabled separately.
 func TestPolicyKeepsHardwareAndSoftwareIndependent(t *testing.T) {
 	tests := []struct {

@@ -1708,6 +1708,8 @@ or older node advertisement is rejected instead of silently changing modes.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
+A plain HLG source resolves to BT.2100 HLG, or to the BT.709-gamut HLG kind
+when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
 resolve to the `dolby_vision` source kind. Only executors that apply the RPU
 advertise it: software `tonemapx`, QSV `tonemap_opencl`, and NVENC

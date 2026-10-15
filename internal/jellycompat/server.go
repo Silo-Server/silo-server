@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -83,7 +84,13 @@ type Dependencies struct {
 	// used to serve app-relative artwork such as bundled collection-template
 	// posters that have no remote origin. Optional.
 	FrontendFS fs.FS
+	// HTTPClient fetches images the compat image routes proxy. The default
+	// uses a netguard transport; see ArtworkStore.
 	HTTPClient *http.Client
+	// ArtworkStore is the artwork blob store. A proxied image URL may reach
+	// the server's local network only when it is a direct URL to this store
+	// (artworkurl.FetchContext); every other URL reaches public addresses only.
+	ArtworkStore blobstore.Store
 
 	// Direct service dependencies (replaces Client)
 	ContentService  ContentService

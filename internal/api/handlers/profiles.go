@@ -53,6 +53,12 @@ type ProfileHandler struct {
 	WatchlistTitlesPurger interface {
 		PurgeProfile(ctx context.Context, userID int, profileID string) error
 	}
+	// EbookReaderPurger removes a deleted profile's ebook reading progress,
+	// reader settings and annotations, which live in Postgres whichever
+	// store holds the profile.
+	EbookReaderPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
 	// RecommendationsPurger removes a deleted profile's ratings, taste
 	// profile and cached recommendations, which live in Postgres whichever
 	// store holds the profile.
@@ -814,6 +820,13 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		defer cancel()
 		if purgeErr := h.WatchlistTitlesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
 			slog.WarnContext(ctx, "profile watchlist-title purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.EbookReaderPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.EbookReaderPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile ebook reader purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 	if h.RecommendationsPurger != nil {

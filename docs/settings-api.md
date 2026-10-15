@@ -949,7 +949,10 @@ family-scoped winner.
 
 The device registry lists each device a profile uses, with its name, platform
 and `last_seen_at`. `GET /api/v2/devices` and the administrator device reads
-list it. The server registers the device named by `X-Silo-Device-Id`, with the
+list it. A profile can also give its entry a `custom_name` through
+`PATCH /api/v2/devices/{device_id}`; `GET /api/v2/devices` returns it when set,
+and clients show it in place of the reported name. Registration below never
+changes it (see [API contract](architecture/api-contract.md#self-service-device-settings)). The server registers the device named by `X-Silo-Device-Id`, with the
 optional `X-Silo-Device-Name` and `X-Silo-Device-Platform`, for the acting
 profile when the device:
 

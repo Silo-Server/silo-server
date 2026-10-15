@@ -529,6 +529,7 @@ GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
 DELETE /api/v2/devices/{device_id}	non-media
+PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
 GET /api/v2/diagnostics/capabilities	non-media
 POST /api/v2/diagnostics/reports	non-media
@@ -1808,6 +1809,7 @@ GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
 DELETE /api/v2/devices/{device_id}	non-media
+PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
 GET /api/v2/diagnostics/capabilities	non-media
 POST /api/v2/diagnostics/reports	non-media

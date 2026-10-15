@@ -1154,6 +1154,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// So do ratings and recommendation state; the Postgres store
 			// already deleted them with the profile.
 			profileHandler.RecommendationsPurger = recommendations.NewRepo(deps.DB)
+			// Ebook reading data lives there too.
+			profileHandler.EbookReaderPurger = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		}
 		if watchlistRequestWithdrawer != nil {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
