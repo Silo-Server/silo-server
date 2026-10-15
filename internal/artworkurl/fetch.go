@@ -54,6 +54,28 @@ func isDirectStoreURL(ctx context.Context, store blobstore.Store, rawURL string)
 	if !ok {
 		return false
 	}
-	return strings.EqualFold(probe.Scheme, target.Scheme) && strings.EqualFold(probe.Host, target.Host) &&
+	return equalASCIIFold(probe.Scheme, target.Scheme) && equalASCIIFold(probe.Host, target.Host) &&
 		strings.HasPrefix(target.Path, prefix)
+}
+
+// equalASCIIFold compares a and b ignoring ASCII case only. Unicode folding
+// (strings.EqualFold) would match host names that resolve as different IDNA
+// names, such as σ and ς, so every non-ASCII byte must match exactly.
+func equalASCIIFold(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range len(a) {
+		x, y := a[i], b[i]
+		if 'A' <= x && x <= 'Z' {
+			x += 'a' - 'A'
+		}
+		if 'A' <= y && y <= 'Z' {
+			y += 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
 }

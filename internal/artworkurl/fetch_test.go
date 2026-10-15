@@ -28,6 +28,10 @@ func TestFetchContextTrustsOnlyTheStoresDirectURLs(t *testing.T) {
 		{"other host", store, "http://10.0.0.5:9000/artwork/key", false},
 		{"relative URL", store, "/api/v2/artwork/key?sig=x", false},
 		{"store without direct URLs", blobstoretest.New(), "http://media.minio.lan:9000/artwork/key", false},
+		// Unicode case folding matches these, but they resolve as other names.
+		{"final sigma for sigma", blobstoretest.NewDirect("http://σ.example.test:8080/artwork"), "http://ς.example.test:8080/artwork/key", false},
+		{"Kelvin sign for k", blobstoretest.NewDirect("http://k.example.test:8080/artwork"), "http://\u212a.example.test:8080/artwork/key", false},
+		{"same internationalized host", blobstoretest.NewDirect("http://σ.example.test:8080/artwork"), "http://σ.example.test:8080/artwork/key", true},
 		{"no store", nil, "http://media.minio.lan:9000/artwork/key", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
