@@ -24,6 +24,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -1059,13 +1060,22 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	// Before ensureTranscodeManifest, for the same reason as the master manifest.
 	attachCompatStream(r.Context(), session, playSession, source.FileID)
 	if playSession.Recipe != nil && playSession.Recipe.TranscodeNodeURL != "" {
-		manifest, relayErr := h.fetchRemoteCompatManifest(r.Context(), playSession.Recipe.TranscodeNodeURL, playSession.UpstreamSessionID)
+		var manifest []byte
+		local, relayErr := h.relayRemoteCompat(r.Context(), playSession, func(nodeURL string) error {
+			var err error
+			manifest, err = h.fetchRemoteCompatManifest(r.Context(), nodeURL, playSession.UpstreamSessionID)
+			return err
+		})
 		if relayErr != nil {
 			writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode manifest is unavailable")
 			return
 		}
-		writeCompatManifest(w, manifest, playSession, *source, h.compatSegmentDuration())
-		return
+		if !local {
+			writeCompatManifest(w, manifest, playSession, *source, h.compatSegmentDuration())
+			return
+		}
+		// The transcode moved to this process; serve it locally below.
+		playSession = h.refreshPlaySession(playSession)
 	}
 
 	// Ensure the transcode process is running.
@@ -1139,8 +1149,23 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	}
 	if playSession.Recipe != nil && playSession.Recipe.TranscodeNodeURL != "" {
 		segmentName := chiURLParam(r, "segmentId") + "." + chiURLParam(r, "segmentContainer")
-		h.proxyRemoteCompatSegment(w, r, playSession.Recipe.TranscodeNodeURL, playSession.UpstreamSessionID, segmentName)
-		return
+		local, relayErr := h.relayRemoteCompat(r.Context(), playSession, func(nodeURL string) error {
+			return h.proxyRemoteCompatSegment(w, r, nodeURL, playSession.UpstreamSessionID, segmentName)
+		})
+		if relayErr != nil {
+			writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
+			return
+		}
+		if !local {
+			return
+		}
+		// The transcode moved to this process: serve the segment from the
+		// local reconstruction below, after the local capability checks.
+		playSession, err = h.prepareCompatSegmentRecipe(r.Context(), h.refreshPlaySession(playSession), *source)
+		if err != nil {
+			writeCompatTranscodeError(w, err)
+			return
+		}
 	}
 
 	name := chiURLParam(r, "segmentId")
@@ -1367,24 +1392,31 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 }
 
-func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *http.Request, nodeURL, upstreamSessionID, segmentName string) {
+// proxyRemoteCompatSegment relays one segment from a transcode node and writes
+// the answer. When the node cannot be reached at all it writes nothing and
+// returns the error (see transcodeproxy.NodeUnreachable), so the caller can
+// move the transcode and retry; every other outcome is written and returns nil.
+func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *http.Request, nodeURL, upstreamSessionID, segmentName string) error {
 	path := "/transcode/" + url.PathEscape(upstreamSessionID) + "/segment/" + url.PathEscape(segmentName)
 	target := nodepool.NodeEndpoint(nodeURL, path)
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to build remote segment request")
-		return
+		return nil
 	}
 	if err := nodeauth.Sign(req, nodeURL, h.JWTSecret); err != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to build remote segment request")
-		return
+		return nil
 	}
 	transcodeproxy.PrepareRequest(req, r)
 	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
 		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
+		if transcodeproxy.NodeUnreachable(err) && r.Context().Err() == nil {
+			return err
+		}
 		writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
-		return
+		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 	generation := resp.Header.Get(transcodeproxy.GenerationHeader)
@@ -1392,12 +1424,47 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	sw.WriteHeader(resp.StatusCode)
 	if _, err := io.Copy(sw, resp.Body); err != nil {
-		return
+		return nil
 	}
 	if generation != "" && r.Method == http.MethodGet && sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
 		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, ""), path, h.JWTSecret, generation); err != nil {
 			slog.WarnContext(r.Context(), "acknowledge Jellyfin-compatible transcode segment", "component", "jellycompat", "error", err, "playback_session_id", upstreamSessionID)
 		}
+	}
+	return nil
+}
+
+// relayRemoteCompat runs relay against the transcode node that runs the play
+// session's transcode. When the node cannot be reached, the transcode moves to
+// another executor (moveCompatTranscodeOffNode) and relay runs again against
+// the new node. local is true when the transcode now runs in this process, and
+// the caller serves the request through its local path. err is the relay's own
+// error, joined with the move's when the move failed.
+func (h *PlaybackHandler) relayRemoteCompat(ctx context.Context, playSession *PlaybackSession, relay func(nodeURL string) error) (local bool, err error) {
+	nodeURL := playSession.Recipe.TranscodeNodeURL
+	// Nodes this request already found unreachable. The pool can list them as
+	// healthy until its next sweep, so each move leaves all of them out.
+	var failedNodes []string
+	for hop := 0; ; hop++ {
+		relayErr := relay(nodeURL)
+		if relayErr == nil || !transcodeproxy.NodeUnreachable(relayErr) || ctx.Err() != nil || hop >= compatMaxMoveHops {
+			return false, relayErr
+		}
+		slog.WarnContext(ctx, "Jellyfin-compatible transcode node unreachable from the relay", "component", "jellycompat",
+			"node", logredact.SanitizeURL(nodeURL), "error", logredact.SanitizeText(relayErr.Error()),
+			"playback_session_id", playSession.UpstreamSessionID)
+		next, moveErr := h.moveCompatTranscodeOffNode(ctx, playSession.UpstreamSessionID, nodeURL, failedNodes...)
+		if moveErr != nil {
+			slog.WarnContext(ctx, "could not move a Jellyfin-compatible transcode off an unreachable node", "component", "jellycompat",
+				"node", logredact.SanitizeURL(nodeURL), "error", logredact.SanitizeText(moveErr.Error()),
+				"playback_session_id", playSession.UpstreamSessionID)
+			return false, errors.Join(relayErr, moveErr)
+		}
+		if next == "" {
+			return true, nil
+		}
+		failedNodes = append(failedNodes, nodeURL)
+		nodeURL = next
 	}
 }
 

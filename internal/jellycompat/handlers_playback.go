@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -382,6 +383,9 @@ type PlaybackHandler struct {
 	// terminal-staging scrobbles; see sendCompatResumeStart, applyCompatReport,
 	// and stageCompatStop.
 	compatScrobbleLocks compatScrobbleLocks
+	// compatMoves single-flights moving a transcode off a node that stopped
+	// answering, so every request that finds the node dead waits on one move.
+	compatMoves singleflight.Group
 }
 
 func (h *PlaybackHandler) serverBitrateCap(ctx context.Context, session *Session) (int, error) {
@@ -1057,6 +1061,29 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 	excludedShapes map[string]struct{},
 	policy config.PlaybackRoutingPolicy,
 ) (noderouting.Decision, error) {
+	request, err := h.compatHLSResolveRequest(
+		ctx, session, file, source, requiredToneMapMode, requiredTranscodeURL, excludedNodes, excludedShapes, policy,
+	)
+	if err != nil {
+		return noderouting.Decision{}, err
+	}
+	return noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), request)
+}
+
+// compatHLSResolveRequest builds the route request for a Jellyfin-compatible
+// HLS transcode: the workload, the capability filter for the frozen recipe,
+// and the proxy filter for the client's access path.
+func (h *PlaybackHandler) compatHLSResolveRequest(
+	ctx context.Context,
+	session *playback.Session,
+	file *models.MediaFile,
+	source PlaybackMediaSource,
+	requiredToneMapMode tonemap.Mode,
+	requiredTranscodeURL string,
+	excludedNodes map[string]struct{},
+	excludedShapes map[string]struct{},
+	policy config.PlaybackRoutingPolicy,
+) (noderouting.ResolveRequest, error) {
 	videoTranscode := !compatHLSCopiesVideo(source)
 	workload := noderouting.WorkloadRemux
 	delivery := noderouting.DeliveryHLSRemux
@@ -1067,7 +1094,7 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 	eligible, err := h.compatTranscodeEligibility(ctx, file, videoTranscode,
 		compatHLSRecipeSourceAudioChannels(source), requiredToneMapMode, excludedNodes, policy)
 	if err != nil {
-		return noderouting.Decision{}, err
+		return noderouting.ResolveRequest{}, err
 	}
 	if source.DVStripToHDR10 && !videoTranscode {
 		eligible, excludedShapes = h.compatDVStripRouting(ctx, eligible, excludedShapes, compatHLSRecipeSourceAudioChannels(source))
@@ -1085,7 +1112,7 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 		}
 		currentTranscodeURL = requiredTranscodeURL
 	}
-	return noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
+	return noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery,
 			Policy: policy, ProxyAllowed: h.JWTSecret != "",
@@ -1097,7 +1124,7 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 		// path; nil on the default path, so every healthy proxy stays eligible.
 		ProxyEligible:    nodepool.ClientReachableVia(netaccess.PathFromContext(ctx), nil),
 		ExcludedShapeIDs: excludedShapes,
-	})
+	}, nil
 }
 
 func (h *PlaybackHandler) releaseCompatSessionReservation(sessionID string) {

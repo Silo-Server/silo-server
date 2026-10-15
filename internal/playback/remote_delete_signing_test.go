@@ -22,7 +22,7 @@ func TestDeleteRemoteTranscodeSignsTheRequest(t *testing.T) {
 
 	manager := NewTranscodeManager()
 	manager.JWTSecretFn = func() string { return secret }
-	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL); err != nil {
+	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL, false); err != nil {
 		t.Fatalf("deleteRemoteTranscode: %v", err)
 	}
 	if !signed.Load() {

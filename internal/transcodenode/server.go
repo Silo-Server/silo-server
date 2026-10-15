@@ -2584,8 +2584,14 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// must be visible to the caller: the in-memory fence cannot survive a node
 	// replacement, so reporting success would make the stop revocable only until
 	// this process exits.
+	//
+	// A transport central moved to another node is stopped here with
+	// keep_recipe: the record now names the new node, which rebuilds from it.
+	// A progressive remux record is this node's active authority and is always
+	// revoked.
+	keepRecipe := r.URL.Query().Get(playback.RemoteStopKeepRecipeParam) == "1" && !durableProgressive && !progressiveFound
 	var authorityErr error
-	if s.recipeStore != nil {
+	if s.recipeStore != nil && !keepRecipe {
 		authorityErr = s.recipeStore.Delete(r.Context(), sessionID)
 		if authorityErr != nil {
 			slog.WarnContext(r.Context(), "delete transcode recipe on stop", "component", "transcodenode", "error", authorityErr, "session", sessionID, "playback_session_id", sessionID)

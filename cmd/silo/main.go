@@ -1160,6 +1160,11 @@ func main() {
 			// and admin terminate before serving media, so a revoked stream
 			// token or grant stops here instead of at its 24h TTL.
 			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
+			// Follow a Jellyfin-compatible transcode that the API moved off a
+			// transcode node this proxy cannot reach: the shared recipe store
+			// names the node it runs on now, and the event bus carries the
+			// request to move it.
+			srv.SetTranscodeMoveFollower(noderecipe.NewStore(redisClient, 0), eventBus)
 			srv.SetRemoteArtifactMissReporter(downloads.NewArtifactManager(
 				downloads.NewArtifactRepository(pool),
 				downloads.NewRepository(pool),
@@ -3649,6 +3654,7 @@ func main() {
 			NodeID:               deps.NodeID,
 			StreamTelemetry:      streamTelemetryRegistry,
 			NodePlanner:          deps.NodePlanner,
+			EventBus:             eventBus,
 			JWTSecret:            cfg.Auth.JWTSecret,
 			RecWorker:            recWorker,
 			FrontendFS:           deps.FrontendFS,

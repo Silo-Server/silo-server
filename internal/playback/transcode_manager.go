@@ -320,7 +320,7 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 // leaves the local live-map entry untouched for an atomic remote-to-local v3
 // replacement.
 func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL string) {
-	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL); err != nil {
+	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL, false); err != nil {
 		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
 	}
 }
@@ -341,7 +341,21 @@ func (m *TranscodeManager) StopRemoteTranscodeAfterFailure(sessionID, transcodeN
 // exists. User-visible stop paths use this before removing the playback session
 // so a node partition leaves a live session the caller can retry stopping.
 func (m *TranscodeManager) CancelRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
-	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL)
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, false)
+}
+
+// RemoteStopKeepRecipeParam is the query parameter on a transcode node's
+// DELETE /transcode/{session_id} that stops the transport without deleting its
+// shared node recipe record. A transport that moved to another node is
+// retired this way: the record names the new node and must survive.
+const RemoteStopKeepRecipeParam = "keep_recipe"
+
+// ReleaseMovedRemoteTranscode stops a transport on the node it moved off and
+// leaves its node recipe record, which now names its new executor, in place.
+// A node that predates RemoteStopKeepRecipeParam ignores it and deletes the
+// record anyway, so a caller that needs the record rewrites it afterwards.
+func (m *TranscodeManager) ReleaseMovedRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, true)
 }
 
 // LockSessionLifecycle acquires the per-session lifecycle mutex and returns a
@@ -1215,7 +1229,7 @@ var remoteTranscodeControlClient = func() *http.Client {
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore
 // succeeds; other transport and HTTP failures remain retryable by the caller.
-func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string, keepRecipe bool) error {
 	if transcodeNodeURL == "" {
 		return nil
 	}
@@ -1226,6 +1240,9 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	defer cancel()
 
 	deleteURL := transcodeNodeURL + "/transcode/" + sessionID
+	if keepRecipe {
+		deleteURL += "?" + RemoteStopKeepRecipeParam + "=1"
+	}
 	req, err := http.NewRequestWithContext(deleteCtx, http.MethodDelete, deleteURL, nil)
 	if err != nil {
 		return fmt.Errorf("build remote transcode delete request: %w", err)

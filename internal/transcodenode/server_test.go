@@ -3881,3 +3881,49 @@ func TestShutdownDrainsProgressiveRemuxAndRejectsLateRequests(t *testing.T) {
 	}
 
 }
+
+// A transport central moved to another node is stopped here with keep_recipe:
+// its shared record now names the new node, which rebuilds from it, so the
+// stop must leave it. A progressive remux record is this node's authority and
+// is revoked regardless.
+func TestHandleStopKeepRecipeLeavesMovedTranscodeRecord(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		card       playback.RecipeCard
+		query      string
+		wantDelete bool
+	}{
+		{name: "moved HLS transcode", card: playback.RecipeCard{SessionID: "upstream-1", PlayMethod: playback.PlayTranscode, TranscodeNodeURL: "http://node-b"}, query: "?keep_recipe=1"},
+		{name: "ordinary stop", card: playback.RecipeCard{SessionID: "upstream-1", PlayMethod: playback.PlayTranscode}, wantDelete: true},
+		{name: "progressive remux authority", card: playback.RecipeCard{SessionID: "upstream-1", TranscodeTransportID: "upstream-1", PlayMethod: playback.PlayRemux}, query: "?keep_recipe=1", wantDelete: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := newTestServer(t)
+			server.sessions["upstream-1"] = &playback.TranscodeSession{}
+			server.activeJobs.Store(1)
+			card := tt.card
+			store := &stubRecipeStore{card: &card, ok: true}
+			server.SetRecipeStore(store)
+			req := httptest.NewRequest(http.MethodDelete, "/transcode/upstream-1"+tt.query, nil)
+			routeContext := chi.NewRouteContext()
+			routeContext.URLParams.Add("session_id", "upstream-1")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+			rr := httptest.NewRecorder()
+
+			server.handleStop(rr, req)
+
+			if rr.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			if deleted := len(store.deletes) > 0; deleted != tt.wantDelete {
+				t.Fatalf("record deleted = %v, want %v", deleted, tt.wantDelete)
+			}
+			server.mu.RLock()
+			_, running := server.sessions["upstream-1"]
+			server.mu.RUnlock()
+			if running {
+				t.Fatal("the stop left the transcode running")
+			}
+		})
+	}
+}

@@ -257,7 +257,11 @@ cancellation installs a process-local fence lasting the maximum token lifetime.
 Configured recipe deletion must succeed and progressive shutdown must finish
 before 204; either can return 503 after local teardown has already occurred.
 Session-close and file-removal errors are logged. A missing session and recipe
-returns 404 after cleanup attempts.
+returns 404 after cleanup attempts. `?keep_recipe=1` stops the transport
+without deleting its shared node recipe record; central sends it when it
+retires a transport it moved to another node, whose record now names that
+node. A progressive remux record is deleted regardless, since it is this
+node's active authority.
 
 This ID-addressed operation has no durable stop identity. Repeating it against a
 reused transport ID could affect a successor, so its description is

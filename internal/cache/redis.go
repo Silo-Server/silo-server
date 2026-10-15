@@ -31,6 +31,12 @@ const (
 	// events.
 	ChannelPlayback = "silo:playback"
 
+	// ChannelTranscodeMove carries only transcode move requests from proxy
+	// nodes to the API server that owns the session. It is separate from
+	// ChannelPlayback so plugin event dispatch and admin stats invalidation,
+	// which react to every ChannelPlayback message, never see them.
+	ChannelTranscodeMove = "silo:transcode-move"
+
 	// ChannelLogs is the pub/sub channel for persisted operational/audit log
 	// entries that should be fanned out to admin WebSocket subscribers.
 	ChannelLogs = "silo:logs"
@@ -85,6 +91,12 @@ const EventAuthProvidersChanged = "auth_providers_changed"
 // login sessions were revoked, so every API replica drops that account's
 // in-memory Jellyfin-compatible sessions.
 const EventUserSessionsRevoked = "user_sessions_revoked"
+
+// EventTranscodeMoveRequested is published on ChannelTranscodeMove by a proxy
+// node that cannot reach the transcode node serving a transport whose recipe
+// lives in the shared node recipe store. The API server that owns the session moves
+// the transcode to another node; the payload is a noderecipe.MoveRequest.
+const EventTranscodeMoveRequested = "transcode_move_requested"
 
 // EventNodeDrainChanged is published on ChannelAdmin by a transcode node when
 // it starts or stops draining, with its stream_nodes id as the payload, so
