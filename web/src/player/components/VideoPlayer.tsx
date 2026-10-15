@@ -3687,6 +3687,10 @@ export function VideoPlayer({
         }
 
         appliedRoomCommandIdRef.current = command.command_id;
+        // The command sets the play state. A position this stream can't reach
+        // starts the reconnect inside applyRoomPosition, before the element
+        // pauses or plays below, and the reconnect resumes by this state.
+        playingRef.current = command.action === "play";
         applyRoomPosition(video);
 
         if (command.action === "pause" || command.action === "seek") {

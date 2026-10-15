@@ -4629,7 +4629,7 @@ describe("VideoPlayer lost connection", () => {
       },
       timeline: { ...fixturePlanV3().timeline, can_seek_anywhere: canSeekAnywhere },
     });
-    const { container } = renderPlayer({ plan, ...props });
+    const { container, rerenderPlayer } = renderPlayer({ plan, ...props });
     const video = container.querySelector("video");
     if (!video) throw new Error("expected video element");
     await waitFor(() => expect(hlsJS.latest).not.toBeNull());
@@ -4645,12 +4645,12 @@ describe("VideoPlayer lost connection", () => {
     act(() =>
       hlsJS.latest?.emit("error", { fatal: true, type: "networkError", details: "fragLoadError" }),
     );
-    return video;
+    return { video, rerenderPlayer };
   }
 
   it("plays out what hls.js buffered before handing the loss to the reconnect", async () => {
     const onConnectionLost = vi.fn();
-    const video = await drainingHlsStream({ onConnectionLost });
+    const { video } = await drainingHlsStream({ onConnectionLost });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     expect(onConnectionLost).not.toHaveBeenCalled();
 
@@ -4690,7 +4690,7 @@ describe("VideoPlayer lost connection", () => {
 
   it("reconnects a draining HLS stream whose playhead stays stuck with media ahead", async () => {
     const onConnectionLost = vi.fn();
-    const video = await drainingHlsStream({ onConnectionLost });
+    const { video } = await drainingHlsStream({ onConnectionLost });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
     setElementBuffer(video, {
@@ -4712,7 +4712,7 @@ describe("VideoPlayer lost connection", () => {
 
   it("leaves a draining HLS stream alone while the viewer pauses", async () => {
     const onConnectionLost = vi.fn();
-    const video = await drainingHlsStream({ onConnectionLost });
+    const { video } = await drainingHlsStream({ onConnectionLost });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
     setElementBuffer(video, {
@@ -4738,7 +4738,10 @@ describe("VideoPlayer lost connection", () => {
     async ({ canSeekAnywhere, playing }) => {
       const onConnectionLost = vi.fn();
       const onReanchorSeek = vi.fn();
-      const video = await drainingHlsStream({ onConnectionLost, onReanchorSeek }, canSeekAnywhere);
+      const { video } = await drainingHlsStream(
+        { onConnectionLost, onReanchorSeek },
+        canSeekAnywhere,
+      );
       if (!playing) fireEvent.pause(video);
       expect(onConnectionLost).not.toHaveBeenCalled();
 
@@ -4748,6 +4751,35 @@ describe("VideoPlayer lost connection", () => {
       expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, playing);
     },
   );
+
+  it("reconnects a Watch Together seek a draining HLS stream cannot reach as paused", async () => {
+    const onConnectionLost = vi.fn();
+    const connection = roomConnection();
+    const { rerenderPlayer } = await drainingHlsStream({
+      onConnectionLost,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: connection,
+    });
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: {
+          command_id: "room-seek-1",
+          session_id: "session-1",
+          selection_revision: 1,
+          action: "seek",
+          position_seconds: 1_200,
+          execute_at: new Date().toISOString(),
+          issued_at: new Date().toISOString(),
+          playback_state: "paused",
+        },
+      },
+    });
+
+    await waitFor(() => expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, false));
+  });
 
   it("reconnects when hls.js fails again while the stream drains", async () => {
     const onConnectionLost = vi.fn();
