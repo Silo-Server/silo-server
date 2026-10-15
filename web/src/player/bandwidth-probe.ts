@@ -93,7 +93,10 @@ export async function measureBandwidthKbps(
     cache: "no-store",
     signal,
   });
-  if (!res.ok || !res.body) return undefined;
+  if (!res.ok || !res.body) {
+    await res.body?.cancel().catch(() => undefined);
+    return undefined;
+  }
   const reader = res.body.getReader();
   // The clock starts at the first chunk, so request latency and server
   // setup do not count against the link.

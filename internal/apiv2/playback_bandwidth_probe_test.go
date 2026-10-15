@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+func TestBandwidthProbeLimiterBoundsInFlightProbesPerAccount(t *testing.T) {
+	limiter := &bandwidthProbeLimiter{inFlight: map[int]int{}}
+	for range bandwidthProbeMaxInFlight {
+		if !limiter.acquire(1) {
+			t.Fatal("refused a probe under the limit")
+		}
+	}
+	if limiter.acquire(1) {
+		t.Fatal("admitted a probe over the limit")
+	}
+	if !limiter.acquire(2) {
+		t.Fatal("one account's probes blocked another account")
+	}
+	limiter.release(1)
+	if !limiter.acquire(1) {
+		t.Fatal("a finished probe did not free its slot")
+	}
+	for range bandwidthProbeMaxInFlight {
+		limiter.release(1)
+	}
+	limiter.release(2)
+	if len(limiter.inFlight) != 0 {
+		t.Fatalf("released accounts still tracked: %v", limiter.inFlight)
+	}
+}
+
 func TestPlaybackBandwidthProbe(t *testing.T) {
 	handler := NewHandler(parityDeps(false))
 	path := Prefix + "/playback/bandwidth-probe"

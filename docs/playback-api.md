@@ -42,7 +42,8 @@ membership, command-aware readiness, and ready/buffering/syncing member status.
 `GET /api/v2/playback/bandwidth-probe?size=N` (feature `bandwidth_probe_v1`)
 sends `N` random bytes, 1 to 100,000,000, default 1,000,000, as
 `application/octet-stream` with `Cache-Control: no-store`. It needs an
-authenticated account but no profile. The bytes are random so a compressing
+authenticated account but no profile. An account may run two probes at once
+on a server; a third gets `429 rate_limited` with `Retry-After`. The bytes are random so a compressing
 proxy cannot inflate the result. A client times the transfer from its first
 byte, may close the connection once it has timed enough, and sends the result
 as `bandwidth_estimate_kbps` on start and replan. Without a measurement a
@@ -55,6 +56,8 @@ are exempt from stream caps, like the Jellyfin-compatible `/Playback/BitrateTest
 The web app probes in the background a few seconds after sign-in, skips Data
 Saver and cellular connections and pages that are already playing media,
 cancels the probe when playback starts, and caches the result for 30 minutes.
+While Data Saver is on it sends no cached measurement, so the planner's metered
+limit applies.
 
 Every mutation body carries the `installation_id` the client read from
 capabilities. A different value is `409 installation_changed`: refresh
