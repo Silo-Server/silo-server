@@ -16,6 +16,13 @@ import { storage } from "@/utils/storage";
 const PROBE_BYTES = 40_000_000;
 /** How long to keep timing once bytes flow. Enough to see past TCP ramp-up. */
 const PROBE_TIME_BUDGET_MS = 2_000;
+/** A probe that has not delivered its first byte by then is abandoned. */
+const PROBE_FIRST_BYTE_DEADLINE_MS = 10_000;
+/**
+ * Slack past the time budget before a read that has stopped returning is cut
+ * off; the rate is then taken from the bytes that did arrive.
+ */
+const PROBE_STALLED_READ_GRACE_MS = 500;
 /** Ramp-up excluded from the rate when the probe ran long enough to spare it. */
 const PROBE_WARMUP_MS = 300;
 /** Shortest timed window, or smallest byte count, that yields a usable rate. */
@@ -87,17 +94,24 @@ export async function measureBandwidthKbps(
   signal: AbortSignal,
   clock: () => number = () => performance.now(),
 ): Promise<number | undefined> {
-  const { res } = await fetchWithSession(`/api/v2/playback/bandwidth-probe?size=${PROBE_BYTES}`, {
-    method: "GET",
-    headers: { ...V2_CLIENT_HEADERS, Accept: "application/octet-stream" },
-    cache: "no-store",
-    signal,
-  });
-  if (!res.ok || !res.body) {
-    await res.body?.cancel().catch(() => undefined);
-    return undefined;
-  }
-  const reader = res.body.getReader();
+  // The caller's signal cancels the probe; the first-byte deadline abandons a
+  // request or body that never starts flowing.
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(signal.reason);
+  if (signal.aborted) forwardAbort();
+  else signal.addEventListener("abort", forwardAbort, { once: true });
+  let firstByteTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(
+    () => controller.abort(),
+    PROBE_FIRST_BYTE_DEADLINE_MS,
+  );
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearTimers = () => {
+    clearTimeout(firstByteTimer);
+    clearTimeout(budgetTimer);
+    firstByteTimer = undefined;
+    budgetTimer = undefined;
+  };
+
   // The clock starts at the first chunk, so request latency and server
   // setup do not count against the link.
   let start: number | undefined;
@@ -105,21 +119,45 @@ export async function measureBandwidthKbps(
   let bytes = 0;
   let now = 0;
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      now = clock();
-      if (start === undefined) {
-        start = now;
-        continue;
+    const { res } = await fetchWithSession(`/api/v2/playback/bandwidth-probe?size=${PROBE_BYTES}`, {
+      method: "GET",
+      headers: { ...V2_CLIENT_HEADERS, Accept: "application/octet-stream" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) {
+      await res.body?.cancel().catch(() => undefined);
+      return undefined;
+    }
+    const reader = res.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        now = clock();
+        if (start === undefined) {
+          start = now;
+          clearTimeout(firstByteTimer);
+          firstByteTimer = undefined;
+          // Ends a read that stops returning, which the check below would
+          // never reach: cancelling resolves the pending read as done.
+          budgetTimer = setTimeout(
+            () => void reader.cancel().catch(() => undefined),
+            PROBE_TIME_BUDGET_MS + PROBE_STALLED_READ_GRACE_MS,
+          );
+          continue;
+        }
+        bytes += value.byteLength;
+        if (!warm && now - start >= PROBE_WARMUP_MS) warm = { at: now, bytes };
+        if (now - start >= PROBE_TIME_BUDGET_MS) break;
       }
-      bytes += value.byteLength;
-      if (!warm && now - start >= PROBE_WARMUP_MS) warm = { at: now, bytes };
-      if (now - start >= PROBE_TIME_BUDGET_MS) break;
+    } finally {
+      // Closing the body ends the transfer; the server stops at its next write.
+      await reader.cancel().catch(() => undefined);
     }
   } finally {
-    // Closing the body ends the transfer; the server stops at its next write.
-    await reader.cancel().catch(() => undefined);
+    clearTimers();
+    signal.removeEventListener("abort", forwardAbort);
   }
   if (start === undefined || now <= start) return undefined;
   const elapsed = now - start;
