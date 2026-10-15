@@ -8,6 +8,7 @@ import {
   buildClientCapabilitiesV3,
   buildClientPlaybackContextV3,
   buildDeliveriesV3,
+  detectBandwidthEstimateKbpsV3,
   detectHLSSupport,
   type WebCapabilityProbe,
 } from "./client-context-v3";
@@ -223,5 +224,40 @@ describe("browser decode engine capabilities", () => {
     expect(
       buildClientPlaybackContextV3(probe, engine).deliveries.original_http?.validated_claims,
     ).toHaveLength(2);
+  });
+});
+
+describe("detectBandwidthEstimateKbpsV3", () => {
+  const withDownlink = (downlink: unknown) =>
+    vi.stubGlobal("navigator", { connection: { downlink } });
+
+  it("reports a reading below the browser ceiling in kbps", () => {
+    withDownlink(4.5);
+    expect(detectBandwidthEstimateKbpsV3()).toBe(4500);
+  });
+
+  it("drops a reading at the browser's 10 Mbps ceiling", () => {
+    withDownlink(10);
+    expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+  });
+
+  it("prefers a fresh probe measurement over the downlink hint", () => {
+    withDownlink(10);
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBe(180_000);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("drops missing and implausibly low readings", () => {
+    withDownlink(undefined);
+    expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+    withDownlink(0.05);
+    expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
   });
 });

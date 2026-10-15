@@ -2564,6 +2564,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.ObserveDownloadDelivery = func(method, pattern string, handler http.Handler) http.Handler {
 		return observeNative(deps.StreamTelemetry, method, pattern, handler.ServeHTTP)
 	}
+	v2deps.ObserveBandwidthProbe = func(handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/bandwidth-probe", handler.ServeHTTP)
+	}
 
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {

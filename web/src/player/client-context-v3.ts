@@ -23,6 +23,7 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
+import { networkInformation, readMeasuredBandwidthKbps } from "./bandwidth-probe";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
 
@@ -236,22 +237,6 @@ export function buildDeliveriesV3(
 }
 
 /**
- * The slice of the Network Information API we use. It is not in the DOM lib
- * and is absent in Safari and Firefox, so everything here is best effort and
- * every reader tolerates `undefined`.
- */
-interface NetworkInformationLike {
-  saveData?: boolean;
-  downlink?: number;
-  type?: string;
-}
-
-function networkInformation(): NetworkInformationLike | undefined {
-  if (typeof navigator === "undefined") return undefined;
-  return (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
-}
-
-/**
  * Whether the user is on a connection they would rather not spend. Only
  * Data Saver is a real signal in a browser — cellular detection via
  * `connection.type` is unimplemented nearly everywhere — so we report exactly
@@ -262,18 +247,29 @@ export function detectMeteredV3(): boolean {
 }
 
 /**
+ * Browsers clamp `connection.downlink` to this ceiling (Chromium caps it at
+ * 10 Mbps), so a reading at the ceiling means "at least this fast", not a
+ * measured limit.
+ */
+const DOWNLINK_CEILING_MBPS = 10;
+
+/**
  * Best-effort downlink estimate in kbps for the planner's ladder choice.
  *
+ * A fresh measurement from the background bandwidth probe wins. Otherwise
  * `connection.downlink` is a coarse, rounded, deliberately fingerprint-resistant
- * number, so it is a hint and not a measurement. Returns undefined rather than a
- * fabricated value when the API is absent or the reading falls outside the
- * contract's 100..1_000_000 kbps bounds.
+ * hint, used only below the browser's ceiling. Returns undefined rather than a
+ * fabricated value when neither source has a usable reading, which lets Auto
+ * plan from the device and the source alone.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
+  const measured = readMeasuredBandwidthKbps();
+  if (measured !== undefined) return measured;
   const downlinkMbps = networkInformation()?.downlink;
   if (typeof downlinkMbps !== "number" || !Number.isFinite(downlinkMbps)) return undefined;
+  if (downlinkMbps >= DOWNLINK_CEILING_MBPS) return undefined;
   const kbps = Math.round(downlinkMbps * 1000);
-  if (kbps < 100 || kbps > 1_000_000) return undefined;
+  if (kbps < 100) return undefined;
   return kbps;
 }
 

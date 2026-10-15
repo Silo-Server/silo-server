@@ -1601,6 +1601,13 @@ also never targets more than the source's own bitrate, counted in the output
 codec (H.264 for a scaled encode, or HEVC for any encode when the planner
 chooses HEVC).
 
+`bandwidth_estimate_kbps` is optional and is the client's belief about its
+link, not a promise. An absent estimate removes the bandwidth term entirely, so
+`auto` plans from the device and the source alone; a client should omit the
+field rather than send a hint it knows is clamped, such as a browser's
+`navigator.connection.downlink`, which Chromium caps at 10 Mbps. Clients that
+can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api.md#bandwidth-probe)).
+
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
 start must never pay for. A rung whose toolchain turns out to be missing degrades

@@ -419,6 +419,7 @@ export const v2Operations = {
   "GET /api/v2/onboarding/state": "getOnboardingState",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
   "GET /api/v2/password-resets/{token}": "lookupPasswordReset",
+  "GET /api/v2/playback/bandwidth-probe": "getPlaybackBandwidthProbe",
   "GET /api/v2/playback/capabilities": "getPlaybackCapabilities",
   "GET /api/v2/playback/sessions/control/capabilities": "getPlaybackControlSocketCapabilities",
   "GET /api/v2/playback/sessions/{session_id}/control/ws": "connectPlaybackControlSocket",

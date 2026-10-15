@@ -25,6 +25,7 @@ import {
 } from "../client-context-v3";
 import { buildRouteEventV3 } from "../route-events-v3";
 import { reportSessionRouteEventV2 } from "../route-events-v2";
+import { cancelBandwidthProbe } from "../bandwidth-probe";
 import { replanV2 } from "../lifecycle-v2";
 import { takePlaybackIntent } from "../first-frame";
 import { buildPlayerStreamUrl } from "../stream-url";
@@ -725,6 +726,8 @@ export function usePlaybackSession(
       subtitleTrackIndex: number | undefined,
       audioTrackIndex: number | null | undefined = explicitAudioTrackIndex,
     ): Promise<DecisionResponseV3> => {
+      // A background probe would compete with the stream about to start.
+      cancelBandwidthProbe();
       const body = buildStartRequestV3({
         extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
         fileId: targetFileId,
