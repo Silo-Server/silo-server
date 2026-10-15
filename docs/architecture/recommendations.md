@@ -231,7 +231,8 @@ handler filters (Popular, Recently Added, the airings Discover blends in,
 Watch Tonight), an item's "More like this" list (left out before ranking, on
 the native and Jellyfin surfaces), and the Home and library discovery
 sections `sections.HidesNotInterested` names, which drop marked titles after
-the shared list cache and refetch a wider window to refill. Library
+the shared list cache and may come out shorter: several draw a daily sample
+sized by the row's limit, so a wider refetch would swap unrelated titles. Library
 browsing, search, item detail, playback, collections, the profile's own
 lists, Continue Watching and Next Up keep the title. Because You Watched
 never anchors on a marked title.
@@ -385,8 +386,10 @@ library sections, which scope the whole row to their libraries.
   share, its main-row slots are re-split by the reduced weights, and under
   0.3 the anchor leaves the main row and the cluster row is cached empty.
   The anchors left fetch again for the slots they gained, so the row keeps
-  its length. A profile whose every anchor leaves gets no main row: a row
-  around the averaged taste vector would serve those interests again.
+  its length, and their shares are taken again from the wider pools. A
+  profile whose every anchor leaves gets a main row cached empty, rather
+  than one around the averaged taste vector, which would serve those
+  interests again; reads count the empty row as built.
   The pushes only reorder the pool, so rows keep their length. A profile
   with no turned-away title gets exactly the rows it would without the
   step. Rows are not built while the turned-away titles, or a pool's

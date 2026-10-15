@@ -713,6 +713,13 @@ func (h *ItemsHandler) writeSimilarFromScored(w http.ResponseWriter, r *http.Req
 }
 
 // writeSimilarFromGenre finds similar items by genre when the recommender is unavailable.
+// similarGenreFallbackWindow is how many genre titles the Similar fallback
+// reads for a list of limit: three times the list and the anchor, so marked
+// titles the list leaves out do not shorten it.
+func similarGenreFallbackWindow(limit int) int {
+	return 3*limit + 1
+}
+
 // notInterestedLister is the optional part of UserDataService that reads a
 // profile's Not interested marks. The direct service implements it.
 type notInterestedLister interface {
@@ -742,7 +749,9 @@ func (h *ItemsHandler) writeSimilarFromGenre(w http.ResponseWriter, r *http.Requ
 	params.Set("genre", genre)
 	params.Set("sort", "rating_tmdb")
 	params.Set("order", "desc")
-	params.Set("limit", strconv.Itoa(limit+1))
+	// The anchor and the profile's Not interested titles are dropped below,
+	// so read a deeper window than the list shows.
+	params.Set("limit", strconv.Itoa(similarGenreFallbackWindow(limit)))
 
 	result, err := h.content.BrowseItems(r.Context(), session, params)
 	if err != nil {

@@ -189,28 +189,44 @@ func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, li
 	slots := allocateAnchorSlots(weights, limit)
 	lists := make([][]ScoredItem, len(anchors))
 	shares := make([]float64, len(anchors))
+	fetched := make([]int, len(anchors))
 	for i := range anchors {
-		if lists[i], shares[i], err = b.anchorList(ctx, anchors[i], i, anchorPoolFactor*slots[i], excludeIDs, filter); err != nil {
+		fetched[i] = anchorPoolFactor * slots[i]
+		if lists[i], shares[i], err = b.anchorList(ctx, anchors[i], i, fetched[i], excludeIDs, filter); err != nil {
 			return nil, nil, false, err
 		}
 	}
-	kept, keptSlots := shrinkAvertedAnchors(weights, shares, slots, limit)
-	if len(kept) == 0 {
-		return nil, nil, true, nil
-	}
-	keptLists := make([][]ScoredItem, len(kept))
-	for k, i := range kept {
-		if keptSlots[k] > slots[i] {
-			if lists[i], _, err = b.anchorList(ctx, anchors[i], i, anchorPoolFactor*keptSlots[k], excludeIDs, filter); err != nil {
-				return nil, nil, false, err
+	// A refill widens an anchor's pool, which moves the median its share is
+	// measured against (see aversion.apply), so the split is taken again
+	// until no anchor gains slots it has not fetched for. Fetches only grow,
+	// up to anchorPoolFactor×limit each, so this ends.
+	for {
+		kept, keptSlots := shrinkAvertedAnchors(weights, shares, slots, limit)
+		if len(kept) == 0 {
+			return nil, nil, true, nil
+		}
+		refilled := false
+		for k, i := range kept {
+			if n := anchorPoolFactor * keptSlots[k]; n > fetched[i] {
+				fetched[i] = n
+				if lists[i], shares[i], err = b.anchorList(ctx, anchors[i], i, n, excludeIDs, filter); err != nil {
+					return nil, nil, false, err
+				}
+				refilled = true
 			}
 		}
-		keptLists[k] = lists[i]
-		// An anchor that leaves the row leaves the pool too, so type
-		// supplements cannot bring its titles back.
-		pool = mergeScoredCandidates(pool, lists[i])
+		if refilled {
+			continue
+		}
+		keptLists := make([][]ScoredItem, len(kept))
+		for k, i := range kept {
+			keptLists[k] = lists[i]
+			// An anchor that leaves the row leaves the pool too, so type
+			// supplements cannot bring its titles back.
+			pool = mergeScoredCandidates(pool, lists[i])
+		}
+		return interleaveAnchors(keptLists, keptSlots, limit), pool, false, nil
 	}
-	return interleaveAnchors(keptLists, keptSlots, limit), pool, false, nil
 }
 
 // anchorList fetches n candidates around anchor a (the i-th), ranks them

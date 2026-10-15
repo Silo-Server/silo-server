@@ -1088,7 +1088,13 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		if aggregatedRow != nil {
 			mainItems = aggregatedRow.Items
 		}
-		putOrDrop(RecTypeForYouMain, "", mainItems)
+		if aggregatedRow != nil && len(mainItems) == 0 {
+			// Every interest was turned away: cache the row empty, so
+			// reads know it was built rather than ask for it again.
+			put(RecTypeForYouMain, "", []ScoredItem{})
+		} else {
+			putOrDrop(RecTypeForYouMain, "", mainItems)
+		}
 
 		// Cache per-cluster ForYou rows. clusterRows logs each cluster whose
 		// candidates failed and returns no row for it, so its cached row

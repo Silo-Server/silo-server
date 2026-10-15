@@ -271,8 +271,9 @@ func TestAversionRefillsTheMainRowAfterDroppingAnInterest(t *testing.T) {
 	}
 }
 
-// A profile that turned away every interest gets no main row, rather than a
-// row around its averaged taste that would serve those interests again.
+// A profile that turned away every interest gets a main row built empty,
+// rather than a row around its averaged taste that would serve those
+// interests again.
 func TestAversionDropsTheMainRowWhenEveryInterestIsTurnedAway(t *testing.T) {
 	c := newToyCatalog()
 	a := relevancePersonas(c)["A"]
@@ -289,7 +290,7 @@ func TestAversionDropsTheMainRowWhenEveryInterestIsTurnedAway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if main != nil {
-		t.Fatalf("main row of %d items after every interest was turned away, want none", len(main.Items))
+	if main == nil || len(main.Items) != 0 {
+		t.Fatalf("main row %v after every interest was turned away, want one built empty", main)
 	}
 }

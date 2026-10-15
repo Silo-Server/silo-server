@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -477,12 +479,17 @@ func (genreFallbackContent) GetItemDetail(_ context.Context, _ *Session, id stri
 	return &upstreamItemDetail{ContentID: id, Type: "movie", Title: "Anchor", Genres: []string{"Drama"}}, nil
 }
 
-func (genreFallbackContent) BrowseItems(context.Context, *Session, url.Values) (*upstreamBrowseResponse, error) {
-	return &upstreamBrowseResponse{Items: []upstreamListItem{
+// BrowseItems answers the first limit dramas, best first.
+func (genreFallbackContent) BrowseItems(_ context.Context, _ *Session, params url.Values) (*upstreamBrowseResponse, error) {
+	all := []upstreamListItem{
 		{ContentID: "movie-a", Type: "movie", Title: "A"},
 		{ContentID: "movie-marked", Type: "movie", Title: "Marked"},
+		{ContentID: "movie-marked-2", Type: "movie", Title: "Marked 2"},
 		{ContentID: "movie-b", Type: "movie", Title: "B"},
-	}}, nil
+		{ContentID: "movie-c", Type: "movie", Title: "C"},
+	}
+	limit, _ := strconv.Atoi(params.Get("limit"))
+	return &upstreamBrowseResponse{Items: all[:min(limit, len(all))]}, nil
 }
 
 // markingUserData reports movie-marked as marked Not interested, or fails.
@@ -495,17 +502,24 @@ func (m markingUserData) ListNotInterestedByMediaItems(_ context.Context, _ *Ses
 	if m.err != nil {
 		return nil, m.err
 	}
-	return map[string]bool{"movie-marked": slices.Contains(ids, "movie-marked")}, nil
+	marked := map[string]bool{}
+	for _, id := range ids {
+		if strings.HasPrefix(id, "movie-marked") {
+			marked[id] = true
+		}
+	}
+	return marked, nil
 }
 
 // The genre fallback, which serves whenever the recommender has nothing,
-// leaves out the profile's Not interested titles, and answers nothing when
-// it cannot read them rather than showing them.
+// leaves out the profile's Not interested titles and still fills the list
+// from deeper in the genre, and answers nothing when it cannot read them
+// rather than showing them.
 func TestCompatSimilarGenreFallbackLeavesOutMarkedTitles(t *testing.T) {
 	codec := NewResourceIDCodec()
 	similar := func(userData UserDataService) []string {
 		h := &ItemsHandler{codec: codec, mapper: newMapper(codec, nil), content: genreFallbackContent{}, userData: userData}
-		req := httptest.NewRequest(http.MethodGet, "/Items/x/Similar", nil)
+		req := httptest.NewRequest(http.MethodGet, "/Items/x/Similar?Limit=2", nil)
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", codec.EncodeStringID(EncodedIDItem, "movie-anchor"))
 		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)

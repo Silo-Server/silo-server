@@ -128,7 +128,10 @@ export function useToggleNotInterested(itemId: string) {
     onMutate: async (authority) => {
       if (!isCapturedProfileAuthorityActive(authority)) return;
       await cancelItemDetailQueries(queryClient, itemId);
-      setDetailNotInterested(queryClient, itemId, false);
+      // The profile may have switched while the reads were cancelled.
+      if (isCapturedProfileAuthorityActive(authority)) {
+        setDetailNotInterested(queryClient, itemId, false);
+      }
     },
     onError: (_err, authority) => {
       if (isCapturedProfileAuthorityActive(authority)) {
@@ -158,7 +161,8 @@ export function useToggleNotInterested(itemId: string) {
     onMutate: async ({ marked, authority }) => {
       if (!isActive(authority)) return;
       await cancelItemDetailQueries(queryClient, itemId);
-      setDetailNotInterested(queryClient, itemId, !marked);
+      // The profile may have switched while the reads were cancelled.
+      if (isActive(authority)) setDetailNotInterested(queryClient, itemId, !marked);
     },
     onError: (_err, { marked, authority }) => {
       if (isActive(authority)) setDetailNotInterested(queryClient, itemId, marked);
