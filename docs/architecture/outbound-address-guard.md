@@ -1,8 +1,8 @@
 # Outbound address guard
 
 Some features make Silo send HTTP requests to an address a user typed or a
-third party supplied: history import, webhook sync, notification webhooks, and
-collection posters set from a URL.
+third party supplied: history import, webhook sync, notification webhooks,
+collection posters set from a URL, and artwork URLs from metadata providers.
 The server sits on a network the user may not: a household LAN, or a cluster
 with its database, cache, transcode nodes, and a cloud metadata endpoint. An
 unchecked address lets anyone who can sign in probe that network from the
@@ -95,8 +95,10 @@ it. See [Notifications](notifications.md#trust-model-and-ssrf-guard).
 ## Artwork downloads
 
 Artwork Silo downloads on its own (metadata refresh, image-cache jobs, person
-images) comes from Public addresses only (`imagecache`). An image an admin
-applies through `POST /api/v2/admin/items/{id}/images/apply` (and its v1
+images) comes from Public addresses only (`imagecache`). Provider artwork URLs
+are untrusted, so these downloads use the netguard transport too, checked on
+every dial and redirect; the cache keeps no address list of its own. An image
+an admin applies through `POST /api/v2/admin/items/{id}/images/apply` (and its v1
 counterpart) is trusted with the local network, like the import sources an
 admin configures. That covers a URL the admin typed and one picked from the
 provider list, since the server cannot tell them apart. The handler marks the
@@ -135,3 +137,9 @@ answer, as it could from its own machine. In a container with bridge
 networking the server cannot see the host's public address, so a request to
 it is not recognized as the server's own. Run the container behind a firewall
 that also applies to traffic from the container if that matters.
+
+A resolver that answers public names with addresses netguard classes as
+Private makes those hosts unreachable for untrusted requests, provider artwork
+downloads included. Two setups do this: proxy routers in fake-IP DNS mode,
+which answer from `198.18.0.0/15`, and DNS64 on an IPv6-only network, which
+answers IPv4-only hosts with `64:ff9b::/96` addresses.
