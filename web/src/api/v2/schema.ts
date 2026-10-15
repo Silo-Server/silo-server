@@ -9627,7 +9627,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. An account may run two probes at once; a third is refused with 429. */
+    /** Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. An account may run two probes at once on a server; a third is refused with 429. */
     get: operations["getPlaybackBandwidthProbe"];
     put?: never;
     post?: never;

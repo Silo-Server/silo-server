@@ -221,6 +221,10 @@ export async function measureBandwidthKbps(
 }
 
 let scheduledTimer: ReturnType<typeof setTimeout> | undefined;
+/** Bumped by stopBandwidthProbes so a stopped schedule never re-arms. */
+let scheduleGeneration = 0;
+/** Web Lock that lets one tab at a time run a probe. */
+const PROBE_LOCK_NAME = "silo-bandwidth-probe";
 let activeProbe: AbortController | undefined;
 
 /** How soon to look again when a probe could not run or did not finish. */
@@ -256,42 +260,60 @@ function probeAllowed(): boolean {
  */
 export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => void {
   stopBandwidthProbes();
+  const generation = scheduleGeneration;
   const schedule = (ms: number) => {
+    if (generation !== scheduleGeneration) return;
     scheduledTimer = setTimeout(run, Math.max(0, ms));
+  };
+  // Schedules the next look for when a fresh cached result expires.
+  const awaitExpiry = (): boolean => {
+    const now = Date.now();
+    const stored = readStored(now);
+    if (!stored) return false;
+    schedule(stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - now + 1000);
+    return true;
+  };
+  const probe = async () => {
+    const controller = new AbortController();
+    activeProbe = controller;
+    try {
+      const kbps = await measureBandwidthKbps(controller.signal);
+      if (kbps !== undefined && !controller.signal.aborted) writeStored(kbps, Date.now());
+    } catch {
+      // Best effort: without a measurement playback plans as it did before.
+    } finally {
+      if (activeProbe === controller) activeProbe = undefined;
+      // A stored result schedules its own expiry; a failed or aborted probe
+      // waits out the retry interval.
+      if (!awaitExpiry()) schedule(PROBE_RETRY_MS);
+    }
   };
   const run = () => {
     scheduledTimer = undefined;
-    const now = Date.now();
-    const stored = readStored(now);
-    if (stored) {
-      schedule(stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - now + 1000);
-      return;
-    }
+    if (awaitExpiry()) return;
     if (!probeAllowed()) {
       schedule(PROBE_RETRY_MS);
       return;
     }
-    const controller = new AbortController();
-    activeProbe = controller;
-    void measureBandwidthKbps(controller.signal)
-      .then((kbps) => {
-        if (kbps !== undefined && !controller.signal.aborted) writeStored(kbps, Date.now());
+    // Tabs share the cached result, so only one of them measures at a time:
+    // two probes at once would split the link and both read low.
+    const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+    if (!locks) {
+      void probe();
+      return;
+    }
+    locks
+      .request(PROBE_LOCK_NAME, { ifAvailable: true }, async (lock) => {
+        if (!lock) {
+          // Another tab is measuring; its result is waiting on the next look.
+          schedule(PROBE_RETRY_MS);
+          return;
+        }
+        // The tab that held the lock may have just stored a result.
+        if (awaitExpiry() || generation !== scheduleGeneration) return;
+        await probe();
       })
-      .catch(() => {
-        // Best effort: without a measurement playback plans as it did before.
-      })
-      .finally(() => {
-        if (activeProbe !== controller) return;
-        activeProbe = undefined;
-        // A stored result schedules its own expiry; a failed or aborted probe
-        // waits out the retry interval.
-        const stored = readStored(Date.now());
-        schedule(
-          stored
-            ? stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - Date.now() + 1000
-            : PROBE_RETRY_MS,
-        );
-      });
+      .catch(() => schedule(PROBE_RETRY_MS));
   };
   schedule(delayMs);
   return stopBandwidthProbes;
@@ -307,6 +329,7 @@ export function cancelBandwidthProbe(): void {
 
 /** Stops the schedule and any running probe, e.g. on sign-out. */
 export function stopBandwidthProbes(): void {
+  scheduleGeneration++;
   if (scheduledTimer !== undefined) {
     clearTimeout(scheduledTimer);
     scheduledTimer = undefined;
