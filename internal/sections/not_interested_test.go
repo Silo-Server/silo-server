@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -81,5 +82,16 @@ func TestWithoutNotInterestedFailsOpen(t *testing.T) {
 	items, total := f.withoutNotInterested(t.Context(), ResolvedSection{ItemLimit: 3}, 1, "p", row, 3)
 	if len(items) != 3 || total != 3 {
 		t.Fatalf("row = %v, %d; want it unchanged", rowIDs(items), total)
+	}
+}
+
+// A discovery recipe suggests titles the profile did not pick, so each one
+// must leave marked titles out.
+func TestHidesNotInterestedCoversDiscoveryRecipes(t *testing.T) {
+	for _, recipe := range recipes.List() {
+		def := recipe.Definition()
+		if def.Category == recipes.CategoryDiscovery && !HidesNotInterested(SectionType(def.Type)) {
+			t.Errorf("discovery recipe %q keeps Not interested titles", def.Type)
+		}
 	}
 }

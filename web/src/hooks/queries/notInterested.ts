@@ -35,6 +35,7 @@ export const NOT_INTERESTED_HIDING_SECTION_TYPES: ReadonlySet<string> = new Set(
   "critically_acclaimed",
   "award_winners",
   "forgotten_favorites",
+  "format_showcase",
   "editorial_spotlight",
   "seasonal_themed",
   "mood_collection",
