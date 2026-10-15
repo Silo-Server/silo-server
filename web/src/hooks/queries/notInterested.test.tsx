@@ -23,6 +23,7 @@ vi.mock("@/api/client", () => ({
     profileId: mocks.activeProfile,
     profileToken: null,
   }),
+  isProfileRequestContextCurrent: () => true,
   isCapturedProfileAuthorityActive: (snapshot: { profileId: string }) =>
     snapshot.profileId === mocks.activeProfile,
 }));
@@ -124,6 +125,28 @@ describe("useToggleNotInterested", () => {
     expect(init.method).toBe("DELETE");
     expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("p-owner");
     // The other profile's caches are left alone.
+    expect(rowIDs(queryClient, "most_watched")).toEqual(["movie:heat", "movie:other"]);
+  });
+
+  it("keeps a mark in flight on its profile when the profile switches", async () => {
+    let finish: (value: ReturnType<typeof noContent>) => void = () => {};
+    mocks.fetchWithSession.mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve)),
+    );
+    const { result } = renderHook(() => useToggleNotInterested("movie:heat"), { wrapper });
+
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.mutateAsync(false);
+    });
+    await waitFor(() => expect(mocks.fetchWithSession).toHaveBeenCalledTimes(1));
+    mocks.activeProfile = "p-other";
+    queryClient.setQueryData(sectionKeys.homeItems("most_watched"), homeRow("most_watched"));
+    finish(noContent());
+    await act(() => pending);
+
+    const [, init] = mocks.fetchWithSession.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("p-owner");
     expect(rowIDs(queryClient, "most_watched")).toEqual(["movie:heat", "movie:other"]);
   });
 

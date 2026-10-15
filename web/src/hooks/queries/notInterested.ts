@@ -141,36 +141,38 @@ export function useToggleNotInterested(itemId: string) {
     },
   });
 
-  return useMutation({
+  const toggle = useMutation({
     ...personalStateMutationOptions,
-    mutationFn: (currentlyMarked: boolean) =>
-      currentlyMarked
+    mutationFn: ({ marked, authority }: ToggleVariables) =>
+      marked
         ? v2("DELETE /api/v2/not-interested/{item_id}", {
             path: { item_id: itemId },
+            profileContext: authority ?? undefined,
             timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
           })
         : v2("PUT /api/v2/not-interested/{item_id}", {
             path: { item_id: itemId },
+            profileContext: authority ?? undefined,
             timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
           }),
-    onMutate: async (currentlyMarked: boolean) => {
-      const authority = captureProfileRequestContext();
+    onMutate: async ({ marked, authority }) => {
+      if (!isActive(authority)) return;
       await cancelItemDetailQueries(queryClient, itemId);
-      setDetailNotInterested(queryClient, itemId, !currentlyMarked);
-      return { authority };
+      setDetailNotInterested(queryClient, itemId, !marked);
     },
-    onError: (_err, currentlyMarked) => {
-      setDetailNotInterested(queryClient, itemId, currentlyMarked);
+    onError: (_err, { marked, authority }) => {
+      if (isActive(authority)) setDetailNotInterested(queryClient, itemId, marked);
       toast.error("Failed to update Not interested");
     },
-    onSuccess: (_data, currentlyMarked, context) => {
-      if (currentlyMarked) {
+    onSuccess: (_data, { marked, authority }) => {
+      if (marked) {
         toast.success("Back in your recommendations");
         return;
       }
-      removeItemFromHomeSectionCaches(queryClient, itemId, NOT_INTERESTED_HIDING_SECTION_TYPES);
-      bumpHomeRefreshSignal(queryClient);
-      const authority = context?.authority;
+      if (isActive(authority)) {
+        removeItemFromHomeSectionCaches(queryClient, itemId, NOT_INTERESTED_HIDING_SECTION_TYPES);
+        bumpHomeRefreshSignal(queryClient);
+      }
       toast.success(
         "We won't recommend this",
         authority
@@ -178,6 +180,29 @@ export function useToggleNotInterested(itemId: string) {
           : undefined,
       );
     },
-    onSettled: settle,
+    onSettled: (_data, _err, { authority }) => {
+      if (isActive(authority)) settle();
+    },
   });
+
+  // The profile is captured when the action is chosen: the write goes out as
+  // that profile and its cache updates apply only while it is still active.
+  return {
+    isPending: toggle.isPending,
+    mutate: (marked: boolean) =>
+      toggle.mutate({ marked, authority: captureProfileRequestContext() }),
+    mutateAsync: (marked: boolean) =>
+      toggle.mutateAsync({ marked, authority: captureProfileRequestContext() }),
+  };
+}
+
+interface ToggleVariables {
+  /** Whether the title is marked now. */
+  marked: boolean;
+  authority: ProfileRequestContextSnapshot | null;
+}
+
+/** A write with no captured profile ran as whichever profile was active. */
+function isActive(authority: ProfileRequestContextSnapshot | null) {
+  return authority === null || isCapturedProfileAuthorityActive(authority);
 }
