@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"sync"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -15,7 +16,37 @@ const (
 	opGetPlaybackBandwidthProbe = "getPlaybackBandwidthProbe"
 	bandwidthProbeSizeParam     = "size"
 	bandwidthProbeDefaultSize   = 1_000_000
+	// bandwidthProbeMaxInFlight bounds the probes one account can run at once
+	// on this server. A client needs one at a time; the request rate limiter
+	// counts requests, not the bytes each one streams.
+	bandwidthProbeMaxInFlight = 2
 )
+
+// bandwidthProbeLimiter counts the probes each account has in flight.
+type bandwidthProbeLimiter struct {
+	mu       sync.Mutex
+	inFlight map[int]int
+}
+
+func (l *bandwidthProbeLimiter) acquire(userID int) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.inFlight[userID] >= bandwidthProbeMaxInFlight {
+		return false
+	}
+	l.inFlight[userID]++
+	return true
+}
+
+func (l *bandwidthProbeLimiter) release(userID int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.inFlight[userID] <= 1 {
+		delete(l.inFlight, userID)
+		return
+	}
+	l.inFlight[userID]--
+}
 
 // registerPlaybackBandwidthProbe serves random bytes a client times to
 // estimate its throughput to this server for bandwidth_estimate_kbps.
@@ -33,11 +64,12 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 		"422": {Description: http.StatusText(http.StatusUnprocessableEntity), Content: map[string]*huma.MediaType{problemContentType: {Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[Problem](), true, "")}}},
 	}
 	op := humaOp(http.MethodGet, Prefix+"/playback/bandwidth-probe", opGetPlaybackBandwidthProbe, playbackTag,
-		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback.")
+		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. An account may run two probes at once; a third is refused with 429.")
 	op.Parameters = params
 	op.Responses = responses
 	raw := RawOperation{Operation: Operation{Operation: op, Class: ClassAuthenticated}, Protocol: "bandwidth-probe",
 		Reason: "A throughput measurement needs an unbuffered, uncompressible byte stream the client can time and abandon mid-transfer."}
+	limiter := &bandwidthProbeLimiter{inFlight: map[int]int{}}
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		size := bandwidthProbeDefaultSize
 		if value := r.URL.Query().Get(bandwidthProbeSizeParam); value != "" {
@@ -48,10 +80,18 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 			}
 			size = parsed
 		}
-		if claims := claimsFrom(r.Context()); claims != nil {
-			streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID),
-				StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
+		claims := claimsFrom(r.Context())
+		if claims == nil {
+			writeProblem(w, r, NewProblem(TypeAuthenticationRequired, "Authentication is required."))
+			return
 		}
+		if !limiter.acquire(claims.UserID) {
+			writeProblem(w, r, NewProblem(TypeRateLimited, "This account already has bandwidth probes running.").WithRetryAfter(5))
+			return
+		}
+		defer limiter.release(claims.UserID)
+		streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID),
+			StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
 		w.Header().Set("Content-Type", playbackMediaBinary)
 		w.Header().Set(playbackContentLength, strconv.Itoa(size))
 		w.Header().Set(playbackCacheControlHeader, "no-store")

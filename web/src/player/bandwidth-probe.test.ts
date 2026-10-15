@@ -69,8 +69,10 @@ describe("measureBandwidthKbps", () => {
   });
 
   it("returns nothing for a failed or too-short probe", async () => {
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    const cancel = vi.fn(async () => undefined);
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: { cancel } } });
     expect(await measureBandwidthKbps(new AbortController().signal)).toBeUndefined();
+    expect(cancel).toHaveBeenCalled();
 
     const tiny = timedBody(3, 1000, 10);
     fetchWithSession.mockResolvedValue({ res: tiny.res });

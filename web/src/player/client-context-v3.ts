@@ -256,16 +256,20 @@ const DOWNLINK_CEILING_MBPS = 10;
 /**
  * Best-effort downlink estimate in kbps for the planner's ladder choice.
  *
- * A fresh measurement from the background bandwidth probe wins. Otherwise
+ * A fresh measurement from the background bandwidth probe wins, unless Data
+ * Saver is on: the planner applies its metered limit only when no estimate is
+ * sent, and a measurement taken before the viewer turned Data Saver on must not
+ * override that choice. Otherwise
  * `connection.downlink` is a coarse, rounded, deliberately fingerprint-resistant
  * hint, used only below the browser's ceiling. Returns undefined rather than a
  * fabricated value when neither source has a usable reading, which lets Auto
  * plan from the device and the source alone.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
-  const measured = readMeasuredBandwidthKbps();
+  const connection = networkInformation();
+  const measured = connection?.saveData === true ? undefined : readMeasuredBandwidthKbps();
   if (measured !== undefined) return measured;
-  const downlinkMbps = networkInformation()?.downlink;
+  const downlinkMbps = connection?.downlink;
   if (typeof downlinkMbps !== "number" || !Number.isFinite(downlinkMbps)) return undefined;
   if (downlinkMbps >= DOWNLINK_CEILING_MBPS) return undefined;
   const kbps = Math.round(downlinkMbps * 1000);
