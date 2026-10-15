@@ -1242,6 +1242,8 @@ export default function MediaItemMenu({
   const hasFinePointer = useHasFinePointer();
   const [currentUserState, setCurrentUserState] = useState(userState);
   const lastSyncedUserStateRef = useRef(userState);
+  const activeProfileId = currentProfile?.id;
+  const lastSyncedProfileRef = useRef(activeProfileId);
   // A card that has never been hovered, focused, or used mounts none of the
   // action machinery — a home page holds hundreds of cards.
   const [engineMounted, setEngineMounted] = useState(false);
@@ -1263,7 +1265,11 @@ export default function MediaItemMenu({
 
   useEffect(() => {
     const lastSynced = lastSyncedUserStateRef.current;
+    // A profile switch always resyncs: the local state may still hold the
+    // earlier profile's optimistic change while the props look unchanged.
+    const sameProfile = lastSyncedProfileRef.current === activeProfileId;
     if (
+      sameProfile &&
       lastSynced?.played === userState?.played &&
       lastSynced?.is_favorite === userState?.is_favorite &&
       lastSynced?.in_watchlist === userState?.in_watchlist &&
@@ -1272,8 +1278,9 @@ export default function MediaItemMenu({
       return;
     }
     lastSyncedUserStateRef.current = userState;
+    lastSyncedProfileRef.current = activeProfileId;
     setCurrentUserState(userState);
-  }, [userState]);
+  }, [userState, activeProfileId]);
 
   const dismissLabel =
     dismissAction?.surface === "continue_watching"
