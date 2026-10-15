@@ -188,7 +188,7 @@ func TestCancelByLibraryStillCancelsRunningScanDB(t *testing.T) {
 		t.Fatalf("load run: %v", err)
 	}
 	if got.Status != StatusCancelled {
-		t.Fatalf("run after cancel = status %s, want cancelled", got.Status)
+		t.Fatalf("run after cancel = status %s, want %s", got.Status, StatusCancelled)
 	}
 	if active, err := repo.GetActiveByScope(ctx, folderID, ModeLibrary, ""); !errors.Is(err, ErrScanRunNotFound) {
 		t.Fatalf("active run after cancel = %#v, %v; want none", active, err)
@@ -206,7 +206,7 @@ func TestRequeueLeavesACancelledRunCancelledDB(t *testing.T) {
 
 	got, changed, err := repo.Requeue(ctx, run.ID, run.StartedAt)
 	if err != nil || changed || got.Status != StatusCancelled {
-		t.Fatalf("requeue after cancel = %#v changed=%v err=%v, want the run left cancelled", got, changed, err)
+		t.Fatalf("requeue after cancel = %#v changed=%v err=%v, want the run left %s", got, changed, err, StatusCancelled)
 	}
 }
 
