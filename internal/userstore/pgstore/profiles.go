@@ -357,12 +357,18 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Lock the profile's collections before anything below takes their
-	// revision rows: the visibility and item deletes advance the revisions
-	// through triggers, and a collection update locks the collection first,
-	// then its revision, so taking them the other way round can deadlock.
-	if _, err := tx.Exec(ctx,
-		`SELECT 1 FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2 ORDER BY id FOR UPDATE`,
+	// Lock every collection whose revision the deletes below advance, in id
+	// order, before taking any revision row: the profile's own collections
+	// and those it has visibility rows on. The visibility and item deletes
+	// advance revisions through triggers, and a collection update, or
+	// another profile's delete, locks collections first; taking them in
+	// another order can deadlock.
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM user_personal_collections
+		WHERE user_id = $1 AND (profile_id = $2 OR id IN (
+			SELECT collection_id FROM user_personal_collection_profiles WHERE user_id = $1 AND profile_id = $2
+		))
+		ORDER BY id FOR UPDATE`,
 		s.userID, id); err != nil {
 		return fmt.Errorf("locking collections of profile %s: %w", id, err)
 	}

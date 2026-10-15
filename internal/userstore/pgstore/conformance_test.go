@@ -446,3 +446,64 @@ func TestPostgresConcurrentSectionOverrideSaves(t *testing.T) {
 		}
 	}
 }
+
+// Two profiles with legacy visibility rows on each other's collections can
+// be deleted at the same time: each delete locks every collection it touches,
+// in id order, before advancing any revision, so neither waits on the other
+// in a cycle.
+func TestPostgresConcurrentProfileDeletesWithCrossVisibility(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	for round := range 20 {
+		var userID int
+		if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+			fmt.Sprintf("conf-crossdelete-%d-%d", round, time.Now().UnixNano())).Scan(&userID); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID) })
+		store := newStore(pool, userID)
+		profiles := []string{"keep", "a", "b"}
+		for _, id := range profiles {
+			if err := store.CreateProfile(ctx, userstore.Profile{ID: id, Name: id}); err != nil {
+				t.Fatalf("CreateProfile %s: %v", id, err)
+			}
+		}
+		collections := map[string]string{}
+		for _, id := range []string{"a", "b"} {
+			c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: id, Name: "Picks of " + id})
+			if err != nil {
+				t.Fatalf("CreateCollection %s: %v", id, err)
+			}
+			collections[id] = c.ID
+		}
+		// Legacy allow-list rows: each profile listed on the other's collection.
+		for viewer, owner := range map[string]string{"a": "b", "b": "a"} {
+			if _, err := pool.Exec(ctx, `INSERT INTO user_personal_collection_profiles (user_id, collection_id, profile_id) VALUES ($1, $2, $3)`,
+				userID, collections[owner], viewer); err != nil {
+				t.Fatalf("seed visibility: %v", err)
+			}
+		}
+
+		var wg sync.WaitGroup
+		errs := make(chan error, 2)
+		for _, id := range []string{"a", "b"} {
+			wg.Go(func() { errs <- newStore(pool, userID).DeleteProfile(ctx, id) })
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: concurrent DeleteProfile: %v", round, err)
+			}
+		}
+	}
+}
