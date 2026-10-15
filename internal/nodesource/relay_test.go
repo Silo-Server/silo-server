@@ -381,19 +381,13 @@ func TestRelayGivesUpOnAStalledUpstreamButKeepsTheHandle(t *testing.T) {
 		failures = append(failures, injection{status: 500})
 	}
 	core.queue(failures...)
-	if h.UpstreamFailed() {
-		t.Fatal("a fresh handle reports an upstream failure")
-	}
 	// The relay aborts the response: FFmpeg sees a broken read, not a short
-	// success, and the handle remembers that the core failed it.
+	// success.
 	if resp, body, err := get(t, t.Context(), h.URL(), http.MethodGet, ""); err == nil {
 		t.Fatalf("a stalled upstream completed: %v, %d bytes", resp, len(body))
 	}
 	if h.Err() != nil {
 		t.Fatalf("a stalled upstream failed the handle: %v", h.Err())
-	}
-	if !h.UpstreamFailed() {
-		t.Fatal("the handle does not report the upstream failure")
 	}
 	core.mu.Lock()
 	core.inject = nil
@@ -872,31 +866,5 @@ func TestOpenLocalComparesTheRevisionToTheSecond(t *testing.T) {
 	}
 	if _, err := relay.Open(t.Context(), "dispatched-grant"); !errors.Is(err, ErrLocalMismatch) {
 		t.Fatalf("open a second later: %v", err)
-	}
-}
-
-// TestReopenOpensASeparateHandle opens the source again from the handle's
-// current grant: a handle of its own, which outlives the first one's close.
-func TestReopenOpensASeparateHandle(t *testing.T) {
-	core := newFakeCore(t, 5000)
-	relay := newTestRelay(t, core, ModeCore)
-	h := openRemote(t, relay)
-	again, err := h.Reopen(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = again.Close() }()
-	if again == h || again.URL() == h.URL() || again.Identity() != h.Identity() || relay.openHandles() != 2 {
-		t.Fatalf("reopened handle %q (%s), %d open", again.URL(), again.Identity(), relay.openHandles())
-	}
-	core.mu.Lock()
-	reopenedWith := core.opens
-	core.mu.Unlock()
-	if reopenedWith != 2 {
-		t.Fatalf("%d opens at the core, want 2", reopenedWith)
-	}
-	_ = h.Close()
-	if !IsRemote(again.URL()) || again.Err() != nil || relay.openHandles() != 1 {
-		t.Fatal("closing the first handle ended the reopened one")
 	}
 }

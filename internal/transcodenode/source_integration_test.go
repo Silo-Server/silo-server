@@ -63,8 +63,20 @@ func (n integrationNode) grant(t *testing.T, id int) string {
 // the loopback relay. Neither node has hardware acceleration.
 func integrationNodes(t *testing.T, ffmpeg string, files integrationCatalog) (local, core integrationNode) {
 	t.Helper()
+	return integrationNodesWithCoreFFmpeg(t, ffmpeg, ffmpeg, files)
+}
+
+// integrationNodesWithCoreFFmpeg is integrationNodes whose core builds
+// subtitle bundles with coreFFmpeg.
+func integrationNodesWithCoreFFmpeg(t *testing.T, ffmpeg, coreFFmpeg string, files integrationCatalog) (local, core integrationNode) {
+	t.Helper()
 	grants := nodesource.NewGrants(func() string { return "integration-grant-secret" })
-	coreURL, nodeKey := nodecontroltest.SourceCore(t, integrationNodeID, nodecontrol.Options{Grants: grants, Files: files})
+	coreDir := t.TempDir()
+	coreURL, nodeKey := nodecontroltest.SourceCore(t, integrationNodeID, nodecontrol.Options{
+		Grants: grants, Files: files,
+		Subtitles:  playback.NewSubtitleCache(func() string { return coreDir }),
+		FFmpegPath: func() string { return coreFFmpeg },
+	})
 	newNode := func(mode string) integrationNode {
 		relay, err := nodesource.NewRelay(nodesource.RelayOptions{Open: openThrough(t, coreURL, nodeKey), CoreURL: coreURL,
 			NodeID: integrationNodeID, NodeKey: nodeKey, Mode: func() string { return mode }})

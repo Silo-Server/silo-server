@@ -237,13 +237,6 @@ func (r *Relay) track(h *Handle) error {
 	return nil
 }
 
-// openHandles is the number of the relay's handles not yet closed.
-func (r *Relay) openHandles() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.live)
-}
-
 func (r *Relay) isClosed() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -377,9 +370,6 @@ type Handle struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
 	closed atomic.Bool
-	// upstreamFailed is set once the relay could not serve a read of the
-	// handle's URL because of the core (see UpstreamFailed).
-	upstreamFailed atomic.Bool
 }
 
 // Input is what FFmpeg opens: the approved path with local access, or the
@@ -416,26 +406,12 @@ func (h *Handle) Context() context.Context { return h.ctx }
 // while it is open.
 func (h *Handle) Err() error { return context.Cause(h.ctx) }
 
-// UpstreamFailed reports whether a read through the handle's URL failed on
-// the core's side: a range the relay could not fetch, or a body it had to cut
-// short. FFmpeg sees either as an input error of its own, so a caller telling
-// a fault in the source's bytes from a relay failure asks here.
-func (h *Handle) UpstreamFailed() bool { return h.upstreamFailed.Load() }
-
 // Close releases the handle: it stops renewal, unregisters the loopback URL
 // and interrupts every read in flight, including a write FFmpeg's back
 // pressure holds.
 func (h *Handle) Close() error {
 	h.end(ErrClosed)
 	return nil
-}
-
-// Reopen opens the handle's source again through its relay, from its current
-// grant, as a handle of its own with its own renewal: for work on the job's
-// behalf that may outlive the job's handle, such as staging a subtitle that a
-// later job on the same source reuses. The caller closes it.
-func (h *Handle) Reopen(ctx context.Context) (*Handle, error) {
-	return h.relay.Open(ctx, h.currentGrant())
 }
 
 // end releases the handle once, with cause as its Err.

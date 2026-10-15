@@ -124,6 +124,13 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 			return nil, err
 		}
 
+		if !reconstruct {
+			// A subtitle the session stages first is not FFmpeg's to
+			// produce: its time counts against the request alone, and
+			// FFmpeg, launched once it completes, gets the whole readiness
+			// wait. A reconstruct keeps a session that is slow to start.
+			_ = session.WaitSubtitleStaged(waitCtx)
+		}
 		_, err = session.WaitForGenerationManifestContext(waitCtx, startup.timeout())
 		if err == nil {
 			pipeline.RememberSuccess()
@@ -150,8 +157,13 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 
 		failedDevice := session.Opts().HWDevice
 		next := false
-		// A subtitle that could not be staged fails every path alike.
-		if !wasRunning && !errors.Is(session.WaitError(), ErrSubtitleStaging) {
+		// A subtitle that could not be staged fails every path alike, and
+		// is the startup's failure, so the caller can tell a passing one.
+		stagingFailed := errors.Is(session.WaitError(), ErrSubtitleStaging)
+		if stagingFailed {
+			err = session.WaitError()
+		}
+		if !wasRunning && !stagingFailed {
 			if pipeline.AdvanceAfterFailure(failedDevice) {
 				attempt = pipeline.Current()
 				next = true

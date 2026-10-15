@@ -4816,6 +4816,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.SourceGrants != nil {
 			nodeControlOptions.Grants = deps.SourceGrants
 		}
+		// Subtitle bundles share the stream handler's subtitle cache, whose
+		// warm slots bound every whole-source demux on this server.
+		if streamHandler != nil && streamHandler.SubtitleCache != nil {
+			nodeControlOptions.Subtitles = streamHandler.SubtitleCache
+			nodeControlOptions.FFmpegPath = func() string {
+				if cfg := deps.CurrentConfig(); cfg != nil {
+					return cfg.Playback.FFmpegPath
+				}
+				return ""
+			}
+		}
 		// A nil *StreamDeny must not become a non-nil DenySource.
 		if streamDeny != nil {
 			nodeControlOptions.Deny = streamDeny
@@ -4842,6 +4853,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
 			r.Get("/", nodeControl.HandleSource)
 			r.Head("/", nodeControl.HandleSource)
+			r.Get("/subtitle", nodeControl.HandleSubtitle)
 		})
 	}
 

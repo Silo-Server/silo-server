@@ -167,9 +167,9 @@ func attachableFont(t *testing.T) (path, family string) {
 }
 
 // A text subtitle burned in from a relayed source renders as it does from
-// the node's own mount: the selected track is staged as an ASS script with
-// the source's attached font, which, with the system's fonts hidden, is the
-// only font either way.
+// the node's own mount: the core's subtitle bundle carries the selected track
+// as an ASS script with the source's attached font, which, with the system's
+// fonts hidden, is the only font either way.
 func TestCoreSourceTextBurnInMatchesLocal(t *testing.T) {
 	ffmpeg, _ := requireFFmpeg(t)
 	if !hasEncoder(ffmpeg, "libx264") {
@@ -209,7 +209,7 @@ func TestCoreSourceTextBurnInMatchesLocal(t *testing.T) {
 	if plain := start(local, "plain", false); plain == burned {
 		t.Fatal("the burned-in subtitle rendered nothing")
 	}
-	staged, _ := filepath.Glob(filepath.Join(core.server.transcodeDir, playback.SubtitleStagingDirName, "*", "fonts", "*"))
+	staged, _ := filepath.Glob(filepath.Join(core.server.transcodeDir, "*", "subtitle-*", "fonts", "*"))
 	if len(staged) != 1 || filepath.Base(staged[0]) != "attachment-3.ttf" {
 		t.Fatalf("staged fonts %q, want the attachment under a generated name", staged)
 	}

@@ -47,11 +47,16 @@ type SubtitleCache struct {
 	// commits or is discarded, so another request can wait for it.
 	inflight map[string]chan struct{}
 
-	// warmSem bounds concurrent background warms server-wide (each warm
-	// demuxes an entire source file — heavy sequential IO). Acquisition is
-	// non-blocking: warms beyond the budget are dropped, not queued; the
-	// next windowed miss for that track re-attempts the warm.
+	// warmSem bounds concurrent background warms and subtitle bundle builds
+	// server-wide (each demuxes an entire source file — heavy sequential
+	// IO). Acquisition is non-blocking: warms beyond the budget are dropped,
+	// not queued; the next windowed miss for that track re-attempts the
+	// warm, and a bundle's next request its build.
 	warmSem chan struct{}
+
+	// bundleFailures remembers failed subtitle bundle builds by cache key
+	// (subtitle_bundle.go). Guarded by mu.
+	bundleFailures map[string]subtitleBundleFailure
 }
 
 const (
@@ -92,10 +97,11 @@ type SUPExtractFunc func(ctx context.Context, opts StreamExtractOpts) error
 // honored). Pass nil to disable caching entirely.
 func NewSubtitleCache(transcodeDir func() string) *SubtitleCache {
 	return &SubtitleCache{
-		transcodeDir: transcodeDir,
-		maxBytes:     defaultSubtitleCacheMaxBytes,
-		inflight:     make(map[string]chan struct{}),
-		warmSem:      make(chan struct{}, subtitleCacheWarmSlots),
+		transcodeDir:   transcodeDir,
+		maxBytes:       defaultSubtitleCacheMaxBytes,
+		inflight:       make(map[string]chan struct{}),
+		warmSem:        make(chan struct{}, subtitleCacheWarmSlots),
+		bundleFailures: make(map[string]subtitleBundleFailure),
 	}
 }
 
@@ -715,7 +721,7 @@ func (c *SubtitleCache) evict(dir string) {
 			}
 			continue
 		}
-		if !slices.Contains([]string{SubtitleExtPGSV3, SubtitleExtVTTV3, SubtitleExtASSV3, ".srt"}, filepath.Ext(e.Name())) {
+		if !slices.Contains([]string{SubtitleExtPGSV3, SubtitleExtVTTV3, SubtitleExtASSV3, SubtitleExtSRTV3, subtitleBundleExt}, filepath.Ext(e.Name())) {
 			continue
 		}
 		ents = append(ents, cacheEnt{path: path, size: info.Size(), mtime: info.ModTime()})

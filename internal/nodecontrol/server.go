@@ -73,6 +73,11 @@ type Options struct {
 	// or theme against; without the one a grant needs, open answers 503.
 	Files  FileCatalog
 	Themes ThemeCatalog
+	// Subtitles builds the subtitle bundles nodes burn text subtitles in
+	// from, with FFmpegPath's FFmpeg; without it the subtitle endpoint
+	// answers 503.
+	Subtitles  SubtitleBundles
+	FFmpegPath func() string
 }
 
 // Server serves the core's node control endpoints. Every handler is stateless

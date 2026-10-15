@@ -54,10 +54,9 @@ func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struc
 			continue
 		}
 
-		// The subtitle cache, a transcode node's subtitle staging and its
-		// keyframe-plan records are not session directories; each manages
-		// its own eviction.
-		if entry.Name() == subtitleCacheDirName || entry.Name() == SubtitleStagingDirName || entry.Name() == CopyPlanRecordDirName {
+		// The subtitle cache and a transcode node's keyframe-plan records are
+		// not session directories; each manages its own eviction.
+		if entry.Name() == subtitleCacheDirName || entry.Name() == CopyPlanRecordDirName {
 			continue
 		}
 

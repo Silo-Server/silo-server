@@ -92,10 +92,10 @@ func Resolver(t testing.TB, nodeID int, opts nodecontrol.Options) *nodecontrol.C
 	return client
 }
 
-// SourceCore serves the core's source endpoints (open and source bytes) for
-// opts behind RequireNode at the paths the API router mounts them on, and
-// returns the core's URL and a key issued for node nodeID. The core closes
-// with the test.
+// SourceCore serves the core's source endpoints (open, source bytes and
+// subtitle bundles) for opts behind RequireNode at the paths the API router
+// mounts them on, and returns the core's URL and a key issued for node
+// nodeID. The core closes with the test.
 func SourceCore(t testing.TB, nodeID int, opts nodecontrol.Options) (coreURL, nodeKey string) {
 	t.Helper()
 	key, err := nodepool.GenerateNodeKey(nodeID)
@@ -109,6 +109,8 @@ func SourceCore(t testing.TB, nodeID int, opts nodecontrol.Options) (coreURL, no
 			server.HandleSourceOpen(w, r)
 		case (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == nodesource.PathSources:
 			server.HandleSource(w, r)
+		case r.Method == http.MethodGet && r.URL.Path == nodesource.PathSubtitle:
+			server.HandleSubtitle(w, r)
 		default:
 			http.NotFound(w, r)
 		}

@@ -508,6 +508,43 @@ logs on the way (a reverse proxy in front of the core) never record it.
 There is no per-replica concurrency cap. The node control routes are excluded
 from the activity log and the request logger.
 
+### Subtitle bundles
+
+`GET /api/internal/nodes/sources/subtitle?track=<ordinal>&codec=<codec>`
+(`HandleSubtitle`), with the grant in the same header, answers what a text
+subtitle burn-in of the granted file needs (see
+[relayed text subtitle burn-in](#relayed-text-subtitle-burn-in)). A node never
+demuxes a relayed source whole for a subtitle track: the core does it from its
+own storage.
+
+1. The grant checks are those of a source read: `403`, then `410` or `412` from
+   a revision check of the granted path. No catalog query. A grant for a theme
+   is `400`, as is a missing or malformed track or codec.
+2. `playback.SubtitleCache.OpenSubtitleBundle` returns the cached bundle, keyed
+   like every subtitle cache entry by path, track, revision and format. On a
+   miss it begins a build in the background, in one of the cache's two
+   whole-source demux slots (shared with background warms), and waits up to 5
+   seconds, under the node's 10-second response header timeout, for it.
+3. `200` serves the bundle with `Content-Length`; `202` means the bundle is
+   still being built or waits for a slot, and the node asks again. A build that
+   fails on the source's bytes is remembered for a minute and answered `422`;
+   other failures are `503`.
+
+The bundle is a tar of `selected.ass`, the track extracted with `-copyts` so
+its events keep the container timestamps the transcode's frames carry (text
+formats convert to ASS, ASS and SSA are copied), and `fonts/`, every font
+attachment (`isFontAttachment`) under a generated name,
+`attachment-<stream index><ext>`. The fonts stream from `-dump_attachment` into
+the tar. The bounds, 256 MiB of script and 1,024 fonts or 256 MiB of fonts, only
+stop pathological files: libass loads every attachment, and the burn-in should
+render as it does from a mount. A build is bounded by the subtitle cache's
+30-minute warm timeout.
+
+Each API replica builds into its own subtitle cache. Behind a load balancer
+that spreads a node's requests, more than one replica can build the same
+bundle; each answers from its own build, so this costs repeated reads, not
+correctness.
+
 ### Local and core access
 
 `source_access` is a per-node admin setting (`local` by default, or `core`),
@@ -556,7 +593,7 @@ the node's mount.
   that source while its handle lives. The URLs are redacted wherever the node
   logs: `RedactLoopback` replaces each with `source <etag>` (or
   `source (released)`), and the node's slog handler, FFmpeg argv logs, the
-  FFmpeg log sink, subtitle staging stderr and error responses all apply it.
+  FFmpeg log sink and error responses all apply it.
   The design assumes the node host runs no untrusted local users or processes;
   `/proc/<pid>/cmdline` exposure is accepted on that basis.
 - **Close.** `Handle.Close` fails the handle with `ErrClosed`, cancels in-flight
@@ -634,51 +671,45 @@ filter has no protocol whitelist.
 | Keyframe index cache | Keyed on identity and size. |
 | DV RPU probe | Keyed on `binary|nodesource.Identity(input)`; the probe now runs on relayed inputs instead of failing open. |
 | Copy-seek anchor and auto-transcode fallback caches | Keyed on `nodesource.InputKey`. |
-| Text subtitle burn-in | Staged on the node; see below. Bitmap burn-in is unchanged. |
+| Text subtitle burn-in | The core's subtitle bundle; see below. Bitmap burn-in is unchanged. |
 | Trickplay sample concat | Relayed concat; see below. |
 
-### Relayed text subtitle staging
+### Relayed text subtitle burn-in
 
 FFmpeg's `subtitles=` filter opens its file with no protocol whitelist, so it
-must not be given a loopback URL. For a core-mode source the node extracts the
-selected embedded text track to `selected.ass` (with `-copyts`) and its fonts
-(`-dump_attachment`) into a node-level staging cache
-(`playback.RelayedSubtitleStaging`, in `<transcode_dir>/subtitle-staging`). A local source keeps the symlink alias it always
-used. `escapeFilterPath` escapes `' [ ] ; , :`.
+must not be given a loopback URL. And loading a text track means demuxing the
+whole source, which through the relay would move the whole file over the
+network. So a core-mode session fetches the track's
+[subtitle bundle](#subtitle-bundles) from the core and unpacks it into
+`subtitle-*/` in its own output directory; the filter reads
+`selected.ass` (`si=0`) with the bundle's `fonts/` as its `fontsdir`. A local
+source keeps the symlink alias it always used. `escapeFilterPath` escapes
+`' [ ] ; , :`.
 
-- **Cache.** Entries are keyed by `(source identity, track, codec)`, so starts
-  and rebuilds of the same source and track share one staging. A staging runs
-  detached from the request on its own reopened handle and commits by rename.
-- **Admission.** Two stagings run at once per node; up to eight more wait in a
-  queue. Each in-progress staging reserves 256 MiB for its script and 32 MiB for
-  fonts against a 1 GiB cache bound. A full queue, a full cache or a cancelled
-  wait is `ErrSubtitleStagingBusy`, which a start answers with `503 subtitle
-  staging is busy; retry shortly` and a rebuild with `503`.
-- **Leases.** Every session using a staging holds a lease; a leased entry is
-  never evicted. When the last lease on an unfinished staging is released, the
-  staging is cancelled after 30 idle seconds. A failed staging is kept for a
-  minute so a burst of retries does not read the source again; a failure that
-  follows from the source's own bytes is kept until the sweep, which removes
-  entries after 24 hours.
-- **Timeout.** Two minutes plus the file size at 4 MiB/s, at most four hours.
-- **Fonts.** Only attachments with font magic bytes are kept, at most 32 of
-  them and 32 MiB in total; other attachments and those past the limits are
-  skipped, not fatal.
-- **Preparing sessions.** A start whose staging is not done registers the
-  session as preparing, and FFmpeg launches when staging completes. Without
-  `RequireReady` the start returns `202` at once; a `RequireReady` start still
-  waits for the manifest, and fails like any readiness failure if staging
-  outlasts that wait.
-  Meanwhile segment requests wait up to 12 seconds and `init.mp4` up to
-  10 seconds, then answer `404`, and the player retries.
+- **Preparing sessions.** A start registers the session as preparing and
+  returns; FFmpeg launches once the bundle is unpacked. Meanwhile segment
+  requests wait up to 12 seconds and `init.mp4` up to 10 seconds, then answer
+  `404`, and the player retries. A `RequireReady` start waits for the bundle
+  within its request's own deadline, then gives FFmpeg the whole manifest wait.
+  A same-ID start retires the live session only once its replacement's bundle
+  is staged, so a failed staging leaves the live session running.
+- **Fetch.** The session asks again after each `202`, at most once a second.
+  `422` and a refused source (`400`, `403`, `404`, `410`, `412`) fail the
+  staging; other failures are retried for 30 seconds, then fail it as
+  `ErrSubtitleStagingUnavailable`, which a start answers `503 subtitle staging
+  unavailable; retry shortly` and a rebuild `503`. The fetch ends with the
+  source's handle and within the core's build bound plus a minute.
+- **Lifetime.** The bundle is the session's: restarts, seeks and audio
+  switches reuse it, and a restart after a failed staging fetches again.
+  Closing the session cancels the fetch and waits for it before the output
+  directory goes. Retries, rebuilds and other nodes get the core's cached
+  bundle without another demux.
 
-**Known limitation.** A cold burn-in start of a large file over a slow link can
-fail its first attempt in either mode: `RequireReady` waits for a manifest for
-a bounded time, and reading the whole file for the subtitle track can take
-longer. A local node mounting the library over NFS or SMB reads at the same
-network speed inside that wait. In core mode the staging survives the failed
-start, and the retry joins it, so a later attempt succeeds without starting
-over.
+**Known limitation.** A cold burn-in start of a large file can fail its first
+`RequireReady` attempt in either mode: the core reads the whole file once to
+build the bundle, as libass does on a local mount, and that can outlast the
+start request. In core mode the build goes on, and the retry, on any node, gets
+the cached bundle.
 
 ### Keyframe plan records
 

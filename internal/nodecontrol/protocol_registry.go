@@ -75,6 +75,15 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 			{Name: "If-Match", In: inHeader, Schema: &huma.Schema{Type: huma.TypeString}}}
 		return o
 	}
+	subtitle := op(http.MethodGet, nodesource.PathSubtitle, "HandleSubtitle", "natural_idempotent",
+		"The subtitle bundle a text burn-in of the granted source needs, so a node that reads the source over HTTP never demuxes it whole through the relay: a tar of selected.ass, the track as an ASS script extracted with -copyts (text formats convert to ASS, ASS and SSA are copied), and fonts/, the source's font attachments under generated names. The core builds it from its own copy, after the same revision check as a source read, and caches it by revision, track and codec; builds share the subtitle cache's whole-source demux slots. No catalog read. A request waits up to 5 seconds for a build, then answers 202 and the node asks again. 400: the track or codec is missing or malformed, or the grant is not a media file's. 403: the grant does not verify, has expired, or is another node's. 410: the file is gone. 412: it changed. 422: the source cannot give the bundle (FFmpeg fails on the track, or it does not convert to ASS); remembered for a minute. 503 is transient.",
+		nil, map[string]*huma.Response{
+			"200": {Description: "The bundle, with Content-Length.", Content: map[string]*huma.MediaType{"application/x-tar": bytes}},
+			"202": {Description: "The bundle is being built, or waits for a build slot; ask again."},
+		}, http.StatusBadRequest, http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusUnprocessableEntity, http.StatusServiceUnavailable)
+	subtitle.Parameters = []*huma.Param{grantHeader,
+		{Name: nodesource.QuerySubtitleTrack, In: "query", Required: true, Description: "The subtitle stream's ordinal among the source's subtitle streams.", Schema: &huma.Schema{Type: huma.TypeInteger}},
+		{Name: nodesource.QuerySubtitleCodec, In: "query", Required: true, Description: "The subtitle stream's codec as FFmpeg names it.", Schema: &huma.Schema{Type: huma.TypeString}}}
 	config := op(http.MethodGet, PathConfig, "HandleConfig", "",
 		"The calling node's configuration document. Revision, also the ETag, is the SHA-256 of the rest of the document; the node swaps its configuration only when it changes. Polled every 30 seconds with If-None-Match, and at once after /admin/reload-config or /admin/force-reload. 404: the node row is gone.",
 		nil, map[string]*huma.Response{
@@ -99,6 +108,7 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 			}, http.StatusBadRequest, http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusServiceUnavailable),
 		sourceRead(http.MethodGet, "GET returns the bytes."),
 		sourceRead(http.MethodHead, "HEAD returns the same status and headers as GET, without the bytes."),
+		subtitle,
 		op(http.MethodPost, PathReport, "HandleReport", "non_retryable",
 			"The node's sessions and stream telemetry, posted every second. Fenced on (boot_id, seq): an older or repeated pair gets 409 and writes nothing. The core files the report under the authenticated node, with its own clock, and replaces the node's session records and telemetry snapshot as a whole. 413: more than 2,000 sessions or transfers.",
 			jsonBody(reflect.TypeFor[Report]()), map[string]*huma.Response{"204": {Description: "Accepted."}},

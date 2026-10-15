@@ -10,6 +10,18 @@ import (
 const (
 	PathOpen    = "/api/internal/nodes/self/sources/open"
 	PathSources = "/api/internal/nodes/sources"
+	// PathSubtitle serves the subtitle bundle a text burn-in of the granted
+	// source needs (playback.SubtitleBundleSource), with the grant in
+	// HeaderSourceGrant and the track in QuerySubtitleTrack and
+	// QuerySubtitleCodec.
+	PathSubtitle = "/api/internal/nodes/sources/subtitle"
+)
+
+// Query parameters of a PathSubtitle request: the subtitle stream's ordinal
+// among the source's subtitle streams, and its codec.
+const (
+	QuerySubtitleTrack = "track"
+	QuerySubtitleCodec = "codec"
 )
 
 // HeaderSourceGrant carries the grant of a PathSources read. It is a header,
@@ -25,8 +37,12 @@ const (
 	ModeCore = "core"
 )
 
-// opRead names a source read in errors.
-const opRead = "read"
+// opRead and opSubtitle name a source read and a subtitle bundle request in
+// errors.
+const (
+	opRead     = "read"
+	opSubtitle = "subtitle"
+)
 
 // OpenRequest is the body of POST PathOpen: the grant to exchange, a newly
 // dispatched one or the node's current one when it renews.

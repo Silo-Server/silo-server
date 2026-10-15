@@ -344,7 +344,6 @@ func (r *Relay) serve(w http.ResponseWriter, req *http.Request) {
 		if req.Context().Err() != nil {
 			return
 		}
-		h.upstreamFailed.Store(true)
 		status := http.StatusBadGateway
 		var statusErr *StatusError
 		if errors.As(err, &statusErr) && (statusErr.Fatal() || statusErr.Status == http.StatusRequestedRangeNotSatisfiable) {
@@ -402,7 +401,6 @@ func (r *Relay) serve(w http.ResponseWriter, req *http.Request) {
 			}
 			// The body cannot be completed. Abort the connection rather
 			// than end it cleanly, so FFmpeg sees a short read.
-			h.upstreamFailed.Store(true)
 			panic(http.ErrAbortHandler)
 		}
 	}

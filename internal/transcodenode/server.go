@@ -372,11 +372,6 @@ type Server struct {
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
 	// session may register after the shutdown drain has taken its snapshot.
 	shuttingDown bool
-	// subtitleStaging is the node's cache of staged text subtitles for
-	// burn-in of relayed sources, under its transcode directory; see
-	// subtitleStagingCache.
-	subtitleStagingOnce sync.Once
-	subtitleStaging     *playback.RelayedSubtitleStaging
 	// sampleCapabilities is a test seam; production uses
 	// mediasample.LoadCapabilities (relayedSamplesUnsupported).
 	sampleCapabilities func(ctx context.Context, ffmpegPath string) (mediasample.Capabilities, error)
@@ -633,7 +628,6 @@ func (s *Server) StartOrphanSweeper(ctx context.Context) {
 			keep[copyPlanRecordName(id)] = struct{}{}
 		}
 		removed += playback.SweepCopyPlanRecords(filepath.Join(dir, playback.CopyPlanRecordDirName), keep, playback.MaxTokenTTL)
-		removed += s.subtitleStagingCache().Sweep(playback.MaxTokenTTL)
 		return removed, err
 	}, playback.OrphanCleanupInterval)
 }
@@ -1184,24 +1178,6 @@ func copyPlanRecordName(sessionID string) string {
 	return hex.EncodeToString(sum[:16]) + ".json"
 }
 
-// subtitleStagingCache is the node's staging cache, created on first use
-// under the transcode directory; nil when it cannot be created, which fails
-// only text burn-in of a relayed source.
-func (s *Server) subtitleStagingCache() *playback.RelayedSubtitleStaging {
-	s.subtitleStagingOnce.Do(func() {
-		if s.transcodeDir == "" {
-			return
-		}
-		staging, err := playback.NewRelayedSubtitleStaging(filepath.Join(s.transcodeDir, playback.SubtitleStagingDirName))
-		if err != nil {
-			slog.Error("create the subtitle staging cache", "component", "transcodenode", "error", err)
-			return
-		}
-		s.subtitleStaging = staging
-	})
-	return s.subtitleStaging
-}
-
 func (s *Server) removeCopyPlanRecord(sessionID string) {
 	if err := os.Remove(s.copyPlanRecordPath(sessionID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("remove keyframe plan record", "component", "transcodenode", "session", sessionID, "error", err)
@@ -1695,7 +1671,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SourceIdentity:             input.Identity(),
 		OutputDir:                  outputDir,
 		CopyPlanRecordPath:         s.copyPlanRecordPath(req.SessionID),
-		SubtitleStaging:            s.subtitleStagingCache(),
 		SessionID:                  req.SessionID,
 		SourceVideoCodec:           req.SourceVideoCodec,
 		SourceVideoProfile:         req.SourceVideoProfile,
@@ -1812,6 +1787,16 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	} else {
 		session, err = playback.StartTranscode(r.Context(), opts)
 	}
+	if err == nil && hasExisting {
+		// A same-ID start replaces a live session only with one that can
+		// run: a subtitle the replacement stages first must be staged before
+		// the live session is retired. A readiness-gated start has already
+		// waited for it.
+		if stageErr := session.WaitSubtitleStaged(r.Context()); stageErr != nil {
+			_ = session.Close()
+			session, err = nil, stageErr
+		}
+	}
 	var startupErr *playback.TranscodeStartupError
 	if errors.As(err, &startupErr) {
 		unlock()
@@ -1821,6 +1806,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+		if errors.Is(err, playback.ErrSubtitleStagingUnavailable) {
+			http.Error(w, "subtitle staging unavailable; retry shortly", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
 		return
 	}
@@ -1830,8 +1819,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case isToneMapRecipeError(err):
 			writeToneMapRecipeError(w, err)
-		case errors.Is(err, playback.ErrSubtitleStagingBusy):
-			http.Error(w, "subtitle staging is busy; retry shortly", http.StatusServiceUnavailable)
+		case errors.Is(err, playback.ErrSubtitleStagingUnavailable):
+			http.Error(w, "subtitle staging unavailable; retry shortly", http.StatusServiceUnavailable)
 		default:
 			http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		}
@@ -2020,7 +2009,6 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	opts.InputPath = input.Input()
 	opts.SourceIdentity = input.Identity()
 	opts.CopyPlanRecordPath = s.copyPlanRecordPath(sessionID)
-	opts.SubtitleStaging = s.subtitleStagingCache()
 	opts.SessionID = sessionID
 	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but reconstruction must
@@ -2128,8 +2116,9 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 					"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
 			} else if errors.Is(session.WaitError(), playback.ErrSubtitleStaging) {
 				// Software encoding would need the same staged subtitle.
+				stageErr := session.WaitError()
 				_ = session.Close()
-				return nil, session.WaitError()
+				return nil, reconstructStartError(stageErr)
 			} else {
 				// Keep the shared output directory: the retry writes into it.
 				_ = session.CloseProcess()
@@ -2200,11 +2189,11 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 // reconstructStartError classifies a rebuild's failed start. One that may
 // succeed on a later request (the keyframe plan could not be worked out now,
-// or the node's subtitle staging is busy) is errReconstructUnavailable, a
-// retryable 503, not a missing session; ErrCopyPlanSourceChanged and the rest
-// pass unchanged.
+// or the core could not provide the subtitle to burn in) is
+// errReconstructUnavailable, a retryable 503, not a missing session;
+// ErrCopyPlanSourceChanged and the rest pass unchanged.
 func reconstructStartError(err error) error {
-	if errors.Is(err, playback.ErrCopyPlanUnavailable) || errors.Is(err, playback.ErrSubtitleStagingBusy) {
+	if errors.Is(err, playback.ErrCopyPlanUnavailable) || errors.Is(err, playback.ErrSubtitleStagingUnavailable) {
 		return fmt.Errorf("%w: %w", errReconstructUnavailable, err)
 	}
 	return err

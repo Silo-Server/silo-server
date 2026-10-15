@@ -5,94 +5,60 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/nodecontrol"
-	"github.com/Silo-Server/silo-server/internal/nodecontrol/nodecontroltest"
-	"github.com/Silo-Server/silo-server/internal/nodesessions"
-	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-// Text burn-in of a relayed source stages its subtitle on the node, not in
-// the start request: these run real FFmpeg on a source served by a core
-// whose source reads are throttled, so the staging outlasts a start's
-// deadline.
+// Text burn-in of a relayed source fetches its subtitle bundle from the core,
+// which builds it from its own copy of the source: these run real FFmpeg on
+// both sides, with the core's bundle build held behind a gate so it outlasts
+// a start's deadline.
 
-// throttledTransport is a relay's upstream that serves source bytes at
-// bytesPerSecond. opens counts the node's source opens at the core, which go
-// through the relay's Open rather than this transport.
-type throttledTransport struct {
-	base           http.RoundTripper
-	bytesPerSecond int
-	opens          atomic.Int32
-}
-
-func (t *throttledTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.base.RoundTrip(req)
-	if err == nil && req.Method == http.MethodGet && req.URL.Path == nodesource.PathSources {
-		resp.Body = &slowBody{ReadCloser: resp.Body, bytesPerSecond: t.bytesPerSecond}
-	}
-	return resp, err
-}
-
-type slowBody struct {
-	io.ReadCloser
-	bytesPerSecond int
-}
-
-func (b *slowBody) Read(p []byte) (int, error) {
-	const chunk = 8 << 10
-	if len(p) > chunk {
-		p = p[:chunk]
-	}
-	n, err := b.ReadCloser.Read(p)
-	time.Sleep(time.Duration(n) * time.Second / time.Duration(b.bytesPerSecond))
-	return n, err
-}
-
-// throttledCoreNode is a node with core source access whose core serves
-// files at bytesPerSecond.
-func throttledCoreNode(t *testing.T, ffmpeg string, files integrationCatalog, bytesPerSecond int) (integrationNode, *throttledTransport) {
+// gatedCoreFFmpeg returns an FFmpeg for the core that logs each run's
+// arguments to runs and, for the subtitle extraction, waits for gate to exist
+// before it runs ffmpeg; ffprobe beside it is the real one.
+func gatedCoreFFmpeg(t *testing.T, ffmpeg, ffprobe string) (bin, gate, runs string) {
 	t.Helper()
-	grants := nodesource.NewGrants(func() string { return "integration-grant-secret" })
-	coreURL, nodeKey := nodecontroltest.SourceCore(t, integrationNodeID, nodecontrol.Options{Grants: grants, Files: files})
-	base, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		t.Fatal("no HTTP transport")
+	dir := t.TempDir()
+	bin, gate, runs = filepath.Join(dir, "ffmpeg"), filepath.Join(dir, "gate"), filepath.Join(dir, "runs")
+	script := "#!/bin/sh\necho \"$*\" >> '" + runs + "'\n" +
+		"case \"$*\" in *-copyts*) while [ ! -e '" + gate + "' ]; do sleep 0.01; done ;; esac\n" +
+		"exec '" + ffmpeg + "' \"$@\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	upstream := base.Clone()
-	upstream.Proxy = nil
-	upstream.DisableCompression = true
-	transport := &throttledTransport{base: upstream, bytesPerSecond: bytesPerSecond}
-	open := openThrough(t, coreURL, nodeKey)
-	countedOpen := func(ctx context.Context, grant string) (*nodesource.OpenResponse, error) {
-		transport.opens.Add(1)
-		return open(ctx, grant)
+	if err := os.Symlink(ffprobe, filepath.Join(dir, "ffprobe")); err != nil {
+		t.Fatal(err)
 	}
-	relay, err := nodesource.NewRelay(nodesource.RelayOptions{
-		Open: countedOpen, CoreURL: coreURL, NodeID: integrationNodeID, NodeKey: nodeKey,
-		Mode: func() string { return nodesource.ModeCore }, Transport: transport,
-	})
+	return bin, gate, runs
+}
+
+func openGate(t *testing.T, gate string) {
+	t.Helper()
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// extractions counts the core's subtitle extractions in runs.
+func extractions(t *testing.T, runs string) int {
+	t.Helper()
+	data, err := os.ReadFile(runs)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = relay.Close() })
-	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	server.watcher.Config().Playback.FFmpegPath = ffmpeg
-	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-	server.sources = RelaySources(relay)
-	return integrationNode{name: nodesource.ModeCore, server: server, relay: relay, grants: grants, files: files}, transport
+	return strings.Count(string(data), "-copyts")
 }
 
 // burnInFixture makes a 4 s H.264 MKV with an ASS track and an attached
@@ -109,7 +75,7 @@ func burnInFixture(t *testing.T, ffmpeg string) string {
 		"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"+
 		"Style: Default,"+family+",28,&H0000FFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\n"+
 		"[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"+
-		"Dialogue: 0,0:00:00.20,0:00:03.80,Default,,0,0,0,,Staged on the node\n"), 0o600); err != nil { //nolint:misspell // ASS event keyword
+		"Dialogue: 0,0:00:00.20,0:00:03.80,Default,,0,0,0,,Staged by the core\n"), 0o600); err != nil { //nolint:misspell // ASS event keyword
 		t.Fatal(err)
 	}
 	fixture := filepath.Join(dir, "subtitled.mkv")
@@ -149,12 +115,10 @@ func liveSession(node integrationNode, id string) *playback.TranscodeSession {
 	return node.server.sessions[id]
 }
 
-// waitFinished waits for session's FFmpeg to finish and returns how long
-// that took.
-func waitFinished(t *testing.T, session *playback.TranscodeSession) time.Duration {
+// waitFinished waits for session's FFmpeg to finish.
+func waitFinished(t *testing.T, session *playback.TranscodeSession) {
 	t.Helper()
-	started := time.Now()
-	deadline := started.Add(2 * time.Minute)
+	deadline := time.Now().Add(2 * time.Minute)
 	for session.IsRunning() {
 		if time.Now().After(deadline) {
 			t.Fatal("the session never finished")
@@ -164,25 +128,18 @@ func waitFinished(t *testing.T, session *playback.TranscodeSession) time.Duratio
 	if err := session.WaitError(); err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	return time.Since(started)
 }
 
-// A start whose staging takes longer than its request may last answers at
-// once and launches FFmpeg once the subtitle is staged: the session serves
-// FFmpeg's manifest and renders the subtitle as the node's own mount does.
-func TestCoreSourceBurnInStagingOutlivesTheStartRequest(t *testing.T) {
-	ffmpeg, _ := requireFFmpeg(t)
+// A start whose bundle the core is still building answers at once and
+// launches FFmpeg once the bundle is fetched: the client's first requests
+// wait for it as for a slow FFmpeg start, and the subtitle renders as it does
+// from the node's own mount.
+func TestCoreSourceBurnInWaitsForTheCoresBundle(t *testing.T) {
+	ffmpeg, ffprobe := requireFFmpeg(t)
 	fixture := burnInFixture(t, ffmpeg)
 	const fileID = 61
-	local, _ := integrationNodes(t, ffmpeg, integrationCatalog{fileID: fixture})
-	info, err := os.Stat(fixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// About a second to read the whole source once: the staging reads it
-	// whole, then the font dump its header.
-	rate := int(info.Size())
-	core, _ := throttledCoreNode(t, ffmpeg, integrationCatalog{fileID: fixture}, rate)
+	coreFFmpeg, gate, _ := gatedCoreFFmpeg(t, ffmpeg, ffprobe)
+	local, core := integrationNodesWithCoreFFmpeg(t, ffmpeg, coreFFmpeg, integrationCatalog{fileID: fixture})
 
 	const deadline = 300 * time.Millisecond
 	rec, answered := postTimedStart(t, core, burnInStart(t, core, "staged-core", fileID, false), deadline)
@@ -192,11 +149,10 @@ func TestCoreSourceBurnInStagingOutlivesTheStartRequest(t *testing.T) {
 	t.Cleanup(func() { stopSession(t, core.server, "staged-core") })
 	session := liveSession(core, "staged-core")
 	if session == nil || !session.IsRunning() || !session.SegmentProgress(time.Now()).Preparing {
-		t.Fatal("the started session is not preparing while its subtitle stages")
+		t.Fatal("the started session is not preparing while the core builds its bundle")
 	}
+	time.AfterFunc(500*time.Millisecond, func() { openGate(t, gate) })
 
-	// The client's first requests wait for the session as for a slow
-	// FFmpeg start.
 	manifest := httptest.NewRecorder()
 	core.server.Handler().ServeHTTP(manifest, signed(t, httptest.NewRequest(http.MethodGet, "/transcode/staged-core/master.m3u8", nil)))
 	if manifest.Code != http.StatusOK || !strings.Contains(manifest.Body.String(), "#EXTM3U") {
@@ -209,37 +165,30 @@ func TestCoreSourceBurnInStagingOutlivesTheStartRequest(t *testing.T) {
 			break
 		}
 	}
-	segmentStarted := time.Now()
 	segment := httptest.NewRecorder()
 	core.server.Handler().ServeHTTP(segment, signed(t, httptest.NewRequest(http.MethodGet, "/transcode/staged-core/"+first, nil)))
 	if segment.Code != http.StatusOK || segment.Body.Len() == 0 {
 		t.Fatalf("first segment %s = %d %s", first, segment.Code, segment.Body.String())
 	}
-	t.Logf("source %d bytes at %d B/s: start answered in %s; its first segment, requested while preparing, served %s later",
-		info.Size(), rate, answered.Round(time.Millisecond), time.Since(segmentStarted).Round(time.Millisecond))
 	waitFinished(t, session)
 	got := hlsVideo(t, ffmpeg, session.Opts().OutputDir)
 	localDir, _ := startSession(t, local, burnInStart(t, local, "staged-local", fileID, true))
 	if want := hlsVideo(t, ffmpeg, localDir); got != want || got == "" {
-		t.Fatalf("staged burn-in differs from the node's own mount:\nlocal:\n%.800s\ncore:\n%.800s", want, got)
+		t.Fatalf("burn-in from the core's bundle differs from the node's own mount:\nlocal:\n%.800s\ncore:\n%.800s", want, got)
 	}
 }
 
-// A second start on the same source and track joins the staging the first
-// began, even after the first gave up waiting for it: the core sees one
-// staging read of the source, and a third start reuses the staging done.
-func TestCoreSourceBurnInStartsShareOneStaging(t *testing.T) {
-	ffmpeg, _ := requireFFmpeg(t)
+// Starts on the same source and track share the core's one extraction: a
+// readiness-gated start that gives up waiting leaves the build running, a
+// second start gets the bundle it built, and a third is ready from the
+// core's cache.
+func TestCoreSourceBurnInStartsShareOneExtraction(t *testing.T) {
+	ffmpeg, ffprobe := requireFFmpeg(t)
 	fixture := burnInFixture(t, ffmpeg)
 	const fileID = 62
-	info, err := os.Stat(fixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	core, transport := throttledCoreNode(t, ffmpeg, integrationCatalog{fileID: fixture}, int(info.Size()))
+	coreFFmpeg, gate, runs := gatedCoreFFmpeg(t, ffmpeg, ffprobe)
+	_, core := integrationNodesWithCoreFFmpeg(t, ffmpeg, coreFFmpeg, integrationCatalog{fileID: fixture})
 
-	// A readiness-gated start whose request ends first fails, as any start
-	// that is not ready in time does; its staging goes on.
 	if rec, _ := postTimedStart(t, core, burnInStart(t, core, "shared-1", fileID, true), 300*time.Millisecond); rec.Code == http.StatusAccepted {
 		t.Fatalf("a readiness-gated start answered before its subtitle was staged: %d", rec.Code)
 	}
@@ -248,39 +197,30 @@ func TestCoreSourceBurnInStartsShareOneStaging(t *testing.T) {
 		t.Fatalf("second start = %d %s", rec.Code, rec.Body.String())
 	}
 	t.Cleanup(func() { stopSession(t, core.server, "shared-2") })
+	openGate(t, gate)
 	waitFinished(t, liveSession(core, "shared-2"))
-	// Each start opens its own input; one staging opened one more.
-	if opens := transport.opens.Load(); opens != 3 {
-		t.Fatalf("%d source opens at the core for two starts, want 3 (one staging)", opens)
-	}
 
 	rec, answered := postTimedStart(t, core, burnInStart(t, core, "shared-3", fileID, true), time.Minute)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("third start = %d %s", rec.Code, rec.Body.String())
 	}
 	t.Cleanup(func() { stopSession(t, core.server, "shared-3") })
-	if opens := transport.opens.Load(); opens != 4 {
-		t.Fatalf("%d source opens after a third start, want 4 (no new staging)", opens)
+	if n := extractions(t, runs); n != 1 {
+		t.Fatalf("%d subtitle extractions on the core for three starts, want 1", n)
 	}
-	t.Logf("a start reusing the staging was ready in %s", answered.Round(time.Millisecond))
-	staged, _ := filepath.Glob(filepath.Join(core.server.transcodeDir, playback.SubtitleStagingDirName, "*", "fonts", "*"))
-	if len(staged) != 1 {
-		t.Fatalf("staged fonts %q, want one staging's font", staged)
-	}
+	t.Logf("a start served from the core's cache was ready in %s", answered.Round(time.Millisecond))
 }
 
-// A stop while the subtitle stages cancels the pending launch: the session
-// ends without starting FFmpeg, no goroutine waits on for it, and once the
-// staging, which runs on, is done, the node holds no source handle.
+// A stop while the bundle is fetched cancels the pending launch and the
+// fetch: the session ends without starting FFmpeg, nothing waits on for it,
+// and the node holds no source handle. The core's build goes on, so the
+// next start is served from its cache.
 func TestCoreSourceStopDuringStagingCancelsTheLaunch(t *testing.T) {
-	ffmpeg, _ := requireFFmpeg(t)
+	ffmpeg, ffprobe := requireFFmpeg(t)
 	fixture := burnInFixture(t, ffmpeg)
 	const fileID = 63
-	info, err := os.Stat(fixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	core, _ := throttledCoreNode(t, ffmpeg, integrationCatalog{fileID: fixture}, int(info.Size()))
+	coreFFmpeg, gate, runs := gatedCoreFFmpeg(t, ffmpeg, ffprobe)
+	_, core := integrationNodesWithCoreFFmpeg(t, ffmpeg, coreFFmpeg, integrationCatalog{fileID: fixture})
 
 	rec, _ := postTimedStart(t, core, burnInStart(t, core, "stopped", fileID, false), time.Minute)
 	if rec.Code != http.StatusAccepted {
@@ -303,27 +243,26 @@ func TestCoreSourceStopDuringStagingCancelsTheLaunch(t *testing.T) {
 	if session.IsRunning() || !errors.Is(session.WaitError(), context.Canceled) {
 		t.Fatalf("stopped session: running %t, %v", session.IsRunning(), session.WaitError())
 	}
-	if launching := goroutinesIn("launchWhenStaged"); launching != 0 {
-		t.Fatalf("%d pending launches left after the stop", launching)
-	}
-
-	// The staging is the node's: it completes, then releases its handle.
-	deadline := time.Now().Add(time.Minute)
-	for {
-		staged, _ := filepath.Glob(filepath.Join(core.server.transcodeDir, playback.SubtitleStagingDirName, "*", "selected.ass"))
-		if len(staged) == 1 && goroutinesIn("renewLoop") == 0 {
-			break
-		}
+	deadline := time.Now().Add(10 * time.Second)
+	for goroutinesIn("launchWhenStaged")+goroutinesIn("fetchSubtitleBundle")+goroutinesIn("renewLoop") != 0 {
 		if time.Now().After(deadline) {
-			t.Fatalf("after the stop: staged %q, %d source handles open", staged, goroutinesIn("renewLoop"))
+			t.Fatalf("after the stop: %d launches, %d fetches, %d source handles", goroutinesIn("launchWhenStaged"),
+				goroutinesIn("fetchSubtitleBundle"), goroutinesIn("renewLoop"))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := os.Stat(core.server.sessionOutputDir("stopped")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the stopped session's output exists: %v", err)
 	}
-	if launching := goroutinesIn("launchWhenStaged"); launching != 0 {
-		t.Fatalf("%d pending launches after the staging", launching)
+
+	openGate(t, gate)
+	rec, _ = postTimedStart(t, core, burnInStart(t, core, "after-stop", fileID, true), time.Minute)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("start after the stop = %d %s", rec.Code, rec.Body.String())
+	}
+	t.Cleanup(func() { stopSession(t, core.server, "after-stop") })
+	if n := extractions(t, runs); n != 1 {
+		t.Fatalf("%d subtitle extractions on the core, want 1", n)
 	}
 }
 
