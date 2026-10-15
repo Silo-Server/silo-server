@@ -534,14 +534,14 @@ func (s *Service) cancelRun(runID string) string {
 
 // shuttingDown reports whether the process is stopping. Shutdown cancels every
 // running scan through the app context, so a run that ends with an error
-// after that was cut short rather than cancelled or failed on its own.
+// after that was cut short, not stopped by a cancel or a failure of its own.
 func (s *Service) shuttingDown() bool {
 	return s.appCtx.Err() != nil
 }
 
 // requeueRun returns a run interrupted by shutdown to the queue, with its owed
-// follow-up, so the next process (or another replica) scans it again. Marking
-// it cancelled would end it for good: the stale-run requeue only revives
+// follow-up, so the next process (or another replica) scans it again. Ending it
+// there would lose it for good: the stale-run requeue only revives
 // running rows, and only a finished run enqueues its follow-up. If the write
 // does not land before the process exits, the row stays running and the
 // stale-run requeue recovers it instead.

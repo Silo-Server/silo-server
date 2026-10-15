@@ -91,8 +91,8 @@ func waitProcessed(t *testing.T, done <-chan struct{}) {
 
 // TestShutdownRequeuesRunningScanWithFollowUpDB pins that a scan cut short by
 // shutdown goes back to the queue with its owed follow-up, so the next
-// process scans it and then serves the request coalesced into it. Marking it
-// cancelled lost both for good.
+// process scans it and then serves the request coalesced into it. Before, the
+// worker ended the run and both were lost for good.
 func TestShutdownRequeuesRunningScanWithFollowUpDB(t *testing.T) {
 	ctx, _, repo, folderID := openDirectRunTestRepository(t)
 	folder := &models.MediaFolder{ID: folderID, Type: "series", Enabled: true}
@@ -168,8 +168,8 @@ func TestShutdownDuringLibraryLoadRequeuesScanDB(t *testing.T) {
 	}
 }
 
-// TestCancelByLibraryStillCancelsRunningScanDB pins that an admin cancel or
-// library delete still ends a running scan cancelled, with no follow-up.
+// TestCancelByLibraryStillCancelsRunningScanDB pins that an admin cancel
+// still ends a running scan with the cancel status and no follow-up.
 func TestCancelByLibraryStillCancelsRunningScanDB(t *testing.T) {
 	ctx, _, repo, folderID := openDirectRunTestRepository(t)
 	folder := &models.MediaFolder{ID: folderID, Type: "series", Enabled: true}

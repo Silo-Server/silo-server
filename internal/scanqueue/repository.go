@@ -580,7 +580,7 @@ func (r *Repository) MarkCancelled(ctx context.Context, id string) (*models.Scan
 // startedAt is the claim being given up: a run that was requeued as stale and
 // claimed again since has a new start time and is left alone. It reports
 // false, with the run's current row, when the run is no longer that running
-// claim, for example because an admin cancelled it first.
+// claim, for example because an admin cancel landed first.
 func (r *Repository) Requeue(ctx context.Context, id string, startedAt *time.Time) (*models.ScanRun, bool, error) {
 	run, err := scanRunRow(r.pool.QueryRow(ctx, `
 		UPDATE scan_runs
