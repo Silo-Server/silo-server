@@ -438,8 +438,20 @@ func TestReadMatroskaChecksTheSamplesAndTheTail(t *testing.T) {
 	}
 }
 
+// readCounter counts ReadAt calls.
+type readCounter struct {
+	r     *bytes.Reader
+	reads int
+}
+
+func (c *readCounter) ReadAt(p []byte, off int64) (int, error) {
+	c.reads++
+	return c.r.ReadAt(p, off)
+}
+
 // Cues that stop long before the end leave the tail unindexed; reading on to
-// the end would read the file.
+// the end would read the file. The limit is found from element headers alone,
+// before any block is read.
 func TestReadMatroskaRejectsCuesThatStopEarly(t *testing.T) {
 	var clusters [][]byte
 	for c := range maxTailElements + 1 {
@@ -452,8 +464,14 @@ func TestReadMatroskaRejectsCuesThatStopEarly(t *testing.T) {
 	}
 	pos := uint64(len(head) + len(cuesFor(0)))
 	f := slices.Concat(ebmlHeader, el(idSegment, slices.Concat(head, cuesFor(pos), slices.Concat(clusters...))))
-	if _, err := read(f); !errors.Is(err, ErrIncompleteIndex) {
+	r := &readCounter{r: bytes.NewReader(f)}
+	if _, err := ReadMatroska(r, int64(len(f))); !errors.Is(err, ErrIncompleteIndex) {
 		t.Fatalf("err = %v, want ErrIncompleteIndex", err)
+	}
+	// The header and metadata, the sampled clusters, and one read per tail
+	// element: not the timestamp and block of each tail cluster too.
+	if r.reads > maxTailElements+25 {
+		t.Fatalf("%d reads, want the tail's element headers and few more", r.reads)
 	}
 }
 

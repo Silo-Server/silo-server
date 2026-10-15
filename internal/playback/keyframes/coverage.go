@@ -282,7 +282,22 @@ func tailVideoEnd(r io.ReaderAt, segStart, segEnd int64, video uint64, ticks []u
 	var end videoEnd
 	lastCue := ticks[len(ticks)-1]
 	cued := false
-	at := segStart + clusters[len(clusters)-1]
+	start := segStart + clusters[len(clusters)-1]
+	// Count the elements first, one header read each, so Cues that stop
+	// early cost a few reads rather than every block of the clusters after
+	// them. An unknown-size element can't be skipped; the walk below counts
+	// what follows it.
+	for n, at := 0, start; at < segEnd; n++ {
+		if n == maxTailElements {
+			return end, ErrIncompleteIndex
+		}
+		_, size, headerLen, err := readElementHeader(r, at)
+		if err != nil || size == unknownSize {
+			break
+		}
+		at += headerLen + size
+	}
+	at := start
 	for n := 0; at < segEnd; n++ {
 		if n == maxTailElements {
 			return end, ErrIncompleteIndex
