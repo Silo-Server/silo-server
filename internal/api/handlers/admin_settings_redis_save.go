@@ -17,7 +17,7 @@ import (
 // changed while this one was checking it.
 var errRedisSettingsMoved = &APIError{
 	Status:  http.StatusBadRequest,
-	Code:    errCodeInvalidSettings,
+	Code:    adminInvalidSettingsCode,
 	Message: "The Redis settings changed while Silo was checking them. Reload the settings and save again.",
 }
 
@@ -102,7 +102,7 @@ func (h *AdminHandler) checkRedisSave(ctx context.Context, changes map[string]st
 	}
 	if err := probeRedis(ctx, next); err != nil {
 		slog.WarnContext(ctx, "refused a Redis settings save that Silo could not connect with", "error", logredact.SanitizeText(err.Error()))
-		return config.RedisConfig{}, &APIError{Status: http.StatusBadRequest, Code: errCodeInvalidSettings, Message: redisSaveRefusal(err)}
+		return config.RedisConfig{}, &APIError{Status: http.StatusBadRequest, Code: adminInvalidSettingsCode, Message: redisSaveRefusal(err)}
 	}
 	return next, nil
 }
@@ -120,6 +120,10 @@ func (h *AdminHandler) confirmRedisSave(stored, prospective map[string]string, c
 // redisSaveRefusal explains a failed connection without quoting the error,
 // which can name hosts and addresses.
 func redisSaveRefusal(err error) string {
+	if errors.Is(err, errRedisURLUnreadable) {
+		return "Silo could not read redis.url as a Redis URL, so it could not check these settings. " +
+			"Save redis.url again in the form redis://host:port, then save the database number."
+	}
 	_, refused := errors.AsType[redis.Error](err)
 	if refused && errors.Is(err, errRedisChannelsRefused) {
 		return "Redis refused a subscription to Silo's event channels, so the server would not start with these settings. " +

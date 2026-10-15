@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"net"
 	"net/http"
@@ -247,9 +248,9 @@ func TestAdminSettingsRefuseRedisSaveWhenTheConnectionMovedDuringTheCheck(t *tes
 	}
 }
 
-// A URL can turn the socket timeout off. The check still gives up when its
-// time is up, so a Redis that accepts the connection and never answers
-// cannot hold a save, or its connection, open.
+// A URL can turn the socket timeout off, as a number or as a duration. The
+// check still gives up when its time is up, so a Redis that accepts the
+// connection and never answers cannot hold a save, or its connection, open.
 func TestRedisCheckGivesUpOnARedisThatNeverAnswers(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -279,18 +280,32 @@ func TestRedisCheckGivesUpOnARedisThatNeverAnswers(t *testing.T) {
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		done <- probeRedis(ctx, config.RedisConfig{URL: "redis://" + listener.Addr().String() + "?read_timeout=-1&write_timeout=-1"})
-	}()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Error("the check succeeded against a Redis that never answers")
+	for _, timeouts := range []string{"read_timeout=-1&write_timeout=-1", "read_timeout=-1s&write_timeout=-1s"} {
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		done := make(chan error, 1)
+		go func() {
+			done <- probeRedis(ctx, config.RedisConfig{URL: "redis://" + listener.Addr().String() + "?" + timeouts})
+		}()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Errorf("%s: the check succeeded against a Redis that never answers", timeouts)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: the check was still waiting 5 seconds after its context ended", timeouts)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the check was still waiting 5 seconds after its context ended")
+		cancel()
+	}
+}
+
+// A redis.url an older build saved as a bare address cannot be checked. The
+// refusal says how to save it again rather than blaming the host.
+func TestRedisSaveRefusalForAnUnreadableURL(t *testing.T) {
+	err := probeRedis(t.Context(), config.RedisConfig{URL: "cache.example.invalid:6379", DB: "2"})
+	if !errors.Is(err, errRedisURLUnreadable) {
+		t.Fatalf("probe error = %v, want errRedisURLUnreadable", err)
+	}
+	if got := redisSaveRefusal(err); !strings.Contains(got, "redis://host:port") {
+		t.Errorf("refusal = %q, want it to say how to save redis.url again", got)
 	}
 }

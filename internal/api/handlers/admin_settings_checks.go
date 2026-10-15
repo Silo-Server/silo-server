@@ -614,6 +614,10 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 // event bus channels with.
 var errRedisChannelsRefused = errors.New("redis refused a subscription to Silo's event channels")
 
+// errRedisURLUnreadable wraps the error a redis.url the Redis clients cannot
+// read gives, such as a bare host:port an older build saved.
+var errRedisURLUnreadable = errors.New("redis URL cannot be read")
+
 // probeRedis does what a starting server needs from the Redis cfg names, with
 // the client Silo's services use: it connects, sends a PING and subscribes to
 // the event bus channels. Connecting selects the database number, so a number
@@ -625,7 +629,7 @@ var probeRedis = func(ctx context.Context, cfg config.RedisConfig) error {
 	// for a URL whose read_timeout disables the socket timeout.
 	client, err := cache.NewDeadlineRedisClientForRole(cfg, "checks")
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errRedisURLUnreadable, err)
 	}
 	if client == nil {
 		return errors.New("redis URL is required")

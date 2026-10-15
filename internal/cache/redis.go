@@ -522,9 +522,27 @@ func newRedisClient(cfg config.RedisConfig, honorContextDeadlines bool) (*redis.
 		return nil, false, err
 	}
 	if failover != nil {
-		failover.ContextTimeoutEnabled = failover.ContextTimeoutEnabled || honorContextDeadlines
+		if honorContextDeadlines {
+			failover.ContextTimeoutEnabled = true
+			keepSocketDeadlines(&failover.ReadTimeout, &failover.WriteTimeout)
+		}
 		return redis.NewFailoverClient(failover), true, nil
 	}
-	options.ContextTimeoutEnabled = options.ContextTimeoutEnabled || honorContextDeadlines
+	if honorContextDeadlines {
+		options.ContextTimeoutEnabled = true
+		keepSocketDeadlines(&options.ReadTimeout, &options.WriteTimeout)
+	}
 	return redis.NewClient(options), false, nil
+}
+
+// keepSocketDeadlines turns a negative timeout into -1, which go-redis reads
+// as no timeout of its own, so the context's deadline still reaches the
+// socket. go-redis sets no socket deadline at all, context or not, for any
+// other negative timeout, such as the -1s a URL's read_timeout=-1s gives.
+func keepSocketDeadlines(timeouts ...*time.Duration) {
+	for _, timeout := range timeouts {
+		if *timeout < 0 {
+			*timeout = -1
+		}
+	}
 }

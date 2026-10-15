@@ -230,7 +230,7 @@ single-server URL and for a Sentinel URL. A change needs a restart.
 
 A server that cannot connect to the Redis its stored settings name stops at its
 next start, and a stored value can then no longer be corrected in the admin UI.
-So a write that changes that connection first runs the check
+So a write that changes that connection first runs the check that
 `POST /api/v2/admin/settings/check/redis` runs, and stores nothing when it
 fails. The check connects, sends a `PING` and subscribes to the event bus
 channels on the database number, which a starting server needs. It gives up
@@ -247,9 +247,10 @@ after 10 seconds, even for a URL that turns the socket timeouts off.
   grant the channels (the pattern `&silo:*`).
 - A failed connection answers a `422` validation problem on `/api/v2` and
   `400 invalid_settings` on `/api/v1`. The detail says whether Redis refused
-  the connection, refused the channels, or could not be reached. It does not
-  quote the client error, which can name hosts and addresses; the server logs
-  that error with credentials masked.
+  the connection, refused the channels, or could not be reached, or that
+  `redis.url` is not a URL the Redis clients can read (a bare `host:port` an
+  older build saved). It does not quote the client error, which can name hosts
+  and addresses; the server logs that error with credentials masked.
 - The connection is made before the settings transaction. If another write
   changes the stored Redis settings in the meantime, the write is refused the
   same way and can be sent again.
