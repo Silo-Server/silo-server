@@ -293,6 +293,25 @@ describe("scheduleBandwidthProbe", () => {
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
   });
 
+  it("abandons a running probe when another tab starts playback", async () => {
+    fetchWithSession.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+    const signal = (fetchWithSession.mock.calls[0]![1] as RequestInit).signal!;
+
+    // Another tab's playback start, as this tab's channel receives it.
+    new BroadcastChannel("silo-playback-start").postMessage("start");
+    await vi.waitFor(() => expect(signal.aborted).toBe(true));
+  });
+
   it("does nothing after it is stopped", async () => {
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     const stop = scheduleBandwidthProbe(1000);

@@ -249,7 +249,20 @@ function syncPlayingHold(): void {
   releasePlayingHold = undefined;
 }
 
+/** Tells other tabs that playback started here, so a running probe yields. */
+const PLAYBACK_CHANNEL_NAME = "silo-playback-start";
+let playbackChannel: BroadcastChannel | undefined;
+
+function onOtherTabPlaybackStart(): void {
+  lastPlaybackStartAt = Date.now();
+  activeProbe?.abort();
+}
+
 function installMediaTracking(): void {
+  if (!playbackChannel && typeof BroadcastChannel !== "undefined") {
+    playbackChannel = new BroadcastChannel(PLAYBACK_CHANNEL_NAME);
+    playbackChannel.onmessage = onOtherTabPlaybackStart;
+  }
   if (mediaTrackingInstalled || typeof document === "undefined" || !lockManager()) return;
   mediaTrackingInstalled = true;
   // Media events do not bubble; capturing on the document sees them all.
@@ -356,8 +369,10 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
 export function cancelBandwidthProbe(): void {
   cancelEpoch++;
   lastPlaybackStartAt = Date.now();
-  // Tell other tabs, until the playing hold takes over or the start settles.
+  // Tell other tabs: a probe running there stops now, and the lock keeps new
+  // ones off until the playing hold takes over or the start settles.
   installMediaTracking();
+  playbackChannel?.postMessage("start");
   holdMediaLock(new Promise<void>((resolve) => setTimeout(resolve, PLAYBACK_START_QUIET_MS)));
   activeProbe?.abort();
 }
