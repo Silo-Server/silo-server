@@ -101,10 +101,11 @@ export function nextRoomNudgeRate(driftSeconds: number, nudging: boolean): numbe
  */
 export const roomSeekDuplicateSeconds = 1;
 
-/** A seek room sync issued: where to, and when (local ms). */
+/** A seek room sync issued: where to, when (monotonic ms), and for which command. */
 export interface RoomIssuedSeek {
   targetSeconds: number;
   issuedAtMs: number;
+  commandId: string | null;
 }
 
 /**
@@ -131,11 +132,87 @@ export function roomSeekAlreadyPending(
 /**
  * The drift loop of a player that cannot nudge its rate (see `rateCapable`)
  * seeks to the room instead, only when the drift exceeds PAUSED_SEEK and the
- * element reaches the room position without a rebuild. The caller spaces
- * these seeks by at least `roomSyncLoopSettleMs`.
+ * element reaches the room position without a rebuild.
  */
 export function roomLoopSeekDue(driftSeconds: number, targetLocallySeekable: boolean): boolean {
   return targetLocallySeekable && Math.abs(driftSeconds) > roomSyncPausedSeekSeconds;
+}
+
+/** Upper bound on how far ahead of the room a correcting seek aims. */
+export const roomSeekLeadMaxSeconds = 3;
+/** Longest wait between correcting seeks that keep missing. */
+export const roomSeekBackoffMaxMs = 16_000;
+
+/**
+ * Seek-based drift correction for a player without rate nudges. A seek takes
+ * time, and a player whose clock stands still while it seeks lands that long
+ * behind a room that kept moving. Aimed at the room's current position, each
+ * seek would land short and the next would follow forever. So each seek's
+ * result is measured: the drift left after it lands is added to a lead the
+ * next seek aims ahead by, and a seek that did not bring the drift under
+ * PAUSED_SEEK doubles the wait before the next. Convergence resets the wait;
+ * the lead, a property of this player, is kept.
+ */
+export interface RoomSeekCorrector {
+  leadSeconds: number;
+  intervalMs: number;
+  /** Monotonic time of the last correcting seek, or of it still running. */
+  lastSeekAtMs: number;
+  /** A seek ran and its landing has not been measured yet. */
+  awaitingResult: boolean;
+}
+
+export function createRoomSeekCorrector(): RoomSeekCorrector {
+  return {
+    leadSeconds: 0,
+    intervalMs: roomSyncLoopSettleMs,
+    lastSeekAtMs: Number.NEGATIVE_INFINITY,
+    awaitingResult: false,
+  };
+}
+
+/** Where a correcting seek aims, given the room position now. */
+export function roomCorrectorSeekTarget(
+  corrector: RoomSeekCorrector,
+  roomPositionSeconds: number,
+): number {
+  return roomPositionSeconds + corrector.leadSeconds;
+}
+
+/** A correcting seek was issued (or is still running) at `nowMs`. */
+export function noteRoomCorrectorSeek(corrector: RoomSeekCorrector, nowMs: number): void {
+  corrector.lastSeekAtMs = nowMs;
+  corrector.awaitingResult = true;
+}
+
+/**
+ * Takes the drift measured once playback runs again after a correcting seek.
+ * Positive drift is a seek that landed short of the room.
+ */
+export function observeRoomCorrector(corrector: RoomSeekCorrector, driftSeconds: number): void {
+  if (!corrector.awaitingResult) return;
+  corrector.awaitingResult = false;
+  corrector.leadSeconds = Math.min(
+    roomSeekLeadMaxSeconds,
+    Math.max(0, corrector.leadSeconds + driftSeconds),
+  );
+  corrector.intervalMs =
+    Math.abs(driftSeconds) > roomSyncPausedSeekSeconds
+      ? Math.min(roomSeekBackoffMaxMs, corrector.intervalMs * 2)
+      : roomSyncLoopSettleMs;
+}
+
+/** Whether the drift loop should seek now. */
+export function roomCorrectorSeekDue(
+  corrector: RoomSeekCorrector,
+  driftSeconds: number,
+  targetLocallySeekable: boolean,
+  nowMs: number,
+): boolean {
+  return (
+    roomLoopSeekDue(driftSeconds, targetLocallySeekable) &&
+    nowMs - corrector.lastSeekAtMs >= corrector.intervalMs
+  );
 }
 
 export type RoomCommandDecision =

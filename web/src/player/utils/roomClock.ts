@@ -65,15 +65,21 @@ export function addRoomClockSample(
   samples: readonly RoomClockSample[],
   sample: RoomClockSample,
 ): RoomClockSample[] {
+  if (roomClockStepped(samples, sample)) return [sample];
+  return [...samples, sample].slice(-roomClockMaxSamples);
+}
+
+/** Whether `sample` and the best of `samples` cannot both be right: a clock stepped. */
+export function roomClockStepped(
+  samples: readonly RoomClockSample[],
+  sample: RoomClockSample,
+): boolean {
   const best = bestRoomClockSample(samples);
-  if (
+  return (
     best !== null &&
     Math.abs(sample.offsetMs - best.offsetMs) >
       (sample.rttMs + best.rttMs) / 2 + roomClockStepToleranceMs
-  ) {
-    return [sample];
-  }
-  return [...samples, sample].slice(-roomClockMaxSamples);
+  );
 }
 
 /**

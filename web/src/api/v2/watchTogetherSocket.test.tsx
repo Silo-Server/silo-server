@@ -264,6 +264,51 @@ it("estimates the clock from the fastest pong, keeps it across a reconnect, and 
   await pong(third, 1_000, 300);
   expect(view.result.current.serverTimeOffsetMs).toBe(300);
 });
+it("returns to fast pings after a clock step", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket()),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  const socket = RoomSocket.all[0]!;
+  const pings = () =>
+    socket.send.mock.calls
+      .map(([data]) => JSON.parse(data as string) as Record<string, string>)
+      .filter((message) => message.type === "ping");
+  const pong = (offsetMs: number) => {
+    const ping = pings().at(-1)!;
+    const serverAt = new Date(Date.parse(ping.client_sent_at!) + offsetMs).toISOString();
+    act(() =>
+      socket.message({
+        type: "pong",
+        client_sent_at: ping.client_sent_at,
+        server_received_at: serverAt,
+        server_sent_at: serverAt,
+      }),
+    );
+  };
+  act(() => socket.open());
+  pong(500);
+  for (let i = 0; i < 3; i++) {
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    pong(500);
+  }
+  // Settled: the next ping is 15 s out.
+  await act(() => vi.advanceTimersByTimeAsync(14_999));
+  expect(pings()).toHaveLength(4);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(pings()).toHaveLength(5);
+  // The clock steps by two seconds; the estimate starts over at 2 s pings.
+  pong(2_500);
+  expect(view.result.current.serverTimeOffsetMs).toBe(2_500);
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  expect(pings()).toHaveLength(6);
+});
 it("drops a transport command with the socket that delivered it", async () => {
   vi.stubGlobal(
     "fetch",

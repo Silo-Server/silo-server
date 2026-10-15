@@ -1049,6 +1049,62 @@ describe("VideoPlayer room catch-up", () => {
     });
   });
 
+  it("pre-rolls a stall seek that joined a reload already loading", async () => {
+    // A progressive remux whose stream starts at 1490 s.
+    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(1491, 1490);
+    let paused = true;
+    Object.defineProperty(video, "paused", { configurable: true, get: () => paused });
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    vi.mocked(video.play).mockImplementation(async () => {
+      paused = false;
+    });
+    vi.mocked(video.pause).mockImplementation(() => {
+      paused = true;
+    });
+    const seekable = (end: number) =>
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 0, end: () => end },
+      });
+    // A correction to 1500 reopens the stream there, in the same plan.
+    seekable(20);
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: { ...command, command_id: "correction", position_seconds: 1500 },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(playerSeek).toHaveBeenCalledExactlyOnceWith(10);
+    // The reopened response starts loading, at the keyframe 2.5 s short.
+    fireEvent(video, new Event("loadstart"));
+    seekable(0);
+    video.currentTime = 7.5;
+
+    // The room now waits on this viewer with a seek to the same position.
+    vi.mocked(video.play).mockClear();
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        room: { ...connection.room!, playback_state: "waiting" as const },
+        transportCommand: {
+          ...command,
+          command_id: "stall-seek",
+          action: "seek" as const,
+          playback_state: "waiting" as const,
+          position_seconds: 1500,
+        },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // No second reload, and the running one still pre-rolls up to the target.
+    expect(playerSeek).toHaveBeenCalledOnce();
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(video.play).toHaveBeenCalledOnce();
+    expect(video.playbackRate).toBe(4);
+  });
+
   it.each(["target", "play", "pause"] as const)(
     "ends a guest seek pre-roll on %s",
     async (ending) => {
@@ -1474,23 +1530,23 @@ describe("VideoPlayer room catch-up", () => {
     expect(onReanchorSeek).toHaveBeenLastCalledWith(100);
 
     // A correction while the rebuilt stream is still starting keeps playing.
-    vi.setSystemTime(Date.now() + 2_000);
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     await correct("correction-2");
     expect(onReanchorSeek).toHaveBeenCalledTimes(1);
 
     // The rebuild plays four seconds after it started.
-    vi.setSystemTime(Date.now() + 2_000);
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     Object.defineProperty(video, "paused", { configurable: true, value: false });
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
     video.currentTime = 100;
     fireEvent.timeUpdate(video);
 
     // The next rebuild waits out the backoff, then aims ahead by that startup.
-    vi.setSystemTime(Date.now() + 5_000);
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
     await correct("correction-3", 120);
     expect(onReanchorSeek).toHaveBeenCalledTimes(1);
 
-    vi.setSystemTime(Date.now() + 5_000);
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
     await correct("correction-4", 125);
     expect(onReanchorSeek).toHaveBeenCalledTimes(2);
     expect(onReanchorSeek).toHaveBeenLastCalledWith(129);
@@ -1517,7 +1573,7 @@ describe("VideoPlayer room catch-up", () => {
 
     // The first load is still running; chasing the room again would only
     // restart it.
-    vi.setSystemTime(Date.now() + 2_000);
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     await correct("correction-2", 110);
     expect(playerSeek).toHaveBeenCalledTimes(1);
 
@@ -1553,7 +1609,7 @@ describe("VideoPlayer room catch-up", () => {
     expect(onReanchorSeek).toHaveBeenCalledTimes(1);
 
     // Another stream loads and plays at the target, but it is not the reload.
-    vi.setSystemTime(Date.now() + 4_000);
+    await act(() => vi.advanceTimersByTimeAsync(4_000));
     Object.defineProperty(video, "paused", { configurable: true, value: false });
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
     fireEvent.loadStart(video);
@@ -1562,7 +1618,7 @@ describe("VideoPlayer room catch-up", () => {
     fireEvent.timeUpdate(video);
 
     // Had it settled, the backoff would have allowed another reload by now.
-    vi.setSystemTime(Date.now() + 11_000);
+    await act(() => vi.advanceTimersByTimeAsync(11_000));
     await correct("correction-2", 115);
     expect(onReanchorSeek).toHaveBeenCalledTimes(1);
   });
@@ -1589,20 +1645,20 @@ describe("VideoPlayer room catch-up", () => {
     };
     await correct("correction-1", 100);
     // The first reload goes stale, and a new one aims at the same position.
-    vi.setSystemTime(Date.now() + 31_000);
+    await act(() => vi.advanceTimersByTimeAsync(31_000));
     await correct("correction-2", 100);
     expect(onReanchorSeek).toHaveBeenCalledTimes(2);
 
     // The first reload's replan completes late; it must not count as the second's load.
     await act(async () => resolvers[0]!(true));
-    vi.setSystemTime(Date.now() + 2_000);
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     Object.defineProperty(video, "paused", { configurable: true, value: false });
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
     video.currentTime = 100;
     fireEvent.timeUpdate(video);
 
     // Had the second reload landed, its 20 s backoff would have ended.
-    vi.setSystemTime(Date.now() + 21_000);
+    await act(() => vi.advanceTimersByTimeAsync(21_000));
     await correct("correction-3", 150);
     expect(onReanchorSeek).toHaveBeenCalledTimes(2);
   });
@@ -1626,7 +1682,7 @@ describe("VideoPlayer room catch-up", () => {
       await act(() => vi.advanceTimersByTimeAsync(0));
     };
     await correct("correction-1");
-    vi.setSystemTime(Date.now() + 2_000);
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     await correct("correction-2");
     expect(onReanchorSeek).toHaveBeenCalledTimes(1);
 
@@ -2388,6 +2444,92 @@ describe("VideoPlayer room catch-up", () => {
     },
   );
 
+  it.each([3600, 3599.8])(
+    "leaves an ended element ended when the room plays at %s",
+    async (position) => {
+      const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(3600);
+      Object.defineProperty(video, "duration", { configurable: true, value: 3600 });
+      Object.defineProperty(video, "ended", { configurable: true, value: true });
+      rerenderPlayer({
+        watchTogetherConnection: {
+          ...connection,
+          transportCommand: { ...command, position_seconds: position },
+        },
+      });
+      await act(() => vi.advanceTimersByTimeAsync(2_000));
+      // play() would start the media over from the beginning.
+      expect(video.play).not.toHaveBeenCalled();
+      expect(playerSeek).not.toHaveBeenCalled();
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+    },
+  );
+
+  it("seeks an ended element to a room still short of the end before playing", async () => {
+    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(3600);
+    Object.defineProperty(video, "duration", { configurable: true, value: 3600 });
+    Object.defineProperty(video, "ended", { configurable: true, value: true });
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: { ...command, position_seconds: 3599.5 },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(3599.5);
+    expect(video.play).toHaveBeenCalledOnce();
+  });
+
+  it("leaves an element that ended during playback to the room", async () => {
+    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(100);
+    markPlaying(video);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    Object.defineProperty(video, "ended", { configurable: true, value: true });
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    expect(video.playbackRate).toBe(1);
+    expect(playerSeek).not.toHaveBeenCalled();
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+  });
+
+  it("keeps correcting drift through a wall-clock jump", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    markPlaying(video);
+    const commanded = { ...connection, transportCommand: command };
+    rerenderPlayer({ watchTogetherConnection: commanded });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // The local clock steps back a minute; the re-estimated server offset
+    // follows it, so the room position itself is unchanged.
+    vi.setSystemTime(Date.now() - 60_000);
+    rerenderPlayer({ watchTogetherConnection: { ...commanded, serverTimeOffsetMs: 60_000 } });
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(video.playbackRate).toBe(1.04);
+  });
+
+  it("names a command in routine reports only once its seek has landed", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(90);
+    markPlaying(video);
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 200 },
+    });
+    const reports = () =>
+      vi
+        .mocked(connection.sendRoomMessage)
+        .mock.calls.map(([message]) => message)
+        .filter((message) => message.type === "state_report");
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(playerSeek).toHaveBeenCalledExactlyOnceWith(100);
+    // The correction's media is still loading; the old stream plays on.
+    await act(() => vi.advanceTimersByTimeAsync(1_500));
+    expect(reports().at(-1)).toMatchObject({ position_seconds: 90 });
+    expect(reports().at(-1)).not.toHaveProperty("command_id");
+    video.currentTime = 100;
+    fireFrameTimeUpdate(video);
+    await act(() => vi.advanceTimersByTimeAsync(1_500));
+    expect(reports().at(-1)).toMatchObject({ command_id: command.command_id });
+  });
+
   it("names the last applied command in routine state reports", async () => {
     const { connection, video, command, rerenderPlayer } = setup(100);
     markPlaying(video);
@@ -2678,7 +2820,7 @@ describe("VideoPlayer room sync without pitch-kept rate changes", () => {
     expect(playerSeek).toHaveBeenLastCalledWith(103);
   });
 
-  it("leaves drift up to a second alone, then seeks from the loop at most once per settle", async () => {
+  it("leaves drift up to a second alone, then seeks from the loop", async () => {
     const { connection, video, command, rerenderPlayer } = await setup(99.2);
     rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
     await act(() => vi.advanceTimersByTimeAsync(0));
@@ -2688,16 +2830,49 @@ describe("VideoPlayer room sync without pitch-kept rate changes", () => {
     await act(() => vi.advanceTimersByTimeAsync(1_000));
     expect(playerSeek).toHaveBeenCalledExactlyOnceWith(101);
     expect(video.playbackRate).toBe(1);
-    // The seek lands, and the element falls behind again at once.
-    video.currentTime = 101;
-    fireFrameTimeUpdate(video);
-    video.currentTime = 99;
-    await act(() => vi.advanceTimersByTimeAsync(500));
-    expect(playerSeek).toHaveBeenCalledOnce();
-    await act(() => vi.advanceTimersByTimeAsync(500));
+  });
+
+  it("aims ahead of a slow seek instead of chasing the room", async () => {
+    const { connection, video, command, rerenderPlayer } = await setup(97);
+    // The engine's clock stands still for the two seconds a seek takes, then
+    // lands where it was aimed; otherwise it plays at 1x.
+    const seekMs = 2_000;
+    let seek: { target: number; remainingMs: number } | null = null;
+    const setSeeking = (value: boolean) =>
+      Object.defineProperty(video, "seeking", { configurable: true, value });
+    playerSeek.mockImplementation((nativeSeconds: number) => {
+      seek = { target: nativeSeconds, remainingMs: seekMs };
+      setSeeking(true);
+    });
+    const play = async (totalMs: number) => {
+      for (let elapsed = 0; elapsed < totalMs; elapsed += 100) {
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        const running = seek as { target: number; remainingMs: number } | null;
+        if (running === null) {
+          video.currentTime += 0.1;
+          continue;
+        }
+        running.remainingMs -= 100;
+        if (running.remainingMs > 0) continue;
+        seek = null;
+        video.currentTime = running.target;
+        setSeeking(false);
+        fireEvent.seeked(video);
+        fireFrameTimeUpdate(video);
+      }
+    };
+
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(playerSeek).toHaveBeenCalledExactlyOnceWith(100);
+    await play(20_000);
+
+    // The first seek lands two seconds short; the next aims that far ahead
+    // and lands with the room. Aimed at the room alone, every seek would land
+    // short and the loop would seek again every few seconds.
     expect(playerSeek).toHaveBeenCalledTimes(2);
-    expect(playerSeek).toHaveBeenLastCalledWith(102);
-    expect(video.playbackRate).toBe(1);
+    const roomPosition = 100 + 20;
+    expect(Math.abs(roomPosition - video.currentTime)).toBeLessThan(1);
   });
 });
 

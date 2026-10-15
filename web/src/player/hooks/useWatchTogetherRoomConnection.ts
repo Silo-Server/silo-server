@@ -12,6 +12,7 @@ import {
   roomClockOffsetMs,
   roomClockPingDelayMs,
   roomClockSample,
+  roomClockStepped,
   type RoomClockSample,
 } from "../utils/roomClock";
 import {
@@ -323,16 +324,18 @@ export function useWatchTogetherRoomConnection({
     }
 
     const recordClockSample = (sample: RoomClockSample) => {
-      connectionSamples += 1;
       const clock = clockSamplesRef.current;
+      const delayBefore = roomClockPingDelayMs(connectionSamples);
+      // After a clock step the estimate starts over, and so does the fast
+      // cadence that builds it.
+      if (roomClockStepped(clock.samples, sample)) connectionSamples = 0;
+      connectionSamples += 1;
       clock.samples = addRoomClockSample(clock.samples, sample);
       const offset = roomClockOffsetMs(clock.samples);
       if (offset !== null) setServerTimeOffsetMs(offset);
-      // The sample that settles the estimate moves the waiting ping to the
-      // slow cadence instead of one more fast ping.
-      if (roomClockPingDelayMs(connectionSamples) !== roomClockPingDelayMs(connectionSamples - 1)) {
-        schedulePing();
-      }
+      // A change of cadence moves the waiting ping instead of letting one
+      // more ping run at the old one.
+      if (roomClockPingDelayMs(connectionSamples) !== delayBefore) schedulePing();
     };
 
     const scheduleReconnect = () => {

@@ -5,12 +5,17 @@ import {
   abandonRoomReload,
   beginRoomReload,
   createRoomReloadBudget,
+  createRoomSeekCorrector,
   decideRoomCommand,
   expireRoomReload,
   isNativePositionInRanges,
   landRoomReload,
   nextRoomNudgeRate,
+  noteRoomCorrectorSeek,
   noteRoomReloadLoading,
+  observeRoomCorrector,
+  roomCorrectorSeekDue,
+  roomCorrectorSeekTarget,
   roomLoopSeekDue,
   roomMembersLeftBehind,
   roomPositionAt,
@@ -271,8 +276,61 @@ describe("roomLoopSeekDue", () => {
   });
 });
 
+describe("seek-based drift correction", () => {
+  it("aims the next seek ahead by what the last one fell short", () => {
+    const corrector = createRoomSeekCorrector();
+    noteRoomCorrectorSeek(corrector, 0);
+    observeRoomCorrector(corrector, 2);
+    expect(roomCorrectorSeekTarget(corrector, 100)).toBe(102);
+    // Landing past the room takes some of the lead back, never below none.
+    noteRoomCorrectorSeek(corrector, 0);
+    observeRoomCorrector(corrector, -0.5);
+    expect(roomCorrectorSeekTarget(corrector, 100)).toBe(101.5);
+    noteRoomCorrectorSeek(corrector, 0);
+    observeRoomCorrector(corrector, -4);
+    expect(corrector.leadSeconds).toBe(0);
+  });
+
+  it("caps the lead", () => {
+    const corrector = createRoomSeekCorrector();
+    for (let i = 0; i < 3; i++) {
+      noteRoomCorrectorSeek(corrector, 0);
+      observeRoomCorrector(corrector, 2);
+    }
+    expect(corrector.leadSeconds).toBe(3);
+  });
+
+  it("doubles the wait after each miss up to 16 s and resets once a seek converges", () => {
+    const corrector = createRoomSeekCorrector();
+    const waits: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      noteRoomCorrectorSeek(corrector, 0);
+      observeRoomCorrector(corrector, 1.5);
+      waits.push(corrector.intervalMs);
+    }
+    expect(waits).toEqual([2_000, 4_000, 8_000, 16_000, 16_000, 16_000]);
+    noteRoomCorrectorSeek(corrector, 0);
+    observeRoomCorrector(corrector, 0.3);
+    expect(corrector.intervalMs).toBe(1_000);
+  });
+
+  it("measures each seek once, and spaces seeks by the current wait", () => {
+    const corrector = createRoomSeekCorrector();
+    expect(roomCorrectorSeekDue(corrector, 1.5, true, 0)).toBe(true);
+    expect(roomCorrectorSeekDue(corrector, 1.5, false, 0)).toBe(false);
+    noteRoomCorrectorSeek(corrector, 10_000);
+    observeRoomCorrector(corrector, 1.5);
+    // Later ticks of the same landing are not new measurements.
+    observeRoomCorrector(corrector, 1.5);
+    expect(corrector.intervalMs).toBe(2_000);
+    expect(corrector.leadSeconds).toBe(1.5);
+    expect(roomCorrectorSeekDue(corrector, 1.5, true, 11_999)).toBe(false);
+    expect(roomCorrectorSeekDue(corrector, 1.5, true, 12_000)).toBe(true);
+  });
+});
+
 describe("roomSeekAlreadyPending", () => {
-  const issued = { targetSeconds: 100, issuedAtMs: 1_000 };
+  const issued = { targetSeconds: 100, issuedAtMs: 1_000, commandId: "c1" };
 
   it("recognizes a repeat of a room seek that is still loading", () => {
     expect(roomSeekAlreadyPending(issued, 100, 100.8, 2_000)).toBe(true);

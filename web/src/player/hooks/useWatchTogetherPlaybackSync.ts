@@ -18,6 +18,13 @@ interface UseWatchTogetherPlaybackSyncOptions {
   appliedCommandIdRef: RefObject<string | null>;
   /** Called when a sustained stall is reported to the room. */
   onSustainedStall?: () => void;
+  /**
+   * The command a routine state report may name, or null to name none. It is
+   * the applied command once any seek it started has landed: before that the
+   * element still plays the stream the command is replacing. Defaults to the
+   * applied command.
+   */
+  reportCommandId?: () => string | null;
 }
 
 interface TransportRequestResult {
@@ -48,6 +55,12 @@ interface UseWatchTogetherPlaybackSyncResult {
   prerollMutedPreference: () => boolean | null;
   /** Records the viewer's mute choice during a pre-roll. False when none runs. */
   setPrerollMutedPreference: (muted: boolean) => boolean;
+  /**
+   * The seek of command `toCommandId` was skipped because the stream rebuild
+   * that `fromCommandId` started already heads to the same position. That
+   * rebuild then serves the new command too, including its pre-roll.
+   */
+  carryStreamRebuild: (fromCommandId: string | null, toCommandId: string) => void;
 }
 
 const stateReportIntervalMs = 1_500;
@@ -131,6 +144,7 @@ export function useWatchTogetherPlaybackSync({
   streamOriginRef,
   appliedCommandIdRef,
   onSustainedStall,
+  reportCommandId,
 }: UseWatchTogetherPlaybackSyncOptions): UseWatchTogetherPlaybackSyncResult {
   const connectionState = roomConnection.connectionState;
   const room = roomConnection.room;
@@ -221,6 +235,30 @@ export function useWatchTogetherPlaybackSync({
   // The command whose seek rebuilt the current stream. Until the rebuilt
   // stream loads, the element still holds the stream the seek replaces.
   const rebuiltForCommandRef = useRef<string | null>(null);
+  // The command applied when the element last started loading a stream, so a
+  // command that adopts an earlier command's rebuild can tell whether that
+  // rebuild has already begun loading.
+  const loadStartedForCommandRef = useRef<string | null>(null);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onLoadStart = () => {
+      loadStartedForCommandRef.current = appliedCommandIdRef.current;
+    };
+    video.addEventListener("loadstart", onLoadStart);
+    return () => video.removeEventListener("loadstart", onLoadStart);
+  }, [appliedCommandIdRef, videoRef]);
+  const carryStreamRebuild = useCallback((fromCommandId: string | null, toCommandId: string) => {
+    // A rebuild that has not started loading yet is marked for the applied
+    // command by its own loadstart.
+    if (fromCommandId === null) return;
+    if (
+      rebuiltForCommandRef.current === fromCommandId ||
+      loadStartedForCommandRef.current === fromCommandId
+    ) {
+      rebuiltForCommandRef.current = toCommandId;
+    }
+  }, []);
   const endPreroll = useCallback(
     (pause: boolean) => {
       const preroll = prerollRef.current;
@@ -515,7 +553,7 @@ export function useWatchTogetherPlaybackSync({
 
         // Naming the latest command this viewer applied lets the server take
         // the report at once instead of waiting out that command's settle window.
-        const appliedCommandId = appliedCommandIdRef.current;
+        const appliedCommandId = reportCommandId ? reportCommandId() : appliedCommandIdRef.current;
         sendRoomMessage({
           type: "state_report",
           session_id: sessionId,
@@ -539,6 +577,7 @@ export function useWatchTogetherPlaybackSync({
     connectionState,
     noteReadyReject,
     readinessPending,
+    reportCommandId,
     sendRoomMessage,
     serverTimeOffsetMs,
     sessionId,
@@ -660,8 +699,10 @@ export function useWatchTogetherPlaybackSync({
       reportBuffering,
       prerollMutedPreference,
       setPrerollMutedPreference,
+      carryStreamRebuild,
     }),
     [
+      carryStreamRebuild,
       attachedSessionId,
       catchingUp,
       readinessPending,

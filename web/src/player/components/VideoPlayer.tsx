@@ -93,13 +93,17 @@ import {
   abandonRoomReload,
   beginRoomReload,
   createRoomReloadBudget,
+  createRoomSeekCorrector,
   decideRoomCommand,
   expireRoomReload,
   isNativePositionInRanges,
   landRoomReload,
   nextRoomNudgeRate,
+  noteRoomCorrectorSeek,
   noteRoomReloadLoading,
-  roomLoopSeekDue,
+  observeRoomCorrector,
+  roomCorrectorSeekDue,
+  roomCorrectorSeekTarget,
   roomPositionAt,
   roomReloadAllowed,
   roomReloadInFlight,
@@ -516,14 +520,17 @@ export function VideoPlayer({
   const roomReferenceRef = useRef<RoomPositionReference | null>(null);
   // When the latest room command executed or finished executing. The drift
   // loop leaves playback alone for a moment after a command.
-  const roomCommandFinishedAtRef = useRef(0);
+  // Local intervals in room sync (this settle, reload staleness and pacing,
+  // seek spacing) run on the monotonic clock, so a wall-clock jump cannot
+  // freeze them. Date.now() is used only where server time is involved.
+  const roomCommandFinishedAtRef = useRef(Number.NEGATIVE_INFINITY);
   // The last seek room sync issued and when. Cleared once no seek is pending
   // and when the stream is replaced, so only an unfinished room seek in this
   // stream suppresses a repeat of itself.
   const roomIssuedSeekRef = useRef<RoomIssuedSeek | null>(null);
-  // When the drift loop last issued or saw a seek; a player without rate
-  // nudges seeks from the loop at most once per loop settle after it.
-  const roomLoopSeekAtRef = useRef(0);
+  // Seek-based drift correction for a player without rate nudges: the lead
+  // its seeks aim ahead by and the wait between them; see RoomSeekCorrector.
+  const roomSeekCorrectorRef = useRef(createRoomSeekCorrector());
   // The rate playback returns to when no room catch-up is active: the
   // viewer's chosen speed, or 1x while a Watch Party room owns the rate.
   const baseRateRef = useRef(1);
@@ -886,6 +893,12 @@ export function VideoPlayer({
     roomStallTimesRef.current.push(Date.now());
     setRoomStallSignal((signal) => signal + 1);
   }, []);
+  // A routine report names the applied command only once any seek it
+  // started has landed; until then the element still plays the old stream.
+  const roomReportCommandId = useCallback(() => {
+    if (pendingSeekTimeRef.current !== null || videoRef.current?.seeking) return null;
+    return appliedRoomCommandIdRef.current;
+  }, []);
   const watchTogetherSync = useWatchTogetherPlaybackSync({
     roomConnection: watchTogether,
     sessionId,
@@ -893,6 +906,7 @@ export function VideoPlayer({
     streamOriginRef: timelineOffsetRef,
     appliedCommandIdRef: appliedRoomCommandIdRef,
     onSustainedStall: noteRoomStall,
+    reportCommandId: roomReportCommandId,
   });
   const roomPlaybackActive = !!watchTogetherRoomId && !watchTogether.closedReason;
   // Read by timers that must use the newest clock estimate without restarting.
@@ -2653,7 +2667,7 @@ export function VideoPlayer({
         video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA &&
         roomReloadLanded(roomReloadBudgetRef.current, nextTime)
       ) {
-        landRoomReload(roomReloadBudgetRef.current, Date.now());
+        landRoomReload(roomReloadBudgetRef.current, performance.now());
       }
       // timeupdate is the most reliable signal that frames are rendering.
       // Also clears any stale buffering state from HLS segment transitions
@@ -3464,13 +3478,24 @@ export function VideoPlayer({
   useEffect(() => {
     reportRoomReadyRef.current = watchTogetherSync.reportReady;
   }, [watchTogetherSync.reportReady]);
+  const carryStreamRebuildRef = useRef(watchTogetherSync.carryStreamRebuild);
+  useEffect(() => {
+    carryStreamRebuildRef.current = watchTogetherSync.carryStreamRebuild;
+  }, [watchTogetherSync.carryStreamRebuild]);
 
   // Seeks for room sync, remembered so a repeat of a seek still loading can
   // be recognized and skipped.
-  const issueRoomSeek = useCallback((seconds: number): boolean | Promise<boolean> => {
-    roomIssuedSeekRef.current = { targetSeconds: seconds, issuedAtMs: Date.now() };
-    return performPlayerSeekRef.current(seconds);
-  }, []);
+  const issueRoomSeek = useCallback(
+    (seconds: number, commandId: string | null): boolean | Promise<boolean> => {
+      roomIssuedSeekRef.current = {
+        targetSeconds: seconds,
+        issuedAtMs: performance.now(),
+        commandId,
+      };
+      return performPlayerSeekRef.current(seconds);
+    },
+    [],
+  );
 
   useEffect(() => {
     const command = watchTogether.transportCommand;
@@ -3519,7 +3544,9 @@ export function VideoPlayer({
     // Applies the command's position at execution; see decideRoomCommand.
     // Play state is the caller's: a play command plays at 1x afterwards unless
     // this starts a nudge.
-    const applyRoomPosition = (video: HTMLVideoElement) => {
+    // Returns false when playback must not start: the element ended and the
+    // room is at or past its end.
+    const applyRoomPosition = (video: HTMLVideoElement): boolean => {
       // A play command is the room's new reference; it supersedes an earlier
       // seek target the element never settled on (one that landed more than
       // the settle tolerance away). Left pending, that target would pin the
@@ -3541,11 +3568,11 @@ export function VideoPlayer({
       const reloadBudget = roomReloadBudgetRef.current;
       if (command.action === "seek") {
         // An explicit room seek supersedes any correction reload.
-        abandonRoomReload(reloadBudget, Date.now());
+        abandonRoomReload(reloadBudget, performance.now());
         settleRoomReloads(reloadBudget);
       } else if (command.action === "pause" && reloadBudget.targetSeconds !== null) {
         // The room stopped; the reload no longer chases a moving position.
-        abandonRoomReload(reloadBudget, Date.now());
+        abandonRoomReload(reloadBudget, performance.now());
       }
 
       // Projected to the actual execution moment: a late command lands where
@@ -3562,7 +3589,7 @@ export function VideoPlayer({
           video.seekable,
           toPlayerTime(targetPositionSeconds, timelineOffsetRef.current),
         );
-      const decision = decideRoomCommand({
+      let decision = decideRoomCommand({
         action: command.action,
         targetPositionSeconds,
         localPositionSeconds:
@@ -3571,19 +3598,32 @@ export function VideoPlayer({
         rateCapable: roomRateCapableRef.current,
         targetLocallySeekable,
       });
+      if (command.action === "play" && video.ended) {
+        // play() on an ended element starts over from the beginning. A room
+        // at or past this media's end leaves it ended; one still short of the
+        // end is sought to first, however small the gap.
+        const localEndSeconds = Number.isFinite(video.duration)
+          ? toMediaTime(video.duration, timelineOffsetRef.current)
+          : Number.POSITIVE_INFINITY;
+        if (targetPositionSeconds >= localEndSeconds - roomSyncDeadbandSeconds) return false;
+        decision = { kind: "seek" };
+      }
 
+      const issued = roomIssuedSeekRef.current;
       if (
         decision.kind === "seek" &&
         roomSeekAlreadyPending(
-          roomIssuedSeekRef.current,
+          issued,
           pendingSeekTimeRef.current,
           targetPositionSeconds,
-          Date.now(),
+          performance.now(),
         )
       ) {
         // The previous command's seek to this position is still loading. A
-        // second one would reload or rebuild the stream all over again.
-        return;
+        // second one would reload or rebuild the stream all over again; the
+        // running one serves this command, pre-roll included.
+        carryStreamRebuildRef.current(issued?.commandId ?? null, command.command_id);
+        return true;
       }
       const targetBuffered = isNativePositionInRanges(
         video.buffered,
@@ -3598,8 +3638,8 @@ export function VideoPlayer({
         // request or a stream rebuild. Keep playing behind the room while an
         // earlier reload is still loading or the backoff runs; the server
         // repeats corrections that still apply.
-        const now = Date.now();
-        if (!roomReloadAllowed(reloadBudget, now)) return;
+        const now = performance.now();
+        if (!roomReloadAllowed(reloadBudget, now)) return true;
         const reloadTarget = beginRoomReload(
           reloadBudget,
           targetPositionSeconds,
@@ -3610,15 +3650,28 @@ export function VideoPlayer({
         // Only this reload's own seek counts as its load: an in-stream seek
         // that was taken, or an adopted reanchor. Other stream swaps, such as
         // a subtitle replan, cannot settle it.
-        void Promise.resolve(issueRoomSeek(reloadTarget)).then((accepted) => {
+        void Promise.resolve(issueRoomSeek(reloadTarget, command.command_id)).then((accepted) => {
           if (reloadBudget.generation !== reloadGeneration) return;
           if (accepted) noteRoomReloadLoading(reloadBudget);
-          else abandonRoomReload(reloadBudget, Date.now());
+          else abandonRoomReload(reloadBudget, performance.now());
         });
       } else if (decision.kind === "seek") {
         // This seek replaces a reload still loading toward an older target.
-        if (reloadBudget.targetSeconds !== null) abandonRoomReload(reloadBudget, Date.now());
-        issueRoomSeek(targetPositionSeconds);
+        if (reloadBudget.targetSeconds !== null) {
+          abandonRoomReload(reloadBudget, performance.now());
+        }
+        if (!roomRateCapableRef.current && command.action === "play" && localPlaying) {
+          // A correcting seek for a player without rate nudges: aimed ahead
+          // by what earlier seeks fell short, and measured by the drift loop.
+          const corrector = roomSeekCorrectorRef.current;
+          noteRoomCorrectorSeek(corrector, performance.now());
+          issueRoomSeek(
+            roomCorrectorSeekTarget(corrector, targetPositionSeconds),
+            command.command_id,
+          );
+        } else {
+          issueRoomSeek(targetPositionSeconds, command.command_id);
+        }
       } else if (decision.kind === "rate") {
         roomNudgeActiveRef.current = true;
         video.playbackRate = decision.rate;
@@ -3626,6 +3679,7 @@ export function VideoPlayer({
         // Already with the room; the drift loop ends any running nudge.
         settleRoomReloads(reloadBudget);
       }
+      return true;
     };
 
     roomCommandTimerRef.current = window.setTimeout(() => {
@@ -3638,14 +3692,14 @@ export function VideoPlayer({
 
         appliedRoomCommandIdRef.current = command.command_id;
         roomReferenceRef.current = reference;
-        roomCommandFinishedAtRef.current = Date.now();
-        applyRoomPosition(video);
+        roomCommandFinishedAtRef.current = performance.now();
+        const playAllowed = applyRoomPosition(video);
 
         if (command.action === "seek") {
           video.pause();
         }
 
-        if (command.action === "play") {
+        if (command.action === "play" && playAllowed) {
           try {
             await video.play();
           } catch (error) {
@@ -3674,8 +3728,8 @@ export function VideoPlayer({
                   return;
                 const currentVideo = videoRef.current;
                 if (!currentVideo) return;
-                roomCommandFinishedAtRef.current = Date.now();
-                applyRoomPosition(currentVideo);
+                roomCommandFinishedAtRef.current = performance.now();
+                if (!applyRoomPosition(currentVideo)) return;
                 void currentVideo
                   .play()
                   .then(() => {
@@ -3706,7 +3760,7 @@ export function VideoPlayer({
         .catch(() => {})
         .finally(() => {
           if (lastRoomCommandIdRef.current === command.command_id) {
-            roomCommandFinishedAtRef.current = Date.now();
+            roomCommandFinishedAtRef.current = performance.now();
           }
         });
     }, delay);
@@ -3773,22 +3827,24 @@ export function VideoPlayer({
       const video = videoRef.current;
       if (!video) return;
       const reloadBudget = roomReloadBudgetRef.current;
-      const nowMs = Date.now();
-      if (reloadBudget.targetSeconds !== null && !roomReloadInFlight(reloadBudget, nowMs)) {
+      const monotonicMs = performance.now();
+      if (reloadBudget.targetSeconds !== null && !roomReloadInFlight(reloadBudget, monotonicMs)) {
         // A reload that never landed; stop waiting for it.
-        expireRoomReload(reloadBudget, nowMs);
+        expireRoomReload(reloadBudget, monotonicMs);
       }
       if (
         roomCommandTimerRef.current !== null ||
-        nowMs - roomCommandFinishedAtRef.current < roomSyncLoopSettleMs ||
-        roomReloadInFlight(reloadBudget, nowMs)
+        monotonicMs - roomCommandFinishedAtRef.current < roomSyncLoopSettleMs ||
+        roomReloadInFlight(reloadBudget, monotonicMs)
       ) {
         return;
       }
+      const corrector = roomSeekCorrectorRef.current;
       const reference = roomReferenceRef.current;
       const localPosition = elementMediaPosition();
       if (video.seeking || pendingSeekTimeRef.current !== null) {
-        roomLoopSeekAtRef.current = nowMs;
+        // Seek spacing counts from when a seek finished, not when it began.
+        corrector.lastSeekAtMs = monotonicMs;
       }
       if (
         roomPhase !== "playing" ||
@@ -3805,22 +3861,20 @@ export function VideoPlayer({
         if (roomNudgeActiveRef.current) resetRoomCatchupRate();
         return;
       }
-      const roomPosition = roomPositionAt(reference, nowMs, serverTimeOffsetRef.current);
+      // The room position maps through the server clock, so it uses wall time.
+      const roomPosition = roomPositionAt(reference, Date.now(), serverTimeOffsetRef.current);
       const drift = roomPosition - localPosition;
       if (!roomRateCapableRef.current) {
         if (roomNudgeActiveRef.current) resetRoomCatchupRate();
+        // Playback runs again after a correcting seek: measure where it landed.
+        observeRoomCorrector(corrector, drift);
+        const target = roomCorrectorSeekTarget(corrector, roomPosition);
         const seekable =
           canSeekAnywhere ||
-          isNativePositionInRanges(
-            video.seekable,
-            toPlayerTime(roomPosition, timelineOffsetRef.current),
-          );
-        if (
-          roomLoopSeekDue(drift, seekable) &&
-          nowMs - roomLoopSeekAtRef.current >= roomSyncLoopSettleMs
-        ) {
-          roomLoopSeekAtRef.current = nowMs;
-          issueRoomSeek(roomPosition);
+          isNativePositionInRanges(video.seekable, toPlayerTime(target, timelineOffsetRef.current));
+        if (roomCorrectorSeekDue(corrector, drift, seekable, monotonicMs)) {
+          noteRoomCorrectorSeek(corrector, monotonicMs);
+          issueRoomSeek(target, appliedRoomCommandIdRef.current);
         }
         return;
       }
@@ -3898,6 +3952,7 @@ export function VideoPlayer({
       // does not apply to it.
       roomReloadBudgetRef.current = createRoomReloadBudget();
       roomIssuedSeekRef.current = null;
+      roomSeekCorrectorRef.current = createRoomSeekCorrector();
       onQualitySelect?.(id, currentTime);
     },
     [currentTime, onQualitySelect],
@@ -3928,6 +3983,7 @@ export function VideoPlayer({
   useEffect(() => {
     roomReloadBudgetRef.current = createRoomReloadBudget();
     roomIssuedSeekRef.current = null;
+    roomSeekCorrectorRef.current = createRoomSeekCorrector();
   }, [sessionId, watchTogetherRoomId]);
 
   // Stall history is judged per quality: choosing another starts over, and an
