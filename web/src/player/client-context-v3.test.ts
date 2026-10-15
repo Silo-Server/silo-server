@@ -281,6 +281,56 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     }
   });
 
+  it("uses a limit playback observed even on a metered link", () => {
+    vi.stubGlobal("navigator", { connection: { downlink: 8, saveData: true } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({
+        kbps: 4_200,
+        measuredAt: Date.now(),
+        observed: true,
+        link: "unknown:save-data",
+      }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBe(4_200);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("does not carry a limit observed on Wi-Fi onto a metered link", () => {
+    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 56_000, measuredAt: Date.now(), observed: true }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+      expect(detectMeteredV3()).toBe(true);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("does not carry a limit observed on cellular onto Data Saver Wi-Fi", () => {
+    vi.stubGlobal("navigator", { connection: { type: "wifi", saveData: true, downlink: 3 } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({
+        kbps: 20_000,
+        measuredAt: Date.now(),
+        observed: true,
+        link: "cellular:full",
+      }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBe(3_000);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
   it("drops missing and implausibly low readings", () => {
     withDownlink(undefined);
     expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();

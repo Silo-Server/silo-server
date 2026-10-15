@@ -1608,6 +1608,25 @@ field rather than send a hint it knows is clamped, such as a browser's
 `navigator.connection.downlink`, which Chromium caps at 10 Mbps. Clients that
 can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api.md#bandwidth-probe)).
 
+A transcode is a single HLS rendition, so the player cannot step down on its
+own. A client on `auto` whose playback keeps rebuffering sends a
+`quality_change` replan that keeps `quality_preference: "auto"` and lowers
+`bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
+re-runs `auto` against the lower estimate. The web player does this after two
+stalls of at least a second within two minutes, or one stall of six seconds.
+Stall time in the first ten seconds of a plan does not count, and buffering
+caused by a seek, pause or source reload is not a stall. It sends 70% of the
+delivered bitrate, so the next stream targets about 56% of the one that
+stalled. It keeps that lower estimate for the next 30 minutes. When the plan
+that follows is no lower, it leaves that plan alone for five minutes rather than
+replan in a loop. On a metered link it uses the estimate only if
+the stall was observed on the same kind of metered link, by the browser's
+connection type and Data Saver setting, since probe results and observations
+from other links do not describe it; back on an unmetered link it ignores a
+limit recorded on a metered one. Buffering while media requests fail (load
+errors, not timeouts) or while the browser is offline is an outage for the
+reconnect path and never counts toward a downshift.
+
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
 start must never pay for. A rung whose toolchain turns out to be missing degrades

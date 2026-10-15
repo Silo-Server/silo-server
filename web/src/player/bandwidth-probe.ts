@@ -55,6 +55,17 @@ export function networkInformation(): NetworkInformationLike | undefined {
 interface StoredEstimate {
   kbps: number;
   measuredAt: number;
+  /**
+   * Set when playback itself showed the link could not sustain more. Unlike a
+   * probe result it describes whatever link the viewer is on now, so it still
+   * applies on a metered connection.
+   */
+  observed?: boolean;
+  /**
+   * The metered link an observed limit was recorded on (see meteredLink), or
+   * absent for an unmetered one.
+   */
+  link?: string;
 }
 
 function clampKbps(kbps: number): number | undefined {
@@ -62,8 +73,14 @@ function clampKbps(kbps: number): number | undefined {
   return Math.min(Math.round(kbps), MAX_ESTIMATE_KBPS);
 }
 
-function readStored(now: number): StoredEstimate | undefined {
-  const raw = storage.get(storage.KEYS.BANDWIDTH_ESTIMATE);
+/**
+ * The entry this page last wrote. localStorage can be full or unavailable,
+ * and its writes then fail silently; this copy keeps a just-recorded limit
+ * in effect for the replan that reads it straight back.
+ */
+let pageEntry: string | undefined;
+
+function parseStored(raw: string | null | undefined, now: number): StoredEstimate | undefined {
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw) as Partial<StoredEstimate>;
@@ -71,19 +88,95 @@ function readStored(now: number): StoredEstimate | undefined {
     if (now - parsed.measuredAt > BANDWIDTH_ESTIMATE_TTL_MS || parsed.measuredAt > now)
       return undefined;
     const kbps = clampKbps(parsed.kbps);
-    return kbps === undefined ? undefined : { kbps, measuredAt: parsed.measuredAt };
+    if (kbps === undefined) return undefined;
+    return {
+      kbps,
+      measuredAt: parsed.measuredAt,
+      observed: parsed.observed === true,
+      ...(typeof parsed.link === "string" ? { link: parsed.link } : {}),
+    };
   } catch {
     return undefined;
   }
 }
 
-function writeStored(kbps: number, now: number): void {
-  storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, JSON.stringify({ kbps, measuredAt: now }));
+/** The newer of this page's entry and the shared one another tab may have written. */
+function readStored(now: number): StoredEstimate | undefined {
+  const page = parseStored(pageEntry, now);
+  const shared = parseStored(storage.get(storage.KEYS.BANDWIDTH_ESTIMATE), now);
+  if (!page) return shared;
+  if (!shared) return page;
+  return shared.measuredAt > page.measuredAt ? shared : page;
 }
 
-/** The cached measurement in kbps, or undefined when none is fresh. */
+function writeStored(kbps: number, now: number, observed = false): void {
+  const entry: StoredEstimate = { kbps, measuredAt: now };
+  if (observed) {
+    entry.observed = true;
+    const link = meteredLink();
+    if (link) entry.link = link;
+  }
+  pageEntry = JSON.stringify(entry);
+  storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, pageEntry);
+}
+
+/** Drops the cached estimate, in this page and in localStorage. */
+export function forgetBandwidthEstimate(): void {
+  pageEntry = undefined;
+  storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
+}
+
+/**
+ * The cached measurement in kbps for an unmetered link, or undefined when none
+ * is fresh or the cached value was recorded on a metered link.
+ */
 export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined {
-  return readStored(now)?.kbps;
+  const stored = readStored(now);
+  // A limit recorded on a metered link describes that link only.
+  return stored && !stored.link ? stored.kbps : undefined;
+}
+
+/**
+ * Records that playback could not sustain `kbps`. The cache only ever moves
+ * down this way, so later starts and replans in the TTL plan for the slower
+ * link instead of the optimistic probe.
+ */
+export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now()): void {
+  const observed = clampKbps(kbps);
+  if (observed === undefined) return;
+  const current = readStored(now);
+  // Nothing to add when a lower limit is already recorded for this kind of
+  // link. Otherwise keep the lower value but record it for the current link,
+  // so a metered link honors it.
+  const sameLink = current?.link === meteredLink();
+  // A cached value caps the new limit unless it came from another kind of
+  // metered link, which does not describe this one. Writing even when the
+  // lower value is kept restarts its TTL: the link just confirmed it.
+  const cap = current && (sameLink || !current.link) ? current.kbps : observed;
+  writeStored(Math.min(observed, cap), now, true);
+}
+
+/**
+ * Names the kind of metered link the viewer is on, from what the browser
+ * reports: its connection type and whether Data Saver is on. Undefined on an
+ * unmetered link. Not a network identity, but enough to keep a limit seen on
+ * cellular from steering a Data Saver Wi-Fi network, and the reverse.
+ */
+function meteredLink(): string | undefined {
+  if (!onMeteredConnection()) return undefined;
+  const connection = networkInformation();
+  return `${connection?.type ?? "unknown"}:${connection?.saveData === true ? "save-data" : "full"}`;
+}
+
+/**
+ * The cached limit playback observed on this kind of metered link, for
+ * planning on it. A limit observed on Wi-Fi or another kind of metered link
+ * does not describe this one, and a probe result never applies here.
+ */
+export function readMeteredObservedLimitKbps(now = Date.now()): number | undefined {
+  const link = meteredLink();
+  const stored = readStored(now);
+  return link && stored?.observed && stored.link === link ? stored.kbps : undefined;
 }
 
 /**
@@ -312,7 +405,9 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
   const awaitExpiry = (): boolean => {
     const now = Date.now();
     const stored = readStored(now);
-    if (!stored) return false;
+    // A limit from a metered link says nothing about an unmetered one, so it
+    // does not stand in for a probe there.
+    if (!stored || (stored.link && !meteredLink())) return false;
     schedule(stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - now + 1000);
     return true;
   };

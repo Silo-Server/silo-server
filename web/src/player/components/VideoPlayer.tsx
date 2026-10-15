@@ -1,4 +1,6 @@
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
+import { useAutoQualityDownshift } from "../hooks/useAutoQualityDownshift";
+import { recordObservedBandwidthLimitKbps } from "../bandwidth-probe";
 import { skipTarget } from "../utils/skipTarget";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
@@ -303,6 +305,9 @@ const MAX_AUTOPLAY_ATTEMPTS = 4;
 const ROOM_STALLS_BEFORE_LOWER_QUALITY = 2;
 const ROOM_STALL_WINDOW_MS = 5 * 60_000;
 const LOWER_QUALITY_ACTION_LABEL = "Lower quality";
+// Buffering this soon after a failed media request is treated as an outage,
+// not a slow link, by the Auto downshift.
+const TRANSPORT_TROUBLE_WINDOW_MS = 15_000;
 const PLAYBACK_NOTICE_VISIBLE_MS = 8_000;
 const ROOM_RECONNECTING_MESSAGE = "Reconnecting to room. Controls are temporarily unavailable.";
 // The server returns a room to the lobby once its position is within two
@@ -464,6 +469,9 @@ export function VideoPlayer({
   const hlsStartupGuardRef = useRef<HlsStartupGuard | null>(null);
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
+  // When hls.js last reported a failed load (not a timeout). Buffering soon
+  // after one is an outage, not a slow link, for the Auto downshift.
+  const lastTransportErrorAtRef = useRef(0);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
   // Whether the current transport has shown a frame. A network error after
   // that is a lost connection, not a route that cannot play. Reset whenever
@@ -2309,6 +2317,14 @@ export function VideoPlayer({
             });
 
             hls.on(Hls.Events.ERROR, (_event, data) => {
+              // A load error (refused, reset, HTTP failure) is the transport
+              // failing; a load timeout can be a slow link and is left out.
+              if (
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                String(data.details).endsWith("LoadError")
+              ) {
+                lastTransportErrorAtRef.current = Date.now();
+              }
               if (!data.fatal || destroyed) return;
 
               console.error("[hls.js] Fatal error:", {
@@ -3757,6 +3773,39 @@ export function VideoPlayer({
   useEffect(() => {
     handleQualitySelectRef.current = handleQualitySelect;
   }, [handleQualitySelect]);
+
+  // A new plan is a new transport; the previous one's failed requests say
+  // nothing about it.
+  useEffect(() => {
+    lastTransportErrorAtRef.current = 0;
+  }, [planRevision]);
+
+  // Auto quality chose this stream from an estimate taken before playback. When
+  // the link proves slower, record what it could not sustain and replan Auto,
+  // which reads that lower estimate. Rooms have their own lower-quality offer.
+  useAutoQualityDownshift({
+    videoRef,
+    // Buffering while the session reconnects is the outage, not a slow link.
+    enabled:
+      activeQualityId === "auto" && !watchTogetherRoomActive && connectionStatus === "connected",
+    sessionId,
+    // Only an adopted plan resets stall history; in-place plan updates such
+    // as a newly ready subtitle must not drop a stall in progress.
+    planIdentity: planRevision,
+    deliveredKbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps,
+    transportTrouble: () =>
+      (typeof navigator !== "undefined" && navigator.onLine === false) ||
+      Date.now() - lastTransportErrorAtRef.current < TRANSPORT_TROUBLE_WINDOW_MS,
+    onDownshift: (estimateKbps) => {
+      recordObservedBandwidthLimitKbps(estimateKbps);
+      setNotice({
+        title: "Lowering quality",
+        message: "Playback kept buffering, so Auto is switching to a lower bitrate.",
+        tone: "info",
+      });
+      handleQualitySelectRef.current("auto");
+    },
+  });
 
   // Rebuild pacing belongs to one stream in one room.
   useEffect(() => {
