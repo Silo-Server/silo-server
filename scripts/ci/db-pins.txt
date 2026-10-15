@@ -276,3 +276,7 @@
 # the frozen legacy bridge alike.
 ./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
 ./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB
+
+# Person lookups reuse their resolved metadata providers: later lookups in the
+# window issue no statements, and a plugin change drops them.
+./internal/metadata TestPersonRefreshReusesResolvedProvidersDB
