@@ -175,6 +175,11 @@ export async function measureBandwidthKbps(
 let scheduledTimer: ReturnType<typeof setTimeout> | undefined;
 /** Bumped by stopBandwidthProbes so a stopped schedule never re-arms. */
 let scheduleGeneration = 0;
+/**
+ * Bumped by cancelBandwidthProbe, so a probe still waiting for the cross-tab
+ * lock when playback starts does not begin once the lock arrives.
+ */
+let cancelEpoch = 0;
 /** Web Lock that lets one tab at a time run a probe. */
 const PROBE_LOCK_NAME = "silo-bandwidth-probe";
 let activeProbe: AbortController | undefined;
@@ -254,10 +259,12 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
       void probe();
       return;
     }
+    const epoch = cancelEpoch;
     locks
       .request(PROBE_LOCK_NAME, { ifAvailable: true }, async (lock) => {
-        if (!lock) {
-          // Another tab is measuring; its result is waiting on the next look.
+        if (!lock || epoch !== cancelEpoch) {
+          // Another tab is measuring, or playback started while the lock
+          // was on its way; look again later.
           schedule(PROBE_RETRY_MS);
           return;
         }
@@ -276,6 +283,7 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
  * continues and tries again later.
  */
 export function cancelBandwidthProbe(): void {
+  cancelEpoch++;
   activeProbe?.abort();
 }
 
