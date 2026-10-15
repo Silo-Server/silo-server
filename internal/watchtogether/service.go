@@ -817,10 +817,8 @@ func (s *Service) handleTransportRequestForConnection(
 		position = math.Max(0, *request.PositionSeconds)
 		// A play or pause carries where the requester was when it pressed;
 		// a requester that was playing runs on until the command executes. A
-		// seek target is absolute. The room's own state is not enough: an
-		// earlier play inside the lead already marked it playing while the
-		// requester is still paused where that play was sent.
-		if request.Action != TransportActionSeek && !live.room.IsPaused && !request.IsPaused {
+		// seek target is absolute.
+		if request.Action != TransportActionSeek && requesterPlayingLocked(live, request.Action, now) {
 			position += executeAt.Sub(now).Seconds()
 		}
 	}
@@ -2616,6 +2614,20 @@ func (s *Service) commandSettlingLocked(live *liveRoom, member *memberState, rep
 // its execute_at or, for a command delivered late, from now. Drift measured
 // before the command is not evidence about the state after it, so the
 // member's strikes and convergence start over.
+// requesterPlayingLocked reports whether a member sending a play or pause
+// now is playing. The room's state says so once its latest command has run.
+// While that command is still pending (the anchor lies at its execute_at),
+// the room already shows its outcome, so the requester is still where it was
+// before: a pause comes from a playing member and a play from a paused one.
+// The request's is_paused is no help: clients disagree on whether it is the
+// requester's state or the one it asks for.
+func requesterPlayingLocked(live *liveRoom, action TransportAction, now time.Time) bool {
+	if live.room.AnchorUpdatedAt.After(now) {
+		return action == TransportActionPause
+	}
+	return !live.room.IsPaused
+}
+
 func (s *Service) noteCommandSentLocked(member *memberState, command TransportCommand) {
 	now := s.now()
 	member.driftStrikes = 0

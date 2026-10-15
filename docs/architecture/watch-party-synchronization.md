@@ -114,9 +114,14 @@ drift by rate. Naming the sync alone is not enough: a player whose play was
 refused (a browser blocking autoplay after a reload) or whose correction never
 loaded names it too.
 
-A play or pause request carries where the requester was. The lead is added only
-when the requester was playing, so a second play sent inside the lead by a
-member still paused does not start the room a lead later.
+A play or pause request carries where the requester was, and the lead is added
+when the requester was playing. Once the room's latest command has run, the
+room's state says whether it was. While that command is still pending, the room
+already shows its outcome, so a pause is taken to come from a playing member
+and a play from a paused one: a second play inside the lead does not start the
+room a lead later, and a second pause still lands a lead after its press. The
+request's `is_paused` is not used for this, because clients send either their
+own state or the state they ask for.
 
 Every command executes one lead from when it is sent, and never before the
 room's own latest command or anchor, so a member synced after the lead drops

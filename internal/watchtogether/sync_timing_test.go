@@ -543,8 +543,9 @@ func TestRepeatedPlayInsideTheLeadKeepsThePausedPosition(t *testing.T) {
 	position := 100.0
 	request := func(action TransportAction) TransportCommand {
 		t.Helper()
+		// is_paused as web and Android send it: the state the request asks for.
 		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
-			TransportRequest{Action: action, PositionSeconds: &position, IsPaused: true}); err != nil {
+			TransportRequest{Action: action, PositionSeconds: &position, IsPaused: action == TransportActionPause}); err != nil {
 			t.Fatal(err)
 		}
 		return lastTransport(t, f.conns["guest"])
@@ -779,4 +780,33 @@ func TestStalledHostWithinTheBoundPausesTheRoomAtItsPosition(t *testing.T) {
 	if anchor := f.repo.room.AnchorPositionSeconds; anchor != stalledAt {
 		t.Fatalf("a host stalled 4 s behind paused the room at %.2f, want its position %.2f", anchor, stalledAt)
 	}
+}
+
+// A pause comes from a playing member, which runs on until the command
+// executes, so the pause lands a lead after the press, also when a second
+// pause follows inside the lead.
+func TestPauseFromAPlayingMemberRunsOnToExecuteAt(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.member("guest").lastPingMS = 2000
+	f.now = f.now.Add(30 * time.Second)
+	pause := func() TransportCommand {
+		t.Helper()
+		position := f.expected()
+		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+			TransportRequest{Action: TransportActionPause, PositionSeconds: &position, IsPaused: true}); err != nil {
+			t.Fatal(err)
+		}
+		command := lastTransport(t, f.conns["guest"])
+		executeAt, err := time.Parse(time.RFC3339Nano, command.ExecuteAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := position + executeAt.Sub(f.now).Seconds(); math.Abs(command.PositionSeconds-want) > 0.01 {
+			t.Fatalf("pause from %.2f lands at %.2f, want %.2f a lead later", position, command.PositionSeconds, want)
+		}
+		return command
+	}
+	pause()
+	f.now = f.now.Add(100 * time.Millisecond)
+	pause()
 }
