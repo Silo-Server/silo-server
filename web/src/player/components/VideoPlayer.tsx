@@ -3570,6 +3570,13 @@ export function VideoPlayer({
     [holdRoomSeek],
   );
 
+  // A held request belongs to the playback session and room selection it was
+  // made in; a new title or session will not answer it.
+  const roomHeldSeekSelectionRevision = watchTogether.room?.selection_revision;
+  useEffect(() => {
+    abandonRoomHeldSeek();
+  }, [abandonRoomHeldSeek, roomHeldSeekSelectionRevision, sessionId]);
+
   // A held request belongs to a live room connection; with none, nothing will
   // answer it.
   useEffect(() => {
@@ -3798,8 +3805,13 @@ export function VideoPlayer({
         roomReferenceRef.current = reference;
         roomCommandFinishedAtRef.current = performance.now();
         // The room's seek for the held request, or a command that replaced it
-        // before it ran, ends the hold. A newer request since resets it.
-        if (roomHeldSeekAnsweredRef.current) abandonRoomHeldSeek();
+        // before it ran, ends the hold. A newer request since resets it. The
+        // seek itself keeps the pending target, which may be a stream rebuild
+        // to the same place already loading; a replacing command drops it.
+        if (roomHeldSeekAnsweredRef.current) {
+          if (command.action === "seek") holdRoomSeek(null);
+          else abandonRoomHeldSeek();
+        }
         const playAllowed = applyRoomPosition(video);
 
         if (command.action === "seek") {
@@ -3885,6 +3897,7 @@ export function VideoPlayer({
     abandonRoomHeldSeek,
     canSeekAnywhere,
     elementMediaPosition,
+    holdRoomSeek,
     issueRoomSeek,
     releasePendingSeek,
     resetRoomCatchupRate,

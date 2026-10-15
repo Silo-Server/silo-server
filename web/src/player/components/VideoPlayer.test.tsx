@@ -802,6 +802,25 @@ describe("VideoPlayer room catch-up", () => {
     expect(controls.current!.currentTime).toBe(130);
   });
 
+  it("releases a held skip when the room selects something else", () => {
+    const { connection, rerenderPlayer } = setup(100, 0, true);
+    const host = {
+      ...connection,
+      room: { ...connection.room!, self_can_manage_room: true, self_can_control_transport: true },
+    };
+    rerenderPlayer({ watchTogetherConnection: host });
+    act(() => controls.current!.onSkip!.forward());
+    expect(controls.current!.currentTime).toBe(130);
+
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...host,
+        room: { ...host.room, selection_revision: (host.room.selection_revision ?? 0) + 1 },
+      },
+    });
+    expect(controls.current!.currentTime).toBe(100);
+  });
+
   it("keeps the actual position when a room seek cannot be sent", () => {
     const { connection, rerenderPlayer } = setup(100);
     connection.room = { ...connection.room!, self_can_manage_room: true };
