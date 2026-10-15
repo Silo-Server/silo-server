@@ -68,6 +68,26 @@ describe("probeWebCapabilities", () => {
     );
   });
 
+  // iOS Safari reports every HEVC configuration as not smooth, while its
+  // hardware decoder (power efficient) plays them in real time.
+  it("accepts a hardware decoder that the browser does not report as smooth", async () => {
+    const decodingInfo = vi
+      .fn()
+      .mockResolvedValue({ supported: true, smooth: false, powerEfficient: true });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(true);
+  });
+
+  it("does not claim HDR10 for a decoder that is neither smooth nor power efficient", async () => {
+    const decodingInfo = vi
+      .fn()
+      .mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
+  });
+
   // The strip remux delivers an hvc1-labeled file; support reported only for
   // hev1 is evidence for bytes Silo never sends and must not earn the claim.
   it("does not promote an hev1-only answer to an HDR10 claim", async () => {

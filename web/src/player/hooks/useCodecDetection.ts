@@ -105,13 +105,18 @@ export function detectHDRFromMatchMedia(matchMediaFn: typeof matchMedia | undefi
  * Deliberately independent of the `dynamic-range` media query: that query
  * describes the active output, not the decoder, and browsers tone-map HDR
  * content onto SDR outputs.
+ *
+ * A configuration counts when it is smooth or power efficient. iOS Safari
+ * answers `smooth: false` for every HEVC configuration, 1080p SDR included,
+ * while `powerEfficient: true` shows a hardware decoder, which plays it in
+ * real time. A software decoder that is not smooth still earns no claim.
  */
 export async function probeHDR10PlaybackSupport(): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.mediaCapabilities) return false;
 
   try {
     const result = await navigator.mediaCapabilities.decodingInfo(HDR10_PROGRESSIVE_CONFIGURATION);
-    return result.supported && result.smooth;
+    return result.supported && (result.smooth || result.powerEfficient);
   } catch {
     return false;
   }
