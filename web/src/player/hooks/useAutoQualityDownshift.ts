@@ -204,10 +204,15 @@ export function useAutoQualityDownshift({
       rearmTimer = setTimeout(() => {
         rearmTimer = undefined;
         done = false;
-        stalledAt = undefined;
         tracker = createStallTracker();
         tracker.playing(Date.now() - STARTUP_GRACE_MS);
         lastDownshiftFromRef.current = undefined;
+        // A stall still in progress fires no further `waiting`; time it
+        // again from here so it can downshift once more.
+        if (stalledAt !== undefined) {
+          tracker.waiting(Date.now());
+          longStallTimer = setTimeout(checkStall, LONG_STALL_MS);
+        }
       }, REARM_AFTER_UNADOPTED_MS);
       onDownshiftRef.current(estimate);
     };

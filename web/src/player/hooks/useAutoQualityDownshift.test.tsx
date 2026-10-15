@@ -233,6 +233,22 @@ describe("useAutoQualityDownshift", () => {
     expect(onDownshift).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps watching a stall that outlasts an unadopted replan", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    renderOnAuto(video, onDownshift);
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+
+    // The replan failed and the element never recovered or fired again.
+    vi.advanceTimersByTime(60_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(2);
+  });
+
   it("downshifts a stall that began in startup and never recovered", () => {
     const video = fakeVideo();
     const onDownshift = vi.fn();
