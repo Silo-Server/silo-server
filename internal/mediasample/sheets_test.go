@@ -197,7 +197,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 	req.Threads = 2
 	output := []string{"-map", "0:V:0", "-an", "-sn", "-dn", "-vf", "GRAPH", "-fps_mode", "passthrough", "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"}
 
-	args, list, err := buildSheetsArgs(req, Attempt{Hardware: true}, hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, 11.4, "GRAPH", "", sampledSheetsList)
+	args, list, err := buildSheetsArgs(req, Attempt{Hardware: true}, hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, sampleEntries(req.Samples.Seconds, 11.4), "GRAPH", "", sampledSheetsList)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 	window := req
 	window.Samples = nil
 	window.Window = &Window{StartSeconds: 0, DurationSeconds: 15.04, KeyframesOnly: true}
-	args, list, err = buildSheetsArgs(window, Attempt{}, hardwareDecode{}, 0, "GRAPH", "packets.framecrc", sampledSheetsList)
+	args, list, err = buildSheetsArgs(window, Attempt{}, hardwareDecode{}, nil, "GRAPH", "packets.framecrc", sampledSheetsList)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,6 +263,10 @@ type fakeSheets struct {
 	editLog     func([]string) []string
 	calls       [][]string
 	packetEnd   float64
+	// keyPackets are keyframe packet times the timing log reports before
+	// its last packet, whether or not frames decoded them. NaN is a
+	// keyframe packet without a time.
+	keyPackets []float64
 	// listStart is the start time a list run's input header reports, and
 	// lists the ffconcat lists the runs read.
 	listStart float64
@@ -295,7 +299,16 @@ func (f *fakeSheets) exec(_ context.Context, _ string, args []string, stdin io.R
 		var timing string
 		if f.packetEnd > 0 {
 			end := int64(math.Round(f.packetEnd * 1000))
-			timing = fmt.Sprintf("#tb 0: 1/1000\n0, %d, %d, 1, 1, 0x00000000\n", end-1, end-1)
+			timing = "#tb 0: 1/1000\n"
+			for _, key := range f.keyPackets {
+				if math.IsNaN(key) {
+					timing += fmt.Sprintf("0, %d, %d, 1, 1, 0x00000000\n", int64(math.MinInt64), int64(math.MinInt64))
+					continue
+				}
+				at := int64(math.Round(key * 1000))
+				timing += fmt.Sprintf("0, %d, %d, 1, 1, 0x00000000\n0, %d, %d, 1, 1, 0x00000000, F=0x0\n", at, at, at+1, at+1)
+			}
+			timing += fmt.Sprintf("0, %d, %d, 1, 1, 0x00000000\n", end-1, end-1)
 		}
 		if err := os.WriteFile(args[i+1], []byte(timing), 0o600); err != nil {
 			return err
@@ -453,42 +466,61 @@ func TestRunSheetsRereadsSparseListAsWindow(t *testing.T) {
 	logDuplicates := func(log []string) []string {
 		return append(log, "[hevc @ 0x55d0] Duplicate POC in a sequence: 48.", "[hevc @ 0x55d0] Skipping invalid undecodable NALU: 21")
 	}
+	logIllegal := func(log []string) []string {
+		return append(log, "[h264 @ 0x55d0] illegal short term buffer state detected")
+	}
 	logUndecodable := func(log []string) []string {
 		return append(log, "[hevc @ 0x55d0] Skipping invalid undecodable NALU: 21")
 	}
 	keyframes := []fakeSheetFrame{timed(10, "4"), timed(20, "14"), timed(30, "24"), timed(40, "34")}
+	keys := []float64{4, 14, 24, 34}
 	tests := map[string]struct {
 		editLog       func([]string) []string
 		window        []fakeSheetFrame
 		windowEditLog func([]string) []string
-		runs          int
-		want          Reason
+		windowKeys    []float64
+		reference     []fakeSheetFrame
+		refEditLog    func([]string) []string
+		// runs after the probe, the list and its repair, in order.
+		runs   []string
+		filled int
+		want   Reason
 	}{
-		"duplicate keyframes":   {editLog: logDuplicates, window: keyframes, runs: 4},
-		"no drops logged":       {window: keyframes, runs: 3, want: ReasonEmpty},
-		"damaged pictures":      {editLog: logUndecodable, window: keyframes, runs: 3, want: ReasonEmpty},
-		"window empty too":      {editLog: logDuplicates, runs: 4, want: ReasonEmpty},
-		"window duplicates too": {editLog: logDuplicates, window: keyframes, windowEditLog: logDuplicates, runs: 4, want: ReasonEmpty},
+		"duplicate keyframes":   {editLog: logDuplicates, window: keyframes, runs: []string{"window"}},
+		"no drops logged":       {window: keyframes, want: ReasonEmpty},
+		"damaged pictures":      {editLog: logUndecodable, window: keyframes, want: ReasonEmpty},
+		"window empty too":      {editLog: logDuplicates, runs: []string{"window"}, want: ReasonEmpty},
+		"window drops a few":    {editLog: logDuplicates, window: keyframes[:3], windowEditLog: logDuplicates, windowKeys: keys, runs: []string{"window"}, filled: 1},
+		"window drops too many": {editLog: logDuplicates, window: keyframes[:1], windowEditLog: logDuplicates, windowKeys: keys, reference: keyframes, runs: []string{"window", "reference"}},
+		"h264 illegal state":    {editLog: logIllegal, window: keyframes[:1], windowEditLog: logIllegal, windowKeys: keys, reference: keyframes, runs: []string{"reference"}},
+		"untimed key dropped":   {editLog: logDuplicates, window: keyframes[:3], windowEditLog: logDuplicates, windowKeys: []float64{4, 14, 24, math.NaN()}, reference: keyframes, runs: []string{"window", "reference"}},
+		"reference fails too":   {editLog: logDuplicates, window: keyframes[:1], windowEditLog: logDuplicates, windowKeys: keys, reference: keyframes[:1], refEditLog: logDuplicates, runs: []string{"window", "reference"}, want: ReasonEmpty},
 	}
 	for name, tt := range tests {
 		list := &fakeSheets{format: "matroska,webm", frames: []fakeSheetFrame{tagged(10, 5)}, editLog: tt.editLog}
-		window := &fakeSheets{format: "matroska,webm", frames: tt.window, packetEnd: 36, editLog: tt.windowEditLog}
+		window := &fakeSheets{format: "matroska,webm", frames: tt.window, packetEnd: 36, editLog: tt.windowEditLog, keyPackets: tt.windowKeys}
+		reference := &fakeSheets{format: "matroska,webm", frames: tt.reference, packetEnd: 36, editLog: tt.refEditLog, keyPackets: tt.windowKeys}
 		var calls [][]string
+		var runs []string
 		runner := Runner{Exec: func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 			calls = append(calls, args)
-			if slices.Contains(args, "concat") {
+			switch {
+			case slices.Contains(args, "concat") || len(calls) == 1:
 				return list.exec(ctx, name, args, stdin, stdout, stderr)
+			case slices.Contains(args, exactSkipFrame):
+				runs = append(runs, "reference")
+				return reference.exec(ctx, name, args, stdin, stdout, stderr)
 			}
+			runs = append(runs, "window")
 			return window.exec(ctx, name, args, stdin, stdout, stderr)
 		}}
 		result, err := runner.Run(t.Context(), sheetsRequest(secondsFrom(5, 10, 4), 2, 2))
-		if len(calls) != tt.runs || !slices.Contains(calls[1], "concat") || !slices.Contains(calls[2], "concat") ||
-			(tt.runs == 4 && !slices.Contains(calls[3], "framecrc")) {
-			t.Fatalf("%s: runs %q, want a probe, a list run, its repair, and %d more", name, calls, tt.runs-3)
+		if !slices.Contains(calls[1], "concat") || !slices.Contains(calls[2], "concat") || !slices.Equal(runs, tt.runs) {
+			t.Fatalf("%s: runs after the list and its repair %q, want %q", name, runs, tt.runs)
 		}
 		if tt.want != "" {
 			failure, ok := errors.AsType[*Error](err)
-			if !ok || failure.Reason != tt.want || (tt.runs == 4 && !strings.Contains(err.Error(), "after the list run")) {
+			if !ok || failure.Reason != tt.want || (len(tt.runs) > 0 && !strings.Contains(err.Error(), "after the list run")) {
 				t.Fatalf("%s: error %v, want %s naming the list run", name, err, tt.want)
 			}
 			continue
@@ -496,8 +528,12 @@ func TestRunSheetsRereadsSparseListAsWindow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{10, 20, 30, 40}) || result.SheetFrames != (SheetFrames{Decoded: 4}) {
-			t.Fatalf("%s: cells %v, frames %+v; want every sample from the window", name, got, result.SheetFrames)
+		want := []int{10, 20, 30, 40}
+		if tt.filled > 0 {
+			want[3] = 30
+		}
+		if got := sheetLumas(t, result, 2, 2); !near(got[0], want) || result.SheetFrames != (SheetFrames{Decoded: 4 - tt.filled, Filled: tt.filled}) {
+			t.Fatalf("%s: cells %v, frames %+v; want cells %v with %d filled", name, got, result.SheetFrames, want, tt.filled)
 		}
 	}
 }
@@ -519,8 +555,9 @@ func TestRunSheetsReadsWindowsByTime(t *testing.T) {
 		if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{10, 10, 60, 70}) {
 			t.Fatalf("%s: cells %v", name, got[0])
 		}
+		// Both probe first: sheets pick their keyframe options from the codec.
 		runs := len(fake.calls)
-		if (name == "read through") != (runs == 1) || slices.Contains(fake.calls[runs-1], "concat") {
+		if runs != 2 || slices.Contains(fake.calls[runs-1], "concat") {
 			t.Fatalf("%s: runs %q", name, fake.calls)
 		}
 	}
@@ -561,17 +598,23 @@ func TestSheetPacketTimingKeepsPresentationExtent(t *testing.T) {
 		end     float64
 		hasTime bool
 		wantErr bool
+		// dts is the assembler's dtsTiming.
+		dts bool
 	}{
-		{"reordered PTS", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, 45000, 45000, 1, 0x0"}, 14.5, true, false},
-		{"missing numeric PTS", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0"}, 0, false, false},
-		{"missing text PTS", []string{"#tb 0: 1/1000", "0, 0, NOPTS, 1000, 1, 0x0"}, 0, false, false},
-		{"negative duration", []string{"#tb 0: 1/1000", "0, 0, 1000, -1, 1, 0x0"}, 0, false, false},
-		{"invalid time base", []string{"#tb 0: 1/0"}, 0, false, true},
-		{"packet before time base", []string{"0, 0, 1000, 1000, 1, 0x0"}, 0, false, true},
+		{"reordered PTS", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, 45000, 45000, 1, 0x0"}, 14.5, true, false, false},
+		{"missing numeric PTS uses DTS", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0"}, 13, true, false, true},
+		{"missing text PTS uses DTS", []string{"#tb 0: 1/1000", "0, 0, NOPTS, 1000, 1, 0x0"}, 13, true, false, true},
+		{"packed XviD without PTS", []string{"#tb 0: 1/25", "0, 0, -9223372036854775808, 1, 23436, 0x0", "0, 1, -9223372036854775808, 1, 11203, 0x0", "0, 2, -9223372036854775808, 1, 6, 0x0"}, 12.12, true, false, true},
+		{"DTS does not stretch PTS extent", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, NOPTS, 45000, 1, 0x0"}, 14.5, true, false, true},
+		{"missing PTS without low delay", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0", "0, 1000, NOPTS, 1000, 1, 0x0"}, 0, false, false, false},
+		{"missing PTS and DTS", []string{"#tb 0: 1/1000", "0, -9223372036854775808, -9223372036854775808, 1000, 1, 0x0"}, 0, false, false, true},
+		{"negative duration", []string{"#tb 0: 1/1000", "0, 0, 1000, -1, 1, 0x0"}, 0, false, false, false},
+		{"invalid time base", []string{"#tb 0: 1/0"}, 0, false, true, false},
+		{"packet before time base", []string{"0, 0, 1000, 1000, 1, 0x0"}, 0, false, true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := &sheetAssembler{offset: 12}
+			a := &sheetAssembler{offset: 12, dtsTiming: tt.dts}
 			for _, line := range tt.lines {
 				a.packetLine(line)
 			}
@@ -592,6 +635,10 @@ func TestRunSheetsRemovesPacketTimingAfterAttempt(t *testing.T) {
 			fake := &fakeSheets{frames: []fakeSheetFrame{timed(10, "0")}, packetEnd: 8}
 			var path string
 			runner := Runner{Exec: func(ctx context.Context, binary string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+				if !slices.Contains(args, "framecrc") {
+					// The probe that picks the codec's keyframe options.
+					return fake.exec(ctx, binary, args, stdin, stdout, stderr)
+				}
 				path = args[slices.Index(args, "framecrc")+1]
 				dir, err := os.Stat(filepath.Dir(path))
 				if err != nil || dir.Mode().Perm() != 0o700 {
@@ -692,5 +739,46 @@ func TestRunSheetsHardwareFallsBack(t *testing.T) {
 	}
 	if result.Decoder != "software" || !near(sheetLumas(t, result, 2, 2)[0], []int{10, 20, 30, 40}) {
 		t.Fatalf("decoder %s, want the software attempt after a sparse hardware one", result.Decoder)
+	}
+}
+
+func TestSheetPacketIsKey(t *testing.T) {
+	for rest, want := range map[string]bool{
+		" 0x00000000":                      true,
+		" 0x00000000, F=0x0":               false,
+		" 0x00000000, F=0x3":               true,
+		" 0x00000000, F=0x2":               false,
+		" 0x00000000, F=0x5, S=1, 8, 0xab": true,
+		" 0x00000000, F=0xzz":              false,
+	} {
+		if got := packetIsKey(rest); got != want {
+			t.Errorf("packetIsKey(%q) = %t, want %t", rest, got, want)
+		}
+	}
+}
+
+// TestSheetWindowCountsAnEmptyStaleSampleOnce counts a sample that dropped
+// its keyframe and has no earlier frame once, when its sheet is finalized,
+// not again as stale: 2 of 20 samples stay within the 15% a window that
+// dropped keyframes may fill, where counting them twice would not.
+func TestSheetWindowCountsAnEmptyStaleSampleOnce(t *testing.T) {
+	logDuplicates := func(log []string) []string {
+		return append(log, "[hevc @ 0x55d0] Duplicate POC in a sequence: 48.")
+	}
+	req := sheetsRequest(secondsFrom(1, 2, 20), 5, 4)
+	req.Samples.ReadThrough = true
+	keys := []float64{0.5}
+	var frames []fakeSheetFrame
+	for at := 4; at <= 38; at += 2 {
+		keys = append(keys, float64(at))
+		frames = append(frames, timed(byte(at), fmt.Sprint(at)))
+	}
+	fake := &fakeSheets{format: "mpegts", frames: frames, packetEnd: 40, keyPackets: keys, editLog: logDuplicates}
+	result, err := Runner{Exec: fake.exec}.Run(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SheetFrames != (SheetFrames{Decoded: 18, Filled: 2}) {
+		t.Fatalf("frames %+v, want the two samples before the first frame filled once each", result.SheetFrames)
 	}
 }

@@ -96,7 +96,7 @@ export function SubtitleAppearancePanelView({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-3.5">
           <div className="flex flex-col">
-            <div className="text-[10px] font-semibold tracking-[0.22em] text-white/50 uppercase">
+            <div className="text-xs font-semibold tracking-[0.22em] text-white/65 uppercase">
               {eyebrow}
             </div>
             <div className="text-[17px] font-semibold tracking-tight text-white">
@@ -243,7 +243,7 @@ export function SubtitleAppearancePanelView({
           ) : (
             <span aria-hidden="true" />
           )}
-          <div className="text-[11px] tracking-wide text-white/40 uppercase">{status}</div>
+          <div className="text-xs tracking-wide text-white/65 uppercase">{status}</div>
         </div>
       </div>
     </div>,
@@ -260,9 +260,7 @@ export function SubtitleAppearancePanelView({
 function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section className="space-y-3">
-      <div className="text-[10.5px] font-semibold tracking-[0.2em] text-white/45 uppercase">
-        {label}
-      </div>
+      <div className="text-xs font-semibold tracking-[0.2em] text-white/65 uppercase">{label}</div>
       <div className="space-y-3">{children}</div>
     </section>
   );
@@ -306,7 +304,7 @@ function PillGroup<T extends string>({
             role="radio"
             aria-checked={active}
             onClick={() => onChange(option.value)}
-            className={`inline-flex items-center rounded-full px-3 py-1 text-[12.5px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+            className={`inline-flex items-center rounded-full px-3 py-1 text-[13px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
               active
                 ? "bg-white text-black"
                 : "bg-white/[0.06] text-white/75 hover:bg-white/10 hover:text-white"
@@ -388,9 +386,9 @@ function PercentField({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
-        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-right text-[12.5px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-right text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
-      <span className="text-[12.5px] text-white/60">%</span>
+      <span className="text-[13px] text-white/60">%</span>
     </div>
   );
 }

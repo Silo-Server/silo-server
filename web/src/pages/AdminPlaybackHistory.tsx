@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminPlaybackHistory, useAdminUserProfiles } from "@/hooks/queries/admin/history";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,93 +123,93 @@ export default function AdminPlaybackHistory() {
   const activeMediaItemLabel = allRows[0]?.media_title || selectedMediaItemId;
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Playback History</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Finalized playback attempts across all users and profiles.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {selectedMediaItemId && (
-            <div className="border-border bg-muted/40 flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-              <span className="text-muted-foreground font-medium">Item filter active</span>
-              <Link
-                to={`/item/${encodeURIComponent(selectedMediaItemId)}`}
-                className="hover:text-primary font-semibold transition-colors hover:underline"
-              >
-                {activeMediaItemLabel}
-              </Link>
-            </div>
-          )}
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="Playback History"
+        subtitle="Finalized playback attempts across all users and profiles."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedMediaItemId && (
+              <div className="border-border bg-muted/40 flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
+                <span className="text-muted-foreground font-medium">Item filter active</span>
+                <Link
+                  to={`/item/${encodeURIComponent(selectedMediaItemId)}`}
+                  className="hover:text-primary font-semibold transition-colors hover:underline"
+                >
+                  {activeMediaItemLabel}
+                </Link>
+              </div>
+            )}
 
-          <Select value={selectedUser} onValueChange={(value) => updateFilter("user_id", value)}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="All users" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_USERS}>All users</SelectItem>
-              {users.map((user) => (
-                <SelectItem key={user.id} value={String(user.id)}>
-                  {user.username}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <Select value={selectedUser} onValueChange={(value) => updateFilter("user_id", value)}>
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="All users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_USERS}>All users</SelectItem>
+                {users.map((user) => (
+                  <SelectItem key={user.id} value={String(user.id)}>
+                    {user.username}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          <Select
-            value={selectedProfile}
-            onValueChange={(value) => updateFilter("profile_id", value)}
-            disabled={selectedUser === ALL_USERS}
-          >
-            <SelectTrigger className="w-[220px]">
-              <SelectValue
-                placeholder={selectedUser === ALL_USERS ? "Choose a user first" : "All profiles"}
+            <Select
+              value={selectedProfile}
+              onValueChange={(value) => updateFilter("profile_id", value)}
+              disabled={selectedUser === ALL_USERS}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue
+                  placeholder={selectedUser === ALL_USERS ? "Choose a user first" : "All profiles"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_PROFILES}>All profiles</SelectItem>
+                {(profiles.data ?? []).map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={selectedCompleted}
+              onValueChange={(value) => updateFilter("completed", value)}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All attempts" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_COMPLETION}>All attempts</SelectItem>
+                <SelectItem value="true">Completed</SelectItem>
+                <SelectItem value="false">Partial</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Button variant="outline" size="sm" onClick={resetFilters}>
+              Reset
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-[8.25rem] justify-center"
+              onClick={() => {
+                void refreshHistory();
+              }}
+              disabled={isManualRefreshPending}
+              aria-busy={isManualRefreshPending}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
               />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_PROFILES}>All profiles</SelectItem>
-              {(profiles.data ?? []).map((profile) => (
-                <SelectItem key={profile.id} value={profile.id}>
-                  {profile.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={selectedCompleted}
-            onValueChange={(value) => updateFilter("completed", value)}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="All attempts" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_COMPLETION}>All attempts</SelectItem>
-              <SelectItem value="true">Completed</SelectItem>
-              <SelectItem value="false">Partial</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button variant="outline" size="sm" onClick={resetFilters}>
-            Reset
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-w-[8.25rem] justify-center"
-            onClick={() => {
-              void refreshHistory();
-            }}
-            disabled={isManualRefreshPending}
-            aria-busy={isManualRefreshPending}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`} />
-            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
-          </Button>
-        </div>
-      </div>
+              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+            </Button>
+          </div>
+        }
+      />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <InfoCard label="Visible Rows" value={String(allRows.length)} />

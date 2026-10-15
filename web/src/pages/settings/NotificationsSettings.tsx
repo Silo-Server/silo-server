@@ -20,6 +20,7 @@ import {
   Webhook as WebhookIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/page/PageHeader";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import type {
   NotificationChannelMode,
@@ -1104,7 +1105,10 @@ export default function NotificationsSettings() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Notifications</h2>
+      <PageHeader
+        title="Notifications"
+        subtitle="New-episode alerts by email, Discord, push, or webhook."
+      />
 
       <PreferencesSection />
 

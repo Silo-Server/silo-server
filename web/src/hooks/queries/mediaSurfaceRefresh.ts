@@ -7,7 +7,10 @@ import type {
 } from "@/api/types";
 import {
   adminKeys,
+  calendarKeys,
   catalogKeys,
+  collectionKeys,
+  episodeKeys,
   favoriteKeys,
   historyKeys,
   itemKeys,
@@ -16,6 +19,7 @@ import {
   progressKeys,
   recKeys,
   sectionKeys,
+  shuffleKeys,
   watchlistKeys,
 } from "./keys";
 import {
@@ -454,6 +458,47 @@ function cacheHasItemDetail(queryClient: QueryClient, itemId: string): boolean {
         (isItemDetailQueryKey(query.queryKey, itemId) || isWatchDetailQueryKey(query.queryKey)) &&
         query.state.data != null,
     );
+}
+
+// Reads that carry localized titles and descriptions beyond the media surfaces:
+// the families a viewer access change refetches, shuffle cards, collection
+// peeks, the Home-row editor's peeks, previews and curated-title search, and
+// the Watch Together picker's rows and catalog searches (pickerKeys in the
+// picker's usePickerData; its room presence and member state are not localized).
+const LOCALIZED_READ_PREFIXES = [
+  collectionKeys.all,
+  episodeKeys.all,
+  calendarKeys.all,
+  shuffleKeys.all,
+  ["collection-peek"],
+  ["home-row-peek"],
+  ["home-row-preview"],
+  ["curatedListPicker"],
+  ["watch-party", "picker"],
+  ["watch-party", "search"],
+  ["watch-party", "recently-added"],
+];
+
+function isLocalizedMediaQuery(query: Query) {
+  return (
+    shouldInvalidateMediaSurfaceQuery(query.queryKey, {}) ||
+    LOCALIZED_READ_PREFIXES.some((prefix) => queryKeyStartsWith(query.queryKey, prefix))
+  );
+}
+
+/**
+ * Refreshes the localized media reads after the viewer's metadata language
+ * changes. A request still in flight would answer in the old language and land
+ * as fresh: TanStack reuses a running request that has no data yet instead of
+ * restarting it, and an observer-less one (Home rows, prefetches) is never
+ * refetched. So those requests are cancelled before the reads are invalidated.
+ * Resolves once the reads are marked stale; mounted screens refetch on their
+ * own, and Home's load queue restarts right away.
+ */
+export async function refreshLocalizedMediaQueries(queryClient: QueryClient) {
+  await queryClient.cancelQueries({ predicate: isLocalizedMediaQuery });
+  void queryClient.invalidateQueries({ predicate: isLocalizedMediaQuery });
+  bumpHomeRefreshSignal(queryClient);
 }
 
 // A letter index sorts the whole result, which on a large library can outlast

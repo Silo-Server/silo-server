@@ -39,6 +39,8 @@ const controls = vi.hoisted(() => ({
     onSubtitleJobAccepted?: (jobId: string) => void;
     onMutedChange?: (muted: boolean) => void;
     onVolumeChange?: (volume: number) => void;
+    playbackSpeed?: number;
+    onPlaybackSpeedChange?: (rate: number) => void;
   },
 }));
 const playerV2Mock = vi.hoisted(() => vi.fn());
@@ -77,6 +79,27 @@ vi.mock("../hooks/usePlaybackRealtime", () => ({
 vi.mock("../hooks/useWatchProgress", () => ({
   useWatchProgress: () => vi.fn().mockResolvedValue(undefined),
 }));
+// Opted into per test: plans whose original the browser engine plays.
+const engineRoute = vi.hoisted(() => ({ chosen: false, refused: false }));
+vi.mock("../engine/routing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../engine/routing")>();
+  return {
+    ...actual,
+    resolveOriginalPlaybackRoute: (
+      ...args: Parameters<typeof actual.resolveOriginalPlaybackRoute>
+    ) =>
+      engineRoute.refused
+        ? {
+            kind: "unsupported",
+            failure: { classification: actual.ENGINE_UNSUPPORTED_SOURCE, message: "refused" },
+          }
+        : engineRoute.chosen
+          ? { kind: "engine", source: {} }
+          : actual.resolveOriginalPlaybackRoute(...args),
+  };
+});
+const attachBrowserEngine = vi.hoisted(() => vi.fn(() => ({ destroy: vi.fn() })));
+vi.mock("../engine", () => ({ attachBrowserEngine }));
 vi.mock("../hooks/useKeyboardShortcuts", () => ({ useKeyboardShortcuts: vi.fn() }));
 vi.mock("../hooks/useRemuxSeeking", () => ({
   useRemuxSeeking: () => ({ handleSeek: playerSeek }),
@@ -2145,6 +2168,50 @@ describe("VideoPlayer room catch-up", () => {
   });
 });
 
+describe("VideoPlayer playback speed", () => {
+  beforeEach(() => {
+    playerSeek.mockClear();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the chosen speed through a pause and a seek", () => {
+    const { container } = renderPlayer({ shouldAutoPlay: false });
+    const video = container.querySelector("video")!;
+
+    act(() => controls.current!.onPlaybackSpeedChange!(1.5));
+    expect(controls.current!.playbackSpeed).toBe(1.5);
+    expect(video.playbackRate).toBe(1.5);
+    // A media reload resets playbackRate to defaultPlaybackRate.
+    expect(video.defaultPlaybackRate).toBe(1.5);
+
+    fireEvent.pause(video);
+    expect(video.playbackRate).toBe(1.5);
+
+    act(() => controls.current!.onSeek(50));
+    expect(video.playbackRate).toBe(1.5);
+  });
+
+  it("leaves the rate to the room in a Watch Party", () => {
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: roomConnection(),
+    });
+    const video = container.querySelector("video")!;
+
+    expect(controls.current!.onPlaybackSpeedChange).toBeUndefined();
+    expect(video.playbackRate).toBe(1);
+    expect(video.defaultPlaybackRate).toBe(1);
+  });
+});
+
 describe("VideoPlayer plan failure recovery", () => {
   beforeEach(() => {
     realtimeOptions.current = null;
@@ -2989,6 +3056,99 @@ describe("VideoPlayer source timeline", () => {
       controls.current!.onSeek(1400);
     });
     expect(playerSeek).toHaveBeenCalledWith(expect.closeTo(1400 + origin));
+  });
+
+  // The engine starts its clock at the file's first frame itself, so the
+  // origin a native load measured must not carry into an engine session, and
+  // a native load after the engine measures its own again.
+  it("drops a native clock origin while the browser engine plays the original", async () => {
+    const engine = {
+      containers: ["mkv"],
+      videoCodecs: ["h264"],
+      audioCodecs: ["aac"],
+      hdr: false,
+    };
+    const { container, rerenderPlayer } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    video.currentTime = 29.977;
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-29.977));
+
+    engineRoute.chosen = true;
+    try {
+      rerenderPlayer({ planRevision: 2, browserEngine: engine });
+      await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalled());
+      await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBe(0));
+      expect(subtitleTimeline.assOffsetSeconds).toBe(0);
+    } finally {
+      engineRoute.chosen = false;
+    }
+
+    rerenderPlayer({ planRevision: 3, browserEngine: null });
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    video.currentTime = 1.4;
+    fireEvent.loadedMetadata(video);
+    await waitFor(() => expect(subtitleTimeline.textOffsetSeconds).toBeCloseTo(-1.4));
+  });
+
+  // A route refused before any media event has no position of its own yet;
+  // recovery must resume where this plan was starting, not at 0.
+  it("reports the resume point when the engine refuses a resumed original", async () => {
+    const onPlanFailure = vi.fn();
+    const plan = fixturePlanV3({
+      ...directPlan,
+      timeline: { ...directPlan.timeline, player_start_seconds: 1300, timeline_offset_seconds: 0 },
+    });
+    engineRoute.refused = true;
+    try {
+      renderPlayer({
+        plan,
+        initialPosition: 1300,
+        onPlanFailure,
+        browserEngine: {
+          containers: ["mkv"],
+          videoCodecs: ["h264"],
+          audioCodecs: ["aac"],
+          hdr: false,
+        },
+      });
+      await waitFor(() => expect(onPlanFailure).toHaveBeenCalled());
+      expect(onPlanFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ classification: "browser_engine_unsupported_source" }),
+        1300,
+      );
+    } finally {
+      engineRoute.refused = false;
+    }
+  });
+
+  // The engine's audio follows playbackRate without keeping pitch, so it plays
+  // at 1x and the speed control is hidden, as in a Watch Party.
+  it("plays the browser engine at 1x and hides the speed control", async () => {
+    const engine = {
+      containers: ["mkv"],
+      videoCodecs: ["h264"],
+      audioCodecs: ["aac"],
+      hdr: false,
+    };
+    const { container, rerenderPlayer } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    act(() => controls.current!.onPlaybackSpeedChange!(1.5));
+    expect(video.playbackRate).toBe(1.5);
+
+    engineRoute.chosen = true;
+    try {
+      rerenderPlayer({ planRevision: 2, browserEngine: engine });
+      await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalled());
+      await waitFor(() => expect(controls.current!.onPlaybackSpeedChange).toBeUndefined());
+      expect(video.playbackRate).toBe(1);
+    } finally {
+      engineRoute.chosen = false;
+    }
   });
 
   // Written to the element before metadata, a seek would become the default
@@ -3973,6 +4133,232 @@ describe("VideoPlayer controls auto-hide", () => {
     menu.remove();
     await act(() => vi.advanceTimersByTimeAsync(3_000));
     expect(controls.current?.visible).toBe(false);
+  });
+});
+
+describe("VideoPlayer progressive remux after a long pause", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-13T12:00:00Z"));
+    realtimeOptions.current = null;
+    controls.current = null;
+    hlsJS.supported = false;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  // A remux reanchored at 1800s: the element clock starts at the origin.
+  const remuxPlan = fixturePlanV3({
+    ...directPlan,
+    delivery: "server_remux_progressive",
+    timeline: { ...directPlan.timeline, timeline_offset_seconds: 1_800, can_seek_anywhere: false },
+  });
+
+  function playThenPause(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {}) {
+    const onReanchorSeek = vi.fn(() => true);
+    const onPlaybackStateChange = vi.fn();
+    const onConnectionLost = vi.fn();
+    const { container, unmount, rerenderPlayer } = renderPlayer({
+      plan: remuxPlan,
+      onReanchorSeek,
+      onPlaybackStateChange,
+      onConnectionLost,
+      ...overrides,
+    });
+    const video = container.querySelector("video")!;
+    video.currentTime = 40;
+    fireFrameTimeUpdate(video);
+    fireEvent.pause(video);
+    return {
+      video,
+      unmount,
+      rerenderPlayer,
+      onReanchorSeek,
+      onPlaybackStateChange,
+      onConnectionLost,
+    };
+  }
+
+  it("reopens the stream at the paused position when playback resumes", () => {
+    const { video, onReanchorSeek, onPlaybackStateChange, onConnectionLost } = playThenPause();
+
+    vi.advanceTimersByTime(10 * 60_000);
+    onPlaybackStateChange.mockClear();
+    fireEvent.play(video);
+
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_840);
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    // The reopened stream must keep playing, so the session hears the play
+    // before it can adopt the new plan.
+    expect(onPlaybackStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ currentTime: 1_840, playing: true }),
+    );
+    expect(onPlaybackStateChange.mock.invocationCallOrder[0]!).toBeLessThan(
+      onReanchorSeek.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it.each([
+    ["reopens once a replan in flight ends without a new plan", 1, 1],
+    ["leaves the stream to a replan in flight that lands a new plan", 2, 0],
+  ])("%s", (_, revisionAfterReplan, reopens) => {
+    const onReanchorSeek = vi.fn(() => true);
+    const { container, rerenderPlayer } = renderPlayer({
+      plan: remuxPlan,
+      onReanchorSeek,
+      replanning: true,
+    });
+    const video = container.querySelector("video")!;
+    video.currentTime = 40;
+    fireFrameTimeUpdate(video);
+    fireEvent.pause(video);
+    vi.advanceTimersByTime(10 * 60_000);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+
+    rerenderPlayer({ replanning: false, planRevision: revisionAfterReplan });
+
+    expect(onReanchorSeek).toHaveBeenCalledTimes(reopens);
+  });
+
+  it("does not reconnect for a viewer who left while the reopen was pending", async () => {
+    const { video, unmount, onReanchorSeek, onConnectionLost } = playThenPause();
+    let settle: (ok: boolean) => void = () => {};
+    onReanchorSeek.mockImplementation(
+      () => new Promise<boolean>((resolve) => (settle = resolve)) as unknown as boolean,
+    );
+
+    vi.advanceTimersByTime(10 * 60_000);
+    fireEvent.play(video);
+    expect(onReanchorSeek).toHaveBeenCalledOnce();
+
+    unmount();
+    // Leaving ends the session's request, which then reports the reopen as not taken.
+    settle(false);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+  });
+
+  it("leaves a superseded reopen to the version switch that started meanwhile", async () => {
+    const { video, rerenderPlayer, onReanchorSeek, onConnectionLost } = playThenPause();
+    let settle: (ok: boolean) => void = () => {};
+    onReanchorSeek.mockImplementation(
+      () => new Promise<boolean>((resolve) => (settle = resolve)) as unknown as boolean,
+    );
+    vi.advanceTimersByTime(10 * 60_000);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+
+    // The viewer switches version; the session drops the reopen as superseded.
+    rerenderPlayer({ replacing: true });
+    settle(false);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    // The switch fails and leaves the idle stream in place, so the reconnect
+    // reopens it.
+    rerenderPlayer({ replacing: false });
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_840, true);
+    expect(onReanchorSeek).toHaveBeenCalledOnce();
+  });
+
+  it("reconnects once when the reopen's own replan fails", async () => {
+    const { video, rerenderPlayer, onReanchorSeek, onConnectionLost } = playThenPause();
+    let settle: (ok: boolean) => void = () => {};
+    onReanchorSeek.mockImplementation(
+      () => new Promise<boolean>((resolve) => (settle = resolve)) as unknown as boolean,
+    );
+    vi.advanceTimersByTime(10 * 60_000);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+
+    // The session shows the reopen's replan in flight, and it answers false
+    // before the render that clears the flag.
+    rerenderPlayer({ replanning: true });
+    settle(false);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    rerenderPlayer({ replanning: false });
+
+    expect(onReanchorSeek).toHaveBeenCalledOnce();
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_840, true);
+  });
+
+  it("hands a reopen the session refuses to the reconnect", async () => {
+    const { video, onReanchorSeek, onConnectionLost } = playThenPause();
+    // The session expired during the pause, so the replan is turned down.
+    onReanchorSeek.mockImplementation(() => Promise.resolve(false) as unknown as boolean);
+
+    vi.advanceTimersByTime(40 * 60_000);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_840, true);
+  });
+
+  it.each([
+    ["has opened but not shown a frame", HTMLMediaElement.HAVE_METADATA, 1],
+    ["was torn down for the next stream", HTMLMediaElement.HAVE_NOTHING, 0],
+  ])("counts a pause before the first frame only when the stream %s", (_, readyState, reopens) => {
+    const onReanchorSeek = vi.fn(() => true);
+    const { container } = renderPlayer({ plan: remuxPlan, onReanchorSeek });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "readyState", { configurable: true, value: readyState });
+    fireEvent.pause(video);
+
+    vi.advanceTimersByTime(10 * 60_000);
+    fireEvent.play(video);
+
+    expect(onReanchorSeek).toHaveBeenCalledTimes(reopens);
+  });
+
+  it.each([
+    ["a short pause on a progressive remux", {}, 30_000],
+    [
+      "a long pause on an original file the browser can range-request",
+      { plan: directPlan },
+      10 * 60_000,
+    ],
+    [
+      "a long pause in a room, which drives its own transport",
+      { watchTogetherRoomId: "room-1", watchTogetherConnection: roomConnection() },
+      10 * 60_000,
+    ],
+    ["a long pause while another replan replaces the stream", { replanning: true }, 10 * 60_000],
+    ["a long pause while a version switch replaces the session", { replacing: true }, 10 * 60_000],
+  ])("keeps the stream after %s", (_, overrides, pauseMs) => {
+    const { video, onReanchorSeek } = playThenPause(overrides);
+
+    vi.advanceTimersByTime(pauseMs);
+    fireEvent.play(video);
+
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+  });
+
+  it("reopens a stream that settled paused and waited", async () => {
+    const onReanchorSeek = vi.fn(() => true);
+    const { container } = renderPlayer({ plan: remuxPlan, onReanchorSeek, shouldAutoPlay: false });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_ENOUGH_DATA,
+    });
+    fireEvent.canPlay(video);
+    video.currentTime = 12;
+
+    vi.advanceTimersByTime(5 * 60_000);
+    fireEvent.play(video);
+
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_812);
   });
 });
 

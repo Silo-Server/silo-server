@@ -8,7 +8,6 @@ describe("CalmPage", () => {
   it("is a page's own h1 with its buttons in the header", () => {
     render(
       <CalmPage
-        heading="page"
         title="Collections"
         subtitle="What viewers see on each library's Collections tab."
         actions={<button type="button">New collection</button>}
@@ -24,13 +23,13 @@ describe("CalmPage", () => {
     expect(screen.getByRole("banner").parentElement).not.toHaveClass("pb-24");
   });
 
-  it("is an h2 under a parent page and leaves room for a docked bar", () => {
+  it("leaves room for a docked bar", () => {
     render(
-      <CalmPage heading="section" title="Home Screen" subtitle="Your rows." padBottom>
+      <CalmPage title="Home Screen" subtitle="Your rows." padBottom>
         <p>List</p>
       </CalmPage>,
     );
-    expect(screen.getByRole("heading", { level: 2, name: "Home Screen" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Home Screen" })).toBeInTheDocument();
     expect(screen.getByRole("banner").parentElement).toHaveClass("pb-24");
   });
 });

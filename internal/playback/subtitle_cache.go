@@ -235,6 +235,9 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 			"input", opts.InputPath, "track", opts.TrackIndex, "cache_entry", cachedPath)
 		opts.InputPath = cachedPath
 		opts.InputIsExtractedSup = true
+		if firstCue, err := readSupFirstCue(cachedPath); err == nil {
+			opts = windowFromCachedSup(opts, firstCue)
+		}
 	} else {
 		c.WarmInBackground(opts, extract)
 	}

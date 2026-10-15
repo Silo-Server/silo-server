@@ -68,13 +68,13 @@ export function RowLine({
       tags={
         <>
           {row.hero ? (
-            <span className="bg-warning/15 text-warning ring-warning/30 inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset max-sm:hidden">
+            <span className="bg-warning/15 text-warning ring-warning/30 inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset max-sm:hidden">
               <Star className="size-3" aria-hidden />
               Hero banner
             </span>
           ) : null}
           {row.own ? (
-            <span className="bg-info/15 text-info ring-info/30 inline-flex h-[22px] shrink-0 items-center rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset">
+            <span className="bg-info/15 text-info ring-info/30 inline-flex h-[22px] shrink-0 items-center rounded-full px-2 text-xs font-semibold ring-1 ring-inset">
               Yours
             </span>
           ) : null}

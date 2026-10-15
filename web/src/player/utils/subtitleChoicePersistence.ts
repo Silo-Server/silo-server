@@ -66,7 +66,7 @@ export function sendSubtitleChoiceRequest(
  * holds only the *resolved* value and has no control that edits it, so for a
  * viewer who never expressed a preference it is the contract default; writing
  * that back would pin the default at the top of the ladder and permanently
- * shadow the profile-scope toggle on the Subtitles settings screen. It still
+ * shadow the profile-scope toggle on the Language & Subtitles settings screen. It still
  * rides along on the legacy composite row, which is keyed to a concrete track
  * selection and is not part of the canonical resolution ladder.
  *

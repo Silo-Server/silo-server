@@ -73,7 +73,7 @@ describe("ActionBar marker re-detection", () => {
     }
     expect(within(dialog).getByRole("link", { name: "Change marker settings" })).toHaveAttribute(
       "href",
-      "/admin/settings/library",
+      "/admin/settings/playback",
     );
   });
 

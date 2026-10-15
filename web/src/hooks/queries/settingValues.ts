@@ -14,6 +14,7 @@ import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { ShortcutTarget } from "@/lib/uiCustomization";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { deviceKeys, libraryKeys, sectionKeys, settingsKeys } from "./keys";
+import { refreshLocalizedMediaQueries } from "./mediaSurfaceRefresh";
 
 /**
  * Typed access to the canonical settings API.
@@ -445,6 +446,23 @@ function refreshLibrariesForSetting(queryClient: ReturnType<typeof useQueryClien
   return queryClient.invalidateQueries({ queryKey: libraryKeys.all });
 }
 
+const METADATA_LANGUAGE_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
+]);
+
+// The metadata language decides the localized titles and descriptions in the
+// media reads (catalog, home sections, people, collections, episodes). The
+// write does not wait for their refetch, so the settings controls unlock as
+// soon as the value is saved.
+function refreshLocalizedMediaForSetting(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key?: string,
+) {
+  if (!key || !METADATA_LANGUAGE_KEYS.has(key)) return;
+  return refreshLocalizedMediaQueries(queryClient);
+}
+
 /** Refreshes the reads a setting write changes, as useSetSettingValue does. */
 export function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -455,6 +473,7 @@ export function invalidateSettingValueQueries(
     queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
     refreshHomeForSetting(queryClient, key),
     refreshLibrariesForSetting(queryClient, key),
+    refreshLocalizedMediaForSetting(queryClient, key),
   ];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
@@ -695,6 +714,7 @@ export function useSettingValuesRealtime() {
         qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
         void refreshHomeForSetting(qc, event.data?.key);
         void refreshLibrariesForSetting(qc, event.data?.key);
+        void refreshLocalizedMediaForSetting(qc, event.data?.key);
       },
     }),
     [qc],

@@ -137,8 +137,11 @@ func (f *fakeRecommendations) WatchTonight(_ context.Context, _ int, _ string, _
 	return handlers.WatchTonightView{Items: []handlers.WatchTonightItemView{fakeWatchTonightItem()}, IsCold: true}, nil
 }
 
-func (f *fakeRecommendations) WatchTonightCards(_ context.Context, _ int, _ string, _ catalogpkg.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) handlers.WatchTonightCardsView {
+func (f *fakeRecommendations) WatchTonightCards(_ context.Context, _ int, _ string, _ catalogpkg.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) (handlers.WatchTonightCardsView, error) {
 	f.lastMode, f.lastGenres, f.lastExclude, f.lastLimit = mode, genres, excludeIDs, limit
+	if f.err != nil {
+		return handlers.WatchTonightCardsView{}, f.err
+	}
 	if f.swipePool > 0 {
 		cards := make([]handlers.WatchTonightCardView, 0, limit)
 		more := false
@@ -155,9 +158,9 @@ func (f *fakeRecommendations) WatchTonightCards(_ context.Context, _ int, _ stri
 			card.ContentID = id
 			cards = append(cards, card)
 		}
-		return handlers.WatchTonightCardsView{Cards: cards, HasMore: more}
+		return handlers.WatchTonightCardsView{Cards: cards, HasMore: more}, nil
 	}
-	return handlers.WatchTonightCardsView{Cards: []handlers.WatchTonightCardView{fakeWatchTonightCard()}, HasMore: f.cardsHasMore}
+	return handlers.WatchTonightCardsView{Cards: []handlers.WatchTonightCardView{fakeWatchTonightCard()}, HasMore: f.cardsHasMore}, nil
 }
 
 func recommendationDeps(t *testing.T) (Dependencies, *fakeRecommendations) {
@@ -306,6 +309,14 @@ func TestRecommendationSection(t *testing.T) {
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/cluster", "", viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.key" || p.Errors[0].Code != codeRequired {
 		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// A key that cannot name a section is a validation failure, not a
+	// server error.
+	for _, path := range []string{"/section/cluster?key=abc", "/section/cluster?key=-1", "/section/cluster?key=%FF%FE", "/section/genre?key=%FF", "/section/genre?key=Drama%00"} {
+		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations"+path, "", viewerHeaders()), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "query.key" || p.Errors[0].Code != codeInvalid {
+			t.Fatalf("%s: errors = %+v", path, p.Errors)
+		}
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/nope", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/popular?limit=61", "", viewerHeaders()), TypeValidationFailed)
@@ -493,6 +504,11 @@ func TestRecommendationWatchTonightCards(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover&limit=21", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", bearer(memberToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", nil), TypeAuthenticationRequired)
+	// A failed item lookup is a 500, not an empty page that looks like the
+	// end of the deck.
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to fetch item details"}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", viewerHeaders()), TypeInternalError)
+	fake.err = nil
 	deps.Recommendations = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", viewerHeaders()), TypeDependencyUnavailable)
 }

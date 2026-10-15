@@ -34,6 +34,8 @@ export interface BrandingContextValue {
   loginBgUrl: string | null;
   /** Whether the running server has an active object-store client for assets. */
   storageAvailable: boolean;
+  /** The server's branding has arrived; until then every field is a default. */
+  loaded: boolean;
 }
 
 const DEFAULT_BRANDING: BrandingContextValue = {
@@ -45,6 +47,7 @@ const DEFAULT_BRANDING: BrandingContextValue = {
   faviconUrl: null,
   loginBgUrl: null,
   storageAvailable: false,
+  loaded: false,
 };
 
 // A non-null default means useBranding() is safe to call anywhere (e.g. in
@@ -61,6 +64,7 @@ function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValu
     faviconUrl: data?.favicon_url || null,
     loginBgUrl: data?.login_bg_url || null,
     storageAvailable: data?.storage_available ?? false,
+    loaded: data !== undefined,
   };
 }
 

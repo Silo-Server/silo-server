@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -86,17 +87,31 @@ export function LoginSessionsPanel({
       ))}
     </ul>
   );
+  // A section of the admin's user page there; the page's own title in Settings.
+  const Heading = adminUser ? "h2" : "h1";
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      {/* In Settings this is the page header, so it matches `PageHeader`'s
+          title and gap; it keeps its own markup for the focusable heading. */}
+      <div
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-3",
+          !adminUser && "page-header mb-8",
+        )}
+      >
         <div className="space-y-2">
-          <h2
+          <Heading
             ref={heading}
             tabIndex={-1}
-            className={`${adminUser ? "text-lg" : "text-2xl sm:text-3xl"} font-semibold tracking-tight focus:outline-none`}
+            className={cn(
+              "focus:outline-none",
+              adminUser
+                ? "text-lg font-semibold tracking-tight"
+                : "text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance sm:text-[2rem]",
+            )}
           >
             Signed-in sessions
-          </h2>
+          </Heading>
           <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
             {adminUser
               ? `Browsers and apps signed in to ${adminUser.username}’s account.`

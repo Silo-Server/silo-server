@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useHWAccelDetection } from "@/hooks/queries/admin/system";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
 import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
+import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import { useAdminTrickplayLibraries } from "@/hooks/queries/admin/trickplay";
 import {
   AlertDialog,
@@ -17,7 +19,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
-import { Button } from "@/components/ui/button";
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { PathSettingField } from "@/components/settings/PathSettingField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
@@ -25,6 +26,7 @@ import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
 import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
+import { MarkerTasksCard } from "./MarkerTasksCard";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
   IMAGE_EXECUTION_DEFAULT,
@@ -39,33 +41,55 @@ import {
   toggleHWDevice,
 } from "./playbackSettings.utils";
 
-// Shown without a disclosure: the handful of controls a household admin
-// actually touches.
+// Shown without a disclosure: the controls a household admin actually
+// touches, including the HDR tone mapping switches, throttling and where
+// segments are written.
 const TRANSCODING_ESSENTIAL_KEYS = [
   "playback.transcode_enabled",
-  "playback.allow_hevc_encoding",
   "playback.hw_accel",
   "allow_4k_transcode",
-];
-
-const TRANSCODING_ADVANCED_KEYS = [
-  "playback.ffmpeg_path",
-  "playback.transcode_dir",
-  "playback.segment_retention_seconds",
-  "playback.copy_keyframe_playlist",
-  "playback.hw_device",
+  "playback.allow_hevc_encoding",
   "playback.transcode_hardware_tone_map_enabled",
   "playback.transcode_software_tone_map_enabled",
   "enable_transcode_throttle",
   "transcode_throttle_seconds",
-  "playback.chapter_thumbnail_workers",
-  "playback.chapter_thumbnail_execution",
-  "playback.chapter_thumbnail_hdr_policy",
-  "playback.chapter_thumbnail_software_tone_map_enabled",
+  "playback.transcode_dir",
+];
+
+const TRANSCODING_ADVANCED_KEYS = [
+  "playback.ffmpeg_path",
+  "playback.hw_device",
+  "playback.segment_retention_seconds",
+  "playback.copy_keyframe_playlist",
+];
+
+// Chapter thumbnails and seek previews are images cut from the video, not part
+// of a transcode, so they get their own group. Width, interval and the chapter
+// thumbnail worker count show without a disclosure.
+const PREVIEW_SHOWN_KEYS = [
   "playback.preview_image_width",
   "playback.trickplay_interval_seconds",
-  "playback.trickplay_workers",
+  "playback.chapter_thumbnail_workers",
+];
+
+// Where the images are made is only a real choice once a transcode node could
+// take the work, so these sit beside width and interval then and in Advanced
+// otherwise.
+const PREVIEW_PLACEMENT_KEYS = [
+  "playback.chapter_thumbnail_execution",
   "playback.trickplay_execution",
+];
+
+const PREVIEW_ADVANCED_KEYS = [
+  "playback.trickplay_workers",
+  "playback.chapter_thumbnail_hdr_policy",
+  "playback.chapter_thumbnail_software_tone_map_enabled",
+];
+
+const PREVIEW_IMAGE_KEYS = [
+  ...PREVIEW_SHOWN_KEYS,
+  ...PREVIEW_PLACEMENT_KEYS,
+  ...PREVIEW_ADVANCED_KEYS,
 ];
 
 // A new preview image width makes every chapter thumbnail and seek preview
@@ -92,147 +116,16 @@ function remakeDescription(widthChanged: boolean, previews: number | null): stri
   return `${what} made again ${how}. This runs in the background and can take a long time on a large library; players keep the current images until each is replaced.`;
 }
 
-const executionOptions = [
-  { value: "prefer_worker", label: "Prefer any worker" },
-  { value: "prefer_transcode", label: "Prefer transcode node" },
-  { value: "worker_only", label: "Any worker only" },
-  { value: "prefer_api", label: "Prefer API server" },
-  { value: "api_only", label: "API server only" },
-];
-
-const egressOptions = [
-  { value: "prefer_proxy", label: "Prefer proxy" },
-  { value: "proxy_only", label: "Proxy only" },
-  { value: "prefer_api", label: "Prefer API server" },
-  { value: "api_only", label: "API server only" },
-];
-
-type ExecutionWorkload = "remux" | "video_transcode";
-
-function executionPreview(value: string, workload: ExecutionWorkload) {
-  const worker = workload === "remux" ? "Any worker" : "Transcode node";
-  switch (value) {
-    case "prefer_transcode":
-      return workload === "remux" ? "Transcode node → any worker → API" : "Transcode node → API";
-    case "worker_only":
-      return `${worker} only`;
-    case "prefer_api":
-      return `API → ${worker.toLowerCase()}`;
-    case "api_only":
-      return "API only";
-    default:
-      return `${worker} → API`;
-  }
-}
-
-function egressPreview(value: string) {
-  switch (value) {
-    case "proxy_only":
-      return "Proxy only";
-    case "prefer_api":
-      return "API → proxy";
-    case "api_only":
-      return "API only";
-    default:
-      return "Proxy → API";
-  }
-}
-
-/** The whole path for a workload that needs an executor, e.g. "Worker → API · Proxy → API". */
-function routePreview(execution: string, egress: string, workload: ExecutionWorkload) {
-  return `${executionPreview(execution, workload)} · ${egressPreview(egress)}`;
-}
-
-// A routing policy either picks who runs the work (execution) or who serves the
-// bytes (egress). The kind decides the choices offered and the value the server
-// applies while the row has never been set.
-const ROUTING_KINDS = {
-  execution: { options: executionOptions, serverDefault: "prefer_transcode" },
-  egress: { options: egressOptions, serverDefault: "prefer_proxy" },
-};
-
-type RoutingKind = keyof typeof ROUTING_KINDS;
-
-const ROUTING_KEYS = [
-  "playback.routing.direct_play_egress",
-  "playback.routing.remux_execution",
-  "playback.routing.remux_egress",
-  "playback.routing.video_transcode_execution",
-  "playback.routing.video_transcode_egress",
-] as const;
-
-type RoutingKey = (typeof ROUTING_KEYS)[number];
-
-interface RoutingField {
-  key: RoutingKey;
-  label: string;
-  kind: RoutingKind;
-  description?: string;
-}
-
-// One row per key in ROUTING_KEYS, in the order they render.
-const ROUTING_FIELDS: readonly RoutingField[] = [
-  {
-    key: "playback.routing.direct_play_egress",
-    label: "Direct play egress",
-    kind: "egress",
-    description: "Original bytes need no executor.",
-  },
-  {
-    key: "playback.routing.remux_execution",
-    label: "Remux execution",
-    kind: "execution",
-    description:
-      "A worker can be a proxy or transcode node. Prefer transcode node runs HLS or progressive remux there when supported; progressive output is relayed through the selected proxy.",
-  },
-  { key: "playback.routing.remux_egress", label: "Remux egress", kind: "egress" },
-  {
-    key: "playback.routing.video_transcode_execution",
-    label: "Video transcode execution",
-    kind: "execution",
-    description: "Video transcode workers are transcode nodes; proxy nodes only provide egress.",
-  },
-  {
-    key: "playback.routing.video_transcode_egress",
-    label: "Video transcode egress",
-    kind: "egress",
-  },
-];
-
-const ROUTING_PRESETS = {
-  standard: {
-    label: "Silo Defaults",
-    values: {
-      "playback.routing.direct_play_egress": "prefer_proxy",
-      "playback.routing.remux_execution": "prefer_transcode",
-      "playback.routing.remux_egress": "prefer_proxy",
-      "playback.routing.video_transcode_execution": "prefer_transcode",
-      "playback.routing.video_transcode_egress": "prefer_proxy",
-    },
-  },
-  gpu: {
-    label: "GPU offload",
-    values: {
-      "playback.routing.direct_play_egress": "prefer_api",
-      "playback.routing.remux_execution": "prefer_api",
-      "playback.routing.remux_egress": "prefer_api",
-      "playback.routing.video_transcode_execution": "prefer_worker",
-      "playback.routing.video_transcode_egress": "prefer_proxy",
-    },
-  },
-  central: {
-    label: "Central egress",
-    values: {
-      "playback.routing.direct_play_egress": "api_only",
-      "playback.routing.remux_execution": "prefer_worker",
-      "playback.routing.remux_egress": "api_only",
-      "playback.routing.video_transcode_execution": "prefer_worker",
-      "playback.routing.video_transcode_egress": "api_only",
-    },
-  },
-} as const;
-
 const WATCH_KEYS = ["playback.watched_threshold", "playback.min_resume_threshold"];
+
+const MARKER_KEYS = [
+  "markers.mode",
+  "markers.detect_intros",
+  "markers.detect_credits",
+  "markers.online_storage",
+  "markers.lazy_playback",
+  "markers.detection_workers",
+];
 
 // `playback.chapter_thumbnail_node_capacity` is deliberately absent from the
 // UI (hidden tier): it is still saved and read through the settings API, but
@@ -241,21 +134,12 @@ const WATCH_KEYS = ["playback.watched_threshold", "playback.min_resume_threshold
 // The `download.*` family is its own page (DownloadsSettings), so it is not
 // loaded or saved here.
 const KEYS = [
+  ...WATCH_KEYS,
   ...TRANSCODING_ESSENTIAL_KEYS,
   ...TRANSCODING_ADVANCED_KEYS,
-  ...ROUTING_KEYS,
-  ...WATCH_KEYS,
+  ...PREVIEW_IMAGE_KEYS,
+  ...MARKER_KEYS,
 ];
-
-/** One line of the preferred-path summary: workload on the left, route on the right. */
-function PreferredPathRow({ label, route }: { label: string; route: string }) {
-  return (
-    <div className="flex justify-between gap-5">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{route}</span>
-    </div>
-  );
-}
 
 export default function PlaybackSettings() {
   const supportsTrickplay = useLibraryCapabilities().data?.trickplay === true;
@@ -315,36 +199,33 @@ export default function PlaybackSettings() {
   // reachable rather than blocking a valid choice on a transient error.
   const transcodeNodeAvailable = !nodes.isSuccess || hasUsableTranscodeNode(nodes.data);
   const trickplayNodeAvailable = !nodes.isSuccess || hasUsableTrickplayNode(nodes.data);
-  const proxyNodeAvailable =
-    !nodes.isSuccess ||
-    (nodes.data ?? []).some((node) => node.type === "proxy" && node.enabled && node.healthy);
-
-  const routingValues = Object.fromEntries(
-    ROUTING_KEYS.map((key) => [key, form.getValue(key)]),
-  ) as Record<RoutingKey, string>;
-  const activeRoutingPreset = Object.values(ROUTING_PRESETS).find((preset) =>
-    ROUTING_KEYS.every((key) => routingValues[key] === preset.values[key]),
-  );
-  const applyRoutingPreset = (values: Record<RoutingKey, string>) => {
-    for (const key of ROUTING_KEYS) form.setValue(key, values[key]);
-  };
-
-  const usesProxyOnlyEgress = ROUTING_KEYS.some((key) => routingValues[key] === "proxy_only");
-  // A remux can run on a proxy node (progressive) or a transcode node (HLS), so
-  // worker-only remuxing is only stranded when neither kind is available. Both
-  // availability flags read as available until the node list has loaded, which
-  // keeps the warning quiet on a transient error.
-  const strandedRoute =
-    (usesProxyOnlyEgress && !proxyNodeAvailable) ||
-    (routingValues["playback.routing.remux_execution"] === "worker_only" &&
-      !proxyNodeAvailable &&
-      !transcodeNodeAvailable) ||
-    (routingValues["playback.routing.video_transcode_execution"] === "worker_only" &&
-      !transcodeNodeAvailable);
+  // Showing the placement selects takes a node list that has one, so a
+  // single-server page never shows them while the list loads.
+  const showPreviewPlacement = hasUsableTranscodeNode(nodes.data);
+  const previewAdvancedKeys = [
+    ...PREVIEW_ADVANCED_KEYS,
+    ...(showPreviewPlacement ? [] : PREVIEW_PLACEMENT_KEYS),
+  ].filter((key) => keys.includes(key));
 
   const isDirty = form.isDirty;
   const anyDirty = (keys: readonly string[]) => keys.some((key) => isDirty(key));
   const allRestart = (keys: readonly string[]) => keys.every((key) => restartKeys.has(key));
+
+  const throttleOn = form.getValue("enable_transcode_throttle") === "true";
+  // Every advanced transcoding key has one row, except the device picker,
+  // which renders only when it applies.
+  const transcodingAdvancedCount = TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1);
+
+  // An older API node saves the detection kind switches but ignores them, so
+  // they are offered only where the server says it honors them.
+  const { data: markerCapabilities } = useAdminMarkerCapabilities();
+  const detectionKindSettings = markerCapabilities?.detection_kind_settings === true;
+  const markerMode = form.getValue("markers.mode") || "both";
+  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
+  const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
+  const localMarkersEnabled = markerMode === "local" || markerMode === "both";
+  const showLazyPlayback =
+    markerMode !== "off" && (!onlineMarkersEnabled || onlineMarkerStorage === "stored");
 
   const detection = hwAccel === "none" ? undefined : hwDetection.data;
   const detectedLabel = describeDetection(detection);
@@ -379,13 +260,66 @@ export default function PlaybackSettings() {
       <span className="flex flex-col items-start gap-1">{hwAccelLines}</span>
     ) : undefined;
 
+  const chapterExecutionField = (
+    <SettingField
+      label="Generate chapter thumbnails on"
+      type="select"
+      options={imageExecutionOptions(chapterExecution, transcodeNodeAvailable)}
+      status={
+        transcodeNodeAvailable ? undefined : (
+          <SettingFieldStatus tone="warn">No transcode nodes are connected</SettingFieldStatus>
+        )
+      }
+      value={chapterExecution}
+      onChange={(v) => form.setValue("playback.chapter_thumbnail_execution", v)}
+      restartRequired={restartKeys.has("playback.chapter_thumbnail_execution")}
+    />
+  );
+  const trickplayExecutionField = supportsTrickplay ? (
+    <SettingField
+      label="Generate seek previews on"
+      type="select"
+      options={imageExecutionOptions(trickplayExecution, trickplayNodeAvailable)}
+      status={
+        trickplayNodeAvailable ? undefined : (
+          <SettingFieldStatus tone="warn">
+            No connected transcode node supports seek previews
+          </SettingFieldStatus>
+        )
+      }
+      value={trickplayExecution}
+      onChange={(v) => form.setValue("playback.trickplay_execution", v)}
+      restartRequired={restartKeys.has("playback.trickplay_execution")}
+    />
+  ) : null;
+
   if (form.isLoading) return <div>Loading...</div>;
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Playback" className="mb-8" />
+      <SettingsPageHeader title="Playback" />
 
       <div className="flex-1 space-y-5">
+        <FieldGroup label="Watch behavior" restartAll={allRestart(WATCH_KEYS)}>
+          <SettingField
+            label="Mark watched at"
+            type="number"
+            unit="%"
+            value={form.getValue("playback.watched_threshold")}
+            onChange={(v) => form.setValue("playback.watched_threshold", v)}
+            restartRequired={restartKeys.has("playback.watched_threshold")}
+          />
+          <SettingField
+            label="Show in Continue Watching after"
+            type="number"
+            unit="%"
+            description="Progress below this is ignored."
+            value={form.getValue("playback.min_resume_threshold")}
+            onChange={(v) => form.setValue("playback.min_resume_threshold", v)}
+            restartRequired={restartKeys.has("playback.min_resume_threshold")}
+          />
+        </FieldGroup>
+
         <FieldGroup
           label="Transcoding"
           restartAll={allRestart([...TRANSCODING_ESSENTIAL_KEYS, ...TRANSCODING_ADVANCED_KEYS])}
@@ -409,13 +343,6 @@ export default function PlaybackSettings() {
             restartRequired={restartKeys.has("playback.hw_accel")}
           />
           <SettingField
-            label="Allow HEVC encoding"
-            type="toggle"
-            description="Use HEVC for clients that support HEVC over HLS. Other clients keep H.264."
-            value={form.getValue("playback.allow_hevc_encoding")}
-            onChange={(v) => form.setValue("playback.allow_hevc_encoding", v)}
-          />
-          <SettingField
             label="Allow 4K transcoding"
             type="toggle"
             description="Heavy load on most hardware."
@@ -423,31 +350,68 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("allow_4k_transcode", v)}
             restartRequired={restartKeys.has("allow_4k_transcode")}
           />
+          <SettingField
+            label="Allow HEVC encoding"
+            type="toggle"
+            description="Use HEVC for clients that support HEVC over HLS. Other clients keep H.264."
+            value={form.getValue("playback.allow_hevc_encoding")}
+            onChange={(v) => form.setValue("playback.allow_hevc_encoding", v)}
+          />
+          <SettingField
+            label="Enable Hardware HDR Tone Mapping"
+            type="toggle"
+            hint="Allows validated local or remote GPU executors to convert HDR video to SDR when transcoding."
+            value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
+            onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
+            restartRequired={restartKeys.has("playback.transcode_hardware_tone_map_enabled")}
+          />
+          <SettingField
+            label="Enable Software HDR Tone Mapping"
+            type="toggle"
+            hint="Allows the CPU to convert HDR video to SDR when transcoding. This can be very CPU-intensive."
+            value={form.getValue("playback.transcode_software_tone_map_enabled")}
+            onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
+            restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
+          />
+          <SettingField
+            label="Throttle transcoding"
+            type="toggle"
+            description="Pause encoding once the client is far enough ahead."
+            value={form.getValue("enable_transcode_throttle")}
+            onChange={(v) => form.setValue("enable_transcode_throttle", v)}
+            restartRequired={restartKeys.has("enable_transcode_throttle")}
+          />
+          {throttleOn && (
+            <SettingField
+              label="Buffer ahead"
+              type="number"
+              unit="seconds"
+              value={form.getValue("transcode_throttle_seconds")}
+              onChange={(v) => form.setValue("transcode_throttle_seconds", v)}
+              restartRequired={restartKeys.has("transcode_throttle_seconds")}
+            />
+          )}
+          <PathSettingField
+            label="Transcode directory"
+            defaultValue={DEFAULT_TRANSCODE_DIR}
+            description={`Use fast local storage with room to spare. Leave blank to use ${DEFAULT_TRANSCODE_DIR}.`}
+            value={form.getValue("playback.transcode_dir")}
+            onChange={(v) => form.setValue("playback.transcode_dir", v)}
+            restartRequired={restartKeys.has("playback.transcode_dir")}
+          />
 
           <AdvancedSection
             id="playback.transcoding"
-            count={
-              TRANSCODING_ADVANCED_KEYS.length -
-              (showDevicePicker ? 0 : 1) -
-              (supportsTrickplay ? 0 : 4)
-            }
+            count={transcodingAdvancedCount}
             forceOpen={anyDirty(TRANSCODING_ADVANCED_KEYS)}
           >
             <PathSettingField
               label="FFmpeg path"
               defaultValue={DEFAULT_FFMPEG_PATH}
-              description={`Leave blank to use the FFmpeg that ships with the server, at ${DEFAULT_FFMPEG_PATH}.`}
+              description={`Leave blank to use jellyfin-ffmpeg at ${DEFAULT_FFMPEG_PATH} when it is installed, then ffmpeg on PATH. macOS tries Homebrew's ffmpeg-full first.`}
               value={form.getValue("playback.ffmpeg_path")}
               onChange={(v) => form.setValue("playback.ffmpeg_path", v)}
               restartRequired={restartKeys.has("playback.ffmpeg_path")}
-            />
-            <PathSettingField
-              label="Transcode directory"
-              defaultValue={DEFAULT_TRANSCODE_DIR}
-              description={`Use fast local storage with room to spare. Leave blank to use ${DEFAULT_TRANSCODE_DIR}.`}
-              value={form.getValue("playback.transcode_dir")}
-              onChange={(v) => form.setValue("playback.transcode_dir", v)}
-              restartRequired={restartKeys.has("playback.transcode_dir")}
             />
             {showDevicePicker && (
               <div>
@@ -516,48 +480,6 @@ export default function PlaybackSettings() {
               </div>
             )}
             <SettingField
-              label="Enable Hardware HDR Tone Mapping"
-              type="toggle"
-              hint="Allows validated local or remote GPU executors to convert HDR video to SDR when transcoding."
-              value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
-              onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
-              restartRequired={restartKeys.has("playback.transcode_hardware_tone_map_enabled")}
-            />
-            <SettingField
-              label="Enable Software HDR Tone Mapping"
-              type="toggle"
-              hint="Allows the CPU to convert HDR video to SDR when transcoding. This can be very CPU-intensive."
-              value={form.getValue("playback.transcode_software_tone_map_enabled")}
-              onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
-              restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
-            />
-            <SettingField
-              label="Complete playlists for copied video"
-              type="toggle"
-              description="Experimental. When Silo copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. A seek ahead of what Silo has copied waits for it to get there."
-              value={form.getValue("playback.copy_keyframe_playlist") || "false"}
-              onChange={(v) => form.setValue("playback.copy_keyframe_playlist", v)}
-              restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}
-            />
-            <SettingField
-              label="Throttle transcoding"
-              type="toggle"
-              description="Pause encoding once the client is far enough ahead."
-              value={form.getValue("enable_transcode_throttle")}
-              onChange={(v) => form.setValue("enable_transcode_throttle", v)}
-              restartRequired={restartKeys.has("enable_transcode_throttle")}
-            />
-            {form.getValue("enable_transcode_throttle") === "true" && (
-              <SettingField
-                label="Buffer ahead"
-                type="number"
-                unit="seconds"
-                value={form.getValue("transcode_throttle_seconds")}
-                onChange={(v) => form.setValue("transcode_throttle_seconds", v)}
-                restartRequired={restartKeys.has("transcode_throttle_seconds")}
-              />
-            )}
-            <SettingField
               label="Transcode back buffer"
               type="number"
               unit="seconds"
@@ -567,28 +489,104 @@ export default function PlaybackSettings() {
               restartRequired={restartKeys.has("playback.segment_retention_seconds")}
             />
             <SettingField
-              label="Chapter thumbnail workers"
-              type="number"
-              description="How many files Silo extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue."
-              value={form.getValue("playback.chapter_thumbnail_workers")}
-              onChange={(v) => form.setValue("playback.chapter_thumbnail_workers", v)}
-              restartRequired={restartKeys.has("playback.chapter_thumbnail_workers")}
+              label="Complete playlists for copied video"
+              type="toggle"
+              description="Experimental. When Silo copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. A seek ahead of what Silo has copied waits for it to get there."
+              value={form.getValue("playback.copy_keyframe_playlist") || "false"}
+              onChange={(v) => form.setValue("playback.copy_keyframe_playlist", v)}
+              restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}
             />
-            <SettingField
-              label="Generate chapter thumbnails on"
-              type="select"
-              options={imageExecutionOptions(chapterExecution, transcodeNodeAvailable)}
-              status={
-                transcodeNodeAvailable ? undefined : (
-                  <SettingFieldStatus tone="warn">
-                    No transcode nodes are connected
-                  </SettingFieldStatus>
-                )
-              }
-              value={chapterExecution}
-              onChange={(v) => form.setValue("playback.chapter_thumbnail_execution", v)}
-              restartRequired={restartKeys.has("playback.chapter_thumbnail_execution")}
-            />
+          </AdvancedSection>
+        </FieldGroup>
+
+        <FieldGroup
+          label="Preview images"
+          description={
+            supportsTrickplay
+              ? "Chapter thumbnails and seek previews are turned on for each library in Libraries."
+              : "Chapter thumbnails are turned on for each library in Libraries."
+          }
+          restartAll={allRestart(PREVIEW_IMAGE_KEYS)}
+          // FieldGroup descriptions are plain text, so the link sits on the
+          // heading line, as Skip markers links to its providers.
+          actions={
+            <Link
+              to="/admin/libraries"
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+            >
+              Libraries
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          }
+        >
+          {supportsTrickplay && (
+            <>
+              <SettingField
+                label="Preview image width"
+                type="number"
+                unit="px"
+                description="Width of chapter thumbnails and of the thumbnails players show while seeking, 160 to 640. Changing it makes them all again; players keep the current ones until each is replaced."
+                value={form.getValue("playback.preview_image_width")}
+                onChange={(v) => form.setValue("playback.preview_image_width", v)}
+                restartRequired={restartKeys.has("playback.preview_image_width")}
+              />
+              <SettingField
+                label="Seek preview interval"
+                type="number"
+                unit="seconds"
+                description="Time between seek previews, 5 to 60. Changing it makes every library's previews again."
+                value={form.getValue("playback.trickplay_interval_seconds")}
+                onChange={(v) => form.setValue("playback.trickplay_interval_seconds", v)}
+                restartRequired={restartKeys.has("playback.trickplay_interval_seconds")}
+              />
+            </>
+          )}
+          <SettingField
+            label="Chapter thumbnail workers"
+            type="number"
+            description="How many files Silo extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue."
+            value={form.getValue("playback.chapter_thumbnail_workers")}
+            onChange={(v) => form.setValue("playback.chapter_thumbnail_workers", v)}
+            restartRequired={restartKeys.has("playback.chapter_thumbnail_workers")}
+          />
+          {showPreviewPlacement && (
+            <>
+              {chapterExecutionField}
+              {trickplayExecutionField}
+            </>
+          )}
+
+          <AdvancedSection
+            id="playback.preview_images"
+            count={previewAdvancedKeys.length}
+            forceOpen={
+              anyDirty(previewAdvancedKeys) ||
+              // Node-only extraction with no node to run on is stranded work;
+              // its warning must not sit inside a closed disclosure.
+              (!transcodeNodeAvailable && chapterExecution === "transcode_nodes_only") ||
+              (!trickplayNodeAvailable && trickplayExecution === "transcode_nodes_only")
+            }
+          >
+            {!showPreviewPlacement && chapterExecutionField}
+            {supportsTrickplay && (
+              <SettingField
+                label="Seek preview workers"
+                type="number"
+                description="How many files each server makes seek previews for at once. They run at low priority, so playback comes first."
+                value={form.getValue("playback.trickplay_workers")}
+                onChange={(v) => form.setValue("playback.trickplay_workers", v)}
+                restartRequired={restartKeys.has("playback.trickplay_workers")}
+              />
+            )}
+            {!showPreviewPlacement && trickplayExecutionField}
+            {/* internal/trickplay tone-maps every HDR seek preview, in
+                software when it has to; these two settings are read only by
+                chapter thumbnail extraction. */}
+            <SettingsSubheading
+              caption={supportsTrickplay ? "Seek previews always convert HDR to SDR." : undefined}
+            >
+              HDR chapter thumbnails
+            </SettingsSubheading>
             <SettingField
               label="HDR handling"
               type="select"
@@ -614,150 +612,118 @@ export default function PlaybackSettings() {
                 "playback.chapter_thumbnail_software_tone_map_enabled",
               )}
             />
-            {supportsTrickplay && (
-              <>
-                <SettingField
-                  label="Preview image width"
-                  type="number"
-                  unit="px"
-                  description="Width of chapter thumbnails and of the thumbnails players show while seeking, 160 to 640. Changing it makes them all again; players keep the current ones until each is replaced."
-                  value={form.getValue("playback.preview_image_width")}
-                  onChange={(v) => form.setValue("playback.preview_image_width", v)}
-                  restartRequired={restartKeys.has("playback.preview_image_width")}
-                />
-                <SettingField
-                  label="Seek preview interval"
-                  type="number"
-                  unit="seconds"
-                  description="Time between seek previews, 5 to 60. Changing it makes every library's previews again."
-                  value={form.getValue("playback.trickplay_interval_seconds")}
-                  onChange={(v) => form.setValue("playback.trickplay_interval_seconds", v)}
-                  restartRequired={restartKeys.has("playback.trickplay_interval_seconds")}
-                />
-                <SettingField
-                  label="Seek preview workers"
-                  type="number"
-                  description="How many files each server makes seek previews for at once. They run at low priority, so playback comes first."
-                  value={form.getValue("playback.trickplay_workers")}
-                  onChange={(v) => form.setValue("playback.trickplay_workers", v)}
-                  restartRequired={restartKeys.has("playback.trickplay_workers")}
-                />
-                <SettingField
-                  label="Generate seek previews on"
-                  type="select"
-                  options={imageExecutionOptions(trickplayExecution, trickplayNodeAvailable)}
-                  status={
-                    trickplayNodeAvailable ? undefined : (
-                      <SettingFieldStatus tone="warn">
-                        No connected transcode node supports seek previews
-                      </SettingFieldStatus>
-                    )
-                  }
-                  value={trickplayExecution}
-                  onChange={(v) => form.setValue("playback.trickplay_execution", v)}
-                  restartRequired={restartKeys.has("playback.trickplay_execution")}
-                />
-              </>
-            )}
           </AdvancedSection>
         </FieldGroup>
 
-        <FieldGroup label="Node routing" restartAll={allRestart(ROUTING_KEYS)}>
-          <SettingFieldRow
-            label="Routing preset"
-            description="Presets update the five primitive policies below; Custom is not stored."
-          >
-            <div className="flex flex-wrap justify-end gap-2">
-              {Object.entries(ROUTING_PRESETS).map(([id, preset]) => (
-                <Button
-                  key={id}
-                  type="button"
-                  size="sm"
-                  variant={activeRoutingPreset === preset ? "default" : "outline"}
-                  onClick={() => applyRoutingPreset(preset.values)}
-                >
-                  {preset.label}
-                </Button>
-              ))}
-              {!activeRoutingPreset && (
-                <span className="text-muted-foreground self-center text-xs">Custom</span>
-              )}
-            </div>
-          </SettingFieldRow>
+        {/*
+          Detection behavior lives here; which online providers answer a lookup,
+          and on what terms, is provider configuration and lives with the other
+          providers.
+        */}
+        <FieldGroup
+          label="Skip markers"
+          description="Markers identify intros, credits, recaps, and previews so players can offer skip controls."
+          restartAll={allRestart(MARKER_KEYS)}
+          actions={
+            <Link
+              to="/admin/settings/providers"
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+            >
+              Marker providers
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          }
+        >
+          <SettingField
+            label="Marker source"
+            type="select"
+            description="Online markers take priority. Silo skips local detection of an intro or credits when an online one is saved in your library. Local detection uses CPU."
+            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
+            options={[
+              { value: "off", label: "Off" },
+              { value: "local", label: "Detect on this server" },
+              { value: "both", label: "Online preferred + server detection" },
+              { value: "online", label: "Online providers only" },
+            ]}
+            value={markerMode}
+            onChange={(value) => form.setValue("markers.mode", value)}
+            restartRequired={restartKeys.has("markers.mode")}
+          />
 
-          {ROUTING_FIELDS.map((field) => (
+          {localMarkersEnabled && detectionKindSettings && (
+            <>
+              <SettingField
+                label="Detect intros"
+                type="toggle"
+                description="Finds each episode's opening from embedded chapters, or by comparing the start of episodes in a season."
+                value={form.getValue("markers.detect_intros") || "true"}
+                onChange={(value) => form.setValue("markers.detect_intros", value)}
+                restartRequired={restartKeys.has("markers.detect_intros")}
+              />
+              <SettingField
+                label="Detect credits"
+                type="toggle"
+                description="Finds end credits from embedded chapters, or by reading the end of each episode and movie. Uses more CPU than intro detection."
+                value={form.getValue("markers.detect_credits") || "true"}
+                onChange={(value) => form.setValue("markers.detect_credits", value)}
+                restartRequired={restartKeys.has("markers.detect_credits")}
+              />
+            </>
+          )}
+
+          {onlineMarkersEnabled && (
             <SettingField
-              key={field.key}
-              label={field.label}
+              label="Save online markers"
               type="select"
-              options={ROUTING_KINDS[field.kind].options}
-              description={field.description}
-              value={routingValues[field.key] || ROUTING_KINDS[field.kind].serverDefault}
-              onChange={(v) => form.setValue(field.key, v)}
-              restartRequired={restartKeys.has(field.key)}
+              description={
+                onlineMarkerStorage === "stored"
+                  ? "Silo saves markers from enabled providers such as TheIntroDB. The Sync online markers task fetches missing markers and refreshes saved markers daily at 03:00 (server time) by default."
+                  : "Fetch markers when needed without saving them to your library. Scheduled online sync is disabled."
+              }
+              options={[
+                { value: "stored", label: "Save to library" },
+                { value: "on_demand", label: "Fetch when needed" },
+              ]}
+              value={onlineMarkerStorage}
+              onChange={(value) => {
+                form.setValue("markers.online_storage", value);
+                if (value === "on_demand") form.setValue("markers.lazy_playback", "true");
+              }}
+              restartRequired={restartKeys.has("markers.online_storage")}
             />
-          ))}
-
-          <SettingFieldRow
-            label="Preferred paths"
-            description="Arrows show soft fallback order; only modes never cross that boundary."
-          >
-            <div className="grid min-w-64 gap-1 text-xs">
-              <PreferredPathRow
-                label="Direct play"
-                route={egressPreview(routingValues["playback.routing.direct_play_egress"])}
-              />
-              <PreferredPathRow
-                label="Remux"
-                route={routePreview(
-                  routingValues["playback.routing.remux_execution"],
-                  routingValues["playback.routing.remux_egress"],
-                  "remux",
-                )}
-              />
-              <PreferredPathRow
-                label="Video transcode"
-                route={routePreview(
-                  routingValues["playback.routing.video_transcode_execution"],
-                  routingValues["playback.routing.video_transcode_egress"],
-                  "video_transcode",
-                )}
-              />
-            </div>
-          </SettingFieldRow>
-
-          {strandedRoute && (
-            <SettingFieldStatus tone="warn">
-              An “only” route currently has no healthy supporting node. Saving is allowed so nodes
-              can join later.
-            </SettingFieldStatus>
           )}
-          {usesProxyOnlyEgress && (
-            <SettingFieldStatus tone="warn">
-              Proxy-only egress requires every native client to support authorized media origins;
-              older clients may be unable to start that workload.
-            </SettingFieldStatus>
-          )}
-        </FieldGroup>
 
-        <FieldGroup label="Watch behavior" restartAll={allRestart(WATCH_KEYS)}>
-          <SettingField
-            label="Mark watched at"
-            type="number"
-            unit="%"
-            value={form.getValue("playback.watched_threshold")}
-            onChange={(v) => form.setValue("playback.watched_threshold", v)}
-            restartRequired={restartKeys.has("playback.watched_threshold")}
-          />
-          <SettingField
-            label="Show in Continue Watching after"
-            type="number"
-            unit="%"
-            description="Progress below this is ignored."
-            value={form.getValue("playback.min_resume_threshold")}
-            onChange={(v) => form.setValue("playback.min_resume_threshold", v)}
-            restartRequired={restartKeys.has("playback.min_resume_threshold")}
-          />
+          {showLazyPlayback && (
+            <SettingField
+              label="Find markers on playback"
+              type="toggle"
+              description={
+                onlineMarkersEnabled
+                  ? markerMode === "both"
+                    ? "Check online first when playback starts. Silo detects only the intro or credits online providers don't have, using this server's CPU."
+                    : "Check online for missing or outdated markers when playback starts."
+                  : "Detect missing markers when playback starts. Local analysis uses CPU."
+              }
+              value={form.getValue("markers.lazy_playback") || "true"}
+              onChange={(value) => form.setValue("markers.lazy_playback", value)}
+              restartRequired={restartKeys.has("markers.lazy_playback")}
+            />
+          )}
+
+          {localMarkersEnabled && (
+            <SettingField
+              label="Detection workers"
+              type="number"
+              description="How many seasons or movies Silo analyzes at once, each with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              value={form.getValue("markers.detection_workers")}
+              onChange={(value) => form.setValue("markers.detection_workers", value)}
+              restartRequired={restartKeys.has("markers.detection_workers")}
+            />
+          )}
+
+          <div className="py-3.5">
+            <MarkerTasksCard />
+          </div>
         </FieldGroup>
       </div>
 

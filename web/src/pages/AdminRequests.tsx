@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 import { Settings2 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
 import { RequestQueue } from "@/pages/admin-requests/RequestQueue";
@@ -57,24 +58,18 @@ function RequestQueuePage() {
 
   return (
     <div className="space-y-6">
-      {/* The action sits under the text, as on the other admin pages: the
-          shell's search button floats over the header's top-right corner. */}
-      <div className="page-header">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
-            Requests
-          </h1>
-          <p className="text-muted-foreground max-w-2xl text-sm leading-6">
-            Approve, decline, and follow media requests.
-          </p>
+      <PageHeader
+        title="Requests"
+        subtitle="Approve, decline, and follow media requests."
+        actions={
           <Button asChild variant="outline" size="sm">
             <Link to={REQUEST_SETTINGS_HREF}>
               <Settings2 aria-hidden="true" />
               Request settings
             </Link>
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       <RequestQueue />
     </div>
