@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -817,7 +818,7 @@ func TestHandleVideoStreamGuardsIntegratedAudioEncodingAfterProxyFiltering(t *te
 			if tt.includeOldProxy {
 				proxyPool.SetNodes([]*nodepool.Node{{ID: 1, URL: oldProxy.URL, Enabled: true, Healthy: true}})
 			}
-			planner := nodepool.NewPlanner(proxyPool, nodepool.NewTranscodePool())
+			planner := nodepool.NewPlanner(proxyPool, nodepooltest.NewTranscodePool())
 			ffmpegPath, probeMarker, executionMarker := writeCompatAudioRecipeFFmpeg(t, tt.localSupportsV2, "remuxed")
 			mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 			if err := os.WriteFile(mediaPath, []byte("source"), 0o644); err != nil {

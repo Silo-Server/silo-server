@@ -80,7 +80,7 @@ func (h *NodeHandler) nodeNetworkAccessCall(ctx context.Context, node plugins.Ne
 	if err != nil {
 		return err
 	}
-	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
+	if err := nodeauth.SignProxy(req, node.URL, h.nodeKeys); err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")

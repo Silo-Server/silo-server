@@ -538,6 +538,7 @@ func TestHandlePlaybackReportRollsBackRemoteAttestationFailureAndRetries(t *test
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}},
 		tm:            playback.NewTranscodeManager(),
 	}
+	withTestNodeKeys(handler)
 
 	for attempt := 1; attempt <= 2; attempt++ {
 		req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(`{"PlaySessionId":"play-1","MediaSourceId":"`+source.ID+`","AudioStreamIndex":2}`))
@@ -930,6 +931,7 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 		}},
 		tm: playback.NewTranscodeManager(),
 	}
+	withTestNodeKeys(handler)
 	if err := handler.startRemoteTranscode(
 		context.Background(),
 		"play-1",
@@ -996,6 +998,7 @@ func TestStartRemoteTranscodeRejectsOldNodeAfterStaleAudioCapabilityProbe(t *tes
 		}},
 		tm: playback.NewTranscodeManager(),
 	}
+	withTestNodeKeys(handler)
 	err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}, 0, node.URL)
 	if !errors.Is(err, transcodenode.ErrAudioRecipeAttestationMismatch) {
 		t.Fatalf("startRemoteTranscode error = %v, want audio recipe attestation mismatch", err)
@@ -1036,6 +1039,7 @@ func TestMonoAACStartupDoesNotRequireStereoBoost(t *testing.T) {
 				fileResolver: testCompatFileResolver{file: file},
 				TranscodeDir: t.TempDir(), FFmpegPath: ffmpeg, tm: playback.NewTranscodeManager(),
 			}
+			withTestNodeKeys(handler)
 			if remote {
 				var request transcodenode.TranscodeStartRequest
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

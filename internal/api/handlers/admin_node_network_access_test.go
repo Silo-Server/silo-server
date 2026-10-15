@@ -82,7 +82,7 @@ func TestNodeHandlerFansNetworkAccessOutToProxies(t *testing.T) {
 		{ID: 4, Name: "proxy-off", Type: nodepool.NodeTypeProxy, URL: "http://proxy-off", Enabled: false},
 		{ID: 5, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: "http://gpu-1", Enabled: true},
 	}}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, secret)
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret(secret))
 	ctx := context.Background()
 
 	nodes, err := handler.ListNetworkAccessNodes(ctx)
@@ -134,7 +134,7 @@ func TestNodeHandlerFansNetworkAccessOutToProxies(t *testing.T) {
 
 	// A wrong node secret is reported as the proxy refusing the signed
 	// request, not as an unknown provider.
-	wrong := NewNodeHandler(repo, nil, nil, nil, nil, nil, "other-secret")
+	wrong := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("other-secret"))
 	if _, err := wrong.NodeNetworkAccessStatus(ctx, node, "stub"); err == nil || errors.Is(err, plugins.ErrNetworkAccessProviderNotFound) || !strings.Contains(err.Error(), "refused the signed request") {
 		t.Fatalf("wrong secret err = %v", err)
 	}

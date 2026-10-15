@@ -90,6 +90,7 @@ func TestPrepareRemoteTransportV3VersionsOnlyExactAACStereoDownmix(t *testing.T)
 			defer node.Close()
 
 			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.NodeKeys = testNodeKeys
 			handler.JWTSecret = "test-secret"
 			result := remoteHLSResultV3()
 			if test.mutate != nil {
@@ -139,6 +140,7 @@ func TestPrepareRemoteTransportV3RejectsOldNodeAfterStaleAudioCapabilityProbe(t 
 	defer node.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}}}
 	policy := config.DefaultPlaybackRoutingPolicy()
@@ -180,6 +182,7 @@ func TestPrepareTransportV3HeaderAuthStoresTheNodeRecipeForRestartRecovery(t *te
 		t.Run(test.name, func(t *testing.T) {
 			node := remoteTranscodeNodeStubV3(t)
 			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.NodeKeys = testNodeKeys
 			handler.JWTSecret = "test-secret"
 			handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}, ProxyNode: &nodepool.Node{URL: "http://proxy-1"}}}
 			handler.ProxyGrantStore = &recordingRecipeCardStoreV3{}
@@ -240,6 +243,7 @@ func TestPrepareProgressiveTransportRollbackStopsAdmittedRemoteJob(t *testing.T)
 	proxy := capableProxyStubV3(t)
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodeRecipeStore = &recordingRecipeCardStoreV3{}
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{
@@ -311,6 +315,7 @@ func TestPrepareProgressiveTransportRequiredRollbackPreservesRetryableRoute(t *t
 	}}
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodeRecipeStore = recipes
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{
@@ -367,12 +372,159 @@ func TestPrepareProgressiveTransportRequiredRollbackPreservesRetryableRoute(t *t
 	unlock()
 }
 
+// The node confirming the cancel does not end the transport while its recipe
+// survives: a node could still rebuild the job from it. A required rollback
+// whose recipe deletion fails reports the failure and keeps the route for the
+// retrying stop, as a failed cancel does.
+func TestPrepareProgressiveTransportRequiredRollbackFailsWhenTheRecipeSurvives(t *testing.T) {
+	cancelRequests := 0
+	predecessorDeleteRequests := 0
+	predecessor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && r.URL.Path == "/transcode/predecessor-transport" {
+			predecessorDeleteRequests++
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(predecessor.Close)
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+				TransportFeatures: []string{playback.TransportFeatureProgressiveRemuxExecutionV1},
+				Transformations: []playback.TransformationV3{{
+					Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+					RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+				}},
+			})
+		case r.Method == http.MethodDelete:
+			cancelRequests++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(node.Close)
+	proxy := capableProxyStubV3(t)
+	recipes := &recordingRecipeCardStoreV3{}
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
+	handler.JWTSecret = "test-secret"
+	handler.NodeRecipeStore = recipes
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{
+		TranscodeNode: &nodepool.Node{ID: 84, URL: node.URL},
+		ProxyNode:     &nodepool.Node{ID: 42, URL: proxy.URL},
+	}}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{
+		Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+		RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+	})
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{
+			ID: "session-progressive-recipe-survives", UserID: 7, ProfileID: "profile-1",
+			TranscodeNodeURL: predecessor.URL, TranscodeTransportID: "predecessor-transport",
+		},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TranscodeAudio: true, SourceAudioChannels: 6, TargetAudioChannels: 2, TargetAudioCodec: "aac"},
+		mediaAuthModeV3{},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare progressive transport: %v", transportErr)
+	}
+	if _, ok := recipes.cards[transport.transportID]; !ok {
+		t.Fatal("progressive transport stored no node recipe authority")
+	}
+	recipes.deleteErr = errors.New("redis unavailable")
+
+	if err := transport.rollbackRequired(); err == nil {
+		t.Fatal("required rollback succeeded while the canceled transport's recipe survived")
+	}
+	if cancelRequests != 1 {
+		t.Fatalf("cancel requests = %d, want one", cancelRequests)
+	}
+	if !slices.Contains(recipes.deleted, transport.transportID) {
+		t.Fatalf("deleted recipes = %v, want the canceled transport %q", recipes.deleted, transport.transportID)
+	}
+	if predecessorDeleteRequests != 1 {
+		t.Fatalf("predecessor delete requests = %d, want the retained successor adopted", predecessorDeleteRequests)
+	}
+	unlock := handler.tm.LockSessionLifecycle("session-progressive-recipe-survives")
+	unlock()
+}
+
+// The remote HLS remux rollback holds the same rule: a confirmed cancel with a
+// surviving recipe is a failed rollback that keeps the node reservation.
+func TestPrepareRemoteRemuxRequiredRollbackFailsWhenTheRecipeSurvives(t *testing.T) {
+	cancelRequests := 0
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+			var request transcodenode.TranscodeStartRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode remote start: %v", err)
+			}
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{SessionID: request.SessionID, Status: "started",
+				AudioRecipeVersion: request.AudioRecipeVersion, CopyFMP4RecipeVersion: request.CopyFMP4RecipeVersion})
+		case r.Method == http.MethodDelete:
+			cancelRequests++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(node.Close)
+	planner := &recordingNodePlannerV3{}
+	recipes := &recordingRecipeCardStoreV3{deleteErr: errors.New("redis unavailable")}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = planner
+	handler.NodeRecipeStore = recipes
+
+	result := remoteHLSResultV3()
+	result.Plan.Delivery = playback.DeliveryRemuxHLSV3
+	session := &playback.Session{ID: "session-remote-remux-recipe-survives", UserID: 7, ProfileID: "profile-1"}
+	transport, transportErr := handler.prepareRemoteTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil), session, v3HandlerFixtureFile(t), result,
+		nodepool.Plan{TranscodeNode: &nodepool.Node{ID: 84, URL: node.URL}}, preparedTimelineV3{}, mediaAuthModeV3{},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare remote transport: %v", transportErr)
+	}
+	if transport.rollbackRequired == nil {
+		t.Fatal("remote remux transport has no required rollback")
+	}
+
+	if err := transport.rollbackRequired(); err == nil {
+		t.Fatal("required rollback succeeded while the canceled transport's recipe survived")
+	}
+	if cancelRequests != 1 {
+		t.Fatalf("cancel requests = %d, want one", cancelRequests)
+	}
+	if !slices.Contains(recipes.deleted, transport.transportID) {
+		t.Fatalf("deleted recipes = %v, want the canceled transport %q", recipes.deleted, transport.transportID)
+	}
+	if slices.Contains(planner.released, session.ID) {
+		t.Fatal("failed rollback released the retained route's node reservation")
+	}
+	unlock := handler.tm.LockSessionLifecycle(session.ID)
+	unlock()
+}
+
 // A legacy attempt carries its whole recipe in the client's stream token, which
 // the relay forwards to the node. It needs no stored copy, and writing one would
 // put a media path in Redis for no reason.
 func TestPrepareTransportV3LegacyAttemptStoresNoNodeRecipe(t *testing.T) {
 	node := remoteTranscodeNodeStubV3(t)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}}}
 	recipes := &recordingRecipeCardStoreV3{}
@@ -400,6 +552,7 @@ func TestPrepareTransportV3LegacyAttemptStoresNoNodeRecipe(t *testing.T) {
 func TestPrepareTransportV3RemoteCommitDropsThePreviousTransportRecipe(t *testing.T) {
 	node := remoteTranscodeNodeStubV3(t)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}}}
 	const previousTransportID = "session-node-replan-plan0001-aaaabbbb"
@@ -434,6 +587,7 @@ func TestPrepareTransportV3RemoteCommitDropsThePreviousTransportRecipe(t *testin
 // A stopped session's node job is gone, so its stored recipe must be too.
 func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	const transportID = "session-node-stop-plan0001-aaaabbbb"
 	requests := make(chan string, 1)
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -493,6 +647,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilAuthorityRevocationSucceeds(t
 	}
 
 	handler := NewPlaybackHandler(manager)
+	handler.NodeKeys = testNodeKeys
 	recipes := &recordingRecipeCardStoreV3{deleteErr: errors.New("redis is down")}
 	handler.NodeRecipeStore = recipes
 	if err := handler.stopPlaybackSession(t.Context(), session, true); err == nil {
@@ -550,6 +705,7 @@ func TestStopPlaybackRetainsProgressiveSessionUntilRemoteCancellationSucceeds(t 
 	}
 
 	handler := NewPlaybackHandler(manager)
+	handler.NodeKeys = testNodeKeys
 	recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
 		transportID: {SessionID: session.ID, TranscodeTransportID: transportID},
 	}}
@@ -607,6 +763,7 @@ func TestStopPlaybackWaitsForReplacementAndRevokesItsCurrentAuthority(t *testing
 	}
 
 	handler := NewPlaybackHandler(manager)
+	handler.NodeKeys = testNodeKeys
 	recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
 		oldTransportID: {SessionID: session.ID, TranscodeTransportID: oldTransportID},
 		newTransportID: {SessionID: session.ID, TranscodeTransportID: newTransportID},
@@ -762,6 +919,7 @@ func TestPrepareTransportV3ReleasesTheProxyHalfWhenTheManifestIsNotProxyServed(t
 		t.Run(test.name, func(t *testing.T) {
 			node := remoteTranscodeNodeStubV3(t)
 			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.NodeKeys = testNodeKeys
 			handler.JWTSecret = test.jwtSecret
 			planner := &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}, ProxyNode: &nodepool.Node{URL: "http://proxy-1"}}}
 			handler.NodePlanner = planner
@@ -800,6 +958,7 @@ func TestPrepareTransportV3ReleasesTheProxyHalfWhenTheManifestIsNotProxyServed(t
 func TestPrepareTransportV3KeepsTheProxyReservationWhenTheProxyServes(t *testing.T) {
 	node := remoteTranscodeNodeStubV3(t)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	planner := &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}, ProxyNode: &nodepool.Node{URL: "http://proxy-1"}}}
 	handler.NodePlanner = planner

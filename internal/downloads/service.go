@@ -23,9 +23,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -1623,17 +1625,15 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	if target.OriginArtifactID == "" {
 		return s.serveLocalFile(ctx, w, r, target.Path, userID)
 	}
-	secret := ""
-	if s.artifacts != nil && s.artifacts.liveCfg != nil {
-		if cfg := s.artifacts.liveCfg(); cfg != nil {
-			secret = strings.TrimSpace(cfg.Auth.JWTSecret)
-		}
+	var keys nodeauth.Keyring
+	if s.artifacts != nil {
+		keys = s.artifacts.nodeKeys
 	}
-	if secret == "" {
+	if keys == nil {
 		return errors.New("remote artifact credentials unavailable")
 	}
 	client := downloadprepare.HTTPPreparer{}
-	resp, err := client.Open(ctx, target.OriginNodeURL, secret, target.OriginArtifactID, r.Method, r.Header)
+	resp, err := client.Open(ctx, target.OriginNodeURL, keys, target.OriginArtifactID, r.Method, r.Header)
 	if err != nil {
 		return err
 	}
@@ -1652,6 +1652,9 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 		return fmt.Errorf("remote artifact was missing and preparation was requeued: %w", ErrDownloadNotActive)
 	}
 	if !downloadprepare.RelayStatusAllowed(resp.StatusCode) {
+		if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+			transcodeproxy.WarnNodeRefusedRelay(ctx, "downloads", target.OriginNodeURL, resp.StatusCode)
+		}
 		return fmt.Errorf("remote artifact node returned %d", resp.StatusCode)
 	}
 	if target.ExpectedExecutionFingerprint != "" {

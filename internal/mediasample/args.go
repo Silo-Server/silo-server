@@ -150,7 +150,7 @@ func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []st
 	if err != nil {
 		return nil, nil, err
 	}
-	args = append(args, concatInputArgs...)
+	args = append(args, concatInputArgs(req.Input)...)
 	args = append(args, "-i", concatListInput,
 		mapStreamOption, firstVideoStream, disableAudioOption, disableSubtitlesOption, disableDataOption,
 		videoFilterOption, req.statsGraph(attempt, hw.Accel).filter,
@@ -188,7 +188,7 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []
 		}
 		args = append(args, decode...)
 		args = append(args, req.keyframeInputArgs(list.skip)...)
-		args = append(args, concatDemuxerArgs...)
+		args = append(args, concatDemuxerArgsFor(req.Input)...)
 		args = append(args, "-i", concatListInput)
 		return append(args, sheetsOutputArgs(graph)...), concat, nil
 	}

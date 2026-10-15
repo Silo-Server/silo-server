@@ -74,7 +74,7 @@ type capabilityCheckerFixture struct {
 
 func newCapabilityCheckerFixture(t *testing.T, node *Node, fetcher *fakeCapabilityFetcher) *capabilityCheckerFixture {
 	t.Helper()
-	transcodePool := NewTranscodePool()
+	transcodePool := newKeyedTranscodePool()
 	transcodePool.SetNodes([]*Node{node})
 	fixture := &capabilityCheckerFixture{
 		checker: NewHealthChecker(NewProxyPool(), transcodePool, nil),
@@ -266,7 +266,7 @@ func TestHealthCheckerAppliesCapabilitiesToProxyPool(t *testing.T) {
 	fetcher := &fakeCapabilityFetcher{payload: []byte(testCapabilityPayload), hash: "sha256:new"}
 	proxyPool := NewProxyPool()
 	proxyPool.SetNodes([]*Node{{ID: 9, Name: "proxy-1", URL: url, Enabled: true}})
-	checker := NewHealthChecker(proxyPool, NewTranscodePool(), nil)
+	checker := NewHealthChecker(proxyPool, newKeyedTranscodePool(), nil)
 	checker.SetCapabilityFetcher(fetcher.fetch)
 
 	checker.checkAll(context.Background())
@@ -282,7 +282,7 @@ func TestHealthCheckerAppliesCapabilitiesToProxyPool(t *testing.T) {
 // must behave exactly as it did before capability tracking.
 func TestHealthCheckerWithoutFetcherStillChecksHealth(t *testing.T) {
 	url := newHealthNode(t, "sha256:new")
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, Name: "gpu-1", URL: url, Enabled: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 
@@ -441,7 +441,7 @@ func TestHealthCheckerSweepDoesNotWaitForCapabilityFetch(t *testing.T) {
 	// The second node advertises no hash, so its own health is all the sweep
 	// has to do for it.
 	steadyURL := newHealthNode(t, "")
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{
 		{ID: 1, Name: "slow-gpu", URL: slowURL, Enabled: true},
 		{ID: 2, Name: "steady-gpu", URL: steadyURL, Enabled: true},
@@ -482,7 +482,7 @@ func TestHealthCheckerSweepDoesNotWaitForCapabilityFetch(t *testing.T) {
 // second fetch of the same node on every sweep until the first one answers.
 func TestHealthCheckerDoesNotStackCapabilityFetchesForOneNode(t *testing.T) {
 	url := newHealthNode(t, "sha256:new")
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, Name: "slow-gpu", URL: url, Enabled: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 	fetcher := newBlockingFetcher()
@@ -513,7 +513,7 @@ func TestHealthCheckerDoesNotStackCapabilityFetchesForOneNode(t *testing.T) {
 // inventory never populates. The backstop is derived from the budget the fetcher
 // gave itself so the fetcher's own deadline always fires first.
 func TestCapabilityFetchBackstopSitsAboveTheFetcherBudget(t *testing.T) {
-	checker := NewHealthChecker(NewProxyPool(), NewTranscodePool(), nil)
+	checker := NewHealthChecker(NewProxyPool(), newKeyedTranscodePool(), nil)
 	node := &Node{ID: 1, URL: "http://gpu-1"}
 
 	if got := checker.capabilityFetchBackstop(node); got != capabilityFetchTimeout {
@@ -558,5 +558,33 @@ func TestCheckNodeReachesATrailingSlashBaseURL(t *testing.T) {
 	}
 	if activeJobs != 1 || hash != "sha256:x" {
 		t.Fatalf("active jobs = %d, hash = %q; want the node's own answer", activeJobs, hash)
+	}
+}
+
+// A node whose key the core refuses answers health but can do no work; the
+// sweep must take it out of placement, keeping what it reported.
+func TestHealthCheckerMarksAKeyRejectedNodeUnhealthy(t *testing.T) {
+	var rejected atomic.Bool
+	rejected.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(healthResponse{Status: "draining", ActiveJobs: 1, KeyRejected: rejected.Load()})
+	}))
+	t.Cleanup(server.Close)
+	pool := newKeyedTranscodePool()
+	pool.SetNodes([]*Node{{ID: 1, Name: "gpu-1", URL: server.URL, Enabled: true, Healthy: true}})
+	checker := NewHealthChecker(NewProxyPool(), pool, nil)
+
+	checker.checkAll(context.Background())
+	stored := pool.Nodes()[0]
+	if stored.Healthy || stored.ActiveJobs != 1 || stored.DrainState != DrainStateDraining {
+		t.Fatalf("key-rejected node = healthy %v, jobs %d, drain %q; want unhealthy with its report kept",
+			stored.Healthy, stored.ActiveJobs, stored.DrainState)
+	}
+
+	rejected.Store(false)
+	checker.checkAll(context.Background())
+	if !pool.Nodes()[0].Healthy {
+		t.Fatal("the node stayed unhealthy after the core accepted its key again")
 	}
 }

@@ -66,9 +66,15 @@ type TranscodeManager struct {
 	Config func() TranscodeRuntimeConfig
 	// LogSinkFn returns the ffmpeg log sink for reconstructed processes.
 	LogSinkFn func() FFmpegLogSink
-	// JWTSecretFn returns the shared secret that signs remote transcode-node
+	// NodeKeysFn returns the keyring that signs remote transcode-node
 	// DELETEs.
-	JWTSecretFn func() string
+	NodeKeysFn func() nodeauth.Keyring
+	// NodeRecipesFn returns the store transcode nodes resolve their
+	// transports' recipes from (internal/noderecipe). Ending a transport is
+	// the core's decision: StopRemoteTranscode deletes its recipe before it
+	// sends the DELETE, so no node can rebuild or restart the stopped work.
+	// Nil deletes nothing.
+	NodeRecipesFn func() NodeRecipeDeleter
 	// OnFFmpegCrash is invoked when a reconstructed/local ffmpeg exits with an
 	// error so the embedding handler can tear down the playback session (keeping
 	// the card, so a resume can respawn). dead is the exact session that crashed;
@@ -143,11 +149,24 @@ func NewTranscodeManager() *TranscodeManager {
 	}
 }
 
-func (m *TranscodeManager) jwtSecret() string {
-	if m.JWTSecretFn == nil {
-		return ""
+// NodeRecipeDeleter deletes the recipe a transcode node resolves a transport
+// from. A missing recipe is not an error. *noderecipe.Store implements it.
+type NodeRecipeDeleter interface {
+	Delete(ctx context.Context, transportID string) error
+}
+
+func (m *TranscodeManager) nodeRecipes() NodeRecipeDeleter {
+	if m.NodeRecipesFn == nil {
+		return nil
 	}
-	return m.JWTSecretFn()
+	return m.NodeRecipesFn()
+}
+
+func (m *TranscodeManager) nodeKeys() nodeauth.Keyring {
+	if m.NodeKeysFn == nil {
+		return nil
+	}
+	return m.NodeKeysFn()
 }
 
 func (m *TranscodeManager) logSink() FFmpegLogSink {
@@ -320,9 +339,32 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 // leaves the local live-map entry untouched for an atomic remote-to-local v3
 // replacement.
 func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL string) {
-	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL); err != nil {
+	if err := m.stopRemoteTranscode(context.Background(), sessionID, transcodeNodeURL); err != nil {
 		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
 	}
+}
+
+// stopRemoteTranscode deletes the transport's node recipe, then sends the
+// node its DELETE.
+//
+// The recipe goes first, so a request a relay forwards while the stop is in
+// flight cannot have the node rebuild the session from it. A failed deletion
+// is returned, as the node's own stop returned it when the node deleted the
+// recipe: the node's stop fence does not survive its restart. The node is
+// told to stop either way.
+func (m *TranscodeManager) stopRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
+	if transcodeNodeURL == "" {
+		return nil
+	}
+	var recipeErr error
+	if recipes := m.nodeRecipes(); recipes != nil {
+		deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if err := recipes.Delete(deleteCtx, sessionID); err != nil {
+			recipeErr = fmt.Errorf("delete remote transcode recipe: %w", err)
+		}
+		cancel()
+	}
+	return errors.Join(recipeErr, m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL))
 }
 
 // StopRemoteTranscodeAfterFailure stops a remote job after a call to its node
@@ -340,6 +382,8 @@ func (m *TranscodeManager) StopRemoteTranscodeAfterFailure(sessionID, transcodeN
 // CancelRemoteTranscode synchronously confirms that a remote process no longer
 // exists. User-visible stop paths use this before removing the playback session
 // so a node partition leaves a live session the caller can retry stopping.
+// It leaves the transport's node recipe to its caller, which deletes it before
+// a stop and keeps it when a rollback cannot cancel the live route.
 func (m *TranscodeManager) CancelRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
 	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL)
 }
@@ -1230,7 +1274,7 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	if err != nil {
 		return fmt.Errorf("build remote transcode delete request: %w", err)
 	}
-	if err := nodeauth.Sign(req, transcodeNodeURL, m.jwtSecret()); err != nil {
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, m.nodeKeys()); err != nil {
 		return fmt.Errorf("sign remote transcode delete: %w", err)
 	}
 

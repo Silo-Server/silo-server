@@ -197,6 +197,7 @@ func copyOnlyEscalationFixtureV3(t *testing.T) (*PlaybackHandler, playback.Plann
 func progressiveRemuxFixtureV3(t *testing.T, file *models.MediaFile, hlsCapable bool) (*PlaybackHandler, playback.PlannerInputV3, playback.PlannerResultV3) {
 	t.Helper()
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
 		"allow_4k_transcode": "true",
 	}}
@@ -345,6 +346,7 @@ func TestPlanNodeSessionV3SkipsCapabilityFanOutWithoutConsumer(t *testing.T) {
 	defer node.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	// Enumerates pooled nodes, but implements neither PlanSessionWith nor the
 	// local-egress selector.

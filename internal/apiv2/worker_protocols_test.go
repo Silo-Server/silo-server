@@ -97,7 +97,7 @@ func TestWorkerStatusSchemasMatchRealListeners(t *testing.T) {
 	watcher.SetConfigForTest(cfg)
 	handlers := map[string]http.Handler{
 		"proxy":          proxy.NewServer(watcher, nil).Handler(),
-		"transcode_node": transcodenode.NewServer(watcher, nil).Handler(),
+		"transcode_node": keyedTranscodeNode(watcher, cfg.Auth.JWTSecret).Handler(),
 	}
 	bodies := map[string]any{}
 	schemas := map[string]*jsonschema.Schema{}
@@ -144,7 +144,7 @@ func TestWorkerControlsRetainProtocolAndBearerGate(t *testing.T) {
 	watcher.SetConfigForTest(cfg)
 	handlers := map[string]http.Handler{
 		"proxy":          proxy.NewServer(watcher, nil).Handler(),
-		"transcode_node": transcodenode.NewServer(watcher, nil).Handler(),
+		"transcode_node": keyedTranscodeNode(watcher, cfg.Auth.JWTSecret).Handler(),
 	}
 	count := 0
 	for _, op := range describeWorkerProtocols().Operations {
@@ -226,7 +226,7 @@ func TestWorkerChapterExtractionProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.Validate(map[string]any{"input_path": "/synthetic/frame.mkv", "future_option": true}); err != nil {
+	if err := schema.Validate(map[string]any{"source_grant": "synthetic-grant", "input_path": "/synthetic/frame.mkv", "future_option": true}); err != nil {
 		t.Fatal("omitted options/unknown key must remain decodable", err)
 	}
 	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
@@ -234,7 +234,7 @@ func TestWorkerChapterExtractionProtocol(t *testing.T) {
 	cfg.Auth.JWTSecret = "synthetic-worker-secret"
 	cfg.Playback.TranscodeDir = t.TempDir()
 	watcher.SetConfigForTest(cfg)
-	handler := transcodenode.NewServer(watcher, nil).Handler()
+	handler := keyedTranscodeNode(watcher, cfg.Auth.JWTSecret).Handler()
 	for _, tc := range []struct {
 		body   string
 		auth   bool
@@ -244,7 +244,8 @@ func TestWorkerChapterExtractionProtocol(t *testing.T) {
 		{"{", false, 401, "text/plain"},
 		{"{", true, 400, "application/json"},
 		{"{}", true, 400, "application/json"},
-		{`{"input_path":"/synthetic/frame.mkv"}`, true, 503, "text/plain"},
+		{`{"input_path":"/synthetic/frame.mkv"}`, true, 400, "application/json"},
+		{`{"source_grant":"synthetic-grant"}`, true, 503, "text/plain"},
 	} {
 		request := httptest.NewRequest(op.Method, op.Path, strings.NewReader(tc.body))
 		if tc.auth {
@@ -285,7 +286,7 @@ func TestWorkerArtifactConditionalProtocol(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfg.Download.ArtifactDir, "fixture.mp4"), []byte("0123456789"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(transcodenode.NewServer(watcher, nil).Handler())
+	server := httptest.NewServer(keyedTranscodeNode(watcher, cfg.Auth.JWTSecret).Handler())
 	defer server.Close()
 	registry := describeWorkerProtocols()
 	for _, tc := range []struct {
@@ -400,7 +401,7 @@ func TestWorkerSegmentAcknowledgementRefusals(t *testing.T) {
 	cfg.Auth.JWTSecret = "synthetic-worker-secret"
 	cfg.Playback.TranscodeDir = t.TempDir()
 	watcher.SetConfigForTest(cfg)
-	handler := transcodenode.NewServer(watcher, nil).Handler()
+	handler := keyedTranscodeNode(watcher, cfg.Auth.JWTSecret).Handler()
 	op := transcodenode.ProtocolSegmentAcknowledgement()
 	for _, tc := range []struct {
 		name, generation string
@@ -429,4 +430,12 @@ func TestWorkerSegmentAcknowledgementRefusals(t *testing.T) {
 	if op.RetrySafety != "natural_idempotent" || op.Responses["204"] == nil || len(op.Responses["204"].Content) != 0 {
 		t.Fatal("acknowledgement semantics changed")
 	}
+}
+
+// keyedTranscodeNode is a transcode node under test that takes key as its own
+// node key, so requests signed with it pass the node's authentication.
+func keyedTranscodeNode(watcher *nodeconfig.Watcher, key string) *transcodenode.Server {
+	server := transcodenode.NewServer(watcher, nil)
+	server.SetNodeKey(key)
+	return server
 }

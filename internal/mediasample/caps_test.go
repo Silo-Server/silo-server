@@ -9,6 +9,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 )
 
 // Excerpts of jellyfin-ffmpeg 7.1.4 listings.
@@ -55,6 +59,14 @@ chromaprint muxer AVOptions:
 Error opening input file pipe:0.
 Error opening input files: No such file or directory
 `
+	// relayedConcatCheckFixture is how FFmpeg 6.1 fails the relayed form of
+	// the concat check after reading its list.
+	relayedConcatCheckFixture = `[tcp @ 0x625f9eabce40] Connection to tcp://127.0.0.1:1 failed: Connection refused
+[concat @ 0x625f9eaa8f40] Impossible to open 'http://127.0.0.1:1/silo-concat-check.mkv'
+[in#0 @ 0x625f9eaa8e40] Error opening input: Connection refused
+Error opening input file pipe:0.
+Error opening input files: Connection refused
+`
 	// concatUnknownKeywordFixture is how an ffmpeg that lacks a list
 	// directive fails it.
 	concatUnknownKeywordFixture = `[concat @ 0x7a82810000] Line 3: unknown keyword 'file_packet_meta'
@@ -71,9 +83,12 @@ type fakeListings struct {
 	muxers  string
 	help    string
 	concat  string
-	// concatList is the list the concat check wrote to stdin.
-	concatList []byte
-	err        error
+	relayed string
+	// concatList and relayedList are the lists the concat checks wrote to
+	// stdin.
+	concatList  []byte
+	relayedList []byte
+	err         error
 	// block, when set, holds the filter listing until it is closed.
 	block chan struct{}
 }
@@ -96,12 +111,15 @@ func (f *fakeListings) list(_ context.Context, _ string, stdin []byte, args ...s
 	case "-hide_banner -nostdin -loglevel error -skip_frame:v nokey -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 -f null -":
 		f.concatList = stdin
 		return []byte(f.concat), errors.New("exit status 254")
+	case "-hide_banner -nostdin -loglevel error -skip_frame:v nokey -protocol_whitelist http,tcp,pipe -format_whitelist concat -f concat -safe 0 -i pipe:0 -f null -":
+		f.relayedList = stdin
+		return []byte(f.relayed), errors.New("exit status 145")
 	}
 	return nil, errors.New("unexpected listing " + strings.Join(args, " "))
 }
 
 func newFakeListings() *fakeListings {
-	return &fakeListings{filters: filtersFixture, muxers: muxersFixture, help: chromaprintHelpFixture, concat: concatCheckFixture}
+	return &fakeListings{filters: filtersFixture, muxers: muxersFixture, help: chromaprintHelpFixture, concat: concatCheckFixture, relayed: relayedConcatCheckFixture}
 }
 
 // useListings routes capability loads to f with an empty cache.
@@ -243,8 +261,21 @@ func TestLoadCapabilitiesSkipsChromaprintHelpWithoutTheMuxer(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), fakeBinary(t)); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 3 {
-		t.Fatalf("%d listing commands, want filters, muxers, and the concat check only", got)
+	if got := f.calls.Load(); got != 4 {
+		t.Fatalf("%d listing commands, want filters, muxers, and the two concat checks only", got)
+	}
+}
+
+// TestCapabilitiesTimeoutCoversEveryListing sizes the budget of an uncached
+// load to the commands it runs one after another, each on listingTimeout.
+func TestCapabilitiesTimeoutCoversEveryListing(t *testing.T) {
+	f := newFakeListings()
+	useListings(t, f)
+	if _, err := LoadCapabilities(context.Background(), fakeBinary(t)); err != nil {
+		t.Fatal(err)
+	}
+	if got := time.Duration(f.calls.Load()) * listingTimeout; CapabilitiesTimeout < got {
+		t.Fatalf("CapabilitiesTimeout = %s, but a cold load runs %d listings of %s", CapabilitiesTimeout, f.calls.Load(), listingTimeout)
 	}
 }
 
@@ -262,8 +293,8 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 			t.Fatal("cached inventory lost chromaprint")
 		}
 	}
-	if got := f.calls.Load(); got != 4 {
-		t.Fatalf("%d listing commands after three loads, want one inventory (4 commands)", got)
+	if got := f.calls.Load(); got != 5 {
+		t.Fatalf("%d listing commands after three loads, want one inventory (5 commands)", got)
 	}
 
 	// Replacing the binary in place changes its identity.
@@ -273,7 +304,7 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), binary); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 8 {
+	if got := f.calls.Load(); got != 10 {
 		t.Fatalf("%d listing commands after the binary changed, want a fresh inventory", got)
 	}
 
@@ -281,7 +312,7 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), binary); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 12 {
+	if got := f.calls.Load(); got != 15 {
 		t.Fatalf("%d listing commands after InvalidateCapabilities, want a fresh inventory", got)
 	}
 }
@@ -341,8 +372,8 @@ func TestLoadCapabilitiesSharesOneLoadAcrossConcurrentCallers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := f.calls.Load(); got != 4 {
-		t.Fatalf("%d listing commands for concurrent callers, want one inventory (4 commands)", got)
+	if got := f.calls.Load(); got != 5 {
+		t.Fatalf("%d listing commands for concurrent callers, want one inventory (5 commands)", got)
 	}
 }
 
@@ -372,6 +403,50 @@ func TestLoadCapabilitiesChecksConcatSamples(t *testing.T) {
 			}
 			if !strings.Contains(string(f.concatList), "file_packet_meta sample 1\ninpoint 1\n") {
 				t.Fatalf("concat check list %q does not use the Samples directives", f.concatList)
+			}
+		})
+	}
+}
+
+// TestLoadCapabilitiesChecksRelayedConcatSamples offers Samples requests on a
+// transcode node's relayed source only to an ffmpeg that read the relayed
+// form of the list, per-file options included, through to opening its URL.
+func TestLoadCapabilitiesChecksRelayedConcatSamples(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(path, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	relayed := nodesourcetest.Relayed(t, path).Input()
+	samples := func(input string) Request {
+		return Request{Input: input, Samples: &Samples{Seconds: []float64{1}}, Stats: &StatsOutput{CropWidth: 1, CropHeight: 1, Width: 160}}
+	}
+	for name, tt := range map[string]struct {
+		output      string
+		wantRelayed bool
+	}{
+		"reads the list":        {relayedConcatCheckFixture, true},
+		"lacks per-file option": {"[concat @ 0x1] Line 3: unknown keyword 'option'\n", false},
+		"blocks http":           {"[concat @ 0x1] Protocol 'http' not on whitelist 'pipe'!\n", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeListings()
+			f.relayed = tt.output
+			useListings(t, f)
+			caps, err := LoadCapabilities(context.Background(), fakeBinary(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := caps.Require(samples(relayed)) == nil; got != tt.wantRelayed {
+				t.Fatalf("Require(relayed samples) passed=%t, want %t", got, tt.wantRelayed)
+			}
+			// A local input needs only the local form.
+			if err := caps.Require(samples(path)); err != nil {
+				t.Fatalf("Require(local samples) = %v", err)
+			}
+			want := "file 'http://127.0.0.1:1/silo-concat-check.mkv'\noption protocol_whitelist http,tcp\noption format_whitelist " +
+				nodesource.AdmittedFormats + "\nfile_packet_meta sample 1\ninpoint 1\n"
+			if !strings.Contains(string(f.relayedList), want) {
+				t.Fatalf("relayed concat check list %q, want the relayed entry %q", f.relayedList, want)
 			}
 		})
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 // ErrPrimaryVideoNotFound reports that FFprobe completed successfully but did
@@ -119,25 +120,26 @@ func (d *SideData) UnmarshalJSON(data []byte) error {
 // ProbePrimaryVideoTrack runs a metadata-only FFprobe and returns the first
 // playable video stream using the same normalization as a catalog scan.
 func ProbePrimaryVideoTrack(ctx context.Context, ffprobePath, filePath string) (models.VideoTrack, error) {
-	cmd := exec.CommandContext(ctx, ffprobePath,
+	// A transcode node's relayed source is held to the relay (nodesource).
+	cmd := exec.CommandContext(ctx, ffprobePath, nodesource.RestrictProbeArgs([]string{
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_streams",
 		"-select_streams", "v",
 		filePath,
-	)
+	})...)
 	output, err := cmd.Output()
 	if err != nil {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return models.VideoTrack{}, contextErr
 		}
-		return models.VideoTrack{}, fmt.Errorf("ffprobe primary video failed for %s: %w", filePath, err)
+		return models.VideoTrack{}, fmt.Errorf("ffprobe primary video failed for %s: %w", nodesource.RedactLoopback(filePath), err)
 	}
 	var raw struct {
 		Streams []Stream `json:"streams"`
 	}
 	if err := json.Unmarshal(output, &raw); err != nil {
-		return models.VideoTrack{}, fmt.Errorf("ffprobe primary video JSON parse failed for %s: %w", filePath, err)
+		return models.VideoTrack{}, fmt.Errorf("ffprobe primary video JSON parse failed for %s: %w", nodesource.RedactLoopback(filePath), err)
 	}
 	for _, stream := range raw.Streams {
 		if IsPrimaryVideoStream(stream) {

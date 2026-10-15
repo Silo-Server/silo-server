@@ -23,6 +23,7 @@ type AdminNodeCreateBody struct {
 	Group            string `json:"group,omitempty" maxLength:"1024"`
 	MaxJobs          *int   `json:"max_jobs,omitempty" nullable:"true" maximum:"2147483647" minimum:"-2147483648"`
 	MaxBandwidthKbps *int   `json:"max_bandwidth_kbps,omitempty" nullable:"true" maximum:"2147483647" minimum:"-2147483648"`
+	SourceAccess     string `json:"source_access,omitempty" enum:"local,core" doc:"How a transcode node reads source media: local at the catalog paths through its own library mount, or core over HTTP from this server. Omitted means local. Only a transcode node takes one; a proxy returns validation_failed."`
 }
 type AdminNodeUpdateBody struct {
 	Name             *string `json:"name,omitempty" minLength:"1" maxLength:"1024"`
@@ -38,6 +39,7 @@ type AdminNodeUpdateBody struct {
 	// when it restarts.
 	DownloadArtifactDirOverride      *string `json:"download_artifact_dir_override,omitempty" nullable:"true" maxLength:"4096" doc:"Absolute directory for this transcode node's prepared download files. Null or empty restores the inherited directory: download.artifact_dir, or when that is blank, download-artifacts inside the node's transcode directory. Applies when the node restarts."`
 	DownloadArtifactMaxBytesOverride *int64  `json:"download_artifact_max_bytes_override,omitempty" nullable:"true" minimum:"-1" doc:"Storage budget in bytes for this node's prepared download files; 0 means no budget. Null or -1 restores download.artifact_max_bytes."`
+	SourceAccess                     *string `json:"source_access,omitempty" enum:"local,core" doc:"How a transcode node reads source media: local at the catalog paths through its own library mount, or core over HTTP from this server. Omitted leaves it unchanged. Only a transcode node takes one; a proxy returns validation_failed. A change is pushed to the node at once and applies to jobs it starts afterwards."`
 }
 
 func (b *AdminNodeUpdateBody) UnmarshalJSON(data []byte) error {
@@ -85,6 +87,9 @@ func adminNodeConfigurationProblem(err error) error {
 	if p, ok := errors.AsType[*Problem](err); ok {
 		return p
 	}
+	if errors.Is(err, nodepool.ErrInvalidNodeInput) {
+		return NewProblem(TypeValidationFailed, "Invalid node configuration.")
+	}
 	if errors.Is(err, nodepool.ErrNodeConfigurationConflict) {
 		return NewProblem(TypeConflict, "Node URL already has a different configuration.")
 	}
@@ -114,7 +119,11 @@ func registerAdminNodeConfiguration(reg *Registry) {
 			return nil, unavailable("administrator nodes")
 		}
 		b := in.Body
-		node, err := reg.deps.AdminNodeConfiguration.CreateAdminNode(ctx, nodepool.CreateNodeInput{Name: b.Name, Type: b.Type, URL: b.URL, PublicURL: b.PublicURL, Group: b.Group, MaxJobs: b.MaxJobs, MaxBandwidthKbps: b.MaxBandwidthKbps})
+		input := nodepool.CreateNodeInput{Name: b.Name, Type: b.Type, URL: b.URL, PublicURL: b.PublicURL, Group: b.Group, MaxJobs: b.MaxJobs, MaxBandwidthKbps: b.MaxBandwidthKbps, SourceAccess: b.SourceAccess}
+		if err := input.Validate(); err != nil {
+			return nil, NewProblem(TypeValidationFailed, "Invalid node configuration.")
+		}
+		node, err := reg.deps.AdminNodeConfiguration.CreateAdminNode(ctx, input)
 		return adminNodeConfigurationOutput(ctx, node, err)
 	})
 	update := Operation{Operation: humaOp("PUT", Prefix+"/admin/nodes/{id}", "updateAdminNode", "admin-nodes", "Update stored node configuration under the original If-Match revision. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}

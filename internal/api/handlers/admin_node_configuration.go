@@ -47,17 +47,17 @@ func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepoo
 		return nil, err
 	}
 	h.configurationChanged()
-	// Same post-commit work as HandleUpdateNode: when the URL or an acceleration
-	// override moved, nudge the worker to re-read its row and drop this server's
-	// cached capabilities before the pool publishes the new policy. Off the
-	// request goroutine; the response is the committed row and never waits on
-	// or reflects the worker's answer.
+	// Same post-commit work as HandleUpdateNode: when the URL, an acceleration
+	// override or the source access moved, nudge the worker to re-read its
+	// configuration and drop this server's cached capabilities before the pool
+	// publishes the new policy. Off the request goroutine; the response is the
+	// committed row and never waits on or reflects the worker's answer.
 	policyChanged := nodePolicyTargetChanged(previous, node)
 	detached := context.WithoutCancel(ctx)
 	go func() {
 		if policyChanged {
 			if !h.reloadNodeConfig(detached, node) {
-				slog.WarnContext(detached, "node has not adopted its new acceleration policy yet; transcodes dispatched to it may fail until its next config poll",
+				slog.WarnContext(detached, "node has not adopted its new acceleration policy or source access yet; jobs dispatched to it may fail until its next config poll",
 					"component", "api", "node_id", node.ID, "name", node.Name)
 			}
 			if h.invalidateCapabilityCache != nil {

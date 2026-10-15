@@ -13,16 +13,23 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // listingTimeout bounds each ffmpeg listing command.
 const listingTimeout = 3 * time.Second
 
-// CapabilitiesTimeout bounds an uncached LoadCapabilities, which runs up to
-// four listings (filters, muxers, Chromaprint's options, the concat check),
-// each on listingTimeout.
-const CapabilitiesTimeout = 4 * listingTimeout
+// maxListings is the most listing commands an uncached LoadCapabilities runs,
+// one after another: filters, muxers, Chromaprint's options, and the concat
+// checks of local files and of a relayed source.
+const maxListings = 5
+
+// CapabilitiesTimeout bounds an uncached LoadCapabilities: maxListings
+// commands, each on listingTimeout. Callers that wait on a load, such as a
+// transcode node refusing a relayed sampled run its ffmpeg cannot read and
+// chapter thumbnails probing software tone mapping, use it as their budget.
+const CapabilitiesTimeout = maxListings * listingTimeout
 
 // Capabilities is what an ffmpeg binary offers sampling runs. The zero value
 // offers nothing.
@@ -32,8 +39,10 @@ type Capabilities struct {
 	// chromaprintRaw records that the chromaprint muxer offers fp_format raw.
 	chromaprintRaw bool
 	// concatSamples records that the concat demuxer reads a Samples list
-	// from stdin; see checkConcatSamples.
-	concatSamples bool
+	// from stdin, and relayedConcatSamples one of a transcode node's relayed
+	// source; see checkConcatSamples.
+	concatSamples        bool
+	relayedConcatSamples bool
 }
 
 // HasFilter reports whether ffmpeg lists the named filter.
@@ -85,8 +94,14 @@ func (c Capabilities) Require(req Request) error {
 			}
 		}
 	}
-	if req.Samples != nil && !req.Samples.ReadThrough && !c.concatSamples {
-		return unsupportedError("ffmpeg cannot read a sampled input list (concat demuxer with file_packet_meta, file and pipe protocols)")
+	if req.Samples != nil && !req.Samples.ReadThrough {
+		if nodesource.IsRemote(req.Input) {
+			if !c.relayedConcatSamples {
+				return unsupportedError("ffmpeg cannot read a sampled list of a relayed source (concat demuxer with file_packet_meta and per-file options, http, tcp and pipe protocols)")
+			}
+		} else if !c.concatSamples {
+			return unsupportedError("ffmpeg cannot read a sampled input list (concat demuxer with file_packet_meta, file and pipe protocols)")
+		}
 	}
 	if req.Sheets != nil && !c.HasFilter(filterMetadata) {
 		return unsupportedError("ffmpeg does not list the metadata filter")
@@ -214,31 +229,45 @@ func loadCapabilities(ffmpegPath string, list listFunc) (Capabilities, error) {
 		lower := bytes.ToLower(help)
 		caps.chromaprintRaw = bytes.Contains(lower, []byte("fp_format")) && bytes.Contains(lower, []byte("raw"))
 	}
-	caps.concatSamples = checkConcatSamples(runWith)
+	caps.concatSamples = checkConcatSamples(runWith, false)
+	caps.relayedConcatSamples = checkConcatSamples(runWith, true)
 	return caps, nil
 }
 
-// concatCheckInput is the input the concat check names. It must not exist.
-const concatCheckInput = "/nonexistent/silo-concat-check.mkv"
+// concatCheckInput is the input the concat check names in a list of local
+// files. It must not exist. relayedConcatCheckInput is the one it names in a
+// relayed source's list: nothing listens on TCP port 1 of the loopback
+// interface, so the open is refused at once.
+const (
+	concatCheckInput        = "/nonexistent/silo-concat-check.mkv"
+	relayedConcatCheckInput = "http://127.0.0.1:1/silo-concat-check.mkv"
+)
 
-// checkConcatSamples reports whether ffmpeg reads a Samples list: it hands
-// ffmpeg a one-sample list, with every directive a Samples list uses, naming
-// an input that does not exist. An ffmpeg that parses the list goes on to
-// open that input and fails there, which the concat demuxer reports as
+// checkConcatSamples reports whether ffmpeg reads a Samples list, of local
+// files or (relayed) of a transcode node's relayed source: it hands ffmpeg a
+// one-sample list in that form, with every directive a Samples list uses,
+// naming an input that cannot be opened. An ffmpeg that parses the list goes
+// on to open that input and fails there, which the concat demuxer reports as
 // "Impossible to open"; one that lacks the demuxer, a directive, or a
 // protocol fails before, typically with "Invalid data found when processing
 // input". Without this check that message would read as a broken file and
 // mark every sampled input unusable.
-func checkConcatSamples(run func(stdin []byte, args ...string) ([]byte, error)) bool {
-	list, err := buildConcatList(concatCheckInput, []float64{1}, 0)
+func checkConcatSamples(run func(stdin []byte, args ...string) ([]byte, error), relayed bool) bool {
+	input, opened, demuxer := concatCheckInput, "file:"+concatCheckInput, concatDemuxerArgs
+	if relayed {
+		input, opened, demuxer = relayedConcatCheckInput, relayedConcatCheckInput, relayedConcatDemuxerArgs
+	}
+	entry, err := concatEntry(input, relayed)
 	if err != nil {
 		return false
 	}
-	args := append(quietArgs(errorLogLevel), concatInputArgs...)
+	list := concatList(entry, sampleEntries([]float64{1}, 0), sampleSpanSeconds)
+	args := append(quietArgs(errorLogLevel), skipFrameOption, keyframeSkipFrame)
+	args = append(args, demuxer...)
 	args = append(args, "-i", concatListInput, "-f", "null", "-")
 	// The run fails by design, so only its output counts.
 	output, _ := run(list, args...)
-	return bytes.Contains(bytes.ToLower(output), []byte("impossible to open 'file:"+concatCheckInput+"'"))
+	return bytes.Contains(bytes.ToLower(output), []byte("impossible to open '"+opened+"'"))
 }
 
 // FilterCapabilities returns the capabilities an `ffmpeg -filters` listing

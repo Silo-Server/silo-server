@@ -392,6 +392,7 @@ func TestEmbeddedSubtitleBurnInLocalAndRemoteRecipe(t *testing.T) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
 	h := &PlaybackHandler{playbackStore: store, fileResolver: testCompatFileResolver{file: file}, TranscodeDir: t.TempDir(), FFmpegPath: writeCompatTestFFmpeg(t), tm: playback.NewTranscodeManager()}
+	withTestNodeKeys(h)
 	h.sessionMgr = &testCompatSessionManager{sessions: map[string]*playback.Session{
 		"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: source.FileID, PlayMethod: playback.PlayTranscode},
 	}}

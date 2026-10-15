@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -638,14 +639,14 @@ func (m *ArtifactManager) reconcileServer(ctx context.Context, remove bool, acto
 // reconcileNode lists one node's artifact directory and records its untracked
 // files; with remove it also deletes them through the node's delete route.
 func (m *ArtifactManager) reconcileNode(ctx context.Context, n *nodepool.Node, remove bool, actor *int) (storageSampleUntracked, error) {
-	secret := m.nodeSecret()
-	if secret == "" {
+	keys := m.nodeKeys
+	if keys == nil {
 		return storageSampleUntracked{}, fmt.Errorf("%w: node credentials unavailable", ErrStorageListingUnavailable)
 	}
 	listCtx, cancel := context.WithTimeout(ctx, storageDirTimeout)
 	defer cancel()
 	client := downloadprepare.HTTPPreparer{}
-	listing, err := client.ListArtifacts(listCtx, n.URL, secret)
+	listing, err := client.ListArtifacts(listCtx, n.URL, keys)
 	if err != nil {
 		return storageSampleUntracked{}, fmt.Errorf("%w: %w", ErrStorageListingUnavailable, err)
 	}
@@ -668,7 +669,7 @@ func (m *ArtifactManager) reconcileNode(ctx context.Context, n *nodepool.Node, r
 		}
 		if !deleted[id] {
 			// The node's delete removes the file, its partial and its receipt.
-			if err := client.Delete(ctx, n.URL, secret, id); err != nil {
+			if err := client.Delete(ctx, n.URL, keys, id); err != nil {
 				slog.WarnContext(ctx, "removing untracked node file failed", "component", "downloads", "node", n.Name, "file", f.Name, "error", err)
 				left = append(left, f)
 				continue
@@ -715,13 +716,10 @@ func (m *ArtifactManager) recordUntrackedRemoval(ctx context.Context, location s
 	}
 }
 
-func (m *ArtifactManager) nodeSecret() string {
-	if m.liveCfg != nil {
-		if cfg := m.liveCfg(); cfg != nil {
-			return strings.TrimSpace(cfg.Auth.JWTSecret)
-		}
-	}
-	return ""
+// SetNodeKeys wires the keyring that signs storage listings and deletions on
+// transcode nodes, and the relay of their prepared files.
+func (m *ArtifactManager) SetNodeKeys(keys nodeauth.Keyring) {
+	m.nodeKeys = keys
 }
 
 // SetStorageNotifier wires a callback that announces a storage change (files

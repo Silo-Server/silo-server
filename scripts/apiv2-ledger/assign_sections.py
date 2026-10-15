@@ -86,6 +86,10 @@ def section_for(entry):
         return NODE_SECTIONS[listener]
     if listener == "root":
         return "root-operational"
+    # The transcode node control plane on the API listener: transcode nodes
+    # call it, signing with their own keys.
+    if entry["path"].startswith("/api/internal/nodes/"):
+        return "node-transcode"
     if entry["namespace"] == "api_v2":
         return "v2-delegation"
     parts = [s for s in entry["path"].split("/") if s]

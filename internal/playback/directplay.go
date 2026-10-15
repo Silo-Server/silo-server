@@ -87,10 +87,6 @@ func MediaMIMETypes() []string {
 // Range requests, conditional requests (including If-Match, If-Range, and
 // If-None-Match), and Content-Type detection.
 func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) error {
-	// Media bodies routinely take longer than the server's absolute
-	// WriteTimeout; roll the write deadline with progress instead.
-	streamWriter := httpstream.NewRollingDeadlineWriter(w)
-	w = streamWriter
 	f, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -107,26 +103,14 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return err
 	}
-	w = &directPlayResponseWriter{
-		RollingDeadlineWriter: streamWriter,
-		size:                  stat.Size(),
-	}
-
-	w.Header().Del("ETag")
 	etag := DirectPlayEntityTag(f, stat)
-	if etag != "" {
-		w.Header().Set("ETag", etag)
-	}
-
-	// Set Content-Type explicitly so ServeContent does not sniff.
-	w.Header().Set("Content-Type", MimeFromExtension(filePath))
 
 	hadRange := len(r.Header.Values("Range")) > 0
 	hadIfMatch := len(r.Header.Values("If-Match")) > 0
 	hadIfRange := len(r.Header.Values("If-Range")) > 0
 	ifRangeResult := directStreamIfRangeResult(r, etag, stat.ModTime())
 	directStreamActive.Inc()
-	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
+	streamWriter := serveOpenFile(w, r, f, stat, etag)
 	outcome := streamWriter.Outcome(r.Context())
 	status := streamWriter.StatusCode()
 	bytesSent := streamWriter.BytesWritten()
@@ -154,6 +138,33 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 	}
 	slog.InfoContext(r.Context(), "direct stream ended", logAttrs...)
 	return nil
+}
+
+// ServeOpenFile serves the already open file f, described by info, with
+// HTTP byte-range support, under etag (none when empty). It never reopens a
+// path, so what it serves is exactly the file the caller checked. Ranges
+// (single and suffix) and conditional requests (If-Match, If-Range,
+// If-None-Match) are http.ServeContent's; a 416 names the file's size. The
+// write deadline rolls with progress, since media bodies routinely outlast
+// the server's absolute WriteTimeout.
+func ServeOpenFile(w http.ResponseWriter, r *http.Request, f *os.File, info os.FileInfo, etag string) {
+	serveOpenFile(w, r, f, info, etag)
+}
+
+func serveOpenFile(w http.ResponseWriter, r *http.Request, f *os.File, info os.FileInfo, etag string) *httpstream.RollingDeadlineWriter {
+	streamWriter := httpstream.NewRollingDeadlineWriter(w)
+	w = &directPlayResponseWriter{
+		RollingDeadlineWriter: streamWriter,
+		size:                  info.Size(),
+	}
+	w.Header().Del("ETag")
+	if etag != "" {
+		w.Header().Set("ETag", etag)
+	}
+	// Set Content-Type explicitly so ServeContent does not sniff.
+	w.Header().Set("Content-Type", MimeFromExtension(info.Name()))
+	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+	return streamWriter
 }
 
 type directPlayResponseWriter struct {

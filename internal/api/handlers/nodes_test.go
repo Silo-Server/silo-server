@@ -11,12 +11,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
-	"github.com/go-chi/chi/v5"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 )
+
+// testNodeKeys signs this package's calls to fake nodes, which do not check
+// the signature: without a keyring nothing is sent at all.
+var testNodeKeys nodeauth.Keyring = nodeauthtest.SharedSecret("test-node-secret")
 
 type stubNodeRepository struct {
 	nodes []*nodepool.Node
@@ -80,7 +87,7 @@ func TestHandleListNodesIncludesCapabilities(t *testing.T) {
 		},
 		{ID: 2, Name: "old-node", Type: nodepool.NodeTypeProxy, URL: "http://old", Enabled: true},
 	}}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	recorder := httptest.NewRecorder()
 	handler.HandleListNodes(recorder, httptest.NewRequest(http.MethodGet, "/admin/nodes", nil))
@@ -135,7 +142,7 @@ func updateNodeRequest(t *testing.T, body string) *http.Request {
 // an answer the admin UI can show.
 func TestHandleUpdateNodeRejectsUnknownHWAccelOverride(t *testing.T) {
 	repo := &stubNodeRepository{updateResult: &nodepool.Node{ID: 1, Name: "gpu-1"}}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	recorder := httptest.NewRecorder()
 	awaitNodeUpdate(t, handler, recorder, `{"hw_accel_override":"videotoolbox"}`)
@@ -182,7 +189,7 @@ func TestHandleUpdateNodeAcceptsAndClearsHWOverrides(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			stored := "qsv"
 			repo := &stubNodeRepository{updateResult: &nodepool.Node{ID: 1, Name: "gpu-1", HWAccelOverride: &stored}}
-			handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+			handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 			recorder := httptest.NewRecorder()
 			awaitNodeUpdate(t, handler, recorder, test.body)
@@ -218,7 +225,7 @@ func TestV1NodeRoutesLeaveStorageOverridesToV2(t *testing.T) {
 	dir, budget := "/mnt/downloads", int64(5e11)
 	stored := &nodepool.Node{ID: 1, Name: "gpu-1", DownloadArtifactDirOverride: &dir, DownloadArtifactMaxBytesOverride: &budget}
 	repo := &stubNodeRepository{nodes: []*nodepool.Node{stored}, updateResult: stored}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	recorder := httptest.NewRecorder()
 	awaitNodeUpdate(t, handler, recorder, `{"name":"gpu-1","download_artifact_dir_override":"/elsewhere","download_artifact_max_bytes_override":0}`)
@@ -276,7 +283,7 @@ func TestHandleUpdateNodeReloadsTheNodeAfterAnOverrideChange(t *testing.T) {
 	nvenc := "nvenc"
 	after := &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: node.URL, HWAccelOverride: &nvenc}
 	repo := &stubNodeRepository{updateResult: after, node: before}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	invalidated := make(chan string, 4)
 	handler.SetCapabilityInvalidator(func(url string) { invalidated <- url })
 
@@ -326,7 +333,7 @@ func TestReloadNodeConfigAcceptsNoContent(t *testing.T) {
 			}))
 			t.Cleanup(node.Close)
 
-			handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+			handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 			if !handler.reloadNodeConfig(context.Background(), &nodepool.Node{ID: 1, Name: "gpu-1", URL: node.URL}) {
 				t.Fatalf("HTTP %d was not accepted as a confirmed reload", status)
 			}
@@ -352,7 +359,7 @@ func TestReloadNodeConfigReportsAnUnconfirmedNode(t *testing.T) {
 	}))
 	t.Cleanup(node.Close)
 
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	if handler.reloadNodeConfig(context.Background(), &nodepool.Node{ID: 1, Name: "gpu-1", URL: node.URL}) {
 		t.Fatal("a 500 from the node reported the reload as confirmed")
 	}
@@ -375,7 +382,7 @@ func TestHandleUpdateNodePublishesPolicyEvenWhenTheNodeDoesNotConfirm(t *testing
 	before := &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: node.URL, HWAccelOverride: &qsv}
 	after := &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: node.URL, HWAccelOverride: &nvenc}
 	repo := &stubNodeRepository{updateResult: after, node: before}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	invalidated := make(chan string, 4)
 	handler.SetCapabilityInvalidator(func(url string) { invalidated <- url })
@@ -418,7 +425,7 @@ func TestHandleUpdateNodeDoesNotReloadWhenOverridesAreUnchanged(t *testing.T) {
 	}
 	repo := &stubNodeRepository{updateResult: unchanged(), node: unchanged()}
 	repo.node.URL += "/"
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	body := `{"name":"gpu-1","url":"` + node.URL + `","hw_accel_override":"qsv","hw_device_override":"/dev/dri/renderD128"}`
 	awaitNodeUpdate(t, handler, httptest.NewRecorder(), body)
@@ -444,7 +451,7 @@ func TestHandleUpdateNodeDoesNotReloadWithoutAnOverrideChange(t *testing.T) {
 
 	stored := &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: node.URL}
 	repo := &stubNodeRepository{updateResult: stored, node: stored}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	invalidated := make(chan string, 4)
 	handler.SetCapabilityInvalidator(func(url string) { invalidated <- url })
 
@@ -509,7 +516,7 @@ func (l *ctxAwareLister) ListEnabled(ctx context.Context, _ string) ([]*nodepool
 func TestReloadPoolsSurvivesRequestCancellation(t *testing.T) {
 	bus := &recordingEventBus{}
 	lister := &ctxAwareLister{nodes: []*nodepool.Node{{ID: 1, URL: "http://node", Enabled: true}}}
-	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepool.NewTranscodePool(), lister, bus, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepooltest.NewTranscodePool(), lister, bus, nil, nodeauthtest.SharedSecret("secret"))
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -550,7 +557,7 @@ func TestHandleUpdateNodeReloadsTheReplacementWhenAURLMoves(t *testing.T) {
 			HWAccelOverride: &qsv, HWDeviceOverride: &device,
 		},
 	}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	body := `{"name":"gpu-1","url":"` + replacement.URL + `","hw_accel_override":"qsv","hw_device_override":"/dev/dri/renderD128"}`
 	awaitNodeUpdate(t, handler, httptest.NewRecorder(), body)
@@ -590,7 +597,7 @@ func TestHandleUpdateNodeReloadsOnAURLOnlyRepoint(t *testing.T) {
 			HWAccelOverride: &qsv, HWDeviceOverride: &device,
 		},
 	}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	// Only the url: no acceleration field in the body at all.
 	awaitNodeUpdate(t, handler, httptest.NewRecorder(), `{"url":"`+replacement.URL+`"}`)
@@ -640,7 +647,7 @@ func TestHandleListNodesCarriesTheAdvertisedHashFromThePools(t *testing.T) {
 		{ID: 2, Name: "proxy-1", Type: nodepool.NodeTypeProxy, URL: "http://proxy-1"},
 		{ID: 3, Name: "quiet", Type: nodepool.NodeTypeTranscode, URL: "http://quiet"},
 	}}
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: 1, URL: "http://gpu-1", Enabled: true},
 		{ID: 3, URL: "http://quiet", Enabled: true},
@@ -651,7 +658,7 @@ func TestHandleListNodesCarriesTheAdvertisedHashFromThePools(t *testing.T) {
 	transcodes.ApplyHealth(1, "http://gpu-1", true, 0, 0, "sha256:newer", nil, nil, time.Now())
 	proxies.ApplyHealth(2, "http://proxy-1", true, 0, 0, "sha256:proxy", nil, nil, time.Now())
 
-	handler := NewNodeHandler(repo, proxies, transcodes, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, proxies, transcodes, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	recorder := httptest.NewRecorder()
 	handler.HandleListNodes(recorder, httptest.NewRequest(http.MethodGet, "/admin/nodes", nil))
 
@@ -701,11 +708,11 @@ func TestHandleCheckNodePublishesResultToThePool(t *testing.T) {
 		ID: 7, Name: "gpu-7", Type: nodepool.NodeTypeTranscode, URL: node.URL, Enabled: true,
 		Healthy: true, ActiveJobs: 99, CapabilitiesHash: &stale, AdvertisedCapabilitiesHash: &stale,
 	}
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{pooled})
 
 	repo := &stubNodeRepository{node: pooled}
-	handler := NewNodeHandler(repo, nil, pool, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, pool, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/admin/nodes/7/check", nil)
@@ -749,12 +756,12 @@ func TestHandleListNodesDistinguishesUncheckedFromUnreportedHashes(t *testing.T)
 		{ID: 1, Name: "checked", Type: nodepool.NodeTypeTranscode, URL: "http://gpu-1", CapabilitiesHash: &stored},
 		{ID: 2, Name: "unchecked", Type: nodepool.NodeTypeTranscode, URL: "http://gpu-2", CapabilitiesHash: &stored},
 	}}
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{
 		{ID: 1, Name: "checked", Type: nodepool.NodeTypeTranscode, URL: "http://gpu-1", AdvertisedCapabilitiesHash: &none},
 		{ID: 2, Name: "unchecked", Type: nodepool.NodeTypeTranscode, URL: "http://gpu-2"},
 	})
-	handler := NewNodeHandler(repo, nil, pool, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, pool, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	recorder := httptest.NewRecorder()
 	handler.HandleListNodes(recorder, httptest.NewRequest(http.MethodGet, "/admin/nodes", nil))
@@ -785,7 +792,7 @@ func TestReadAdminNodesDoesNotMutateRepositoryRows(t *testing.T) {
 	pool := nodepool.NewProxyPool()
 	pool.SetNodes([]*nodepool.Node{stored})
 	pool.ApplyHealth(1, stored.URL, true, 0, 0, "advertised", nil, nil, time.Now())
-	rows, err := NewNodeHandler(repo, pool, nil, nil, nil, nil, "").ReadAdminNodes(t.Context())
+	rows, err := NewNodeHandler(repo, pool, nil, nil, nil, nil, nodeauthtest.SharedSecret("")).ReadAdminNodes(t.Context())
 	if err != nil || len(rows) != 1 || rows[0] == stored || stored.AdvertisedCapabilitiesHash != nil || rows[0].AdvertisedCapabilitiesHash == nil || *rows[0].AdvertisedCapabilitiesHash != "advertised" {
 		t.Fatal(rows, stored, err)
 	}

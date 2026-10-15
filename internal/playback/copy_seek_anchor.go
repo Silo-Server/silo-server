@@ -3,6 +3,7 @@ package playback
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os/exec"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 const (
@@ -58,36 +61,73 @@ func ResolveCopySeekAnchor(
 	}
 
 	resolvedFFmpegPath := ResolveFFmpegPath(ffmpegPath)
+	// A transcode node's relayed source is a new loopback URL for every job;
+	// its identity lets jobs on the same source share one probe.
 	key := strings.Join([]string{
 		resolvedFFmpegPath,
-		inputPath,
+		nodesource.InputKey(inputPath),
 		strconv.FormatFloat(requestedSeekSeconds, 'f', 6, 64),
 		strconv.Itoa(segmentDuration),
 	}, "\x00")
-	resultCh := copySeekProbeGroup.DoChan(key, func() (any, error) {
-		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copySeekProbeTimeout)
-		defer cancel()
-		select {
-		case copySeekProbeSlots <- struct{}{}:
-			defer func() { <-copySeekProbeSlots }()
-		case <-probeCtx.Done():
-			return copySeekAnchor{}, probeCtx.Err()
-		}
-		seconds, segment, err := resolveCopySeekAnchor(probeCtx, resolvedFFmpegPath, inputPath, requestedSeekSeconds, segmentDuration)
-		return copySeekAnchor{seconds: seconds, segment: segment}, err
-	})
+	// The shared probe reads the first caller's input. When that caller's
+	// relayed handle is released mid-probe, the probe fails with
+	// nodesource.ErrClosed, which says nothing about the others' sources: a
+	// waiter whose own handle still lives probes again with it.
+	for attempt := 1; ; attempt++ {
+		resultCh := copySeekProbeGroup.DoChan(key, func() (any, error) {
+			return probeCopySeekAnchor(ctx, resolvedFFmpegPath, inputPath, requestedSeekSeconds, segmentDuration)
+		})
+		copySeekProbeJoined()
 
-	select {
-	case <-ctx.Done():
-		return 0, 0, ctx.Err()
-	case result := <-resultCh:
-		if result.Err != nil {
-			return 0, 0, result.Err
+		select {
+		case <-ctx.Done():
+			return 0, 0, ctx.Err()
+		case result := <-resultCh:
+			if result.Err != nil {
+				if errors.Is(result.Err, nodesource.ErrClosed) && nodesource.IsRemote(inputPath) && attempt < maxCopySeekProbeAttempts {
+					continue
+				}
+				return 0, 0, result.Err
+			}
+			anchor, ok := result.Val.(copySeekAnchor)
+			if !ok {
+				return 0, 0, errors.New("resolve copy seek anchor: invalid shared probe result")
+			}
+			return anchor.seconds, anchor.segment, nil
 		}
-		anchor := result.Val.(copySeekAnchor)
-		return anchor.seconds, anchor.segment, nil
 	}
 }
+
+// maxCopySeekProbeAttempts bounds how often a caller joins a shared probe
+// that failed because another caller's relayed source was released.
+const maxCopySeekProbeAttempts = 3
+
+// copySeekProbeJoined runs once a caller has joined a shared probe; tests
+// replace it to order callers.
+var copySeekProbeJoined = func() {}
+
+// probeCopySeekAnchor is one shared probe of inputPath, detached from the
+// caller that started it and bounded by copySeekProbeTimeout. A relayed input
+// released while it ran fails with nodesource.ErrClosed.
+func probeCopySeekAnchor(ctx context.Context, ffmpegPath, inputPath string, requestedSeekSeconds float64, segmentDuration int) (any, error) {
+	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copySeekProbeTimeout)
+	defer cancel()
+	select {
+	case copySeekProbeSlots <- struct{}{}:
+		defer func() { <-copySeekProbeSlots }()
+	case <-probeCtx.Done():
+		return copySeekAnchor{}, probeCtx.Err()
+	}
+	remote := nodesource.IsRemote(inputPath)
+	seconds, segment, err := runCopySeekAnchorProbe(probeCtx, ffmpegPath, inputPath, requestedSeekSeconds, segmentDuration)
+	if err != nil && remote && !nodesource.IsRemote(inputPath) {
+		err = fmt.Errorf("%w: %w", nodesource.ErrClosed, err)
+	}
+	return copySeekAnchor{seconds: seconds, segment: segment}, err
+}
+
+// runCopySeekAnchorProbe runs the probe; tests replace it.
+var runCopySeekAnchorProbe = resolveCopySeekAnchor
 
 func resolveCopySeekAnchor(
 	ctx context.Context,
@@ -97,7 +137,7 @@ func resolveCopySeekAnchor(
 	segmentDuration int,
 ) (float64, int, error) {
 
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := exec.CommandContext(ctx, ffmpegPath, nodesource.RestrictArgs([]string{
 		"-v", "error",
 		"-fflags", "+genpts+fastseek",
 		"-analyzeduration", "3000000",
@@ -114,7 +154,7 @@ func resolveCopySeekAnchor(
 		"-frames:v", "1",
 		"-f", "framecrc",
 		"-",
-	)
+	})...)
 	var stdout bytes.Buffer
 	stderr := newBoundedTailBuffer(stderrTailMaxBytes)
 	cmd.Stdout = &stdout

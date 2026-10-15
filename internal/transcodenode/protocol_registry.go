@@ -46,7 +46,7 @@ func ProtocolControls(schemas huma.Registry) []workerprotocol.Operation {
 	reprobe.RetrySafety = "non_retryable"
 	reprobe.Description = "Rebuild the capability snapshot. Active jobs or probes refuse with 409; an incomplete probe retains the prior published hash. No durable replay receipt."
 	return []workerprotocol.Operation{
-		workerprotocol.EmptyCommand("transcode_node", "/admin/force-reload", "(*internal/transcodenode.Server).handleForceReload", "Reload configuration and tear down active sessions and delivery authority. Failure can follow partial effects.", 503),
+		workerprotocol.EmptyCommand("transcode_node", "/admin/force-reload", "(*internal/transcodenode.Server).handleForceReload", "Reload configuration and tear down active sessions. The caller revokes the node's delivery authority before it sends this. Failure can follow partial effects.", 503),
 		workerprotocol.EmptyCommand("transcode_node", "/admin/reload-config", "(*internal/transcodenode.Server).handleReloadConfig", "Reload configuration without tearing down active sessions. No durable replay receipt.", 503),
 		reprobe,
 	}

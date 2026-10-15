@@ -20,9 +20,10 @@ import (
 func speechRequestBody(t *testing.T, mutate func(*mediasample.Request)) []byte {
 	t.Helper()
 	req := mediasample.Request{
-		Input:  "/media/film.mkv",
-		Window: &mediasample.Window{StartSeconds: 60, DurationSeconds: 0.05},
-		Audio:  &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}},
+		SourceGrant: "/media/film.mkv",
+		Input:       "/media/film.mkv",
+		Window:      &mediasample.Window{StartSeconds: 60, DurationSeconds: 0.05},
+		Audio:       &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}},
 	}
 	if mutate != nil {
 		mutate(&req)
@@ -79,7 +80,7 @@ func TestMediaSampleRefusals(t *testing.T) {
 	cases := map[string]struct {
 		body       []byte
 		authorized bool
-		paths      InputPathAuthorizer
+		sources    SourceOpener
 		status     int
 		reason     mediasample.Reason
 	}{
@@ -93,13 +94,14 @@ func TestMediaSampleRefusals(t *testing.T) {
 			r.Stats = &mediasample.StatsOutput{CropWidth: 1, CropHeight: 1, Width: 64}
 			r.Attempts = []mediasample.Attempt{{Hardware: true}}
 		}), authorized: true, status: http.StatusBadRequest, reason: mediasample.ReasonInvalidRequest},
-		"unapproved path": {body: speechRequestBody(t, nil), authorized: true, paths: denyInputPaths{}, status: http.StatusBadRequest},
+		"refused source": {body: speechRequestBody(t, nil), authorized: true, sources: refuseSources{}, status: http.StatusBadRequest},
+		"no grant":       {body: speechRequestBody(t, func(r *mediasample.Request) { r.SourceGrant = "" }), authorized: true, status: http.StatusBadRequest},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			server.inputPaths = allowInputPaths{}
-			if tc.paths != nil {
-				server.inputPaths = tc.paths
+			server.sources = &grantPathSources{}
+			if tc.sources != nil {
+				server.sources = tc.sources
 			}
 			rec := postMediaSample(t, server, tc.body, tc.authorized)
 			if rec.Code != tc.status {
@@ -130,8 +132,8 @@ func TestMediaSampleReportsSamplingFailure(t *testing.T) {
 	// The client turns the refusal into a RemoteError the caller can classify.
 	node := httptest.NewServer(server.router())
 	defer node.Close()
-	_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, testSecret,
-		mediasample.Request{Input: "/m.mkv", Window: &mediasample.Window{DurationSeconds: 1}, Audio: &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}}})
+	_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, nodeauthtest.SharedSecret(testSecret),
+		mediasample.Request{SourceGrant: "/m.mkv", Input: "/m.mkv", Window: &mediasample.Window{DurationSeconds: 1}, Audio: &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}}})
 	var remoteErr *mediasample.RemoteError
 	if !errors.As(err, &remoteErr) || remoteErr.Status != http.StatusUnprocessableEntity || remoteErr.Infrastructure() {
 		t.Fatalf("remote error %#v", err)
@@ -146,22 +148,23 @@ func TestMediaSampleRefusalsClassifyForFallback(t *testing.T) {
 	node := httptest.NewServer(server.router())
 	defer node.Close()
 	run := func(req mediasample.Request) *mediasample.RemoteError {
-		_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, testSecret, req)
+		_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, nodeauthtest.SharedSecret(testSecret), req)
 		var remoteErr *mediasample.RemoteError
 		if !errors.As(err, &remoteErr) {
 			t.Fatalf("error %#v", err)
 		}
 		return remoteErr
 	}
-	speech := mediasample.Request{Input: "/m.mkv", Window: &mediasample.Window{DurationSeconds: 1}, Audio: &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}}}
+	speech := mediasample.Request{SourceGrant: "/m.mkv", Input: "/m.mkv", Window: &mediasample.Window{DurationSeconds: 1}, Audio: &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}}}
 
-	// A node that cannot read the file is another node's problem, not the file's.
-	server.inputPaths = denyInputPaths{}
+	// A source the core will not give this node is another node's problem,
+	// not the file's.
+	server.sources = refuseSources{}
 	if refused := run(speech); refused.Status != http.StatusBadRequest || !refused.Infrastructure() {
-		t.Fatalf("unapproved path: %#v", refused)
+		t.Fatalf("refused source: %#v", refused)
 	}
 	// A malformed request fails the same way anywhere.
-	server.inputPaths = allowInputPaths{}
+	server.sources = &grantPathSources{}
 	bad := speech
 	bad.Window = nil
 	if refused := run(bad); refused.Status != http.StatusBadRequest || refused.Infrastructure() {

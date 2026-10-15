@@ -11,7 +11,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -111,12 +113,13 @@ func TestPrepareTransportV3SkipsAnUnreachableCurrentTranscodeNode(t *testing.T) 
 	t.Cleanup(dead.Close)
 	live := remoteTranscodeNodeStubV3(t)
 
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: 1, URL: dead.URL, Enabled: true, Healthy: true},
 		{ID: 2, URL: live.URL, Enabled: true, Healthy: true},
 	})
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
 	requireWorkerRoutingV3(handler)
@@ -161,7 +164,7 @@ func TestPrepareTransportV3RoutesAroundAnUnreachableProxy(t *testing.T) {
 			proxies.SetNodes(nodes)
 			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 			handler.JWTSecret = "test-secret"
-			handler.NodePlanner = nodepool.NewPlanner(proxies, nodepool.NewTranscodePool())
+			handler.NodePlanner = nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool())
 			handler.ProxyGrantStore = &recordingRecipeCardStoreV3{}
 
 			request := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -228,7 +231,7 @@ func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
 		return node
 	}
 	first, second := newNode(), newNode()
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: 1, URL: first.URL, Enabled: true, Healthy: true},
 		{ID: 2, URL: second.URL, Enabled: true, Healthy: true},
@@ -237,6 +240,7 @@ func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
 	file := v3HandlerFixtureFile(t)
 	file.CodecVideo, file.VideoTracks[0].Codec = "mpeg4", "mpeg4"
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true", "allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -382,10 +386,11 @@ func TestPlanningCapabilityReadsSkipUnreachableNodes(t *testing.T) {
 	t.Cleanup(dead.Close)
 	live := remoteTranscodeNodeStubV3(t)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 
 	ctx := withUnreachableRouteNodesV3(context.Background(), map[string]struct{}{dead.URL: {}})
-	capabilities := handler.pooledNodeCapabilitiesV3(ctx, []string{dead.URL, live.URL})
+	capabilities := handler.pooledNodeCapabilitiesV3(ctx, nodeauth.TargetTranscode, []string{dead.URL, live.URL})
 	if _, ok := capabilities[live.URL]; !ok {
 		t.Fatalf("capabilities = %v, want the live node's inventory", capabilities)
 	}

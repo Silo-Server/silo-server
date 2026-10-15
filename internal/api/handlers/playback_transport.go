@@ -47,7 +47,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpRequest, nodeURL, h.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(httpRequest, nodeURL, h.NodeKeys); err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, err
 	}
 	response, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpRequest, "transcode_start")
@@ -112,8 +112,11 @@ func remoteAutoFallbackPossibleV3(request transcodenode.TranscodeStartRequest) b
 		!strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), "copy")
 }
 
-func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {
-	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, jwtSecret)
+// fetchRemoteNodeCapabilities reads the capability report of the worker of kind
+// target at nodeURL. The caller names the kind it holds the node as; the
+// keyring refuses a target that is not registered at that URL.
+func fetchRemoteNodeCapabilities(ctx context.Context, target nodeauth.Target, nodeURL string, nodeKeys nodeauth.Keyring) (playback.HWAccelInfo, error) {
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, target, nodeKeys)
 	if err != nil {
 		return playback.HWAccelInfo{}, err
 	}

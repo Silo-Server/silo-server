@@ -90,6 +90,7 @@ func TestPrepareRemoteTransportV3DispatchesTheNodesEffectiveBackend(t *testing.T
 			defer node.Close()
 
 			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.NodeKeys = testNodeKeys
 			handler.JWTSecret = "test-secret"
 			handler.PlaybackConfig = func() config.PlaybackConfig {
 				return config.PlaybackConfig{TranscodeEnabled: true, HWAccel: test.cluster}

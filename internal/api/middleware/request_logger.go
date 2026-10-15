@@ -21,7 +21,9 @@ import (
 func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			for _, prefix := range []string{"/api/v1/health", "/api/v1/ready", "/api/v1/admin/logs", APIv2Prefix} {
+			// Transcode nodes call /api/internal/nodes/ every second; a
+			// record per report or log shipment would bury everything else.
+			for _, prefix := range []string{"/api/v1/health", "/api/v1/ready", "/api/v1/admin/logs", APIv2Prefix, "/api/internal/nodes/"} {
 				if strings.HasPrefix(r.URL.Path, prefix) {
 					next.ServeHTTP(w, r)
 					return

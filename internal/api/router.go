@@ -56,9 +56,12 @@ import (
 	metatrakt "github.com/Silo-Server/silo-server/internal/metadata/trakt"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodecontrol"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -174,6 +177,17 @@ type Dependencies struct {
 	TranscodePool            *nodepool.TranscodePool         // transcode node pool (may be nil)
 	NodePlanner              *nodepool.Planner               // group/cap-aware node selection (may be nil)
 	NodeHealthChecker        *nodepool.HealthChecker         // periodic node health/capability sweep (may be nil)
+	// NodeKeyRegistry holds every stream node's credential; the admin key
+	// operation reloads it after issuing a key. nil without stream nodes.
+	NodeKeyRegistry *nodepool.KeyRegistry
+	// NodeKeys signs every call to a stream node: a transcode node's own key,
+	// the shared secret for a proxy. nil leaves those calls unsigned, which
+	// only tests do.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants mints the source grant every piece of transcode-node work
+	// carries, and verifies the grants nodes present. nil without stream
+	// nodes.
+	SourceGrants *nodesource.Grants
 	// NodeCapabilityInvalidator drops one node's cached capability inventory
 	// outside the playback handler — the prepared-download preparer holds its
 	// own. nil where downloads are not wired; set before NewRouter runs.
@@ -225,6 +239,7 @@ type Dependencies struct {
 	OpsLogRepo                *opslog.Repo
 	FFmpegLogSink             playback.FFmpegLogSink
 	RedisClient               *redis.Client              // for session listing (may be nil)
+	StreamDeny                *playback.StreamDeny       // the process's deny marker store (see sharedStreamDeny); nil builds one from RedisClient
 	TaskManager               *taskmanager.TaskManager   // task manager (may be nil)
 	ArtifactManager           *downloads.ArtifactManager // download prepare-to-file pipeline (may be nil)
 	AdminJobCancelRegistry    *adminjob.CancelRegistry
@@ -399,6 +414,18 @@ type sealedHandler struct {
 }
 
 func (s sealedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.h.ServeHTTP(w, r) }
+
+// sharedStreamDeny is the deny marker store the router's relays and node
+// control check: the process's own when the caller supplied one, otherwise
+// one over client, and nil without either. The process's value is shared with
+// the Jellyfin handlers built outside the router, so a marker this replica
+// could only cache (its Redis write failed) refuses on every surface here.
+func sharedStreamDeny(deny *playback.StreamDeny, client *redis.Client) *playback.StreamDeny {
+	if deny != nil {
+		return deny
+	}
+	return playback.NewStreamDeny(client)
+}
 
 // NewRouter builds the API listener's handler: the base middleware stack, every
 // route under /api/v1/, and the version-neutral paths registered beside it.
@@ -1317,6 +1344,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// realtime hub and session manager are in scope; nil when playback is off.
 	var subtitleAINotifier *playback.SubtitleReadyNotifier
 
+	// The stream deny marker revokes a stopped session's tokens on every
+	// replica. Nil-safe: without Redis a stopped session serves from a valid
+	// token until the token expires, as before.
+	streamDeny := sharedStreamDeny(deps.StreamDeny, deps.RedisClient)
+
 	// Build playback handler if session manager is available.
 	var playbackHandler *handlers.PlaybackHandler
 	var adminPlaybackControlHandler *handlers.AdminPlaybackControlHandler
@@ -1350,10 +1382,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				playbackHandler.InstallationID = installationID
 			}
 		}
-		// The stream deny marker revokes a stopped session's tokens on every
-		// replica. Nil-safe: without Redis a stopped session serves from a valid
-		// token until the token expires, as before.
-		playbackHandler.StreamDeny = playback.NewStreamDeny(deps.RedisClient)
+		playbackHandler.StreamDeny = streamDeny
 		// Maintenance also bounds the in-memory fallback store: without it a
 		// DB-less deployment accumulates attempts and replans forever.
 		playbackHandler.StartV3Maintenance(deps.AppContext)
@@ -1400,6 +1429,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		if deps.Config != nil && deps.Config.Auth.JWTSecret != "" {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
+		}
+		playbackHandler.NodeKeys = deps.NodeKeys
+		if deps.SourceGrants != nil {
+			playbackHandler.SourceGrants = deps.SourceGrants
 		}
 		// Hand proxy nodes the recipes they serve header-authenticated sessions
 		// from, so an attempt that negotiated authorized media origins egresses
@@ -2834,11 +2867,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminCatalogSources = catalogSeedHandler
 		v2deps.AdminCatalogTransfer = catalogSeedHandler
 	}
-	systemJWTSecret := ""
-	if deps.Config != nil {
-		systemJWTSecret = deps.Config.Auth.JWTSecret
-	}
-	v2deps.AdminHardwareAcceleration = handlers.NewSystemHandler(deps.TranscodePool, systemJWTSecret, func() (string, string, string) {
+	v2deps.AdminHardwareAcceleration = handlers.NewSystemHandler(deps.TranscodePool, deps.NodeKeys, func() (string, string, string) {
 		cfg := deps.CurrentConfig()
 		if cfg == nil {
 			return "", "", ""
@@ -2858,15 +2887,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.AdminServerRestart = serverControlHandler
 	var nodeHandler *handlers.NodeHandler
 	if deps.NodeRepo != nil {
-		jwtSecret := ""
-		if deps.Config != nil {
-			jwtSecret = deps.Config.Auth.JWTSecret
-		}
-		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
+		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, deps.NodeKeys)
 		v2deps.AdminNodesRead = nodeHandler
 		v2deps.AdminNodeCommands = nodeHandler
 		v2deps.AdminNodeDrain = nodeHandler
 		v2deps.AdminNodeReload = nodeHandler
+		nodeHandler.SetRecipeAuthority(noderecipe.NewStore(deps.RedisClient, 0))
 		// Network access admin operations fan out to every enabled proxy node
 		// over its bearer routes, the same way force-reload does.
 		if deps.PluginService != nil {
@@ -2875,6 +2901,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			nodeHandler.SetConfigurationStore(nodepool.NewAdminConfigurationStore(deps.DB))
 			v2deps.AdminNodeConfiguration = nodeHandler
+		}
+		if deps.SecretCipher != nil {
+			nodeRepo, cipher := deps.NodeRepo, deps.SecretCipher
+			nodeHandler.SetNodeKeyIssuance(func(ctx context.Context, id int) (string, error) {
+				return nodeRepo.IssueNodeKey(ctx, cipher, id)
+			}, deps.NodeKeyRegistry)
+			v2deps.AdminNodeKeys = nodeHandler
 		}
 	}
 	var rateLimitHandler *handlers.RateLimitHandler
@@ -4579,16 +4612,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 							// System inspection.
 							{
-								sysJWTSecret := ""
-								if deps.Config != nil {
-									sysJWTSecret = deps.Config.Auth.JWTSecret
-								}
 								// Read per request, not captured: playback
 								// settings hot reload, and a probe against the
 								// values this process started with would show an
 								// operator a result for the configuration they
 								// just replaced.
-								systemHandler := handlers.NewSystemHandler(deps.TranscodePool, sysJWTSecret,
+								systemHandler := handlers.NewSystemHandler(deps.TranscodePool, deps.NodeKeys,
 									func() (string, string, string) {
 										cfg := deps.CurrentConfig()
 										if cfg == nil {
@@ -4762,10 +4791,78 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 	})
 
+	// Transcode nodes call these with their own key, never with a user
+	// credential, so they sit outside every auth group. They work on any API
+	// replica: nothing a later request depends on stays in this process.
+	if deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil {
+		nodeControlOptions := nodecontrol.Options{
+			Nodes:      deps.NodeRepo,
+			Identities: deps.NodeKeyRegistry,
+			Settings:   nodeConfigSettings(settingsRepo),
+			Redis:      deps.RedisClient,
+			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
+			Events:     deps.EventBus,
+			// Resolve verifies the stream tokens nodes no longer hold the
+			// secret for, against the recipes and deny markers playback
+			// writes.
+			StreamSecret: func() string {
+				if cfg := deps.CurrentConfig(); cfg != nil {
+					return cfg.Auth.JWTSecret
+				}
+				return ""
+			},
+			Recipes: noderecipe.NewStore(deps.RedisClient, 0),
+		}
+		if deps.SourceGrants != nil {
+			nodeControlOptions.Grants = deps.SourceGrants
+		}
+		// A nil *StreamDeny must not become a non-nil DenySource.
+		if streamDeny != nil {
+			nodeControlOptions.Deny = streamDeny
+		}
+		if deps.DB != nil {
+			nodeControlOptions.Logs = opslog.NewConsumer(deps.DB, deps.LogStreamHub)
+			nodeControlOptions.Files = scanner.NewFileRepository(deps.DB)
+			nodeControlOptions.Themes = themesongs.NewRepository(deps.DB)
+		}
+		nodeControl := nodecontrol.NewServer(nodeControlOptions)
+		r.Route("/api/internal/nodes/self", func(r chi.Router) {
+			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
+			r.Get("/config", nodeControl.HandleConfig)
+			r.Post("/report", nodeControl.HandleReport)
+			r.Post("/logs", nodeControl.HandleLogs)
+			r.Post("/health-changed", nodeControl.HandleHealthChanged)
+			r.Post("/resolve", nodeControl.HandleResolve)
+			r.Post("/sources/open", nodeControl.HandleSourceOpen)
+		})
+		// Source bytes for nodes with core source access. The grant, in the
+		// nodesource.HeaderSourceGrant header so no access log records it, is
+		// the authority: nothing here reads the catalog.
+		r.Route("/api/internal/nodes/sources", func(r chi.Router) {
+			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
+			r.Get("/", nodeControl.HandleSource)
+			r.Head("/", nodeControl.HandleSource)
+		})
+	}
+
 	if nodeHandler != nil {
 		nodeHandler.StartConfigurationReconciliation(deps.AppContext)
 	}
 	return r
+}
+
+// nodeConfigSettings reads the server settings a transcode node's
+// configuration is built from, as the node's database watcher read them: the
+// staged storage transition belongs to storage recovery, not to Config.
+func nodeConfigSettings(settings catalog.SettingsStore) func(context.Context) (map[string]string, error) {
+	return func(ctx context.Context) (map[string]string, error) {
+		all, err := settings.GetAll(ctx)
+		if err != nil {
+			return nil, err
+		}
+		delete(all, config.StorageTransitionTargetKey)
+		return all, nil
+	}
 }
 
 // overlayOrigins returns the source of connected overlay origins the
@@ -4814,7 +4911,16 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	}
 }
 
+// nodeControlPrefix is the path prefix of the routes transcode nodes call.
+const nodeControlPrefix = "/api/internal/nodes/"
+
 func skipNativeMediaCompression(r *http.Request) bool {
+	// The node control routes stay identity-encoded too: a configuration
+	// response carries a strong ETag that names exactly one representation,
+	// and the media a node reads must reach it as stored.
+	if strings.HasPrefix(r.URL.Path, nodeControlPrefix) {
+		return true
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}

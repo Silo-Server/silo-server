@@ -65,7 +65,8 @@ flowchart LR
   end
   RA -- "publish snapshot" --> R[("Redis<br/>silo:stelem:snap:PUBLISHER<br/>silo:stelem:roster")]
   RP -- "publish snapshot" --> R
-  RT -- "publish snapshot" --> R
+  RT -- "report every 1 s" --> RA
+  RA -- "write as node:ID" --> R
   R -- "reads roster + all snapshots" --> M["BuildGlobalView — pure<br/>complete | degraded"]
   M --> V["ViewCache<br/>read-driven TTL, single-flight"]
   V --> E["GET /api/v1/admin/stream-telemetry/parity<br/>CompareLiveSessions"]
@@ -251,10 +252,14 @@ serving through is a P0 decision — a fail-closed download policy belongs to P1
 ### 2.3 Transport: a `SnapshotStore` in every mode, never `nil`
 
 An explicit `SnapshotStore` interface with a **local in-process implementation** rather
-than `nil`, plus a Redis implementation. Every publisher — each API replica, each
-proxy, each transcode node — publishes under a **random process-unique instance id**,
-with logical node identity carried as a separate field. A node hash derived from
-`nodeURL` is not process identity: instances sharing a public URL collide.
+than `nil`, plus a Redis implementation. Every publisher — each API replica and each
+proxy — publishes under a **random process-unique instance id**, with logical node
+identity carried as a separate field. A node hash derived from `nodeURL` is not
+process identity: instances sharing a public URL collide. A transcode node has no
+Redis: it posts its snapshot to the core with its report every second, and the core
+writes it as a full replace under the publisher id `node:<node id>`, using its own
+clock for the roster and clamping the node's timestamps
+([transcode nodes](../architecture/transcode-nodes.md#reports)).
 
 Stated plainly here and in the code: **synchronous admission remains per-process; this
 is a cross-replica backstop, not a replacement for it.**
@@ -280,8 +285,8 @@ client progress timestamp enters enforcement.
 **Producer activity does not live on the `LogicalSession`.** A transcode job counts
 toward neither the cap nor viewer bytes. A `JobView` is the natural carrier but is
 **deferred without a phase** (§6): a live job snapshot cannot count jobs *started* over
-a window, and the node request carries only a transport session id with no canonical
-owner.
+a window. (The node start request now names the job's owner, `playback_session_id`,
+`user_id` and `profile_id`, so an owner is no longer what is missing.)
 
 ### 2.5 The global view — as built
 
@@ -345,7 +350,8 @@ ABS families are enrolled. **Consumers must not derive per-user aggregates, caps
 deltas from an incomplete view.**
 
 **A publisher that cannot reach Redis never joins the roster.** It is invisible to the
-view rather than degrading it; P1 must not read that as safe completeness.
+view rather than degrading it; P1 must not read that as safe completeness. A transcode
+node whose reports stop reaching the core is the same case.
 
 **Election, when P1 needs it, must be fenced.** A total order only agrees on identical
 inputs, so deterministic victim ordering is a tie-break *within* an epoch and not a
@@ -419,7 +425,7 @@ authorization, then starts a transcode, and can still 404.
 |---|---:|---|---|
 | `native` | 18 | `viewer_egress` | handler attachment |
 | `proxy` | 22 | `viewer_egress` | verified stream token |
-| `transcode_node` | 8 | **`internal_relay`** | forwarded token, else `node-transport:<id>` |
+| `transcode_node` | 8 | **`internal_relay`** | playback session from the start request or the core's resolution |
 | `jellycompat` | 24 | `viewer_egress` | compat play session |
 | `abs` | 22 | `viewer_egress` | ABS session id / abs user / feed owner |
 
@@ -434,13 +440,14 @@ classified for the same reason: they serve almost no bytes but **issue a further
 capability**.
 
 **The transcode node publishes a correlation key and nothing else** — no subject, no
-profile, no viewer IP, no client. A node cannot know who is watching: its start request
-carries no user, profile or media ownership fields at all. Its capture hook must never
+profile, no viewer IP, no client. Its start request names the playback session's owner
+for its session records, but the viewer-facing edge alone attributes bytes to a viewer,
+and the node cannot see the viewer at all. Its capture hook must never
 fall back to the generic capture, which would record the *proxy's* address as a viewer
 IP. The node's URL `{session_id}` is the transcode **transport** id, not the canonical
-session id; the canonical id is resolved from the forwarded `X-Silo-Stream-Token`, and
-otherwise falls back to `node-transport:<id>` rather than joining a session it cannot
-prove.
+session id; the canonical id is the playback session id the start request names, or the
+one the core resolves for a rebuilt session or a progressive remux. The node reads no
+token.
 
 **The rule: viewer bytes and viewer IP are owned exclusively by the outermost
 viewer-facing edge.** Proxy→node hops, proxy artifact relays and download-prepare
@@ -625,7 +632,7 @@ its input.
 | Projection | Written by | Read by |
 |---|---|---|
 | `playback_sessions_sync` (Postgres) | `internal/worker/reconciler.go` from `playback.SessionManager` | `GET /api/v1/admin/sessions`, `active_streams` in `admin_stats.go` |
-| `silo:sessions:{nodeHash}:{sessionID}` (Redis, 60s TTL, 30s refresh) | `internal/nodesessions` on each proxy and transcode node | `GET /api/v1/admin/node-sessions` |
+| `silo:sessions:{nodeHash}:{sessionID}` and `silo:sessions:n{nodeID}:{sessionID}` (Redis, 60s TTL) | `internal/nodesessions`: each proxy writes the first (30s refresh); the API writes the second from each transcode node's report (every second) | `GET /api/v1/admin/node-sessions` |
 
 **The cached view.** `BuildGlobalView` measured **347 ms at 50,000 sessions**, so it can
 neither run at sweep frequency nor be rebuilt per request. `streamtelemetry.ViewCache`
@@ -812,6 +819,12 @@ error clears it and forces a full publish; a periodic full publish bounds drift 
 without a reported error. `Leave` atomically removes the publisher from the roster and
 deletes its snapshot; shutdown stops the collector first so a final sweep cannot re-add
 it.
+
+A transcode node's snapshot is written by the core that receives its report, not by
+the node: every report replaces the `node:<node id>` hash in full, with no delta
+digests and no process-local state, so any API replica can write it. The report is
+fenced on the node's `(boot_id, seq)` first, so a replayed or delayed report never
+overwrites a newer one.
 
 **Encoding** is versioned JSON with explicit field tags; all times are signed Unix
 nanoseconds with zero reserved for the zero `time.Time`. Version 1 is additive: fields

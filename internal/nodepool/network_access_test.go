@@ -118,7 +118,7 @@ func TestHealthCheckerStoresNetworkAccessFromTheHealthPull(t *testing.T) {
 	block.Store(&report)
 	pool := NewProxyPool()
 	pool.SetNodes([]*Node{{ID: 9, Name: "proxy-1", URL: url, Enabled: true}})
-	checker := NewHealthChecker(pool, NewTranscodePool(), nil)
+	checker := NewHealthChecker(pool, newKeyedTranscodePool(), nil)
 
 	checker.checkAll(context.Background())
 

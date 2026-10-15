@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
@@ -242,7 +243,7 @@ func TestNetworkAccessProxyReportsOriginTheAPIStores(t *testing.T) {
 	})
 
 	// --- API fan-out --------------------------------------------------------
-	nodeHandler := handlers.NewNodeHandler(nodeRepo, nil, nil, nodeRepo, bus, nil, jwtSecret)
+	nodeHandler := handlers.NewNodeHandler(nodeRepo, nil, nil, nodeRepo, bus, nil, nodeauthtest.SharedSecret(jwtSecret))
 	apiService.SetNetworkAccessNodes(nodeHandler)
 
 	waitFor(t, "proxy resident running", 60*time.Second, func() bool {

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 
 	"github.com/google/uuid"
@@ -53,13 +54,15 @@ func (a PreparedArtifact) Remote() bool {
 // implementation calls playback.PrepareFile and returns a local path; pooled
 // implementations may return an opaque remote locator instead.
 type EncodePreparer interface {
-	PrepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error)
+	// PrepareFile encodes source, the media file opts reads, into one
+	// artifact.
+	PrepareFile(ctx context.Context, artifactID string, source *models.MediaFile, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error)
 }
 
 type playbackPreparer struct{}
 
 // PrepareFile produces one finalized local download artifact.
-func (playbackPreparer) PrepareFile(ctx context.Context, _ string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
+func (playbackPreparer) PrepareFile(ctx context.Context, _ string, _ *models.MediaFile, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
 	observer := prepareObserverFrom(ctx)
 	observer.prepareWorker(nil, "")
 	opts.PrepareProgressSink = observer
@@ -106,6 +109,7 @@ type ArtifactManager struct {
 	notify               ArtifactNotifier
 	remoteRecoveryBudget time.Duration
 	remoteCleanupBudget  time.Duration
+	nodeKeys             nodeauth.Keyring
 
 	mu             sync.Mutex
 	kick           func()
@@ -965,7 +969,7 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		// A preparer without placement only writes here.
 		err = ErrStorageFull
 	} else {
-		prepared, err = m.preparer.PrepareFile(withPrepareObserver(hbCtx, observer), remoteAttemptID, opts, a.OutputPath)
+		prepared, err = m.preparer.PrepareFile(withPrepareObserver(hbCtx, observer), remoteAttemptID, file, opts, a.OutputPath)
 	}
 	if err != nil {
 		if prepared.Remote() {

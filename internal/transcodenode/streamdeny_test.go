@@ -19,8 +19,9 @@ import (
 
 // unreachableStreamDeny returns a marker store whose Redis never answers, so
 // Deny populates only the in-process cache and every other lookup fails open.
-// That is enough to prove the serve paths consult the marker before serving or
-// reconstructing, without a Redis in the test environment.
+// The node checks no marker itself; the test core it resolves through does,
+// and that is enough to prove a denied session is neither rebuilt nor
+// remuxed, without a Redis in the test environment.
 func unreachableStreamDeny(t *testing.T) *playback.StreamDeny {
 	t.Helper()
 	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:0", DialTimeout: 50 * time.Millisecond, MaxRetries: -1})
@@ -43,7 +44,7 @@ func nodeRequest(t *testing.T, server *Server, method, path, token string) *http
 func TestStreamDenyRefusesHLSServeAndReconstruction(t *testing.T) {
 	server := newTestServer(t)
 	deny := unreachableStreamDeny(t)
-	server.SetStreamDeny(deny)
+	server.useCoreDeny(deny)
 	deny.Deny(t.Context(), "denied-transport")
 
 	for _, path := range []string{"/transcode/denied-transport/master.m3u8", "/transcode/denied-transport/segment/seg_00001.m4s"} {
@@ -81,7 +82,7 @@ func TestStreamDenyRefusesProgressiveRemuxBeforeFFmpeg(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }
 	deny := unreachableStreamDeny(t)
-	server.SetStreamDeny(deny)
+	server.useCoreDeny(deny)
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -98,7 +99,7 @@ func TestStreamDenyRefusesProgressiveRemuxBeforeFFmpeg(t *testing.T) {
 		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
-	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	server.useCoreRecipes(&stubRecipeStore{card: &card, ok: true})
 	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
 	if err != nil {
 		t.Fatal(err)

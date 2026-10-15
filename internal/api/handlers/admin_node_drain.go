@@ -28,8 +28,9 @@ var (
 // SetAdminNodeDrain asks a transcode node to drain, or lifts the request. The
 // node stays in the pools, health-checked, but takes no new work while its
 // sessions finish. This server's pools change before it returns; the
-// node_pool_changed event moves the other API servers and the node itself,
-// which rereads its own row.
+// node_pool_changed event moves the other API servers. The node reads the
+// request in its configuration, which a change pushes to it at once through
+// /admin/reload-config rather than leaving it to the node's next poll.
 func (h *NodeHandler) SetAdminNodeDrain(ctx context.Context, id int, requested bool) (*nodepool.Node, error) {
 	if h == nil || h.repo == nil {
 		return nil, ErrAdminNodesUnavailable
@@ -45,11 +46,17 @@ func (h *NodeHandler) SetAdminNodeDrain(ctx context.Context, id int, requested b
 	if node.Type != nodepool.NodeTypeTranscode {
 		return nil, ErrNodeNotDrainable
 	}
+	changed := node.DrainRequested != requested
 	node, err = repo.SetDrainRequested(ctx, id, requested)
 	if err != nil {
 		return nil, err
 	}
 	h.reloadPools(ctx)
 	h.configurationChanged()
+	if changed {
+		// Best effort and off the request: a node that misses the push reads
+		// the request at its next poll.
+		go h.reloadNodeConfig(context.WithoutCancel(ctx), node)
+	}
 	return node, nil
 }

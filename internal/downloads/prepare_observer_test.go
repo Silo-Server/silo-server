@@ -10,7 +10,10 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -58,17 +61,17 @@ type progressRemotePreparer struct {
 	polls       int
 }
 
-func (p *progressRemotePreparer) Prepare(ctx context.Context, nodeURL, secret string, req downloadprepare.Request) (downloadprepare.Result, error) {
+func (p *progressRemotePreparer) Prepare(ctx context.Context, nodeURL string, keys nodeauth.Keyring, req downloadprepare.Request) (downloadprepare.Result, error) {
 	select {
 	case <-p.polled:
 	case <-ctx.Done():
 		return downloadprepare.Result{}, ctx.Err()
 	case <-time.After(5 * time.Second):
 	}
-	return p.recordingRemotePreparer.Prepare(ctx, nodeURL, secret, req)
+	return p.recordingRemotePreparer.Prepare(ctx, nodeURL, keys, req)
 }
 
-func (p *progressRemotePreparer) Progress(_ context.Context, _, _, artifactID string) (downloadprepare.Progress, error) {
+func (p *progressRemotePreparer) Progress(_ context.Context, _ string, _ nodeauth.Keyring, artifactID string) (downloadprepare.Progress, error) {
 	p.mu.Lock()
 	p.polls++
 	polls := p.polls
@@ -92,11 +95,12 @@ func fastRemoteProgressPolls(t *testing.T) {
 
 func singleNodePreparer(t *testing.T, remote downloadprepare.RemotePreparer) *NodeAwarePreparer {
 	t.Helper()
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{{ID: 17, Name: "gpu-01", URL: "http://gpu-01", Enabled: true, Healthy: true}})
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "secret"
 	p := NewNodeAwarePreparer(&recordingEncodePreparer{}, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p.SetNodeKeys(nodeauthtest.SharedSecret("secret"))
 	p.remote = remote
 	return p
 }
@@ -107,7 +111,7 @@ func TestNodeAwarePreparerReportsNodeAndRelaysProgress(t *testing.T) {
 	p := singleNodePreparer(t, remote)
 	observer := &recordingPrepareObserver{}
 	opts := playback.TranscodeOpts{InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac"}
-	if _, err := p.PrepareFile(withPrepareObserver(context.Background(), observer), "artifact-1", opts, "/local/a.mp4"); err != nil {
+	if _, err := p.PrepareFile(withPrepareObserver(context.Background(), observer), "artifact-1", testPrepareSource, opts, "/local/a.mp4"); err != nil {
 		t.Fatal(err)
 	}
 	workers, nodeIDs, readings, unavailable := observer.snapshot()
@@ -128,7 +132,7 @@ func TestNodeAwarePreparerMarksNodesWithoutProgressUnavailable(t *testing.T) {
 	p := singleNodePreparer(t, remote)
 	observer := &recordingPrepareObserver{}
 	opts := playback.TranscodeOpts{InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac"}
-	if _, err := p.PrepareFile(withPrepareObserver(context.Background(), observer), "artifact-2", opts, "/local/a.mp4"); err != nil {
+	if _, err := p.PrepareFile(withPrepareObserver(context.Background(), observer), "artifact-2", testPrepareSource, opts, "/local/a.mp4"); err != nil {
 		t.Fatal(err)
 	}
 	_, _, readings, unavailable := observer.snapshot()
@@ -154,7 +158,7 @@ func TestPlaybackPreparerReportsServerWorkerAndProgress(t *testing.T) {
 		InputPath: "/nonexistent/in.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
 		FFmpegPath: script, HWAccel: playback.HWAccelNone, TotalDuration: 10,
 	}
-	if _, err := NewPlaybackPreparer().PrepareFile(withPrepareObserver(context.Background(), observer), "a", opts, filepath.Join(dir, "out.mp4")); err != nil {
+	if _, err := NewPlaybackPreparer().PrepareFile(withPrepareObserver(context.Background(), observer), "a", testPrepareSource, opts, filepath.Join(dir, "out.mp4")); err != nil {
 		t.Fatal(err)
 	}
 	workers, nodeIDs, readings, _ := observer.snapshot()

@@ -119,6 +119,13 @@ writers never block and never log. Neither Redis nor Postgres is on that path.
   logging is persisted and reaches other nodes. A node that dies loses the entries
   still in its buffer, including the record that `log.Fatalf` writes just before it
   exits.
+- A transcode node has no Postgres or Redis. Its consumer posts each batch (100
+  entries or every two seconds) to the core's
+  `POST /api/internal/nodes/self/logs` instead of inserting it, under the same
+  retry and drop rules, and FFmpeg output goes the same way. The core stamps
+  every entry with the authenticated node as `<name>#<id>`, clamps timestamps to
+  the last 24 hours and the next 30 seconds, inserts the batch and hands it to
+  the hub. See [transcode nodes](transcode-nodes.md#logs).
 - Earlier Silo versions pushed entries into the Redis lists `ops_log:buffer` and
   `activity_log:buffer`. Current versions never read them. Once no node runs an earlier
   version, delete both keys.

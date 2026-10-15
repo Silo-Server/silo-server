@@ -25,7 +25,9 @@ type AdminNodeDrainOutput struct{ Body AdminNodeDrain }
 // AdminNodeCapabilities describes node administration support in this build.
 type AdminNodeCapabilities struct {
 	Capability
-	Drain bool `json:"drain" doc:"Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows."`
+	Drain        bool `json:"drain" doc:"Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows."`
+	NodeKeys     bool `json:"node_keys" doc:"Transcode nodes authenticate with their own key: the key operation, and key_issued on node rows."`
+	SourceAccess bool `json:"source_access" doc:"Transcode nodes can read source media over HTTP from this server instead of a library mount: source_access on node rows and in create and update bodies."`
 }
 type AdminNodeCapabilitiesOutput struct {
 	Status       int
@@ -55,7 +57,7 @@ func registerAdminNodeDrain(reg *Registry) {
 		if reg.deps.AdminNodeDrain == nil {
 			state = StateNotConfigured
 		}
-		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true}}, nil
+		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, NodeKeys: true, SourceAccess: true}}, nil
 	})
 
 	op := func(suffix, id, summary string) Operation {

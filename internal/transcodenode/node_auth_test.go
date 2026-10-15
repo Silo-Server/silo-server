@@ -8,8 +8,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
-// The node admits only requests signed for exactly the route they reach, plus
-// the previous release's bearer while a deployment upgrades.
+// The node admits only requests signed with its own key for exactly the route
+// they reach. No sender ever held the node's key to send as a bearer, so the
+// legacy bearer is refused.
 func TestNodeRoutesRequireASignatureForTheRequest(t *testing.T) {
 	server := newTestServer(t)
 	status := func(r *http.Request) int {
@@ -40,10 +41,23 @@ func TestNodeRoutesRequireASignatureForTheRequest(t *testing.T) {
 		t.Fatalf("request signed with another secret: status %d, want 401", code)
 	}
 
-	// Remove with the legacy bearer in nodeauth.Verify.
 	legacy := httptest.NewRequest(http.MethodGet, "/status", nil)
 	legacy.Header.Set("Authorization", "Bearer "+testSecret)
-	if code := status(legacy); code != http.StatusOK {
-		t.Fatalf("legacy bearer during the upgrade window: status %d, want 200", code)
+	if code := status(legacy); code != http.StatusUnauthorized {
+		t.Fatalf("legacy bearer: status %d, want 401", code)
+	}
+}
+
+// A node started without its key refuses every authenticated request rather
+// than falling back to the shared secret, which it may still hold.
+func TestNodeWithoutAKeyRefusesSignedRequests(t *testing.T) {
+	server := newTestServer(t)
+	server.SetNodeKey("")
+	signed := httptest.NewRequest(http.MethodGet, "/status", nil)
+	nodeauthtest.Sign(t, signed, testSecret)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, signed)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("request signed with the shared secret: status %d, want 401", recorder.Code)
 	}
 }

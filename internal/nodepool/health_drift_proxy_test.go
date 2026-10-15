@@ -12,7 +12,7 @@ func newProxyCapabilityFixture(t *testing.T, node *Node, fetcher *fakeCapability
 	t.Helper()
 	proxyPool := NewProxyPool()
 	proxyPool.SetNodes([]*Node{node})
-	checker := NewHealthChecker(proxyPool, NewTranscodePool(), nil)
+	checker := NewHealthChecker(proxyPool, newKeyedTranscodePool(), nil)
 	checker.SetCapabilityFetcher(fetcher.fetch)
 	return checker, proxyPool
 }

@@ -17,7 +17,7 @@ import (
 // test never drains the queue, so it is never invoked.
 type stubQuotaPreparer struct{}
 
-func (stubQuotaPreparer) PrepareFile(_ context.Context, _ string, _ playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
+func (stubQuotaPreparer) PrepareFile(_ context.Context, _ string, _ *models.MediaFile, _ playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
 	return PreparedArtifact{OutputPath: outputPath}, nil
 }
 

@@ -309,8 +309,11 @@ signed query strings are preserved without decoding or re-encoding.
 Stop, session expiry or abort, and admin stop or terminate (v1 and v2) write the
 Redis key `silo:streamauth:<session_id>` with a TTL equal to the stream token
 lifetime. The API checks it before it serves or reconstructs a session, and the
-proxy and transcode nodes check it on every token-verified serve, so a
-still-valid token cannot revive a session on any replica. Lookups are cached in
+proxies check it on every token-verified serve. Transcode nodes read no tokens
+and no Redis: every relay to one (the API, proxies and the Jellyfin-compatible
+surface) checks the marker before it forwards a request, and the core refuses
+to rebuild a denied session for a node. A still-valid token therefore cannot
+revive a session on any replica or node. Lookups are cached in
 process for two seconds. When Redis is unavailable the check fails open with a
 warning: serving never waits on Redis. A deployment without Redis keeps the
 token TTL as its bound.

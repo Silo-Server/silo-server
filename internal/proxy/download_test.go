@@ -37,7 +37,9 @@ func newDownloadProxyServer(t *testing.T, secret string) *Server {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = secret
 	w.SetConfigForTest(cfg)
-	return NewServer(w, nil)
+	srv := NewServer(w, nil)
+	srv.SetNodeKeys(nodeauthtest.SharedSecret(secret))
+	return srv
 }
 
 func TestProxyDownloadServesAuthorizedRange(t *testing.T) {

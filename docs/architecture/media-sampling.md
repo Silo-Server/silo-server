@@ -133,6 +133,18 @@ statistics. Rules:
   with "Invalid data found when processing input", which would otherwise
   read as a broken file. This works with FFmpeg 7.1 (jellyfin-ffmpeg 7.1.4)
   and later.
+- On a transcode node that reads its source over HTTP from the core
+  ([transcode nodes](transcode-nodes.md#relayed-concat)), the input is a
+  loopback relay URL instead of a file. The list then opens with
+  `-protocol_whitelist http,tcp,pipe -format_whitelist concat -f concat -safe 0`,
+  and each entry names the bare URL followed by
+  `option protocol_whitelist http,tcp` and `option format_whitelist` with the
+  demuxers a relayed input may use, so no entry can reach another protocol or
+  demuxer. `Capabilities` checks that form separately (`relayedConcatSamples`,
+  against a loopback URL nothing listens on), and a node whose ffmpeg fails it
+  refuses a relayed `Samples` run with `422` reason `unsupported` (or
+  `capabilities` when the check itself failed). Neither reason is permanent, so
+  the caller runs the work elsewhere instead of marking the file unusable.
 
 Outputs read from ffmpeg's log run at `-loglevel repeat+info`: without
 `repeat`, ffmpeg folds identical consecutive lines into "Last message
@@ -154,8 +166,9 @@ is held as PCM. Subtitle sync is its consumer.
 `POST /media-samples/run` on the transcode-node listener runs one `Request`
 with the node's ffmpeg and returns its `Result` as JSON
 (`mediasample.RemoteClient` is the caller). The node requires a
-[signed request](worker-http-protocol.md#authentication) and an input path it is allowed to read, accepts software attempts
-only, and answers a failed run with `422` and a `RemoteFailure` whose reason is
+[signed request](worker-http-protocol.md#authentication) and a `source_grant`,
+which it opens through the core ([source access](transcode-nodes.md#source-access));
+the node replaces `input` with the source it opened. It accepts software attempts only, and answers a failed run with `422` and a `RemoteFailure` whose reason is
 the run's `Classify` cause. `RemoteError.Infrastructure` tells a caller
 whether running the request elsewhere may succeed: an unreachable node, a 5xx,
 or a node lacking a capability, but not a file that has no stream or cannot be
@@ -474,7 +487,8 @@ at the sample's keyframe and reads only it and the entry's span
   included, which also bounds the memory parsing Cues takes (a few times
   their size), and a run that finds none free skips the read. A file that is not
   Matroska, has no Cues, whose Cues leave out keyframes, or whose read is
-  skipped or stopped gets sample-time entries.
+  skipped or stopped gets sample-time entries, as does a relayed source on a
+  transcode node with core source access, which is not read in-process.
 - An entry starts at the last keyframe at or before the sample's inpoint
   (sample time plus container start, in the microseconds the list is
   written in), rounded up to the microsecond so the seek never lands on the

@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"os/exec"
@@ -15,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
 )
 
@@ -42,7 +45,7 @@ func TestPlanCopySegments(t *testing.T) {
 	// video at 10s.
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, Duration: 12, VideoEnd: 10}, nil)
 
-	plan := planCopySegments(t.Context(), plannedOpts())
+	plan := planOnly(planCopySegments(t.Context(), plannedOpts()))
 	if plan == nil {
 		t.Fatal("no plan for an eligible session")
 	}
@@ -62,7 +65,7 @@ func TestPlanCopySegments(t *testing.T) {
 // A source whose timestamps start later than zero plans the same segments.
 func TestPlanCopySegmentsForALaterStart(t *testing.T) {
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{7, 8, 9.6, 14.0, 14.4, 16.0}, VideoEnd: 17}, nil)
-	plan := planCopySegments(t.Context(), plannedOpts())
+	plan := planOnly(planCopySegments(t.Context(), plannedOpts()))
 	if plan == nil {
 		t.Fatal("no plan for a source starting at 7s")
 	}
@@ -86,7 +89,7 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			opts := plannedOpts()
 			change(&opts)
-			if plan := planCopySegments(t.Context(), opts); plan != nil {
+			if plan := planOnly(planCopySegments(t.Context(), opts)); plan != nil {
 				t.Fatalf("plan = %v, want none", plan.durations)
 			}
 		})
@@ -94,19 +97,19 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 
 	t.Run("unknown video end", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}}, nil)
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planOnly(planCopySegments(t.Context(), plannedOpts())); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("no index", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrNoIndex)
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planOnly(planCopySegments(t.Context(), plannedOpts())); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("unreadable source", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, errors.New("permission denied"))
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planOnly(planCopySegments(t.Context(), plannedOpts())); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
@@ -119,25 +122,25 @@ func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 	opts.OutputDir = t.TempDir()
 
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
+	if plan := resolvedPlan(resolveCopyPlan(t.Context(), opts)); plan != nil {
 		t.Fatal("planned while the index is being checked")
 	}
 	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
 	stubKeyframeIndex(t, verified, nil)
-	if plan := resolveCopyPlan(t.Context(), opts); plan != nil {
+	if plan := resolvedPlan(resolveCopyPlan(t.Context(), opts)); plan != nil {
 		t.Fatal("a rebuilt session switched to a keyframe playlist")
 	}
 
 	planned := plannedOpts()
 	planned.OutputDir = t.TempDir()
-	first := resolveCopyPlan(t.Context(), planned)
+	first := resolvedPlan(resolveCopyPlan(t.Context(), planned))
 	if first == nil {
 		t.Fatal("no plan with a verified index")
 	}
 	// The record stands in for the index, which a cold process may not have
 	// verified yet.
 	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	again := resolveCopyPlan(t.Context(), planned)
+	again := resolvedPlan(resolveCopyPlan(t.Context(), planned))
 	if again == nil || !slices.Equal(again.durations, first.durations) {
 		t.Fatalf("rebuilt plan = %+v, want the recorded %+v", again, first)
 	}
@@ -151,7 +154,7 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 	stubKeyframeIndex(t, verified, nil)
 	first := plannedOpts()
 	first.OutputDir = t.TempDir()
-	original := resolveCopyPlan(t.Context(), first)
+	original := resolvedPlan(resolveCopyPlan(t.Context(), first))
 	if original == nil {
 		t.Fatal("no plan with a verified index")
 	}
@@ -167,7 +170,7 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 	rebuilt := plannedOpts()
 	rebuilt.OutputDir = t.TempDir()
 	rebuilt.Reconstructed = true
-	again := resolveCopyPlan(t.Context(), rebuilt)
+	again := resolvedPlan(resolveCopyPlan(t.Context(), rebuilt))
 	if again == nil || !slices.Equal(again.durations, original.durations) || verifiedLoads != 1 {
 		t.Fatalf("rebuilt plan = %+v after %d verified loads, want the original %+v", again, verifiedLoads, original)
 	}
@@ -175,7 +178,7 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 	// A first start still doesn't wait for the check.
 	fresh := plannedOpts()
 	fresh.OutputDir = t.TempDir()
-	if plan := resolveCopyPlan(t.Context(), fresh); plan != nil || verifiedLoads != 1 {
+	if plan := resolvedPlan(resolveCopyPlan(t.Context(), fresh)); plan != nil || verifiedLoads != 1 {
 		t.Fatalf("a first start planned (%v) or waited for the check (%d loads)", plan != nil, verifiedLoads)
 	}
 }
@@ -199,13 +202,13 @@ func TestResolveCopyPlanLeavesNoRecordWhenTheRebuildIsCanceled(t *testing.T) {
 	rebuilt.Reconstructed = true
 	gone, cancel := context.WithCancel(t.Context())
 	cancel()
-	if plan := resolveCopyPlan(gone, rebuilt); plan != nil {
+	if plan := resolvedPlan(resolveCopyPlan(gone, rebuilt)); plan != nil {
 		t.Fatal("planned without the keyframe check")
 	}
 	if _, err := os.Stat(filepath.Join(rebuilt.OutputDir, copyPlanRecordFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a canceled rebuild left a plan record: %v", err)
 	}
-	if plan := resolveCopyPlan(t.Context(), rebuilt); plan == nil {
+	if plan := resolvedPlan(resolveCopyPlan(t.Context(), rebuilt)); plan == nil {
 		t.Fatal("the next rebuild didn't plan")
 	}
 }
@@ -412,4 +415,324 @@ func extinfDurations(t *testing.T, playlist []byte) []float64 {
 		}
 	}
 	return durations
+}
+
+// planOnly drops a plan's error, for tests that need only the decision.
+func planOnly(plan *copySegmentPlan, _ error) *copySegmentPlan { return plan }
+
+// resolvedPlan is planOnly for resolveCopyPlan, which also returns a node
+// session's candidate record.
+func resolvedPlan(plan *copySegmentPlan, _ string, _ error) *copySegmentPlan { return plan }
+
+// A rebuilt session whose keyframe check fails to read the source, runs out
+// of its deadline or budget, returns that error and records nothing, so a
+// later rebuild plans; a first start with the same failure keeps FFmpeg's
+// playlist, as it always has.
+func TestResolveCopyPlanRefusesToRebuildOnAReadFailure(t *testing.T) {
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	for name, failure := range map[string]error{
+		"read":     &fs.PathError{Op: "read", Path: "source", Err: errors.New("connection reset")},
+		"budget":   &fs.PathError{Op: "read", Path: "source", Err: errors.New("nodesource: source reader budget exceeded")},
+		"deadline": &fs.PathError{Op: "read", Path: "source", Err: context.DeadlineExceeded},
+	} {
+		t.Run(name, func(t *testing.T) {
+			previous := loadVerifiedKeyframeIndex
+			loadVerifiedKeyframeIndex = func(context.Context, string) (keyframes.Index, error) { return keyframes.Index{}, failure }
+			t.Cleanup(func() { loadVerifiedKeyframeIndex = previous })
+
+			rebuilt := plannedOpts()
+			rebuilt.OutputDir = t.TempDir()
+			rebuilt.Reconstructed = true
+			plan, _, err := resolveCopyPlan(t.Context(), rebuilt)
+			if plan != nil || !errors.Is(err, failure) {
+				t.Fatalf("rebuild = %v, %v; want the read failure", plan, err)
+			}
+			if _, statErr := os.Stat(filepath.Join(rebuilt.OutputDir, copyPlanRecordFile)); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("a failed rebuild left a plan record: %v", statErr)
+			}
+
+			stubKeyframeIndex(t, keyframes.Index{}, failure)
+			first := plannedOpts()
+			first.OutputDir = t.TempDir()
+			if plan, _, err := resolveCopyPlan(t.Context(), first); plan != nil || err != nil {
+				t.Fatalf("first start = %v, %v; want FFmpeg's playlist", plan, err)
+			}
+		})
+	}
+}
+
+// The plan record names the source revision it was made for. A rebuild on
+// another revision refuses it rather than serving a playlist the file no
+// longer matches; a record from before the field existed is followed.
+func TestResolveCopyPlanRecordNamesTheSourceRevision(t *testing.T) {
+	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
+	stubKeyframeIndex(t, verified, nil)
+	opts := plannedOpts()
+	opts.OutputDir = t.TempDir()
+	opts.SourceIdentity = `"file-42-100-1"`
+	first, _, err := resolveCopyPlan(t.Context(), opts)
+	if first == nil || err != nil {
+		t.Fatalf("first start = %v, %v", first, err)
+	}
+	data, err := os.ReadFile(filepath.Join(opts.OutputDir, copyPlanRecordFile))
+	if err != nil || !strings.Contains(string(data), `"source_identity":"\"file-42-100-1\""`) {
+		t.Fatalf("record %s, %v; want the source identity", data, err)
+	}
+
+	rebuilt := opts
+	rebuilt.Reconstructed = true
+	if plan, _, err := resolveCopyPlan(t.Context(), rebuilt); plan == nil || err != nil || !slices.Equal(plan.durations, first.durations) {
+		t.Fatalf("same revision = %v, %v", plan, err)
+	}
+	rebuilt.SourceIdentity = `"file-42-100-2"`
+	if plan, _, err := resolveCopyPlan(t.Context(), rebuilt); plan != nil || !errors.Is(err, ErrCopyPlanSourceChanged) {
+		t.Fatalf("another revision = %v, %v; want ErrCopyPlanSourceChanged", plan, err)
+	}
+
+	legacy := plannedOpts()
+	legacy.OutputDir = t.TempDir()
+	legacy.SourceIdentity = `"file-42-100-3"`
+	if err := os.WriteFile(filepath.Join(legacy.OutputDir, copyPlanRecordFile), []byte(`{"planned":true,"durations":[2,2]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if plan, _, err := resolveCopyPlan(t.Context(), legacy); plan == nil || err != nil || !slices.Equal(plan.durations, []float64{2, 2}) {
+		t.Fatalf("legacy record = %v, %v", plan, err)
+	}
+}
+
+// A transcode node's relayed source is indexed through its handle, under its
+// identity, and a rebuild waits for the full check.
+func TestLoadCopyKeyframeIndexReadsARelayedSourceByIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.mkv")
+	if err := os.WriteFile(path, []byte("relayed source bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := nodesourcetest.Relayed(t, path)
+	stubKeyframeIndex(t, keyframes.Index{}, errors.New("a relayed source was read by its URL as a path"))
+	var loaded []string
+	stub := func(verified bool) func(context.Context, keyframes.Source) (keyframes.Index, error) {
+		return func(ctx context.Context, source keyframes.Source) (keyframes.Index, error) {
+			loaded = append(loaded, fmt.Sprintf("%s %d %t", source.Identity, source.Size, verified))
+			r, err := source.Open(ctx)
+			if err != nil {
+				return keyframes.Index{}, err
+			}
+			defer func() { _ = r.Close() }()
+			head := make([]byte, 7)
+			if _, err := r.ReadAt(head, 0); err != nil || string(head) != "relayed" {
+				return keyframes.Index{}, fmt.Errorf("read %q: %w", head, err)
+			}
+			return keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}, VideoEnd: 10}, nil
+		}
+	}
+	previousQuick, previousVerified := loadKeyframeSource, loadVerifiedKeyframeSource
+	loadKeyframeSource, loadVerifiedKeyframeSource = stub(false), stub(true)
+	t.Cleanup(func() { loadKeyframeSource, loadVerifiedKeyframeSource = previousQuick, previousVerified })
+
+	opts := plannedOpts()
+	opts.InputPath = h.Input()
+	if plan, err := planCopySegments(t.Context(), opts); plan == nil || err != nil {
+		t.Fatalf("first start = %v, %v", plan, err)
+	}
+	opts.Reconstructed = true
+	if plan, err := planCopySegments(t.Context(), opts); plan == nil || err != nil {
+		t.Fatalf("rebuild = %v, %v", plan, err)
+	}
+	want := []string{fmt.Sprintf("%s %d false", h.Identity(), h.Size()), fmt.Sprintf("%s %d true", h.Identity(), h.Size())}
+	if !slices.Equal(loaded, want) {
+		t.Fatalf("loads %q, want %q", loaded, want)
+	}
+}
+
+// A transcode node records the plan apart from the output directory
+// (CopyPlanRecordPath). An idle reap removes the output; the rebuild that
+// follows uses the record and reads nothing of the source to verify it. A
+// fresh start on the same transport decides again and replaces the record.
+func TestResolveCopyPlanRebuildAfterIdleReapFollowsTheNodeRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.mkv")
+	if err := os.WriteFile(path, []byte("relayed source bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := nodesourcetest.Relayed(t, path)
+	stubKeyframeIndex(t, keyframes.Index{}, errors.New("a relayed source was read by its URL as a path"))
+	var quick, verified int
+	previousQuick, previousVerified := loadKeyframeSource, loadVerifiedKeyframeSource
+	loadKeyframeSource = func(context.Context, keyframes.Source) (keyframes.Index, error) {
+		quick++
+		return keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}, VideoEnd: 10}, nil
+	}
+	loadVerifiedKeyframeSource = func(context.Context, keyframes.Source) (keyframes.Index, error) {
+		verified++
+		return keyframes.Index{}, errors.New("verification reads")
+	}
+	t.Cleanup(func() { loadKeyframeSource, loadVerifiedKeyframeSource = previousQuick, previousVerified })
+
+	opts := plannedOpts()
+	opts.InputPath = h.Input()
+	opts.SourceIdentity = h.Identity()
+	opts.OutputDir = filepath.Join(t.TempDir(), "planned")
+	opts.CopyPlanRecordPath = filepath.Join(t.TempDir(), "keyframe-plans", "planned.json")
+	first, candidate, err := resolveCopyPlan(t.Context(), opts)
+	if first == nil || err != nil || candidate == "" {
+		t.Fatalf("first start = %v, %q, %v", first, candidate, err)
+	}
+	if _, err := os.Stat(opts.CopyPlanRecordPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the decision was recorded before its start succeeded: %v", err)
+	}
+	// The start succeeded (TranscodeSession.CommitCopyPlanRecord).
+	if err := os.Rename(candidate, opts.CopyPlanRecordPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(opts.OutputDir, copyPlanRecordFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the record is in the output directory too: %v", err)
+	}
+	// The idle reap removes the output directory.
+	if err := os.RemoveAll(opts.OutputDir); err != nil {
+		t.Fatal(err)
+	}
+
+	rebuilt := opts
+	rebuilt.Reconstructed = true
+	plan, _, err := resolveCopyPlan(t.Context(), rebuilt)
+	if plan == nil || err != nil || !slices.Equal(plan.durations, first.durations) {
+		t.Fatalf("rebuild after reap = %v, %v", plan, err)
+	}
+	if verified != 0 || quick != 1 {
+		t.Fatalf("rebuild read the source: %d verifications, %d quick checks", verified, quick)
+	}
+	rebuilt.SourceIdentity = `"file-1-0-0"`
+	if _, _, err := resolveCopyPlan(t.Context(), rebuilt); !errors.Is(err, ErrCopyPlanSourceChanged) {
+		t.Fatalf("rebuild on another revision = %v, want ErrCopyPlanSourceChanged", err)
+	}
+
+	// A fresh start decides again rather than following the record.
+	if err := os.WriteFile(opts.CopyPlanRecordPath, []byte(`{"source_identity":"\"other\"","planned":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, candidate, err = resolveCopyPlan(t.Context(), opts)
+	if plan == nil || err != nil || quick != 2 || candidate == "" {
+		t.Fatalf("fresh start = %v, %v after %d quick checks", plan, err, quick)
+	}
+	if err := os.Rename(candidate, opts.CopyPlanRecordPath); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt.SourceIdentity = h.Identity()
+	if plan, _, err := resolveCopyPlan(t.Context(), rebuilt); plan == nil || err != nil || verified != 0 {
+		t.Fatalf("rebuild after the fresh start = %v, %v after %d verifications", plan, err, verified)
+	}
+}
+
+// SweepCopyPlanRecords removes records unused for its age, sparing the
+// recent and the named.
+func TestSweepCopyPlanRecords(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-48 * time.Hour)
+	for _, name := range []string{"stale.json", "live.json", "fresh.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if name != "fresh.json" {
+			if err := os.Chtimes(filepath.Join(dir, name), old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if removed := SweepCopyPlanRecords(dir, map[string]struct{}{"live.json": {}}, 24*time.Hour); removed != 1 {
+		t.Fatalf("removed %d records, want 1", removed)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		t.Fatalf("records left: %v", entries)
+	}
+}
+
+// On a transcode node a replacement start shares its transport's plan record
+// with the live session it would replace. Its decision is published only
+// once its start succeeds (CommitCopyPlanRecord): a replacement that fails
+// after deciding leaves the record the live session follows, and no
+// candidate behind.
+func TestReplacementPublishesItsPlanRecordOnlyOnSuccess(t *testing.T) {
+	ffmpeg, _ := fakeFFmpeg(t)
+	records := filepath.Join(t.TempDir(), CopyPlanRecordDirName)
+	if err := os.MkdirAll(records, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	recordPath := filepath.Join(records, "transport.json")
+	const live = `{"source_identity":"\"file-1-2-3\"","planned":true,"durations":[2,2,2,2,2]}`
+	if err := os.WriteFile(recordPath, []byte(live), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	record := func() string {
+		t.Helper()
+		data, err := os.ReadFile(recordPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	opts := plannedOpts()
+	opts.FFmpegPath = ffmpeg
+	opts.HWAccel = HWAccelNone
+	opts.OutputDir = t.TempDir()
+	opts.CopyPlanRecordPath = recordPath
+	opts.SourceIdentity = `"file-1-2-3"`
+	// The replacement decides differently from the live session.
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrNoIndex)
+
+	failed, err := StartTranscode(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := record(); got != live {
+		t.Fatalf("a replacement still starting replaced the record: %s", got)
+	}
+	_ = failed.Close() // its readiness failed
+	if got := record(); got != live {
+		t.Fatalf("a failed replacement replaced the record: %s", got)
+	}
+	if entries, _ := os.ReadDir(records); len(entries) != 1 {
+		t.Fatalf("a failed replacement left %d files beside the record", len(entries))
+	}
+
+	succeeded, err := StartTranscode(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = succeeded.Close() }()
+	if err := succeeded.CommitCopyPlanRecord(); err != nil {
+		t.Fatal(err)
+	}
+	if got := record(); !strings.Contains(got, `"planned":false`) {
+		t.Fatalf("a successful replacement did not publish its decision: %s", got)
+	}
+	_ = succeeded.Close()
+	if got := record(); !strings.Contains(got, `"planned":false`) {
+		t.Fatalf("closing a committed session removed its record: %s", got)
+	}
+}
+
+// A rebuild whose keyframe check fails is ErrCopyPlanUnavailable, which a
+// later rebuild may get past; one whose record names another revision is
+// ErrCopyPlanSourceChanged alone.
+func TestStartTranscodeClassifiesARebuildsPlanFailure(t *testing.T) {
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	previous := loadVerifiedKeyframeIndex
+	loadVerifiedKeyframeIndex = func(context.Context, string) (keyframes.Index, error) {
+		return keyframes.Index{}, &fs.PathError{Op: "read", Path: "source", Err: context.DeadlineExceeded}
+	}
+	t.Cleanup(func() { loadVerifiedKeyframeIndex = previous })
+	rebuilt := plannedOpts()
+	rebuilt.OutputDir = t.TempDir()
+	rebuilt.Reconstructed = true
+	rebuilt.HWAccel = HWAccelNone
+	if _, err := StartTranscode(t.Context(), rebuilt); !errors.Is(err, ErrCopyPlanUnavailable) || errors.Is(err, ErrCopyPlanSourceChanged) {
+		t.Fatalf("a rebuild whose check timed out = %v, want ErrCopyPlanUnavailable", err)
+	}
+	rebuilt.SourceIdentity = `"file-1-2-4"`
+	if err := os.WriteFile(filepath.Join(rebuilt.OutputDir, copyPlanRecordFile), []byte(`{"source_identity":"\"file-1-2-3\"","planned":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StartTranscode(t.Context(), rebuilt); !errors.Is(err, ErrCopyPlanSourceChanged) || errors.Is(err, ErrCopyPlanUnavailable) {
+		t.Fatalf("a rebuild on another revision = %v, want ErrCopyPlanSourceChanged", err)
+	}
 }

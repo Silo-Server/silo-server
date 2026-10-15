@@ -164,7 +164,7 @@ func TestCheckNodeRejectsAnOversizedHealthBody(t *testing.T) {
 // An unreachable node reports nothing, and its stats must be cleared rather
 // than left behind: a dead node's five-minute-old CPU number reads as live.
 func TestApplyHealthClearsStatsWhenACheckCarriesNone(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://node", Enabled: true}})
 
 	pool.ApplyHealth(1, "http://node", true, 1, 0, "", []byte(`{"system":{"cpu_pct":41}}`), nil, time.Now())
@@ -200,7 +200,7 @@ func TestApplyHealthClonesStats(t *testing.T) {
 // one worker's health — and the scratch fill transcode admission reads — onto
 // the replacement, and it would stay there until a later sweep.
 func TestApplyHealthIgnoresAResultForAReplacedWorker(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://replacement", Enabled: true}})
 
 	pool.ApplyHealth(1, "http://original", true, 7, 0, "", []byte(`{"system":{"cpu_pct":41}}`), nil, time.Now())
@@ -214,7 +214,7 @@ func TestApplyHealthIgnoresAResultForAReplacedWorker(t *testing.T) {
 // The fence must not reject the ordinary case: the pools normalize URLs and the
 // database column does not, so a trailing slash on one side is the same worker.
 func TestApplyHealthAcceptsATrailingSlashDifference(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://node/", Enabled: true}})
 
 	pool.ApplyHealth(1, "http://node", true, 3, 0, "", nil, nil, time.Now())
@@ -228,7 +228,7 @@ func TestApplyHealthAcceptsATrailingSlashDifference(t *testing.T) {
 // their fetch is bounded at two minutes — an even wider window for the row to
 // be repointed underneath them.
 func TestApplyCapabilitiesIgnoresAReportForAReplacedWorker(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://replacement", Enabled: true}})
 
 	pool.ApplyCapabilities(1, "http://original",

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -390,7 +391,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 
 	logs := newPrepareLogWriter(ctx, opts)
 	runOnce := func(runOpts TranscodeOpts) error {
-		args := buildPrepareFileArgs(runOpts, partPath)
+		args := nodesource.RestrictArgs(buildPrepareFileArgs(runOpts, partPath))
 		bin := runOpts.FFmpegPath
 		if bin == "" {
 			bin = ffmpegBinary()

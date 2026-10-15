@@ -27,10 +27,13 @@ const (
 	maxQueuedChecks = 16
 )
 
+// cacheKey names a file's revision: a local file by its path, size and
+// modification time, a Source by its identity and size.
 type cacheKey struct {
-	path    string
-	size    int64
-	modTime time.Time
+	path     string
+	identity string
+	size     int64
+	modTime  time.Time
 }
 
 type cacheEntry struct {
@@ -234,4 +237,138 @@ func storeLocked(key cacheKey, idx Index, err error) {
 			delete(indexCache.entries, entry.key)
 		}
 	}
+}
+
+// Source is a media file read through something other than its path: on a
+// transcode node with core source access, a source relayed from the core
+// (internal/nodesource), whose loopback URL changes with every job while its
+// identity stays the same.
+type Source struct {
+	// Identity names the source's revision; it keys the cache, so it must
+	// change whenever the bytes do.
+	Identity string
+	Size     int64
+	// Context ends when the source is released or withdrawn. It bounds the
+	// background check that LoadSource starts on the source's behalf.
+	Context context.Context
+	// Open opens the source for reading, bounded by ctx. Its errors, and
+	// those of the reader, are *fs.PathError (see transient).
+	Open func(ctx context.Context) (ReaderAtCloser, error)
+	// OpenSequential is Open for the full check, which reads the whole file
+	// front to back: a reader that streams it rather than fetching each
+	// block header on its own. Nil uses Open.
+	OpenSequential func(ctx context.Context) (ReaderAtCloser, error)
+}
+
+// openForCheck opens the source for the full check.
+func (s Source) openForCheck(ctx context.Context) (ReaderAtCloser, error) {
+	if s.OpenSequential != nil {
+		return s.OpenSequential(ctx)
+	}
+	return s.Open(ctx)
+}
+
+// ReaderAtCloser is random access to a Source.
+type ReaderAtCloser interface {
+	io.ReaderAt
+	io.Closer
+}
+
+// LoadSource is Load for a Source: the quick check here, the full check in the
+// background, ErrUnverified until it passes.
+func LoadSource(ctx context.Context, source Source) (Index, error) {
+	return loadSource(ctx, source, false)
+}
+
+// LoadSourceVerified is LoadVerified for a Source: it runs the full check
+// itself, stopping when ctx is done. A check that stopped, or whose reads
+// failed, returns its error and isn't cached.
+func LoadSourceVerified(ctx context.Context, source Source) (Index, error) {
+	return loadSource(ctx, source, true)
+}
+
+func loadSource(ctx context.Context, source Source, wait bool) (Index, error) {
+	if source.Identity == "" || source.Size <= 0 || source.Context == nil || source.Open == nil {
+		return Index{}, sourceError(errors.New("incomplete source"))
+	}
+	key := cacheKey{identity: source.Identity, size: source.Size}
+	if idx, err, ok := cached(key); ok && (!wait || !errors.Is(err, ErrUnverified)) {
+		return idx, err
+	}
+	if err := source.Context.Err(); err != nil {
+		return Index{}, sourceError(context.Cause(source.Context))
+	}
+	open := source.Open
+	if wait {
+		open = source.openForCheck
+	}
+	r, err := open(ctx)
+	if err != nil {
+		return Index{}, err
+	}
+	defer func() { _ = r.Close() }()
+
+	if wait {
+		idx, err := VerifyMatroska(contextReaderAt{ctx: ctx, r: r}, source.Size)
+		if err != nil && transient(err) {
+			return Index{}, err
+		}
+		idx, err = settle(idx, err)
+		store(key, idx, err)
+		return idx, err
+	}
+
+	if idx, err := ReadMatroska(contextReaderAt{ctx: ctx, r: r}, source.Size); err != nil {
+		if transient(err) {
+			return Index{}, err
+		}
+		idx, err = settle(idx, err)
+		store(key, idx, err)
+		return idx, err
+	}
+	if startCheck(key) {
+		go verifySourceInBackground(key, source)
+		return Index{}, ErrUnverified
+	}
+	if idx, err, ok := cached(key); ok {
+		return idx, err
+	}
+	return Index{}, ErrUnverified
+}
+
+// sourceError reports a Source that cannot be read as the read failure it is.
+func sourceError(err error) error {
+	return &fs.PathError{Op: "index", Path: "source", Err: err}
+}
+
+// verifySourceInBackground is verifyInBackground for a Source. The check
+// waits for its turn and runs within the source's life: a source released or
+// withdrawn meanwhile ends it, uncached, and a later playback tries again.
+func verifySourceInBackground(key cacheKey, source Source) {
+	idx, err := func() (Index, error) {
+		select {
+		case verifySlots <- struct{}{}:
+			defer func() { <-verifySlots }()
+		case <-source.Context.Done():
+			return Index{}, sourceError(context.Cause(source.Context))
+		}
+		r, err := source.openForCheck(source.Context)
+		if err != nil {
+			return Index{}, err
+		}
+		defer func() { _ = r.Close() }()
+		return VerifyMatroska(contextReaderAt{ctx: source.Context, r: r}, source.Size)
+	}()
+	if err != nil && transient(err) {
+		slog.Warn("keyframe index: check source", "component", "playback", "source", source.Identity, "error", err)
+		indexCache.Lock()
+		delete(indexCache.inFlight, key) // a later playback tries again
+		indexCache.Unlock()
+		return
+	}
+	idx, err = settle(idx, err)
+	indexCache.Lock()
+	storeLocked(key, idx, err)
+	delete(indexCache.inFlight, key)
+	indexCache.Unlock()
 }

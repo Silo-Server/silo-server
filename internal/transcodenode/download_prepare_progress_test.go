@@ -73,7 +73,7 @@ func TestDownloadPrepareProgressIsReadableWhileEncoding(t *testing.T) {
 	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
 	server.watcher.Config().Playback.HWAccel = "none"
 	body, err := json.Marshal(downloadprepare.Request{
-		ArtifactID: "attempt-1", InputPath: "/media/movie.mkv",
+		ArtifactID: "attempt-1", SourceGrant: "/media/movie.mkv", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "copy", TargetCodecAudio: "copy", AudioTrackIndex: -1,
 		TotalDuration: 120, LogSessionID: playback.DownloadPrepareLogSessionID("art-1"),
 	})

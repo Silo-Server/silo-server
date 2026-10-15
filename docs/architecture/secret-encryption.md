@@ -89,8 +89,9 @@ remaining plaintext in place:
 The backfill is safe to run repeatedly: already-encrypted values are skipped, and
 a per-row guard makes concurrent multi-node boots converge without
 double-encrypting. A failed row is logged and left as plaintext (no new exposure)
-rather than blocking boot. Proxy/transcode nodes skip the backfill; they read
-whatever the primary encrypted. No manual steps are required.
+rather than blocking boot. Proxies skip the backfill; they read whatever the
+primary encrypted. Transcode nodes hold no `SECRET_KEY` and read no encrypted
+data. No manual steps are required.
 
 ## Rollback / downgrade hazard
 
@@ -130,7 +131,9 @@ history-import admin/session tokens and temporary server-list credentials,
 subtitle provider `api_key`/`password`,
 the Jellyfin-compat session's bridged Silo access/refresh tokens
 (`jellycompat_sessions.streamapp_access_token` / `streamapp_refresh_token`),
-the ABS signing key, and an external sign-in plugin's per-identity refresh
+the ABS signing key, transcode node keys (`stream_nodes.node_key_ciphertext`, AAD
+`stream_nodes.node_key/<id>`; see
+[transcode nodes](transcode-nodes.md#node-keys)), and an external sign-in plugin's per-identity refresh
 state (`plugin_auth_identities.refresh_state`, AAD
 `plugin_auth_identities:refresh_state:<id>`; an OIDC refresh token, see
 [external-sign-in.md](external-sign-in.md#provider-re-check)). After a

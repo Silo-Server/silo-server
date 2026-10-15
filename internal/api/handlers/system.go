@@ -9,6 +9,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -32,7 +33,7 @@ type playbackSettings func() (ffmpegPath, hwAccel, hwDevice string)
 // SystemHandler serves read-only system inspection endpoints.
 type SystemHandler struct {
 	transcodePool *nodepool.TranscodePool
-	jwtSecret     string
+	nodeKeys      nodeauth.Keyring
 	playback      playbackSettings
 	buildInfo     buildinfo.Info
 	resources     resourceSampler
@@ -41,13 +42,13 @@ type SystemHandler struct {
 // NewSystemHandler creates a SystemHandler. playback supplies the current
 // playback settings on each call, so a local probe verifies the backend and
 // devices this host would transcode on right now.
-func NewSystemHandler(transcodePool *nodepool.TranscodePool, jwtSecret string, playback playbackSettings) *SystemHandler {
+func NewSystemHandler(transcodePool *nodepool.TranscodePool, nodeKeys nodeauth.Keyring, playback playbackSettings) *SystemHandler {
 	if playback == nil {
 		playback = func() (string, string, string) { return "", "", "" }
 	}
 	return &SystemHandler{
 		transcodePool: transcodePool,
-		jwtSecret:     jwtSecret,
+		nodeKeys:      nodeKeys,
 		playback:      playback,
 		buildInfo:     buildinfo.Current(),
 	}
@@ -242,7 +243,7 @@ func (h *SystemHandler) HandleBuildInfo(w http.ResponseWriter, _ *http.Request) 
 func (h *SystemHandler) fetchRemoteHWAccel(ctx context.Context, node *nodepool.Node) (playback.HWAccelInfo, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, h.remoteInventoryTimeout(node))
 	defer cancel()
-	return fetchRemoteTranscodeCapabilities(requestCtx, node.URL, h.jwtSecret)
+	return fetchRemoteNodeCapabilities(requestCtx, node.SignTarget(), node.URL, h.nodeKeys)
 }
 
 // remoteInventoryTimeout bounds one node's inventory fetch by that node's own

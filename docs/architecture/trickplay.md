@@ -207,8 +207,11 @@ the lease, and the uploads; a node only decodes and tiles
   node. A transient sampling failure also tries another node, followed by
   local extraction in `prefer_transcode_nodes` mode. Only a `permanent`
   sampling failure marks the file unusable, as it would locally.
-- Remote extraction checks the media path on the node. It does not require
-  the API server's media mount to be readable.
+- Remote extraction needs the API server to see the file: the grant each
+  request carries is minted from a stat of the media path on the API server,
+  and a file it cannot stat fails the grant, which moves the run on like an
+  unavailable node. The node then reads the file through its own mount or from
+  the API, as its [source access](transcode-nodes.md#source-access) says.
 - The request carries a hardware attempt and a software attempt; a node
   whose accelerator cannot decode drops the hardware attempt.
 

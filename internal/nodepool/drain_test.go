@@ -123,7 +123,7 @@ func TestCheckNodeReportReadsDrainStatus(t *testing.T) {
 func TestHealthSweepAppliesDrainState(t *testing.T) {
 	status := "draining"
 	url := newStatsHealthNodeFunc(t, func() string { return `{"status":"` + status + `","active_jobs":2}` })
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 7, URL: url, Type: NodeTypeTranscode, Enabled: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 
@@ -158,7 +158,7 @@ func TestHealthChecksOfOneNodeRunInOrder(t *testing.T) {
 		}
 		return `{"status":"draining"}`
 	})
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 7, URL: url, Type: NodeTypeTranscode, Enabled: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 
@@ -183,7 +183,7 @@ func TestHealthChecksOfOneNodeRunInOrder(t *testing.T) {
 // ApplyHealth, the positional writer other callers still use, must not touch a
 // drain state it was not given.
 func TestApplyHealthKeepsDrainState(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	node := transcodeNode(1, "http://tc", nil, 0)
 	node.DrainState = DrainStateDrained
 	pool.SetNodes([]*Node{node})

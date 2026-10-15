@@ -1,7 +1,9 @@
 package transcodenode
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -67,11 +70,13 @@ func signedNodeTelemetryToken(t *testing.T, sessionID, transportID, secret strin
 func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 	tests := []struct {
 		name        string
-		withToken   bool
+		identity    sessionIdentity
 		wantSession string
 	}{
-		{name: "canonical viewer session", withToken: true, wantSession: "viewer-session"},
-		{name: "transport fallback", wantSession: "node-transport:transport-session"},
+		{name: "viewer session from the start request", identity: sessionIdentity{playbackSessionID: "viewer-session"}, wantSession: "viewer-session"},
+		// A session started without one is filed under its transport, which
+		// is the playback session's own id for a jellycompat transcode.
+		{name: "no playback session", wantSession: "transport-session"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -83,12 +88,10 @@ func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			srv.mu.Lock()
-			srv.sessions[transportID] = playback.NewTranscodeSessionForTest(outputDir)
+			srv.registerSessionLocked(transportID, playback.NewTranscodeSessionForTest(outputDir), test.identity, nil)
 			srv.mu.Unlock()
-			token := ""
-			if test.withToken {
-				token = signedNodeTelemetryToken(t, "viewer-session", transportID, testSecret)
-			}
+			// A forwarded token is not read: identity comes from the start.
+			token := signedNodeTelemetryToken(t, "token-session", transportID, testSecret)
 			status, body := nodeMediaRequest(t, server, "/transcode/"+transportID+"/segment/seg1.ts", token)
 			if status != http.StatusOK || string(body) != segment {
 				t.Fatalf("segment = %d %q", status, body)
@@ -105,6 +108,62 @@ func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 				t.Fatalf("routes = %+v", session.Routes)
 			}
 		})
+	}
+}
+
+// A native transcode runs on a node under a plan-scoped transport id, and the
+// relay forwards no token for a header-authenticated attempt. The node files
+// its bytes and its session record under the viewer's playback session the
+// start request names, and creates no session of its own.
+func TestNativeTranscodeTelemetryUsesTheViewerPlaybackSession(t *testing.T) {
+	srv, registry, server := telemetryNodeServer(t)
+	tracker := nodesessions.NewLocalTracker(nil)
+	srv.tracker = tracker
+	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	const playbackSessionID = "viewer-playback-session"
+	const transportID = playbackSessionID + "-plan1234-abcd1234"
+	body, err := json.Marshal(TranscodeStartRequest{
+		SessionID: transportID, PlaybackSessionID: playbackSessionID, UserID: 7, ProfileID: "profile-1", MediaFileID: 42,
+		SourceGrant: "/media/movie.mkv",
+		InputPath:   "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body))
+	nodeauthtest.Sign(t, start, testSecret)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, start)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("start = %d %s", rr.Code, rr.Body.String())
+	}
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+
+	const segment = "native-segment-bytes"
+	if err := os.WriteFile(filepath.Join(srv.sessionOutputDir(transportID), "seg1.ts"), []byte(segment), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, got := nodeMediaRequest(t, server, "/transcode/"+transportID+"/segment/seg1.ts", "")
+	if status != http.StatusOK || string(got) != segment {
+		t.Fatalf("segment = %d %q", status, got)
+	}
+	snapshot := registry.Sweep()
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].SessionID != playbackSessionID {
+		t.Fatalf("telemetry sessions = %+v, want only %q", snapshot.Sessions, playbackSessionID)
+	}
+	records := tracker.Snapshot()
+	if len(records) != 1 {
+		t.Fatalf("session records = %+v", records)
+	}
+	if record := records[0]; record.SessionID != transportID || record.AuthUserID != 7 || record.ProfileID != "profile-1" || record.MediaFileID != 42 {
+		t.Fatalf("session record = %+v, want the transport owned by the start request's viewer", record)
+	}
+	if calls := srv.core().resolveCalls(); calls != 0 {
+		t.Fatalf("a started transcode asked the core %d times for its identity", calls)
 	}
 }
 
@@ -129,7 +188,7 @@ func TestMountedTranscodeNodeProgressiveRemuxTelemetry(t *testing.T) {
 		RoutingEgress:          string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
-	srv.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	srv.useCoreRecipes(&stubRecipeStore{card: &card, ok: true})
 	token, err := streamtoken.Sign(claims, testSecret, time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -196,33 +255,5 @@ func TestMountedTranscodeNodeUnknownSessionCreatesNothing(t *testing.T) {
 	snapshot := registry.Sweep()
 	if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 {
 		t.Fatalf("snapshot = %+v", snapshot)
-	}
-}
-
-func TestCanonicalSessionID(t *testing.T) {
-	srv := newTestServer(t)
-	const transportID = "transport-id"
-	tests := []struct {
-		name      string
-		token     string
-		want      string
-		wantClaim bool
-	}{
-		{name: "matching", token: signedNodeTelemetryToken(t, "viewer-id", transportID, testSecret), want: "viewer-id", wantClaim: true},
-		{name: "different transport", token: signedNodeTelemetryToken(t, "viewer-id", "other", testSecret), want: "node-transport:" + transportID},
-		{name: "wrong secret", token: signedNodeTelemetryToken(t, "viewer-id", transportID, "wrong"), want: "node-transport:" + transportID},
-		{name: "no header", want: "node-transport:" + transportID},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/transcode/"+transportID+"/master.m3u8", nil)
-			if test.token != "" {
-				req.Header.Set("X-Silo-Stream-Token", test.token)
-			}
-			got, claims := srv.canonicalSessionID(req, transportID)
-			if got != test.want || (claims != nil) != test.wantClaim {
-				t.Fatalf("canonical = %q, claims=%+v", got, claims)
-			}
-		})
 	}
 }

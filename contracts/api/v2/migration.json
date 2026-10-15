@@ -10,7 +10,7 @@
   "consumer_method": "Client call sites were extracted by scripts/apiv2-ledger/extract_consumers.py from web/src (this repo) and the origin/main trees of silo-apple and silo-android at the commits pinned in source_trees (re-resolve a sibling site with git show <sha>:<file> in that repo, never against a moving branch): path literals and templates passed to HTTP/WebSocket calls, plus paths built by helper functions that return a template, templates rooted at the API base URL, Kotlin buildString/const val builders, and Swift let/static let path bindings, with interpolations normalized to a wildcard and matched against inventory paths by method (scripts/apiv2-ledger/match_consumers.py). scripts/apiv2-ledger/sweep_uncredited.py then greps the last two static segments of every inventory path across all three trees and every hit not within four lines of a credited site was resolved by hand. Server-internal and compat consumers are Go URL builders and callers in this repo. Sites marked match=manual were resolved by hand where the path is assembled from variables the scripts cannot follow. Call-site files are repository-root-relative for their repo (web: src/... under web/; apple: iosApp/...; android: shared/, android-shared/, androidApp/, androidTvApp/; server: this repository root). Absence of a first-party consumer is not proof of disuse.",
   "field_reference": "internal/contractledger validates this file against migration.schema.json and reconciles it against the route inventory: listener, namespace, method, path, registration_index, handler, handler_kind, source_file, route_group, middleware_chain, auth_class, auth_traits, conditional, conditions, delegates_to (inventory empty string is null here), request_kind, response_media_kind, streams, and upgrades_websocket are copied from the inventory row and must match it, except that dynamic_plugin_proxy rows record both media kinds as dynamic_proxy; profile_required and admin_required are derived from auth_traits. Every other field is curated by hand and preserved when scripts/apiv2-ledger/build_ledger.py merges a regenerated inventory into this file.",
   "totals": {
-    "entries": 783
+    "entries": 791
   },
   "entries": [
     {
@@ -1164,6 +1164,438 @@
         "operation_id": null
       },
       "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/nodes/self/config",
+      "registration_index": 0,
+      "handler": "(*internal/nodecontrol.Server).HandleConfig",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/internal/nodes/self",
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodecontrol/protocol.go",
+          "line": 17,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Internal transcode node control route on the API listener: only transcode nodes call it, signing with their own key (node_signed, nodecontrol.RequireNode). It carries the calling node's configuration document (ETag/304). Not a client contract, so it has no /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Node-to-core control plane (internal/nodecontrol), described in x-silo-worker-protocols. Excluded from the activity log and the request logger. Inventory media kinds are heuristic and unresolved for this row. Conditionally registered: deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/nodes/self/health-changed",
+      "registration_index": 0,
+      "handler": "(*internal/nodecontrol.Server).HandleHealthChanged",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/internal/nodes/self",
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodecontrol/protocol.go",
+          "line": 20,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Internal transcode node control route on the API listener: only transcode nodes call it, signing with their own key (node_signed, nodecontrol.RequireNode). It carries the calling node's drain change, republished as node_drain_changed. Not a client contract, so it has no /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Node-to-core control plane (internal/nodecontrol), described in x-silo-worker-protocols. Excluded from the activity log and the request logger. Inventory media kinds are heuristic and unresolved for this row. Conditionally registered: deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/nodes/self/logs",
+      "registration_index": 0,
+      "handler": "(*internal/nodecontrol.Server).HandleLogs",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/internal/nodes/self",
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodecontrol/protocol.go",
+          "line": 19,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Internal transcode node control route on the API listener: only transcode nodes call it, signing with their own key (node_signed, nodecontrol.RequireNode). It carries a batch of the calling node's operational log entries. Not a client contract, so it has no /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Node-to-core control plane (internal/nodecontrol), described in x-silo-worker-protocols. Excluded from the activity log and the request logger. Inventory media kinds are heuristic and unresolved for this row. Conditionally registered: deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/nodes/self/report",
+      "registration_index": 0,
+      "handler": "(*internal/nodecontrol.Server).HandleReport",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/internal/nodes/self",
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodecontrol/protocol.go",
+          "line": 18,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Internal transcode node control route on the API listener: only transcode nodes call it, signing with their own key (node_signed, nodecontrol.RequireNode). It carries the calling node's sessions and stream telemetry, fenced on (boot_id, seq). Not a client contract, so it has no /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Node-to-core control plane (internal/nodecontrol), described in x-silo-worker-protocols. Excluded from the activity log and the request logger. Inventory media kinds are heuristic and unresolved for this row. Conditionally registered: deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/nodes/self/resolve",
+      "registration_index": 0,
+      "handler": "(*internal/nodecontrol.Server).HandleResolve",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/internal/nodes/self",
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodecontrol/protocol.go",
+          "line": 22,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Internal transcode node control route on the API listener: only transcode nodes call it, signing with their own key (node_signed, nodecontrol.RequireNode). It resolves a transport the calling node serves into its recipe and playback identity, verifying the forwarded stream token and the deny marker on the node's behalf. Not a client contract, so it has no /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Node-to-core control plane (internal/nodecontrol), described in x-silo-worker-protocols. Excluded from the activity log and the request logger. Inventory media kinds are heuristic and unresolved for this row. Conditionally registered: deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/nodes/self/sources/open",
+      "registration_index": 0,
+      "handler": "(*internal/nodecontrol.Server).HandleSourceOpen",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/internal/nodes/self",
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodesource/protocol.go",
+          "line": 11,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Internal transcode node control route on the API listener: only transcode nodes call it, signing with their own key (node_signed, nodecontrol.RequireNode). It exchanges a core-minted source grant for the approved catalog path and a renewed grant, checking the grant's node, the catalog and the file's revision; nodes call it when a job's input opens and at every renewal. Not a client contract, so it has no /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Node-to-core source access (internal/nodecontrol, grants in internal/nodesource), described in x-silo-worker-protocols. Excluded from the activity log and the request logger. Inventory media kinds are heuristic and unresolved for this row. Conditionally registered: deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/nodes/sources/",
+      "registration_index": 0,
+      "handler": "(*internal/nodecontrol.Server).HandleSource",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/internal/nodes/sources",
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodesource/protocol.go",
+          "line": 12,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Internal transcode node source route on the API listener: only transcode nodes with core source access call it, signing with their own key (node_signed, nodecontrol.RequireNode). It serves the bytes of the one file revision the grant in the X-Silo-Source-Grant header names (a header, so access logs never record it), to the node the grant names, with single and suffix ranges; it reads no catalog. Not a client contract, so it has no /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Node-to-core source access (internal/nodecontrol, grants in internal/nodesource), described in x-silo-worker-protocols. Excluded from the activity log and the request logger. Inventory media kinds are heuristic and unresolved for this row. Conditionally registered: deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/nodes/sources/",
+      "registration_index": 0,
+      "handler": "(*internal/nodecontrol.Server).HandleSource",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/api/internal/nodes/sources",
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": true,
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "delegates_to": null,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/nodesource/protocol.go",
+          "line": 12,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "maintainer_decision",
+      "disposition_rationale": "Internal transcode node source route on the API listener: only transcode nodes with core source access call it, signing with their own key (node_signed, nodecontrol.RequireNode). It serves the bytes of the one file revision the grant in the X-Silo-Source-Grant header names (a header, so access logs never record it), to the node the grant names, with single and suffix ranges; it reads no catalog. Not a client contract, so it has no /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Node-to-core source access (internal/nodecontrol, grants in internal/nodesource), described in x-silo-worker-protocols. Excluded from the activity log and the request logger. Inventory media kinds are heuristic and unresolved for this row. Conditionally registered: deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil."
     },
     {
       "listener": "api",
@@ -45373,7 +45805,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45433,7 +45865,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45486,7 +45918,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45539,7 +45971,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -45598,7 +46030,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -45651,7 +46083,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -45704,7 +46136,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45779,7 +46211,7 @@
       "handler_kind": "expression",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -45823,7 +46255,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45876,7 +46308,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45930,7 +46362,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45984,7 +46416,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -46029,7 +46461,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -46074,7 +46506,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46135,7 +46567,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46196,7 +46628,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46257,7 +46689,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46318,7 +46750,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46379,7 +46811,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46440,7 +46872,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46485,7 +46917,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46530,7 +46962,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46583,7 +47015,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46636,7 +47068,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46697,7 +47129,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46758,7 +47190,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46818,7 +47250,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46871,7 +47303,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46924,7 +47356,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46977,7 +47409,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -47030,7 +47462,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -47090,7 +47522,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47149,7 +47581,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47201,7 +47633,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47310,7 +47742,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47362,7 +47794,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47414,7 +47846,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47467,7 +47899,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47519,7 +47951,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47571,7 +48003,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47625,7 +48057,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47677,7 +48109,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47751,7 +48183,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47845,7 +48277,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47904,7 +48336,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47963,7 +48395,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48007,7 +48439,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48069,7 +48501,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48122,7 +48554,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48196,7 +48628,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48270,7 +48702,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48345,7 +48777,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 29,
+      "middleware_chain": 30,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"

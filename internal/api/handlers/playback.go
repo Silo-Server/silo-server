@@ -32,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -199,6 +200,8 @@ type PlaybackHandler struct {
 	MissingMarker          MissingFileMarker
 	NodePlanner            nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
 	JWTSecret              string                    // needed for signing stream tokens
+	NodeKeys               nodeauth.Keyring          // signs calls to transcode nodes
+	SourceGrants           nodesource.FileGranter    // grants transcode nodes their sources
 	StreamTelemetry        *streamtelemetry.Registry // local observation-only telemetry
 	// StreamDeny revokes a session's stream tokens before they expire (see
 	// docs/architecture/restart-resilient-playback.md). Nil-safe: without Redis
@@ -279,7 +282,7 @@ type PlaybackHandler struct {
 	v3ToneMapProbe       func(context.Context, string, string, string) (tonemap.Capabilities, error)
 	v3RouteNodeProbe     func(context.Context, string) bool // nil: probeRouteNodeV3
 	v3NodeCapabilitiesMu sync.Mutex
-	v3NodeCapabilities   map[string]v3NodeCapabilityCache
+	v3NodeCapabilities   map[v3NodeCapabilityKey]v3NodeCapabilityCache
 	// v3NodeProbeBudgets holds what each node last said a capability read of it
 	// costs, guarded by v3NodeCapabilitiesMu. It is kept apart from the
 	// inventory above because the two are invalidated for different reasons: an
@@ -290,13 +293,15 @@ type PlaybackHandler struct {
 	// v3NodeCapabilityInvalidations counts invalidations per node URL, guarded
 	// by v3NodeCapabilitiesMu. A probe that started before the count moved
 	// describes hardware the health sweep has already reported as changed, so
-	// its result must not be installed. See RefreshNodeCapabilitiesV3.
+	// its result must not be installed. It is kept per URL, not per signing
+	// target: an invalidation covers whatever worker answers at that address.
+	// See RefreshNodeCapabilitiesV3.
 	v3NodeCapabilityInvalidations map[string]uint64
-	// v3NodeCapabilityRefresh holds the nodes with a background refresh in
-	// flight, one at a time each. Guarded by v3NodeCapabilitiesMu, the same
+	// v3NodeCapabilityRefresh holds the inventories with a background refresh
+	// in flight, one at a time each. Guarded by v3NodeCapabilitiesMu, the same
 	// lock as the invalidation counter, so a refresh cannot release its slot in
 	// between an invalidation and that invalidation's claim on it.
-	v3NodeCapabilityRefresh map[string]struct{}
+	v3NodeCapabilityRefresh map[v3NodeCapabilityKey]struct{}
 	v3EventOnce             sync.Once
 	v3EventQueue            chan playback.RouteEventRecordV3
 	v3StartEffectsOnce      sync.Once
@@ -342,7 +347,8 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (often late-set) config/store/secret fields lazily at call time, avoiding a
 	// field-ordering hazard during router setup.
-	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.NodeKeysFn = func() nodeauth.Keyring { return h.NodeKeys }
+	h.tm.NodeRecipesFn = func() playback.NodeRecipeDeleter { return h.NodeRecipeStore }
 	h.tm.LogSinkFn = func() playback.FFmpegLogSink { return h.FFmpegLogSink }
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
 		c := h.playbackConfig()
@@ -852,6 +858,20 @@ func remoteTransportID(session *playback.Session) string {
 	return session.ID
 }
 
+// remoteTransportDenied answers 410 when the deny marker revokes the remote
+// transport a relay is about to sign a node request for. The serve lookup
+// already checked the playback session id; a plan-scoped transport has an id
+// of its own, the one the node serves, and a marker under it refuses the relay
+// as the node's own check did before the relays took it over.
+func (h *PlaybackHandler) remoteTransportDenied(w http.ResponseWriter, r *http.Request, session *playback.Session) bool {
+	transportID := remoteTransportID(session)
+	if transportID == session.ID || !h.StreamDeny.Denied(r.Context(), transportID) {
+		return false
+	}
+	writePlaybackSessionEnded(w)
+	return true
+}
+
 func (h *PlaybackHandler) closeTranscodeForSession(session *playback.Session) {
 	if session == nil {
 		return
@@ -861,6 +881,9 @@ func (h *PlaybackHandler) closeTranscodeForSession(session *playback.Session) {
 	// coexist with its predecessor until commit.
 	h.tm.CloseTranscodeSession(session.ID, "")
 	if session.TranscodeNodeURL != "" {
+		// The stop deletes the transport's stored node recipe before the
+		// node's DELETE: a buffered or retrying request would otherwise rebuild
+		// ffmpeg on the node for a transport that no longer exists.
 		h.tm.StopRemoteTranscode(remoteTransportID(session), session.TranscodeNodeURL)
 	}
 }
@@ -1245,10 +1268,6 @@ func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, se
 	// recipe card it is never a reconstruction aid, so it is revoked on every
 	// stop and abort.
 	h.deleteProxyGrantV3(ctx, session.ID)
-	// The teardown above stopped the remote job, so its stored recipe must not
-	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
-	// the node for a transport that no longer exists.
-	h.deleteNodeRecipeV3(ctx, session.TranscodeTransportID)
 }
 
 // recordStopHistory writes a stopped session to watch history and the admin
@@ -1324,10 +1343,6 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	// recipe card it is never a reconstruction aid, so it is revoked on every
 	// stop and abort.
 	h.deleteProxyGrantV3(ctx, session.ID)
-	// The teardown above stopped the remote job, so its stored recipe must not
-	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
-	// the node for a transport that no longer exists.
-	h.deleteNodeRecipeV3(ctx, session.TranscodeTransportID)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1765,6 +1780,9 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 	if transcodeSession == nil && session.TranscodeNodeURL != "" {
 		// No local session — relay to the remote transcode node, moving the
 		// transcode to another executor if that node cannot be reached.
+		if h.remoteTransportDenied(w, r, session) {
+			return
+		}
 		h.touchSessionActivity(sessionID)
 		var served bool
 		transcodeSession, served = h.relayOrRehomeTranscode(w, r, session, card, -1, "/master.m3u8")
@@ -1881,6 +1899,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 
 	transcodeSession := h.tm.GetTranscodeSession(sessionID)
 	if transcodeSession == nil && session.TranscodeNodeURL != "" {
+		if h.remoteTransportDenied(w, r, session) {
+			return
+		}
 		h.touchSessionActivity(sessionID)
 		var served bool
 		transcodeSession, served = h.relayOrRehomeTranscode(w, r, session, card, requestedSegment,
@@ -2111,7 +2132,7 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil
 	}
-	if err := nodeauth.Sign(req, transcodeNodeURL, h.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, h.NodeKeys); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil
 	}
@@ -2152,6 +2173,11 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 		return nil
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "api", transcodeNodeURL, resp.StatusCode)
+		writeTranscodeNodeUnavailable(w)
+		return nil
+	}
 
 	// The node strips "st" from the request query (kept out of node URLs/logs),
 	// so the segment/init URIs in the manifest it builds carry no token. Without
@@ -2193,7 +2219,7 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	fullSize := transcodeproxy.FullRepresentationSize(resp)
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(fullSize) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, h.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, h.NodeKeys, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "api", "error", ackErr, "playback_session_id", sessionID)
 		}
 	}

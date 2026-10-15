@@ -26,14 +26,12 @@ A node drains for either of two reasons:
 ## What a draining node does
 
 The node is `draining` when it received SIGTERM or when its own
-`stream_nodes` row carries a drain request. `nodeconfig.Watcher` reads the
-request with a one-column query of the row it matched for the acceleration
-overrides: on every config load (the 60-second poll and settings changes) and
-on every `node_pool_changed` event, which the API publishes after a drain or
-resume. The event does not reload the config, since a new config pointer makes
-starts already in flight refuse. The query is separate from the override read
-so that a node started before the API has migrated the column still reads its
-overrides; until then it reads no drain request.
+`stream_nodes` row carries a drain request. The request reaches the node as
+`drain_requested` in the configuration document the core serves it
+([transcode nodes](transcode-nodes.md#configuration)): the API asks the node to
+re-read its configuration after a drain or resume, and the node polls it every
+30 seconds. A change to `drain_requested` alone does not replace the node's
+configuration pointer, so starts already in flight are not refused.
 
 While draining, the node:
 
@@ -68,11 +66,12 @@ are unavailable while it is stopped.
 
 `GET /api/v1/health` answers `200` in every phase, with `status` `ok`,
 `draining` or `drained`. Anything else would make the node pool treat the node
-as dead and stop routing its sessions. The node publishes
-`cache.EventNodeDrainChanged` (payload: its `stream_nodes` id) when a drain
-starts, stops, and reaches drained, so every API server rechecks it at once
-instead of at its next 30-second sweep. A node that has not matched its row
-yet announces nothing and is found by the sweep.
+as dead and stop routing its sessions. When a drain starts, stops, or reaches
+drained, and when it starts with a drain already in force, the node posts
+`POST /api/internal/nodes/self/health-changed`; the core publishes
+`cache.EventNodeDrainChanged` (payload: the node's `stream_nodes` id), so every
+API server rechecks it at once instead of at its next 30-second sweep. A node
+that cannot reach the core is found by the sweep.
 
 ## What the API servers do
 

@@ -107,6 +107,15 @@ type Server struct {
 	// stamps on requests it proxies to this listener, so the access path is
 	// known here too. Nil accepts no tokens (the header is still stripped).
 	ingressTokens *netaccess.Registry
+	// nodeKeys signs relays to transcode nodes with each node's own key. Nil
+	// leaves them unsigned, which only tests do; the node refuses them.
+	nodeKeys nodeauth.Keyring
+}
+
+// SetNodeKeys wires the keyring that signs this proxy's relays to transcode
+// nodes. Call it during construction.
+func (s *Server) SetNodeKeys(keys nodeauth.Keyring) {
+	s.nodeKeys = keys
 }
 
 // SetIngressTokens wires the ingress-token registry the listener validates
@@ -828,8 +837,7 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	attachTransfer(r.Context(), claims)
-	cfg := s.watcher.Config()
-	if cfg == nil || strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
+	if s.nodeKeys == nil {
 		http.Error(w, "download unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -837,7 +845,7 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 	// wait, as the API relay does. s.httpClient waits on headers without a
 	// deadline for transcode rebuilds, which an artifact read never needs.
 	client := downloadprepare.HTTPPreparer{}
-	resp, err := client.Open(r.Context(), claims.TranscodeNode, cfg.Auth.JWTSecret, claims.DownloadArtifactID, r.Method, r.Header)
+	resp, err := client.Open(r.Context(), claims.TranscodeNode, s.nodeKeys, claims.DownloadArtifactID, r.Method, r.Header)
 	if err != nil {
 		slog.WarnContext(r.Context(), "download artifact relay failed", "component", "proxy", "artifact_id", claims.DownloadArtifactID, "node", claims.TranscodeNode, "error", err)
 		http.Error(w, "download unavailable", http.StatusBadGateway)
@@ -859,6 +867,9 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	if !downloadprepare.RelayStatusAllowed(resp.StatusCode) {
+		if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+			transcodeproxy.WarnNodeRefusedRelay(r.Context(), "proxy", claims.TranscodeNode, resp.StatusCode)
+		}
 		http.Error(w, "download unavailable", http.StatusBadGateway)
 		return
 	}
@@ -1142,7 +1153,6 @@ func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 // (never to the client): the client's own token on a token route, a
 // proxy-minted one on a grant route.
 func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, path, forwardToken string) {
-	cfg := s.watcher.Config()
 	if claims.TranscodeNode == "" {
 		http.Error(w, "no transcode node in token", http.StatusBadRequest)
 		return
@@ -1161,18 +1171,17 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if err := nodeauth.Sign(req, claims.TranscodeNode, cfg.Auth.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(req, claims.TranscodeNode, s.nodeKeys); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if isSegmentRoute {
 		transcodeproxy.PrepareRequest(req, r)
 	}
-	// Forward the verified stream token so the transcode node can self-reconstruct
-	// a lost session after its OWN restart: the token carries the full byte-affecting
-	// recipe, so the node can re-spawn ffmpeg seeked to the requested segment instead
-	// of 404ing (the integrated server already does this from the same token). The
-	// node re-verifies the token independently before trusting it.
+	// Forward the verified stream token so the transcode node can rebuild a lost
+	// session after its own restart. The node does not read it: it passes it,
+	// opaque, to the core's resolve endpoint, which verifies it and returns the
+	// recipe the node re-spawns ffmpeg from, seeked to the requested segment.
 	if forwardToken != "" {
 		req.Header.Set("X-Silo-Stream-Token", forwardToken)
 	}
@@ -1184,6 +1193,11 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "proxy", claims.TranscodeNode, resp.StatusCode)
+		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
+		return
+	}
 
 	generation := resp.Header.Get(transcodeproxy.GenerationHeader)
 	transcodeproxy.CopyResponseHeaders(w.Header(), resp.Header)
@@ -1194,7 +1208,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	}
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, claims.TranscodeNode, path, cfg.Auth.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, claims.TranscodeNode, path, s.nodeKeys, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "proxy", "error", ackErr, "playback_session_id", claims.SessionID)
 		}
 	}

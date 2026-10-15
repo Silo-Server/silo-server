@@ -15,6 +15,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -95,13 +97,17 @@ type Deps struct {
 	Subtitles  *subtitles.Manager
 	Rows       subtitleRows
 	// External stores sidecar timing corrections.
-	External   externalRows
-	Files      mediaFiles
-	Artifacts  *mediaartifact.Store
-	Settings   SettingsReader
-	Nodes      NodeSource
-	FFmpegPath func() string
-	Notifier   Notifier
+	External  externalRows
+	Files     mediaFiles
+	Artifacts *mediaartifact.Store
+	Settings  SettingsReader
+	Nodes     NodeSource
+	// NodeKeys signs requests to the nodes; without it sampling runs here.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants a node the file it samples.
+	SourceGrants nodesource.FileGranter
+	FFmpegPath   func() string
+	Notifier     Notifier
 	// Node names this server in artifact failure records.
 	Node string
 }
@@ -135,9 +141,10 @@ func NewService(d Deps) *Service {
 	s := &Service{
 		jobs: d.Jobs, rows: d.Rows, content: d.Subtitles, external: d.External, readFile: os.ReadFile,
 		files: d.Files, artifacts: d.Artifacts,
-		settings: d.Settings, sampler: newSampler(d.Settings, d.Nodes, d.FFmpegPath),
+		settings: d.Settings, sampler: newSampler(d.Settings, d.Nodes, d.NodeKeys, d.FFmpegPath),
 		notifier: d.Notifier, node: d.Node, now: time.Now,
 	}
+	s.sampler.grants = d.SourceGrants
 	if s.node == "" {
 		s.node = "silo"
 	}
@@ -731,7 +738,7 @@ func failureOf(err error) string {
 		return FailureSubtitleChanged
 	case errors.Is(err, errNoUsableAudio):
 		return FailureNoAudio
-	case errors.Is(err, errNoNode), errors.Is(err, errAnalysisBackoff),
+	case errors.Is(err, errNoNode), errors.Is(err, errAnalysisBackoff), errors.Is(err, nodesource.ErrSourceChanged),
 		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return FailureUnavailable
 	}
@@ -795,7 +802,7 @@ func (s *Service) speech(ctx context.Context, file *models.MediaFile, language s
 		if decoded != nil {
 			done = func(n int) { decoded(n, len(reqs)) }
 		}
-		results, executedOn, err := s.sampler.run(ctx, reqs, done)
+		results, executedOn, err := s.sampler.run(ctx, file, reqs, done)
 		if err == nil {
 			windows := make([]mediasample.SpeechLevels, 0, len(results))
 			for _, r := range results {
@@ -811,7 +818,9 @@ func (s *Service) speech(ctx context.Context, file *models.MediaFile, language s
 			return windows, p, executedOn, nil
 		}
 		lastErr = err
-		if ctx.Err() != nil || errors.Is(err, errNoNode) {
+		// A file that changed mid-job says nothing about the plan: the next
+		// job samples the new revision.
+		if ctx.Err() != nil || errors.Is(err, errNoNode) || errors.Is(err, nodesource.ErrSourceChanged) {
 			return nil, p, executedOn, err
 		}
 		// A failure the file itself causes rules the plan out. So does an

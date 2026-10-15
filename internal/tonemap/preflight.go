@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 const (
@@ -85,7 +87,7 @@ func ValidateSourceWithRunner(ctx context.Context, request SourcePreflightReques
 	if request.Kind == "" || request.Mode == "" || strings.TrimSpace(request.InputPath) == "" {
 		return fmt.Errorf("%w: incomplete tone-map source preflight", ErrSourcePreflightRejected)
 	}
-	if err := request.SourceRevision.ValidatePath(request.InputPath); err != nil {
+	if err := request.SourceRevision.ValidatePath(ctx, request.InputPath); err != nil {
 		return err
 	}
 	if strings.TrimSpace(request.FFmpegPath) == "" {
@@ -358,7 +360,7 @@ func runSourcePreflight(ctx context.Context, request SourcePreflightRequest, run
 			_ = os.Remove(outputPath)
 			return fmt.Errorf("%w: close tone-map preflight output: %w", ErrSourcePreflightUnavailable, err)
 		}
-		args := sourceConversionPreflightArgs(request, position, outputPath)
+		args := nodesource.RestrictArgs(sourceConversionPreflightArgs(request, position, outputPath))
 		if output, err := runBounded(ctx, run, request.FFmpegPath, args...); err != nil {
 			_ = os.Remove(outputPath)
 			return fmt.Errorf("%w: tone-map source conversion failed: %w (%s)", ErrSourcePreflightUnavailable, err, boundedCommandFailure(err, output))
@@ -420,12 +422,12 @@ func (frame preflightFrame) hasDolbyVisionMetadata() bool {
 // inspectSourceFrame reads color metadata from one decoded frame at position.
 func inspectSourceFrame(ctx context.Context, request SourcePreflightRequest, position float64, run CommandRunner) (preflightFrame, error) {
 	interval := strconv.FormatFloat(position, 'f', 3, 64) + "%+#1"
-	args := []string{
+	args := nodesource.RestrictProbeArgs([]string{
 		"-v", ffmpegErrorLogLevel, "-read_intervals", interval, "-select_streams", "v:0",
 		"-show_frames",
 		"-show_entries", "frame=color_range,color_space,color_transfer,color_primaries:frame_side_data=side_data_type",
 		"-of", "json", request.InputPath,
-	}
+	})
 	output, err := runBounded(ctx, run, request.FFprobePath, args...)
 	if err != nil {
 		return preflightFrame{}, fmt.Errorf("%w: inspect tone-map source frame: %w (%s)", ErrSourcePreflightUnavailable, err, boundedCommandFailure(err, output))

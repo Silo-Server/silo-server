@@ -47,7 +47,7 @@ func TestWorkerStartProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := request.Validate(map[string]any{"session_id": "fixture", "input_path": "/synthetic/input.mkv", "future": true}); err != nil {
+	if err := request.Validate(map[string]any{"session_id": "fixture", "source_grant": "synthetic-grant", "input_path": "/synthetic/input.mkv", "future": true}); err != nil {
 		t.Fatal(err)
 	}
 	encoded := op.Responses["202"].Content["text/plain"].Schema
@@ -74,14 +74,15 @@ func TestWorkerStartProtocol(t *testing.T) {
 	cfg.Playback.TranscodeDir = t.TempDir()
 	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
 	watcher.SetConfigForTest(cfg)
-	handler := transcodenode.NewServer(watcher, nil).Handler()
+	handler := keyedTranscodeNode(watcher, cfg.Auth.JWTSecret).Handler()
 	for _, tc := range []struct {
 		body   string
 		auth   bool
 		status int
 	}{
 		{"{}", false, 401}, {"{", true, 400}, {"{}", true, 400},
-		{`{"session_id":"fixture","input_path":"/synthetic/input.mkv"}`, true, 503},
+		{`{"session_id":"fixture","input_path":"/synthetic/input.mkv"}`, true, 400},
+		{`{"session_id":"fixture","source_grant":"synthetic-grant"}`, true, 503},
 	} {
 		req := httptest.NewRequest(http.MethodPost, op.Path, strings.NewReader(tc.body))
 		if tc.auth {

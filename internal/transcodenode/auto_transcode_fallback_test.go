@@ -76,6 +76,7 @@ func postAutoTranscodeStartRequest(t *testing.T, server *Server, req TranscodeSt
 	t.Helper()
 	requestBody, err := json.Marshal(TranscodeStartRequest{
 		SessionID:         req.SessionID,
+		SourceGrant:       "/media/movie.mkv",
 		InputPath:         "/media/movie.mkv",
 		TargetCodecVideo:  "h264",
 		TargetCodecAudio:  "aac",
@@ -194,7 +195,7 @@ func TestSpawnReconstructAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", TargetBitrateKbps: 2000,
 		SegmentDuration: 2,
 	})
-	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, resolutionOf(card))
 	if err != nil || session == nil {
 		t.Fatalf("spawnReconstruct = %v, %v; want the CPU-decode session", session, err)
 	}
@@ -234,7 +235,7 @@ func TestHandleStartRequireReadyKeepsVideoToolboxSoftwareRetry(t *testing.T) {
 	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
 
 	requestBody, err := json.Marshal(TranscodeStartRequest{
-		SessionID: "vt-retry-1", InputPath: "/media/movie.mkv",
+		SessionID: "vt-retry-1", SourceGrant: "/media/movie.mkv", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", TargetBitrateKbps: 2000,
 		SegmentDuration: 2, HWAccel: "videotoolbox", RequireReady: true,
 	})

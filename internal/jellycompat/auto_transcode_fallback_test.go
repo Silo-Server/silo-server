@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -156,6 +159,17 @@ func TestEnsureTranscodeSessionAutoFinalFailureUnregisters(t *testing.T) {
 // node described by report and returns the request the node received.
 func startCompatRemoteAutoTranscode(t *testing.T, report string, response transcodenode.TranscodeStartResponse) (transcodenode.TranscodeStartRequest, *PlaybackSessionStore) {
 	t.Helper()
+	remoteReq, playbackStore, err := startCompatRemoteTranscode(t, report, response, nil)
+	if err != nil {
+		t.Fatalf("startRemoteTranscode: %v", err)
+	}
+	return remoteReq, playbackStore
+}
+
+// startCompatRemoteTranscode is startCompatRemoteAutoTranscode with the
+// handler's source grants and its start error. The fake node is row 6.
+func startCompatRemoteTranscode(t *testing.T, report string, response transcodenode.TranscodeStartResponse, grants nodesource.FileGranter) (transcodenode.TranscodeStartRequest, *PlaybackSessionStore, error) {
+	t.Helper()
 	version := testCompatVersion()
 	source := testCompatSource(NewResourceIDCodec(), version)
 	var remoteReq transcodenode.TranscodeStartRequest
@@ -175,7 +189,7 @@ func startCompatRemoteAutoTranscode(t *testing.T, report string, response transc
 	}))
 	defer node.Close()
 
-	pooled := &nodepool.Node{URL: node.URL}
+	pooled := &nodepool.Node{ID: 6, URL: node.URL}
 	if report != "" {
 		pooled.Capabilities = json.RawMessage(report)
 	}
@@ -183,19 +197,89 @@ func startCompatRemoteAutoTranscode(t *testing.T, report string, response transc
 	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
 	handler := &PlaybackHandler{
 		JWTSecret:     "secret",
+		NodeKeys:      nodeauthtest.SharedSecret("secret"),
 		HWAccel:       "auto",
 		NodePlanner:   &nodeLookupPlannerStub{node: pooled},
 		playbackStore: playbackStore,
 		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
 			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
 		}},
-		tm: playback.NewTranscodeManager(),
+		tm:           playback.NewTranscodeManager(),
+		SourceGrants: grants,
 	}
 	file := &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}
-	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {
-		t.Fatalf("startRemoteTranscode: %v", err)
+	err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, file, 0, node.URL)
+	return remoteReq, playbackStore, err
+}
+
+// A remote start carries the grant for its file, minted for the node it
+// starts on; a grant that cannot be minted fails the start.
+func TestStartRemoteTranscodeGrantsTheNodeItsSource(t *testing.T) {
+	response := transcodenode.TranscodeStartResponse{Status: "started", HWAccel: "none"}
+	remoteReq, _, err := startCompatRemoteTranscode(t, "", response, nodesourcetest.Granter{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	return remoteReq, playbackStore
+	if want := nodesourcetest.GrantFor(6, testCompatVersion().FileID, "/media/movie.mkv"); remoteReq.SourceGrant != want {
+		t.Fatalf("source grant = %q, want %q", remoteReq.SourceGrant, want)
+	}
+	remoteReq, _, err = startCompatRemoteTranscode(t, "", response, nodesourcetest.Granter{Err: errors.New("no grant key")})
+	if err == nil || remoteReq.SessionID != "" {
+		t.Fatalf("failed grant: err %v, node request %+v", err, remoteReq)
+	}
+}
+
+// A restart (a seek or an audio switch) runs on the node already serving the
+// session, which may have been disabled since and so be missing from the
+// planner's pool: its grant still names that node, from the route the session
+// recorded.
+func TestRemoteRestartGrantsTheServingNodeThePlannerNoLongerOffers(t *testing.T) {
+	for name, record := range map[string]func(store *PlaybackSessionStore, upstream *playback.Session, nodeURL string){
+		"playback session route": func(store *PlaybackSessionStore, _ *playback.Session, nodeURL string) {
+			_ = store.Update("play-1", func(current *PlaybackSession) error {
+				current.RoutingAssignment = &playback.NodeRoutingAssignment{ExecutionNodeID: 6, ExecutionNodeURL: nodeURL + "/"}
+				return nil
+			})
+		},
+		"upstream session route": func(_ *PlaybackSessionStore, upstream *playback.Session, nodeURL string) {
+			upstream.RoutingExecutionNodeID, upstream.RoutingExecutionNodeURL = 6, nodeURL
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			version := testCompatVersion()
+			source := testCompatSource(NewResourceIDCodec(), version)
+			var remoteReq transcodenode.TranscodeStartRequest
+			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&remoteReq); err != nil {
+					t.Errorf("decode remote request: %v", err)
+				}
+				writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{SessionID: remoteReq.SessionID, Status: "started", HWAccel: "none"})
+			}))
+			defer node.Close()
+			playbackStore := NewPlaybackSessionStore(time.Hour, nil)
+			playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+			upstream := &playback.Session{ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode}
+			record(playbackStore, upstream, node.URL)
+			handler := &PlaybackHandler{
+				JWTSecret: "secret",
+				NodeKeys:  nodeauthtest.SharedSecret("secret"),
+				HWAccel:   "auto",
+				// The serving node was disabled: the planner no longer has it.
+				NodePlanner:   &nodeLookupPlannerStub{},
+				playbackStore: playbackStore,
+				sessionMgr:    &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": upstream}},
+				tm:            playback.NewTranscodeManager(),
+				SourceGrants:  nodesourcetest.Granter{},
+			}
+			file := &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}
+			if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, file, 30, node.URL); err != nil {
+				t.Fatal(err)
+			}
+			if want := nodesourcetest.GrantFor(6, version.FileID, "/media/movie.mkv"); remoteReq.SourceGrant != want {
+				t.Fatalf("source grant = %q, want %q", remoteReq.SourceGrant, want)
+			}
+		})
+	}
 }
 
 func TestStartRemoteTranscodeAutoRequestsFallbackReadinessAndRecordsDecodePath(t *testing.T) {

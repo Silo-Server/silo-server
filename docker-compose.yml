@@ -159,18 +159,20 @@ services:
   #   stop_grace_period: 11m
   #   environment:
   #     MODE: transcode
-  #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
-  #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
-  #     REDIS_URL: redis://redis:6379
-  #     SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
+  #     # The URL this node reaches the API at, and the key the admin node
+  #     # settings issued for it. The node takes the rest from the API.
+  #     SILO_CORE_URL: http://silo:8080
+  #     SILO_NODE_KEY: ${SILO_NODE_KEY:?Issue this node a key in the admin node settings}
   #     PORT: "8080"
   #   ports:
   #     - "${TRANSCODE_PORT:-8082}:8080"
   #   volumes:
+  #     # The library at the API's paths, for a node whose source access is
+  #     # "local". A node set to "core" reads media from the API instead.
   #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
-  #     - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
-  #     - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
+  #     # Segments, staged subtitles and prepared downloads. The node needs no
+  #     # plugin or artwork volume and no database, Redis or SECRET_KEY; it
+  #     # ignores those settings, with a warning, when a shared .env sets them.
   #     - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
   #     # See the note on the integrated service above: a node reports its own
   #     # CPU, load, and memory rather than the physical machine's only with
@@ -178,11 +180,6 @@ services:
   #     - /proc/meminfo:/host/proc/meminfo:ro
   #     - /proc/stat:/host/proc/stat:ro
   #     - /proc/loadavg:/host/proc/loadavg:ro
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
   #   env_file:
   #     - path: .env
   #       required: false

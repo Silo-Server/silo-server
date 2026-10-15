@@ -18,6 +18,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
+// Source access modes of a transcode node (stream_nodes.source_access).
+const (
+	SourceAccessLocal = "local"
+	SourceAccessCore  = "core"
+)
+
 const (
 	// NodeTypeProxy identifies a proxy stream node.
 	NodeTypeProxy = "proxy"
@@ -128,6 +134,15 @@ type Node struct {
 	// DrainStateDrained once nothing is left. Rewritten by every check, like
 	// Healthy. Off the v1 wire for the same reason as DrainRequested.
 	DrainState DrainState `json:"-"`
+	// KeyIssued reports that this transcode node has a node key. The key
+	// itself never leaves the credential registry, so no reader of a Node can
+	// serialize it. Off the v1 wire, which is frozen; v2 maps it explicitly.
+	KeyIssued bool `json:"-"`
+	// SourceAccess is how this transcode node reads source media:
+	// SourceAccessLocal at the catalog paths through its own mount, or
+	// SourceAccessCore over HTTP from the API. It reaches the node in its
+	// configuration. Off the v1 wire, which is frozen.
+	SourceAccess string `json:"-"`
 	// PhysicalGPUKeys identifies the actual GPUs behind this node, derived from
 	// Capabilities rather than stored: it is a pure function of that payload, so
 	// a column would only be a second copy that can disagree with it. Two nodes
@@ -253,6 +268,10 @@ type CreateNodeInput struct {
 	Group            string `json:"group"`              // empty = ungrouped
 	MaxJobs          *int   `json:"max_jobs"`           // nil or <= 0 = unlimited
 	MaxBandwidthKbps *int   `json:"max_bandwidth_kbps"` // nil or <= 0 = unlimited
+	// SourceAccess is SourceAccessLocal or SourceAccessCore; empty means
+	// SourceAccessLocal. Only a transcode node takes one. v2 only: the frozen
+	// v1 handler clears it.
+	SourceAccess string `json:"source_access"`
 }
 
 // Validate checks required fields and allowed values.
@@ -265,6 +284,36 @@ func (i CreateNodeInput) Validate() error {
 	}
 	if i.URL == "" {
 		return errors.New("url is required")
+	}
+	if i.SourceAccess != "" {
+		return ValidateSourceAccess(i.Type, i.SourceAccess)
+	}
+	return nil
+}
+
+// sourceAccess is the value Create stores: SourceAccessLocal unless the
+// input names one.
+func (i CreateNodeInput) sourceAccess() string {
+	if i.SourceAccess == "" {
+		return SourceAccessLocal
+	}
+	return i.SourceAccess
+}
+
+// ValidateSourceAccess checks a source access value for a node of nodeType.
+// Only a transcode node reads source media, so a proxy takes no value at all.
+func ValidateSourceAccess(nodeType, value string) error {
+	if nodeType != NodeTypeTranscode {
+		return fmt.Errorf("%w: source_access applies only to transcode nodes", ErrInvalidNodeInput)
+	}
+	return validateSourceAccessValue(value)
+}
+
+// validateSourceAccessValue checks the value alone, for an input that does
+// not know the node's type.
+func validateSourceAccessValue(value string) error {
+	if value != SourceAccessLocal && value != SourceAccessCore {
+		return fmt.Errorf("%w: source_access must be %q or %q", ErrInvalidNodeInput, SourceAccessLocal, SourceAccessCore)
 	}
 	return nil
 }
@@ -292,6 +341,11 @@ type UpdateNodeInput struct {
 	// DownloadArtifactMaxBytesOverride is a byte budget, 0 for none; a
 	// negative value (or JSON null) restores the inherited budget.
 	DownloadArtifactMaxBytesOverride *int64 `json:"download_artifact_max_bytes_override,omitempty"`
+	// SourceAccess sets how a transcode node reads source media; nil leaves
+	// it. The value is checked against the row's type by the caller that
+	// holds the row (AdminConfigurationStore.Update), since this input does
+	// not know it. v2 only: the frozen v1 handler clears it.
+	SourceAccess *string `json:"source_access,omitempty"`
 }
 
 // UnmarshalJSON decodes an update body, mapping an explicit JSON null on the
@@ -338,6 +392,11 @@ func isJSONNull(raw json.RawMessage) bool {
 // has a closed set of values; the database CHECK enforces the same list, and
 // rejecting here turns a constraint violation into an operator-readable error.
 func (i UpdateNodeInput) Validate() error {
+	if i.SourceAccess != nil {
+		if err := validateSourceAccessValue(*i.SourceAccess); err != nil {
+			return err
+		}
+	}
 	if i.DownloadArtifactDirOverride != nil {
 		if dir := strings.TrimSpace(*i.DownloadArtifactDirOverride); dir != "" && !filepath.IsAbs(dir) {
 			return fmt.Errorf("%w: download_artifact_dir_override must be an absolute path", ErrInvalidNodeInput)
@@ -439,7 +498,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state`
+const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state, node_key_ciphertext IS NOT NULL, source_access`
 
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
@@ -459,6 +518,7 @@ func scanNode(row pgx.Row) (*Node, error) {
 		&networkAccessBytes,
 		&n.DownloadArtifactDirOverride, &n.DownloadArtifactMaxBytesOverride,
 		&n.DrainRequested, &n.DrainState,
+		&n.KeyIssued, &n.SourceAccess,
 	)
 	if err != nil {
 		return nil, err
@@ -536,17 +596,42 @@ func (r *Repository) GetByID(ctx context.Context, id int) (*Node, error) {
 	return n, nil
 }
 
+// Identity is the part of a stream node's row that names it: what a transcode
+// node's reports and logs are filed under on the core.
+type Identity struct {
+	ID   int
+	Name string
+	Type string
+	URL  string
+}
+
+// GetIdentity returns a node's id, name, type and URL, and ErrNodeNotFound for
+// a deleted node. It reads four columns rather than the whole row, because a
+// transcode node's every report asks for it.
+func (r *Repository) GetIdentity(ctx context.Context, id int) (Identity, error) {
+	var out Identity
+	err := r.pool.QueryRow(ctx, `SELECT id, name, type, url FROM stream_nodes WHERE id = $1`, id).
+		Scan(&out.ID, &out.Name, &out.Type, &out.URL)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Identity{}, ErrNodeNotFound
+	}
+	if err != nil {
+		return Identity{}, fmt.Errorf("get node identity: %w", err)
+	}
+	return out, nil
+}
+
 // Create inserts a new node and returns it.
 func (r *Repository) Create(ctx context.Context, input CreateNodeInput) (*Node, error) {
 	if err := input.Validate(); err != nil {
 		return nil, err
 	}
 	row := r.pool.QueryRow(ctx,
-		`INSERT INTO stream_nodes (name, type, url, public_url, node_group, max_jobs, max_bandwidth_kbps)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO stream_nodes (name, type, url, public_url, node_group, max_jobs, max_bandwidth_kbps, source_access)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 RETURNING `+nodeColumns,
 		input.Name, input.Type, input.URL, normalizeOverride(input.PublicURL), normalizeGroup(input.Group),
-		normalizeCap(input.MaxJobs), normalizeCap(input.MaxBandwidthKbps))
+		normalizeCap(input.MaxJobs), normalizeCap(input.MaxBandwidthKbps), input.sourceAccess())
 	return scanNode(row)
 }
 
@@ -600,6 +685,7 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 			public_url = CASE WHEN $15::boolean THEN $16::text ELSE public_url END,
 			download_artifact_dir_override = CASE WHEN $17::boolean THEN $18::text ELSE download_artifact_dir_override END,
 			download_artifact_max_bytes_override = CASE WHEN $19::boolean THEN $20::bigint ELSE download_artifact_max_bytes_override END,
+			source_access = COALESCE($21::text, source_access),
 			-- Everything below describes the worker the old URL addressed, so
 			-- repointing the row at a different machine has to drop it. The
 			-- caller publishes the returned row to the pools immediately, and
@@ -627,7 +713,8 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 		input.HWDeviceOverride != nil, hwDeviceOverride,
 		input.PublicURL != nil, publicURL,
 		input.DownloadArtifactDirOverride != nil, artifactDir,
-		input.DownloadArtifactMaxBytesOverride != nil, artifactMaxBytes)
+		input.DownloadArtifactMaxBytesOverride != nil, artifactMaxBytes,
+		input.SourceAccess)
 	n, err := scanNode(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNodeNotFound

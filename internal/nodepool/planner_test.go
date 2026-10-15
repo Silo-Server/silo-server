@@ -22,7 +22,7 @@ type plannerFixture struct {
 func newFixture(proxies, transcodes []*Node) *plannerFixture {
 	pp := NewProxyPool()
 	pp.SetNodes(proxies)
-	tp := NewTranscodePool()
+	tp := newKeyedTranscodePool()
 	tp.SetNodes(transcodes)
 	f := &plannerFixture{
 		planner:    NewPlanner(pp, tp),
@@ -629,7 +629,7 @@ func TestUnknownBitrateAdmittedBelowCap(t *testing.T) {
 
 func TestReserveTranscodeWorkSharesCapacityReservations(t *testing.T) {
 	capOne := 1
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{
 		{URL: "http://transcode-a", Enabled: true, Healthy: true, MaxJobs: &capOne},
 		{URL: "http://transcode-b", Enabled: true, Healthy: true, MaxJobs: &capOne},
@@ -659,7 +659,7 @@ func TestReserveTranscodeWorkSharesCapacityReservations(t *testing.T) {
 
 func TestReserveTranscodeWorkOverlappingAttemptsReleaseOnlyTheirOwnReservation(t *testing.T) {
 	capTwo := 2
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{URL: "http://transcode-a", Enabled: true, Healthy: true, MaxJobs: &capTwo}})
 	planner := NewPlanner(NewProxyPool(), transcodes)
 
@@ -693,7 +693,7 @@ func TestPlanDownloadSkipsBandwidthCappedProxiesAndReservesJobCapacity(t *testin
 		{URL: "http://bandwidth-capped", Enabled: true, Healthy: true, MaxBandwidthKbps: &bandwidthCap},
 		{URL: "http://uncapped", Enabled: true, Healthy: true, MaxJobs: &jobCap},
 	})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	first := planner.PlanDownload("download-1")
 	if first.ProxyNode == nil || first.ProxyNode.URL != "http://uncapped" {
@@ -715,7 +715,7 @@ func TestPlanDownloadPrefersArtifactOriginGroup(t *testing.T) {
 		{URL: "http://proxy-a", Group: &groupA, Enabled: true, Healthy: true},
 		{URL: "http://proxy-b", Group: &groupB, Enabled: true, Healthy: true},
 	})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 	plan := planner.PlanDownload("download-grouped", groupB)
 	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-b" {
 		t.Fatalf("plan = %+v, want proxy-b", plan)
@@ -726,7 +726,7 @@ func TestPlanDownloadFallsBackWhenOriginGroupHasNoProxy(t *testing.T) {
 	group := "host-a"
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{URL: "http://proxy-a", Group: &group, Enabled: true, Healthy: true}})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 	plan := planner.PlanDownload("download-fallback", "host-missing")
 	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-a" {
 		t.Fatalf("plan = %+v, want proxy-a fallback", plan)
@@ -742,7 +742,7 @@ func TestPlanSessionWithFiltersProxiesForProxyOnlyPlans(t *testing.T) {
 		{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true},
 		{ID: 2, URL: "http://proxy-new", Enabled: true, Healthy: true},
 	})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	// Only the upgraded proxy can run the recipe; every selection must land
 	// there regardless of where the round-robin cursor happens to be.
@@ -759,7 +759,7 @@ func TestPlanSessionWithFiltersProxiesForProxyOnlyPlans(t *testing.T) {
 func TestPlanSessionWithReturnsNoProxyWhenNoneAreCapable(t *testing.T) {
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true}})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	plan := planner.PlanSessionWith("session-none", "", false, 0, func(*Node) bool { return false })
 	if plan.ProxyNode != nil {
@@ -775,7 +775,7 @@ func TestPlanRouteReservesExactlyRequestedTopology(t *testing.T) {
 	group := "rack-a"
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy", Group: &group, Enabled: true, Healthy: true}})
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{ID: 2, URL: "http://transcode", Group: &group, Enabled: true, Healthy: true}})
 	planner := NewPlanner(proxies, transcodes)
 
@@ -814,7 +814,7 @@ func TestPlanRouteTranscodeAPIIgnoresUnhealthyProxyGroupMember(t *testing.T) {
 	group := "rack-a"
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy", Group: &group, Enabled: true, Healthy: false}})
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{ID: 2, URL: "http://transcode", Group: &group, Enabled: true, Healthy: true}})
 	planner := NewPlanner(proxies, transcodes)
 
@@ -834,7 +834,7 @@ func TestPlanRouteUsesIndependentCapabilityPredicates(t *testing.T) {
 		{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true},
 		{ID: 2, URL: "http://proxy-new", Enabled: true, Healthy: true},
 	})
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{
 		{ID: 3, URL: "http://transcode-old", Enabled: true, Healthy: true},
 		{ID: 4, URL: "http://transcode-new", Enabled: true, Healthy: true},
@@ -857,7 +857,7 @@ func TestProxyNodeURLsListsEnabledProxies(t *testing.T) {
 		{ID: 1, URL: "http://proxy-1", Enabled: true, Healthy: true},
 		{ID: 2, URL: "http://proxy-2", Enabled: true, Healthy: false},
 	})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	// Unhealthy nodes are still listed: capability planning wants the
 	// deployment's toolchain, and an unreachable node excludes itself when its
@@ -1067,7 +1067,7 @@ func TestSharedGPUDoesNotAffectProxySelection(t *testing.T) {
 func TestProxyNodeByURLNormalizesStoredAndLookupURLs(t *testing.T) {
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{ID: 1, Name: "p1", URL: "https://proxy.example.com/", Enabled: true, Healthy: true}})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	for _, lookup := range []string{"https://proxy.example.com", "https://proxy.example.com/"} {
 		node, ok := planner.ProxyNodeByURL(lookup)

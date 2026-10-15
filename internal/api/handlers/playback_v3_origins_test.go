@@ -206,6 +206,7 @@ func TestPrepareTransportV3AuthorizedOriginsCommitOffTheProxyRevokesTheGrant(t *
 // different stream than the plan promised.
 func TestPrepareTransportV3AuthorizedOriginsCarryRemuxSourceFacts(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	proxy := capableProxyStubV3(t)
@@ -321,6 +322,7 @@ func TestPrepareTransportV3AuthorizedOriginsRefuseLocalRemuxWhenTheGrantFails(t 
 
 func TestPrepareTransportV3AuthorizedOriginsFallsBackWhenTranscodeProxyGrantFails(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	proxyServer := capableProxyStubV3(t)
@@ -366,6 +368,7 @@ func TestPrepareTransportV3AuthorizedOriginsFallsBackWhenTranscodeProxyGrantFail
 
 func TestPrepareTransportV3AuthorizedOriginsDoNotFallBackToAnIncapableAPI(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
@@ -451,6 +454,7 @@ func TestPrepareTransportV3AuthorizedOriginsPublishGrantBackedHLSManifest(t *tes
 	defer node.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	planner := &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}, ProxyNode: &nodepool.Node{ID: 52, URL: "http://proxy-1"}}}
 	handler.NodePlanner = planner

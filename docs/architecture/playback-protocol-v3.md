@@ -768,9 +768,10 @@ and remains eligible when relay capability is absent. During a rolling upgrade,
 an older node is therefore excluded from only the shapes it cannot serve before
 a client receives a URL rather than failing the stream on its first request.
 The transcode-executed shape also requires the shared node-recipe store. The API
-writes the plan-scoped transport record before publishing the proxy URL; the
-transcode node validates it before starting each progressive response, and stop
-or force reload deletes it. This durable authority prevents a signed URL whose
+writes the plan-scoped transport record before publishing the proxy URL; before
+each progressive response the transcode node asks the core to resolve the
+request, and the core validates the record field by field
+([resolve](transcode-nodes.md#resolve)). Stop or force reload deletes it. This durable authority prevents a signed URL whose
 token remains valid after a node replacement from resurrecting stopped FFmpeg
 work. When the store is unavailable, route selection excludes only this shape.
 

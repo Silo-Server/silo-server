@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 )
 
 type fixedNodes []*nodepool.Node
@@ -60,13 +61,13 @@ func nodeRequest() mediasample.Request {
 func TestNodeExtractorModes(t *testing.T) {
 	ok := mediasample.Result{Decoder: "hardware:vaapi", SheetTileHeight: 284, Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("jpeg")}}}
 	settings := func(mode string) fakeSettings {
-		return fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}
+		return fakeSettings{ExecutionSetting: mode}
 	}
 
 	t.Run("local", func(t *testing.T) {
 		node, calls := fakeNode(t, http.StatusOK, ok)
 		local := &countingExtractor{}
-		result, err := NewNodeExtractor(local, fixedNodes{node}, settings(ExecutionLocal)).Extract(t.Context(), nil, nodeRequest())
+		result, err := NewNodeExtractor(local, fixedNodes{node}, settings(ExecutionLocal), nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 		if err != nil || result.Decoder != "local" || calls.Load() != 0 {
 			t.Fatalf("%+v %v calls %d", result, err, calls.Load())
 		}
@@ -76,7 +77,7 @@ func TestNodeExtractorModes(t *testing.T) {
 		busy, busyCalls := fakeNode(t, http.StatusServiceUnavailable, ExtractError{Reason: NodeBusyReason})
 		free, freeCalls := fakeNode(t, http.StatusOK, ok)
 		local := &countingExtractor{}
-		result, err := NewNodeExtractor(local, fixedNodes{busy, free}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
+		result, err := NewNodeExtractor(local, fixedNodes{busy, free}, settings(ExecutionTranscodeNodesOnly), nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 		if err != nil || result.Decoder != "hardware:vaapi" || result.SheetTileHeight != 284 || string(result.Sheets[0].JPEG) != "jpeg" || freeCalls.Load() != 1 || busyCalls.Load() > 1 || local.calls != 0 {
 			t.Fatalf("%+v %v", result, err)
 		}
@@ -86,7 +87,7 @@ func TestNodeExtractorModes(t *testing.T) {
 		busy, _ := fakeNode(t, http.StatusServiceUnavailable, ExtractError{Reason: NodeBusyReason})
 		dead := &nodepool.Node{Name: "dead", URL: "http://127.0.0.1:1", Enabled: true, Healthy: true, Capabilities: trickplayCapabilities}
 		local := &countingExtractor{}
-		result, err := NewNodeExtractor(local, fixedNodes{busy, dead}, settings(ExecutionPreferTranscodeNodes)).Extract(t.Context(), nil, nodeRequest())
+		result, err := NewNodeExtractor(local, fixedNodes{busy, dead}, settings(ExecutionPreferTranscodeNodes), nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 		if err != nil || result.Decoder != "local" || local.calls != 1 {
 			t.Fatalf("%+v %v", result, err)
 		}
@@ -97,16 +98,33 @@ func TestNodeExtractorModes(t *testing.T) {
 		sick := &nodepool.Node{Name: "sick", URL: "http://127.0.0.1:1", Enabled: true, Healthy: false, Capabilities: trickplayCapabilities}
 		off := &nodepool.Node{Name: "off", URL: "http://127.0.0.1:1", Enabled: false, Healthy: true, Capabilities: trickplayCapabilities}
 		local := &countingExtractor{}
-		_, err := NewNodeExtractor(local, fixedNodes{old, sick, off}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
+		_, err := NewNodeExtractor(local, fixedNodes{old, sick, off}, settings(ExecutionTranscodeNodesOnly), nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 		if !errors.Is(err, errNoNode) || local.calls != 0 {
 			t.Fatalf("err %v local %d", err, local.calls)
+		}
+	})
+
+	t.Run("a mount mismatch moves on", func(t *testing.T) {
+		// A node whose own mount does not show the approved source answers
+		// 409 in plain text; the next node can still make the sheets.
+		mismatchCalls := &atomic.Int32{}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			mismatchCalls.Add(1)
+			http.Error(w, "local source access: this node's mount does not show the approved source", http.StatusConflict)
+		}))
+		t.Cleanup(server.Close)
+		mismatch := &nodepool.Node{Name: server.URL, URL: server.URL, Enabled: true, Healthy: true, Capabilities: trickplayCapabilities}
+		other, otherCalls := fakeNode(t, http.StatusOK, ok)
+		result, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{mismatch, other}, settings(ExecutionTranscodeNodesOnly), nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
+		if err != nil || result.Decoder != "hardware:vaapi" || mismatchCalls.Load() != 1 || otherCalls.Load() != 1 {
+			t.Fatalf("%+v %v mismatch %d other %d", result, err, mismatchCalls.Load(), otherCalls.Load())
 		}
 	})
 
 	t.Run("a failure on a node is final", func(t *testing.T) {
 		broken, _ := fakeNode(t, http.StatusUnprocessableEntity, ExtractError{Reason: "invalid_data", Permanent: true, Message: "moov atom not found"})
 		other, otherCalls := fakeNode(t, http.StatusOK, ok)
-		_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{broken, other}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
+		_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{broken, other}, settings(ExecutionTranscodeNodesOnly), nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 		failure, isNode := errors.AsType[*ExtractError](err)
 		if !isNode || !failure.Permanent || failure.Reason != "invalid_data" || otherCalls.Load() != 0 {
 			t.Fatalf("err %v", err)
@@ -142,8 +160,8 @@ func TestNodeExtractorRetriesWorkersWithoutDisplayGeometry(t *testing.T) {
 			local := &countingExtractor{}
 			req := nodeRequest()
 			req.Sheets.UseInputAspect = true
-			settings := fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}
-			result, err := NewNodeExtractor(local, fixedNodes{node}, settings).Extract(t.Context(), nil, req)
+			settings := fakeSettings{ExecutionSetting: mode}
+			result, err := NewNodeExtractor(local, fixedNodes{node}, settings, nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, req)
 			if calls.Load() != 1 {
 				t.Fatalf("node calls %d", calls.Load())
 			}
@@ -155,5 +173,37 @@ func TestNodeExtractorRetriesWorkersWithoutDisplayGeometry(t *testing.T) {
 				t.Fatalf("nodes only = %v; local calls %d", err, local.calls)
 			}
 		})
+	}
+}
+
+// A node run carries the grant for the job's file; a grant that cannot be
+// minted moves the run on like an unavailable node.
+func TestNodeExtractorGrantsTheNodeItsSource(t *testing.T) {
+	ok := mediasample.Result{Decoder: "hardware:vaapi", SheetTileHeight: 284, Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("jpeg")}}}
+	var grants []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mediasample.Request
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		grants = append(grants, req.SourceGrant)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ok)
+	}))
+	t.Cleanup(server.Close)
+	node := &nodepool.Node{ID: 4, Name: server.URL, URL: server.URL, Enabled: true, Healthy: true, Capabilities: trickplayCapabilities}
+	job := &Job{FileID: 9, FilePath: "/m.mkv"}
+	extractor := NewNodeExtractor(&countingExtractor{}, fixedNodes{node}, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly}, nodeauthtest.SharedSecret("secret"))
+	extractor.SetSourceGrants(nodesourcetest.Granter{})
+	if _, err := extractor.Extract(t.Context(), job, nodeRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if len(grants) != 1 || grants[0] != nodesourcetest.GrantFor(4, 9, "/m.mkv") {
+		t.Fatalf("grants = %v", grants)
+	}
+
+	local := &countingExtractor{}
+	extractor = NewNodeExtractor(local, fixedNodes{node}, fakeSettings{ExecutionSetting: ExecutionPreferTranscodeNodes}, nodeauthtest.SharedSecret("secret"))
+	extractor.SetSourceGrants(nodesourcetest.Granter{Err: errors.New("no grant key")})
+	if result, err := extractor.Extract(t.Context(), job, nodeRequest()); err != nil || result.Decoder != "local" || len(grants) != 1 {
+		t.Fatalf("failed grant: %+v %v, node runs %d", result, err, len(grants))
 	}
 }

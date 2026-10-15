@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -11,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 )
 
 func TestResolveCopySeekAnchorUsesKeyPacketTimestamp(t *testing.T) {
@@ -231,5 +235,79 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 		if got != VideoSampleEntryHVC1 {
 			t.Fatalf("copy HLS sample entry = %q, want only %q", tag, VideoSampleEntryHVC1)
 		}
+	}
+}
+
+// TestResolveCopySeekAnchorWaiterOutlivesTheProbingJobsRelease shares one
+// probe between two jobs on the same relayed source; when the job whose
+// handle the probe reads releases it mid-probe, the other job probes again
+// with its own handle instead of failing with the first job's release.
+func TestResolveCopySeekAnchorWaiterOutlivesTheProbingJobsRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(path, []byte("relayed bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	relay := nodesourcetest.CoreRelay(t)
+	first, err := relay.Open(t.Context(), nodesourcetest.Grant(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := relay.Open(t.Context(), nodesourcetest.Grant(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.Close() }()
+
+	started, release := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	var probed []string
+	previousProbe, previousJoined := runCopySeekAnchorProbe, copySeekProbeJoined
+	t.Cleanup(func() { runCopySeekAnchorProbe, copySeekProbeJoined = previousProbe, previousJoined })
+	runCopySeekAnchorProbe = func(_ context.Context, _ string, input string, _ float64, _ int) (float64, int, error) {
+		mu.Lock()
+		probed = append(probed, input)
+		mu.Unlock()
+		if input == first.Input() {
+			close(started)
+			<-release
+			return 0, 0, errors.New("resolve copy seek anchor: ffmpeg failed: exit status 1")
+		}
+		return 16, 8, nil
+	}
+	joined := make(chan struct{}, 4)
+	copySeekProbeJoined = func() { joined <- struct{}{} }
+
+	firstErr := make(chan error, 1)
+	go func() {
+		_, _, err := ResolveCopySeekAnchor(context.Background(), "ffmpeg", first.Input(), 18, 2)
+		firstErr <- err
+	}()
+	<-joined
+	<-started
+	type anchor struct {
+		seconds float64
+		segment int
+		err     error
+	}
+	secondResult := make(chan anchor, 1)
+	go func() {
+		seconds, segment, err := ResolveCopySeekAnchor(context.Background(), "ffmpeg", second.Input(), 18, 2)
+		secondResult <- anchor{seconds, segment, err}
+	}()
+	<-joined
+	_ = first.Close()
+	close(release)
+
+	if err := <-firstErr; !errors.Is(err, nodesource.ErrClosed) {
+		t.Fatalf("released job's probe = %v, want ErrClosed", err)
+	}
+	got := <-secondResult
+	if got.err != nil || got.seconds != 16 || got.segment != 8 {
+		t.Fatalf("waiting job = %+v, want its own probe's anchor", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(probed) != 2 || probed[1] != second.Input() {
+		t.Fatal("the waiting job did not probe again with its own handle")
 	}
 }

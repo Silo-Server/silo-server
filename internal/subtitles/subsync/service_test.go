@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +17,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -178,11 +184,11 @@ func (s settingsMap) Get(_ context.Context, key string) (string, error) { return
 
 type nodeList []*nodepool.Node
 
-func (n nodeList) Nodes() []*nodepool.Node { return n }
+func (n nodeList) KeyedNodes() []*nodepool.Node { return n }
 
 type fakeRemote func(req mediasample.Request) (mediasample.Result, error)
 
-func (f fakeRemote) Run(_ context.Context, _, _ string, req mediasample.Request) (mediasample.Result, error) {
+func (f fakeRemote) Run(_ context.Context, _ string, _ nodeauth.Keyring, req mediasample.Request) (mediasample.Result, error) {
 	return f(req)
 }
 
@@ -209,7 +215,7 @@ func newFixture(t *testing.T, truth subtitles.Timing, settings settingsMap, layo
 		files: fakeFiles{file}, artifacts: f.artifacts, settings: settings, notifier: f.notifier, node: "test", now: time.Now,
 		inline: true,
 	}
-	f.svc.sampler = newSampler(settings, nil, func() string { return "ffmpeg" })
+	f.svc.sampler = newSampler(settings, nil, nil, func() string { return "ffmpeg" })
 	f.svc.sampler.local = func(_ context.Context, req mediasample.Request) (mediasample.Result, error) {
 		f.decodes++
 		f.center = append(f.center, req.Audio.Speech.CenterChannel)
@@ -445,18 +451,19 @@ func TestSamplerExecution(t *testing.T) {
 		return mediasample.Result{Decoder: "software"}, nil
 	}
 	node := &nodepool.Node{ID: 1, Name: "gpu-1", URL: "http://node", Enabled: true, Healthy: true}
-	settings := settingsMap{settingJWTSecret: "secret"}
+	settings := settingsMap{}
+	keys := nodeauthtest.SharedSecret("secret")
 
 	t.Run("node", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settings, keys: keys, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) { return mediasample.Result{}, nil })}
-		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != "node:gpu-1" {
+		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != "node:gpu-1" {
 			t.Fatalf("%q %v", where, err)
 		}
 	})
 	t.Run("node failure falls back", func(t *testing.T) {
 		calls := 0
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settings, keys: keys, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				calls++
 				if calls == 2 {
@@ -465,7 +472,7 @@ func TestSamplerExecution(t *testing.T) {
 				return mediasample.Result{}, nil
 			})}
 		var done []int
-		results, where, err := s.run(context.Background(), reqs, func(n int) { done = append(done, n) })
+		results, where, err := s.run(context.Background(), nil, reqs, func(n int) { done = append(done, n) })
 		if err != nil || where != ExecutionLocal || len(results) != 2 {
 			t.Fatalf("%q %d %v", where, len(results), err)
 		}
@@ -475,43 +482,43 @@ func TestSamplerExecution(t *testing.T) {
 		}
 	})
 	t.Run("node refusing the path falls back", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settings, keys: keys, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusBadRequest, Reason: mediasample.ReasonNodeUnavailable}
 			})}
-		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != ExecutionLocal {
+		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != ExecutionLocal {
 			t.Fatalf("%q %v", where, err)
 		}
 	})
 	t.Run("file failure does not fall back", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settings, keys: keys, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusUnprocessableEntity, Reason: mediasample.ReasonInvalidData}
 			})}
-		if _, _, err := s.run(context.Background(), reqs, nil); err == nil {
+		if _, _, err := s.run(context.Background(), nil, reqs, nil); err == nil {
 			t.Fatal("invalid data fell back to local")
 		}
 	})
 	t.Run("transcode only does not fall back from a busy node", func(t *testing.T) {
-		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly, settingJWTSecret: "secret"},
+		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly}, keys: keys,
 			nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusServiceUnavailable, Reason: mediasample.ReasonNodeUnavailable}
 			})}
-		if _, _, err := s.run(context.Background(), reqs, nil); err == nil {
+		if _, _, err := s.run(context.Background(), nil, reqs, nil); err == nil {
 			t.Fatal("transcode_nodes_only ran locally")
 		}
 	})
 	t.Run("transcode only without node", func(t *testing.T) {
-		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly, settingJWTSecret: "secret"},
+		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly}, keys: keys,
 			nodes: nodeList{}, reservations: &nodepool.Reservations{}, local: ok}
-		if _, _, err := s.run(context.Background(), reqs, nil); !errors.Is(err, errNoNode) {
+		if _, _, err := s.run(context.Background(), nil, reqs, nil); !errors.Is(err, errNoNode) {
 			t.Fatalf("err %v", err)
 		}
 	})
 	t.Run("prefer without node runs locally", func(t *testing.T) {
 		s := &sampler{settings: settingsMap{}, nodes: nodeList{}, reservations: &nodepool.Reservations{}, local: ok}
-		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != ExecutionLocal {
+		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != ExecutionLocal {
 			t.Fatalf("%q %v", where, err)
 		}
 	})
@@ -921,5 +928,111 @@ func TestExecuteNamesFailures(t *testing.T) {
 				t.Fatalf("final update %+v", final)
 			}
 		})
+	}
+}
+
+// Every request a node runs carries the grant for the file it samples. A
+// grant that cannot be minted sends prefer mode local and fails
+// transcode_nodes_only.
+func TestSamplerGrantsTheNodeItsSource(t *testing.T) {
+	reqs := []mediasample.Request{{Input: "/m.mkv"}, {Input: "/m.mkv"}}
+	file := &models.MediaFile{ID: 42, FilePath: "/m.mkv"}
+	node := &nodepool.Node{ID: 3, Name: "gpu-1", URL: "http://node", Enabled: true, Healthy: true}
+	keys := nodeauthtest.SharedSecret("secret")
+	local := func(context.Context, mediasample.Request) (mediasample.Result, error) {
+		return mediasample.Result{Decoder: "software"}, nil
+	}
+	var grants []string
+	s := &sampler{settings: settingsMap{}, keys: keys, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: local,
+		grants: nodesourcetest.Granter{},
+		remote: fakeRemote(func(req mediasample.Request) (mediasample.Result, error) {
+			grants = append(grants, req.SourceGrant)
+			return mediasample.Result{}, nil
+		})}
+	if _, where, err := s.run(t.Context(), file, reqs, nil); err != nil || where != "node:gpu-1" {
+		t.Fatalf("%q %v", where, err)
+	}
+	want := nodesourcetest.GrantFor(3, 42, "/m.mkv")
+	if len(grants) != 2 || grants[0] != want || grants[1] != want {
+		t.Fatalf("grants = %v, want %q for each request", grants, want)
+	}
+
+	s.grants = nodesourcetest.Granter{Err: errors.New("no grant key")}
+	grants = nil
+	if _, where, err := s.run(t.Context(), file, reqs, nil); err != nil || where != ExecutionLocal || len(grants) != 0 {
+		t.Fatalf("prefer mode with a failed grant: %q %v, node runs %d", where, err, len(grants))
+	}
+	s.settings = settingsMap{SettingExecution: ExecutionTranscodeOnly}
+	if _, _, err := s.run(t.Context(), file, reqs, nil); err == nil || len(grants) != 0 {
+		t.Fatalf("transcode_nodes_only with a failed grant: %v, node runs %d", err, len(grants))
+	}
+}
+
+// countingGranter mints real grants and records how many windows the node
+// had sampled when it minted each.
+type countingGranter struct {
+	grants  *nodesource.Grants
+	sampled func() int
+	minted  []int
+}
+
+func (g *countingGranter) ForFile(ctx context.Context, nodeID int, file *models.MediaFile) (string, error) {
+	g.minted = append(g.minted, g.sampled())
+	return g.grants.ForFile(ctx, nodeID, file)
+}
+
+// A grant lives an hour, and a file's windows can take longer. The node gets
+// a fresh grant before the one it holds could lapse, for the revision the job
+// started on; a file that changed meanwhile fails the job instead of mixing
+// two versions' speech.
+func TestSamplerRenewsTheNodesGrantForTheSameRevision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "film.mkv")
+	if err := os.WriteFile(path, []byte("first revision"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{ID: 42, FilePath: path}
+	node := &nodepool.Node{ID: 3, Name: "gpu-1", URL: "http://node", Enabled: true, Healthy: true}
+	clock := time.Unix(1_700_000_000, 0)
+	var sent []string
+	granter := &countingGranter{grants: nodesource.NewGrants(func() string { return "grant-secret" }), sampled: func() int { return len(sent) }}
+	var beforeWindow func(n int)
+	s := &sampler{settings: settingsMap{}, keys: nodeauthtest.SharedSecret("secret"), nodes: nodeList{node},
+		reservations: &nodepool.Reservations{}, grants: granter, now: func() time.Time { return clock },
+		remote: fakeRemote(func(req mediasample.Request) (mediasample.Result, error) {
+			sent = append(sent, req.SourceGrant)
+			if beforeWindow != nil {
+				beforeWindow(len(sent))
+			}
+			clock = clock.Add(30 * time.Minute)
+			return mediasample.Result{}, nil
+		})}
+	reqs := make([]mediasample.Request, 4)
+
+	if _, where, err := s.run(t.Context(), file, reqs, nil); err != nil || where != "node:gpu-1" {
+		t.Fatalf("%q %v", where, err)
+	}
+	// Windows start at 0, 30, 60 and 90 minutes: the third one needs a grant
+	// minted after the first.
+	if fmt.Sprint(granter.minted) != "[0 2]" || len(sent) != 4 {
+		t.Fatalf("grants minted after %v windows of %d, want [0 2]: one renewal before the third", granter.minted, len(sent))
+	}
+
+	granter.minted, sent = nil, nil
+	beforeWindow = func(n int) {
+		if n == 2 {
+			if err := os.WriteFile(path, []byte("second, longer revision"), 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	_, _, err := s.run(t.Context(), file, reqs, nil)
+	if !errors.Is(err, nodesource.ErrSourceChanged) {
+		t.Fatalf("a file that changed mid-job: %v, want ErrSourceChanged", err)
+	}
+	if len(sent) != 2 {
+		t.Fatalf("the node sampled %d windows, want none after the change was found", len(sent))
+	}
+	if failureOf(err) != FailureUnavailable {
+		t.Fatalf("failure = %q, want %q so a later job samples the new revision", failureOf(err), FailureUnavailable)
 	}
 }

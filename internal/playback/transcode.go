@@ -21,6 +21,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/google/uuid"
@@ -35,7 +36,18 @@ func init() {
 // TranscodeOpts holds configuration for an HLS transcode session.
 type TranscodeOpts struct {
 	InputPath string
-	OutputDir string // e.g., /tmp/silo-transcode/{session_id}/
+	// SourceIdentity names the revision of the source InputPath opens, for
+	// what a session records about it (the keyframe plan). A transcode node
+	// sets the identity of the source the core approved, the same whether it
+	// reads the source from its mount or through the relay; empty derives it
+	// from InputPath (sourceIdentity).
+	SourceIdentity string
+	OutputDir      string // e.g., /tmp/silo-transcode/{session_id}/
+	// CopyPlanRecordPath is where a keyframe-planned session records its
+	// planning decision (resolveCopyPlan). Empty keeps it in OutputDir,
+	// removed with it. A transcode node keeps it in a node-level directory, so
+	// an idle reap, which removes the output, leaves it for the rebuild.
+	CopyPlanRecordPath string
 	// subtitleFilterInputPath is a parser-safe local alias used only by the
 	// libass subtitles filter. FFmpeg still opens InputPath as the media input.
 	subtitleFilterInputPath string
@@ -267,6 +279,10 @@ type TranscodeSession struct {
 	// copyPlan is the planned segment list served instead of FFmpeg's
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
+	// copyPlanCandidate is the keyframe-plan decision this session's start
+	// made, not yet published over its transport's record, or "" (see
+	// CommitCopyPlanRecord). Closing the session discards it.
+	copyPlanCandidate string
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -423,12 +439,19 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(ctx, opts)
-	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
+	if err := checkSubtitleFilterInput(opts); err != nil {
+		releaseHWDevice()
+		return nil, err
+	}
+	copyPlan, copyPlanCandidate, err := resolveCopyPlan(ctx, opts)
+	if err != nil {
 		// Rebuilding without the plan would serve FFmpeg's playlist to a
 		// player that may hold the planned one; a later request rebuilds.
 		releaseHWDevice()
-		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", ctx.Err())
+		if !errors.Is(err, ErrCopyPlanSourceChanged) {
+			err = fmt.Errorf("%w: %w", ErrCopyPlanUnavailable, err)
+		}
+		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", err)
 	}
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
@@ -452,15 +475,16 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		segmentIncarnation:   uuid.NewString(),
 		hwWorkloadDevice:     hwWorkloadDevice,
 		copyPlan:             copyPlan,
+		copyPlanCandidate:    copyPlanCandidate,
 	}
 
-	args := buildFFmpegArgs(opts)
+	args := nodesource.RestrictArgs(buildFFmpegArgs(opts))
 	bin := opts.FFmpegPath
 	if bin == "" {
 		bin = ffmpegBinary()
 	}
 
-	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
+	log.Printf("playback: ffmpeg cmd: %s %s", bin, nodesource.RedactLoopback(strings.Join(args, " ")))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
 	cmd := exec.CommandContext(ctx, bin, args...)
@@ -468,6 +492,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if err != nil {
 		cancel()
 		releaseHWDevice()
+		removeCopyPlanCandidate(copyPlanCandidate)
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
 	cmd.Dir = opts.OutputDir
@@ -482,6 +507,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
 		releaseHWDevice()
+		removeCopyPlanCandidate(copyPlanCandidate)
 		s.logFFmpegEvent(ctx, "ffmpeg process exit error", err.Error())
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
@@ -496,6 +522,38 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
 
 	return s, nil
+}
+
+// ErrRelayedTextBurnIn refuses a text subtitle burn-in of a relayed source.
+// The libass subtitles filter opens its file itself, outside FFmpeg's input
+// and its protocol and format restrictions, so it must never be given a
+// transcode node's loopback URL. A node refuses such a start before it
+// reaches FFmpeg (RelayedTextBurnIn); a node with the library mounted, or the
+// API server, burns the subtitle in.
+var ErrRelayedTextBurnIn = errors.New("text subtitle burn-in needs local source access")
+
+// textSubtitleBurnIn reports a burn-in of a text subtitle track, which the
+// libass subtitles filter renders by opening the subtitle's file itself.
+func textSubtitleBurnIn(opts TranscodeOpts) bool {
+	return opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0 && !NeedsBurnIn(opts.SubtitleCodec)
+}
+
+// RelayedTextBurnIn reports a text subtitle burn-in whose input is a relay
+// URL, which this build cannot run (ErrRelayedTextBurnIn). Copied video
+// renders no subtitle, and bitmap burn-in reads the decoded stream, so
+// neither is one.
+func RelayedTextBurnIn(opts TranscodeOpts) bool {
+	return textSubtitleBurnIn(opts) && !strings.EqualFold(opts.TargetCodecVideo, "copy") && nodesource.IsRelayURL(opts.InputPath)
+}
+
+// checkSubtitleFilterInput refuses a text burn-in whose subtitles filter
+// would open a relay URL: the filter opens its file outside FFmpeg's input
+// restrictions.
+func checkSubtitleFilterInput(opts TranscodeOpts) error {
+	if RelayedTextBurnIn(opts) {
+		return ErrRelayedTextBurnIn
+	}
+	return nil
 }
 
 func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func()) {
@@ -719,7 +777,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 	if opts.ToneMapMode == "" {
 		return nil
 	}
-	if err := opts.ToneMapSourceRevision.ValidatePath(opts.InputPath); err != nil {
+	if err := opts.ToneMapSourceRevision.ValidatePath(ctx, opts.InputPath); err != nil {
 		if errors.Is(err, tonemap.ErrSourceRevisionChanged) {
 			return err
 		}
@@ -1979,13 +2037,17 @@ func nvencScaleFilter(res string) string {
 	return "scale_cuda=format=nv12"
 }
 
-// filterPathReplacer escapes special characters in file paths for ffmpeg filter syntax.
+// filterPathReplacer escapes special characters in file paths for ffmpeg
+// filter syntax: inside the quotes a path is written in, the filtergraph
+// keeps a backslash and its character, and the filter's option parser then
+// takes the character literally, so a ':' does not end the option.
 var filterPathReplacer = strings.NewReplacer(
 	"'", "'\\''",
 	"[", "\\[",
 	"]", "\\]",
 	";", "\\;",
 	",", "\\,",
+	":", "\\:",
 )
 
 // escapeFilterPath escapes special characters in file paths for ffmpeg filter syntax.
@@ -1999,9 +2061,10 @@ const subtitleFilterAliasName = "subtitle-source.media"
 // FFmpeg's nested filter parsers. In particular, an apostrophe can be consumed
 // by the filtergraph parser even after it was escaped for the subtitles filter.
 // A stable alias in the session directory keeps the media input unchanged and
-// is retained for seek restarts with the rest of TranscodeOpts.
+// is retained for seek restarts with the rest of TranscodeOpts. A relay URL
+// gets no alias: the filter must not open it (checkSubtitleFilterInput).
 func prepareSubtitleFilterInput(opts *TranscodeOpts) error {
-	if !opts.SubtitleBurnIn || opts.SubtitleTrackIndex < 0 || NeedsBurnIn(opts.SubtitleCodec) {
+	if !textSubtitleBurnIn(*opts) || nodesource.IsRelayURL(opts.InputPath) {
 		return nil
 	}
 
@@ -3014,6 +3077,13 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	}
 
 	s.mu.Lock()
+	candidate := s.copyPlanCandidate
+	s.copyPlanCandidate = ""
+	s.mu.Unlock()
+	// A start that did not succeed leaves its transport's record as it was.
+	removeCopyPlanCandidate(candidate)
+
+	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.running = false
@@ -3027,6 +3097,36 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 		}
 	}
 	return nil
+}
+
+// CommitCopyPlanRecord publishes the keyframe-plan decision this session's
+// start made over its transport's record (TranscodeOpts.CopyPlanRecordPath).
+// A transcode node calls it once the start has succeeded: until then the
+// record stays the one the session it replaces follows, so a replacement
+// that fails changes nothing. A session that followed the record, or made no
+// decision, has nothing to publish.
+func (s *TranscodeSession) CommitCopyPlanRecord() error {
+	s.mu.Lock()
+	candidate, path := s.copyPlanCandidate, s.opts.CopyPlanRecordPath
+	s.copyPlanCandidate = ""
+	s.mu.Unlock()
+	if candidate == "" {
+		return nil
+	}
+	if err := os.Rename(candidate, path); err != nil {
+		removeCopyPlanCandidate(candidate)
+		return fmt.Errorf("publish keyframe plan record: %w", err)
+	}
+	return nil
+}
+
+func removeCopyPlanCandidate(candidate string) {
+	if candidate == "" {
+		return
+	}
+	if err := os.Remove(candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("playback: remove keyframe plan candidate: %v", err)
+	}
 }
 
 // Done returns a channel that closes when the current ffmpeg process exits.
@@ -3316,13 +3416,25 @@ func (s *TranscodeSession) restart(
 			startSegment, previousOpts.TargetCodecVideo, opts.TargetCodecVideo)
 	}
 
-	args := buildFFmpegArgs(opts)
+	// A text burn-in of a relayed source is refused here as at the start
+	// (checkSubtitleFilterInput).
+	if err := checkSubtitleFilterInput(opts); err != nil {
+		s.mu.Lock()
+		flight.err = err
+		s.restarting = nil
+		s.waitErr = err
+		s.mu.Unlock()
+		close(flight.done)
+		return fmt.Errorf("restart: %w", err)
+	}
+
+	args := nodesource.RestrictArgs(buildFFmpegArgs(opts))
 	bin := opts.FFmpegPath
 	if bin == "" {
 		bin = ffmpegBinary()
 	}
 
-	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, strings.Join(args, " "))
+	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, nodesource.RedactLoopback(strings.Join(args, " ")))
 	s.logFFmpegEvent(ctx, "ffmpeg process restart", "")
 
 	// As on initial start, the caller bounds synchronous validation; the new

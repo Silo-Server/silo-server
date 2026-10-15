@@ -43,7 +43,7 @@ func TestSignNeverSendsTheSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Sign(req, "http://node.test", testSecret); err != nil {
+	if err := sign(req, "http://node.test", testSecret, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	auth := req.Header.Get("Authorization")
@@ -203,11 +203,8 @@ func TestVerifyRequiresACredential(t *testing.T) {
 	}
 }
 
-func TestNoSecretSignsAndVerifiesNothing(t *testing.T) {
+func TestNoSecretVerifiesNothing(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
-	if err := Sign(req, "http://node.test", ""); err != nil || req.Header.Get("Authorization") != "" {
-		t.Fatalf("Sign = %v with Authorization %q, want an unsigned request", err, req.Header.Get("Authorization"))
-	}
 	req.Header.Set("Authorization", "Bearer ")
 	if err := Verify(req, ""); !errors.Is(err, ErrNoSecret) {
 		t.Fatalf("Verify = %v, want ErrNoSecret", err)
@@ -227,7 +224,7 @@ func TestVerifyAcceptsTheLegacyBearerForOneRelease(t *testing.T) {
 // The MAC key must not be the shared secret itself, or a signature would be
 // an HMAC under the key that also signs login and stream tokens.
 func TestMACKeyIsDerivedFromTheSecret(t *testing.T) {
-	got, err := requestMAC(testSecret, "1760000000", http.MethodGet, "/status", "", hex.EncodeToString(emptyBodyHash[:]))
+	got, err := requestMAC(coreToNode, testSecret, "1760000000", http.MethodGet, "/status", "", hex.EncodeToString(emptyBodyHash[:]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +273,7 @@ func TestSignedRequestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Sign(req, server.URL, testSecret); err != nil {
+	if err := sign(req, server.URL, testSecret, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	resp, err := server.Client().Do(req)
@@ -369,7 +366,7 @@ func TestSignedRequestThroughAPrefixStrippingProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Sign(req, nodeURL, testSecret); err != nil {
+	if err := sign(req, nodeURL, testSecret, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	resp, err := server.Client().Do(req)

@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodecontrol"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -21,6 +23,9 @@ func TestWorkerDeliveryInventoryDescriptionCoverage(t *testing.T) {
 	}
 	described := map[string]bool{}
 	for _, op := range describeWorkerProtocols().Operations {
+		if op.Listener == "api" {
+			continue // the node control routes; see TestNodeControlProtocolCoverage
+		}
 		described[op.Listener+" "+op.Method+" "+op.Path] = true
 	}
 	count := 0
@@ -42,13 +47,23 @@ func TestWorkerDeliveryInventoryDescriptionCoverage(t *testing.T) {
 	}
 }
 
+// unknownTransports is a core that resolves no transport.
+type unknownTransports struct{}
+
+func (unknownTransports) Resolve(context.Context, nodecontrol.ResolveRequest) (*nodecontrol.Resolution, error) {
+	return nil, &nodecontrol.StatusError{Path: nodecontrol.PathResolve, Status: http.StatusNotFound, Reason: nodecontrol.ResolveNotFound}
+}
+
 func TestWorkerStreamingRefusalDescription(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "synthetic-streaming-worker"
 	cfg.Playback.TranscodeDir = t.TempDir()
 	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
 	watcher.SetConfigForTest(cfg)
-	handler := transcodenode.NewServer(watcher, nil).Handler()
+	node := keyedTranscodeNode(watcher, cfg.Auth.JWTSecret)
+	// The core knows no such transport, so a lost session is not found.
+	node.SetRecipeResolver(unknownTransports{})
+	handler := node.Handler()
 	for _, op := range transcodenode.ProtocolStreaming() {
 		path := strings.ReplaceAll(strings.ReplaceAll(op.Path, "{session_id}", "missing"), "{name}", "seg_00001.ts")
 		for _, authenticated := range []bool{false, true} {

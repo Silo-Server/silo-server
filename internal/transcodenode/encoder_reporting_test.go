@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -24,9 +23,8 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			server := newTestServer(t)
-			tracker := newBlockingSessionTracker()
+			tracker := &recordingSessionTracker{}
 			server.tracker = tracker
-			defer close(tracker.trackRelease)
 			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
 			script := "#!/bin/sh\ncase \" $* \" in\n*' -c:v hevc_vaapi '*) exit 1 ;;\n*' -f null '*) exit 0 ;;\nesac\nexec sleep 30\n"
 			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
@@ -47,7 +45,7 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 			writeNodeToneMapFFprobe(t, ffmpeg, track)
 			revision := tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: 6, VideoTracks: []models.VideoTrack{track}})
 			request := TranscodeStartRequest{
-				SessionID: "encoder-report", InputPath: input, TargetCodecVideo: "hevc", TargetCodecAudio: "aac", SegmentDuration: 2,
+				SessionID: "encoder-report", SourceGrant: input, InputPath: input, TargetCodecVideo: "hevc", TargetCodecAudio: "aac", SegmentDuration: 2,
 				HWAccel: tonemap.BackendVAAPI, ToneMapPolicy: tonemap.PolicyHardwareOnly, ToneMapMode: tonemap.ModeHardware,
 				ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3, ToneMapSourceRevision: revision,
 			}
@@ -58,7 +56,7 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 					HWAccel: tonemap.BackendVAAPI, ToneMapPolicy: request.ToneMapPolicy, ToneMapMode: request.ToneMapMode,
 					ToneMapSourceKind: request.ToneMapSourceKind, ToneMapRecipeVersion: request.ToneMapRecipeVersion, ToneMapSourceRevision: revision,
 				})
-				session, _ = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), request.SessionID, -1, card)
+				session, _ = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), request.SessionID, -1, resolutionOf(card))
 				if session == nil {
 					t.Fatal("reconstruction failed")
 				}
@@ -87,13 +85,13 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 				t.Fatal("session was not registered")
 			}
 			defer func() { _ = session.CloseProcess() }()
-			select {
-			case <-tracker.trackStarted:
-			case <-time.After(3 * time.Second):
-				t.Fatal("session tracking did not start")
-			}
+			// Tracking is done by the time the session is registered.
 			tracker.mu.Lock()
-			tracked := tracker.tracked
+			if len(tracker.tracked) != 1 {
+				tracker.mu.Unlock()
+				t.Fatalf("tracked %d sessions, want 1", len(tracker.tracked))
+			}
+			tracked := tracker.tracked[0]
 			tracker.mu.Unlock()
 			if tracked.HWAccel != playback.HWAccelNone || tracked.ToneMapMode != string(tonemap.ModeHardware) {
 				t.Fatalf("node activity misreported encoder: %#v", tracked)

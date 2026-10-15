@@ -9,7 +9,14 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
+
+// testNodeKeys signs this package's calls to fake nodes, which do not check
+// the signature: without a keyring nothing is sent at all.
+var testNodeKeys nodeauth.Keyring = nodeauthtest.SharedSecret("test-node-secret")
 
 func TestStopRemoteTranscodeAfterFailure(t *testing.T) {
 	deletes := make(chan string, 2)
@@ -23,6 +30,7 @@ func TestStopRemoteTranscodeAfterFailure(t *testing.T) {
 	}))
 	defer node.Close()
 	m := NewTranscodeManager()
+	m.NodeKeysFn = func() nodeauth.Keyring { return testNodeKeys }
 
 	// An unreachable node is stopped in the background: the call returns
 	// while the node is still holding the stop.

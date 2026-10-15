@@ -50,6 +50,12 @@ type healthResponse struct {
 	// Absent on a node that predates the field or runs no providers, which
 	// reads as "no overlay origins" — see CheckNode.
 	NetworkAccess netaccess.NodeNetworkAccess `json:"network_access,omitempty"`
+	// KeyRejected is a transcode node saying the core answers its calls with
+	// 401: its key was rotated or the node deleted. It answers health but can
+	// do no work (every stream it would start fails at its first signed call),
+	// and with no streams left it would otherwise look like the least loaded
+	// node and win placement.
+	KeyRejected bool `json:"key_rejected"`
 }
 
 // maxHealthResponseBytes bounds a node's whole /health body.
@@ -140,7 +146,7 @@ func CheckNodeReport(ctx context.Context, n *Node) HealthReport {
 	}
 
 	return HealthReport{
-		Healthy:          true,
+		Healthy:          !hr.KeyRejected,
 		ActiveJobs:       hr.ActiveJobs,
 		EgressKbps:       hr.EgressKbps,
 		CapabilitiesHash: hr.CapabilitiesHash,
@@ -474,7 +480,10 @@ func (hc *HealthChecker) publishHealth(ctx context.Context, n *Node, report Heal
 		}
 	}
 
-	if healthy && capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
+	// A transcode node without a key cannot be asked for its report: the
+	// fetch would fail on every sweep until a key is issued.
+	keyless := n.Type != NodeTypeProxy && hc.transcodePool != nil && !hc.transcodePool.hasKey(n)
+	if healthy && !keyless && capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
 		hc.startCapabilityRefresh(ctx, n, applyCapabilities)
 	}
 }

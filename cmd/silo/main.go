@@ -88,11 +88,13 @@ import (
 	// entries in-process (no gRPC).
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/partman"
@@ -121,7 +123,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager/tasks"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/triggers"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
-	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/trickplay"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
@@ -176,7 +177,7 @@ func resolveNodeIdentity() string {
 // contract. budget takes the node because the device set is a per-node
 // property: an hw_device override is exactly a node that probes a different
 // matrix from the one the cluster setting describes.
-func nodeCapabilityFetcher(jwtSecret string, budget func(*nodepool.Node) time.Duration) nodepool.CapabilityFetcher {
+func nodeCapabilityFetcher(nodeKeys nodeauth.Keyring, budget func(*nodepool.Node) time.Duration) nodepool.CapabilityFetcher {
 	client := &http.Client{}
 	return func(ctx context.Context, node *nodepool.Node) ([]byte, string, error) {
 		if node == nil {
@@ -184,7 +185,7 @@ func nodeCapabilityFetcher(jwtSecret string, budget func(*nodepool.Node) time.Du
 		}
 		ctx, cancel := context.WithTimeout(ctx, budget(node))
 		defer cancel()
-		info, payload, status, err := transcodenode.FetchHWCapabilitiesPayload(ctx, client, node.URL, jwtSecret)
+		info, payload, status, err := transcodenode.FetchHWCapabilitiesPayload(ctx, client, node.URL, node.SignTarget(), nodeKeys)
 		if err != nil {
 			return nil, "", err
 		}
@@ -733,6 +734,13 @@ func main() {
 		"roll back every migration newer than this version and exit (the version to KEEP)")
 	flag.Parse()
 
+	// A transcode node branches before the bootstrap: it has no DATABASE_URL
+	// or SECRET_KEY to load, and takes everything else from the core.
+	if !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 && transcodeNodeMode(*envFile) {
+		runTranscodeNode()
+		return
+	}
+
 	ctx := context.Background()
 
 	// Step 0: Validate the embedded settings contract before anything can
@@ -1071,8 +1079,9 @@ func main() {
 	defer logStreamHub.Close()
 	defer stopOperationalLog()
 
-	// Proxy and transcode modes run with DB + Redis for hot-reload.
-	if mode == "proxy" || mode == "transcode" {
+	// Proxy mode runs with DB + Redis for hot-reload. Transcode nodes never
+	// reach here: they branch before the bootstrap (runTranscodeNode).
+	if mode == nodepool.NodeTypeProxy {
 		// Delivery writes run in the background with a short deadline. Honor it
 		// on the sockets too, so a stalled Redis cannot retain their connections.
 		redisClient, err := cache.NewDeadlineRedisClientForRole(cfg.Redis, "worker")
@@ -1132,83 +1141,63 @@ func main() {
 			}
 		}()
 
-		var handler http.Handler
-		var shutdownStandalone func(context.Context) error
-		var standaloneHooks standaloneServerHooks
-		if mode == "proxy" {
-			srv := proxy.NewServer(watcher, tracker)
-			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
-			if resolverErr != nil {
-				log.Fatalf("load trusted CIDRs: %v", resolverErr)
-			}
-			registerClientIPConfigReload(watcher, proxyIPResolver)
-			srv.SetClientIPResolver(proxyIPResolver)
-			srv.SetStreamTelemetry(streamTelemetryRegistry)
-			// Network access providers run on this proxy too, one instance per
-			// node with its own overlay identity; see newProxyPluginHost.
-			proxyPlugins := newProxyPluginHost(appCtx, pool, dataCipher, eventBus, watcher, nodeName, cfg.Server.Listen, resolvePluginCacheDir())
-			srv.SetIngressTokens(proxyPlugins.broker.Registry)
-			srv.SetNetworkAccessStatus(proxyPlugins.broker.Status)
-			srv.SetNetworkAccessProviderHost(proxyPlugins.service)
-			standaloneHooks = proxyPlugins.hooks()
-			// Serve header-authenticated sessions: the recipe comes from the
-			// shared grant store central wrote at plan time, and the caller's
-			// own access token is re-checked against the live login session in
-			// Postgres, so a revoked login stops streaming here immediately.
-			srv.SetMediaGrantAuthority(noderecipe.NewProxyGrantStore(redisClient, 0), auth.NewSessionRepository(pool))
-			// Consult the session-deny marker central writes on stop, expiry,
-			// and admin terminate before serving media, so a revoked stream
-			// token or grant stops here instead of at its 24h TTL.
-			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
-			srv.SetRemoteArtifactMissReporter(downloads.NewArtifactManager(
-				downloads.NewArtifactRepository(pool),
-				downloads.NewRepository(pool),
-				nil,
-				downloads.NewPlaybackPreparer(),
-				nodeID,
-				watcher.Config,
-				nil,
-			))
-			// Keep the capability hash /health advertises current, so the API's
-			// sweep refetches this proxy's inventory only when it actually changed.
-			srv.StartCapabilitySnapshots(appCtx)
-			// Sample host and GPU resources so /health, /status and /metrics can
-			// report them without doing any work on the request.
-			srv.StartMetricsSampler(appCtx)
-			handler = srv.Handler()
-		} else {
-			srv := transcodenode.NewServer(watcher, tracker)
-			srv.SetInputPathAuthorizer(transcodenode.NewCatalogPathAuthorizer(scanner.NewFileRepository(pool)))
-			srv.SetThemeInputAuthorizer(transcodenode.NewThemeInputAuthorizer(themesongs.NewRepository(pool)))
-			// Consult the session-deny marker central writes on stop, expiry,
-			// and admin terminate before serving or reconstructing a session,
-			// so a revoked stream token stops here instead of at its 24h TTL.
-			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
-			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
-			// Read jellycompat reconstruction recipes central wrote at transcode
-			// start, so this node can rebuild a Jellyfin transcode after its own
-			// restart (the node hop token is recipe-less). Shares the offload Redis.
-			srv.SetRecipeStore(noderecipe.NewStore(redisClient, 0))
-			srv.SetStreamTelemetry(streamTelemetryRegistry)
-			// The first capability snapshot waits on warmup so it measures a
-			// primed encoder rather than racing it into a probe failure.
-			srv.StartCapabilitySnapshots(appCtx, srv.StartHardwareEncoderWarmup(appCtx))
-			// Sample host and GPU resources so /health, /status and /metrics can
-			// report them without doing any work on the request.
-			srv.StartMetricsSampler(appCtx)
-			// Reclaim orphaned transcode dirs at boot and hourly thereafter, bound
-			// to appCtx so it stops on shutdown.
-			srv.StartOrphanSweeper(appCtx)
-			// SIGTERM drains the node before it shuts down, and every drain
-			// change is announced so placement reacts before the next sweep.
-			srv.SetDrainAnnouncer(nodeDrainAnnouncer(appCtx, eventBus, watcher))
-			standaloneHooks.drain = newTranscodeNodeDrain(srv)
-			handler = srv.Handler()
-			shutdownStandalone = srv.Shutdown
+		srv := proxy.NewServer(watcher, tracker)
+		proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
+		if resolverErr != nil {
+			log.Fatalf("load trusted CIDRs: %v", resolverErr)
 		}
+		registerClientIPConfigReload(watcher, proxyIPResolver)
+		srv.SetClientIPResolver(proxyIPResolver)
+		srv.SetStreamTelemetry(streamTelemetryRegistry)
+		// Network access providers run on this proxy too, one instance per
+		// node with its own overlay identity; see newProxyPluginHost.
+		proxyPlugins := newProxyPluginHost(appCtx, pool, dataCipher, eventBus, watcher, nodeName, cfg.Server.Listen, resolvePluginCacheDir())
+		srv.SetIngressTokens(proxyPlugins.broker.Registry)
+		srv.SetNetworkAccessStatus(proxyPlugins.broker.Status)
+		srv.SetNetworkAccessProviderHost(proxyPlugins.service)
+		// Serve header-authenticated sessions: the recipe comes from the
+		// shared grant store central wrote at plan time, and the caller's
+		// own access token is re-checked against the live login session in
+		// Postgres, so a revoked login stops streaming here immediately.
+		srv.SetMediaGrantAuthority(noderecipe.NewProxyGrantStore(redisClient, 0), auth.NewSessionRepository(pool))
+		// Consult the session-deny marker central writes on stop, expiry,
+		// and admin terminate before serving media, so a revoked stream
+		// token or grant stops here instead of at its 24h TTL.
+		srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
+		// Relays to transcode nodes sign with each node's own key, so this
+		// proxy keeps the same credential registry the API servers do.
+		nodeKeys := nodepool.NewKeyRegistry(nodepool.NewRepository(pool), dataCipher)
+		if err := nodeKeys.Refresh(appCtx); err != nil {
+			slog.Error("load stream node credentials failed", "error", err)
+			os.Exit(1)
+		}
+		nodeKeys.Start(appCtx)
+		if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+			if event.Type == cache.EventNodePoolChanged {
+				nodeKeys.Invalidate()
+			}
+		}); err != nil {
+			slog.Warn("node credential reload events unavailable; reloading every minute instead", "error", err)
+		}
+		srv.SetNodeKeys(nodeKeys.Keyring(func() string { return watcher.Config().Auth.JWTSecret }))
+		srv.SetRemoteArtifactMissReporter(downloads.NewArtifactManager(
+			downloads.NewArtifactRepository(pool),
+			downloads.NewRepository(pool),
+			nil,
+			downloads.NewPlaybackPreparer(),
+			nodeID,
+			watcher.Config,
+			nil,
+		))
+		// Keep the capability hash /health advertises current, so the API's
+		// sweep refetches this proxy's inventory only when it actually changed.
+		srv.StartCapabilitySnapshots(appCtx)
+		// Sample host and GPU resources so /health, /status and /metrics can
+		// report them without doing any work on the request.
+		srv.StartMetricsSampler(appCtx)
 
 		_ = opsRepo
-		startStandaloneServer(cfg.Server.Listen, handler, appCancel, shutdownStandalone, standaloneHooks)
+		startStandaloneServer(cfg.Server.Listen, srv.Handler(), appCancel, nil, proxyPlugins.hooks())
 		return
 	}
 
@@ -1291,6 +1280,10 @@ func main() {
 	// The API routes connect the subtitle sync service to this hook; the
 	// Jellyfin routes share it, so a first play from either side syncs.
 	subtitlePlaySync := &subtitles.PlaySyncHook{}
+	// One deny marker store for the native and Jellyfin relays alike: its
+	// local cache is what refuses a stopped session on this replica when the
+	// Redis write of its marker failed.
+	streamDeny := playback.NewStreamDeny(apiRedisClient)
 	// Set when shutdown begins; /api/v1/ready fails from then on.
 	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
@@ -1310,6 +1303,7 @@ func main() {
 		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
 		RedisClient:                  apiRedisClient,
+		StreamDeny:                   streamDeny,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
@@ -1434,6 +1428,25 @@ func main() {
 
 		deps.ProxyPool = proxyPool
 		deps.TranscodePool = transcodePool
+
+		// Every call to a stream node is signed through this registry: a
+		// transcode node's own key, the shared secret for a proxy. It holds
+		// disabled nodes too, which keep serving their existing streams.
+		nodeKeys := nodepool.NewKeyRegistry(nodeRepo, dataCipher)
+		if err := nodeKeys.Refresh(appCtx); err != nil {
+			log.Fatalf("load stream node credentials: %v", err)
+		}
+		nodeKeys.Start(appCtx)
+		// A transcode node without a key cannot be signed for, so placement
+		// asks the registry, which a missed node_pool_changed delays by one
+		// refresh at most, rather than the pooled rows.
+		transcodePool.SetKeyCheck(nodeKeys.HasKey)
+		deps.NodeKeyRegistry = nodeKeys
+		deps.NodeKeys = nodeKeys.Keyring(func() string { return configWatcher.Config().Auth.JWTSecret })
+		// Every piece of transcode-node work carries a grant for its source,
+		// keyed by the same secret; see internal/nodesource.
+		deps.SourceGrants = nodesource.NewGrants(func() string { return configWatcher.Config().Auth.JWTSecret })
+
 		planner := nodepool.NewPlanner(proxyPool, transcodePool)
 		deps.NodePlanner = planner
 
@@ -1451,7 +1464,7 @@ func main() {
 			}()
 		})
 		capabilityBudget := nodeCapabilityProbeBudget(configWatcher.Config)
-		healthChecker.SetCapabilityFetcher(nodeCapabilityFetcher(cfg.Auth.JWTSecret, capabilityBudget))
+		healthChecker.SetCapabilityFetcher(nodeCapabilityFetcher(deps.NodeKeys, capabilityBudget))
 		// The sweep's backstop is derived from the same budget, so it can never
 		// be the deadline that fires first on a node with many devices.
 		healthChecker.SetCapabilityFetchBudget(capabilityBudget)
@@ -1491,6 +1504,7 @@ func main() {
 				return
 			}
 			if event.Type == cache.EventNodePoolChanged {
+				nodeKeys.Invalidate()
 				pNodes, pErr := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeProxy)
 				tNodes, tErr := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeTranscode)
 				if pErr != nil || tErr != nil {
@@ -1592,6 +1606,8 @@ func main() {
 			cfg.Playback.ChapterThumbnailWorkers,
 		)
 		if chapterThumbService != nil {
+			chapterThumbService.SetNodeKeys(deps.NodeKeys)
+			chapterThumbService.SetSourceGrants(deps.SourceGrants)
 			if queue := blobgc.NewQueue(deps.DB); queue != nil {
 				chapterThumbService.SetBlobQueue(queue)
 			}
@@ -3055,7 +3071,8 @@ func main() {
 			if sweeper := blobgc.NewSweeper(deps.DB, deps.Blobs.Assets, mediaImages...); sweeper != nil {
 				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
 			}
-			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo)
+			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo, deps.NodeKeys)
+			trickplayExtractor.SetSourceGrants(deps.SourceGrants)
 			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
 				trickplayService.Start(appCtx)
 				taskMgr.Register(tasks.NewQueueSeekPreviewsTask(trickplayService))
@@ -3129,6 +3146,8 @@ func main() {
 			// protocol-v3 planning, so the router's invalidation has to reach
 			// both. Set before NewRouter, which composes them.
 			deps.NodeCapabilityInvalidator = preparer.InvalidateNodeCapabilities
+			preparer.SetNodeKeys(deps.NodeKeys)
+			preparer.SetSourceGrants(deps.SourceGrants)
 			artifactMgr := downloads.NewArtifactManager(
 				downloads.NewArtifactRepository(deps.DB),
 				downloads.NewRepository(deps.DB),
@@ -3149,6 +3168,7 @@ func main() {
 				},
 			)
 			artifactMgr.SetSettingsReader(settingsRepo)
+			artifactMgr.SetNodeKeys(deps.NodeKeys)
 			artifactMgr.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), deps.NodeID))
 			artifactMgr.SetPreparationNotifier(func(ctx context.Context, event downloads.PreparationEvent) {
 				if deps.EventsHub == nil {
@@ -3650,11 +3670,17 @@ func main() {
 			StreamTelemetry:      streamTelemetryRegistry,
 			NodePlanner:          deps.NodePlanner,
 			JWTSecret:            cfg.Auth.JWTSecret,
+			NodeKeys:             deps.NodeKeys,
+			SourceGrants:         deps.SourceGrants,
 			RecWorker:            recWorker,
 			FrontendFS:           deps.FrontendFS,
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
-			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),
+			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
+			// The deny marker the relays to a transcode node check; the node
+			// no longer checks it. It is the native API's own value, so a
+			// marker this replica could only cache refuses here too.
+			StreamDeny:       streamDeny,
 			SessionSyncer:    deps.SessionSyncer,
 			SubtitlePlaySync: subtitlePlaySync,
 			// One PIN budget per profile across the native and Jellyfin logins.

@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
@@ -21,7 +22,7 @@ func TestDeleteRemoteTranscodeSignsTheRequest(t *testing.T) {
 	t.Cleanup(node.Close)
 
 	manager := NewTranscodeManager()
-	manager.JWTSecretFn = func() string { return secret }
+	manager.NodeKeysFn = func() nodeauth.Keyring { return nodeauthtest.SharedSecret(secret) }
 	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL); err != nil {
 		t.Fatalf("deleteRemoteTranscode: %v", err)
 	}

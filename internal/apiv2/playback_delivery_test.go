@@ -60,6 +60,16 @@ func TestPlaybackDeliveryV2BytesErrorsAndAuthorization(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
+func TestPlaybackDeliveryNodeRefusalIsDependencyUnavailable(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession, nil)
+	writer := &playbackDeliveryWriter{ResponseWriter: w, request: r}
+	http.Error(writer, "transcode node unavailable", http.StatusBadGateway)
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), TypeDependencyUnavailable.ID) {
+		t.Fatalf("node refusal = %d %s, want 503 %s", w.Code, w.Body.String(), TypeDependencyUnavailable.ID)
+	}
+}
+
 func TestPlaybackDeliveryProblemDropsLegacyBodyAndHeaders(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession, nil)

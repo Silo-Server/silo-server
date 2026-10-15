@@ -15,7 +15,9 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -163,14 +165,14 @@ func TestHandleHWAccelAggregatesAllHealthyNodes(t *testing.T) {
 	}))
 	defer nodeDown.Close()
 
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{
 		{ID: 1, Name: "node-a", URL: nodeA.URL, Enabled: true, Healthy: true},
 		{ID: 2, Name: "node-b", URL: nodeB.URL, Enabled: true, Healthy: true},
 		{ID: 3, Name: "node-down", URL: nodeDown.URL, Enabled: true, Healthy: true},
 		{ID: 4, Name: "node-unhealthy", URL: "http://unreachable.invalid", Enabled: true, Healthy: false},
 	})
-	handler := &SystemHandler{transcodePool: pool, jwtSecret: "secret"}
+	handler := &SystemHandler{transcodePool: pool, nodeKeys: nodeauthtest.SharedSecret("secret")}
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/system/hw-accel", nil)
 	rec := httptest.NewRecorder()
@@ -213,11 +215,11 @@ func TestHandleHWAccelAllNodeProbesFailFallsBackLocal(t *testing.T) {
 	}))
 	defer nodeDown.Close()
 
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{
 		{ID: 1, Name: "node-down", URL: nodeDown.URL, Enabled: true, Healthy: true},
 	})
-	handler := &SystemHandler{transcodePool: pool, jwtSecret: "secret"}
+	handler := &SystemHandler{transcodePool: pool, nodeKeys: nodeauthtest.SharedSecret("secret")}
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/system/hw-accel", nil)
 	rec := httptest.NewRecorder()
@@ -254,12 +256,12 @@ func TestHandleHWAccelProbeLogRedactsNodeURLSecrets(t *testing.T) {
 	failedNodeURL := strings.Replace(failed.URL, "http://", "http://"+username+":"+password+"@", 1) +
 		"?access_token=" + querySecret + "#" + fragmentSecret
 
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{
 		{ID: 1, Name: "healthy-node", URL: healthy.URL, Enabled: true, Healthy: true},
 		{ID: 2, Name: "failed-node", URL: failedNodeURL, Enabled: true, Healthy: true},
 	})
-	handler := &SystemHandler{transcodePool: pool, jwtSecret: "jwt-secret"}
+	handler := &SystemHandler{transcodePool: pool, nodeKeys: nodeauthtest.SharedSecret("jwt-secret")}
 
 	var logs bytes.Buffer
 	previousLogger := slog.Default()

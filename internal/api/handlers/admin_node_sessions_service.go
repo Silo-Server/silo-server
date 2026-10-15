@@ -28,35 +28,36 @@ func (s *AdminNodeSessionsService) Read(ctx context.Context, nodeID int) (nodese
 	if !s.Available() {
 		return empty, &APIError{Status: http.StatusServiceUnavailable, Message: "Node session observations unavailable"}
 	}
-	nodeURL := ""
-	if nodeID > 0 {
-		node, err := s.Nodes.GetByID(ctx, nodeID)
-		if errors.Is(err, nodepool.ErrNodeNotFound) {
-			return empty, &APIError{Status: http.StatusNotFound, Message: "Node not found"}
-		}
-		if err != nil {
-			return empty, err
-		}
-		if node == nil {
-			return empty, &APIError{Status: http.StatusNotFound, Message: "Node not found"}
-		}
-		nodeURL = node.URL
-	}
-	result, err := nodesessions.ListAll(ctx, s.Redis, 50000)
+	result, err := s.list(ctx, nodeID)
 	if err != nil {
 		return empty, err
 	}
 	if result.Truncated {
 		return empty, &APIError{Status: http.StatusServiceUnavailable, Message: "Too many node observations to enumerate completely"}
 	}
-	if nodeURL != "" {
-		filtered := make([]nodesessions.SessionInfo, 0)
-		for _, row := range result.Sessions {
-			if row.NodeURL == nodeURL {
-				filtered = append(filtered, row)
-			}
-		}
-		result.Sessions = filtered
-	}
 	return result, nil
+}
+
+// adminNodeSessionsLimit bounds one read of the session records.
+const adminNodeSessionsLimit = 50_000
+
+// list reads every node's session records, or with nodeID > 0 that node's
+// own: those the core writes under its id from its reports, and those under
+// the hash of its URL that name that URL. The hash alone would also match any
+// node whose URL shares it.
+func (s *AdminNodeSessionsService) list(ctx context.Context, nodeID int) (nodesessions.ListResult, error) {
+	if nodeID <= 0 {
+		return nodesessions.ListAll(ctx, s.Redis, adminNodeSessionsLimit)
+	}
+	node, err := s.Nodes.GetByID(ctx, nodeID)
+	if errors.Is(err, nodepool.ErrNodeNotFound) {
+		return nodesessions.ListResult{}, &APIError{Status: http.StatusNotFound, Message: "Node not found"}
+	}
+	if err != nil {
+		return nodesessions.ListResult{}, err
+	}
+	if node == nil {
+		return nodesessions.ListResult{}, &APIError{Status: http.StatusNotFound, Message: "Node not found"}
+	}
+	return nodesessions.ListNode(ctx, s.Redis, nodeID, node.URL, adminNodeSessionsLimit)
 }

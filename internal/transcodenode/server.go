@@ -2,6 +2,8 @@ package transcodenode
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,22 +31,33 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodecontrol"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
-	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
-	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
 
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
-	SessionID                  string                 `json:"session_id"`
+	// SessionID is the transport id the node serves the job under.
+	SessionID string `json:"session_id"`
+	// PlaybackSessionID, UserID, ProfileID and MediaFileID are the playback
+	// session the job serves. The node files its session record and stream
+	// telemetry under them; it reads no identity from tokens.
+	PlaybackSessionID string `json:"playback_session_id,omitempty"`
+	UserID            int    `json:"user_id,omitempty"`
+	ProfileID         string `json:"profile_id,omitempty"`
+	MediaFileID       int    `json:"media_file_id,omitempty"`
+	// SourceGrant is the core's grant for the job's source. The node opens
+	// its input with it (internal/nodesource) and refuses a start without
+	// one; InputPath is informational.
+	SourceGrant                string                 `json:"source_grant,omitempty"`
 	InputPath                  string                 `json:"input_path"`
 	SourceVideoCodec           string                 `json:"source_video_codec"`
 	SourceVideoProfile         string                 `json:"source_video_profile,omitempty"`
@@ -235,6 +248,11 @@ type HealthResponse struct {
 	// directory, path removed for the same reason as the disk entries. Absent
 	// until the first measurement finishes.
 	Artifacts *downloadstorage.Usage `json:"artifacts,omitempty"`
+	// KeyRejected is set while the core answers this node's calls with 401:
+	// its key was rotated or the node deleted. The node still answers 200 so
+	// liveness probes do not restart it, which would not help; the core's
+	// health sweep reads the field as unhealthy and stops placing work here.
+	KeyRejected bool `json:"key_rejected,omitempty"`
 }
 
 // sessionIdleTTL is how long a job may go without a manifest or segment
@@ -268,14 +286,6 @@ const TranscodeStartReadyMaxDuration = time.Duration(playback.MaxAutoTranscodeSt
 // completion while the old-config process is still live.
 const progressiveRemuxShutdownTimeout = 10 * time.Second
 
-type sessionTracker interface {
-	Track(context.Context, nodesessions.SessionInfo)
-	Remove(context.Context, string)
-	Cleanup(context.Context)
-	NodeURL() string
-	NodeName() string
-}
-
 type progressiveRemuxRequest struct {
 	id                uint64
 	playbackSessionID string
@@ -285,17 +295,25 @@ type progressiveRemuxRequest struct {
 
 // Server is the HTTP handler for transcode mode.
 type Server struct {
-	watcher           *nodeconfig.Watcher
-	streamDeny        *playback.StreamDeny
-	nodeRowID         func() (int, bool)
-	registeredNodeURL func() (string, bool)
-	tracker           sessionTracker
-	ffmpegSink        playback.FFmpegLogSink
-	prepareProgress   prepareProgressRegistry
-	inputPaths        InputPathAuthorizer
-	themeInputs       ThemeInputApprover
-	transcodeDir      string
-	artifactRoot      string
+	watcher RuntimeConfig
+	// nodeKey is this node's own key, the only key requireBearer accepts.
+	// Empty refuses every authenticated request.
+	nodeKey string
+	// keyRejected reports that the core refuses the node's key; nil reads as
+	// accepted. See SetKeyRejected.
+	keyRejected     func() bool
+	nodeRowID       func() (int, bool)
+	tracker         SessionTracker
+	ffmpegSink      playback.FFmpegLogSink
+	prepareProgress prepareProgressRegistry
+	// sources opens every job's input with the grant the job carries; see
+	// SourceOpener.
+	sources SourceOpener
+	// resolver asks the core for the recipe and playback identity of a lost
+	// transcode or a progressive remux; see RecipeResolver.
+	resolver     RecipeResolver
+	transcodeDir string
+	artifactRoot string
 	// artifactProber measures artifactRoot in the background for health,
 	// status, and the artifact listing.
 	artifactProber *downloadstorage.Prober
@@ -311,6 +329,13 @@ type Server struct {
 	// Guarded by mu alongside sessions; the idle reaper closes jobs whose entry
 	// is older than sessionIdleTTL.
 	lastAccess map[string]time.Time
+	// identities records, per registered session id, the playback session the
+	// job serves. Guarded by mu alongside sessions.
+	identities map[string]sessionIdentity
+	// inputs holds, per registered session id, the source the session reads
+	// across its FFmpeg restarts and seeks; forgetting the session closes it.
+	// Guarded by mu alongside sessions.
+	inputs     map[string]SourceInput
 	reaperOnce sync.Once
 	// mediaSamples admits media sampling runs up to the configured per-node
 	// capacity, whichever API servers send them.
@@ -322,11 +347,11 @@ type Server struct {
 	// reloadMu keeps force-reload teardown atomic with session creation and
 	// reconstruction. It is always acquired before lifecycleMu or mu.
 	reloadMu sync.RWMutex
-	// pendingAuthorityRevocations retains normalized node URLs whose generation
-	// bump failed during a force reload. Guarded by reloadMu; the next operator
-	// retry must revisit them even if the watcher has already adopted a new URL.
-	pendingAuthorityRevocations []string
-	activeJobs                  atomic.Int32
+	// forceReloads counts force reloads; one advances it under reloadMu. A
+	// progressive remux resolved before a force reload that it then waited
+	// out was resolved against authority the core has since revoked.
+	forceReloads atomic.Uint64
+	activeJobs   atomic.Int32
 	// inFlight counts requests for work activeJobs does not count; see
 	// trackInFlight.
 	inFlight atomic.Int32
@@ -347,6 +372,9 @@ type Server struct {
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
 	// session may register after the shutdown drain has taken its snapshot.
 	shuttingDown bool
+	// sampleCapabilities is a test seam; production uses
+	// mediasample.LoadCapabilities (relayedSamplesUnsupported).
+	sampleCapabilities func(ctx context.Context, ffmpegPath string) (mediasample.Capabilities, error)
 	// startThrottler is a test seam; production falls back to session.StartThrottler.
 	startThrottler func(*playback.TranscodeSession, int)
 
@@ -375,10 +403,6 @@ type Server struct {
 	// so concurrent relays remain independent while prepare/delete stay exclusive.
 	lifecycleMu    sync.Mutex
 	lifecycleLocks map[string]*sessionLifecycleLock
-
-	// recipeStore is the control-plane recipe store consulted when a forwarded
-	// token carries no recipe (the jellycompat node hop). Nil disables that path.
-	recipeStore recipeStore
 
 	// capabilityHash is the last computed capability snapshot's hash, published
 	// by /health without probing. Nil until the first snapshot or capability
@@ -532,12 +556,9 @@ func (s *Server) restartSegmentLocked(
 	return session.RestartSegment(ctx, segNum)
 }
 
-// NewServer creates a new transcode server.
-func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
-	var trackerImpl sessionTracker
-	if tracker != nil {
-		trackerImpl = tracker
-	}
+// NewServer creates a new transcode server. A nil tracker records no
+// sessions.
+func NewServer(watcher RuntimeConfig, tracker SessionTracker) *Server {
 	transcodeDir := config.DefaultTranscodeDir
 	artifactDir := ""
 	if watcher != nil {
@@ -554,7 +575,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 	}
 	s := &Server{
 		watcher:                   watcher,
-		tracker:                   trackerImpl,
+		tracker:                   tracker,
 		transcodeDir:              transcodeDir,
 		artifactRoot:              artifactRoot,
 		artifactProber:            downloadstorage.NewProber(0),
@@ -562,10 +583,10 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		progressiveRemuxes:        make(map[string]progressiveRemuxRequest),
 		stoppedProgressiveRemuxes: make(map[string]time.Time),
 		lastAccess:                make(map[string]time.Time),
+		identities:                make(map[string]sessionIdentity),
 	}
 	if watcher != nil {
 		s.nodeRowID = watcher.NodeRowID
-		s.registeredNodeURL = watcher.NodeRegisteredURL
 	}
 	return s
 }
@@ -600,7 +621,14 @@ func (s *Server) StartOrphanSweeper(ctx context.Context) {
 		// already-written segments stops advancing its dir mtime, so the age
 		// guard could misclassify it as orphaned. The live set is authoritative
 		// (in-flight reconstructs are covered by their fresh writes + age guard).
-		return playback.CleanupOrphanedTranscodeDirs(dir, s.activeSessionIDs(), playback.MaxTokenTTL)
+		active := s.activeSessionIDs()
+		removed, err := playback.CleanupOrphanedTranscodeDirs(dir, active, playback.MaxTokenTTL)
+		keep := make(map[string]struct{}, len(active))
+		for id := range active {
+			keep[copyPlanRecordName(id)] = struct{}{}
+		}
+		removed += playback.SweepCopyPlanRecords(filepath.Join(dir, playback.CopyPlanRecordDirName), keep, playback.MaxTokenTTL)
+		return removed, err
 	}, playback.OrphanCleanupInterval)
 }
 
@@ -774,8 +802,7 @@ func (s *Server) reapSession(sessionID string, session *playback.TranscodeSessio
 		s.mu.Unlock()
 		return
 	}
-	delete(s.sessions, sessionID)
-	delete(s.lastAccess, sessionID)
+	s.forgetSessionLocked(sessionID)
 	s.mu.Unlock()
 
 	if err := s.closeSessionOffGPU(session); err != nil {
@@ -812,93 +839,10 @@ func (s *Server) retireGPUSession(close func() error) error {
 	return close()
 }
 
-// recipeStore reads a remote transport record written by central, keyed by the
-// transport id this node serves the job under. It is the reconstruct source for
-// every flow whose request cannot carry a complete recipe itself: the
-// jellycompat node-hop token is identity-only by
-// design — not because a Jellyfin client can't round-trip it, but because the
-// recipe is mutated in place and the client can't be driven to refresh a stale
-// token — and a header-authenticated (tokenless) attempt publishes no credential
-// at all, so the relayed request carries nothing to rebuild from (see
-// internal/noderecipe). On a node restart the node fetches the recipe here
-// instead of 404ing. Progressive remux uses the same record as durable active
-// authority before spawning FFmpeg. *noderecipe.Store implements it.
-type recipeStore interface {
-	Get(ctx context.Context, sessionID string) (*playback.RecipeCard, bool)
-	// Delete drops a session's recipe so a buffered/retrying request after a node
-	// restart cannot reconstruct a brand-new ffmpeg for an already-stopped session.
-	// Called only on deliberate teardown; nil-safe and a missing key is a no-op.
-	Delete(ctx context.Context, sessionID string) error
-	// RevokeNode invalidates all recipes issued for a node before a destructive
-	// reload under its legacy URL identity.
-	RevokeNode(ctx context.Context, nodeURL string) error
-	// RevokeNodeID invalidates current progressive-remux authority under the
-	// stable stream_nodes identity, which survives URL repoints and restarts.
-	RevokeNodeID(ctx context.Context, nodeID int) error
-}
-
-// SetRecipeStore wires the control-plane recipe store so this node can rebuild a
-// jellycompat or header-authenticated transcode after its own restart and
-// validate active progressive-remux transports. Optional for reconstruction;
-// transcode-executed progressive remux is not routed to a node without it.
-func (s *Server) SetRecipeStore(store recipeStore) {
-	s.recipeStore = store
-}
-
-// SetInputPathAuthorizer wires the library-root authority used by every node
-// endpoint that accepts an FFmpeg input path.
-func (s *Server) SetInputPathAuthorizer(authorizer InputPathAuthorizer) {
-	s.inputPaths = authorizer
-}
-
-// SetThemeInputAuthorizer wires the theme-file authority for theme AAC
-// conversions. A node without one does not advertise theme execution, so the
-// API never routes a theme conversion to it.
-func (s *Server) SetThemeInputAuthorizer(authorizer ThemeInputApprover) {
-	s.themeInputs = authorizer
-}
-
 // SetStreamTelemetry wires local stream observation. A nil registry is a
 // complete no-op.
 func (s *Server) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 	s.telemetry = registry
-}
-
-// SetStreamDeny installs the session-deny marker store this node consults
-// before serving or reconstructing a session. A nil store disables the check,
-// which is the pre-marker behavior for a node without Redis.
-func (s *Server) SetStreamDeny(deny *playback.StreamDeny) {
-	s.streamDeny = deny
-}
-
-// sessionDenied reports whether the deny marker revokes the session a request
-// serves. The URL names the transcode transport; a forwarded stream token names
-// the playback session, which is what stop, expiry, and admin terminate deny.
-// Both are checked so a compat transport whose id differs from its playback
-// session is still cut. A missing or invalid token only removes the second
-// lookup; the token was never this route's authorization.
-func (s *Server) sessionDenied(r *http.Request, transportID string) bool {
-	if s.streamDeny == nil {
-		return false
-	}
-	if s.streamDeny.Denied(r.Context(), transportID) {
-		return true
-	}
-	if _, claims := s.canonicalSessionID(r, transportID); claims != nil && claims.SessionID != transportID {
-		return s.streamDeny.Denied(r.Context(), claims.SessionID)
-	}
-	return false
-}
-
-// claimsDenied is sessionDenied for a path that has already verified its token.
-func (s *Server) claimsDenied(ctx context.Context, claims *streamtoken.Claims, transportID string) bool {
-	if s.streamDeny == nil {
-		return false
-	}
-	if s.streamDeny.Denied(ctx, transportID) {
-		return true
-	}
-	return claims != nil && claims.SessionID != "" && claims.SessionID != transportID && s.streamDeny.Denied(ctx, claims.SessionID)
 }
 
 // writeStreamDenied answers a denied session: 410 with no media bytes. The
@@ -977,8 +921,8 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if !downloadprepare.ValidArtifactID(req.ArtifactID) || strings.TrimSpace(req.InputPath) == "" {
-		http.Error(w, "a valid artifact_id and input_path are required", http.StatusBadRequest)
+	if !downloadprepare.ValidArtifactID(req.ArtifactID) {
+		http.Error(w, "a valid artifact_id is required", http.StatusBadRequest)
 		return
 	}
 	if req.AudioRecipeRequested() && !req.StereoDownmixBoostRequested() {
@@ -997,9 +941,6 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	cfg := s.watcher.Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
-		return
-	}
-	if !s.requireApprovedInputPath(w, r, req.InputPath) {
 		return
 	}
 	opts := req.TranscodeOpts(cfg.Playback.FFmpegPath, cfg.Playback.HWAccel, cfg.Playback.HWDevice, s.ffmpegSink)
@@ -1021,6 +962,15 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Opened only once the request must produce something: serving an
+	// artifact that already exists needs no source, so it neither asks the
+	// core nor fails when the source is gone.
+	input, ok := s.openInput(w, r, req.SourceGrant)
+	if !ok {
+		return
+	}
+	defer func() { _ = input.Close() }()
+	opts.InputPath = input.Input()
 	// Claimed only once this request is committed to producing something: a
 	// prepared download encodes on the GPU like any transcode, and the tone-map
 	// recipe resolution just below runs ffmpeg probes on it too. Serving an
@@ -1048,7 +998,8 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobCtx := r.Context()
+	jobCtx, cancelJob := inputContext(r.Context(), input)
+	defer cancelJob()
 	s.activeJobs.Add(1)
 	defer s.activeJobs.Add(-1)
 	if s.tracker != nil {
@@ -1212,6 +1163,27 @@ func writeDownloadPrepareResult(w http.ResponseWriter, result downloadprepare.Re
 	_ = json.NewEncoder(w).Encode(result)
 }
 
+// copyPlanRecordPath is where session sessionID records its keyframe-plan
+// decision: outside its output directory, so an idle reap, which removes the
+// output, leaves it for the rebuild. A stop or force reload removes it, and
+// the orphan sweep removes one unused for playback.MaxTokenTTL.
+func (s *Server) copyPlanRecordPath(sessionID string) string {
+	return filepath.Join(s.transcodeDir, playback.CopyPlanRecordDirName, copyPlanRecordName(sessionID))
+}
+
+// copyPlanRecordName names a transport's record by a hash of its id, so any
+// id makes one safe file name.
+func copyPlanRecordName(sessionID string) string {
+	sum := sha256.Sum256([]byte(sessionID))
+	return hex.EncodeToString(sum[:16]) + ".json"
+}
+
+func (s *Server) removeCopyPlanRecord(sessionID string) {
+	if err := os.Remove(s.copyPlanRecordPath(sessionID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("remove keyframe plan record", "component", "transcodenode", "session", sessionID, "error", err)
+	}
+}
+
 func (s *Server) sessionOutputDir(sessionID string) string {
 	return filepath.Join(s.transcodeDir, sessionID)
 }
@@ -1327,6 +1299,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		SampledAt:        snapshot.SampledAt,
 		Build:            buildinfo.Current(),
 		Artifacts:        artifacts,
+		KeyRejected:      s.keyRejected != nil && s.keyRejected(),
 	})
 }
 
@@ -1436,22 +1409,29 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	// Progressive remux tokens bind execution to the stable stream_nodes row.
-	// Do not let central commit work to this node until the watcher can resolve
-	// that identity; otherwise every committed GET would fail closed at serve
-	// time with no different route for a replan to choose.
-	if s.nodeRowID != nil {
-		if nodeID, ok := s.nodeRowID(); ok && nodeID > 0 {
-			info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxExecutionV1}
-			if s.themeInputs != nil {
-				info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeatureThemeAudioExecutionV1)
-			}
-		}
-	}
-	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
+	info.TransportFeatures = append(s.executionTransportFeatures(), playback.TransportFeaturePreparedTracksV1,
 		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
+}
+
+// executionTransportFeatures are the progressive executions this node can
+// serve, and so may advertise: central commits a route to an advertised
+// feature, and a route the node cannot serve fails closed at serve time with
+// no different route for a replan to choose.
+//
+// A progressive remux binds execution to the stable stream_nodes row, so the
+// watcher must know it; each request resolves through the core and opens its
+// input with the grant the core resolves, so both must be wired. Theme audio
+// is a progressive remux of a theme file and needs nothing more.
+func (s *Server) executionTransportFeatures() []string {
+	if s.resolver == nil || s.sources == nil || s.nodeRowID == nil {
+		return nil
+	}
+	if nodeID, ok := s.nodeRowID(); !ok || nodeID <= 0 {
+		return nil
+	}
+	return []string{playback.TransportFeatureProgressiveRemuxExecutionV1, playback.TransportFeatureThemeAudioExecutionV1}
 }
 
 // handleHWCapabilities reports live smoke-tested node capabilities.
@@ -1530,11 +1510,8 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 		writeChapterThumbnailError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
-	if strings.TrimSpace(req.InputPath) == "" {
-		writeChapterThumbnailError(w, http.StatusBadRequest, "invalid_request", "input_path is required")
-		return
-	}
-	if !s.requireApprovedInputPath(w, r, req.InputPath) {
+	if strings.TrimSpace(req.SourceGrant) == "" {
+		writeChapterThumbnailError(w, http.StatusBadRequest, "invalid_request", "source_grant is required")
 		return
 	}
 	if s.draining() {
@@ -1557,8 +1534,15 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer s.gpu.endWork()
-	frame, reason, err := chapterthumbs.ExtractFrame(r.Context(), chapterthumbs.FrameExtractOptions{
-		InputPath:            req.InputPath,
+	input, ok := s.openInput(w, r, req.SourceGrant)
+	if !ok {
+		return
+	}
+	defer func() { _ = input.Close() }()
+	ctx, cancel := inputContext(r.Context(), input)
+	defer cancel()
+	frame, reason, err := chapterthumbs.ExtractFrame(ctx, chapterthumbs.FrameExtractOptions{
+		InputPath:            input.Input(),
 		SeekSeconds:          req.SeekSeconds,
 		FFmpegPath:           cfg.Playback.FFmpegPath,
 		HWAccel:              cfg.Playback.HWAccel,
@@ -1581,13 +1565,27 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(chapterthumbs.RemoteExtractErrorResponse{
 		Reason: reason,
-		Error:  message,
+		Error:  nodesource.RedactLoopback(message),
 	})
 }
 
+// SetNodeKey sets the key this node verifies its callers' signatures with:
+// the key issued to its stream_nodes row. Call it during construction.
+func (s *Server) SetNodeKey(key string) {
+	s.nodeKey = key
+}
+
+// SetKeyRejected wires the check health reports as key_rejected: whether the
+// core refused this node's key on its last configuration read. Call it during
+// construction.
+func (s *Server) SetKeyRejected(rejected func() bool) {
+	s.keyRejected = rejected
+}
+
 // requireBearer is middleware that admits only API servers and proxies: it
-// checks the request's node signature (see nodeauth). The name predates
-// signing and is kept because the route inventory classifies by it.
+// checks the request's node signature (see nodeauth) against this node's own
+// key, never the shared secret. Without a key it refuses everything. The name
+// predates signing and is kept because the route inventory classifies by it.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1596,7 +1594,7 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 			http.Error(w, "node not configured", http.StatusServiceUnavailable)
 			return
 		}
-		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
+		if s.nodeKey == "" || nodeauth.VerifySigned(r, s.nodeKey) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -1613,8 +1611,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.SessionID == "" || req.InputPath == "" {
-		http.Error(w, "session_id and input_path are required", http.StatusBadRequest)
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
 		return
 	}
 	if req.ThrottleSeconds < 0 {
@@ -1627,9 +1625,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateCopyFMP4RecipeRequest(req); err != nil {
 		http.Error(w, "invalid copy-fmp4 recipe", http.StatusBadRequest)
-		return
-	}
-	if !s.requireApprovedInputPath(w, r, req.InputPath) {
 		return
 	}
 	// A draining node starts no new transcode, but it still replaces one it
@@ -1655,11 +1650,27 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.gpu.endWork()
+	// Opened only once the node would run the start, so a refused one never
+	// asks the core.
+	input, ok := s.openInput(w, r, req.SourceGrant)
+	if !ok {
+		return
+	}
+	// The session owns the source once it registers; until then every
+	// return releases it.
+	inputOwned := false
+	defer func() {
+		if !inputOwned {
+			_ = input.Close()
+		}
+	}()
 	outputDir := s.sessionOutputDir(req.SessionID)
 
 	opts := playback.TranscodeOpts{
-		InputPath:                  req.InputPath,
+		InputPath:                  input.Input(),
+		SourceIdentity:             input.Identity(),
 		OutputDir:                  outputDir,
+		CopyPlanRecordPath:         s.copyPlanRecordPath(req.SessionID),
 		SessionID:                  req.SessionID,
 		SourceVideoCodec:           req.SourceVideoCodec,
 		SourceVideoProfile:         req.SourceVideoProfile,
@@ -1711,6 +1722,12 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
 		opts.HWAccel = cfg.Playback.HWAccel
+	}
+	if playback.RelayedTextBurnIn(opts) {
+		slog.WarnContext(r.Context(), "refusing text subtitle burn-in from a core-access source", "component", "transcodenode",
+			"session", req.SessionID, "source", input.Identity())
+		http.Error(w, errRemoteTextBurnIn, http.StatusUnprocessableEntity)
+		return
 	}
 	if toneMapRecipeRequested(opts) {
 		if err := s.resolveToneMapRecipe(r.Context(), &opts); err != nil {
@@ -1791,20 +1808,26 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		unlock()
 		slog.ErrorContext(r.Context(), "start transcode", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-		if isToneMapRecipeError(err) {
+		switch {
+		case isToneMapRecipeError(err):
 			writeToneMapRecipeError(w, err)
-		} else {
+		default:
 			http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		}
 		return
+	}
+
+	// The start succeeded, so its keyframe-plan decision becomes the
+	// transport's; a replacement that failed above left the record alone.
+	if err := session.CommitCopyPlanRecord(); err != nil {
+		slog.WarnContext(r.Context(), "record keyframe plan", "component", "transcodenode", "error", err, "session", req.SessionID)
 	}
 
 	// The replacement has successfully spawned, so retire the old session and
 	// publish the new one under the same ID.
 	s.mu.Lock()
 	if old, ok := s.sessions[req.SessionID]; ok {
-		delete(s.sessions, req.SessionID)
-		delete(s.lastAccess, req.SessionID)
+		s.forgetSessionLocked(req.SessionID)
 		s.mu.Unlock()
 		_ = s.closeSessionOffGPU(old)
 		staleDir := outputDir + ".stale-" + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -1818,21 +1841,18 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	s.sessions[req.SessionID] = session
-	published = true
-	s.noteSessionAccessLocked(req.SessionID)
+	s.registerSessionLocked(req.SessionID, session, sessionIdentity{
+		playbackSessionID: req.PlaybackSessionID, userID: req.UserID, profileID: req.ProfileID, mediaFileID: req.MediaFileID,
+	}, input)
+	published, inputOwned = true, true
 	s.mu.Unlock()
-	unlock()
-	s.activeJobs.Add(1)
-	s.armSessionThrottler(session, req.ThrottleSeconds)
-
-	// Track session in Redis off the request path — the API server (and
-	// behind it the playback client) is blocked on this 202, and the
-	// tracking write is monitoring-only.
+	// Track before releasing the lifecycle lock, which stop, the idle reaper
+	// and force reload take before they Remove: a Remove then always follows
+	// this Track, so an ended session never stays listed. Track only records
+	// the session in memory for the node's next report.
 	effectiveHWAccel := session.Opts().HWAccel
 	encoderHWAccel := session.Opts().EffectiveEncoderHWAccel()
-	trackCtx := context.WithoutCancel(r.Context())
-	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
+	s.tracker.Track(context.WithoutCancel(r.Context()), nodesessions.SessionInfo{
 		SessionID:   req.SessionID,
 		NodeURL:     s.tracker.NodeURL(),
 		NodeName:    s.tracker.NodeName(),
@@ -1843,7 +1863,13 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		HWAccel:     encoderHWAccel,
 		ToneMapMode: string(session.Opts().ToneMapMode),
 		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+		AuthUserID:  req.UserID,
+		ProfileID:   req.ProfileID,
+		MediaFileID: req.MediaFileID,
 	})
+	unlock()
+	s.activeJobs.Add(1)
+	s.armSessionThrottler(session, req.ThrottleSeconds)
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(TranscodeStartResponse{
@@ -1860,77 +1886,62 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) requireApprovedInputPath(w http.ResponseWriter, r *http.Request, path string) bool {
-	if s.inputPaths == nil {
-		http.Error(w, "input path authority unavailable", http.StatusServiceUnavailable)
-		return false
-	}
-	allowed, err := s.inputPaths.Allowed(r.Context(), path)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "authorize transcode input path", "component", "transcodenode", "error", err)
-		http.Error(w, "input path authority unavailable", http.StatusServiceUnavailable)
-		return false
-	}
-	if !allowed {
-		http.Error(w, "input_path must be an approved absolute media file", http.StatusBadRequest)
-		return false
-	}
-	return true
-}
+// errReconstructDenied is a lost session the core refused to rebuild because
+// its playback session ended.
+var errReconstructDenied = errors.New("transcode session denied")
 
-// reconstructFromToken rebuilds a transcode session this node lost to its own
-// restart, from whichever recipe source the request has.
+// errReconstructTextBurnIn is a lost session whose recipe burns in a text
+// subtitle from a core-access source, which this node refuses as it refuses
+// the start (errRemoteTextBurnIn). It answers 404 like any refused rebuild,
+// so the client's next plan puts the session elsewhere.
+var errReconstructTextBurnIn = errors.New(errRemoteTextBurnIn)
+
+// errReconstructUnavailable is a lost session the node could not ask the core
+// about: the core was unreachable, failing, or not wired. It is retryable, so
+// it must not read as the session not existing.
+var errReconstructUnavailable = errors.New("recipe authority unavailable")
+
+// reconstructLost rebuilds a transcode session this node lost to its own
+// restart, from the recipe the core resolves for it.
 //
-// A legacy attempt forwards the client's verified stream token in the
-// X-Silo-Stream-Token header, and a native token carries the full byte-affecting
-// recipe (the former Postgres "recipe card"), so the node can re-spawn ffmpeg
-// seeked to the requested segment rather than 404ing — mirroring the integrated
-// server's token-carried reconstruct.
+// The relay's X-Silo-Stream-Token header goes to the core unread: a native
+// token carries the full byte-affecting recipe, and the core falls back to
+// its recipe store for the flows whose token carries none (jellycompat, and a
+// header-authenticated attempt that has no token). The node re-spawns FFmpeg
+// seeked to the requested segment rather than 404ing, mirroring the
+// integrated server's token-carried reconstruct.
 //
-// Two flows reach this path with no usable token at all and rebuild from the
-// control-plane recipe store instead: jellycompat, whose node-hop token is
-// identity-only by design (see internal/noderecipe), and a header-authenticated
-// (tokenless) attempt, where no client-visible URL carries a credential and the
-// relayed request therefore has no token to forward. The token was never this
-// route's authorization — the node signature already authenticated the caller —
-// so its absence only removes a recipe source, never a permission.
-//
-// Returns nil when no source yields a complete transcode recipe for the session
-// id in the URL, which the caller renders as a genuine not-found.
+// Returns nil and errReconstructDenied when the core reports the session
+// denied, nil and errReconstructTextBurnIn for a text burn-in this node cannot
+// run from a core-access source, and nil and no error when the core refuses it
+// otherwise (no recipe, or a recipe that is not this node's); the caller
+// renders the last two as a not-found. Anything short of a refusal — a core
+// the node cannot reach, one that times out or fails — returns
+// errReconstructUnavailable, which the caller renders as a retryable 503.
 //
 // requestedSegment is the segment the client is fetching, or negative on the
-// manifest path. Reconstruction is single-flighted per session id so concurrent
-// manifest and segment requests for the same lost session share one ffmpeg.
-func (s *Server) reconstructFromToken(r *http.Request, sessionID string, requestedSegment int) (*playback.TranscodeSession, error) {
-	var card playback.RecipeCard
-	tokenComplete := false
-	if tokenStr := r.Header.Get("X-Silo-Stream-Token"); tokenStr != "" {
-		cfg := s.watcher.Config()
-		if cfg == nil {
-			return nil, nil
-		}
-		claims, err := streamtoken.Verify(tokenStr, cfg.Auth.JWTSecret)
-		if err != nil {
-			slog.WarnContext(r.Context(), "transcode node reconstruct: invalid stream token", "component", "transcodenode", "error", err,
+// manifest path. Reconstruction is single-flighted per session id so
+// concurrent manifest and segment requests for the same lost session share
+// one ffmpeg.
+func (s *Server) reconstructLost(r *http.Request, sessionID string, requestedSegment int) (*playback.TranscodeSession, error) {
+	resolution, err := s.resolve(r, sessionID, nodecontrol.ResolvePurposeHLS)
+	if err != nil {
+		switch reason := nodecontrol.Reason(err); {
+		case reason == nodecontrol.ResolveDenied:
+			return nil, errReconstructDenied
+		case reason == nodecontrol.ResolveWrongRoute:
+			slog.WarnContext(r.Context(), "transcode node reconstruct: recipe bound to another node", "component", "transcodenode",
 				"session", sessionID, "playback_session_id", sessionID)
 			return nil, nil
-		}
-		card = playback.RecipeCardFromClaims(claims)
-		// A presented token's recipe must be a transcode card for the session id in
-		// the URL: a mismatch is a forged or stale request, and direct/remux cards
-		// carry no encode parameters to rebuild. An empty PlayMethod is a transcode
-		// card (back-compat).
-		if !recipeServesTransport(card, sessionID) {
+		case reason != "":
+			// Every refusal carries its reason; only these are the core's
+			// answer about the session.
 			return nil, nil
 		}
-		tokenComplete = recipeIsComplete(card)
+		slog.WarnContext(r.Context(), "transcode node reconstruct: recipe unavailable", "component", "transcodenode", "error", err,
+			"session", sessionID, "playback_session_id", sessionID)
+		return nil, fmt.Errorf("%w: %w", errReconstructUnavailable, err)
 	}
-	// Without a complete token recipe the store is the only remaining source; with
-	// no store wired there is nothing to rebuild from, so 404.
-	if !tokenComplete && s.recipeStore == nil {
-		return nil, nil
-	}
-
 	v, err, _ := s.reconstructGroup.Do(sessionID, func() (interface{}, error) {
 		// A concurrent reconstruct (or a fresh start) may already have registered the
 		// session; serve it rather than spawning a duplicate ffmpeg.
@@ -1940,20 +1951,7 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 		if ok {
 			return existing, nil
 		}
-		resolved := card
-		if !tokenComplete {
-			// No complete token recipe (jellycompat's identity-only token, or a
-			// header-authenticated attempt with no token at all): fetch the recipe
-			// central wrote to the control-plane store at transcode start. A miss,
-			// a recipe for another transport, or an incomplete one is a genuine
-			// not-found (404), never a spawn from a bad recipe.
-			fetched, ok := s.recipeStore.Get(r.Context(), sessionID)
-			if !ok || fetched == nil || !recipeServesTransport(*fetched, sessionID) || !recipeIsComplete(*fetched) {
-				return (*playback.TranscodeSession)(nil), nil
-			}
-			resolved = *fetched
-		}
-		return s.spawnReconstruct(r, sessionID, requestedSegment, resolved)
+		return s.spawnReconstruct(r, sessionID, requestedSegment, resolution)
 	})
 	if session, _ := v.(*playback.TranscodeSession); session != nil {
 		return session, nil
@@ -1961,46 +1959,13 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	return nil, err
 }
 
-// recipeServesTransport reports whether a recipe card describes the transcode
-// this node serves under transportID — the id in the node-facing URL.
-//
-// The two writers key that id differently and both shapes are accepted. A native
-// v3 remote transcode runs under a plan-scoped transport id (so a prepared
-// successor can coexist with its predecessor), recorded on the card as
-// TranscodeTransportID; jellycompat runs under the upstream playback session id
-// and leaves the field empty, so SessionID is the transport id there. A card
-// that matches neither is a forged, stale, or misrouted request. An empty
-// PlayMethod counts as a transcode card (back-compat).
-func recipeServesTransport(card playback.RecipeCard, transportID string) bool {
-	expected := card.SessionID
-	if card.TranscodeTransportID != "" {
-		expected = card.TranscodeTransportID
-	}
-	return expected == transportID && card.IsTranscodeRecipe() && playback.ValidateCopyFMP4RecipeCard(card) == nil
-}
-
-// recipeIsComplete reports whether a recipe carries the encode parameters
-// ffmpeg needs. An identity-only card (the jellycompat node-hop token) is not
-// complete and has to be resolved against the control-plane store.
-func recipeIsComplete(card playback.RecipeCard) bool {
-	return card.SegmentDuration > 0 && card.TargetCodecVideo != ""
-}
-
 // spawnReconstruct re-spawns ffmpeg for a lost session from its recipe card and
 // registers it in the live map. It is only ever called inside the per-session
-// single-flight in reconstructFromToken, so it is the sole writer racing to
+// single-flight in reconstructLost, so it is the sole writer racing to
 // register sessionID. Returns nil if the spawn fails or the slot wait is canceled.
-func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSegment int, card playback.RecipeCard) (*playback.TranscodeSession, error) {
+func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSegment int, resolution *nodecontrol.Resolution) (*playback.TranscodeSession, error) {
 	defer s.trackInFlight()()
-	if s.inputPaths == nil {
-		slog.ErrorContext(r.Context(), "transcode node reconstruct input authority unavailable", "component", "transcodenode", "session", sessionID)
-		return nil, nil
-	}
-	allowed, err := s.inputPaths.Allowed(r.Context(), card.InputPath)
-	if err != nil || !allowed {
-		slog.WarnContext(r.Context(), "transcode node reconstruct input rejected", "component", "transcodenode", "session", sessionID, "error", err)
-		return nil, nil
-	}
+	card := resolution.Recipe
 	s.mu.RLock()
 	existing, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -2020,21 +1985,45 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return nil, nil
 	}
 	defer s.gpu.endWork()
+	input, err := s.resolveInput(r.Context(), resolution.SourceGrant)
+	if err != nil {
+		slog.WarnContext(r.Context(), "transcode node reconstruct input unavailable", "component", "transcodenode", "session", sessionID, "error", err)
+		if sourceRefused(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: %w", errReconstructUnavailable, err)
+	}
+	// The session owns the source once it registers; until then every
+	// return releases it.
+	inputOwned := false
+	defer func() {
+		if !inputOwned {
+			_ = input.Close()
+		}
+	}()
 	outputDir := s.sessionOutputDir(sessionID)
 	opts := card.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
+	opts.InputPath = input.Input()
+	opts.SourceIdentity = input.Identity()
+	opts.CopyPlanRecordPath = s.copyPlanRecordPath(sessionID)
 	opts.SessionID = sessionID
 	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but reconstruction must
 	// retain the normal manifest cushion rather than the fresh-start fast path.
 	opts.FastStart = false
 	// Re-resolve environment-specific encode knobs from this node's live config; the
-	// token deliberately omits HWAccel/HWDevice so an operator change applies on
+	// recipe deliberately omits HWAccel/HWDevice so an operator change applies on
 	// rebuild. Run as a transcode node, not integrated (card.TranscodeOpts defaults).
 	opts.HWAccel = cfg.Playback.HWAccel
 	opts.HWDevice = cfg.Playback.HWDevice
 	opts.SegmentRetentionSeconds = cfg.Playback.SegmentRetentionSeconds
 	opts.NodeType = "transcode"
 	opts.ExecutionMode = "transcode_node"
+	if playback.RelayedTextBurnIn(opts) {
+		slog.WarnContext(r.Context(), "refusing to rebuild a text subtitle burn-in from a core-access source", "component", "transcodenode",
+			"session", sessionID, "source", input.Identity())
+		return nil, errReconstructTextBurnIn
+	}
 	if toneMapRecipeRequested(opts) {
 		err := s.resolveToneMapRecipe(context.WithoutCancel(r.Context()), &opts)
 		if err != nil {
@@ -2109,7 +2098,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
 			"session", sessionID, "playback_session_id", sessionID)
-		return nil, err
+		return nil, reconstructStartError(err)
 	}
 
 	// Readiness is normally the caller's concern, but a VideoToolbox session
@@ -2138,7 +2127,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 				if err != nil {
 					slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
 						"session", sessionID, "playback_session_id", sessionID)
-					return nil, err
+					return nil, reconstructStartError(err)
 				}
 				if _, retryErr := session.WaitForManifest(playback.ManifestStartupTimeout); retryErr != nil {
 					_ = session.Close()
@@ -2158,33 +2147,52 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		_ = session.CloseProcess()
 		return existing, nil
 	}
-	s.sessions[sessionID] = session
-	s.noteSessionAccessLocked(sessionID)
+	if err := session.CommitCopyPlanRecord(); err != nil {
+		slog.WarnContext(r.Context(), "record keyframe plan", "component", "transcodenode", "error", err, "session", sessionID)
+	}
+	s.registerSessionLocked(sessionID, session, identityOfResolution(resolution), input)
+	inputOwned = true
 	s.mu.Unlock()
 	s.activeJobs.Add(1)
 	s.armSessionThrottler(session, card.ThrottleSeconds)
 
-	trackCtx := context.WithoutCancel(r.Context())
-	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
-		SessionID:   sessionID,
-		NodeURL:     s.tracker.NodeURL(),
-		NodeName:    s.tracker.NodeName(),
-		Type:        "transcode",
-		CodecVideo:  card.TargetCodecVideo,
-		CodecAudio:  card.TargetCodecAudio,
-		Resolution:  card.TargetResolution,
-		HWAccel:     session.Opts().EffectiveEncoderHWAccel(),
-		ToneMapMode: string(session.Opts().ToneMapMode),
-		StartedAt:   time.Now().UTC().Format(time.RFC3339),
-		AuthUserID:  card.UserID,
-		ProfileID:   card.ProfileID,
-		MediaFileID: card.MediaFileID,
+	// The caller holds the lifecycle lock until this returns, so a stop's
+	// Remove follows this Track (see handleStart). The record keeps the
+	// playback session's own start, not the rebuild's.
+	startedAt, startedSource := resolvedStart(resolution)
+	s.tracker.Track(context.WithoutCancel(r.Context()), nodesessions.SessionInfo{
+		SessionID:         sessionID,
+		NodeURL:           s.tracker.NodeURL(),
+		NodeName:          s.tracker.NodeName(),
+		Type:              "transcode",
+		CodecVideo:        card.TargetCodecVideo,
+		CodecAudio:        card.TargetCodecAudio,
+		Resolution:        card.TargetResolution,
+		HWAccel:           session.Opts().EffectiveEncoderHWAccel(),
+		ToneMapMode:       string(session.Opts().ToneMapMode),
+		StartedAt:         startedAt.Format(time.RFC3339),
+		StartedAtUnixNano: startedAt.UnixNano(),
+		StartedAtSource:   startedSource,
+		AuthUserID:        resolution.UserID,
+		ProfileID:         resolution.ProfileID,
+		MediaFileID:       resolution.MediaFileID,
 	})
 
-	slog.InfoContext(r.Context(), "transcode node session reconstructed from token", "component", "transcodenode",
+	slog.InfoContext(r.Context(), "transcode node session reconstructed from its recipe", "component", "transcodenode",
 		"session", sessionID, "playback_session_id", sessionID,
 		"requested_segment", requestedSegment, "start_segment_number", opts.StartSegmentNumber)
 	return session, nil
+}
+
+// reconstructStartError classifies a rebuild's failed start. One that may
+// succeed on a later request (the keyframe plan could not be worked out now)
+// is errReconstructUnavailable, a retryable 503, not a missing session;
+// ErrCopyPlanSourceChanged and the rest pass unchanged.
+func reconstructStartError(err error) error {
+	if errors.Is(err, playback.ErrCopyPlanUnavailable) {
+		return fmt.Errorf("%w: %w", errReconstructUnavailable, err)
+	}
+	return err
 }
 
 // Shutdown prevents new sessions from registering, then closes every session
@@ -2209,8 +2217,18 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	clear(s.sessions)
 	clear(s.lastAccess)
+	clear(s.identities)
+	inputs := s.inputs
+	s.inputs = nil
 	progressive := maps.Clone(s.progressiveRemuxes)
 	s.mu.Unlock()
+	// Release the sources once their sessions are closed, so no FFmpeg
+	// reads a withdrawn source on its way out.
+	defer func() {
+		for _, input := range inputs {
+			_ = input.Close()
+		}
+	}()
 
 	for _, request := range progressive {
 		request.cancel()
@@ -2257,58 +2275,29 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 }
 
 // handleRemux executes a progressive remux on demand. The node signature
-// authenticates the proxy process; the independently verified stream token
-// binds the media recipe and the exact transcode-execution/proxy-egress route.
+// authenticates the proxy process; the core resolves the forwarded stream
+// token, once per request, into the media recipe after checking it binds the
+// exact transcode-execution/proxy-egress route to this node and that its
+// durable authority is still active.
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	defer s.trackInFlight()()
 	cfg := s.watcher.Config()
-	if cfg == nil || cfg.Auth.JWTSecret == "" {
-		http.Error(w, "node not configured", http.StatusServiceUnavailable)
-		return
-	}
-	token := strings.TrimSpace(r.Header.Get("X-Silo-Stream-Token"))
-	claims, err := streamtoken.Verify(token, cfg.Auth.JWTSecret)
-	if err != nil {
+	reloads := s.forceReloads.Load()
+	transportID := chi.URLParam(r, "session_id")
+	// A remux without a token can never resolve; refuse it without asking.
+	if strings.TrimSpace(r.Header.Get(streamTokenHeader)) == "" {
 		http.Error(w, "invalid stream token", http.StatusUnauthorized)
 		return
 	}
-	transportID := claims.TranscodeTransportID
-	if transportID == "" {
-		transportID = claims.SessionID
-	}
-	if s.claimsDenied(r.Context(), claims, transportID) {
-		writeStreamDenied(w)
+	resolution, err := s.resolve(r, transportID, nodecontrol.ResolvePurposeRemux)
+	if err != nil {
+		writeRemuxRefusal(w, r, transportID, err)
 		return
 	}
-	if transportID == "" || transportID != chi.URLParam(r, "session_id") ||
-		claims.TranscodeNode == "" ||
-		claims.RoutingWorkload != string(noderouting.WorkloadRemux) ||
-		claims.RoutingExecution != string(noderouting.ExecutionTranscode) ||
-		claims.RoutingEgress != string(noderouting.EgressProxy) ||
-		!transcodeNodeRemuxPlayMethod(claims.PlayMethod) {
-		http.Error(w, "routing policy unsatisfied", http.StatusServiceUnavailable)
-		return
-	}
-	if !s.progressiveRemuxRunsOnThisNode(claims) {
-		http.Error(w, "routing policy unsatisfied", http.StatusServiceUnavailable)
-		return
-	}
-	if claims.PlayMethod == streamtoken.PlayMethodAudioDownmixRemux &&
-		(!claims.TranscodeAudio || claims.TargetAudioChannels != 2 ||
-			!playback.IsAudioToAACStereoDownmixV3(claims.SourceAudioChannels, claims.TargetCodecAudio, claims.TargetAudioChannels)) {
+	recipe := resolution.Recipe
+	theme := string(recipe.PlayMethod) == streamtoken.PlayMethodThemeAAC
+	if theme && resolution.Theme == nil {
 		http.NotFound(w, r)
-		return
-	}
-	theme := claims.PlayMethod == streamtoken.PlayMethodThemeAAC
-	if theme {
-		if !claims.TranscodeAudio || !claims.AudioOnly || claims.TargetCodecAudio != themesongs.CodecAAC || claims.ThemeID <= 0 {
-			http.NotFound(w, r)
-			return
-		}
-		if !s.requireApprovedThemeInput(w, r, claims) {
-			return
-		}
-	} else if !s.requireApprovedInputPath(w, r, claims.MediaPath) {
 		return
 	}
 	seekSeconds := 0.0
@@ -2320,11 +2309,20 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		}
 		seekSeconds = parsed
 	}
+	// The source is opened once per request, HEAD included, and released
+	// when the request ends. It is opened before admission below, which
+	// holds the reload lock: a call to the core must not hold up a reload.
+	input, ok := s.openInput(w, r, resolution.SourceGrant)
+	if !ok {
+		return
+	}
+	defer func() { _ = input.Close() }()
 
 	// Admit against one stable configuration generation. Force reload takes the
 	// exclusive side, then cancels every request registered below before it
 	// returns; a request that waited through a reload must retry with a fresh
-	// route instead of starting FFmpeg from the stale cfg pointer above.
+	// route instead of starting FFmpeg from the stale cfg pointer above or the
+	// recipe the core resolved before it revoked the node's authority.
 	s.reloadMu.RLock()
 	if s.shuttingDown {
 		s.reloadMu.RUnlock()
@@ -2338,19 +2336,14 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
-	if s.watcher.Config() != cfg {
+	if s.watcher.Config() != cfg || s.forceReloads.Load() != reloads {
 		s.reloadMu.RUnlock()
 		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)
 		return
 	}
-	if !s.progressiveRemuxAuthorityActive(r.Context(), transportID, claims) {
-		s.reloadMu.RUnlock()
-		http.Error(w, "session stopped", http.StatusGone)
-		return
-	}
 	if r.Method == http.MethodHead {
 		s.reloadMu.RUnlock()
-		contentType := playback.RemuxContentType(claims.AudioOnly)
+		contentType := playback.RemuxContentType(recipe.AudioOnly)
 		if contentType == "" {
 			contentType = "video/mp4"
 		}
@@ -2362,7 +2355,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	requestID := s.progressiveRemuxSequence.Add(1)
-	playbackSessionID := claims.SessionID
+	playbackSessionID := resolution.PlaybackSessionID
 	if playbackSessionID == "" {
 		playbackSessionID = transportID
 	}
@@ -2371,6 +2364,9 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		close(abort)
 	})
+	// A source the core withdraws mid-request ends the remux like a stop.
+	stopOnInputLoss := context.AfterFunc(input.Context(), stop)
+	defer stopOnInputLoss()
 	done := make(chan struct{})
 	unlock := s.lockSessionLifecycle(transportID)
 	s.mu.Lock()
@@ -2411,18 +2407,15 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	s.activeJobs.Add(1)
 	defer s.activeJobs.Add(-1)
 	if s.tracker != nil {
-		startedAt, source := claims.StartedAt()
-		if source == streamtoken.StartedAtSourceNone {
-			startedAt = time.Now().UTC()
-		}
+		startedAt, source := resolvedStart(resolution)
 		trackerType := "remux"
 		if theme {
 			trackerType = "theme_audio"
 		}
 		s.tracker.Track(ctx, nodesessions.SessionInfo{
 			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: trackerType,
-			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
-			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
+			CodecAudio: recipe.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
+			StartedAtSource: source, AuthUserID: resolution.UserID, ProfileID: resolution.ProfileID, MediaFileID: resolution.MediaFileID,
 		})
 		defer s.tracker.Remove(context.WithoutCancel(ctx), playbackSessionID)
 	}
@@ -2431,84 +2424,21 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if theme {
 		// A theme conversion is a transfer attributed to its viewer, not a
 		// playback session.
-		streamtelemetry.Attach(ctx, streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID), ProfileID: claims.ProfileID})
+		streamtelemetry.Attach(ctx, streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(resolution.UserID), ProfileID: resolution.ProfileID})
 	} else {
-		s.attachTelemetrySession(request, transportID)
+		attachTelemetrySession(request, playbackSessionID)
 	}
-	if err := playback.ServeRemuxWithOptions(w, request, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
-		DVMode: playback.RemuxDVMode(claims.RemuxDVMode), FFmpegPath: cfg.Playback.FFmpegPath,
-		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
-		ContentType:               playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
-		SourceAudioChannels: claims.SourceAudioChannels, TargetAudioChannels: claims.TargetAudioChannels,
-		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps,
+	if err := playback.ServeRemuxWithOptions(w, request, input.Input(), "mp4", seekSeconds, recipe.TranscodeAudio, recipe.AudioTrackIndex, recipe.DVProfile, playback.RemuxServeOptions{
+		DVMode: recipe.RemuxDVMode, FFmpegPath: cfg.Playback.FFmpegPath,
+		DropResumeLeadingPictures: recipe.RemuxResumeLeadingPictureDrop,
+		ContentType:               playback.RemuxContentType(recipe.AudioOnly), AudioOnly: recipe.AudioOnly,
+		SourceAudioChannels: recipe.SourceAudioChannels, TargetAudioChannels: recipe.TargetAudioChannels,
+		TargetAudioBitrateKbps: recipe.TargetAudioBitrateKbps,
 		Abort:                  abort,
 	}); err != nil && !errors.Is(err, context.Canceled) {
 		slog.WarnContext(ctx, "progressive remux ended with an error", "component", "transcodenode", "error", err,
-			"session", transportID, "playback_session_id", claims.SessionID)
+			"session", transportID, "playback_session_id", playbackSessionID)
 	}
-}
-
-// progressiveRemuxRunsOnThisNode binds a routed remux to the stable database
-// identity selected by the planner. NODE_URL is only the worker's local
-// address and may intentionally differ from the registered route URL in a
-// split-horizon deployment. A transcode-executed progressive route has never
-// shipped without the additive row ID, so an ID-less token fails closed.
-func (s *Server) progressiveRemuxRunsOnThisNode(claims *streamtoken.Claims) bool {
-	if s == nil || claims == nil || claims.RoutingExecutionNodeID <= 0 || s.nodeRowID == nil {
-		return false
-	}
-	nodeID, ok := s.nodeRowID()
-	return ok && nodeID == claims.RoutingExecutionNodeID
-}
-
-func transcodeNodeRemuxPlayMethod(method string) bool {
-	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux ||
-		method == streamtoken.PlayMethodThemeAAC
-}
-
-// requireApprovedThemeInput is requireApprovedInputPath for theme conversions:
-// the theme authority, not the media_files catalog, approves the input.
-func (s *Server) requireApprovedThemeInput(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) bool {
-	if s.themeInputs == nil {
-		http.Error(w, "theme input authority unavailable", http.StatusServiceUnavailable)
-		return false
-	}
-	allowed, err := s.themeInputs.AllowedTheme(r.Context(), claims.ThemeID, claims.MediaPath, claims.ThemeSize, time.Unix(0, claims.ThemeModifiedUnixNano))
-	if err != nil {
-		slog.ErrorContext(r.Context(), "authorize theme conversion input", "component", "transcodenode", "error", err)
-		http.Error(w, "theme input authority unavailable", http.StatusServiceUnavailable)
-		return false
-	}
-	if !allowed {
-		http.Error(w, "theme input is not an approved theme file", http.StatusBadRequest)
-		return false
-	}
-	return true
-}
-
-// progressiveRemuxAuthorityActive checks the durable transport record written
-// before central publishes this node route. Stop and force reload delete the
-// record, so a signed token that remains cryptographically valid cannot start a
-// new FFmpeg process after this node's in-memory stop fence is lost on restart.
-func (s *Server) progressiveRemuxAuthorityActive(ctx context.Context, transportID string, claims *streamtoken.Claims) bool {
-	if s.recipeStore == nil || claims == nil {
-		return false
-	}
-	card, ok := s.recipeStore.Get(ctx, transportID)
-	if !ok || card == nil {
-		return false
-	}
-	stored := card.ToClaims()
-	return stored.SessionID == claims.SessionID &&
-		stored.MediaPath == claims.MediaPath &&
-		stored.PlayMethod == claims.PlayMethod &&
-		stored.TranscodeNode == claims.TranscodeNode &&
-		stored.TranscodeTransportID == transportID &&
-		stored.RoutingWorkload == claims.RoutingWorkload &&
-		stored.RoutingExecution == claims.RoutingExecution &&
-		stored.RoutingExecutionNodeID == claims.RoutingExecutionNodeID &&
-		stored.RoutingEgress == claims.RoutingEgress &&
-		stored.RoutingEgressNodeID == claims.RoutingEgressNodeID
 }
 
 func (s *Server) pruneStoppedProgressiveRemuxesLocked(now time.Time) {
@@ -2519,6 +2449,9 @@ func (s *Server) pruneStoppedProgressiveRemuxesLocked(now time.Time) {
 	}
 }
 
+// handleStop ends a transport's local work. The core deletes the transport's
+// recipe before it sends this, so nothing can rebuild or restart the session
+// from it afterwards; the node only tears down what runs here.
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 
@@ -2531,36 +2464,23 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
 
-	durableProgressive := false
-	authorityFound := false
-	playbackSessionID := sessionID
-	if s.recipeStore != nil {
-		card, ok := s.recipeStore.Get(r.Context(), sessionID)
-		authorityFound = ok && card != nil
-		durableProgressive = authorityFound && card.PlayMethod == playback.PlayRemux
-		if authorityFound && card.SessionID != "" {
-			playbackSessionID = card.SessionID
-		}
-	}
-
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStoppedProgressiveRemuxesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
-	if progressiveFound && progressive.playbackSessionID != "" {
-		playbackSessionID = progressive.playbackSessionID
-	}
-	if progressiveFound || durableProgressive {
+	session, ok := s.sessions[sessionID]
+	if !ok {
+		// Anything but a live HLS transcode may be a progressive remux, active
+		// here or not: fence its transport so a request the core resolved just
+		// before it withdrew the authority cannot start FFmpeg after the stop.
 		if s.stoppedProgressiveRemuxes == nil {
 			s.stoppedProgressiveRemuxes = make(map[string]time.Time)
 		}
 		s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
 	}
-	session, ok := s.sessions[sessionID]
-	found := ok || progressiveFound || authorityFound
+	found := ok || progressiveFound
 	if ok {
-		delete(s.sessions, sessionID)
-		delete(s.lastAccess, sessionID)
+		s.forgetSessionLocked(sessionID)
 	}
 	s.mu.Unlock()
 	if progressiveFound {
@@ -2571,43 +2491,30 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		if err := s.closeSessionOffGPU(session); err != nil {
 			slog.ErrorContext(r.Context(), "close transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		}
-	}
-
-	if ok {
 		if err := os.RemoveAll(s.sessionOutputDir(sessionID)); err != nil {
 			slog.WarnContext(r.Context(), "remove transcode session directory", "component", "transcodenode", "session", sessionID, "error", err)
 		}
 	}
-
-	// Drop the recipe so a buffered/retrying request after a node restart cannot
-	// reconstruct a new ffmpeg for this now-stopped session. A failed deletion
-	// must be visible to the caller: the in-memory fence cannot survive a node
-	// replacement, so reporting success would make the stop revocable only until
-	// this process exits.
-	var authorityErr error
-	if s.recipeStore != nil {
-		authorityErr = s.recipeStore.Delete(r.Context(), sessionID)
-		if authorityErr != nil {
-			slog.WarnContext(r.Context(), "delete transcode recipe on stop", "component", "transcodenode", "error", authorityErr, "session", sessionID, "playback_session_id", sessionID)
-		}
-	}
+	// A stopped transport is never rebuilt, whether it was live or reaped.
+	s.removeCopyPlanRecord(sessionID)
 
 	if s.tracker != nil {
-		s.tracker.Remove(r.Context(), playbackSessionID)
+		// A remux is tracked under its playback session, a transcode under
+		// its transport.
+		trackerSessionID := sessionID
+		if progressiveFound && progressive.playbackSessionID != "" {
+			trackerSessionID = progressive.playbackSessionID
+		}
+		s.tracker.Remove(r.Context(), trackerSessionID)
 	}
-	var shutdownErr error
 	if progressiveFound {
 		waitCtx, cancelWait := context.WithTimeout(r.Context(), progressiveRemuxShutdownTimeout)
-		shutdownErr = waitForProgressiveRemuxShutdown(waitCtx, sessionID, progressive)
+		shutdownErr := waitForProgressiveRemuxShutdown(waitCtx, sessionID, progressive)
 		cancelWait()
-	}
-	if authorityErr != nil {
-		http.Error(w, "transcode authority revocation unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	if shutdownErr != nil {
-		http.Error(w, "progressive remux shutdown unavailable", http.StatusServiceUnavailable)
-		return
+		if shutdownErr != nil {
+			http.Error(w, "progressive remux shutdown unavailable", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	if !found {
 		http.Error(w, "session not found", http.StatusNotFound)
@@ -2617,37 +2524,51 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// writeReconstructFailure answers a request for a lost session that could not
+// be rebuilt.
+func writeReconstructFailure(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errReconstructDenied):
+		writeStreamDenied(w)
+	case errors.Is(err, errReconstructTextBurnIn):
+		http.Error(w, errRemoteTextBurnIn, http.StatusNotFound)
+	case errors.Is(err, errReconstructUnavailable):
+		http.Error(w, "recipe authority unavailable", http.StatusServiceUnavailable)
+	case err != nil && isToneMapRecipeError(err):
+		writeToneMapRecipeError(w, err)
+	case errors.Is(err, playback.ErrCopyPlanSourceChanged):
+		// No rebuild can give the player its planned playlist on this
+		// revision of the source; 410 ends the session rather than letting
+		// every request rebuild and fail again.
+		http.Error(w, "source changed", http.StatusGone)
+	default:
+		http.Error(w, "session not found", http.StatusNotFound)
+	}
+}
+
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
-	// A denied session is neither served from memory nor reconstructed.
-	if s.sessionDenied(r, sessionID) {
-		writeStreamDenied(w)
-		return
-	}
 
 	// Lookup and liveness refresh happen atomically so the idle reaper can
 	// never unregister the job between them and tear down a session this
-	// request is about to serve from.
+	// request is about to serve from. A live session is served without asking
+	// the core: every relay checks the deny marker before it forwards.
 	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		// Lost the in-memory session (this node restarted): rebuild it from the
-		// stream token the proxy forwarded. The manifest path carries no segment
+		// recipe the core resolves. The manifest path carries no segment
 		// context, so reconstruct at the recipe's original start position.
 		var reconstructErr error
-		session, reconstructErr = s.reconstructFromToken(r, sessionID, -1)
+		session, reconstructErr = s.reconstructLost(r, sessionID, -1)
 		if session == nil {
-			if reconstructErr != nil && isToneMapRecipeError(reconstructErr) {
-				writeToneMapRecipeError(w, reconstructErr)
-				return
-			}
-			http.Error(w, "session not found", http.StatusNotFound)
+			writeReconstructFailure(w, reconstructErr)
 			return
 		}
 		// A reconstruct that yielded to a concurrently registered winner has
 		// not recorded this hit; count it so the reaper sees the liveness.
 		s.touchSession(sessionID)
 	}
-	s.attachTelemetrySession(r, sessionID)
+	attachTelemetrySession(r, s.playbackSessionID(sessionID))
 
 	var manifest []byte
 	var err error
@@ -2671,39 +2592,31 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 	name := chi.URLParam(r, "name")
-	// A denied session is neither served from memory nor reconstructed.
-	if s.sessionDenied(r, sessionID) {
-		writeStreamDenied(w)
-		return
-	}
 
 	// Lookup and liveness refresh happen atomically so the idle reaper can
 	// never unregister the job between them and tear down a session this
-	// request is about to serve from.
+	// request is about to serve from. A live session is served without asking
+	// the core: every relay checks the deny marker before it forwards.
 	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		// Lost the in-memory session (this node restarted): rebuild it from the
-		// forwarded stream token, seeked to the segment the client is requesting so
-		// playback resumes near its position instead of restarting from the start.
+		// recipe the core resolves, seeked to the segment the client is requesting
+		// so playback resumes near its position instead of restarting from the start.
 		requestedSegment := -1
 		if n, parseErr := playback.ParseSegmentNumber(name); parseErr == nil {
 			requestedSegment = n
 		}
 		var reconstructErr error
-		session, reconstructErr = s.reconstructFromToken(r, sessionID, requestedSegment)
+		session, reconstructErr = s.reconstructLost(r, sessionID, requestedSegment)
 		if session == nil {
-			if reconstructErr != nil && isToneMapRecipeError(reconstructErr) {
-				writeToneMapRecipeError(w, reconstructErr)
-				return
-			}
-			http.Error(w, "session not found", http.StatusNotFound)
+			writeReconstructFailure(w, reconstructErr)
 			return
 		}
 		// A reconstruct that yielded to a concurrently registered winner has
 		// not recorded this hit; count it so the reaper sees the liveness.
 		s.touchSession(sessionID)
 	}
-	s.attachTelemetrySession(r, sessionID)
+	attachTelemetrySession(r, s.playbackSessionID(sessionID))
 
 	segmentLease, err := session.OpenSegment(name)
 	if err != nil && err == playback.ErrSegmentNotFound {
@@ -2875,22 +2788,18 @@ func (s *Server) handleReloadConfig(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleForceReload rereads the configuration and tears down every session
+// and progressive remux this node runs. The core revokes the node's recipes
+// before it calls this, so nothing torn down here can be rebuilt from them.
 func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	previousRegisteredURL := ""
-	previousNodeID := 0
-	if s.registeredNodeURL != nil {
-		previousRegisteredURL, _ = s.registeredNodeURL()
-	}
-	if s.nodeRowID != nil {
-		previousNodeID, _ = s.nodeRowID()
-	}
+	s.forceReloads.Add(1)
 	if err := s.watcher.ForceReload(r.Context()); err != nil {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.teardownForForceReload(r.Context(), previousRegisteredURL, previousNodeID); err != nil {
+	if err := s.teardownForForceReload(r.Context()); err != nil {
 		http.Error(w, "force reload teardown failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -2899,67 +2808,7 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredURL string, previousNodeID int) error {
-	var authorityErr error
-	if s.recipeStore != nil {
-		var revokeErrs []error
-		nodeIDs := []int{previousNodeID}
-		if s.nodeRowID != nil {
-			if nodeID, ok := s.nodeRowID(); ok {
-				nodeIDs = append(nodeIDs, nodeID)
-			}
-		}
-		seenNodeIDs := make(map[int]struct{}, len(nodeIDs))
-		for _, nodeID := range nodeIDs {
-			if nodeID <= 0 {
-				continue
-			}
-			if _, duplicate := seenNodeIDs[nodeID]; duplicate {
-				continue
-			}
-			seenNodeIDs[nodeID] = struct{}{}
-			if err := s.recipeStore.RevokeNodeID(ctx, nodeID); err != nil {
-				revokeErrs = append(revokeErrs, fmt.Errorf("revoke node id %d: %w", nodeID, err))
-			}
-		}
-
-		nodeURLs := append([]string(nil), s.pendingAuthorityRevocations...)
-		nodeURLs = append(nodeURLs, previousRegisteredURL)
-		registeredURLResolved := false
-		if s.registeredNodeURL != nil {
-			registeredURL, ok := s.registeredNodeURL()
-			if ok {
-				nodeURLs = append(nodeURLs, registeredURL)
-				registeredURLResolved = true
-			}
-		}
-		if !registeredURLResolved && s.tracker != nil {
-			nodeURLs = append(nodeURLs, s.tracker.NodeURL())
-		}
-		seen := make(map[string]struct{}, len(nodeURLs))
-		failedURLs := make([]string, 0, len(s.pendingAuthorityRevocations))
-		for _, nodeURL := range nodeURLs {
-			nodeURL = strings.TrimRight(strings.TrimSpace(nodeURL), "/")
-			if nodeURL == "" {
-				continue
-			}
-			if _, duplicate := seen[nodeURL]; duplicate {
-				continue
-			}
-			seen[nodeURL] = struct{}{}
-			if err := s.recipeStore.RevokeNode(ctx, nodeURL); err != nil {
-				failedURLs = append(failedURLs, nodeURL)
-				revokeErrs = append(revokeErrs, fmt.Errorf("revoke %s: %w", nodeURL, err))
-			}
-		}
-		s.pendingAuthorityRevocations = failedURLs
-		if len(seenNodeIDs) == 0 && len(seen) == 0 {
-			authorityErr = errors.New("transcode node URL unavailable")
-		} else {
-			authorityErr = errors.Join(revokeErrs...)
-		}
-	}
-
+func (s *Server) teardownForForceReload(ctx context.Context) error {
 	type forceReloadVictim struct {
 		id      string
 		session *playback.TranscodeSession
@@ -2980,25 +2829,14 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 			unlock()
 			continue
 		}
-		delete(s.sessions, victim.id)
-		delete(s.lastAccess, victim.id)
+		s.forgetSessionLocked(victim.id)
 		s.mu.Unlock()
 
 		_ = s.closeSessionOffGPU(victim.session)
 		if err := os.RemoveAll(s.sessionOutputDir(victim.id)); err != nil {
 			slog.WarnContext(ctx, "remove transcode session directory during reload", "component", "transcodenode", "session", victim.id, "error", err)
 		}
-
-		// A force-reload tears this session down for good, so drop its recipe too:
-		// otherwise a buffered/retrying request could reconstruct a session this
-		// reload deliberately killed. Keep the lifecycle lock through deletion so a
-		// concurrent same-ID start cannot have its newly written recipe removed.
-		if s.recipeStore != nil {
-			id := victim.id
-			if err := s.recipeStore.Delete(ctx, id); err != nil {
-				slog.WarnContext(ctx, "delete transcode recipe on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
-			}
-		}
+		s.removeCopyPlanRecord(victim.id)
 
 		// Drop only this victim from the tracker. A blanket Cleanup here would
 		// also wipe unrelated tracker-only work, such as an active download
@@ -3024,11 +2862,6 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 
 	for id, request := range progressiveVictims {
 		request.cancel()
-		if s.recipeStore != nil {
-			if err := s.recipeStore.Delete(ctx, id); err != nil {
-				slog.WarnContext(ctx, "delete progressive remux authority on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
-			}
-		}
 		if s.tracker != nil {
 			trackerSessionID := request.playbackSessionID
 			if trackerSessionID == "" {
@@ -3042,10 +2875,10 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 	defer cancelWait()
 	for id, request := range progressiveVictims {
 		if err := waitForProgressiveRemuxShutdown(waitCtx, id, request); err != nil {
-			return errors.Join(authorityErr, err)
+			return err
 		}
 	}
-	return authorityErr
+	return nil
 }
 
 func waitForProgressiveRemuxShutdown(ctx context.Context, transportID string, request progressiveRemuxRequest) error {

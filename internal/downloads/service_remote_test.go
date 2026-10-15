@@ -39,7 +39,7 @@ func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 	defer origin.Close()
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = secret
-	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }}}
+	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }, nodeKeys: nodeauthtest.SharedSecret(secret)}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	req.Header.Set("Range", "bytes=1-3")
 	rr := httptest.NewRecorder()
@@ -112,8 +112,9 @@ func TestServiceRequeuesReadyArtifactWhenRemoteFileIsMissing(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = secret
 	svc := &Service{artifacts: &ArtifactManager{
-		repo:    repo,
-		liveCfg: func() *config.Config { return cfg },
+		repo:     repo,
+		liveCfg:  func() *config.Config { return cfg },
+		nodeKeys: nodeauthtest.SharedSecret(secret),
 	}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	err = svc.serveFileTarget(req.Context(), httptest.NewRecorder(), req, &FileTarget{
@@ -164,7 +165,7 @@ func TestServiceDoesNotAppendAPIErrorAfterRemoteBodyIsCommitted(t *testing.T) {
 	defer origin.Close()
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = secret
-	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }}}
+	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }, nodeKeys: nodeauthtest.SharedSecret(secret)}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	rr := httptest.NewRecorder()
 	err := svc.serveFileTarget(req.Context(), rr, req, &FileTarget{
@@ -193,7 +194,7 @@ func TestServiceRelaysRemotePreconditionFailure(t *testing.T) {
 	defer origin.Close()
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = secret
-	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }}}
+	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }, nodeKeys: nodeauthtest.SharedSecret(secret)}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	req.Header.Set("If-Match", `"old-etag"`)
 	rr := httptest.NewRecorder()

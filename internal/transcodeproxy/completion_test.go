@@ -33,7 +33,7 @@ func TestAcknowledgeSurvivesCompletedDownstreamRequest(t *testing.T) {
 
 	requestCtx, cancelRequest := context.WithCancel(context.Background())
 	cancelRequest()
-	if err := Acknowledge(requestCtx, server.Client(), server.URL, "/segment", jwtSecret, generation); err != nil {
+	if err := Acknowledge(requestCtx, server.Client(), server.URL, "/segment", nodeauthtest.SharedSecret(jwtSecret), generation); err != nil {
 		t.Fatalf("Acknowledge() error = %v", err)
 	}
 	select {

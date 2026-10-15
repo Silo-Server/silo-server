@@ -231,10 +231,10 @@ func requireGrantPlaybackEndpointV3(w http.ResponseWriter, claims *streamtoken.C
 // relayGrantToTranscodeNode forwards to the transcode node exactly as the token
 // routes do, minting the node-facing stream token here from the grant.
 //
-// That token never reaches the client: it is the node's own reconstruction
-// descriptor (it re-verifies it independently and can re-spawn ffmpeg from it
-// after its own restart), so the credential the client was promised it would
-// never see stays strictly on the proxy→node hop.
+// That token never reaches the client. The node passes it, unread, to the
+// core's resolve endpoint, which verifies it and returns the recipe the node
+// rebuilds a lost session from, so the credential the client was promised it
+// would never see stays on the proxy→node→core path.
 func (s *Server) relayGrantToTranscodeNode(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, path string) {
 	// The token transcode routes attach in their handlers; this is the only path
 	// the two grant transcode handlers take, so attaching once here is the

@@ -3048,6 +3048,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/nodes/{id}/key": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Issue a new key for a transcode node and return it once. Each call rotates: the previous key stops working on this server at once and on other servers and proxies within seconds. A disabled node can take a key. */
+    post: operations["issueAdminNodeKey"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/nodes/{id}/reprobe": {
     parameters: {
       query?: never;
@@ -16096,6 +16113,8 @@ export interface components {
        * @example 1
        */
       id: string;
+      /** @description A key has been issued to this transcode node. The key itself is shown only when it is issued. Always false for a proxy. */
+      key_issued: boolean;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision, or null
@@ -16114,6 +16133,11 @@ export interface components {
       };
       physical_gpu_keys?: string[];
       public_url?: string;
+      /**
+       * @description How this transcode node reads source media: local at the catalog paths through its own library mount, or core over HTTP from this server. Omitted for a proxy.
+       * @enum {string}
+       */
+      source_access?: "local" | "core";
       /** @enum {string} */
       type: "proxy" | "transcode";
       url: string;
@@ -16123,8 +16147,12 @@ export interface components {
       allowed: boolean;
       /** @description Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows. */
       drain: boolean;
+      /** @description Transcode nodes authenticate with their own key: the key operation, and key_issued on node rows. */
+      node_keys: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Transcode nodes can read source media over HTTP from this server instead of a library mount: source_access on node rows and in create and update bodies. */
+      source_access: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -16139,6 +16167,11 @@ export interface components {
       max_jobs?: number | null;
       name: string;
       public_url?: string;
+      /**
+       * @description How a transcode node reads source media: local at the catalog paths through its own library mount, or core over HTTP from this server. Omitted means local. Only a transcode node takes one; a proxy returns validation_failed.
+       * @enum {string}
+       */
+      source_access?: "local" | "core";
       /** @enum {string} */
       type: "proxy" | "transcode";
       url: string;
@@ -16171,6 +16204,10 @@ export interface components {
       /** @description The URL-fenced persistence call returned successfully; it may have ignored a concurrently repointed node. Not a revision receipt. */
       health_persisted: boolean;
       healthy: boolean;
+    };
+    AdminNodeKey: {
+      /** @description The transcode node's new key, for its SILO_NODE_KEY setting. Shown only in this response; it is never returned again. */
+      node_key: string;
     };
     AdminNodeNetworkAccess: {
       /** @description Overlay DNS name of the node. */
@@ -16284,6 +16321,11 @@ export interface components {
       max_jobs?: number;
       name?: string;
       public_url?: string | null;
+      /**
+       * @description How a transcode node reads source media: local at the catalog paths through its own library mount, or core over HTTP from this server. Omitted leaves it unchanged. Only a transcode node takes one; a proxy returns validation_failed. A change is pushed to the node at once and applies to jobs it starts afterwards.
+       * @enum {string}
+       */
+      source_access?: "local" | "core";
       url?: string;
     };
     AdminNotificationDiscordTestResult: {
@@ -59741,6 +59783,124 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  issueAdminNodeKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          "Cache-Control"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminNodeKey"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

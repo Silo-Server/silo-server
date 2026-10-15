@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/trickplay"
@@ -55,9 +56,6 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		writeTrickplayError(w, http.StatusBadRequest, trickplay.ExtractError{Reason: trickplayInvalidRequest, Message: "a sheets request of samples is required"})
 		return
 	}
-	if !s.requireApprovedInputPath(w, r, req.Input) {
-		return
-	}
 	if s.draining() {
 		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: errNodeDraining})
 		return
@@ -82,8 +80,18 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer s.gpu.endWork()
+	input, ok := s.openInput(w, r, req.SourceGrant)
+	if !ok {
+		return
+	}
+	defer func() { _ = input.Close() }()
+	req.Input = input.Input()
 
 	ffmpeg := playback.ResolveFFmpegPath(cfg.Playback.FFmpegPath)
+	if reason, err := s.relayedSamplesUnsupported(r.Context(), ffmpeg, req); err != nil {
+		writeTrickplayError(w, http.StatusUnprocessableEntity, trickplay.ExtractError{Reason: string(reason), Message: err.Error()})
+		return
+	}
 	accel := strings.TrimSpace(cfg.Playback.HWAccel)
 	if accel == "" {
 		accel = trickplayAutoAccel
@@ -98,7 +106,9 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		req.Attempts = softwareAttempts(req.Attempts)
 	}
 	req.Background = true
-	result, err := runner.Run(r.Context(), req)
+	ctx, cancel := inputContext(r.Context(), input)
+	defer cancel()
+	result, err := runner.Run(ctx, req)
 	if err != nil {
 		cause := mediasample.Classify(err)
 		writeTrickplayError(w, http.StatusUnprocessableEntity, trickplay.ExtractError{Reason: string(cause), Permanent: cause.Permanent(), Message: err.Error()})
@@ -126,6 +136,7 @@ func softwareAttempts(attempts []mediasample.Attempt) []mediasample.Attempt {
 func writeTrickplayError(w http.ResponseWriter, status int, failure trickplay.ExtractError) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	failure.Message = nodesource.RedactLoopback(failure.Message)
 	_ = json.NewEncoder(w).Encode(failure)
 }
 
@@ -146,15 +157,16 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 	return workerprotocol.Operation{
 		Listener: listener, Method: http.MethodPost, Path: "/trickplay/extract",
 		Handler: "(*internal/transcodenode.Server).handleTrickplayExtract", AuthClass: bearerClass,
-		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, one run at a time, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on the source its source_grant names, opened through the core, one run at a time, at idle priority, on the node's own hardware. A relayed source (core source access) whose concat form the node's ffmpeg cannot read is refused with 422 unsupported, or 422 capabilities when the node could not list its ffmpeg's capabilities, never permanent, so the API server runs it elsewhere. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
 		RetrySafety: nonRetryable,
 		RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonMedia: {Schema: request}}},
 		Responses: map[string]*huma.Response{
 			"200": {Description: "The run's sheets", Content: map[string]*huma.MediaType{jsonMedia: {Schema: result}}},
-			"400": {Description: "Invalid request or unapproved input path", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
+			"400": {Description: "Invalid request, missing source grant, or a source the core refused", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 			"401": {Description: http.StatusText(http.StatusUnauthorized), Content: map[string]*huma.MediaType{textMedia: text}},
-			"422": {Description: "Sampling failed; permanent names a cause in the file itself", Content: map[string]*huma.MediaType{jsonMedia: problem}},
-			"503": {Description: "Node busy with another trickplay run, re-probing, or unconfigured", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
+			"409": {Description: localSourceMismatchDescription, Content: map[string]*huma.MediaType{textMedia: text}},
+			"422": {Description: "Sampling failed, or refused for this node's ffmpeg (unsupported, capabilities); permanent names a cause in the file itself", Content: map[string]*huma.MediaType{jsonMedia: problem}},
+			"503": {Description: "Node busy with another trickplay run, re-probing, unconfigured, or without the core's source authority", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 		},
 	}
 }

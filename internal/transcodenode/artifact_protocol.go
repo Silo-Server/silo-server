@@ -20,7 +20,7 @@ func ProtocolArtifacts() []workerprotocol.Operation {
 	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodDelete} {
 		op := workerprotocol.Operation{Listener: listener, Method: method, Path: path, AuthClass: "node_bearer", Handler: "(*internal/transcodenode.Server).handleDownloadArtifact",
 			Description: "Read node-local prepared MP4 bytes under the preparation/deletion lifecycle lock. No native delivery grant or cross-node artifact availability is implied.",
-			Parameters:  []*huma.Param{{Name: "artifact_id", In: "path", Required: true, Schema: &huma.Schema{Type: huma.TypeString, Pattern: `^[A-Za-z0-9_-]{1,128}$`}}},
+			Parameters:  []*huma.Param{{Name: "artifact_id", In: "path", Required: true, Schema: &huma.Schema{Type: huma.TypeString, Pattern: artifactIDPattern}}},
 			Responses:   map[string]*huma.Response{},
 		}
 		for _, status := range []int{401, 404, 500, 503} {

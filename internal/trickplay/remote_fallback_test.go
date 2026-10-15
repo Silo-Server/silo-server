@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
 type executionReadFailure struct{ fakeSettings }
@@ -23,7 +24,7 @@ func (s executionReadFailure) Get(ctx context.Context, key string) (string, erro
 func TestNodeExtractorDoesNotRunLocallyWhenExecutionSettingIsUnreadable(t *testing.T) {
 	local := &countingExtractor{}
 	settings := executionReadFailure{fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly}}
-	_, err := NewNodeExtractor(local, nil, settings).Extract(t.Context(), nil, nodeRequest())
+	_, err := NewNodeExtractor(local, nil, settings, nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 	if !errors.Is(err, errSettingsUnreadable) || local.calls != 0 {
 		t.Fatalf("error=%v local calls=%d", err, local.calls)
 	}
@@ -47,7 +48,7 @@ func TestNodeExtractorSkipsCapabilitiesRejectedByLatestHealthCheck(t *testing.T)
 				node, calls := fakeNode(t, http.StatusOK, mediasample.Result{Decoder: "node"})
 				node.AdvertisedCapabilitiesHash, node.CapabilitiesHash = tc.advertised, tc.stored
 				local := &countingExtractor{}
-				result, err := NewNodeExtractor(local, fixedNodes{node}, fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}).Extract(t.Context(), nil, nodeRequest())
+				result, err := NewNodeExtractor(local, fixedNodes{node}, fakeSettings{ExecutionSetting: mode}, nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 				if tc.eligible {
 					if err != nil || result.Decoder != "node" || calls.Load() != 1 || local.calls != 0 {
 						t.Fatalf("eligible node: result=%+v error=%v node calls=%d local calls=%d", result, err, calls.Load(), local.calls)
@@ -74,8 +75,8 @@ func TestRemoteGenerationDoesNotRequireAPIMediaMount(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			node, calls := fakeNode(t, http.StatusOK, mediasample.Result{Decoder: "software", SheetTileHeight: 126, Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("jpeg")}}})
 			local := &countingExtractor{}
-			settings := fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}
-			extractor := NewNodeExtractor(local, fixedNodes{node}, settings)
+			settings := fakeSettings{ExecutionSetting: mode}
+			extractor := NewNodeExtractor(local, fixedNodes{node}, settings, nodeauthtest.SharedSecret("secret"))
 			queue := newFakeQueue()
 			service := newService(queue, &fakeStore{}, settings, extractor, "api")
 			job := testJob(1, 10)
@@ -107,7 +108,7 @@ func TestNodeExtractorFallsBackAfterTransientSamplingFailure(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			node, calls := fakeNode(t, http.StatusUnprocessableEntity, ExtractError{Reason: reason})
 			local := &countingExtractor{}
-			result, err := NewNodeExtractor(local, fixedNodes{node}, fakeSettings{ExecutionSetting: ExecutionPreferTranscodeNodes, jwtSecretSetting: "secret"}).Extract(t.Context(), nil, nodeRequest())
+			result, err := NewNodeExtractor(local, fixedNodes{node}, fakeSettings{ExecutionSetting: ExecutionPreferTranscodeNodes}, nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 			if err != nil || result.Decoder != "local" || calls.Load() != 1 || local.calls != 1 {
 				t.Fatalf("result=%+v error=%v node calls=%d local calls=%d", result, err, calls.Load(), local.calls)
 			}
@@ -119,7 +120,7 @@ func TestNodeExtractorTriesAllNodesAfterTransientSamplingFailure(t *testing.T) {
 	first, firstCalls := fakeNode(t, http.StatusUnprocessableEntity, ExtractError{Reason: "timeout"})
 	second, secondCalls := fakeNode(t, http.StatusUnprocessableEntity, ExtractError{Reason: "killed"})
 	local := &countingExtractor{}
-	_, err := NewNodeExtractor(local, fixedNodes{first, second}, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly, jwtSecretSetting: "secret"}).Extract(t.Context(), nil, nodeRequest())
+	_, err := NewNodeExtractor(local, fixedNodes{first, second}, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly}, nodeauthtest.SharedSecret("secret")).Extract(t.Context(), nil, nodeRequest())
 	if !errors.Is(err, errNoNode) || firstCalls.Load() != 1 || secondCalls.Load() != 1 || local.calls != 0 {
 		t.Fatalf("error=%v node calls=%d/%d local calls=%d", err, firstCalls.Load(), secondCalls.Load(), local.calls)
 	}

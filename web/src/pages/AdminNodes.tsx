@@ -3,13 +3,19 @@ import { captureProfileRequestContext } from "@/api/client";
 import type { NodeDeleteIntent } from "@/hooks/queries/admin/nodes";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import type { FormEvent, ReactNode } from "react";
-import type { StreamNode, CreateNodeRequest, UpdateNodeRequest } from "@/api/types";
+import type {
+  StreamNode,
+  CreateNodeRequest,
+  UpdateNodeRequest,
+  NodeSourceAccess,
+} from "@/api/types";
 import {
   useAdminNodes,
   useCreateNode,
   useUpdateNode,
   useDeleteNode,
   useCheckNodeHealth,
+  useIssueNodeKey,
   useReprobeNode,
   useSetNodeDrain,
   useToggleNode,
@@ -20,7 +26,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -38,8 +51,12 @@ import {
   AlertTriangle,
   CirclePause,
   CirclePlay,
+  Copy,
+  KeyRound,
 } from "lucide-react";
+import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
 import { formatRelativeTime } from "@/lib/date";
 import { toggleHWDevice } from "@/lib/hwDevices";
@@ -528,6 +545,46 @@ function NodeGroupFilter({
   );
 }
 
+/**
+ * A transcode node's key status and the action that issues or rotates it.
+ *
+ * The status is worded as its consequence: a node without a key is not a
+ * misconfiguration to look up somewhere, it is a node that receives no work.
+ */
+function NodeKeyLine({
+  node,
+  onIssueKey,
+  isIssuingKey,
+}: {
+  node: StreamNode;
+  onIssueKey: (node: StreamNode) => void;
+  isIssuingKey: boolean;
+}) {
+  const issued = node.key_issued === true;
+  const action = issued ? "Rotate key" : "Issue key";
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <KeyRound className="text-muted-foreground h-3 w-3 shrink-0" aria-hidden="true" />
+      <span className={issued ? "text-muted-foreground" : "text-warning font-medium"}>
+        {issued ? "Key issued" : "No key: this node takes no work"}
+      </span>
+      {node.source_access === "core" && (
+        <span className="text-muted-foreground">· Reads media from this server</span>
+      )}
+      <Button
+        variant="link"
+        size="sm"
+        className="h-auto p-0 text-xs"
+        disabled={isIssuingKey}
+        aria-label={`${action} for ${node.name}`}
+        onClick={() => onIssueKey(node)}
+      >
+        {action}
+      </Button>
+    </div>
+  );
+}
+
 interface NodeUnitProps {
   node: StreamNode;
   /**
@@ -548,6 +605,9 @@ interface NodeUnitProps {
   /** Drain (true) or resume (false) a transcode node. */
   onSetDrain: (node: StreamNode, requested: boolean) => void;
   isSettingDrain: boolean;
+  /** Issue or rotate a transcode node's key. */
+  onIssueKey: (node: StreamNode) => void;
+  isIssuingKey: boolean;
 }
 
 /**
@@ -572,6 +632,8 @@ function NodeUnit({
   isReprobing,
   onSetDrain,
   isSettingDrain,
+  onIssueKey,
+  isIssuingKey,
 }: NodeUnitProps) {
   const state = nodeState(node);
   const drain = describeNodeDrain(node);
@@ -628,6 +690,9 @@ function NodeUnit({
             >
               public: {node.public_url}
             </p>
+          )}
+          {node.type === "transcode" && (
+            <NodeKeyLine node={node} onIssueKey={onIssueKey} isIssuingKey={isIssuingKey} />
           )}
         </div>
 
@@ -766,6 +831,9 @@ interface NodeSectionProps {
   reprobingId: StreamNode["id"] | null;
   onSetDrain: (node: StreamNode, requested: boolean) => void;
   settingDrainId: StreamNode["id"] | null;
+  onIssueKey: (node: StreamNode) => void;
+  /** One issuance at a time: a second would replace the key still waiting to be revealed. */
+  isIssuingKey: boolean;
 }
 
 function NodeSection({
@@ -785,6 +853,8 @@ function NodeSection({
   reprobingId,
   onSetDrain,
   settingDrainId,
+  onIssueKey,
+  isIssuingKey,
 }: NodeSectionProps) {
   const label = type === "proxy" ? "Proxy" : "Transcode";
 
@@ -847,6 +917,8 @@ function NodeSection({
               isReprobing={reprobingId === node.id}
               onSetDrain={onSetDrain}
               isSettingDrain={settingDrainId === node.id}
+              onIssueKey={onIssueKey}
+              isIssuingKey={isIssuingKey}
             />
           ))}
         </div>
@@ -946,6 +1018,9 @@ function NodeForm({
     node?.hw_accel_override?.trim() || HW_ACCEL_INHERIT,
   );
   const [hwDeviceOverride, setHwDeviceOverride] = useState(node?.hw_device_override ?? "");
+  const [sourceAccess, setSourceAccess] = useState<NodeSourceAccess>(
+    node?.source_access ?? "local",
+  );
   // The picker is driven by the node's own reported inventory; a node that has
   // never reported one keeps the free-text field, since the override still has
   // to be settable on a node this server has not heard from yet.
@@ -1014,12 +1089,16 @@ function NodeForm({
         const overrideDevices = parseHWDeviceOverride(hwDeviceOverride);
         body.hw_accel_override = hwAccelOverride === HW_ACCEL_INHERIT ? null : hwAccelOverride;
         body.hw_device_override = overrideDevices.length > 0 ? overrideDevices.join(",") : null;
+        body.source_access = sourceAccess;
       }
       updateMutation.mutate({ node, body }, { onSuccess: onClose });
     } else {
       const body: CreateNodeRequest = { type: nodeType, ...fields };
       if (nodeType === "proxy" && publicUrl.trim() !== "") {
         body.public_url = publicUrl.trim();
+      }
+      if (nodeType === "transcode") {
+        body.source_access = sourceAccess;
       }
       createMutation.mutate(body, { onSuccess: onClose });
     }
@@ -1112,6 +1191,31 @@ function NodeForm({
             Optional concurrency cap for this node. Leave empty (or 0) for unlimited.
           </p>
         </div>
+
+        {nodeType === "transcode" && (
+          <div className="space-y-2">
+            <Label htmlFor="node-source-access">Source Access</Label>
+            <Select
+              value={sourceAccess}
+              onValueChange={(value) => setSourceAccess(value as NodeSourceAccess)}
+            >
+              <SelectTrigger id="node-source-access" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="local">Local library mount</SelectItem>
+                <SelectItem value="core">Read from this server over HTTP</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-sm">
+              {sourceAccess === "core"
+                ? "The node needs no library mount: it reads each file from this server over HTTP."
+                : "The node reads media through its own mount of the library, at the same paths as this server."}{" "}
+              Files must have the same size and modification time on the node and every server.
+              Applies to jobs the node starts after you save.
+            </p>
+          </div>
+        )}
 
         {nodeType === "proxy" && (
           <div className="space-y-2">
@@ -1235,6 +1339,93 @@ function NodeForm({
   );
 }
 
+/**
+ * The one-time reveal of a node key, with the environment the node starts
+ * with. The page holds the key in state only to pass it here, and the issuing
+ * mutation keeps none: closing clears that state, which drops the page's last
+ * copy, and the server never returns it again.
+ */
+function NodeKeyDialog({
+  issued,
+  coreURL,
+  onClose,
+}: {
+  issued: { node: StreamNode; key: string } | null;
+  coreURL: string;
+  onClose: () => void;
+}) {
+  const env = issued ? `SILO_CORE_URL=${coreURL}\nSILO_NODE_KEY=${issued.key}` : "";
+  async function copy(text: string, what: string) {
+    try {
+      await copyTextToClipboard(text);
+      toast.success(`${what} copied`);
+    } catch {
+      toast.error(`Could not copy the ${what.toLowerCase()}. Select it and copy it by hand.`);
+    }
+  }
+  return (
+    <Dialog open={issued !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        // An outside click would throw the key away with no way to see it
+        // again; closing takes the explicit button or Escape.
+        onInteractOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>Key for {issued?.node.name}</DialogTitle>
+          <DialogDescription>
+            Copy it now: this key is not shown again. If it is lost, rotate the key and update the
+            node.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor="node-key-value">Node key</Label>
+          <div className="bg-muted flex items-center gap-2 rounded-lg p-3 font-mono text-xs break-all">
+            <output id="node-key-value" className="min-w-0 flex-1">
+              {issued?.key}
+            </output>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              aria-label="Copy key"
+              onClick={() => issued && void copy(issued.key, "Key")}
+            >
+              <Copy className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="node-env-value">Node environment</Label>
+          <div className="bg-muted flex items-start gap-2 rounded-lg p-3">
+            <output
+              id="node-env-value"
+              className="block min-w-0 flex-1 font-mono text-xs break-all whitespace-pre-wrap"
+            >
+              {env}
+            </output>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              aria-label="Copy environment"
+              onClick={() => void copy(env, "Environment")}
+            >
+              <Copy className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            Start the node with these two settings and no database, Redis or secret key. Change
+            SILO_CORE_URL if the node reaches this server at another address.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>I've saved it</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function AdminNodes() {
   const { data: nodes = [], isLoading } = useAdminNodes();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -1250,6 +1441,16 @@ export default function AdminNodes() {
   const reprobeMutation = useReprobeNode();
   const drainMutation = useSetNodeDrain();
   const toggleMutation = useToggleNode();
+  const [rotateKeyNode, setRotateKeyNode] = useState<StreamNode | null>(null);
+  const [issuedKey, setIssuedKey] = useState<{ node: StreamNode; key: string } | null>(null);
+  const issueKeyMutation = useIssueNodeKey((node, key) => setIssuedKey({ node, key }));
+  // The node runs against this server's own address: the configured public URL
+  // when there is one, otherwise the origin this page was loaded from.
+  const { data: serverSettings } = useAdminServerSettings();
+  const coreURL = (serverSettings?.["server.public_url"]?.trim() || window.location.origin).replace(
+    /\/+$/,
+    "",
+  );
 
   const groupOptions = describeNodeGroups(nodes);
   // Derived rather than reset in an effect: the selected group can stop
@@ -1277,6 +1478,18 @@ export default function AdminNodes() {
 
   const settingDrainId =
     drainMutation.isPending && drainMutation.variables ? drainMutation.variables.id : null;
+
+  // Every key action waits while one issuance is in flight, so a second
+  // response cannot replace a key before the admin has seen it.
+  const isIssuingKey = issueKeyMutation.isPending;
+
+  // Issuing to a keyless node breaks nothing. Rotating does: the running node
+  // keeps the old key, so it is cut off until it is restarted with the new one.
+  function handleIssueKey(node: StreamNode) {
+    if (isIssuingKey) return;
+    if (node.key_issued) setRotateKeyNode(structuredClone(node));
+    else issueKeyMutation.mutate(node);
+  }
 
   const resolvedNodeType: NodeType = editingNode
     ? (editingNode.type as NodeType)
@@ -1339,6 +1552,23 @@ export default function AdminNodes() {
         }}
       />
 
+      <ConfirmDialog
+        open={rotateKeyNode !== null}
+        onOpenChange={(open) => {
+          if (!open) setRotateKeyNode(null);
+        }}
+        title="Rotate node key"
+        description={`Issue a new key for "${rotateKeyNode?.name}"? Its current key stops working at once: the running node's streams stop, and it shows unhealthy and takes no work until you restart it with the new key. Drain the node first to let its streams finish.`}
+        confirmLabel="Rotate key"
+        variant="destructive"
+        onConfirm={() => {
+          if (rotateKeyNode && !isIssuingKey) issueKeyMutation.mutate(rotateKeyNode);
+          setRotateKeyNode(null);
+        }}
+      />
+
+      <NodeKeyDialog issued={issuedKey} coreURL={coreURL} onClose={() => setIssuedKey(null)} />
+
       <NodeSection
         type="proxy"
         nodes={proxyNodes}
@@ -1355,6 +1585,8 @@ export default function AdminNodes() {
         reprobingId={reprobingId}
         onSetDrain={(node, requested) => drainMutation.mutate(node, requested)}
         settingDrainId={settingDrainId}
+        onIssueKey={handleIssueKey}
+        isIssuingKey={isIssuingKey}
         infoBanner={
           <div className="surface-panel-subtle text-info flex items-start gap-2 rounded-xl p-3 text-sm">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1379,6 +1611,8 @@ export default function AdminNodes() {
         reprobingId={reprobingId}
         onSetDrain={(node, requested) => drainMutation.mutate(node, requested)}
         settingDrainId={settingDrainId}
+        onIssueKey={handleIssueKey}
+        isIssuingKey={isIssuingKey}
         infoBanner={
           <div className="surface-panel-subtle text-warning flex items-start gap-2 rounded-xl p-3 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

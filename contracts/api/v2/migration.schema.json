@@ -40,11 +40,11 @@
     "method": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"] },
     "path": { "type": "string", "pattern": "^/" },
     "handlerKind": { "enum": ["method", "func", "expression", "literal", "delegation"] },
-    "authClass": { "enum": ["public", "authenticated", "profile_scoped", "acting_admin", "permission_gated", "node_bearer", "delegated"] },
+    "authClass": { "enum": ["public", "authenticated", "profile_scoped", "acting_admin", "permission_gated", "node_bearer", "node_signed", "delegated"] },
     "authTrait": {
       "enum": [
         "acting_admin", "authenticated", "cors", "delegated", "demo_guarded", "egress_metered",
-        "household_profile_gate", "marker_edit", "metadata_curation", "node_bearer",
+        "household_profile_gate", "marker_edit", "metadata_curation", "node_bearer", "node_signed",
         "optional_viewer_access", "profile_required", "rate_limited", "viewer_access"
       ]
     },

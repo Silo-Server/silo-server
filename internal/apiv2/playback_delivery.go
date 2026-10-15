@@ -222,8 +222,13 @@ func (w *playbackDeliveryWriter) transport() *streamResponseWriter {
 // handler onto the catalog. A 410 is the stream deny marker (the session was
 // stopped or expired), which has its own corrective action: start again.
 func playbackDeliveryProblemType(status int) ProblemType {
-	if status == http.StatusGone {
+	switch status {
+	case http.StatusGone:
 		return TypePlaybackSessionEnded
+	case http.StatusBadGateway:
+		// A relay answers 502 when a transcode node refused it (a rotated or
+		// not-yet-loaded node key): the node is unavailable, not the server.
+		return TypeDependencyUnavailable
 	}
 	return TypeForStatus(status)
 }

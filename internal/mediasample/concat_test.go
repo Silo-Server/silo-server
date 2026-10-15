@@ -3,10 +3,15 @@ package mediasample
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
@@ -253,5 +258,71 @@ func TestInputHeaderParser(t *testing.T) {
 		if got := info.seeksToKeyframes(); got != want {
 			t.Errorf("%q seeks to keyframes = %t, want %t", formats, got, want)
 		}
+	}
+}
+
+// relayedInput registers a transcode node's relayed source of a small file
+// and returns its loopback URL.
+func relayedInput(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(path, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return nodesourcetest.Relayed(t, path).Input()
+}
+
+// TestBuildConcatListForARelayedSource names a relayed source bare in each
+// entry, holding what it opens to the relay's protocols and the admitted
+// demuxers, and opens the list itself with concat and pipe alone.
+func TestBuildConcatListForARelayedSource(t *testing.T) {
+	input := relayedInput(t)
+	list, err := buildConcatList(input, []float64{3, 6.5}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := "file '" + input + "'\noption protocol_whitelist http,tcp\noption format_whitelist " + nodesource.AdmittedFormats + "\n"
+	want := "ffconcat version 1.0\n" +
+		entry + "file_packet_meta sample 3\ninpoint 3\noutpoint 3.04\n" +
+		entry + "file_packet_meta sample 6.5\ninpoint 6.5\noutpoint 6.54\n"
+	if string(list) != want {
+		t.Fatalf("list\n got %q\nwant %q", list, want)
+	}
+	if got := concatDemuxerArgsFor(input); !slices.Equal(got, relayedConcatDemuxerArgs) {
+		t.Fatalf("relayed list options %q", got)
+	}
+	if got := concatDemuxerArgsFor("/media/movie.mkv"); !slices.Equal(got, concatDemuxerArgs) {
+		t.Fatalf("local list options %q", got)
+	}
+}
+
+// TestRunSamplesOfARelayedSource runs a Samples request on a relayed source:
+// the probe opens the URL held to the relay, and the decode reads the
+// relayed form of the list.
+func TestRunSamplesOfARelayedSource(t *testing.T) {
+	req := samplesRequest(100, 103)
+	req.Input = relayedInput(t)
+	fake := &fakeSamplesExec{
+		header: probeHeaderLog("matroska,webm", "0.000000"),
+		decode: statsFrameLog("0", "100", "") + statsFrameLog("1", "103", ""),
+	}
+	runner := Runner{Workload: processmetrics.Analysis, Exec: fake.exec}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fake.calls) != 2 {
+		t.Fatalf("processes %q, want the probe and then the decode", fake.calls)
+	}
+	if want := nodesource.RestrictArgs(probeArgs(req.Input)); !slices.Equal(fake.calls[0], want) ||
+		!slices.Contains(fake.calls[0], "-format_whitelist") {
+		t.Fatalf("probe %q, want %q", fake.calls[0], want)
+	}
+	decode := strings.Join(fake.calls[1], " ")
+	if !strings.Contains(decode, "-protocol_whitelist http,tcp,pipe -format_whitelist concat -f concat -safe 0 -i pipe:0") ||
+		strings.Contains(decode, req.Input) {
+		t.Fatalf("decode %q, want the relayed list options and no URL argument", decode)
+	}
+	if want, _ := buildConcatList(req.Input, req.Samples.Seconds, 0); string(fake.stdin) != string(want) {
+		t.Fatalf("stdin %q, want the relayed list %q", fake.stdin, want)
 	}
 }

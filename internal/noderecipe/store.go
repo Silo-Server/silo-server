@@ -17,6 +17,9 @@
 // remuxes also use the record as durable active authority: central writes it
 // before publishing the route, the node checks it before each remux response,
 // and deliberate teardown deletes it so a surviving token cannot restart work.
+// A native transcode moved off an unreachable node gets a record too: its
+// token still names the node it left, and the record names the node it runs
+// on now.
 // Each node record is stamped with a per-node authority generation; destructive
 // force reload advances that generation so even a published remux URL which has
 // not received its first request is revoked without enumerating recipe keys.
@@ -265,45 +268,65 @@ func (s *Store) PutTTL(ctx context.Context, sessionID string, card playback.Reci
 // Get returns the stored recipe for sessionID. It fails CLOSED — a miss or any
 // error yields (nil, false) — because an absent recipe legitimately means the
 // node cannot reconstruct and should 404, never rebuild from a bad recipe.
+// Lookup tells a Redis failure from a miss.
 func (s *Store) Get(ctx context.Context, sessionID string) (*playback.RecipeCard, bool) {
-	if s == nil || s.rdb == nil || sessionID == "" {
+	card, ok, err := s.Lookup(ctx, sessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "load node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "error", err, "playback_session_id", sessionID)
 		return nil, false
 	}
+	return card, ok
+}
+
+// Lookup is Get for a caller that must not read a Redis failure as a missing
+// recipe: a miss, an undecodable card or a revoked one is (nil, false, nil),
+// and a failure to read the store is a non-nil error.
+func (s *Store) Lookup(ctx context.Context, sessionID string) (*playback.RecipeCard, bool, error) {
+	if s == nil || s.rdb == nil || sessionID == "" {
+		return nil, false, nil
+	}
 	data, generation, stamped, err := s.loadStoredCard(ctx, sessionID)
+	if errors.Is(err, redis.Nil) {
+		return nil, false, nil
+	}
+	if errors.Is(err, errMalformedRecord) {
+		// No retry reads it differently: a miss, like an undecodable card.
+		slog.WarnContext(ctx, "node recipe record is malformed", "component", "noderecipe", "key_prefix", s.prefix, "error", err, "playback_session_id", sessionID)
+		return nil, false, nil
+	}
 	if err != nil {
-		if !errors.Is(err, redis.Nil) {
-			slog.WarnContext(ctx, "load node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "error", err, "playback_session_id", sessionID)
-		}
-		return nil, false
+		return nil, false, err
 	}
 	card, ok := unmarshalCard(data)
 	if !ok {
 		slog.WarnContext(ctx, "decode node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "playback_session_id", sessionID)
-		return nil, false
+		return nil, false, nil
 	}
 	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
 		if stamped {
 			currentGeneration, generationErr := s.currentNodeAuthorityGeneration(ctx, authorityKey)
 			if generationErr != nil {
-				slog.WarnContext(ctx, "load node authority generation failed", "component", "noderecipe", "error", generationErr, "playback_session_id", sessionID)
-				return nil, false
+				return nil, false, fmt.Errorf("load node authority generation: %w", generationErr)
 			}
 			if generation != currentGeneration {
-				return nil, false
+				return nil, false, nil
 			}
 		} else {
 			valid, validationErr := s.legacyRecipeIssuedAfterRevocation(ctx, sessionID, data, authorityKey)
 			if validationErr != nil {
-				slog.WarnContext(ctx, "validate legacy node recipe authority failed", "component", "noderecipe", "error", validationErr, "playback_session_id", sessionID)
-				return nil, false
+				return nil, false, fmt.Errorf("validate legacy node recipe authority: %w", validationErr)
 			}
 			if !valid {
-				return nil, false
+				return nil, false, nil
 			}
 		}
 	}
-	return &card, true
+	return &card, true, nil
 }
+
+// errMalformedRecord is a stored recipe record whose authority stamp cannot
+// be read: lasting, unlike a failure to reach Redis.
+var errMalformedRecord = errors.New("malformed node recipe record")
 
 func (s *Store) loadStoredCard(ctx context.Context, sessionID string) ([]byte, int64, bool, error) {
 	if s.prefix != KeyPrefix {
@@ -331,11 +354,11 @@ func (s *Store) loadStoredCard(ctx context.Context, sessionID string) ([]byte, i
 	}
 	rawGeneration, ok := values[1].(string)
 	if !ok {
-		return nil, 0, false, errors.New("invalid node authority generation type")
+		return nil, 0, false, fmt.Errorf("%w: invalid node authority generation type", errMalformedRecord)
 	}
 	generation, err := strconv.ParseInt(rawGeneration, 10, 64)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("parse node authority generation: %w", err)
+		return nil, 0, false, fmt.Errorf("%w: parse node authority generation: %w", errMalformedRecord, err)
 	}
 	return []byte(recipe), generation, true, nil
 }

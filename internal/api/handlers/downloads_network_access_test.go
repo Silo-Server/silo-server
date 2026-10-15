@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 )
 
 // recordingDownloadPlanner hands out one proxy and records reservations, so a
@@ -95,7 +96,7 @@ func TestDirectDownloadViaProxyRedirectsToTheProviderOrigin(t *testing.T) {
 		NetworkAccess: netaccess.NodeNetworkAccess{"tailscale": {State: netaccess.StateConnected, Origin: origin}},
 	}})
 	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), func() string { return "secret" })
 
 	req := downloadTestRequest(http.MethodGet, "/direct-download-proxy?file_id=42", nil, 7, "", "")
 	req = req.WithContext(netaccess.WithPath(req.Context(), netaccess.Path{Provider: "tailscale"}))
@@ -150,7 +151,7 @@ func TestDirectDownloadViaProxySkipsUnreachablePreferredGroup(t *testing.T) {
 		},
 	}
 	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), func() string { return "secret" })
 	for range 4 {
 		req := downloadTestRequest(http.MethodGet, "/direct-download-proxy?file_id=42", nil, 7, "", "")
 		req = req.WithContext(netaccess.WithPath(req.Context(), netaccess.Path{Provider: "tailscale"}))

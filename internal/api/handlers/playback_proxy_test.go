@@ -56,6 +56,7 @@ func TestRelayToTranscodeNodeAcknowledgesOnlyFullDownstreamResponse(t *testing.T
 			defer node.Close()
 
 			handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+			handler.NodeKeys = testNodeKeys
 			req := withPlaybackRouteParam(
 				httptest.NewRequest(http.MethodGet, "/playback/transcode/public/segment/seg_00007.ts", nil),
 				"session_id",
@@ -98,6 +99,7 @@ func TestRelayToTranscodeNodeDoesNotAcknowledgeFailedDownstreamWrite(t *testing.
 	defer node.Close()
 
 	handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+	handler.NodeKeys = testNodeKeys
 	req := withPlaybackRouteParam(
 		httptest.NewRequest(http.MethodGet, "/playback/transcode/public/segment/seg_00007.ts", nil),
 		"session_id",
@@ -143,6 +145,7 @@ func TestRelayToTranscodeNodeReusesNodeConnections(t *testing.T) {
 		waves       = 2
 	)
 	handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+	handler.NodeKeys = testNodeKeys
 
 	t.Run("sequential", func(t *testing.T) {
 		node := newConnCountingTranscodeNode(t, false)
@@ -259,5 +262,45 @@ func (n *connCountingTranscodeNode) releaseWave(t *testing.T, count int) {
 	}
 	for range count {
 		n.release <- struct{}{}
+	}
+}
+
+// A node refusing the API's signature (a key rotating) answers 401. The API
+// relay authenticated its client already, so it answers that as the node being
+// unavailable: a player reading the node's 401 as its own login failing would
+// sign out. The node's client-facing answers still pass through.
+func TestRelayToTranscodeNodeAnswersANodeRefusalAsNodeUnavailable(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		nodeStatus int
+		wantStatus int
+	}{
+		{name: "node refuses the relay", nodeStatus: http.StatusUnauthorized, wantStatus: http.StatusBadGateway},
+		{name: "session gone", nodeStatus: http.StatusGone, wantStatus: http.StatusGone},
+		{name: "segment not ready", nodeStatus: http.StatusNotFound, wantStatus: http.StatusNotFound},
+	} {
+		for _, path := range []string{"/transcode/remote/master.m3u8", "/transcode/remote/segment/seg_00007.ts"} {
+			t.Run(tt.name+" "+path, func(t *testing.T) {
+				node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					http.Error(w, http.StatusText(tt.nodeStatus), tt.nodeStatus)
+				}))
+				defer node.Close()
+
+				handler := &PlaybackHandler{JWTSecret: "proxy-test-secret"}
+				handler.NodeKeys = testNodeKeys
+				req := withPlaybackRouteParam(httptest.NewRequest(http.MethodGet, "/playback/transcode/public"+path, nil), "session_id", "public")
+				rr := httptest.NewRecorder()
+				if err := handler.relayToTranscodeNode(rr, req, node.URL, path); err != nil {
+					t.Fatalf("relay error = %v, want the node's answer written", err)
+				}
+
+				if rr.Code != tt.wantStatus {
+					t.Fatalf("status = %d, want %d; body = %q", rr.Code, tt.wantStatus, rr.Body.String())
+				}
+				if tt.wantStatus == http.StatusBadGateway && strings.TrimSpace(rr.Body.String()) != "transcode node unavailable" {
+					t.Fatalf("body = %q, want the relay's node-unavailable error", rr.Body.String())
+				}
+			})
+		}
 	}
 }

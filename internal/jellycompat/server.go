@@ -15,7 +15,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
@@ -67,7 +70,10 @@ type Dependencies struct {
 	// control-plane recipe store (Redis) so a restarted transcode node can rebuild
 	// a jellycompat session. Optional; nil disables the handoff.
 	RecipeNodeStore recipeNodePutter
-	LoginResolver   loginResolver
+	// StreamDeny is the session deny marker the relays to a transcode node
+	// check before they forward. Nil denies nothing.
+	StreamDeny    *playback.StreamDeny
+	LoginResolver loginResolver
 	// ProfilePINAttempts is the native API's profile PIN limiter, shared so
 	// password#pin guesses count against the same per-profile budget. Nil
 	// gets a process-local limiter.
@@ -143,8 +149,12 @@ type Dependencies struct {
 	PlaybackScopeResolver  ScopeResolver
 	NodePlanner            nodepool.SessionPlanner
 	JWTSecret              string
-	Recommender            recommendations.Recommender
-	RecWorker              *recommendations.Worker
+	// NodeKeys signs calls to transcode nodes; see nodeauth.Keyring.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants transcode nodes the sources they start on.
+	SourceGrants *nodesource.Grants
+	Recommender  recommendations.Recommender
+	RecWorker    *recommendations.Worker
 	// RecommendationReader serves /Movies/Recommendations from the cached
 	// rows the native API reads; nil answers an empty list.
 	RecommendationReader RecommendationRowReader

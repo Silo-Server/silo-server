@@ -2308,22 +2308,23 @@ func (r *FileRepository) GetByPath(ctx context.Context, path string) (*models.Me
 	return scanMediaFile(r.pool.QueryRow(ctx, query, path))
 }
 
-// IsActivePath reports whether path is the exact logical path of a media file
-// that is still active in the catalog. Scanner paths are authoritative here:
-// they deliberately preserve readable symlinks instead of replacing them with
-// their physical targets.
-func (r *FileRepository) IsActivePath(ctx context.Context, path string) (bool, error) {
+// IsActiveFile reports whether media file id is still active in the catalog
+// at exactly path. Scanner paths are authoritative here: they deliberately
+// preserve readable symlinks instead of replacing them with their physical
+// targets. A transcode node may open a granted source only while this holds.
+func (r *FileRepository) IsActiveFile(ctx context.Context, id int, path string) (bool, error) {
 	var active bool
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM media_files
-			WHERE file_path = $1
+			WHERE id = $1
+			  AND file_path = $2
 			  AND missing_since IS NULL
 		)
-	`, path).Scan(&active)
+	`, id, path).Scan(&active)
 	if err != nil {
-		return false, fmt.Errorf("checking active media file path: %w", err)
+		return false, fmt.Errorf("checking active media file %d: %w", id, err)
 	}
 	return active, nil
 }

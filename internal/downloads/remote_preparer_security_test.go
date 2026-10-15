@@ -43,6 +43,7 @@ func TestNodeAwarePreparerCapabilityProbeDoesNotForwardJWTOnRedirect(t *testing.
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = jwt
 	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.SharedSecret(jwt))
 	preparer.probeClient = injectedClient
 
 	_, err := preparer.toneMapCapabilitiesForNode(context.Background(), source.URL)
@@ -80,6 +81,7 @@ func TestNodeAwarePreparerCapabilityProbeRejectsOversizedResponse(t *testing.T) 
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "cluster-jwt-secret"
 	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.SharedSecret("cluster-jwt-secret"))
 
 	_, err := preparer.toneMapCapabilitiesForNode(context.Background(), remote.URL)
 	if err == nil || !strings.Contains(err.Error(), "capability response exceeds") {
@@ -107,6 +109,7 @@ func TestNodeAwarePreparerCoalescesConcurrentColdCapabilityProbes(t *testing.T) 
 		cfg := &config.Config{}
 		cfg.Auth.JWTSecret = "cluster-jwt-secret"
 		preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+		preparer.SetNodeKeys(nodeauthtest.SharedSecret("cluster-jwt-secret"))
 		preparer.probeClient = &http.Client{Transport: transport}
 		type result struct {
 			capabilities tonemap.Capabilities

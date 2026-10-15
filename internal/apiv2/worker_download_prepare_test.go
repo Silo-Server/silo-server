@@ -1,7 +1,6 @@
 package apiv2
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,14 +14,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
-
-type prepareProtocolPathAuthority struct{}
-
-func (prepareProtocolPathAuthority) Allowed(context.Context, string) (bool, error) { return true, nil }
 
 func TestWorkerDownloadPreparationProtocol(t *testing.T) {
 	document, err := generatedOpenAPIBytes()
@@ -54,10 +50,10 @@ func TestWorkerDownloadPreparationProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Existing decoder permits omitted codec/index fields and ignores unknown keys.
-	if err := requestSchema.Validate(map[string]any{"artifact_id": "fixture", "input_path": "/synthetic/input.mkv", "future": true}); err != nil {
+	if err := requestSchema.Validate(map[string]any{"artifact_id": "fixture", "source_grant": "synthetic-grant", "input_path": "/synthetic/input.mkv", "future": true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := requestSchema.Validate(map[string]any{"artifact_id": "../bad", "input_path": "/synthetic/input.mkv"}); err == nil {
+	if err := requestSchema.Validate(map[string]any{"artifact_id": "../bad", "source_grant": "synthetic-grant"}); err == nil {
 		t.Fatal("invalid opaque handle accepted")
 	}
 	resultSchema, err := compiler.Compile(schemaURL + op.Responses["200"].Content["application/json"].Schema.Ref)
@@ -73,8 +69,12 @@ func TestWorkerDownloadPreparationProtocol(t *testing.T) {
 	}
 	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
 	watcher.SetConfigForTest(cfg)
-	server := transcodenode.NewServer(watcher, nil)
-	server.SetInputPathAuthorizer(prepareProtocolPathAuthority{})
+	server := keyedTranscodeNode(watcher, cfg.Auth.JWTSecret)
+	input := filepath.Join(t.TempDir(), "input.mkv")
+	if err := os.WriteFile(input, []byte("source"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	server.SetSourceOpener(transcodenode.RelaySources(nodesourcetest.LocalRelay(t)))
 	handler := server.Handler()
 	for _, tc := range []struct {
 		body   string
@@ -82,8 +82,11 @@ func TestWorkerDownloadPreparationProtocol(t *testing.T) {
 		status int
 	}{
 		{"{", false, 401}, {"{", true, 400}, {"{}", true, 400},
-		{`{"artifact_id":"fixture","input_path":"/synthetic/input.mkv","future":true}`, true, 200},
-		{`{"artifact_id":"fixture","input_path":"/synthetic/input.mkv","audio_recipe_version":"partial"}`, true, 400},
+		{`{"artifact_id":"fixture","source_grant":"` + nodesourcetest.Grant(input) + `","input_path":"/synthetic/input.mkv","future":true}`, true, 200},
+		// An existing artifact is served without its source, so the missing
+		// grant is refused only for one that must be prepared.
+		{`{"artifact_id":"unprepared","input_path":"/synthetic/input.mkv"}`, true, 400},
+		{`{"artifact_id":"fixture","source_grant":"` + nodesourcetest.Grant(input) + `","audio_recipe_version":"partial"}`, true, 400},
 		{strings.Repeat(" ", 64<<10) + "{}", true, 400},
 	} {
 		req := httptest.NewRequest(http.MethodPost, op.Path, strings.NewReader(tc.body))
@@ -112,7 +115,7 @@ func TestWorkerDownloadPreparationProtocol(t *testing.T) {
 	}
 	watcher.SetConfigForTest(nil)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, op.Path, strings.NewReader(`{"artifact_id":"fixture","input_path":"/synthetic/input.mkv"}`)))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, op.Path, strings.NewReader(`{"artifact_id":"fixture","source_grant":"`+nodesourcetest.Grant(input)+`"}`)))
 	if rec.Code != 503 {
 		t.Fatal(rec.Code, rec.Body)
 	}

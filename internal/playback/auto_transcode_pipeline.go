@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 type autoTranscodeStage uint8
@@ -275,10 +277,12 @@ func isHardwareTranscodeBackend(hwAccel string) bool {
 // autoTranscodePipelineCacheKey keeps a fallback local to one source file and
 // executable recipe. File-specific corruption or unusual stream metadata must
 // never downgrade another title that happens to share the same codec label.
+// A transcode node's relayed source, a new loopback URL for every session, is
+// keyed by its identity, so its next session finds the fallback too.
 func autoTranscodePipelineCacheKey(opts TranscodeOpts) string {
 	return strings.Join([]string{
 		ffmpegIdentityKey(opts.FFmpegPath),
-		strings.TrimSpace(opts.InputPath),
+		nodesource.InputKey(strings.TrimSpace(opts.InputPath)),
 		opts.HWAccel,
 		strings.Join(ParseHWDeviceSet(opts.HWDevice).List(), ","),
 		normalizeCodecV3(opts.SourceVideoCodec),

@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
-	"github.com/go-chi/chi/v5"
 )
 
 // stubCapabilityRefresher stands in for the health checker's on-demand refresh.
@@ -67,7 +68,7 @@ func TestHandleReprobeNodeRefreshesStoredCapabilities(t *testing.T) {
 		`{"resolved":"qsv","capability_hash":"sha256:new"}`)
 	repo := &stubNodeRepository{node: &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: url}}
 	refresher := &stubCapabilityRefresher{}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	handler.SetCapabilityRefresher(refresher)
 
 	recorder := httptest.NewRecorder()
@@ -105,7 +106,7 @@ func TestHandleReprobeNodeSurfacesNodeFailure(t *testing.T) {
 	url, _ := fakeNodeServer(t, http.StatusServiceUnavailable, "capability probe unavailable\n")
 	repo := &stubNodeRepository{node: &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: url}}
 	refresher := &stubCapabilityRefresher{}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	handler.SetCapabilityRefresher(refresher)
 
 	recorder := httptest.NewRecorder()
@@ -141,7 +142,7 @@ func TestHandleReprobeNodeReportsRefreshFailureSeparately(t *testing.T) {
 	url, _ := fakeNodeServer(t, http.StatusOK, `{"resolved":"none","capability_hash":"sha256:new"}`)
 	repo := &stubNodeRepository{node: &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: url}}
 	refresher := &stubCapabilityRefresher{err: nodepool.ErrCapabilityRefreshInFlight}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	handler.SetCapabilityRefresher(refresher)
 
 	recorder := httptest.NewRecorder()
@@ -168,7 +169,7 @@ func TestHandleReprobeNodeSurfacesBusyNodeRefusal(t *testing.T) {
 		"node is running 2 transcode job(s); a re-probe smoke-encodes on the GPU. Retry when the node is idle.\n")
 	repo := &stubNodeRepository{node: &nodepool.Node{ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: url}}
 	refresher := &stubCapabilityRefresher{}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	handler.SetCapabilityRefresher(refresher)
 
 	recorder := httptest.NewRecorder()
@@ -215,7 +216,7 @@ func TestHandleReprobeNodeOutlivesTheListenerWriteTimeout(t *testing.T) {
 		ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: node.URL,
 		Capabilities: report,
 	}}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	handler.SetCapabilityRefresher(&stubCapabilityRefresher{})
 
 	router := chi.NewRouter()
@@ -240,7 +241,7 @@ func TestHandleReprobeNodeOutlivesTheListenerWriteTimeout(t *testing.T) {
 }
 
 func TestHandleReprobeNodeUnknownNode(t *testing.T) {
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	recorder := httptest.NewRecorder()
 	handler.HandleReprobeNode(recorder, reprobeRequest(t))
 	if recorder.Code != http.StatusNotFound {
@@ -252,7 +253,7 @@ func TestHandleReprobeNodeUnknownNode(t *testing.T) {
 // slower hardware is not abandoned on a cluster-wide guess. A node that has
 // never been inventoried falls back to the generous constant.
 func TestNodeReprobeTimeoutPrefersTheNodeAdvertisedBudget(t *testing.T) {
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	// Above the fallback, which is a floor: a node that says it needs less than
 	// the constant this handler is willing to spend does not shorten it.
 	advertised := playback.HWAccelInfo{ProbeRequestTimeoutMillis: 200_000}
@@ -281,7 +282,7 @@ func TestNodeReprobeTimeoutPrefersTheNodeAdvertisedBudget(t *testing.T) {
 func TestNodeReprobeTimeoutRepricesAWidenedDeviceOverride(t *testing.T) {
 	devices := "/dev/dri/renderD128,/dev/dri/renderD129,/dev/dri/renderD130,/dev/dri/renderD131"
 	backend := tonemap.BackendQSV
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 	handler.SetClusterPlaybackPolicy(func() config.PlaybackConfig {
 		return config.PlaybackConfig{HWAccel: tonemap.BackendQSV, HWDevice: "/dev/dri/renderD128"}
 	})
@@ -324,7 +325,7 @@ func (b *boundedCapabilityRefresher) CapabilityRefreshBound(*nodepool.Node) time
 // has already changed the node.
 func TestReprobeWriteDeadlineReservesTheNodesOwnRefreshBound(t *testing.T) {
 	node := &nodepool.Node{ID: 1, Name: "gpu-1", URL: "http://gpu-1", Type: nodepool.NodeTypeTranscode}
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	// No refresher: the floor is all this handler can promise.
 	if got := handler.capabilityRefreshBound(node); got != nodepool.CapabilityRefreshTimeout {
@@ -373,7 +374,7 @@ func TestHandleReprobeNodeReachesATrailingSlashBaseURL(t *testing.T) {
 	repo := &stubNodeRepository{node: &nodepool.Node{
 		ID: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: node.URL + "/", Enabled: true,
 	}}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("secret"))
 
 	recorder := httptest.NewRecorder()
 	handler.HandleReprobeNode(recorder, reprobeRequest(t))

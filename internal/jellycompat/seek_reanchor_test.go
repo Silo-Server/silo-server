@@ -115,6 +115,7 @@ func TestSeekReanchorLocalAndRemoteFreezeActualOrigin(t *testing.T) {
 			ps := PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", InitialSeekSeconds: tc.requested, MediaSources: []PlaybackMediaSource{source}}
 			store.Put(ps)
 			h := &PlaybackHandler{sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile", MediaFileID: 42, PlayMethod: playback.PlayTranscode}}}, playbackStore: store, fileResolver: testCompatFileResolver{file: file}, TranscodeDir: t.TempDir(), FFmpegPath: ffmpeg, tm: playback.NewTranscodeManager()}
+			withTestNodeKeys(h)
 			live, err := h.ensureTranscodeSession(t.Context(), ps.ID, ps.UpstreamSessionID, source)
 			if err != nil {
 				t.Fatal(err)

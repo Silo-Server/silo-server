@@ -261,11 +261,14 @@ type NodeCommandRequest = {
  * A POST command on one node row. The selected node and the rendered authority
  * are captured before the request queues, nothing is replayed automatically,
  * and a result or invalidation that arrives under a changed authority is
- * dropped. `send` issues the request for the intent's action.
+ * dropped. `send` issues the request for the intent's action; `onResult` gets
+ * the full result inside the mutation, and the mutation keeps only what
+ * `retain` returns (the full result by default) as its cached data.
  */
-function useNodeCommand<A, R extends object>(command: {
+function useNodeCommand<A, R extends object, D = R>(command: {
   send: (action: A, request: NodeCommandRequest) => Promise<R>;
   onResult: (result: R, intent: NodeCommandIntent<A>) => void;
+  retain?: (result: R) => D;
   errorMessage: (intent: NodeCommandIntent<A>) => string;
 }) {
   const queryClient = useQueryClient();
@@ -284,10 +287,8 @@ function useNodeCommand<A, R extends object>(command: {
         throw new StaleApiRequestContextError();
       if ("node_id" in result && result.node_id !== String(intent.node.id))
         throw new Error("Unexpected node command result");
-      return result;
-    },
-    onSuccess: (result, intent) => {
-      if (isCapturedProfileAuthorityActive(intent.authority)) command.onResult(result, intent);
+      command.onResult(result, intent);
+      return command.retain ? command.retain(result) : (result as unknown as D);
     },
     onError: (_error, intent) => {
       if (isCapturedProfileAuthorityActive(intent.authority))
@@ -368,6 +369,23 @@ export function useSetNodeDrain() {
         ? `Could not drain ${intent.node.name}. Refresh node state and try again.`
         : `Could not resume ${intent.node.name}. Refresh node state and try again.`,
   });
+}
+
+/**
+ * Issues a transcode node's key, or rotates it when one exists. The key is in
+ * this one response only: the mutation hands it to `onIssued` for a one-time
+ * reveal and resolves with nothing, so TanStack's mutation cache never holds
+ * it. Never replayed, because every call rotates.
+ */
+export function useIssueNodeKey(onIssued: (node: StreamNode, key: string) => void) {
+  const command = useNodeCommand<"issue", V2Result<"POST /api/v2/admin/nodes/{id}/key">, void>({
+    send: (_action, request) => v2("POST /api/v2/admin/nodes/{id}/key", request),
+    onResult: (result, intent) => onIssued(intent.node, result.node_key),
+    retain: () => undefined,
+    errorMessage: (intent) =>
+      `Could not confirm a new key for ${intent.node.name}. Refresh node state before trying again; the old key may already have stopped working.`,
+  });
+  return { ...command, mutate: (node: StreamNode) => command.mutate(node, "issue") };
 }
 
 export function useToggleNode() {

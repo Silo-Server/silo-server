@@ -34,7 +34,7 @@ func newCapabilityTestServer(t *testing.T) (*Server, string) {
 	cfg.Playback.TranscodeDir = t.TempDir()
 	cfg.Playback.FFmpegPath = ffmpegPath
 	watcher.SetConfigForTest(cfg)
-	return &Server{watcher: watcher, sessions: make(map[string]*playback.TranscodeSession)}, logPath
+	return &Server{watcher: watcher, nodeKey: testSecret, sessions: make(map[string]*playback.TranscodeSession)}, logPath
 }
 
 func decodeHealth(t *testing.T, server *Server) HealthResponse {
@@ -164,5 +164,58 @@ func TestRefreshCapabilitySnapshotKeepsHashOnProbeFailure(t *testing.T) {
 
 	if got := server.storedCapabilityHash(); got != "sha256:previous" {
 		t.Fatalf("stored hash = %q, want the previous hash kept after a failed probe", got)
+	}
+}
+
+// A progressive remux binds to the node's stream_nodes row: the node takes
+// one only once it knows its row id, whoever resolves the token. The core
+// resolves it for a node that holds no stream-token secret.
+func TestHWCapabilitiesAdvertiseProgressiveRemuxByRowID(t *testing.T) {
+	for _, known := range []bool{false, true} {
+		server := newTestServer(t)
+		server.watcher.Config().Auth.JWTSecret = ""
+		server.nodeRowID = func() (int, bool) { return 42, known }
+
+		request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
+		nodeauthtest.Sign(t, request, testSecret)
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, request)
+		if recorder.Code == http.StatusServiceUnavailable {
+			t.Skip("this host's ffmpeg cannot answer a capability probe")
+		}
+		var info playback.HWAccelInfo
+		if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &info) != nil {
+			t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+		}
+		if got := slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1); got != known {
+			t.Fatalf("row id known = %v: transport features = %v", known, info.TransportFeatures)
+		}
+	}
+}
+
+// A node advertises a progressive execution only when it can serve one: it
+// knows its row, resolves through the core, and opens its media through the
+// core's source access.
+func TestExecutionTransportFeaturesNeedEveryServingDependency(t *testing.T) {
+	both := []string{playback.TransportFeatureProgressiveRemuxExecutionV1, playback.TransportFeatureThemeAudioExecutionV1}
+	for _, test := range []struct {
+		name   string
+		mutate func(*Server)
+		want   []string
+	}{
+		{"fully wired", func(*Server) {}, both},
+		{"no resolver", func(s *Server) { s.resolver = nil }, nil},
+		{"no source access", func(s *Server) { s.sources = nil }, nil},
+		{"row unknown", func(s *Server) { s.nodeRowID = func() (int, bool) { return 0, false } }, nil},
+		{"no row source", func(s *Server) { s.nodeRowID = nil }, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			server.nodeRowID = func() (int, bool) { return 42, true }
+			test.mutate(server)
+			if got := server.executionTransportFeatures(); !slices.Equal(got, test.want) {
+				t.Fatalf("features = %v, want %v", got, test.want)
+			}
+		})
 	}
 }

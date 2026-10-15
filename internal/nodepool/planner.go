@@ -469,15 +469,16 @@ func (p *Planner) ProxyNodeURLs() []string {
 	return urls
 }
 
-// TranscodeNodeURLs lists the URLs of every enabled pooled transcode node,
-// healthy or not: capability planning wants the deployment's toolchain, and
-// an unreachable node excludes itself when its capability fetch fails. An
-// empty slice means no nodes are pooled.
+// TranscodeNodeURLs lists the URLs of every enabled pooled transcode node
+// that has a key, healthy or not: capability planning wants the deployment's
+// toolchain, and an unreachable node excludes itself when its capability
+// fetch fails. A node without a key can run nothing, so it is left out. An
+// empty slice means no such nodes are pooled.
 func (p *Planner) TranscodeNodeURLs() []string {
 	if p == nil || p.transcodes == nil {
 		return nil
 	}
-	nodes := p.transcodes.Nodes()
+	nodes := p.transcodes.KeyedNodes()
 	urls := make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		if node != nil && node.URL != "" {
@@ -538,7 +539,7 @@ func (p *Planner) ReleaseSessionProxy(sessionID string) {
 	}
 }
 
-// ReserveTranscodeWork selects the least-loaded healthy transcode node while
+// ReserveTranscodeWork selects the least-loaded healthy, keyed transcode node while
 // sharing the same health-bridging reservation accounting as playback. Unlike
 // a playback session it does not require a proxy partner: the completed file
 // is written to the configured shared artifact store and served later.
@@ -560,7 +561,7 @@ func (p *Planner) ReserveTranscodeWorkWith(workID string, eligible func(*Node) b
 
 	var best *Node
 	for _, node := range p.transcodes.Nodes() {
-		if !node.TakesNewWork() || !p.underCap(node, now) {
+		if !node.TakesNewWork() || !p.transcodes.hasKey(node) || !p.underCap(node, now) {
 			continue
 		}
 		if eligible != nil && !eligible(node) {
@@ -584,8 +585,8 @@ func (p *Planner) ReserveTranscodeWorkWith(workID string, eligible func(*Node) b
 	}
 }
 
-// TranscodeWorkAvailableWith reports whether a healthy, under-cap transcode
-// node satisfies eligible without creating a provisional reservation.
+// TranscodeWorkAvailableWith reports whether a healthy, keyed, under-cap
+// transcode node satisfies eligible without creating a provisional reservation.
 func (p *Planner) TranscodeWorkAvailableWith(eligible func(*Node) bool) bool {
 	if p == nil || p.transcodes == nil {
 		return false
@@ -594,7 +595,7 @@ func (p *Planner) TranscodeWorkAvailableWith(eligible func(*Node) bool) bool {
 	defer p.mu.Unlock()
 	now := p.now()
 	for _, node := range p.transcodes.Nodes() {
-		if !node.TakesNewWork() || !p.underCap(node, now) {
+		if !node.TakesNewWork() || !p.transcodes.hasKey(node) || !p.underCap(node, now) {
 			continue
 		}
 		if eligible == nil || eligible(node) {
@@ -872,7 +873,7 @@ func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealth
 }
 
 // transcodeEligible reports whether a transcode node may take a new session:
-// it must be healthy and under cap, and a grouped node additionally requires
+// it must be healthy, have a key, and be under cap, and a grouped node additionally requires
 // its whole group healthy and — when the group contains proxies — at least
 // one of them with job and bandwidth headroom (a group's capacity is bounded
 // by its proxies).
@@ -883,7 +884,7 @@ func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealth
 // directly (ReserveTranscodeWorkWith's non-streaming reservations) intentionally
 // keep the historical behavior.
 func (p *Planner) transcodeEligible(n *Node, proxies []*Node, groupHealthy map[string]bool, estKbps int, now time.Time) bool {
-	if !n.Healthy || !n.Enabled || !p.underCap(n, now) {
+	if !n.Healthy || !n.Enabled || !p.transcodes.hasKey(n) || !p.underCap(n, now) {
 		return false
 	}
 	if n.Group == nil {

@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
 )
 
@@ -45,8 +46,9 @@ import (
 //
 // Samples before the first keyframe, and every sample of an input without
 // usable Cues (other containers, a Matroska file without Cues or whose Cues
-// leave out keyframes, or a read that fails or takes longer than
-// keyframeLookupTimeout), start at their own time as before. MP4 inputs keep
+// leave out keyframes, a relayed source on a transcode node, or a read that
+// fails or takes longer than keyframeLookupTimeout), start at their own time
+// as before. MP4 inputs keep
 // sample-time entries even with an index: an entry that starts exactly at an
 // MP4 keyframe's time often seeks past it. Repairs always list sample times;
 // they read from the keyframe on by design.
@@ -73,7 +75,9 @@ var lookupKeyframes = matroskaKeyframes
 // start entries at. Run calls it once, before any attempt and its timeout
 // start, and stops waiting when ctx ends or keyframeLookupTimeout passes.
 func sheetKeyframes(ctx context.Context, req Request) []float64 {
-	if req.Sheets == nil || req.Samples == nil || req.Samples.ReadThrough || ctx.Err() != nil {
+	// A relayed source is read through the node's relay, not opened as a
+	// file.
+	if req.Sheets == nil || req.Samples == nil || req.Samples.ReadThrough || nodesource.IsRemote(req.Input) || ctx.Err() != nil {
 		return nil
 	}
 	select {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -20,6 +21,10 @@ type TranscodePool struct {
 	// rows, and those still carry the last sweep's verdict. A successful
 	// health result for the node, or the node leaving the pool, clears it.
 	unreachable map[string]struct{}
+	// keyCheck, when set, reports whether a node id has a usable key (the
+	// credential registry's HasKey). Without it each node's KeyIssued stands
+	// in, which only a pool reload updates.
+	keyCheck atomic.Pointer[func(nodeID int) bool]
 }
 
 // NewTranscodePool creates an empty transcode pool.
@@ -55,6 +60,40 @@ func (p *TranscodePool) SetNodes(nodes []*Node) {
 	p.nodes = nodes
 }
 
+// SetKeyCheck makes the pool ask hasKey whether a node can be signed for.
+// Wire it to the credential registry's HasKey, which a missed
+// node_pool_changed event delays by one registry refresh at most.
+func (p *TranscodePool) SetKeyCheck(hasKey func(nodeID int) bool) {
+	p.keyCheck.Store(&hasKey)
+}
+
+// hasKey reports whether a request to n can be signed. A transcode node
+// without a key cannot be, so it takes no new work: it would only fail every
+// job sent to it, and as the node that never has a job it would otherwise win
+// least-loaded selection.
+func (p *TranscodePool) hasKey(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	if check := p.keyCheck.Load(); check != nil && *check != nil {
+		return (*check)(n.ID)
+	}
+	return n.KeyIssued
+}
+
+// KeyedNodes returns the pooled nodes a request can be signed for: the only
+// ones new work may go to.
+func (p *TranscodePool) KeyedNodes() []*Node {
+	nodes := p.Nodes()
+	keyed := nodes[:0]
+	for _, n := range nodes {
+		if p.hasKey(n) {
+			keyed = append(keyed, n)
+		}
+	}
+	return keyed
+}
+
 // Acquire returns the healthy node with the fewest active jobs.
 // Returns nil if no healthy nodes are available.
 func (p *TranscodePool) Acquire() *Node {
@@ -63,7 +102,7 @@ func (p *TranscodePool) Acquire() *Node {
 
 	var best *Node
 	for _, n := range p.nodes {
-		if !n.Healthy || !n.Enabled {
+		if !n.Healthy || !n.Enabled || !p.hasKey(n) {
 			continue
 		}
 		if best == nil || n.ActiveJobs < best.ActiveJobs {

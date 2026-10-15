@@ -28,6 +28,10 @@ func TestSkipNativeMediaCompression(t *testing.T) {
 		{http.MethodGet, "/api/v1/stream/s1/", false},
 		{http.MethodPost, "/api/v1/stream/s1", false},
 		{http.MethodGet, "/API/v1/stream/s1", false},
+		// Node control responses carry strong ETags; POSTs are covered too.
+		{http.MethodGet, "/api/internal/nodes/self/config", true},
+		{http.MethodPost, "/api/internal/nodes/self/report", true},
+		{http.MethodGet, "/api/internal/nodes/sources", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {

@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
@@ -63,8 +62,8 @@ type NodeHandler struct {
 	transcodePool     *nodepool.TranscodePool
 	lister            NodeListEnabled
 	eventBus          cache.EventBus
-	redisClient       *redis.Client // for reading session keys
-	jwtSecret         string        // signs calls to nodes (see nodeauth)
+	redisClient       *redis.Client    // for reading session keys
+	nodeKeys          nodeauth.Keyring // signs calls to nodes (see nodeauth)
 	// capabilities refreshes a node's stored inventory on demand; nil in a
 	// deployment with no health checker, where a re-probe still runs on the node
 	// and the stored row catches up on the next sweep.
@@ -82,6 +81,13 @@ type NodeHandler struct {
 	// snapshotted, because it is hot-reloadable. nil where nothing wired it, and
 	// then a node's own override is all this handler can price from.
 	clusterPlayback func() config.PlaybackConfig
+	// issueNodeKey and nodeKeyRegistry back IssueAdminNodeKey; see
+	// SetNodeKeyIssuance.
+	issueNodeKey    NodeKeyIssuer
+	nodeKeyRegistry *nodepool.KeyRegistry
+	// recipeAuthority revokes a transcode node's recipes before its force
+	// reload; see SetRecipeAuthority.
+	recipeAuthority NodeRecipeAuthority
 }
 
 // SetClusterPlaybackPolicy wires the live cluster-wide acceleration policy,
@@ -126,7 +132,7 @@ func (h *NodeHandler) SetCapabilityRefresher(refresher NodeCapabilityRefresher) 
 }
 
 // NewNodeHandler creates a new NodeHandler.
-func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcodePool *nodepool.TranscodePool, lister NodeListEnabled, eventBus cache.EventBus, redisClient *redis.Client, jwtSecret string) *NodeHandler {
+func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcodePool *nodepool.TranscodePool, lister NodeListEnabled, eventBus cache.EventBus, redisClient *redis.Client, nodeKeys nodeauth.Keyring) *NodeHandler {
 	return &NodeHandler{
 		repo:          repo,
 		proxyPool:     proxyPool,
@@ -134,7 +140,7 @@ func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcod
 		lister:        lister,
 		eventBus:      eventBus,
 		redisClient:   redisClient,
-		jwtSecret:     jwtSecret,
+		nodeKeys:      nodeKeys,
 	}
 }
 
@@ -228,6 +234,8 @@ func (h *NodeHandler) HandleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	// Source access is v2-only; v1 ignores it.
+	input.SourceAccess = ""
 
 	node, err := h.repo.Create(r.Context(), input)
 	if err != nil {
@@ -260,8 +268,10 @@ func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	// The storage overrides are v2-only; v1 ignores them as it always has.
+	// The storage overrides and source access are v2-only; v1 ignores them as
+	// it always has.
 	input.DownloadArtifactDirOverride, input.DownloadArtifactMaxBytesOverride = nil, nil
+	input.SourceAccess = nil
 
 	// Read the row before the write so the nudge below can tell a real policy
 	// change from a resubmit: the admin form posts every field on each save, so
@@ -271,7 +281,7 @@ func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	// carries only a new url still repoints the row's existing overrides at a
 	// different worker, and without the old row to compare against
 	// nodePolicyTargetChanged has nothing to see — the replacement would keep
-	// running on what it inherited until its own 60s poll.
+	// running on what it inherited until its own 30s config poll.
 	var previous *nodepool.Node
 	if input.URL != nil || input.HWAccelOverride != nil || input.HWDeviceOverride != nil {
 		previous, _ = h.repo.GetByID(r.Context(), id)
@@ -296,10 +306,10 @@ func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	// Order matters: the node has to adopt its policy before this server starts
 	// dispatching under it. reloadPools publishes the updated row, and
 	// EffectiveHWAccel then names its backend on every start request; the node
-	// itself only re-reads its row on the config watcher's 60s poll. Without the
+	// itself only re-reads its row on its 30s config poll. Without the
 	// nudge, an operator switching both overlays at once (QSV on a render node
 	// to NVENC on a CUDA index, say) — or repointing the row at a worker that
-	// has been running on what it inherited — gets up to a minute of requests
+	// has been running on what it inherited — gets up to 30 seconds of requests
 	// pairing one side's backend with the other side's device.
 	// Off the request goroutine, not merely detached from its context.
 	//
@@ -317,7 +327,7 @@ func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
 			if !h.reloadNodeConfig(ctx, node) {
 				// The node did not confirm. Its backend now comes from this
 				// server's pool while its device still comes from its own
-				// configuration, so until its poll catches up (within 60s) a
+				// configuration, so until its poll catches up (within 30s) a
 				// start request can pair the new backend with the old device
 				// and fail.
 				//
@@ -359,9 +369,10 @@ func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
 // override moving. The other is the row being repointed: the overrides may be
 // byte-identical, but they now describe a *different* worker, one that has been
 // running under whatever it inherited and will not learn otherwise until its own
-// 60s poll. reloadPools publishes the new URL immediately, so between those two
-// moments this server dispatches the row's overridden backend to a worker still
-// holding its inherited device — the same mismatch, reached by a different edit.
+// 30s config poll. reloadPools publishes the new URL immediately, so between
+// those two moments this server dispatches the row's overridden backend to a
+// worker still holding its inherited device — the same mismatch, reached by a
+// different edit.
 //
 // The admin form submits every field on each save, so their presence in the body
 // is not evidence of a change; without this, renaming a node or editing its
@@ -375,8 +386,11 @@ func nodePolicyTargetChanged(before, after *nodepool.Node) bool {
 	if !sameNodeURL(before.URL, after.URL) {
 		return true
 	}
+	// A transcode node reads its source access from its configuration too,
+	// so a change to it is pushed the same way.
 	return !sameOptionalString(before.HWAccelOverride, after.HWAccelOverride) ||
-		!sameOptionalString(before.HWDeviceOverride, after.HWDeviceOverride)
+		!sameOptionalString(before.HWDeviceOverride, after.HWDeviceOverride) ||
+		before.SourceAccess != after.SourceAccess
 }
 
 // sameNodeURL compares two stored node URLs the way the pools and the database
@@ -416,12 +430,12 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	if err != nil {
 		return false
 	}
-	if nodeauth.Sign(req, node.URL, h.jwtSecret) != nil {
+	if nodeauth.SignWith(req, node.SignTarget(), node.URL, h.nodeKeys) != nil {
 		return false
 	}
 	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout}, req, "reload")
 	if err != nil {
-		slog.WarnContext(ctx, "node did not reload after an acceleration override change; it will pick it up on its next config poll",
+		slog.WarnContext(ctx, "node did not reload after a change to its configuration; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "error", logredact.SanitizeURLError(err))
 		return false
 	}
@@ -431,7 +445,7 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	// warning about a reload that in fact succeeded, and leaves room for the
 	// node's answer to gain a body later.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		slog.WarnContext(ctx, "node refused the reload after an acceleration override change; it will pick it up on its next config poll",
+		slog.WarnContext(ctx, "node refused the reload after a change to its configuration; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "status", resp.StatusCode)
 		return false
 	}
@@ -782,7 +796,7 @@ func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nod
 	if err != nil {
 		return nodeReprobeResponse{}, err
 	}
-	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
+	if err := nodeauth.SignWith(req, node.SignTarget(), node.URL, h.nodeKeys); err != nil {
 		return nodeReprobeResponse{}, err
 	}
 
@@ -833,38 +847,46 @@ func (h *NodeHandler) HandleListSessions(w http.ResponseWriter, r *http.Request)
 	}
 
 	ctx := r.Context()
-	pattern := "silo:sessions:*"
-
+	// A node_id that names no node is ignored: every node's sessions are
+	// listed.
+	nodeID, nodeURL := 0, ""
 	if nodeIDStr := r.URL.Query().Get("node_id"); nodeIDStr != "" {
-		nodeID, err := strconv.Atoi(nodeIDStr)
-		if err == nil {
-			node, err := h.repo.GetByID(ctx, nodeID)
-			if err == nil {
-				hashBytes := sha256.Sum256([]byte(node.URL))
-				nodeHash := hex.EncodeToString(hashBytes[:4])
-				pattern = "silo:sessions:" + nodeHash + ":*"
+		if id, err := strconv.Atoi(nodeIDStr); err == nil {
+			if node, err := h.repo.GetByID(ctx, id); err == nil && node != nil {
+				nodeID, nodeURL = id, node.URL
 			}
 		}
 	}
 
 	var sessions []json.RawMessage
-	var cursor uint64
-	for {
-		keys, next, err := h.redisClient.Scan(ctx, cursor, pattern, 100).Result()
+	if nodeID > 0 {
+		// The node's own records, not every record under the hash of its URL:
+		// see nodesessions.NodeRecords.
+		records, err := nodesessions.NodeRecords(ctx, h.redisClient, nodeID, nodeURL)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "redis_error", err.Error())
 			return
 		}
-		for _, key := range keys {
-			val, err := h.redisClient.Get(ctx, key).Result()
+		sessions = records
+	} else {
+		var cursor uint64
+		for {
+			keys, next, err := h.redisClient.Scan(ctx, cursor, "silo:sessions:*", 100).Result()
 			if err != nil {
-				continue
+				writeError(w, http.StatusInternalServerError, "redis_error", err.Error())
+				return
 			}
-			sessions = append(sessions, json.RawMessage(val))
-		}
-		cursor = next
-		if cursor == 0 {
-			break
+			for _, key := range keys {
+				val, err := h.redisClient.Get(ctx, key).Result()
+				if err != nil {
+					continue
+				}
+				sessions = append(sessions, json.RawMessage(val))
+			}
+			cursor = next
+			if cursor == 0 {
+				break
+			}
 		}
 	}
 

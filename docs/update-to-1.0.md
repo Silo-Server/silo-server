@@ -97,6 +97,8 @@ unavailable.
   web application.
 - [ ] Record health/readiness probe configuration for containers, Kubernetes, load balancers,
   uptime monitors, and remote nodes.
+- [ ] For each remote transcode node, record how it is started and whether it mounts the media
+  library. 1.0 nodes start with different settings; see [Transcode nodes](#transcode-nodes).
 - [ ] Finish or pause active playback and downloads. Expect unfinished jobs to be restarted after
   the update.
 - [ ] Drain and stop every API replica, proxy/playback node, and remote transcode node. Do not
@@ -114,8 +116,9 @@ unavailable.
    version.
 2. Stop or drain the entire alpha deployment according to the release-specific instructions,
    including every API replica and remote playback/transcode node.
-3. Deploy the matching Silo 1.0 API, proxy, and worker components and run only the documented
-   database migration procedure. An incompatible node must remain unschedulable.
+3. Deploy the matching Silo 1.0 API and proxy components and run only the documented database
+   migration procedure. Leave transcode nodes stopped until they have keys; see
+   [Transcode nodes](#transcode-nodes).
 4. Keep operational checks on `GET /api/v1/health` and `GET /api/v1/ready` (and node
    `GET /api/v1/health`); these probes are retained unversioned and are not redirected or
    tombstoned.
@@ -134,6 +137,57 @@ unavailable.
    own release notes require a version compatible with Silo 1.0.
 10. Restart downloads and playback instead of attempting to resume an alpha-issued URL.
 11. Resend any pre-1.0 tokenized email action that still needs to be completed.
+
+## Transcode nodes
+
+A 1.0 transcode node holds no database, Redis or secret key. It starts with the API's URL and a
+key of its own, takes its configuration from the API, and reads media either through its own
+mount of the library or over HTTP from the API. Alpha nodes cannot work with 1.0 API servers and
+1.0 nodes cannot work with alpha ones, so the nodes change over in the same maintenance window.
+Proxies are unchanged: they keep their database, Redis and `SECRET_KEY` settings.
+
+Each node needs a network path to the API at the address it is given. When a reverse proxy or
+load balancer sits in front of the API, it must pass `/api/internal/nodes/*` through to the API
+servers. Nodes read their configuration, post reports and logs, and open their sources there, and
+a node that reads over HTTP streams whole media files through `/api/internal/nodes/sources/`, so
+that path must not buffer responses and needs read and idle timeouts long enough for a transfer
+that lasts as long as a transcode. A node treats ten seconds without a byte as a stalled read.
+Requests in both directions are signed with a timestamp, so each node's clock must be within 30
+seconds of the API servers'.
+
+1. Stop every transcode node before upgrading the API servers and proxies.
+2. Upgrade the API servers and proxies.
+3. In the administration UI, open the nodes page and choose **Issue key** on each transcode node.
+   The key is shown once, together with the two settings the node needs; copy them before closing
+   the dialog. A node without a key gets no work. Issuing again rotates the key: the running node's
+   streams stop, and it shows unhealthy and gets no work until it is restarted with the new one.
+   Drain a node before rotating its key so its streams can finish.
+4. Set each node's source access, in its editor on the same page, before starting it. The default,
+   **Local library mount**, reads at the catalog paths through the node's own mount. A node with no
+   library mount must be set to **Read from this server over HTTP** (`source_access: core`) first:
+   it then reads each file from the API. A node left on the default without a mount refuses every
+   job. A node that reads over HTTP does not burn text subtitles into the video; those streams
+   run on a node with a library mount or, when the routing policy allows it, on the API server.
+5. Start each node with `MODE=transcode`, `SILO_CORE_URL` set to an address of the API that the
+   node can reach, and `SILO_NODE_KEY` set to its key. With several API replicas, point
+   `SILO_CORE_URL` at their load-balanced address rather than at one replica, so a node keeps
+   working while any one of them restarts. Remove `DATABASE_URL`, `REDIS_URL`,
+   `SECRET_KEY`, `NODE_URL` and `NODE_NAME` from its environment. A node that still finds them,
+   for example in a shared env file, ignores them and logs a warning.
+6. Check that each node shows as healthy on the nodes page, then play a title that has to be
+   transcoded. **Key issued** means only that a key exists. A node opens its listener only after
+   it has read its configuration from the API with its key, and reports itself unhealthy while the
+   API refuses that key later, so a node that shows healthy has authenticated. A node whose key or
+   API address is wrong at startup stays unhealthy and logs
+   `cannot read this node's configuration from the core; retrying`.
+
+Every API server, and every node that reads through a local mount, must see each library file
+with the same size and the same modification time to the second. This is the same assumption as
+identical library paths. A job whose file differs fails instead of reading different bytes.
+
+Node keys are stored encrypted with `SECRET_KEY`. Changing `SECRET_KEY` makes every stored node
+key undecryptable: every node then gets no work until it is issued a new key and restarted with
+it.
 
 ## Integration checklist
 
@@ -172,6 +226,8 @@ individually, and a retired one does not answer `410`.
 - [ ] Installed plugin pages and static assets load without `/api/v1` requests.
 - [ ] Previously sent tokenized links fail safely, and newly sent links work.
 - [ ] Server diagnostics show the expected API major and contract digest.
+- [ ] Every transcode node shows as healthy on the nodes page (it has read its configuration with
+  its key), and a transcoded title plays on it.
 - [ ] Logs and metrics contain no unexplained legacy-native traffic. Expected `/api/v1` attempts
   receive only the upgrade tombstone; separately retired version-neutral paths never execute old
   business behavior.

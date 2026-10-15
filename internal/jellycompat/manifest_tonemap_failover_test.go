@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -640,7 +641,7 @@ func newManifestToneMapFailoverHandler(
 	}}
 
 	maxJobs := 1
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	nodes := []*nodepool.Node{{ID: 1, URL: failedNodeURL, Enabled: true, Healthy: true, MaxJobs: &maxJobs}}
 	for index, nodeURL := range fallbackNodeURLs {
 		nodes = append(nodes, &nodepool.Node{ID: index + 2, URL: nodeURL, Enabled: true, Healthy: true, MaxJobs: &maxJobs})
@@ -662,6 +663,7 @@ func newManifestToneMapFailoverHandler(
 		JWTSecret: "test-secret",
 		tm:        playback.NewTranscodeManager(),
 	}
+	withTestNodeKeys(handler)
 	if !localFallback {
 		requireCompatWorkerRouting(handler)
 	}

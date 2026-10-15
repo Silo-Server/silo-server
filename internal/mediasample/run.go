@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
@@ -537,6 +538,9 @@ func (a attemptRun) readSheets(req Request, times []float64, plan listPlan, onDi
 // when that is not nil, writing its stdout to stdout when that is not nil,
 // and routing its log to handlers.
 func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, stdoutWriter io.Writer, handlers ...func(string)) *AttemptError {
+	// A transcode node's relayed input is held to the relay; a sampled list
+	// restricts each of its entries itself (concat.go).
+	args = nodesource.RestrictArgs(args)
 	var stdin io.Reader
 	if stdinBytes != nil {
 		stdin = bytes.NewReader(stdinBytes)

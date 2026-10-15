@@ -29,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -3123,6 +3124,7 @@ func TestPrepareTransportV3RejectsNodeMissingRequiredTransformation(t *testing.T
 	defer remote.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
 	requireWorkerRoutingV3(handler)
 	plan := &playback.PlanV3{
@@ -3167,6 +3169,7 @@ func TestPrepareTransportV3RequiresRemoteManifestReadiness(t *testing.T) {
 	defer remote.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
 	plan := &playback.PlanV3{
@@ -3219,6 +3222,7 @@ func TestPrepareTransportV3KeepsHeaderAuthenticatedRemoteHLSBehindAPI(t *testing
 			defer remote.Close()
 
 			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.NodeKeys = testNodeKeys
 			handler.JWTSecret = "test-stream-signing-secret"
 			handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{
 				TranscodeNode: &nodepool.Node{URL: remote.URL},
@@ -3280,6 +3284,7 @@ func TestPrepareTransportV3SendsResolvedCopyAnchorToRemoteExecutor(t *testing.T)
 	defer remote.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
 	handler.copySeekAnchor = func(context.Context, string, string, float64, int) (float64, int, error) {
@@ -3341,6 +3346,7 @@ func TestPrepareRemoteTransportV3RemuxOmitsToneMapOnlyDolbyVisionEvidence(t *tes
 	defer remote.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
 	file := v3HandlerFixtureFile(t)
@@ -3442,6 +3448,7 @@ func TestPrepareTransportV3UsesFrozenSourceMetadataAfterProbeDrift(t *testing.T)
 	file.VideoTracks[0].BitDepth = 10
 	file.Duration = 7_201
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
 	plan := &playback.PlanV3{PlanID: "plan:frozen-source", Delivery: playback.DeliveryTranscodeHLSV3}
@@ -3591,6 +3598,7 @@ func TestPrepareRemoteTransportV3OmitsToneMapProvenanceForDolbyVisionRemux(t *te
 	defer remote.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	file := v3HandlerFixtureFile(t)
 	file.CodecVideo = "hevc"
@@ -6180,6 +6188,7 @@ func TestPrepareTransportV3RoutesDirectPlayThroughProxyNode(t *testing.T) {
 
 func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	proxy := capableProxyStubV3(t)
@@ -6229,6 +6238,7 @@ func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t
 
 func TestPrepareTransportV3RunsProgressiveRemuxOnTranscodeNodeThroughProxy(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	proxyServer := capableProxyStubV3(t)
@@ -6279,6 +6289,7 @@ func TestPrepareTransportV3RunsProgressiveRemuxOnTranscodeNodeThroughProxy(t *te
 
 func TestPrepareTransportV3FallsBackWhenTranscodeRemuxAuthorityWriteFails(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	proxyServer := capableProxyStubV3(t)
@@ -6336,6 +6347,7 @@ func TestPrepareTransportV3FallsBackWhenSelectedRemuxNodeLosesCapability(t *test
 	defer transcodeServer.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	proxyServer := capableProxyStubV3(t)
@@ -6348,7 +6360,7 @@ func TestPrepareTransportV3FallsBackWhenSelectedRemuxNodeLosesCapability(t *test
 			return
 		}
 		handler.v3NodeCapabilitiesMu.Lock()
-		delete(handler.v3NodeCapabilities, transcodeServer.URL)
+		delete(handler.v3NodeCapabilities, transcodeCapabilityKeyV3(transcodeServer.URL))
 		handler.v3NodeCapabilitiesMu.Unlock()
 	}
 	handler.NodePlanner = planner
@@ -6636,6 +6648,7 @@ func TestPrepareTransportV3KeepsBoostedDownmixLocalWhenProxyHasOldRecipe(t *test
 	defer proxy.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
@@ -6675,6 +6688,7 @@ func TestPrepareTransportV3KeepsBoostedDownmixLocalWhenProxyHasOldRecipe(t *test
 func TestPrepareTransportV3SkipsIncapablePreferredAPIForProgressiveRemux(t *testing.T) {
 	proxy := capableProxyStubV3(t)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
@@ -6717,6 +6731,7 @@ func TestPrepareTransportV3DirectPlaySkipsProxyCapabilityProbe(t *testing.T) {
 	defer proxy.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: proxy.URL}}}
 
@@ -6837,6 +6852,7 @@ func TestPrepareTransportV3PrefersACapableSiblingProxy(t *testing.T) {
 	upgraded := capableProxyStubV3(t)
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
 	requireWorkerRoutingV3(handler)
@@ -7021,15 +7037,21 @@ func TestLookupRemoteCapabilitiesStartsCacheTTLAfterRequestCompletes(t *testing.
 			defer remote.Close()
 
 			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.NodeKeys = testNodeKeys
 			startedAt := time.Now()
-			_, _ = handler.lookupRemoteCapabilitiesV3(context.Background(), remote.URL, false)
-			entry := handler.v3NodeCapabilities[remote.URL]
+			_, _ = handler.lookupRemoteCapabilitiesV3(context.Background(), nodeauth.TargetTranscode, remote.URL, false)
+			entry := handler.v3NodeCapabilities[transcodeCapabilityKeyV3(remote.URL)]
 			minimumLifetime := test.ttl + requestDelay - 20*time.Millisecond
 			if lifetime := entry.expiresAt.Sub(startedAt); lifetime < minimumLifetime {
 				t.Fatalf("cache lifetime from request start = %s, want at least %s", lifetime, minimumLifetime)
 			}
 		})
 	}
+}
+
+// transcodeCapabilityKeyV3 is the cache key of a transcode node's inventory.
+func transcodeCapabilityKeyV3(nodeURL string) v3NodeCapabilityKey {
+	return v3NodeCapabilityKey{target: nodeauth.TargetTranscode, url: nodeURL}
 }
 
 // waitForCachedNodeCapabilitiesV3 returns the first successful cache entry the
@@ -7039,7 +7061,7 @@ func waitForCachedNodeCapabilitiesV3(t *testing.T, handler *PlaybackHandler, nod
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		handler.v3NodeCapabilitiesMu.Lock()
-		entry, ok := handler.v3NodeCapabilities[nodeURL]
+		entry, ok := handler.v3NodeCapabilities[transcodeCapabilityKeyV3(nodeURL)]
 		handler.v3NodeCapabilitiesMu.Unlock()
 		if ok && entry.err == nil {
 			return entry
@@ -7072,7 +7094,8 @@ func TestRefreshNodeCapabilitiesDropsReportFetchedBeforeInvalidation(t *testing.
 	defer remote.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.refreshRemoteCapabilitiesV3(remote.URL)
+	handler.NodeKeys = testNodeKeys
+	handler.refreshRemoteCapabilitiesV3(transcodeCapabilityKeyV3(remote.URL))
 	<-firstRequest
 
 	// The sweep's callback lands while the earlier probe is still outstanding.
@@ -7095,11 +7118,12 @@ func TestRemoteToneMapProbeTimeoutUsesTargetNodeBudget(t *testing.T) {
 	}))
 	defer remote.Close()
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodeKeys = testNodeKeys
 	handler.PlaybackConfig = func() config.PlaybackConfig {
 		return config.PlaybackConfig{HWAccel: tonemap.BackendQSV, HWDevice: "/central/device/one"}
 	}
 
-	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), remote.URL, false); err != nil {
+	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), nodeauth.TargetTranscode, remote.URL, false); err != nil {
 		t.Fatal(err)
 	}
 	// The node's own figure is what this path exists to use. It has to exceed
@@ -7117,10 +7141,10 @@ func TestRemoteToneMapProbeTimeoutUsesTargetNodeBudget(t *testing.T) {
 	}
 
 	handler.v3NodeCapabilitiesMu.Lock()
-	delete(handler.v3NodeCapabilities, remote.URL)
+	delete(handler.v3NodeCapabilities, transcodeCapabilityKeyV3(remote.URL))
 	handler.v3NodeCapabilitiesMu.Unlock()
 	probeTimeoutMillis = (24 * time.Hour).Milliseconds()
-	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), remote.URL, false); err != nil {
+	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), nodeauth.TargetTranscode, remote.URL, false); err != nil {
 		t.Fatal(err)
 	}
 	// Still bounded — the value comes off the wire from a worker — but at the
@@ -7259,15 +7283,15 @@ func TestRefreshNodeCapabilitiesV3NormalizesTheCacheKey(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.v3NodeCapabilitiesMu.Lock()
 	if handler.v3NodeCapabilities == nil {
-		handler.v3NodeCapabilities = map[string]v3NodeCapabilityCache{}
+		handler.v3NodeCapabilities = map[v3NodeCapabilityKey]v3NodeCapabilityCache{}
 	}
-	handler.v3NodeCapabilities[nodeURL] = v3NodeCapabilityCache{expiresAt: time.Now().Add(time.Hour)}
+	handler.v3NodeCapabilities[transcodeCapabilityKeyV3(nodeURL)] = v3NodeCapabilityCache{expiresAt: time.Now().Add(time.Hour)}
 	handler.v3NodeCapabilitiesMu.Unlock()
 
 	handler.RefreshNodeCapabilitiesV3(nodeURL + "/")
 
 	handler.v3NodeCapabilitiesMu.Lock()
-	_, present := handler.v3NodeCapabilities[nodeURL]
+	_, present := handler.v3NodeCapabilities[transcodeCapabilityKeyV3(nodeURL)]
 	invalidations := handler.v3NodeCapabilityInvalidations[nodeURL]
 	handler.v3NodeCapabilitiesMu.Unlock()
 	if present {

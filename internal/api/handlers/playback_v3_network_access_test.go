@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -38,7 +39,7 @@ func lanOnlyProxyPlanner(connected bool) (*nodepool.Planner, *nodepool.ProxyPool
 	}
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{node})
-	return nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), proxies
+	return nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()), proxies
 }
 
 func assertAPIRelative(t *testing.T, rawURL string) {

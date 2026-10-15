@@ -1,6 +1,7 @@
 package tonemap
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -8,11 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 // ErrSourceRevisionChanged reports that live source facts no longer match the
@@ -131,16 +134,23 @@ func DecodeSourceRevision(value string) (SourceRevision, error) {
 // 16-character OpenSubtitles format and are rechecked with size and mtime; older
 // catalog values still receive the filesystem checks they had before hashes were
 // validated at execution time.
-func (r SourceRevision) ValidatePath(path string) error {
+//
+// path is a local file, or on a transcode node with core source access the
+// loopback URL of a relayed source (nodesource), described and read through
+// its handle. The relay knows the modification time only to the second (the
+// source revision's precision, which the core checks against the file at every
+// open), so a relayed source's time is compared to the second; its size and
+// hash are compared exactly.
+func (r SourceRevision) ValidatePath(ctx context.Context, path string) error {
 	if r.IsZero() {
 		return nil
 	}
 	if r.MediaFileID <= 0 {
 		return ErrSourceRevisionChanged
 	}
-	info, err := os.Stat(path)
+	info, err := nodesource.Stat(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || sourceWithdrawn(err) {
 			return fmt.Errorf("%w: %w", ErrSourceRevisionChanged, err)
 		}
 		return fmt.Errorf("stat tone-map source: %w", err)
@@ -148,12 +158,15 @@ func (r SourceRevision) ValidatePath(path string) error {
 	if !info.Mode().IsRegular() || info.Size() != r.FileSize {
 		return ErrSourceRevisionChanged
 	}
-	if r.FileModifiedUnixNano > 0 && normalizeRevisionTime(info.ModTime()).UnixNano() != r.FileModifiedUnixNano {
+	if r.FileModifiedUnixNano > 0 && !r.sameModTime(info.ModTime(), nodesource.IsRemote(path)) {
 		return ErrSourceRevisionChanged
 	}
 	if isOpenSubtitlesHash(r.FileHash) {
-		currentHash, err := computeOpenSubtitlesHash(path, info.Size())
+		currentHash, err := computeOpenSubtitlesHash(ctx, path, info.Size())
 		if err != nil {
+			if sourceWithdrawn(err) {
+				return fmt.Errorf("%w: %w", ErrSourceRevisionChanged, err)
+			}
 			return fmt.Errorf("hash tone-map source: %w", err)
 		}
 		if !strings.EqualFold(currentHash, strings.TrimSpace(r.FileHash)) {
@@ -174,11 +187,38 @@ func isOpenSubtitlesHash(value string) bool {
 	return err == nil
 }
 
-func computeOpenSubtitlesHash(path string, size int64) (string, error) {
+// sameModTime compares a source's modification time with the frozen one, to
+// the microsecond the catalog keeps, or for a relayed source to the second.
+func (r SourceRevision) sameModTime(modTime time.Time, relayed bool) bool {
+	if relayed {
+		return modTime.Unix() == time.Unix(0, r.FileModifiedUnixNano).Unix()
+	}
+	return normalizeRevisionTime(modTime).UnixNano() == r.FileModifiedUnixNano
+}
+
+// sourceWithdrawn reports a relayed source the core no longer serves because
+// it is gone or changed: a lasting answer about the source, unlike a core the
+// node could not reach.
+func sourceWithdrawn(err error) bool {
+	var status *nodesource.StatusError
+	if !errors.As(err, &status) {
+		return false
+	}
+	switch status.Status {
+	case http.StatusNotFound, http.StatusGone, http.StatusPreconditionFailed:
+		return true
+	}
+	return false
+}
+
+// computeOpenSubtitlesHash hashes the first and last 64 KiB of the source at
+// path, a local file or a relayed source (two ranged reads through its
+// handle).
+func computeOpenSubtitlesHash(ctx context.Context, path string, size int64) (string, error) {
 	if size < 2*openSubtitlesHashBlockSize {
 		return "", fmt.Errorf("file is too small for OpenSubtitles hash")
 	}
-	file, err := os.Open(path)
+	file, err := nodesource.OpenReaderAt(ctx, path)
 	if err != nil {
 		return "", err
 	}

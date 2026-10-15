@@ -261,6 +261,8 @@ configuration, last health result, and last stored hardware inventory. See
 | `enabled` | bool | Whether the node is eligible for new placement. Disabling also stops routine health sampling after pool reconciliation; existing streams continue. See the v2 node configuration lifecycle below. |
 | `healthy` | bool | Result of the last health check. |
 | `drain_requested` | bool | An administrator asked this transcode node to drain: it stays listed and health-checked, but new work goes to other nodes while its sessions finish. See [node drain (v2)](#node-drain-v2). Always `false` on a proxy. |
+| `key_issued` | bool | A key has been issued to this transcode node (see [node keys](#post-apiv2adminnodesidkey)). A transcode node without one gets no work. Always `false` on a proxy. |
+| `source_access` | string | How this transcode node reads source media: `local` at the catalog paths through its own library mount, or `core` over HTTP from the API. Omitted on a proxy. |
 | `drain_state` | string | What the node reported on its last health check: `none`, `draining` (after a drain request or SIGTERM, while it finishes its work) or `drained` (nothing left; safe to stop). `none` for a proxy, a node that predates draining, and a node that did not answer. |
 | `active_jobs`, `egress_kbps` | int | Last health-reported load. `egress_kbps` is a rolling average and is currently non-zero for proxy nodes only. |
 | `group` | string \| null | Co-location group. A group is only eligible while every enabled member is healthy. |
@@ -329,30 +331,18 @@ provider origin, or the file is served from the API server when the planned
 proxy has none. The Jellyfin-compatible playback redirects use the same
 accessor.
 
-A node finds its own row by URL first: `NODE_URL` on the node is matched
-against `stream_nodes.url`, ignoring a trailing slash on either side. Set
-`NODE_URL` explicitly on every node. Without it a node guesses
-`http://localhost:<port>` and adopts whatever row carries that URL, which on a
-multi-node deployment can be a different machine's policy.
+A transcode node is told its row: its node key names the row id, and the core
+builds the node's configuration with that row's overrides applied (see
+[transcode nodes](architecture/transcode-nodes.md#configuration)), so renaming
+or repointing the row never detaches a node from its policy. A proxy still
+finds its own row by URL first: `NODE_URL` on the proxy is matched against
+`stream_nodes.url`, ignoring a trailing slash on either side, and then
+`NODE_NAME` against the registered name. `name` carries no unique constraint, so
+an ambiguous name match identifies nothing. Set `NODE_URL` explicitly on every
+proxy.
 
-If the URL does not match, the node falls back to `NODE_NAME` against the
-registered name. This covers split-horizon topologies where `stream_nodes.url`
-was registered as a public address the node's own `NODE_URL` never equals —
-with `public_url` carrying the client-facing address, `url` can simply be the
-node's internal address and match `NODE_URL` directly, which is the
-recommended shape. `name`
-carries no unique constraint, so an ambiguous match — more than one row
-sharing that name — identifies nothing and adopts neither row's overrides;
-registered names should be unique per node, and `NODE_NAME` should equal the
-registered name. A node whose row *stops* matching — renaming it in the admin
-form while the worker's `NODE_NAME` still holds the old value — keeps the last
-overrides it read rather than reverting to the cluster settings, since the API
-goes on dispatching that row's backend and a row that has gone is not evidence
-an operator cleared the override. Fix the mismatch: the node adopts whatever it
-finds on its next poll.
-
-The node overlays its row onto the cluster-wide playback settings on every
-config reload, so the override is what that node probes with, advertises in
+The core applies the row's overrides to the cluster-wide playback settings in
+the node's configuration, so the override is what that node probes with, advertises in
 `capabilities.resolved`, and falls back to when a start request names no
 backend. The API dispatches remote transcodes with the node's
 `hw_accel_override` in preference to its own cluster setting, so the request
@@ -374,7 +364,7 @@ API also drops its own cached view of what the node can do, so the next session
 is planned against the new backend's tone-map executors rather than the previous
 one's. It is
 also best effort — a node that is unreachable still applies the change on its
-next config reload (within 60 seconds). When it does not confirm, the policy is
+next config poll (within 30 seconds). When it does not confirm, the policy is
 published anyway and a warning names the node: withholding it would leave a
 stored override never reaching dispatch, since nothing else re-reads the column.
 Until that node's poll catches up its backend comes from this server while its
@@ -629,9 +619,12 @@ selection, which is round-robin and does no GPU work.
 ## `POST /api/v2/admin/nodes`
 
 Registers a node. Body: `name`, `type` (`proxy` or `transcode`), `url`, and the
-optional `public_url`, `group`, `max_jobs`, `max_bandwidth_kbps`. A
-non-positive cap and an empty group mean "unlimited" and "ungrouped"; an empty
-`public_url` means clients use `url`.
+optional `public_url`, `group`, `max_jobs`, `max_bandwidth_kbps` and
+`source_access`. A non-positive cap and an empty group mean "unlimited" and
+"ungrouped"; an empty `public_url` means clients use `url`. `source_access`
+(`local`, the default, or `core`) is for transcode nodes only; a proxy with one
+gets `422 validation_failed`. A new transcode node has no key, so it gets no
+work until one is [issued](#post-apiv2adminnodesidkey).
 
 `201 Created` with the created node in the same shape as one list entry (with
 no capability fields yet — nothing has been fetched). `400 Bad Request` when a
@@ -671,8 +664,36 @@ prepared again and cached ones are dropped. See
 [prepared download storage](architecture/download-storage.md). The frozen
 `/api/v1/admin/nodes` routes neither accept nor return these two fields.
 
+`source_access` (`local` or `core`) is writable on a transcode node; on a proxy
+it is refused with `422 validation_failed` and nothing is stored. A change
+advances `config_etag`, and the server asks the node to re-read its
+configuration at once, as for an override change. Jobs the node starts
+afterwards read their sources the new way; running jobs keep theirs. See
+[transcode nodes](architecture/transcode-nodes.md#source-access). The frozen
+`/api/v1/admin/nodes` routes neither accept nor return it.
+
 Capability fields are not writable here. They are owned by the health sweep,
 because only the node can say what hardware it has.
+
+## `POST /api/v2/admin/nodes/{id}/key`
+
+Issues a key to a transcode node and returns it once:
+`201 Created` with `{"node_key": "snk1_<id>_<random>"}` and
+`Cache-Control: no-store`. The key is never returned again; `key_issued` on the
+node row records that one exists. The node is started with it as
+`SILO_NODE_KEY`, beside `SILO_CORE_URL`.
+
+Every call rotates: the previous key stops working on this replica at once and
+on other replicas and proxies within seconds. The running node's streams stop,
+and once the core refuses its key the node reports `key_rejected` on its health
+route, so the next health sweep marks it unhealthy and it takes no work until it
+restarts with the new key. Drain the node before rotating its key to let its
+streams finish. A disabled node can take a key. `409` for a
+proxy, which signs with the shared secret and takes no key; `404` for an
+unknown id. It requires an acting administrator, is refused in demo mode, and
+is `non_retryable`: after a lost response, issue again and use the new key. It
+does not move `config_etag`. See
+[transcode nodes](architecture/transcode-nodes.md#node-keys).
 
 ## `DELETE /api/v2/admin/nodes/{id}`
 
@@ -2926,9 +2947,9 @@ advance `config_etag` or the pool generation.
 
 The 200 body is `{node_id, drain_requested, drain_state, active_jobs}` with
 `node_id` an opaque decimal string. This replica's pools change before the
-response; the server publishes `node_pool_changed`, so the other replicas and the
-node itself reread the row at once (and within five seconds and sixty seconds
-respectively without the event). From then on new sessions, downloads,
+response; the server publishes `node_pool_changed`, so the other replicas reread
+the row at once (within five seconds without the event), and asks the node to
+re-read its configuration, which it otherwise polls every 30 seconds. From then on new sessions, downloads,
 trickplay, chapter thumbnails and subtitle-sync samples go to other nodes, while
 sessions already on the node keep playing until they end. `drain_state` moves to
 `draining` once the node has read the request and to `drained` when it has no
@@ -2941,7 +2962,8 @@ jobs, not prepared downloads stored on the node, which are unavailable while it
 is stopped.
 
 `GET /api/v2/admin/nodes/capabilities` (`getAdminNodeCapabilities`) advertises
-`drain: true`. The web nodes page shows `Draining · N transcodes left` and then
+`drain: true`, and `node_keys: true` and `source_access: true` for the key
+operation and the `key_issued` and `source_access` node fields. The web nodes page shows `Draining · N transcodes left` and then
 `Drained · safe to stop` from these fields. See
 [node drain](architecture/node-drain.md) for the protocol.
 
@@ -2962,12 +2984,14 @@ follow partial work. No automatic retry or redirect dispatch occurs. Each worker
 request has a ten-second timeout and follows request cancellation; bulk results are
 neither atomic nor a durable job. No202/job Location or rollback is promised.
 
-Force reload can tear down active worker sessions. Lost responses and error results
+Force reload can tear down active worker sessions. Before it calls a transcode
+node, the server revokes the stored recipes bound to that node's id and URL, so
+the node cannot rebuild the sessions it tears down; when revocation fails, the
+node is not called and its result is `error`. Lost responses and error results
 must be reconciled before another explicit command; do not interpret them as proof
 that no reload or teardown happened. The API does not launch plugins, verify hardware
 support or manufacture worker completion beyond the acknowledgement. Shared URL/auth
-request construction preserves the frozen bridge's existing behavior; worker reload
-and teardown implementation remains unchanged. There are no actual web callers or
+request construction preserves the frozen bridge's existing behavior. There are no actual web callers or
 helpers for either route, and no Jellyfin administration equivalent.
 
 ### Node configuration lifecycle (v2)
@@ -2994,8 +3018,8 @@ the same ETag. After a lost response, a retry using the original `If-Match`
 returns412 if the first request changed configuration (or another write did).
 Re-read `config_etag` and compare stored configuration before resubmitting;
 neither200 with an unchanged ETag nor412 identifies which request wrote the state.
-Public URL and acceleration/device override nulls clear those fields; omitted fields retain their values. When a PUT changes the URL or
-an acceleration/device override, the server asks that worker to re-read its
+Public URL and acceleration/device override nulls clear those fields; omitted fields retain their values. When a PUT changes the URL, an
+acceleration/device override or `source_access`, the server asks that worker to re-read its
 configuration and drops its cached capabilities after the commit, off the
 request; the response does not wait on or report the worker's answer. DELETE returns204 after the
 row deletion and durable pool invalidation commit together. A later404 does not
@@ -3008,8 +3032,8 @@ transaction, including writes through the frozen bridge. Reconciliation reapplie
 the current snapshot even when the generation is unchanged so a late legacy
 notification cannot leave the pool stale indefinitely. A response acknowledges
 stored configuration, not reconciliation by every replica, worker policy reload,
-or session teardown. Workers retain their existing configuration watcher. The
-post-commit URL/override reload described above creates no durable execution job.
+or session teardown. Transcode nodes also poll their configuration from the API
+every 30 seconds. The post-commit URL/override reload described above creates no durable execution job.
 
 Setting only `enabled` to false removes the node from new placement and routine
 health sweeps on each replica's next pool reconciliation. It does not contact

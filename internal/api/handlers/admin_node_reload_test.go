@@ -5,6 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -48,7 +51,7 @@ func TestAdminNodeReloadBulk(t *testing.T) {
 		{ID: 9, Name: "Disabled", URL: server.URL + "/disabled", Enabled: false},
 		{ID: 2, Name: "Second", URL: server.URL + "/second", Enabled: true},
 	}}}
-	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "synthetic-secret")
+	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("synthetic-secret"))
 	done := make(chan []ForceReloadResult, 1)
 	go func() {
 		rows, err := h.ForceReloadAdminNodes(t.Context())
@@ -93,7 +96,7 @@ func TestAdminNodeReloadSingle(t *testing.T) {
 			}))
 			defer server.Close()
 			repo := &stubNodeRepository{node: &nodepool.Node{ID: 17, URL: server.URL, Enabled: false}}
-			h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "synthetic-secret")
+			h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("synthetic-secret"))
 			rows, err := h.ForceReloadAdminNode(t.Context(), 17)
 			if err != nil || len(rows) != 1 || rows[0].NodeID != 17 || calls.Load() != 1 || redirected.Load() != 0 {
 				t.Fatal(rows, err, calls.Load(), redirected.Load())
@@ -106,7 +109,7 @@ func TestAdminNodeReloadSingle(t *testing.T) {
 }
 func TestAdminNodeReloadMissingAndCanceled(t *testing.T) {
 	repo := &stubNodeRepository{}
-	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "")
+	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret(""))
 	if _, err := h.ForceReloadAdminNode(t.Context(), 1); !errors.Is(err, nodepool.ErrNodeNotFound) {
 		t.Fatal(err)
 	}
@@ -127,5 +130,82 @@ func TestAdminNodeReloadMissingAndCanceled(t *testing.T) {
 	rows, err = h.ForceReloadAdminNode(t.Context(), 1)
 	if err != nil || rows[0].Status != "error" || rows[0].Error != "" {
 		t.Fatal(rows, err)
+	}
+}
+
+// reloadEvents records recipe revocations and the node calls they precede.
+type reloadEvents struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (e *reloadEvents) add(event string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, event)
+}
+
+func (e *reloadEvents) take() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	events := e.events
+	e.events = nil
+	return events
+}
+
+type recordingRecipeAuthority struct {
+	events    *reloadEvents
+	revokeErr error
+}
+
+func (a recordingRecipeAuthority) RevokeNodeID(_ context.Context, nodeID int) error {
+	a.events.add("revoke id " + strconv.Itoa(nodeID))
+	return a.revokeErr
+}
+
+func (a recordingRecipeAuthority) RevokeNode(_ context.Context, nodeURL string) error {
+	a.events.add("revoke url " + nodeURL)
+	return nil
+}
+
+// A transcode node no longer holds the recipe store, so the core withdraws
+// every recipe the node could rebuild a session from, by row id and URL,
+// before it tells the node to tear its sessions down. A failed revocation
+// leaves the node alone for the operator's retry. Proxies hold no recipes.
+func TestAdminNodeForceReloadRevokesTranscodeRecipesFirst(t *testing.T) {
+	events := &reloadEvents{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		events.add("node " + r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	repo := &stubNodeRepository{node: &nodepool.Node{ID: 17, Type: nodepool.NodeTypeTranscode, URL: server.URL, Enabled: true}}
+	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SharedSecret("synthetic-secret"))
+	h.SetRecipeAuthority(recordingRecipeAuthority{events: events})
+
+	rows, err := h.ForceReloadAdminNode(t.Context(), 17)
+	if err != nil || len(rows) != 1 || rows[0].Status != "ok" {
+		t.Fatal(rows, err)
+	}
+	want := []string{"revoke id 17", "revoke url " + server.URL, "node /admin/force-reload"}
+	if got := events.take(); !slices.Equal(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+
+	h.SetRecipeAuthority(recordingRecipeAuthority{events: events, revokeErr: errors.New("redis unavailable")})
+	rows, err = h.ForceReloadAdminNode(t.Context(), 17)
+	if err != nil || len(rows) != 1 || rows[0].Status == "ok" {
+		t.Fatal(rows, err)
+	}
+	if got := events.take(); slices.Contains(got, "node /admin/force-reload") {
+		t.Fatalf("events = %v: the node was reloaded with its recipes still valid", got)
+	}
+
+	repo.node = &nodepool.Node{ID: 18, Type: nodepool.NodeTypeProxy, URL: server.URL, Enabled: true}
+	if rows, err = h.ForceReloadAdminNode(t.Context(), 18); err != nil || rows[0].Status != "ok" {
+		t.Fatal(rows, err)
+	}
+	if got := events.take(); !slices.Equal(got, []string{"node /admin/force-reload"}) {
+		t.Fatalf("proxy reload events = %v", got)
 	}
 }

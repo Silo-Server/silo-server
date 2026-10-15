@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/nodecontrol"
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
@@ -19,7 +20,9 @@ type workerProtocolRegistry struct {
 
 // Worker paths cannot enter the native Paths map: identical paths can describe
 // different listeners and they are not served by the API. Keep the owning
-// registry in the single artifact, with locally scoped schema references.
+// registry in the single artifact, with locally scoped schema references. The
+// node control routes are the exception that is on the API listener: only
+// transcode nodes call them, so they are described here rather than in v2.
 func describeWorkerProtocols() workerProtocolRegistry {
 	schemas := huma.NewMapRegistry("#/"+workerProtocolsExtension+"/schemas/", func(t reflect.Type, hint string) string {
 		for t.Kind() == reflect.Pointer {
@@ -51,5 +54,6 @@ func describeWorkerProtocols() workerProtocolRegistry {
 	operations = append(operations, proxy.ProtocolStreaming()...)
 	operations = append(operations, transcodenode.ProtocolStreaming()...)
 	operations = append(operations, proxy.ProtocolNetworkAccess(schemas)...)
+	operations = append(operations, nodecontrol.Protocol(schemas)...)
 	return workerProtocolRegistry{Operations: operations, Schemas: schemas.Map()}
 }

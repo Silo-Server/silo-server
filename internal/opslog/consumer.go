@@ -36,11 +36,21 @@ func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
 // records reach stderr and OTLP but are not captured: a warning about a failed
 // batch must not queue another entry behind it.
 func (c *Consumer) Run(ctx context.Context, ch <-chan Entry) {
+	Ship(ctx, ch, c.batchSize, c.interval, c.insertBatch)
+}
+
+// Ship hands entries from ch to insert in batches of at most size, flushing a
+// partial batch every interval, until ctx ends; see logstream.Drain for
+// retries and drops. It is Run with a caller-supplied sink: a transcode node,
+// which has no database, ships its entries to the core with it. Records the
+// pipeline logs about itself reach stderr and OTLP but are not captured, so a
+// warning about a failed batch never queues another entry behind it.
+func Ship(ctx context.Context, ch <-chan Entry, size int, interval time.Duration, insert func(context.Context, []Entry) error) {
 	logstream.Drain[Entry]{
 		Stream:   logstream.StreamApp,
-		Size:     c.batchSize,
-		Interval: c.interval,
-		Insert:   c.insertBatch,
+		Size:     size,
+		Interval: interval,
+		Insert:   insert,
 		Failed: func(ctx context.Context, f logstream.InsertFailure) {
 			if f.RetryIn > 0 {
 				slog.WarnContext(ctx, "opslog batch insert failed; retrying", "component", "opslog",
@@ -51,6 +61,59 @@ func (c *Consumer) Run(ctx context.Context, ch <-chan Entry) {
 				"entries", f.Entries, "attempt", f.Attempt, "error", f.Err)
 		},
 	}.Run(withoutCapture(ctx), ch)
+}
+
+// Bounds on the timestamp of an entry a transcode node shipped, which the
+// node's clock set. Later than nodeEntryMaxAhead past the core's clock is a
+// clock running ahead; older than nodeEntryMaxAge is more than a node keeps
+// queued (logstream.Drain drops what it cannot deliver within minutes). Both
+// are moved to the bound, so a bad clock or a stolen node key cannot file
+// rows outside retention, into a partition not yet created (the default
+// partition), or ahead of everything the live tail shows.
+const (
+	nodeEntryMaxAhead = 30 * time.Second
+	nodeEntryMaxAge   = 24 * time.Hour
+)
+
+// InsertNodeBatch stores a batch a transcode node shipped, as the node's own
+// consumer would have: every entry gets nodeID, whatever node id it carried,
+// its timestamp is kept within nodeEntryMaxAge before and nodeEntryMaxAhead
+// after the core's clock, and the rows go to the admin live tail. When
+// Postgres rejects a value in the batch, the rows are inserted one at a time
+// so only the rejected ones are lost, as logstream.Drain does for a local
+// batch.
+func (c *Consumer) InsertNodeBatch(ctx context.Context, nodeID string, entries []Entry) error {
+	now := time.Now().UTC()
+	earliest, latest := now.Add(-nodeEntryMaxAge), now.Add(nodeEntryMaxAhead)
+	stamped := make([]Entry, len(entries))
+	for i, entry := range entries {
+		entry.NodeID = nodeID
+		switch {
+		case entry.Timestamp.After(latest):
+			entry.Timestamp = latest
+		case entry.Timestamp.Before(earliest):
+			entry.Timestamp = earliest
+		}
+		stamped[i] = entry
+	}
+	err := c.insertBatch(ctx, stamped)
+	if err == nil || len(stamped) < 2 || !logstream.ValueRejected(err) {
+		return err
+	}
+	var rejected int
+	for i := range stamped {
+		if rowErr := c.insertBatch(ctx, stamped[i:i+1]); rowErr != nil {
+			if !logstream.ValueRejected(rowErr) {
+				return rowErr
+			}
+			rejected++
+		}
+	}
+	if rejected > 0 {
+		slog.WarnContext(withoutCapture(ctx), "opslog: dropped node log entries Postgres rejected", "component", "opslog",
+			"node_id", nodeID, "rejected", rejected, "entries", len(stamped))
+	}
+	return nil
 }
 
 func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {

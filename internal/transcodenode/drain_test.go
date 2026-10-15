@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
@@ -64,7 +65,7 @@ func newLoopingFFmpegServer(t *testing.T) *Server {
 func postStart(t *testing.T, s *Server, sessionID string) *httptest.ResponseRecorder {
 	t.Helper()
 	body, err := json.Marshal(TranscodeStartRequest{
-		SessionID: sessionID, InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
+		SessionID: sessionID, SourceGrant: "/media/movie.mkv", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
 		TargetCodecAudio: "aac", SegmentDuration: 2,
 	})
 	if err != nil {
@@ -194,7 +195,7 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 	var announced atomic.Int32
 	s.SetDrainAnnouncer(func() { announced.Add(1) })
 
-	s.watcher.SetNodeDrainRequestedForTest(true)
+	s.watcher.(*nodeconfig.Watcher).SetNodeDrainRequestedForTest(true)
 	if !s.draining() || healthStatusOf(t, s).Status != HealthStatusDrained {
 		t.Fatalf("draining=%v status=%q after a drain request", s.draining(), healthStatusOf(t, s).Status)
 	}
@@ -202,7 +203,7 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 		t.Fatalf("start while admin-drained: %d, want 503", rr.Code)
 	}
 
-	s.watcher.SetNodeDrainRequestedForTest(false)
+	s.watcher.(*nodeconfig.Watcher).SetNodeDrainRequestedForTest(false)
 	if s.draining() || healthStatusOf(t, s).Status != HealthStatusOK {
 		t.Fatal("lifting the request did not put the node back to work")
 	}
@@ -211,8 +212,8 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 	}
 
 	s.BeginShutdownDrain()
-	s.watcher.SetNodeDrainRequestedForTest(true)
-	s.watcher.SetNodeDrainRequestedForTest(false)
+	s.watcher.(*nodeconfig.Watcher).SetNodeDrainRequestedForTest(true)
+	s.watcher.(*nodeconfig.Watcher).SetNodeDrainRequestedForTest(false)
 	if !s.draining() {
 		t.Fatal("lifting an admin request ended a SIGTERM drain")
 	}
@@ -275,11 +276,11 @@ func TestDrainingNodeRefusesNewJobs(t *testing.T) {
 	s := newTestServer(t)
 	handler := s.Handler()
 	s.BeginShutdownDrain()
-	prepare, err := json.Marshal(downloadprepare.Request{ArtifactID: strings.Repeat("a", 32), InputPath: "/media/movie.mkv"})
+	prepare, err := json.Marshal(downloadprepare.Request{ArtifactID: strings.Repeat("a", 32), SourceGrant: "/media/movie.mkv", InputPath: "/media/movie.mkv"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	chapter, err := json.Marshal(chapterthumbs.RemoteExtractRequest{InputPath: "/media/movie.mkv"})
+	chapter, err := json.Marshal(chapterthumbs.RemoteExtractRequest{SourceGrant: "/media/movie.mkv", InputPath: "/media/movie.mkv"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,10 +315,10 @@ func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
 	const sessionID = "sess-drain-1"
 	const transportID = sessionID + "-plan1234-abcd1234"
 	s := newLoopingFFmpegServer(t)
-	s.SetRecipeStore(&stubRecipeStore{ok: true, card: nativeTransportCard(sessionID, transportID)})
+	s.useCoreRecipes(&stubRecipeStore{ok: true, card: nativeTransportCard(sessionID, transportID)})
 	s.BeginShutdownDrain()
 
-	session, err := s.reconstructFromToken(requestWithToken(transportID, ""), transportID, 5)
+	session, err := s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
 	if err != nil || session == nil {
 		t.Fatalf("reconstruct while draining = %v, %v; want the session rebuilt", session, err)
 	}
@@ -327,7 +328,7 @@ func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
 	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
 		t.Fatalf("status = %q, want drained", got)
 	}
-	session, err = s.reconstructFromToken(requestWithToken(transportID, ""), transportID, 5)
+	session, err = s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
 	if err != nil || session != nil {
 		if session != nil {
 			_ = session.CloseProcess()
@@ -340,7 +341,7 @@ func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
 // load at boot) is announced when the announcer is set, and so is its end.
 func TestDrainReadAtBootIsAnnounced(t *testing.T) {
 	s := newTestServer(t)
-	s.watcher.SetNodeDrainRequestedForTest(true)
+	s.watcher.(*nodeconfig.Watcher).SetNodeDrainRequestedForTest(true)
 	announcements := make(chan struct{}, 4)
 	s.SetDrainAnnouncer(func() { announcements <- struct{}{} })
 	for _, what := range []string{"the drain read at boot", "the drained node"} {
@@ -357,7 +358,6 @@ func TestDrainReadAtBootIsAnnounced(t *testing.T) {
 func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }
-	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -369,7 +369,7 @@ func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
 		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
 	card := playback.RecipeCardFromClaims(&claims)
-	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	server.useCoreRecipes(&stubRecipeStore{card: &card, ok: true})
 	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
 	if err != nil {
 		t.Fatal(err)

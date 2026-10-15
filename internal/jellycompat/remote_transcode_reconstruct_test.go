@@ -17,7 +17,10 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -593,7 +596,7 @@ func TestMasterManifestGatesUnhealthyRemoteAdoption(t *testing.T) {
 	adoptedURL := adoptedNode.URL
 	const healthyURL = "http://healthy.invalid"
 	newPool := func(adoptedHealthy bool) *nodepool.Planner {
-		transcodes := nodepool.NewTranscodePool()
+		transcodes := nodepooltest.NewTranscodePool()
 		transcodes.SetNodes([]*nodepool.Node{
 			{URL: adoptedURL, Enabled: true, Healthy: adoptedHealthy},
 			{URL: healthyURL, Enabled: true, Healthy: true},
@@ -659,7 +662,7 @@ func TestMasterManifestReplansRouteAroundDifferentAdoptedRemote(t *testing.T) {
 	groupA, groupB := "group-a", "group-b"
 	plannedLimit, adoptedLimit := 1, 3
 	proxyLimit := 1
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: 1, URL: plannedURL, Group: &groupA, Enabled: true, Healthy: true, MaxJobs: &plannedLimit},
 		{ID: 2, URL: adoptedURL, Group: &groupB, Enabled: true, Healthy: true, ActiveJobs: 2, MaxJobs: &adoptedLimit},
@@ -750,7 +753,7 @@ func TestMasterManifestReplansRouteAroundDifferentAdoptedRemote(t *testing.T) {
 func TestMasterManifestWrapsRemoteCopyMediaPlaylistAsVariant(t *testing.T) {
 	const adoptedURL = "http://adopted.invalid"
 	handler, _, playbackStore := newRemoteTranscodeHandler(t, adoptedURL, &stubRecipeNodeStore{})
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{{URL: adoptedURL, Enabled: true, Healthy: true}})
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{URL: "https://proxy.example", Enabled: true, Healthy: true}})
@@ -823,6 +826,19 @@ func (r *localSessionRegistry) RegisterReconstructedWithLimits(_ context.Context
 // transcode path: a fake node that accepts /transcode/start, an upstream
 // session carrying the native identity used to build the recipe, and a stub
 // recipe store standing in for the control-plane Redis store.
+// testNodeKeys signs this package's calls to fake nodes, which do not check
+// the signature: without a keyring nothing is sent at all.
+var testNodeKeys nodeauth.Keyring = nodeauthtest.SharedSecret("test-secret")
+
+// withTestNodeKeys gives a handler built as a literal the keyring its
+// constructor would wire, for the handler and its transcode manager alike.
+func withTestNodeKeys(h *PlaybackHandler) {
+	h.NodeKeys = testNodeKeys
+	if h.tm != nil {
+		h.tm.NodeKeysFn = func() nodeauth.Keyring { return h.NodeKeys }
+	}
+}
+
 func newRemoteTranscodeHandler(t *testing.T, nodeURL string, recipeStore *stubRecipeNodeStore) (*PlaybackHandler, *testCompatSessionManager, *PlaybackSessionStore) {
 	t.Helper()
 
@@ -848,6 +864,7 @@ func newRemoteTranscodeHandler(t *testing.T, nodeURL string, recipeStore *stubRe
 		JWTSecret:       "test-secret",
 		RecipeNodeStore: recipeStore,
 	}
+	withTestNodeKeys(handler)
 	return handler, sessionMgr, playbackStore
 }
 
@@ -1338,8 +1355,8 @@ func TestStartRemoteTranscode_NodeRestartReconstruct(t *testing.T) {
 	if card.TranscodeNodeURL != node.URL {
 		t.Fatalf("recipe TranscodeNodeURL = %q, want %q", card.TranscodeNodeURL, node.URL)
 	}
-	// The recipe must be reconstruct-complete: the node refuses to rebuild from a
-	// recipe lacking encode parameters (server.go reconstructFromToken).
+	// The recipe must be reconstruct-complete: the core resolves no recipe
+	// lacking encode parameters for a node to rebuild from (nodecontrol resolve).
 	if card.SegmentDuration <= 0 || card.TargetCodecVideo == "" {
 		t.Fatalf("recipe not reconstruct-complete: seg=%d video=%q", card.SegmentDuration, card.TargetCodecVideo)
 	}
@@ -1392,7 +1409,7 @@ func TestStartRemoteTranscode_CentralRestartReconstruct(t *testing.T) {
 	reg := &localSessionRegistry{}
 	tm := playback.NewTranscodeManager()
 	tm.Sessions = reg
-	tm.JWTSecretFn = func() string { return "test-secret" }
+	tm.NodeKeysFn = func() nodeauth.Keyring { return nodeauthtest.SharedSecret("test-secret") }
 
 	session, status := tm.LoadOrReconstructSession(
 		context.Background(),
@@ -1456,7 +1473,7 @@ func TestStartRemoteTranscodeDoesNotAdoptRuntimeOnDrainedNode(t *testing.T) {
 	var received transcodenode.TranscodeStartRequest
 	node := fakeTranscodeNode(t, &received)
 	handler, _, playbackStore := newRemoteTranscodeHandler(t, drainedURL, &stubRecipeNodeStore{})
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{URL: drainedURL, Enabled: true, Healthy: true, DrainRequested: true, DrainState: nodepool.DrainStateDrained},
 		{URL: node.URL, Enabled: true, Healthy: true},

@@ -42,10 +42,14 @@ const (
 
 // Auth classes, from least to most privileged.
 const (
-	authPublic          = "public"
-	authOptional        = "optional_auth"
-	authAuthenticated   = "authenticated"
-	authNodeBearer      = "node_bearer"
+	authPublic        = "public"
+	authOptional      = "optional_auth"
+	authAuthenticated = "authenticated"
+	authNodeBearer    = "node_bearer"
+	// authNodeSigned admits only a transcode node, signing with its own key
+	// (nodecontrol.RequireNode). node_bearer is the other direction: a node's
+	// listener admitting API servers and proxies.
+	authNodeSigned      = "node_signed"
 	authProfileScoped   = "profile_scoped"
 	authPermissionGated = "permission_gated"
 	authActingAdmin     = "acting_admin"
@@ -788,6 +792,7 @@ var authRules = []authRule{
 	{marker: markerDisplayMiddlewares, class: authProfileScoped, trait: traitProfileReq, rank: 40},
 	{marker: "RequireAuth", class: authAuthenticated, trait: traitAuthenticated, rank: 30},
 	{marker: "requireBearer", class: authNodeBearer, trait: "node_bearer", rank: 30},
+	{marker: "RequireNode", class: authNodeSigned, trait: "node_signed", rank: 30},
 	{marker: "OptionalAuth", class: authOptional, trait: "optional_auth", rank: 20},
 }
 

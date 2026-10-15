@@ -29,7 +29,7 @@ func TestWorkerStartActualMedia(t *testing.T) {
 	})
 	handler := httptest.NewServer(server.Handler())
 	defer handler.Close()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, handler.URL+"/transcode/start", strings.NewReader(`{"session_id":"synthetic-start","input_path":"/synthetic/input.mkv","target_codec_video":"h264"}`))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, handler.URL+"/transcode/start", strings.NewReader(`{"session_id":"synthetic-start","source_grant":"/synthetic/input.mkv","input_path":"/synthetic/input.mkv","target_codec_video":"h264"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

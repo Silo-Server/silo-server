@@ -382,7 +382,7 @@ func TestResolveToneMapTargetReturnsCancellationWhenExecutorInventoryIsEmpty(t *
 
 type unavailableToneMapPreparer struct{}
 
-func (unavailableToneMapPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
+func (unavailableToneMapPreparer) PrepareFile(context.Context, string, *models.MediaFile, playback.TranscodeOpts, string) (PreparedArtifact, error) {
 	return PreparedArtifact{}, nil
 }
 
@@ -398,7 +398,7 @@ type capacityAwareToneMapPreparer struct {
 	capacityErr  map[tonemap.Mode]error
 }
 
-func (p capacityAwareToneMapPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
+func (p capacityAwareToneMapPreparer) PrepareFile(context.Context, string, *models.MediaFile, playback.TranscodeOpts, string) (PreparedArtifact, error) {
 	return PreparedArtifact{}, nil
 }
 
@@ -601,7 +601,7 @@ type lifecycleTestPreparer struct {
 	deleteWait    bool
 }
 
-func (p *lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
+func (p *lifecycleTestPreparer) PrepareFile(context.Context, string, *models.MediaFile, playback.TranscodeOpts, string) (PreparedArtifact, error) {
 	return p.prepared, nil
 }
 func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Artifact) error {

@@ -32,6 +32,11 @@ type InsertFailure struct {
 	RetryIn time.Duration
 }
 
+// ErrRetryable marks a failed insert that can succeed unchanged later, for an
+// Insert whose failures are not Postgres or network errors: a transcode node
+// shipping its logs to the core wraps a 5xx answer in it.
+var ErrRetryable = errors.New("logstream: retryable insert failure")
+
 // Drain moves one stream's buffered entries into Postgres in batches.
 type Drain[T any] struct {
 	Stream Stream
@@ -159,8 +164,8 @@ func (d Drain[T]) report(ctx context.Context, failure InsertFailure) {
 // retryable reports whether a failed insert can succeed unchanged later:
 // Postgres was unreachable, the attempt timed out or lost its connection, or
 // the server refused work for a passing reason (failover, restart, overload,
-// conflict). Anything else, such as a row the server rejects or a closed pool,
-// is not retried.
+// conflict), or the Insert said so with ErrRetryable. Anything else, such as a
+// row the server rejects or a closed pool, is not retried.
 //
 // A write refused as read-only (25006) is retried: during a switchover, pooled
 // connections still point at the demoted primary until they are replaced.
@@ -169,6 +174,9 @@ func (d Drain[T]) report(ctx context.Context, failure InsertFailure) {
 // makes the retry insert the batch twice. Duplicate log rows are preferred to
 // lost ones.
 func retryable(err error) bool {
+	if errors.Is(err, ErrRetryable) {
+		return true
+	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		if pgErr.Code == "25006" { // read_only_sql_transaction
@@ -197,6 +205,10 @@ func retryable(err error) bool {
 		errors.Is(err, io.EOF) ||
 		errors.Is(err, io.ErrUnexpectedEOF)
 }
+
+// ValueRejected reports whether Postgres rejected a value in a batch insert,
+// so that inserting its rows one at a time keeps the others; see valueRejected.
+func ValueRejected(err error) bool { return valueRejected(err) }
 
 // valueRejected reports whether the server rejected a value in the statement
 // (class 22, data exception), such as a client address that is not an inet.

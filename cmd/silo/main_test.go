@@ -14,8 +14,10 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
@@ -467,7 +469,7 @@ func TestNodeCapabilityFetcherStoresTheNodesOwnBytes(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	payload, hash, err := nodeCapabilityFetcher("secret", nodeCapabilityProbeBudget(nil))(
+	payload, hash, err := nodeCapabilityFetcher(nodeauthtest.SharedSecret("secret"), nodeCapabilityProbeBudget(nil))(
 		context.Background(), &nodepool.Node{ID: 1, URL: server.URL})
 	if err != nil {
 		t.Fatalf("nodeCapabilityFetcher: %v", err)

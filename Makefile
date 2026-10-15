@@ -47,9 +47,18 @@ dev-backend:
 dev-proxy:
 	go run ./cmd/silo/ --mode=proxy
 
-# Run a transcode node (HLS transcode worker, no DB required)
+# Run a transcode node against a running API (make dev-backend). Register the
+# node on the admin Nodes page with URL http://localhost:8082
+# and issue it a key, then:
+#   make dev-transcode SILO_NODE_KEY=snk1_...
+# SILO_CORE_URL defaults to the dev backend. The node takes everything else
+# from the API; it needs no database, Redis or SECRET_KEY, and ignores them
+# with a warning when .env sets them.
+DEV_TRANSCODE_PORT ?= 8082
+SILO_CORE_URL ?= http://localhost:8080
 dev-transcode:
-	go run ./cmd/silo/ --mode=transcode
+	@if [ -z "$(SILO_NODE_KEY)" ]; then echo "usage: make dev-transcode SILO_NODE_KEY=<key issued on the admin Nodes page>"; exit 1; fi
+	@MODE=transcode SILO_CORE_URL=$(SILO_CORE_URL) SILO_NODE_KEY=$(SILO_NODE_KEY) PORT=$(DEV_TRANSCODE_PORT) go run ./cmd/silo/
 
 # Lint Go and frontend code
 lint:

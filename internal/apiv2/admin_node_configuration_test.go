@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ type fakeNodeConfiguration struct {
 	calls, effects int
 	err            error
 	update         nodepool.UpdateNodeInput
+	create         nodepool.CreateNodeInput
 }
 
 func (f *fakeNodeConfiguration) ReadAdminNodes(context.Context) ([]*nodepool.Node, error) {
@@ -27,6 +29,7 @@ func (f *fakeNodeConfiguration) CreateAdminNode(_ context.Context, in nodepool.C
 		return nil, f.err
 	}
 	f.effects++
+	f.create = in
 	f.node.Name = in.Name
 	return &f.node, nil
 }
@@ -158,4 +161,52 @@ func TestAdminNodeConfigurationContract(t *testing.T) {
 	}
 	f.err = nodepool.ErrNodeConfigurationConflict
 	requireProblem(t, do(t, h, "POST", Prefix+"/admin/nodes", `{"name":"x","type":"proxy","url":"http://node.invalid"}`, bearer(adminToken)), TypeConflict)
+}
+
+// source_access reaches the store on create and update, comes back for a
+// transcode node only, and is refused for a proxy at create with the
+// validation problem; the store's proxy refusal on update maps to the same.
+func TestAdminNodeSourceAccess(t *testing.T) {
+	f := &fakeNodeConfiguration{node: nodepool.Node{ID: 17, AdminRevision: 1, Name: "Synthetic", Type: "transcode", URL: "http://node.invalid", CreatedAt: time.Unix(1, 0), SourceAccess: nodepool.SourceAccessCore}}
+	deps := pilotDeps(nil, nil)
+	deps.AdminNodeConfiguration = f
+	deps.AdminNodesRead = f
+	h := NewHandler(deps)
+
+	rec := do(t, h, "POST", Prefix+"/admin/nodes", `{"name":"Synthetic","type":"transcode","url":"http://node.invalid","source_access":"core"}`, bearer(adminToken))
+	if rec.Code != 201 || f.create.SourceAccess != nodepool.SourceAccessCore {
+		t.Fatalf("create: %d %s, stored %q", rec.Code, rec.Body.String(), f.create.SourceAccess)
+	}
+	var created AdminNode
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || created.SourceAccess != "core" {
+		t.Fatalf("create output source_access = %q (%v)", created.SourceAccess, err)
+	}
+
+	calls := f.calls
+	requireProblem(t, do(t, h, "POST", Prefix+"/admin/nodes", `{"name":"P","type":"proxy","url":"http://proxy.invalid","source_access":"core"}`, bearer(adminToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, "POST", Prefix+"/admin/nodes", `{"name":"T","type":"transcode","url":"http://t.invalid","source_access":"nfs"}`, bearer(adminToken)), TypeValidationFailed)
+	if f.calls != calls {
+		t.Fatal("an invalid source_access reached the store")
+	}
+
+	headers := bearer(adminToken)
+	headers["If-Match"] = created.ConfigETag
+	rec = do(t, h, "PUT", Prefix+"/admin/nodes/17", `{"source_access":"local"}`, headers)
+	if rec.Code != 200 || f.update.SourceAccess == nil || *f.update.SourceAccess != nodepool.SourceAccessLocal {
+		t.Fatalf("update: %d %s", rec.Code, rec.Body.String())
+	}
+	var updated AdminNode
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	headers["If-Match"] = updated.ConfigETag
+	f.err = fmt.Errorf("%w: source_access applies only to transcode nodes", nodepool.ErrInvalidNodeInput)
+	requireProblem(t, do(t, h, "PUT", Prefix+"/admin/nodes/17", `{"source_access":"core"}`, headers), TypeValidationFailed)
+	f.err = nil
+
+	f.node.Type, f.node.SourceAccess = "proxy", nodepool.SourceAccessLocal
+	read := do(t, h, "GET", Prefix+"/admin/nodes", "", bearer(adminToken))
+	if strings.Contains(read.Body.String(), "source_access") {
+		t.Fatalf("a proxy lists source_access: %s", read.Body.String())
+	}
 }

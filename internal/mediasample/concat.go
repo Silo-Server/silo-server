@@ -6,6 +6,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 // A Samples request reads the input through ffmpeg's concat demuxer: an
@@ -29,6 +31,15 @@ import (
 // the pipe URL: each entry names the input as an explicit file: URL, and the
 // input opens with a protocol whitelist of file and pipe (the concat demuxer
 // otherwise allows neither).
+//
+// On a transcode node with core source access the input is the loopback URL
+// of a relayed source (nodesource). Its list opens with a protocol whitelist
+// of http, tcp and pipe and a format whitelist of concat alone, and each entry
+// names the URL bare, followed by options that hold the source it opens to
+// the relay's protocols and the admitted media demuxers, as every relayed
+// input is (nodesource.RestrictArgs). The entries inherit the list's
+// whitelists otherwise, and concat would let a crafted source open another
+// list.
 
 // sampleSpanSeconds is how long after its inpoint each entry ends. It is
 // short enough that a sample rarely decodes a second keyframe, and long enough
@@ -41,12 +52,39 @@ const sampleMetadataKey = "sample"
 // skipFrameOption sets which video frames the decoder skips.
 const skipFrameOption = "-skip_frame:v"
 
-// concatDemuxerArgs open a list input; concatInputArgs are the input options
-// of a Samples request, before -i.
+// concatDemuxerArgs open a list of local files, relayedConcatDemuxerArgs one
+// of a relayed source.
 var (
-	concatDemuxerArgs = []string{"-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "0"}
-	concatInputArgs   = append([]string{skipFrameOption, keyframeSkipFrame}, concatDemuxerArgs...)
+	concatDemuxerArgs        = append([]string{protocolWhitelistOption, "file,pipe"}, openConcatArgs...)
+	relayedConcatDemuxerArgs = append([]string{protocolWhitelistOption, "http,tcp,pipe", formatWhitelistOption, concatDemuxer}, openConcatArgs...)
 )
+
+// openConcatArgs read the input as an ffconcat list whose entries may be
+// absolute paths and URLs.
+var openConcatArgs = []string{"-f", concatDemuxer, "-safe", "0"}
+
+const (
+	// protocolWhitelistOption sets the protocols an input may open, and
+	// formatWhitelistOption the demuxers.
+	protocolWhitelistOption = "-protocol_whitelist"
+	formatWhitelistOption   = "-format_whitelist"
+	// concatDemuxer is FFmpeg's ffconcat list demuxer.
+	concatDemuxer = "concat"
+)
+
+// concatDemuxerArgsFor returns the options that open the list sampling input.
+func concatDemuxerArgsFor(input string) []string {
+	if nodesource.IsRemote(input) {
+		return relayedConcatDemuxerArgs
+	}
+	return concatDemuxerArgs
+}
+
+// concatInputArgs are the input options of a Samples request on input, before
+// -i.
+func concatInputArgs(input string) []string {
+	return append([]string{skipFrameOption, keyframeSkipFrame}, concatDemuxerArgsFor(input)...)
+}
 
 // concatListInput is the input a Samples request reads its list from.
 const concatListInput = "pipe:0"
@@ -89,31 +127,61 @@ func buildConcatList(input string, seconds []float64, inputStart float64) ([]byt
 // buildConcatListSpan returns the ffconcat list reading input's entries, each
 // lasting span seconds.
 func buildConcatListSpan(input string, entries []listEntry, span float64) ([]byte, error) {
-	quoted, err := concatPath(input)
+	open, err := concatEntry(input, nodesource.IsRemote(input))
 	if err != nil {
 		return nil, err
 	}
+	return concatList(open, entries, span), nil
+}
+
+// concatList returns an ffconcat list of entries whose every entry opens the
+// input with open (see concatEntry).
+func concatList(open string, entries []listEntry, span float64) []byte {
 	var list bytes.Buffer
 	list.WriteString("ffconcat version 1.0\n")
 	for _, entry := range entries {
-		list.WriteString("file " + quoted + "\n")
+		list.WriteString(open)
 		list.WriteString("file_packet_meta " + sampleMetadataKey + " " + formatSampleSeconds(entry.sample) + "\n")
 		list.WriteString("inpoint " + formatSampleSeconds(entry.inpoint) + "\n")
 		list.WriteString("outpoint " + formatSampleSeconds(entry.inpoint+span) + "\n")
 	}
-	return list.Bytes(), nil
+	return list.Bytes()
 }
 
-// concatPath returns input as a quoted file: URL for an ffconcat list. Inside
-// single quotes ffconcat takes every character literally, backslashes
-// included, so a single quote is written by closing the quotes, escaping it,
-// and reopening them. A list is read line by line and ffmpeg URLs end at a
-// NUL, so paths holding a line break or NUL are rejected.
+// concatEntry returns the lines that open input in an ffconcat list: its
+// file directive, and for a relayed source the options holding it to the
+// relay (see the comment at the top of this file).
+func concatEntry(input string, relayed bool) (string, error) {
+	if !relayed {
+		quoted, err := concatPath(input)
+		if err != nil {
+			return "", err
+		}
+		return "file " + quoted + "\n", nil
+	}
+	if strings.ContainsAny(input, "\n\r\x00") {
+		return "", errors.New("sampled input path must not contain a line break or NUL")
+	}
+	return "file " + concatQuote(input) + "\n" +
+		"option protocol_whitelist " + nodesource.ProtocolWhitelist + "\n" +
+		"option format_whitelist " + nodesource.AdmittedFormats + "\n", nil
+}
+
+// concatPath returns input as a quoted file: URL for an ffconcat list. A list
+// is read line by line and ffmpeg URLs end at a NUL, so paths holding a line
+// break or NUL are rejected.
 func concatPath(input string) (string, error) {
 	if strings.ContainsAny(input, "\n\r\x00") {
 		return "", errors.New("sampled input path must not contain a line break or NUL")
 	}
-	return "'file:" + strings.ReplaceAll(input, "'", `'\''`) + "'", nil
+	return concatQuote("file:" + input), nil
+}
+
+// concatQuote quotes s for an ffconcat list. Inside single quotes ffconcat
+// takes every character literally, backslashes included, so a single quote is
+// written by closing the quotes, escaping it, and reopening them.
+func concatQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // formatSampleSeconds prints a sample time with microsecond precision, the

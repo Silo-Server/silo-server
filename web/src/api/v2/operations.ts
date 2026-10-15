@@ -641,6 +641,7 @@ export const v2Operations = {
   "POST /api/v2/admin/nodes/{id}/check": "checkAdminNode",
   "POST /api/v2/admin/nodes/{id}/drain": "drainAdminNode",
   "POST /api/v2/admin/nodes/{id}/force-reload": "forceReloadAdminNode",
+  "POST /api/v2/admin/nodes/{id}/key": "issueAdminNodeKey",
   "POST /api/v2/admin/nodes/{id}/reprobe": "reprobeAdminNode",
   "POST /api/v2/admin/nodes/{id}/resume": "resumeAdminNode",
   "POST /api/v2/admin/notifications/discord/test": "testAdminDiscordNotification",

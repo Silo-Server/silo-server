@@ -227,6 +227,7 @@ PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
 POST /api/v2/admin/nodes/{id}/drain	non-media
 POST /api/v2/admin/nodes/{id}/force-reload	non-media
+POST /api/v2/admin/nodes/{id}/key	non-media
 POST /api/v2/admin/nodes/{id}/reprobe	non-media
 POST /api/v2/admin/nodes/{id}/resume	non-media
 POST /api/v2/admin/notifications/discord/test	non-media
@@ -1501,6 +1502,7 @@ PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
 POST /api/v2/admin/nodes/{id}/drain	non-media
 POST /api/v2/admin/nodes/{id}/force-reload	non-media
+POST /api/v2/admin/nodes/{id}/key	non-media
 POST /api/v2/admin/nodes/{id}/reprobe	non-media
 POST /api/v2/admin/nodes/{id}/resume	non-media
 POST /api/v2/admin/notifications/discord/test	non-media

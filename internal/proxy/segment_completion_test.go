@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
@@ -109,6 +110,7 @@ func newCompletionTestProxy(client *http.Client) *Server {
 	cfg.Auth.JWTSecret = "proxy-test-secret"
 	watcher.SetConfigForTest(cfg)
 	server := NewServer(watcher, nil)
+	server.SetNodeKeys(nodeauthtest.SharedSecret("proxy-test-secret"))
 	server.httpClient = client
 	return server
 }

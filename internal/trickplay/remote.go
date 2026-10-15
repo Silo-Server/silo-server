@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
@@ -26,9 +28,6 @@ const (
 	NodeBusyReason        = "node_busy"
 	NodeUnavailableReason = "node_unavailable"
 )
-
-// jwtSecretSetting authenticates the API server to its transcode nodes.
-const jwtSecretSetting = "auth.jwt_secret"
 
 const (
 	// remoteOverhead covers the transfer and the node's own start on top of
@@ -59,8 +58,17 @@ type NodeExtractor struct {
 	local    Extractor
 	planner  NodeWorkPlanner
 	settings SettingsReader
-	client   *http.Client
-	logger   *slog.Logger
+	// keys signs requests to nodes; without it every request runs here.
+	keys nodeauth.Keyring
+	// grants grants each node a run is sent to the run's source.
+	grants nodesource.FileGranter
+	client *http.Client
+	logger *slog.Logger
+}
+
+// SetSourceGrants wires the grants every remote run's source is sent with.
+func (e *NodeExtractor) SetSourceGrants(grants nodesource.FileGranter) {
+	e.grants = grants
 }
 
 // NodeWorkPlanner reserves transcode capacity shared with playback and
@@ -69,10 +77,11 @@ type NodeWorkPlanner interface {
 	ReserveTranscodeWorkWith(string, func(*nodepool.Node) bool) (*nodepool.Node, func())
 }
 
-// NewNodeExtractor returns an extractor that reserves nodes through planner,
-// or runs locally when the execution setting permits it.
-func NewNodeExtractor(local Extractor, planner NodeWorkPlanner, settings SettingsReader) *NodeExtractor {
-	return &NodeExtractor{local: local, planner: planner, settings: settings, client: &http.Client{}, logger: slog.Default().With("component", "trickplay")}
+// NewNodeExtractor returns an extractor that reserves nodes through planner
+// and signs its requests to them with keys, or runs locally when the
+// execution setting permits it.
+func NewNodeExtractor(local Extractor, planner NodeWorkPlanner, settings SettingsReader, keys nodeauth.Keyring) *NodeExtractor {
+	return &NodeExtractor{local: local, planner: planner, settings: settings, keys: keys, client: &http.Client{}, logger: slog.Default().With("component", "trickplay")}
 }
 
 // Extract runs req where the execution setting says.
@@ -88,9 +97,8 @@ func (e *NodeExtractor) Extract(ctx context.Context, job *Job, req mediasample.R
 	if mode != ExecutionPreferTranscodeNodes && mode != ExecutionTranscodeNodesOnly {
 		return e.local.Extract(ctx, job, req)
 	}
-	secret := readSetting(ctx, e.settings, jwtSecretSetting)
 	tried := make(map[string]bool)
-	for secret != "" && e.planner != nil {
+	for e.keys != nil && e.planner != nil {
 		node, release := e.planner.ReserveTranscodeWorkWith("trickplay", func(candidate *nodepool.Node) bool {
 			return trickplayNodeEligible(candidate) && !tried[candidate.URL]
 		})
@@ -98,7 +106,7 @@ func (e *NodeExtractor) Extract(ctx context.Context, job *Job, req mediasample.R
 			break
 		}
 		tried[node.URL] = true
-		result, err := e.remote(ctx, node, secret, req)
+		result, err := e.remote(ctx, node, job, req)
 		release()
 		if err == nil {
 			return result, nil
@@ -145,7 +153,16 @@ func makesTrickplay(report []byte) bool {
 
 // remote runs req on node. The node decides whether its hardware can decode,
 // so the plan always offers a hardware attempt first.
-func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, secret string, req mediasample.Request) (mediasample.Result, error) {
+func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, job *Job, req mediasample.Request) (mediasample.Result, error) {
+	var file *models.MediaFile
+	if job != nil {
+		file = &models.MediaFile{ID: job.FileID, FilePath: job.FilePath}
+	}
+	grant, err := nodesource.GrantFile(ctx, e.grants, node.ID, file)
+	if err != nil {
+		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: "grant the node its source: " + err.Error()}
+	}
+	req.SourceGrant = grant
 	req.Attempts = AttemptPlan(true, len(req.Samples.Seconds))
 	timeout := remoteOverhead
 	for _, attempt := range req.Attempts {
@@ -162,7 +179,7 @@ func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, secret 
 		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: err.Error()}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpReq, node.URL, secret); err != nil {
+	if err := nodeauth.SignTranscode(httpReq, node.URL, e.keys); err != nil {
 		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: err.Error()}
 	}
 	resp, err := telemetry.DoTrustedNode(e.client, httpReq, "trickplay_extract")

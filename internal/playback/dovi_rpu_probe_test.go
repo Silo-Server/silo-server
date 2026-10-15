@@ -9,6 +9,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 )
 
 // The real failure exits 0: ffmpeg treats a per-packet bitstream-filter error
@@ -286,5 +289,42 @@ func TestProbeOutputCaptureIsBounded(t *testing.T) {
 	}
 	if !dvRPUOutputFailed(buf.String()) {
 		t.Fatal("truncation lost the rejection the probe exists to spot")
+	}
+}
+
+// A transcode node's relayed source is probed rather than failing open: it is
+// keyed by its revision, which every job's loopback URL shares, and its
+// ffmpeg reads the URL held to the relay.
+func TestProbeKeysARelayedSourceOnItsIdentity(t *testing.T) {
+	path := writeProbeFile(t, "not really a movie")
+	first, second := nodesourcetest.Relayed(t, path), nodesourcetest.Relayed(t, path)
+	if first.Input() == second.Input() {
+		t.Fatal("two jobs share a loopback URL")
+	}
+	key, ok := dvRPUProbeKey("ffmpeg", first.Input())
+	if !ok || key != "ffmpeg|"+first.Identity() {
+		t.Fatalf("relayed key = %q, %t; want the binary and the source identity", key, ok)
+	}
+	if other, _ := dvRPUProbeKey("ffmpeg", second.Input()); other != key {
+		t.Fatalf("the same revision at another URL keys %q, want %q", other, key)
+	}
+
+	dir := t.TempDir()
+	bin, argsLog := filepath.Join(dir, "ffmpeg"), filepath.Join(dir, "args")
+	script := "#!/bin/sh\necho \"$@\" >> " + argsLog + "\necho '[dovi_rpu @ 0x55] Failed to read unit 1 (type 39).' >&2\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	probe := NewDVRPUProbe()
+	if probe.CanStrip(context.Background(), bin, first.Input()) || probe.CanStrip(context.Background(), bin, second.Input()) {
+		t.Fatal("the relayed source's rejection was not reached")
+	}
+	logged, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := strings.Split(strings.TrimSpace(string(logged)), "\n")
+	if len(runs) != 1 || !strings.Contains(runs[0], "-protocol_whitelist http,tcp -format_whitelist "+nodesource.AdmittedFormats+" -i "+first.Input()) {
+		t.Fatalf("probe runs %q, want one restricted run on the first URL", runs)
 	}
 }

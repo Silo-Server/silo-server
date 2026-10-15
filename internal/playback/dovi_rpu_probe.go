@@ -3,12 +3,13 @@ package playback
 import (
 	"context"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 // Some Dolby Vision sources carry an RPU that ffmpeg's dovi_rpu bitstream
@@ -116,7 +117,7 @@ func (p *DVRPUProbe) CanStrip(ctx context.Context, bin, inputPath string) bool {
 	}
 	key, ok := dvRPUProbeKey(bin, inputPath)
 	if !ok {
-		// The file cannot even be stat'd; leave the verdict to whatever
+		// The source cannot even be stat'd; leave the verdict to whatever
 		// actually tries to open it.
 		return true
 	}
@@ -163,7 +164,7 @@ func (p *DVRPUProbe) CanStrip(ctx context.Context, bin, inputPath string) bool {
 
 	slog.InfoContext(ctx, "dolby vision rpu strip probed",
 		"component", "playback",
-		"input", inputPath,
+		"input", nodesource.RedactLoopback(inputPath),
 		"can_strip", call.strippable,
 		"conclusive", verdict != dvRPUUnknown,
 		"took_ms", time.Since(started).Milliseconds(),
@@ -171,21 +172,18 @@ func (p *DVRPUProbe) CanStrip(ctx context.Context, bin, inputPath string) bool {
 	return call.strippable
 }
 
-// dvRPUProbeKey identifies a probe result. Keyed on size and modification time
-// as well as path so a file replaced in place is re-probed rather than
-// inheriting the old verdict, and on the binary because a different ffmpeg
-// build can parse a different set of RPUs.
+// dvRPUProbeKey identifies a probe result. Keyed on the source's revision
+// (nodesource.Identity: a local file's path, size and modification time, so a
+// file replaced in place is re-probed rather than inheriting the old verdict;
+// a transcode node's relayed source by its revision, whatever loopback URL the
+// job reads it at), and on the binary because a different ffmpeg build can
+// parse a different set of RPUs.
 func dvRPUProbeKey(bin, inputPath string) (string, bool) {
-	info, err := os.Stat(inputPath)
+	identity, err := nodesource.Identity(inputPath)
 	if err != nil {
 		return "", false
 	}
-	return strings.Join([]string{
-		bin,
-		inputPath,
-		strconv.FormatInt(info.Size(), 10),
-		strconv.FormatInt(info.ModTime().UnixNano(), 10),
-	}, "|"), true
+	return bin + "|" + identity, true
 }
 
 // trimLocked bounds the cache, oldest first. A wrong eviction costs one extra
@@ -209,9 +207,7 @@ func runDVRPUProbe(ctx context.Context, bin, inputPath string) dvRPUVerdict {
 	probeCtx, cancel := context.WithTimeout(ctx, dvRPUProbeTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(
-		probeCtx,
-		bin,
+	cmd := exec.CommandContext(probeCtx, bin, nodesource.RestrictArgs([]string{
 		"-hide_banner",
 		"-nostats",
 		"-v", "error",
@@ -222,7 +218,7 @@ func runDVRPUProbe(ctx context.Context, bin, inputPath string) dvRPUVerdict {
 		"-bsf:v", DV7ToHDR10BitstreamFilter,
 		"-an", "-sn", "-dn",
 		"-f", "null", "-",
-	)
+	})...)
 	output := &cappedBuffer{limit: maxDVRPUProbeOutput}
 	cmd.Stdout = output
 	cmd.Stderr = output

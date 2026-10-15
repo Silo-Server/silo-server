@@ -23,7 +23,7 @@ func TestWorkerLegacyStopProtocol(t *testing.T) {
 	cfg.Auth.JWTSecret = "synthetic-stop-protocol"
 	cfg.Playback.TranscodeDir = t.TempDir()
 	watcher.SetConfigForTest(cfg)
-	handler := transcodenode.NewServer(watcher, nil).Handler()
+	handler := keyedTranscodeNode(watcher, cfg.Auth.JWTSecret).Handler()
 	for _, tc := range []struct {
 		configured, authenticated bool
 		status                    int

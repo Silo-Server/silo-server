@@ -129,7 +129,8 @@ func matchesCreation(node *Node, input CreateNodeInput) bool {
 		reflect.DeepEqual(node.MaxJobs, normalizeCap(input.MaxJobs)) &&
 		reflect.DeepEqual(node.MaxBandwidthKbps, normalizeCap(input.MaxBandwidthKbps)) &&
 		node.HWAccelOverride == nil && node.HWDeviceOverride == nil &&
-		node.DownloadArtifactDirOverride == nil && node.DownloadArtifactMaxBytesOverride == nil
+		node.DownloadArtifactDirOverride == nil && node.DownloadArtifactMaxBytesOverride == nil &&
+		node.SourceAccess == input.sourceAccess()
 }
 
 // Update evaluates the original-version guard while holding the row lock. The
@@ -158,6 +159,11 @@ func (s *AdminConfigurationStore) Update(ctx context.Context, id int, input Upda
 		return nil, nil, err
 	}
 	previous.AdminRevision = revision
+	if input.SourceAccess != nil {
+		if err = ValidateSourceAccess(previous.Type, *input.SourceAccess); err != nil {
+			return nil, nil, err
+		}
+	}
 	node, err = repo.Update(ctx, id, input)
 	if err != nil {
 		return nil, nil, err

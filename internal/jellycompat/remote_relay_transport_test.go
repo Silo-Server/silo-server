@@ -67,7 +67,7 @@ func TestRemoteCompatRelayReusesNodeConnectionsAndRecordsDependencyMetrics(t *te
 	t.Cleanup(node.Close)
 	t.Cleanup(func() { close(done) })
 
-	handler := &PlaybackHandler{JWTSecret: secret}
+	handler := &PlaybackHandler{JWTSecret: secret, NodeKeys: nodeauthtest.SharedSecret(secret)}
 	streamCallsBefore := nodeDependencyOperations(t, "stream")
 
 	if _, err := handler.fetchRemoteCompatManifest(t.Context(), node.URL, upstream); err != nil {

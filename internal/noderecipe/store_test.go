@@ -462,3 +462,31 @@ func TestPutTTLBoundsRecordLifetime(t *testing.T) {
 		t.Fatalf("ttl above the store bound = %v err=%v", ttl, err)
 	}
 }
+
+// Lookup tells a store it cannot read from a missing recipe, which resolve
+// answers differently (503 against 404); Get keeps reading both as a miss.
+func TestLookupReportsAnUnreachableStore(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1, DialTimeout: 100 * time.Millisecond})
+	t.Cleanup(func() { _ = client.Close() })
+	store := NewStore(client, time.Minute)
+	if card, ok, err := store.Lookup(context.Background(), "sid"); err == nil || ok || card != nil {
+		t.Fatalf("Lookup on an unreachable store = (%v, %v, %v), want an error", card, ok, err)
+	}
+	if card, ok := store.Get(context.Background(), "sid"); ok || card != nil {
+		t.Fatalf("Get on an unreachable store = (%v, %v), want a miss", card, ok)
+	}
+
+	rawURL := os.Getenv("SILO_TEST_REDIS_URL")
+	if rawURL == "" {
+		return
+	}
+	options, err := redis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := redis.NewClient(options)
+	t.Cleanup(func() { _ = live.Close() })
+	if card, ok, err := NewStore(live, time.Minute).Lookup(context.Background(), "missing-"+uuid.NewString()); err != nil || ok || card != nil {
+		t.Fatalf("Lookup of a missing recipe = (%v, %v, %v), want a clean miss", card, ok, err)
+	}
+}
