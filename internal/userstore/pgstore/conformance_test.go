@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -398,5 +399,50 @@ func TestPostgresDeleteProfileCoversEveryProfileTable(t *testing.T) {
 			continue
 		}
 		t.Errorf("%s has a profile_id but nothing removes its rows when the profile is deleted: add it to profileCascadeTables, or to profileTablesClearedElsewhere with the step that does", table)
+	}
+}
+
+// Profiles saving section overrides for one scope at the same time each keep
+// their own: every writer reads, merges and writes the whole value under one
+// lock, so no write is lost.
+func TestPostgresConcurrentSectionOverrideSaves(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		fmt.Sprintf("conf-overrides-%d", time.Now().UnixNano())).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID) })
+	store := newStore(pool, userID)
+
+	const profiles = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, profiles)
+	for i := range profiles {
+		wg.Go(func() {
+			errs <- store.SaveSectionOverrides(ctx, fmt.Sprintf("p%d", i), "home", "", []userstore.SectionOverride{{SectionID: "default-recently-added", Hidden: true}})
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("SaveSectionOverrides: %v", err)
+		}
+	}
+	for i := range profiles {
+		got, err := store.ListSectionOverrides(ctx, fmt.Sprintf("p%d", i), "home", "")
+		if err != nil || len(got) != 1 {
+			t.Fatalf("profile p%d overrides = %d, %v; want its own one", i, len(got), err)
+		}
 	}
 }

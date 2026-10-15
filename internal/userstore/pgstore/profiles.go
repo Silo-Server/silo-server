@@ -342,6 +342,12 @@ var profileCascadeTables = []string{
 	"user_taste_profiles",
 	"user_taste_clusters",
 	"recommendation_cache",
+	// Ebook reading data. Like the recommendation state, it lives in
+	// Postgres whichever store holds the profile; the profile handler
+	// purges it after a delete from any other store.
+	"ebook_reader_progress",
+	"ebook_reader_config",
+	"ebook_reader_annotations",
 }
 
 func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
@@ -350,6 +356,16 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		return fmt.Errorf("beginning transaction for profile delete: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Lock the profile's collections before anything below takes their
+	// revision rows: the visibility and item deletes advance the revisions
+	// through triggers, and a collection update locks the collection first,
+	// then its revision, so taking them the other way round can deadlock.
+	if _, err := tx.Exec(ctx,
+		`SELECT 1 FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2 ORDER BY id FOR UPDATE`,
+		s.userID, id); err != nil {
+		return fmt.Errorf("locking collections of profile %s: %w", id, err)
+	}
 
 	// Preferences belong to viewers, not creators, so remove every override
 	// for collections owned by the profile before those collections disappear.
@@ -438,6 +454,9 @@ func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string
 // scope and library in one JSON value (see SaveSectionOverrides). A value left
 // with no entries is deleted, as ResetSectionOverrides does.
 func deleteProfileSectionOverrides(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
+	if err := lockSectionOverrides(ctx, tx, userID); err != nil {
+		return err
+	}
 	rows, err := tx.Query(ctx,
 		`SELECT key, value FROM user_settings WHERE user_id = $1 AND key LIKE 'section\_overrides:%' FOR UPDATE`, userID)
 	if err != nil {
