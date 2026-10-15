@@ -53,6 +53,14 @@ type bandwidthProbeAccount struct {
 func (l *bandwidthProbeLimiter) acquire(userID, size int, now time.Time) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// Forget accounts with nothing running whose window has passed. Probes are
+	// rare (one per client about every 30 minutes), so a sweep per admission
+	// is cheap and keeps the map to the accounts probing now.
+	for id, idle := range l.accounts {
+		if idle.inFlight <= 0 && now.Sub(idle.windowStart) >= bandwidthProbeWindow {
+			delete(l.accounts, id)
+		}
+	}
 	account := l.accounts[userID]
 	if account == nil {
 		account = &bandwidthProbeAccount{windowStart: now}
