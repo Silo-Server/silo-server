@@ -139,6 +139,25 @@ describe("useToggleNotInterested", () => {
     expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("p-owner");
   });
 
+  it("undoes the title it marked after the hook moves to another title", async () => {
+    const { result, rerender } = renderHook(({ id }) => useToggleNotInterested(id), {
+      wrapper,
+      initialProps: { id: "movie:heat" },
+    });
+    await act(() => result.current.mutateAsync(false));
+    const [, options] = mocks.toastSuccess.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ];
+
+    rerender({ id: "movie:other" });
+    act(() => options.action.onClick());
+    await waitFor(() => expect(mocks.fetchWithSession).toHaveBeenCalledTimes(2));
+    const [url, init] = mocks.fetchWithSession.mock.calls[1] as [string, RequestInit];
+    expect(init.method).toBe("DELETE");
+    expect(url).toContain("/api/v2/not-interested/movie%3Aheat");
+  });
+
   it("keeps a mark in flight on its profile when the profile switches", async () => {
     let finish: (value: ReturnType<typeof noContent>) => void = () => {};
     mocks.fetchWithSession.mockImplementationOnce(
