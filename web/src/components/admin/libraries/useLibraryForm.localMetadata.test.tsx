@@ -37,6 +37,9 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryRealtimeMonitoring: () => ({ data: undefined }),
 }));
 
+// The translation panel fetches its own status; this file only covers the provider chain.
+vi.mock("./LibraryTranslatePanel", () => ({ LibraryTranslatePanel: () => null }));
+
 beforeEach(() => setChain.mockClear());
 
 const library = { id: 7, name: "Shows", type: "series", paths: ["/tv"] } as Library;

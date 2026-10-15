@@ -152,8 +152,10 @@ func registerProgress(reg *Registry) {
 		"The watch progress features this server supports, such as clearing a resume position.")), reg.getProgressCapabilities)
 	// Non-retryable as unmark is: a delayed retry would also clear a position
 	// the profile recorded after the first request.
-	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/progress/{media_item_id}/position", "clearResumePosition", "progress",
-		"Clear the acting profile's resume position on a movie or episode, keeping its watched state and watch history. An item without a resume position is a no-op.")), reg.clearResumePosition)
+	clearPosition := humaOp(http.MethodDelete, Prefix+"/progress/{media_item_id}/position", "clearResumePosition", "progress",
+		"Clear the acting profile's resume position on a movie or episode, keeping its watched state and watch history. An item without a resume position is a no-op.")
+	clearPosition.DefaultStatus = http.StatusNoContent
+	Register(reg, Operation{Operation: clearPosition, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.clearResumePosition)
 }
 
 func (reg *Registry) getProgressCapabilities(_ context.Context, _ *CapabilityInput) (*ProgressCapabilitiesOutput, error) {

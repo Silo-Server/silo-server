@@ -246,7 +246,7 @@ func TestPostgresCollectionSortPreferences(t *testing.T) {
 }
 
 // TestPostgresPersonalListPage runs the keyset favorites/watchlist paging
-// conformance test against the Postgres backend.
+// and membership-change conformance tests against the Postgres backend.
 // Skips unless SILO_TEST_DATABASE_URL is set.
 func TestPostgresPersonalListPage(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -260,7 +260,7 @@ func TestPostgresPersonalListPage(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	storetest.RunPersonalListPage(t, func(t *testing.T) userstore.UserStore {
+	newListStore := func(t *testing.T) userstore.UserStore {
 		var userID int
 		if err := pool.QueryRow(ctx,
 			`INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
@@ -275,7 +275,9 @@ func TestPostgresPersonalListPage(t *testing.T) {
 			_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 		})
 		return newStore(pool, userID)
-	})
+	}
+	storetest.RunPersonalListPage(t, newListStore)
+	storetest.RunPersonalListMembership(t, newListStore)
 }
 
 // TestPostgresProgressPage runs the keyset progress paging conformance test

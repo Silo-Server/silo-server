@@ -15,6 +15,12 @@ import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "
 import type { StreamNode } from "@/api/types";
 import { useAdminNodes, useCheckNodeHealth, useReprobeNode } from "./nodes";
 import AdminNodes from "@/pages/AdminNodes";
+
+// Routing settings have their own suite, and their unsaved-changes guard needs
+// a data router these node-command tests do not mount.
+vi.mock("@/pages/admin-settings/NodeRoutingSettings", () => ({
+  NodeRoutingSettings: () => null,
+}));
 const node: StreamNode = {
   id: "17",
   name: "Synthetic",

@@ -30,6 +30,15 @@ transport at the requested source position.
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.
 
+When the API relays a transcode whose node it can no longer reach, it moves
+the transcode to another node with an ordinary `POST /transcode/start`: the
+same `session_id` (transport id), the recorded recipe, `throttle_seconds` from
+that recipe, `require_ready`, and a start position resumed at the requested
+segment. The response is checked with the same attestations as a fresh start,
+and a node that fails them is stopped and skipped. The API then sends a
+best-effort `DELETE /transcode/{session_id}` to the node it left. See
+[Transcode node lost under the API relay](architecture/restart-resilient-playback.md#transcode-node-lost-under-the-api-relay).
+
 The start response also reports `hw_accel`, the backend retained for video
 decoding and tone mapping, and optional `encoder_hw_accel`, the actual video
 encoder backend. When a GPU can tone-map but cannot encode HEVC, `hw_accel`

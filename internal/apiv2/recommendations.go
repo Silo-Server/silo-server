@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -200,7 +201,7 @@ const (
 func registerRecommendations(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/because-watched/{item_id}", "listBecauseWatched", "recommendations",
-		"Cards recommended because the acting profile watched the item, minus what it has watched or rated low.")), reg.listBecauseWatched)
+		"Cards recommended because the acting profile watched the item, minus what it has watched or rated.")), reg.listBecauseWatched)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/discover", "getDiscover", "recommendations",
 		"The Discover page: the acting profile's recommendation rows with their cards, blended with upcoming airings.")), reg.getDiscover)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/main", "getForYouMain", "recommendations",
@@ -360,11 +361,32 @@ func (reg *Registry) getRecommendationSection(ctx context.Context, in *Recommend
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: "query.key", Code: codeRequired, Detail: "a " + in.Kind + " section needs a key"})
 	}
+	if detail := invalidSectionKey(in.Kind, in.Key); detail != "" {
+		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: "query.key", Code: codeInvalid, Detail: detail})
+	}
 	view, err := svc.Section(ctx, userID, profileID, in.Kind, in.Key, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	return &RecommendationRowOutput{Body: RecommendationRow{Type: view.Type, Title: view.Label, Kind: view.Kind, Key: view.Key, Items: catalogItemsOfSection(view.Items, reg.ratingSelection(ctx))}}, nil
+}
+
+// invalidSectionKey explains why key cannot name a section of kind, or is
+// empty when it can: a cluster section's key is its index, and a genre
+// section's key is the genre's name as text.
+func invalidSectionKey(kind, key string) string {
+	switch kind {
+	case recommendations.SectionKindCluster:
+		if idx, err := strconv.Atoi(key); err != nil || idx < 0 {
+			return "a cluster section's key is its index, a whole number from 0"
+		}
+	case recommendations.SectionKindGenre:
+		if !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
+			return "a genre section's key is the genre's name"
+		}
+	}
+	return ""
 }
 
 func (reg *Registry) listSimilar(ctx context.Context, in *SimilarInput) (*CatalogItemCollectionOutput, error) {
@@ -507,7 +529,10 @@ func (reg *Registry) listWatchTonightCards(ctx context.Context, in *WatchTonight
 			excludeIDs[id] = struct{}{}
 		}
 	}
-	view := svc.WatchTonightCards(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Mode, genres, excludeIDs, in.Limit)
+	view, err := svc.WatchTonightCards(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Mode, genres, excludeIDs, in.Limit)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
 	remaining := max(0, watchTonightExclusionLimit-len(excludeIDs))
 	if len(view.Cards) > remaining {
 		view.Cards = view.Cards[:remaining]

@@ -162,6 +162,19 @@ func TestVideoToolboxListingGateRequiresCompletePipeline(t *testing.T) {
 	}
 }
 
+func TestQSVListingGateRequiresOpenCLBitmapSubtitleFilters(t *testing.T) {
+	filters := "tonemap_opencl hwmap scale_vaapi"
+	encoders := []byte("h264_qsv")
+	if !hardwareProbeAvailable(BackendQSV, []byte(filters+" overlay_opencl scale_opencl"), encoders) {
+		t.Fatal("complete QSV pipeline was not accepted")
+	}
+	for _, missing := range []string{" scale_opencl", " overlay_opencl"} {
+		if hardwareProbeAvailable(BackendQSV, []byte(filters+missing), encoders) {
+			t.Fatalf("QSV pipeline with only%s was accepted", missing)
+		}
+	}
+}
+
 // TestProbeTotalTimeoutCoversBoundedCommandMatrix verifies the deadline covers every possible probe command.
 func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 	tests := []struct {
@@ -627,7 +640,7 @@ func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
 		wantSoftware bool
 		wantHardware bool
 	}{
-		{name: "tonemapx and QSV OpenCL", backend: BackendQSV, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n", encoders: "libx264 h264_qsv", wantSoftware: true, wantHardware: true},
+		{name: "tonemapx and QSV OpenCL", backend: BackendQSV, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n", encoders: "libx264 h264_qsv", wantSoftware: true, wantHardware: true},
 		{name: "tonemapx and NVENC CUDA", backend: BackendNVENC, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_cuda V->V\n .S. scale_cuda V->V\n", encoders: "libx264 h264_nvenc", wantSoftware: true, wantHardware: true},
 		{name: "Hable and VAAPI", backend: BackendVAAPI, filters: " .S. zscale V->V\n .S. tonemap V->V\n .S. sidedata V->V\n .S. tonemap_vaapi V->V\n .S. scale_vaapi V->V\n", encoders: "libx264 h264_vaapi"},
 		{name: "tonemapx and VideoToolbox", backend: BackendVideoToolbox, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. scale_vt V->V\n .S. hwdownload V->V\n", encoders: "libx264 h264_videotoolbox", wantSoftware: true},

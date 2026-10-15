@@ -11,14 +11,14 @@ type SettingReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
-// unratedContentCacheTTL bounds how long a node serves a cached
+// UnratedContentCacheTTL bounds how long a node serves a cached
 // access.unrated_content value. Every viewer scope resolution reads the
 // setting, so it is not worth a database round trip per request, while an
 // administrator's change still reaches every node within seconds.
-const unratedContentCacheTTL = 10 * time.Second
+const UnratedContentCacheTTL = 10 * time.Second
 
 // UnratedContentPolicy resolves AccessUnratedContentSettingKey for the viewer
-// scope resolvers, caching a successful read for unratedContentCacheTTL.
+// scope resolvers, caching a successful read for UnratedContentCacheTTL.
 type UnratedContentPolicy struct {
 	setting *CachedSetting[bool]
 }
@@ -26,7 +26,7 @@ type UnratedContentPolicy struct {
 // NewUnratedContentPolicy binds the policy to a server settings reader. A nil
 // reader keeps the default.
 func NewUnratedContentPolicy(settings SettingReader) *UnratedContentPolicy {
-	return &UnratedContentPolicy{setting: NewCachedSetting(settings, AccessUnratedContentSettingKey, unratedContentCacheTTL, func(value string) bool {
+	return &UnratedContentPolicy{setting: NewCachedSetting(settings, AccessUnratedContentSettingKey, UnratedContentCacheTTL, func(value string) bool {
 		return strings.EqualFold(strings.TrimSpace(value), AccessUnratedContentAllow)
 	})}
 }

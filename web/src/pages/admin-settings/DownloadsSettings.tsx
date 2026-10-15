@@ -19,31 +19,33 @@ import { effectiveDownloadArtifactDir } from "./settingsPathDefaults";
 // Decimal GB, matching how drives and object stores are sold and reported.
 const BYTES_PER_GB = 1_000_000_000;
 
-// Shown without a disclosure: whether offline downloads exist at all, and the
-// one cap a household admin actually reaches for.
-const ESSENTIAL_KEYS = ["download.enabled", "download.user_bandwidth_mbps"];
+// Shown without a disclosure: whether offline downloads exist at all, whether
+// Silo converts them, and where and how much it prepares. Without conversion no
+// lower quality is offered, and a device gets the original video even when it
+// can't play it (DownloadQualityResolver in internal/downloads/policy.go).
+const ESSENTIAL_KEYS = [
+  "download.enabled",
+  "download.transcode_enabled",
+  "download.max_concurrent_prepares",
+  "download.artifact_dir",
+  "download.artifact_max_bytes",
+  "download.artifact_disk_ceiling_percent",
+  "download.server_bandwidth_mbps",
+];
 
 // Enforced per user: QuantityLimiter counts concurrency and period usage
 // against a user ID (internal/downloads/limiter.go), and the bandwidth cap
 // shapes each user's transfer. They are listed first, under their own
 // heading, so they do not read as server-wide budgets.
 const PER_USER_ADVANCED_KEYS = [
+  "download.user_bandwidth_mbps",
   "download.max_concurrent_per_user",
   "download.max_per_period",
   "download.period_duration",
 ];
 
 // Enforced across the whole server.
-const GLOBAL_ADVANCED_KEYS = [
-  "download.server_bandwidth_mbps",
-  "download.transcode_enabled",
-  "download.local_transcode_fallback",
-  "download.artifact_dir",
-  "download.max_concurrent_prepares",
-  "download.artifact_max_bytes",
-  "download.artifact_cache_hours",
-  "download.artifact_disk_ceiling_percent",
-];
+const GLOBAL_ADVANCED_KEYS = ["download.local_transcode_fallback", "download.artifact_cache_hours"];
 
 const ADVANCED_KEYS = [...PER_USER_ADVANCED_KEYS, ...GLOBAL_ADVANCED_KEYS];
 
@@ -110,12 +112,59 @@ export default function DownloadsSettings() {
             onChange={(v) => form.setValue("download.enabled", v)}
             restartRequired={restartKeys.has("download.enabled")}
           />
+          <SettingField
+            label="Prepare device-friendly copies"
+            type="toggle"
+            description="Converts video the device can't play and offers lower qualities. Off, every download keeps the original video, even where the device can't play it."
+            value={form.getValue("download.transcode_enabled")}
+            onChange={(v) => form.setValue("download.transcode_enabled", v)}
+            restartRequired={restartKeys.has("download.transcode_enabled")}
+          />
+          {/* Not a LimitField: the server reads 0 as "use the built-in
+              worker count" (2), not as unlimited. */}
+          <SettingField
+            label="Files prepared at once"
+            type="number"
+            description="0 uses the built-in default of 2."
+            value={form.getValue("download.max_concurrent_prepares")}
+            onChange={(v) => form.setValue("download.max_concurrent_prepares", v)}
+            restartRequired={restartKeys.has("download.max_concurrent_prepares")}
+          />
+          <PathSettingField
+            label="Prepared file directory"
+            defaultValue={derivedArtifactDir}
+            description="Leave blank for a silo-download-artifacts folder beside this server's transcode directory. Transcode nodes use download-artifacts inside their own transcode directory unless a node has its own directory."
+            value={form.getValue("download.artifact_dir")}
+            onChange={(v) => form.setValue("download.artifact_dir", v)}
+            restartRequired={restartKeys.has("download.artifact_dir")}
+          />
+          {/* Stored as raw bytes (download.artifact_max_bytes); typed in GB
+              because nobody sizes a disk budget in bytes. Unlimited stays
+              the default and still writes the 0 sentinel. */}
           <LimitField
-            label="Per-user bandwidth"
+            label="Default storage budget per location"
+            unit="GB"
+            scale={BYTES_PER_GB}
+            hint="Applies to this server and to every node without its own budget. Over budget, cached files go first, least recently used first; files a device is still waiting on stay."
+            value={form.getValue("download.artifact_max_bytes")}
+            onChange={(v) => form.setValue("download.artifact_max_bytes", v)}
+            restartRequired={restartKeys.has("download.artifact_max_bytes")}
+          />
+          <SettingField
+            label="Disk ceiling (%)"
+            type="number"
+            description="Above this disk fill, cached files at that location are deleted early, whatever the budget. 50 to 95; nodes stop taking playback at 95% when downloads share their transcode disk."
+            value={form.getValue("download.artifact_disk_ceiling_percent")}
+            onChange={(v) => form.setValue("download.artifact_disk_ceiling_percent", v)}
+            restartRequired={restartKeys.has("download.artifact_disk_ceiling_percent")}
+          />
+          <LimitField
+            label="Server bandwidth"
             unit="Mbps"
-            value={form.getValue("download.user_bandwidth_mbps")}
-            onChange={(v) => form.setValue("download.user_bandwidth_mbps", v)}
-            restartRequired={restartKeys.has("download.user_bandwidth_mbps")}
+            hint="All downloads on this server combined."
+            value={form.getValue("download.server_bandwidth_mbps")}
+            onChange={(v) => form.setValue("download.server_bandwidth_mbps", v)}
+            restartRequired={restartKeys.has("download.server_bandwidth_mbps")}
           />
 
           <AdvancedSection
@@ -125,8 +174,15 @@ export default function DownloadsSettings() {
           >
             <SettingsSubheading>Per user</SettingsSubheading>
             <LimitField
+              label="Per-user bandwidth"
+              unit="Mbps"
+              value={form.getValue("download.user_bandwidth_mbps")}
+              onChange={(v) => form.setValue("download.user_bandwidth_mbps", v)}
+              restartRequired={restartKeys.has("download.user_bandwidth_mbps")}
+            />
+            <LimitField
               label="Downloads at once per user"
-              hint="Counted per user, alongside the per-user bandwidth cap above."
+              hint="Counted per user, alongside the per-user bandwidth cap."
               value={form.getValue("download.max_concurrent_per_user")}
               onChange={(v) => form.setValue("download.max_concurrent_per_user", v)}
               restartRequired={restartKeys.has("download.max_concurrent_per_user")}
@@ -148,22 +204,6 @@ export default function DownloadsSettings() {
             />
 
             <SettingsSubheading>Whole server</SettingsSubheading>
-            <LimitField
-              label="Server bandwidth"
-              unit="Mbps"
-              hint="All downloads on this server combined."
-              value={form.getValue("download.server_bandwidth_mbps")}
-              onChange={(v) => form.setValue("download.server_bandwidth_mbps", v)}
-              restartRequired={restartKeys.has("download.server_bandwidth_mbps")}
-            />
-            <SettingField
-              label="Prepare device-friendly copies"
-              type="toggle"
-              description="Converts a file the device cannot play before download."
-              value={form.getValue("download.transcode_enabled")}
-              onChange={(v) => form.setValue("download.transcode_enabled", v)}
-              restartRequired={restartKeys.has("download.transcode_enabled")}
-            />
             <SettingField
               label="Prepare locally when workers are unavailable"
               type="toggle"
@@ -172,36 +212,6 @@ export default function DownloadsSettings() {
               onChange={(v) => form.setValue("download.local_transcode_fallback", v)}
               restartRequired={restartKeys.has("download.local_transcode_fallback")}
             />
-            <PathSettingField
-              label="Prepared file directory"
-              defaultValue={derivedArtifactDir}
-              description="Leave blank for a silo-download-artifacts folder beside this server's transcode directory. Transcode nodes use download-artifacts inside their own transcode directory unless a node has its own directory."
-              value={form.getValue("download.artifact_dir")}
-              onChange={(v) => form.setValue("download.artifact_dir", v)}
-              restartRequired={restartKeys.has("download.artifact_dir")}
-            />
-            {/* Not a LimitField: the server reads 0 as "use the built-in
-                worker count" (2), not as unlimited. */}
-            <SettingField
-              label="Files prepared at once"
-              type="number"
-              description="0 uses the built-in default of 2."
-              value={form.getValue("download.max_concurrent_prepares")}
-              onChange={(v) => form.setValue("download.max_concurrent_prepares", v)}
-              restartRequired={restartKeys.has("download.max_concurrent_prepares")}
-            />
-            {/* Stored as raw bytes (download.artifact_max_bytes); typed in GB
-                because nobody sizes a disk budget in bytes. Unlimited stays
-                the default and still writes the 0 sentinel. */}
-            <LimitField
-              label="Default storage budget per location"
-              unit="GB"
-              scale={BYTES_PER_GB}
-              hint="Applies to this server and to every node without its own budget. Over budget, cached files go first, least recently used first; files a device is still waiting on stay."
-              value={form.getValue("download.artifact_max_bytes")}
-              onChange={(v) => form.setValue("download.artifact_max_bytes", v)}
-              restartRequired={restartKeys.has("download.artifact_max_bytes")}
-            />
             <SettingField
               label="Keep cached files for"
               type="number"
@@ -209,14 +219,6 @@ export default function DownloadsSettings() {
               value={form.getValue("download.artifact_cache_hours")}
               onChange={(v) => form.setValue("download.artifact_cache_hours", v)}
               restartRequired={restartKeys.has("download.artifact_cache_hours")}
-            />
-            <SettingField
-              label="Disk ceiling (%)"
-              type="number"
-              description="Above this disk fill, cached files at that location are deleted early, whatever the budget. 50 to 95; nodes stop taking playback at 95% when downloads share their transcode disk."
-              value={form.getValue("download.artifact_disk_ceiling_percent")}
-              onChange={(v) => form.setValue("download.artifact_disk_ceiling_percent", v)}
-              restartRequired={restartKeys.has("download.artifact_disk_ceiling_percent")}
             />
           </AdvancedSection>
         </FieldGroup>

@@ -169,7 +169,7 @@ func TestIdentifyConflictMergeMarksTheSurvivorPostgres(t *testing.T) {
 	ctx := context.Background()
 	t.Run("into the owner", func(t *testing.T) {
 		checkIdentifyMoveMarks(t, pool, true, func(from, to, _ string, markIdentity bool) error {
-			_, err := canonicalizeProviderIDDuplicateInto(ctx, pool, from, to, true, markIdentity)
+			_, err := canonicalizeProviderIDDuplicateInto(ctx, pool, nil, from, to, true, markIdentity)
 			return err
 		})
 	})
@@ -184,7 +184,7 @@ func TestIdentifyConflictMergeMarksTheSurvivorPostgres(t *testing.T) {
 				t.Fatalf("seed %s: %v", id, err)
 			}
 		}
-		survivor, err := canonicalizeProviderIDDuplicate(ctx, pool, from, to, true, true)
+		survivor, err := canonicalizeProviderIDDuplicate(ctx, pool, nil, from, to, true, true)
 		if err != nil {
 			t.Fatalf("merge: %v", err)
 		}

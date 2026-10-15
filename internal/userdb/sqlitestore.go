@@ -200,7 +200,7 @@ func (s *SQLiteUserStore) DeleteHomeDismissal(_ context.Context, profileID, surf
 
 // --- Favorites & Watchlist ---
 
-func (s *SQLiteUserStore) AddFavorite(_ context.Context, profileID, mediaItemID string) error {
+func (s *SQLiteUserStore) AddFavorite(_ context.Context, profileID, mediaItemID string) (bool, error) {
 	return AddFavorite(s.db, profileID, mediaItemID)
 }
 
@@ -208,7 +208,7 @@ func (s *SQLiteUserStore) AddFavoriteAt(_ context.Context, profileID, mediaItemI
 	return AddFavoriteAt(s.db, profileID, mediaItemID, addedAt)
 }
 
-func (s *SQLiteUserStore) RemoveFavorite(_ context.Context, profileID, mediaItemID string) error {
+func (s *SQLiteUserStore) RemoveFavorite(_ context.Context, profileID, mediaItemID string) (bool, error) {
 	return RemoveFavorite(s.db, profileID, mediaItemID)
 }
 
@@ -236,7 +236,7 @@ func (s *SQLiteUserStore) GetWatchlistEntry(_ context.Context, profileID, mediaI
 	return GetWatchlistEntry(s.db, profileID, mediaItemID)
 }
 
-func (s *SQLiteUserStore) AddToWatchlist(_ context.Context, profileID, mediaItemID string) error {
+func (s *SQLiteUserStore) AddToWatchlist(_ context.Context, profileID, mediaItemID string) (bool, error) {
 	return AddToWatchlist(s.db, profileID, mediaItemID)
 }
 
@@ -244,7 +244,7 @@ func (s *SQLiteUserStore) AddToWatchlistAt(_ context.Context, profileID, mediaIt
 	return AddToWatchlistAt(s.db, profileID, mediaItemID, addedAt)
 }
 
-func (s *SQLiteUserStore) RemoveFromWatchlist(_ context.Context, profileID, mediaItemID string) error {
+func (s *SQLiteUserStore) RemoveFromWatchlist(_ context.Context, profileID, mediaItemID string) (bool, error) {
 	return RemoveFromWatchlist(s.db, profileID, mediaItemID)
 }
 

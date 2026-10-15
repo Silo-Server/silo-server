@@ -117,7 +117,7 @@ func (p *PlexProvider) ParseWebhook(ctx context.Context, conn *Connection, r *ht
 	if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
 		return nil, fmt.Errorf("invalid Plex payload")
 	}
-	if payload.Event == "" || payload.Account.ID == 0 || payload.Metadata.RatingKey == "" || payload.Metadata.Type == "" {
+	if payload.Event == "" {
 		return nil, fmt.Errorf("invalid Plex webhook payload")
 	}
 	action, completed, ok := plexWebhookAction(payload.Event)
@@ -127,6 +127,11 @@ func (p *PlexProvider) ParseWebhook(ctx context.Context, conn *Connection, r *ht
 			Summary:   "Ignored unsupported Plex event type",
 			Apply:     false,
 		}, nil
+	}
+	// Only the events Silo applies need an account and an item. Plex sends
+	// every event to every webhook, including server events without an item.
+	if payload.Account.ID == 0 || payload.Metadata.RatingKey == "" || payload.Metadata.Type == "" {
+		return nil, fmt.Errorf("invalid Plex webhook payload")
 	}
 	userID := strconv.FormatInt(payload.Account.ID, 10)
 	// A playback start only needs the account and item IDs, so it is recorded
@@ -244,7 +249,7 @@ func (p *EmbyProvider) ParseWebhook(_ context.Context, conn *Connection, r *http
 		return nil, err
 	}
 	eventName := strings.ToLower(strings.TrimSpace(payload.Event))
-	if eventName == "" || payload.User.ID == "" || payload.Item.ID == "" || payload.Item.Type == "" {
+	if eventName == "" {
 		return nil, fmt.Errorf("invalid Emby webhook payload")
 	}
 	action, ok := embyWebhookAction(eventName)
@@ -254,6 +259,11 @@ func (p *EmbyProvider) ParseWebhook(_ context.Context, conn *Connection, r *http
 			Summary:   "Ignored unsupported Emby event type",
 			Apply:     false,
 		}, nil
+	}
+	// Only the events Silo applies need a user and an item. The Test
+	// Notification and server events carry neither.
+	if payload.User.ID == "" || payload.Item.ID == "" || payload.Item.Type == "" {
+		return nil, fmt.Errorf("invalid Emby webhook payload")
 	}
 	record, mediaKind, ok := embyLikeRecord(payload.Item.Type, payload.Item.Name, payload.Item.SeriesName, payload.Item.ProductionYear, payload.Item.IndexNumber, payload.Item.ParentIndexNumber, payload.Item.RunTimeTicks, payload.PlaybackInfo.PositionTicks, payload.PlaybackInfo.PlayedToCompletion || action == ActionImportProgress && isEmbyMarkPlayedEvent(eventName), payload.Item.ProviderIDs, payload.Item.ID, payload.Date, actionAllowsSeries(action))
 	if !ok {

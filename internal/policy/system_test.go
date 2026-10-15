@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,12 +21,21 @@ func TestSystemCrossNodeConvergenceEventAndPoll(t *testing.T) {
 	eventBus := newPolicyTestEventBus()
 	systemA := newStartedPolicySystem(t, ctx, storeA, eventBus, time.Hour)
 	systemB := newStartedPolicySystem(t, ctx, storeB, eventBus, time.Hour)
+	var appliedA, appliedB atomic.Int32
+	systemA.OnChangeApplied(func(context.Context, int64) { appliedA.Add(1) })
+	systemB.OnChangeApplied(func(context.Context, int64) { appliedB.Add(1) })
 
 	documentID, generation := activatePolicyVersion(t, ctx, storeA, 0, "sha-event")
 	if err := systemA.NotifyChanged(ctx); err != nil {
 		t.Fatalf("NotifyChanged(event) error: %v", err)
 	}
 	waitForPolicyRevision(t, systemB, generation)
+	// Each node announces the change once it has applied it; the origin's
+	// own event reload of the same generation does not announce it again.
+	waitForChangeApplied(t, &appliedB, 1)
+	if n := appliedA.Load(); n != 1 {
+		t.Fatalf("origin announced the change %d times, want 1", n)
+	}
 
 	systemA.Stop()
 	systemB.Stop()
@@ -36,12 +46,69 @@ func TestSystemCrossNodeConvergenceEventAndPoll(t *testing.T) {
 	pollSystemB := newStartedPolicySystem(t, ctx, storeB, droppingBus, 20*time.Millisecond)
 	defer pollSystemA.Stop()
 	defer pollSystemB.Stop()
+	var appliedPollB atomic.Int32
+	pollSystemB.OnChangeApplied(func(context.Context, int64) { appliedPollB.Add(1) })
 
 	_, generation = activatePolicyVersion(t, ctx, storeA, documentID, "sha-poll")
 	if err := pollSystemA.NotifyChanged(ctx); err != nil {
 		t.Fatalf("NotifyChanged(poll) error: %v", err)
 	}
 	waitForPolicyRevision(t, pollSystemB, generation)
+	waitForChangeApplied(t, &appliedPollB, 1)
+}
+
+// A change committed without a successful local reload, as when the origin's
+// synchronous reload fails, is announced by the poll reload that loads it, and
+// only once however many reloads load it again.
+func TestSystemAnnouncesAChangeLoadedByALaterReload(t *testing.T) {
+	ctx := context.Background()
+	_, store := newPolicyStoreTest(t, ctx)
+	system := newStartedPolicySystem(t, ctx, store, &cache.NoopEventBus{}, time.Hour)
+	defer system.Stop()
+	var applied atomic.Int32
+	var announced atomic.Int64
+	system.OnChangeApplied(func(_ context.Context, generation int64) {
+		applied.Add(1)
+		announced.Store(generation)
+	})
+
+	_, generation := activatePolicyVersion(t, ctx, store, 0, "sha-recovery")
+	// Until this node reloads, it does not serve the stored generation.
+	if current, err := system.Current(ctx); err != nil || current {
+		t.Fatalf("Current before the reload = %v, %v; want false", current, err)
+	}
+	system.reloadIfGenerationChanged(ctx)
+	if system.Generation() != generation || applied.Load() != 1 || announced.Load() != generation {
+		t.Fatalf("after the poll reload: generation %d (want %d), hook ran %d times (want 1) with generation %d", system.Generation(), generation, applied.Load(), announced.Load())
+	}
+	if current, err := system.Current(ctx); err != nil || !current {
+		t.Fatalf("Current after the reload = %v, %v; want true", current, err)
+	}
+	if err := system.reloadFromStore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := applied.Load(); n != 1 {
+		t.Fatalf("a second reload of the same generation ran the hook again: %d times", n)
+	}
+}
+
+// waitForChangeApplied waits until the change hook counted by applied has run
+// want times.
+func waitForChangeApplied(t *testing.T, applied *atomic.Int32, want int32) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("change hook ran %d times, want %d", applied.Load(), want)
+		case <-ticker.C:
+			if applied.Load() == want {
+				return
+			}
+		}
+	}
 }
 
 func TestSystemDegradedBootUsesVendorPolicy(t *testing.T) {

@@ -137,6 +137,18 @@ export const FEATURE_OUTPUT_CHANGE_V3 = "output_change_v1";
  */
 export const FEATURE_PLAN_INVALIDATED_V3 = "plan_invalidated_v1";
 
+/**
+ * `original_http` validated claim: the client maps `selected_tracks.audio.index`
+ * onto the file's own audio tracks, so a non-default track needs no remux.
+ */
+export const CLAIM_CLIENT_SELECTED_AUDIO_TRACK_V3 = "client_selected_audio_track_v1";
+
+/**
+ * `original_http` validated claim: the client accepts HDR and Dolby Vision
+ * originals and resolves presentation for the live output itself.
+ */
+export const CLAIM_CLIENT_MANAGED_DYNAMIC_RANGE_V3 = "client_managed_dynamic_range_v1";
+
 /** The `original` rung label, which always preserves the source. */
 export const QUALITY_ORIGINAL_V3 = "original";
 

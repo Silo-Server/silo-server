@@ -532,7 +532,7 @@ func sourceConversionPreflightFilter(request SourcePreflightRequest) string {
 		filter = "format=nv12,hwupload," + filter
 	}
 	if request.Backend == BackendQSV {
-		filter = QSVFilter(request.Kind) + "," + QSVInteropFilter()
+		filter = QSVFilter(request.Kind, 0) + "," + QSVInteropFilter()
 		if request.SoftwareVideoDecode {
 			format := "nv12"
 			if !IsSDRSource(request.Kind) {
