@@ -16,6 +16,7 @@ import {
 } from "./keys";
 import {
   cancelItemDetailQueries,
+  dropInactiveWatchDetail,
   getQueryKeyItemId,
   invalidateMediaSurfaceQueries,
   relatedItemIds,
@@ -520,6 +521,38 @@ describe("invalidateMediaSurfaceQueries", () => {
     await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-1" });
 
     expect(queryClient.getQueryState(seasonsKey)?.isInvalidated).toBe(true);
+  });
+
+  it("drops a closed player's watch detail and keeps its link to the series", async () => {
+    // The watch detail is the only link from the episode to its series, and
+    // its cached resume position no longer holds.
+    const queryClient = new QueryClient();
+    const closedKey = itemKeys.watchDetail("episode-1");
+    queryClient.setQueryData(closedKey, { content_id: "episode-1", series_id: "series-1" });
+    const seasonsKey = catalogKeys.seriesSeasons("series-1");
+    queryClient.setQueryData(seasonsKey, { seasons: [] });
+
+    const knownRelatedIds = dropInactiveWatchDetail(queryClient, "episode-1");
+    expect(queryClient.getQueryData(closedKey)).toBeUndefined();
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-1", knownRelatedIds });
+    expect(queryClient.getQueryState(seasonsKey)?.isInvalidated).toBe(true);
+  });
+
+  it("keeps an open player's watch detail", () => {
+    const queryClient = new QueryClient();
+    const openKey = itemKeys.watchDetail("episode-1");
+    queryClient.setQueryData(openKey, { content_id: "episode-1" });
+    const observer = new QueryObserver(queryClient, {
+      queryKey: openKey,
+      queryFn: () => ({ content_id: "episode-1" }),
+      staleTime: Infinity,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+
+    expect(dropInactiveWatchDetail(queryClient, "episode-1")).toBeUndefined();
+    expect(queryClient.getQueryData(openKey)).toBeDefined();
+    unsubscribe();
   });
 
   it("stays narrowed for a progress event about an uncached item", async () => {

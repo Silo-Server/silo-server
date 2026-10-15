@@ -109,9 +109,11 @@ func implicitWatchWeight(wp WatchProgressRow, now time.Time) (float64, bool) {
 	var progressPct float64
 	if wp.Completed {
 		progressPct = 1.0
-	} else if wp.DurationSeconds > 0 {
+	} else if wp.DurationSeconds > 0 && wp.PositionSeconds > 0 {
 		progressPct = wp.PositionSeconds / wp.DurationSeconds
 	} else {
+		// No position and not watched: a cleared resume position or a play that
+		// never got going, which says nothing either way.
 		return 0, false
 	}
 

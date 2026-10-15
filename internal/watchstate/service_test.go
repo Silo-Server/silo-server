@@ -606,6 +606,124 @@ func TestImportedWatchIfNewerSuppressesHiddenOlderWatch(t *testing.T) {
 	}
 }
 
+// TestClearResumePositionKeepsHistoryAndWatchedState pins issue #2134: a
+// resume position reset leaves every earlier watch in history (unlike mark
+// unwatched, which hides it) and keeps a rewatched item watched.
+func TestClearResumePositionKeepsHistoryAndWatchedState(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestUserStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+	createWatchstateProfile(t, store)
+	service := NewService(testStoreProvider{store: store})
+
+	// movie-1 was watched to the end two days ago and is now partly rewatched;
+	// movie-2 was only ever skimmed to the middle.
+	if err := service.RecordManualMarkWatched(ctx, 1, "profile-1", []LeafWatchTarget{{MediaItemID: "movie-1", DurationSeconds: 7200}}, time.Now().UTC().Add(-48*time.Hour)); err != nil {
+		t.Fatalf("RecordManualMarkWatched: %v", err)
+	}
+	for _, play := range []struct {
+		id       string
+		position float64
+	}{{"movie-1", 1800}, {"movie-2", 2700}} {
+		if _, err := service.RecordPlaybackStop(ctx, 1, "profile-1", play.id, 7200, play.position, time.Now().UTC().Add(-time.Hour), userstore.VersionHints{}, userstore.ProgressThresholds{}); err != nil {
+			t.Fatalf("RecordPlaybackStop(%s): %v", play.id, err)
+		}
+	}
+	before, err := store.ListHistory(ctx, "profile-1", 10, 0)
+	if err != nil || len(before) != 3 {
+		t.Fatalf("history before = %+v, %v; want the mark and two partial plays", before, err)
+	}
+
+	for _, id := range []string{"movie-1", "movie-2"} {
+		cleared, err := service.ClearResumePosition(ctx, 1, "profile-1", id)
+		if err != nil || !cleared {
+			t.Fatalf("ClearResumePosition(%s) = %v, %v; want cleared", id, cleared, err)
+		}
+	}
+
+	for _, want := range []struct {
+		id        string
+		completed bool
+	}{{"movie-1", true}, {"movie-2", false}} {
+		progress, err := store.GetProgress(ctx, "profile-1", want.id)
+		if err != nil || progress == nil {
+			t.Fatalf("GetProgress(%s) = %+v, %v", want.id, progress, err)
+		}
+		if progress.PositionSeconds != 0 || progress.Completed != want.completed || progress.DurationSeconds != 7200 {
+			t.Fatalf("%s progress = %+v, want position 0, completed %v, duration kept", want.id, progress, want.completed)
+		}
+	}
+	inProgress, err := store.ListProgress(ctx, "profile-1", "in_progress", 10, 0)
+	if err != nil || len(inProgress) != 0 {
+		t.Fatalf("in-progress rows = %+v, %v; want none", inProgress, err)
+	}
+	after, err := store.ListHistory(ctx, "profile-1", 10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("history after = %+v, want all %d earlier watches kept", after, len(before))
+	}
+	for i := range before {
+		if after[i].ID != before[i].ID || after[i].Completed != before[i].Completed {
+			t.Fatalf("history row %d = %+v, want %+v", i, after[i], before[i])
+		}
+	}
+
+	// Nothing left to clear: a no-op that reports so.
+	if cleared, err := service.ClearResumePosition(ctx, 1, "profile-1", "movie-2"); err != nil || cleared {
+		t.Fatalf("second ClearResumePosition = %v, %v; want a no-op", cleared, err)
+	}
+}
+
+// A live write under a hidden-history watermark that lies ahead of the clock
+// (a mark unwatched after a future-dated imported watch) is stamped just past
+// the watermark and stays visible. Clearing that resume position must still
+// write, not be skipped as hidden while reporting success.
+func TestClearResumePositionUnderFutureHiddenWatermark(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestUserStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+	createWatchstateProfile(t, store)
+
+	hiddenBefore := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	if _, err := db.Exec(`
+		INSERT INTO hidden_history_items (profile_id, media_item_id, hidden_before, updated_at)
+		VALUES (?, ?, ?, ?)`, "profile-1", "movie-1", hiddenBefore, hiddenBefore); err != nil {
+		t.Fatalf("seed hidden watermark: %v", err)
+	}
+	if err := store.UpdateProgress(ctx, "profile-1", "movie-1", 1800, 7200, userstore.ProgressThresholds{}); err != nil {
+		t.Fatalf("UpdateProgress: %v", err)
+	}
+	if progress, err := store.GetProgress(ctx, "profile-1", "movie-1"); err != nil || progress == nil || progress.PositionSeconds != 1800 {
+		t.Fatalf("progress before = %+v, %v; want a visible resume point", progress, err)
+	}
+
+	cleared, err := NewService(testStoreProvider{store: store}).ClearResumePosition(ctx, 1, "profile-1", "movie-1")
+	if err != nil || !cleared {
+		t.Fatalf("ClearResumePosition = %v, %v; want cleared", cleared, err)
+	}
+	progress, err := store.GetProgress(ctx, "profile-1", "movie-1")
+	if err != nil || progress == nil || progress.PositionSeconds != 0 {
+		t.Fatalf("progress after = %+v, %v; want visible with position 0", progress, err)
+	}
+}
+
+func TestClearResumePositionWithoutProgressWritesNothing(t *testing.T) {
+	ctx := context.Background()
+	store, db := newTestUserStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+	createWatchstateProfile(t, store)
+
+	cleared, err := NewService(testStoreProvider{store: store}).ClearResumePosition(ctx, 1, "profile-1", "movie-1")
+	if err != nil || cleared {
+		t.Fatalf("ClearResumePosition = %v, %v; want a no-op", cleared, err)
+	}
+	if progress, err := store.GetProgress(ctx, "profile-1", "movie-1"); err != nil || progress != nil {
+		t.Fatalf("progress = %+v, %v; want no row", progress, err)
+	}
+}
+
 func newTestUserStore(t *testing.T) (userstore.UserStore, *sql.DB) {
 	t.Helper()
 	db, err := sql.Open("sqlite3", ":memory:")

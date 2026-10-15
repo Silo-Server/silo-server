@@ -23,6 +23,7 @@ import {
   MoreVertical,
   Plus,
   RotateCcw,
+  TimerReset,
   X,
 } from "lucide-react";
 import { useLocation } from "react-router";
@@ -36,6 +37,7 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { useClearResumePosition } from "@/hooks/queries/progress";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
@@ -119,6 +121,7 @@ type MediaItemMenuEntry =
       key:
         | "playFromBeginning"
         | "toggleWatched"
+        | "resetProgress"
         | "toggleFavorite"
         | "toggleWatchlist"
         | "dismissFromHome"
@@ -137,6 +140,11 @@ interface BuildMediaItemMenuModelOptions {
   mediaType: MediaItemType;
   userState?: MediaItemUserState;
   hasPartialProgress?: boolean;
+  /**
+   * Whether the item has a resume position to clear, rewatches included.
+   * Defaults to hasPartialProgress.
+   */
+  hasResumePosition?: boolean;
   isAdmin: boolean;
   canCurateMetadata?: boolean;
   showCollectionActions?: boolean;
@@ -158,6 +166,11 @@ interface MediaItemMenuProps {
   showFavoriteShortcut?: boolean;
   dismissAction?: DismissHomeItemVariables;
   hasPartialProgress?: boolean;
+  /**
+   * Whether the item has a resume position to clear, rewatches included, for
+   * lists that hide a watched item's progress. Defaults to hasPartialProgress.
+   */
+  hasResumePosition?: boolean;
   /** Enables the watched shortcut on wide cards such as Continue Watching. */
   showWatchedShortcut?: boolean;
   /** Uses smaller poster controls on narrow catalog cards. */
@@ -174,6 +187,7 @@ export function buildMediaItemMenuModel({
   mediaType,
   userState,
   hasPartialProgress = false,
+  hasResumePosition = hasPartialProgress,
   isAdmin,
   canCurateMetadata = isAdmin,
   showCollectionActions = true,
@@ -197,6 +211,11 @@ export function buildMediaItemMenuModel({
       key: "toggleWatched",
       label: getWatchedActionLabel({ type: mediaType, user_data: { played: userState.played } }),
     });
+  }
+
+  // Clears the resume point without passing through watched (issue #2134).
+  if ((mediaType === "movie" || mediaType === "episode") && hasResumePosition) {
+    entries.push({ kind: "action", key: "resetProgress", label: "Reset Progress" });
   }
 
   if (userState && showCollectionActions) {
@@ -299,6 +318,8 @@ function MediaItemMenuActionIcon({
       ) : (
         <EyeOff aria-hidden="true" className="size-4" />
       );
+    case "resetProgress":
+      return <TimerReset aria-hidden="true" className="size-4" />;
     case "toggleFavorite":
       return (
         <Heart
@@ -960,6 +981,7 @@ function MediaItemMenuEngine({
   const watchlistMutation = useToggleWatchlist(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
+  const clearResumePositionMutation = useClearResumePosition();
   const currentHref = `${location.pathname}${location.search}`;
 
   const isPending =
@@ -967,7 +989,8 @@ function MediaItemMenuEngine({
     favoriteMutation.isPending ||
     watchlistMutation.isPending ||
     refreshMetadataMutation.isPending ||
-    dismissHomeItemMutation.isPending;
+    dismissHomeItemMutation.isPending ||
+    clearResumePositionMutation.isPending;
   const watchedPending = watchedMutation.isPending;
   const favoritePending = favoriteMutation.isPending;
   const refreshPending = refreshMetadataMutation.isPending;
@@ -1037,6 +1060,10 @@ function MediaItemMenuEngine({
       }
       case "toggleWatched": {
         await handleWatchedToggle();
+        return;
+      }
+      case "resetProgress": {
+        clearResumePositionMutation.mutate({ contentId });
         return;
       }
       case "toggleFavorite": {
@@ -1162,6 +1189,7 @@ export default function MediaItemMenu({
   showFavoriteShortcut = true,
   dismissAction,
   hasPartialProgress = false,
+  hasResumePosition = hasPartialProgress,
   showWatchedShortcut = false,
   narrowPosterActions = false,
   quickActionMode = "none",
@@ -1226,6 +1254,7 @@ export default function MediaItemMenu({
     mediaType,
     userState: currentUserState,
     hasPartialProgress,
+    hasResumePosition,
     isAdmin,
     canCurateMetadata,
     showCollectionActions,

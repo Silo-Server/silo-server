@@ -318,6 +318,34 @@ func (s *PostgresUserStore) ClearProgress(ctx context.Context, profileID, mediaI
 	return nil
 }
 
+// ClearResumePosition is one conditional UPDATE, so there is no window for a
+// concurrent unmark between reading and writing the row. updated_at is raised
+// to at least event_at: the stamp trigger copies updated_at into an unchanged
+// event_at, and an offline write may have left event_at slightly ahead.
+func (s *PostgresUserStore) ClearResumePosition(ctx context.Context, profileID, mediaItemID string, at time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE user_watch_progress
+		SET position_seconds = 0,
+			updated_at = GREATEST($4::timestamptz, updated_at, event_at),
+			event_at = GREATEST($4::timestamptz, event_at)
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3
+		  AND position_seconds > 0
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = user_watch_progress.user_id
+			  AND hhi.profile_id = user_watch_progress.profile_id
+			  AND hhi.media_item_id = user_watch_progress.media_item_id
+			  AND user_watch_progress.updated_at <= hhi.hidden_before
+		  )`,
+		s.userID, profileID, mediaItemID, at.UTC(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("clearing resume position: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // MarkWatchedBatch atomically marks incomplete targets watched and inserts
 // their history rows. Conflict updates recheck completed state after any
 // concurrent writer, and only changed targets emit history and provider entries.

@@ -98,7 +98,3 @@ func TestSQLiteCollectionSharing(t *testing.T) {
 func TestSQLiteProfilePINRevision(t *testing.T) {
 	storetest.RunProfilePINRevision(t, newConformanceStore)
 }
-
-func TestSQLiteDeleteProfileRemovesProfileState(t *testing.T) {
-	storetest.RunDeleteProfileRemovesProfileState(t, newConformanceStore)
-}

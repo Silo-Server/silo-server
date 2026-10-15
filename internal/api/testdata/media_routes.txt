@@ -742,6 +742,8 @@ DELETE /api/v2/profiles/{id}/avatar	non-media
 PUT /api/v2/profiles/{id}/avatar	non-media
 POST /api/v2/profiles/{id}/verify-pin	non-media
 GET /api/v2/progress	non-media
+GET /api/v2/progress/capabilities	non-media
+DELETE /api/v2/progress/{media_item_id}/position	non-media
 GET /api/v2/ratings	non-media
 DELETE /api/v2/ratings/{item_id}	non-media
 GET /api/v2/ratings/{item_id}	non-media
@@ -2014,6 +2016,8 @@ DELETE /api/v2/profiles/{id}/avatar	non-media
 PUT /api/v2/profiles/{id}/avatar	non-media
 POST /api/v2/profiles/{id}/verify-pin	non-media
 GET /api/v2/progress	non-media
+GET /api/v2/progress/capabilities	non-media
+DELETE /api/v2/progress/{media_item_id}/position	non-media
 GET /api/v2/ratings	non-media
 DELETE /api/v2/ratings/{item_id}	non-media
 GET /api/v2/ratings/{item_id}	non-media

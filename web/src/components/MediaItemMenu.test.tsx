@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   matchItem: vi.fn(),
   toggleFavorite: vi.fn(),
   toggleWatched: vi.fn(),
+  clearResumePosition: vi.fn(),
   posterSize: "standard" as "compact" | "standard" | "large",
   authState: undefined as { user: { role: "admin" | "user" } } | undefined,
 }));
@@ -53,6 +54,13 @@ vi.mock("@/hooks/queries/items", () => ({
   }),
 }));
 
+vi.mock("@/hooks/queries/progress", () => ({
+  useClearResumePosition: () => ({
+    isPending: false,
+    mutate: (...args: unknown[]) => mocks.clearResumePosition(...args),
+  }),
+}));
+
 vi.mock("@/hooks/useUICustomization", () => ({
   useUICustomization: () => ({ cardPresentation: { poster_size: mocks.posterSize } }),
 }));
@@ -90,6 +98,7 @@ beforeEach(() => {
   mocks.toggleFavorite.mockResolvedValue(undefined);
   mocks.toggleWatched.mockReset();
   mocks.toggleWatched.mockResolvedValue(undefined);
+  mocks.clearResumePosition.mockReset();
   mocks.posterSize = "standard";
   mocks.authState = undefined;
 });
@@ -255,6 +264,73 @@ describe("buildMediaItemMenuModel", () => {
     expect(
       model.some((item) => item.kind === "action" && item.label === "Play from Beginning"),
     ).toBe(true);
+  });
+
+  it("offers reset progress after the watched toggle for a partly watched movie or episode", () => {
+    for (const mediaType of ["movie", "episode"] as const) {
+      const labels = buildMediaItemMenuModel({
+        mediaType,
+        hasPartialProgress: true,
+        userState: { played: false, is_favorite: false, in_watchlist: false },
+        isAdmin: false,
+        showCollectionActions: false,
+        dismissLabel: "Remove from Continue Watching",
+      }).flatMap((item) => (item.kind === "action" ? [item.label] : []));
+
+      expect(labels).toEqual([
+        "Play from Beginning",
+        "Mark Watched",
+        "Reset Progress",
+        "Remove from Continue Watching",
+      ]);
+    }
+  });
+
+  it("offers reset progress during a rewatch, which keeps the item watched", () => {
+    const labels = buildMediaItemMenuModel({
+      mediaType: "movie",
+      hasPartialProgress: true,
+      userState: { played: true, is_favorite: false, in_watchlist: false },
+      isAdmin: false,
+      showCollectionActions: false,
+    }).flatMap((item) => (item.kind === "action" ? [item.label] : []));
+
+    expect(labels).toEqual(["Play from Beginning", "Mark Unwatched", "Reset Progress"]);
+  });
+
+  it("offers reset progress for a rewatched episode in a list that hides its progress bar", () => {
+    const model = buildMediaItemMenuModel({
+      mediaType: "episode",
+      hasPartialProgress: false,
+      hasResumePosition: true,
+      userState: { played: true, is_favorite: false, in_watchlist: false },
+      isAdmin: false,
+      showCollectionActions: false,
+    });
+
+    expect(model.some((item) => item.kind === "action" && item.key === "resetProgress")).toBe(true);
+  });
+
+  it("offers reset progress only when a movie or episode has a resume position", () => {
+    const cases = [
+      { mediaType: "movie", hasPartialProgress: false, played: true },
+      { mediaType: "episode", hasPartialProgress: false, played: false },
+      { mediaType: "audiobook", hasPartialProgress: true, played: false },
+      { mediaType: "series", hasPartialProgress: true, played: false },
+    ] as const;
+    for (const { mediaType, hasPartialProgress, played } of cases) {
+      const model = buildMediaItemMenuModel({
+        mediaType,
+        hasPartialProgress,
+        userState: { played, is_favorite: false, in_watchlist: false },
+        isAdmin: false,
+      });
+
+      expect(
+        model.some((item) => item.kind === "action" && item.key === "resetProgress"),
+        mediaType,
+      ).toBe(false);
+    }
   });
 
   it("uses listening labels for audiobook state actions", () => {
@@ -593,6 +669,26 @@ describe("MediaItemMenu trigger visibility", () => {
         "false",
       );
     });
+  });
+
+  it("resets a partly watched item's progress from the menu", async () => {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          hasPartialProgress
+          variant="wide"
+        />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Reset Progress" }));
+
+    expect(mocks.clearResumePosition).toHaveBeenCalledWith({ contentId: "movie-1" });
+    expect(mocks.toggleWatched).not.toHaveBeenCalled();
   });
 
   it("rolls the watched eye back when the request fails", async () => {

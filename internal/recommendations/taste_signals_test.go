@@ -100,6 +100,9 @@ func TestImplicitWatchWeightLowProgressCountsOnceStale(t *testing.T) {
 		{"abandoned 15 days ago", WatchProgressRow{PositionSeconds: 10, DurationSeconds: 100, UpdatedAt: now.Add(-15 * day)}, WeightWatchLow, true},
 		{"low progress without a timestamp", WatchProgressRow{PositionSeconds: 10, DurationSeconds: 100}, 0, false},
 		{"no duration", WatchProgressRow{PositionSeconds: 10, UpdatedAt: now.Add(-100 * day)}, 0, false},
+		// A cleared resume position (issue #2134) keeps the duration; it is not
+		// an abandoned watch, however long ago it was cleared.
+		{"cleared resume position", WatchProgressRow{DurationSeconds: 100, UpdatedAt: now.Add(-100 * day)}, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			weight, ok := implicitWatchWeight(tc.row, now)

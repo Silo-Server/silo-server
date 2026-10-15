@@ -1616,6 +1616,14 @@ retry after an intervening unmark can create another watch; a durable client wat
 is still needed. History removal and unmark choose a fresh cutoff, so a delayed retry can
 hide an intervening watch. Sync accepts an omitted `updated_at`, so a delayed replay can
 overwrite newer progress; every item needs a stable event time before automatic retries are safe.
+Two v2-only operations extend the section without ledger rows: `clearResumePosition`
+(`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
+resume position while keeping its watched state and history, answers `204` (also when there is
+nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
+kind `markWatched` does not handle, and is
+`non_retryable` because a delayed retry would also clear a position recorded in between;
+`getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
+`clear_resume_position`. Semantics are in [the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,

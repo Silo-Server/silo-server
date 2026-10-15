@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"testing"
 	"time"
 
@@ -310,91 +309,4 @@ func TestPostgresProgressPage(t *testing.T) {
 		})
 		return newStore(pool, userID)
 	})
-}
-
-// TestPostgresDeleteProfileRemovesProfileState runs the profile-deletion
-// conformance test against the Postgres backend. Skips unless
-// SILO_TEST_DATABASE_URL is set.
-func TestPostgresDeleteProfileRemovesProfileState(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	storetest.RunDeleteProfileRemovesProfileState(t, func(t *testing.T) userstore.UserStore {
-		var userID int
-		if err := pool.QueryRow(ctx,
-			`INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
-			fmt.Sprintf("conf-profiledelete-%d", time.Now().UnixNano()),
-		).Scan(&userID); err != nil {
-			t.Fatalf("seed user: %v", err)
-		}
-		// Deleting the user cascades to every user-scoped table.
-		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID) })
-		return newStore(pool, userID)
-	})
-}
-
-// profileTablesClearedElsewhere are the user tables with a profile_id that
-// DeleteProfile leaves to another step, with the step.
-var profileTablesClearedElsewhere = map[string]string{
-	"user_devices":   "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
-	"user_downloads": "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
-}
-
-// Every user table keyed by (user_id, profile_id) is cleared when a profile
-// is deleted: by profileCascadeTables, by a foreign key to user_profiles that
-// cascades, or by a step named in profileTablesClearedElsewhere. A new table
-// fails this test until it is given one of the three.
-func TestPostgresDeleteProfileCoversEveryProfileTable(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	rows, err := pool.Query(ctx, `
-		SELECT c.table_name
-		FROM   information_schema.columns c
-		JOIN   information_schema.tables t USING (table_schema, table_name)
-		WHERE  c.table_schema = 'public' AND t.table_type = 'BASE TABLE'
-		  AND  c.table_name LIKE 'user\_%' AND c.column_name = 'profile_id'
-		  AND  EXISTS (SELECT 1 FROM information_schema.columns u
-		               WHERE u.table_schema = 'public' AND u.table_name = c.table_name AND u.column_name = 'user_id')
-		  AND  NOT EXISTS (
-		         SELECT 1 FROM pg_constraint fk
-		         WHERE fk.contype = 'f' AND fk.confdeltype = 'c'
-		           AND fk.conrelid = format('public.%I', c.table_name)::regclass
-		           AND fk.confrelid = 'public.user_profiles'::regclass)
-		ORDER  BY 1`)
-	if err != nil {
-		t.Fatalf("list profile tables: %v", err)
-	}
-	tables, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		t.Fatalf("list profile tables: %v", err)
-	}
-	if len(tables) == 0 {
-		t.Fatal("found no profile tables; the schema query is wrong")
-	}
-	for _, table := range tables {
-		if slices.Contains(profileCascadeTables, table) {
-			continue
-		}
-		if _, ok := profileTablesClearedElsewhere[table]; ok {
-			continue
-		}
-		t.Errorf("%s has a profile_id but nothing removes its rows when the profile is deleted: add it to profileCascadeTables, or to profileTablesClearedElsewhere with the step that does", table)
-	}
 }

@@ -506,6 +506,14 @@ func (s *interestTrackingStore) ClearProgress(ctx context.Context, profileID, me
 	return err
 }
 
+func (s *interestTrackingStore) ClearResumePosition(ctx context.Context, profileID, mediaItemID string, at time.Time) (bool, error) {
+	cleared, err := s.UserStore.ClearResumePosition(ctx, profileID, mediaItemID, at)
+	if err == nil && cleared {
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+	}
+	return cleared, err
+}
+
 func (s *interestTrackingStore) ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
 	err := s.UserStore.ClearProgressBatch(ctx, profileID, mediaItemIDs, updatedAt)
 	if err == nil {

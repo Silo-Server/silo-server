@@ -4472,6 +4472,68 @@
       "body_file": "clear_file_marker_segment_ok.json"
     },
     {
+      "name": "clear_resume_position_not_found",
+      "operation_id": "clearResumePosition",
+      "scenario": "An item outside the viewer's catalog has no resume position to clear.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/progress/movie:missing/position",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "clear_resume_position_not_found.json"
+    },
+    {
+      "name": "clear_resume_position_not_leaf",
+      "operation_id": "clearResumePosition",
+      "scenario": "A season or series has no single resume position: a validation failure naming the path parameter.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/progress/series:heat/position",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "clear_resume_position_not_leaf.json"
+    },
+    {
+      "name": "clear_resume_position_ok",
+      "operation_id": "clearResumePosition",
+      "scenario": "Clearing a movie's resume position: 204 with no body; its watched state and history stay.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/progress/movie:heat-1995/position",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "collection_group_unsupported",
       "operation_id": "updateCollectionGroup",
       "scenario": "Personal collection groups are no longer supported; every group operation answers capability_unsupported.",
@@ -7916,6 +7978,28 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ProfileSectionSettingCollection",
       "body_file": "get_profile_section_settings_ok.json"
+    },
+    {
+      "name": "get_progress_capabilities_ok",
+      "operation_id": "getProgressCapabilities",
+      "scenario": "The progress capability document: clearResumePosition is served.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/progress/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"2ff6c702f87c15b4122063ead741b7271dbbbc461a5a54a97379df4b16633a18\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProgressCapabilities",
+      "body_file": "get_progress_capabilities_ok.json"
     },
     {
       "name": "get_provider_logout_api_key_empty",

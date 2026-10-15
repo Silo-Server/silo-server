@@ -41342,6 +41342,43 @@
         ],
         "type": "object"
       },
+      "ProgressCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "clear_resume_position": {
+            "description": "Whether clearResumePosition is served: it clears a movie or episode's resume position and keeps its watched state and watch history",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "clear_resume_position",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
       "ProgressCollection": {
         "additionalProperties": false,
         "properties": {
@@ -183268,6 +183305,358 @@
           "progress"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/progress/capabilities": {
+      "get": {
+        "operationId": "getProgressCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The watch progress features this server supports, such as clearing a resume position.",
+        "tags": [
+          "progress"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/progress/{media_item_id}/position": {
+      "delete": {
+        "operationId": "clearResumePosition",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "A movie or episode",
+            "in": "path",
+            "name": "media_item_id",
+            "required": true,
+            "schema": {
+              "description": "A movie or episode",
+              "examples": [
+                "movie-8f2c1a"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clear the acting profile's resume position on a movie or episode, keeping its watched state and watch history. An item without a resume position is a no-op.",
+        "tags": [
+          "progress"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },

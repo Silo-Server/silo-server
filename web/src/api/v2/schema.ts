@@ -9949,6 +9949,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/progress/{media_item_id}/position": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Clear the acting profile's resume position on a movie or episode, keeping its watched state and watch history. An item without a resume position is a no-op. */
+    delete: operations["clearResumePosition"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/progress/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The watch progress features this server supports, such as clearing a resume position. */
+    get: operations["getProgressCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/ratings": {
     parameters: {
       query?: never;
@@ -28295,6 +28329,22 @@ export interface components {
       revision: string;
       /** Format: int64 */
       snapshot_ttl_seconds: number;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    ProgressCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /**
+       * @description Whether clearResumePosition is served: it clears a movie or episode's resume position and keeps its watched state and watch history
+       * @example true
+       */
+      clear_resume_position: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -120178,6 +120228,245 @@ export interface operations {
       /** @description Not Acceptable */
       406: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  clearResumePosition: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description A movie or episode */
+        media_item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getProgressCapabilities: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProgressCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
