@@ -183,7 +183,6 @@ describe("measured bandwidth cache", () => {
       expect(readMeteredObservedLimitKbps(now)).toBeUndefined();
 
       recordObservedBandwidthLimitKbps(4_200, now);
-      expect(readMeasuredBandwidthKbps(now)).toBe(3_000);
       expect(readMeteredObservedLimitKbps(now)).toBe(3_000);
     } finally {
       vi.unstubAllGlobals();
@@ -207,6 +206,22 @@ describe("measured bandwidth cache", () => {
     recordObservedBandwidthLimitKbps(56_000);
     expect(readMeasuredBandwidthKbps()).toBe(56_000);
     expect(readMeteredObservedLimitKbps()).toBeUndefined();
+  });
+
+  it("does not carry a metered limit back onto an unmetered link", () => {
+    const now = Date.now();
+    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
+    try {
+      recordObservedBandwidthLimitKbps(4_200, now);
+      expect(readMeteredObservedLimitKbps(now)).toBe(4_200);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // Back on Wi-Fi: the cellular limit is neither an estimate nor fresh enough
+    // to skip a probe, and a Wi-Fi stall is not capped by it.
+    expect(readMeasuredBandwidthKbps(now)).toBeUndefined();
+    recordObservedBandwidthLimitKbps(30_000, now);
+    expect(readMeasuredBandwidthKbps(now)).toBe(30_000);
   });
 
   it("keeps a recorded limit when localStorage refuses the write", () => {

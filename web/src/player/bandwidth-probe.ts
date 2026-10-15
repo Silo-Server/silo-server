@@ -126,9 +126,14 @@ export function forgetBandwidthEstimate(): void {
   storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
 }
 
-/** The cached measurement in kbps, or undefined when none is fresh. */
+/**
+ * The cached measurement in kbps for an unmetered link, or undefined when none
+ * is fresh or the cached value was recorded on a metered link.
+ */
 export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined {
-  return readStored(now)?.kbps;
+  const stored = readStored(now);
+  // A limit recorded on a metered link describes that link only.
+  return stored && !stored.link ? stored.kbps : undefined;
 }
 
 /**
@@ -145,7 +150,10 @@ export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now())
   // so a metered link honors it.
   const sameLink = current?.link === meteredLink();
   if (current?.observed && sameLink && current.kbps <= observed) return;
-  writeStored(Math.min(observed, current?.kbps ?? observed), now, true);
+  // A cached value caps the new limit unless it came from another kind of
+  // metered link, which does not describe this one.
+  const cap = current && (sameLink || !current.link) ? current.kbps : observed;
+  writeStored(Math.min(observed, cap), now, true);
 }
 
 /**
@@ -389,7 +397,9 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
   const awaitExpiry = (): boolean => {
     const now = Date.now();
     const stored = readStored(now);
-    if (!stored) return false;
+    // A limit from a metered link says nothing about an unmetered one, so it
+    // does not stand in for a probe there.
+    if (!stored || (stored.link && !meteredLink())) return false;
     schedule(stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - now + 1000);
     return true;
   };

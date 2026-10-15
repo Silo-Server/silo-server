@@ -305,6 +305,9 @@ const MAX_AUTOPLAY_ATTEMPTS = 4;
 const ROOM_STALLS_BEFORE_LOWER_QUALITY = 2;
 const ROOM_STALL_WINDOW_MS = 5 * 60_000;
 const LOWER_QUALITY_ACTION_LABEL = "Lower quality";
+// Buffering this soon after a failed media request is treated as an outage,
+// not a slow link, by the Auto downshift.
+const TRANSPORT_TROUBLE_WINDOW_MS = 15_000;
 const PLAYBACK_NOTICE_VISIBLE_MS = 8_000;
 const ROOM_RECONNECTING_MESSAGE = "Reconnecting to room. Controls are temporarily unavailable.";
 // The server returns a room to the lobby once its position is within two
@@ -466,6 +469,9 @@ export function VideoPlayer({
   const hlsStartupGuardRef = useRef<HlsStartupGuard | null>(null);
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
+  // When hls.js last reported a failed load (not a timeout). Buffering soon
+  // after one is an outage, not a slow link, for the Auto downshift.
+  const lastTransportErrorAtRef = useRef(0);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
   // Whether the current transport has shown a frame. A network error after
   // that is a lost connection, not a route that cannot play. Reset whenever
@@ -2311,6 +2317,14 @@ export function VideoPlayer({
             });
 
             hls.on(Hls.Events.ERROR, (_event, data) => {
+              // A load error (refused, reset, HTTP failure) is the transport
+              // failing; a load timeout can be a slow link and is left out.
+              if (
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                String(data.details).endsWith("LoadError")
+              ) {
+                lastTransportErrorAtRef.current = Date.now();
+              }
               if (!data.fatal || destroyed) return;
 
               console.error("[hls.js] Fatal error:", {
@@ -3773,6 +3787,9 @@ export function VideoPlayer({
     // as a newly ready subtitle must not drop a stall in progress.
     planIdentity: planRevision,
     deliveredKbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps,
+    transportTrouble: () =>
+      (typeof navigator !== "undefined" && navigator.onLine === false) ||
+      Date.now() - lastTransportErrorAtRef.current < TRANSPORT_TROUBLE_WINDOW_MS,
     onDownshift: (estimateKbps) => {
       recordObservedBandwidthLimitKbps(estimateKbps);
       setNotice({

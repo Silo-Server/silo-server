@@ -294,6 +294,34 @@ describe("useAutoQualityDownshift", () => {
     expect(onDownshift).toHaveBeenCalledTimes(2);
   });
 
+  it("does not read buffering during a transport failure as a slow link", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    let failing = true;
+    renderHook(() =>
+      useAutoQualityDownshift({
+        videoRef: { current: video as unknown as HTMLVideoElement },
+        enabled: true,
+        sessionId: "s1",
+        planIdentity: "plan-1",
+        deliveredKbps: 80_000,
+        onDownshift,
+        transportTrouble: () => failing,
+      }),
+    );
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    vi.advanceTimersByTime(10_000);
+    expect(onDownshift).not.toHaveBeenCalled();
+
+    // Once requests succeed again, a new stall counts as usual.
+    failing = false;
+    fire(video, "playing", 45_000);
+    fire(video, "waiting", 60_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves an explicit quality alone", () => {
     const video = fakeVideo();
     const onDownshift = vi.fn();

@@ -104,6 +104,12 @@ interface Options {
   planIdentity: unknown;
   /** Bitrate the current plan delivers, when the server reported it. */
   deliveredKbps: number | undefined;
+  /**
+   * Whether the transport is failing rather than slow: requests erroring or
+   * the browser offline. Buffering then is an outage, which the reconnect
+   * path owns, so it never counts toward a downshift.
+   */
+  transportTrouble?: () => boolean;
   onDownshift: (estimateKbps: number) => void;
 }
 
@@ -114,11 +120,14 @@ export function useAutoQualityDownshift({
   planIdentity,
   deliveredKbps,
   onDownshift,
+  transportTrouble,
 }: Options): void {
   const onDownshiftRef = useRef(onDownshift);
+  const transportTroubleRef = useRef(transportTrouble);
   useEffect(() => {
     onDownshiftRef.current = onDownshift;
-  }, [onDownshift]);
+    transportTroubleRef.current = transportTrouble;
+  }, [onDownshift, transportTrouble]);
   // The plan the last downshift left and its bitrate, until the next plan is
   // adopted. The same plan still playing means the replan was not adopted,
   // and it stays eligible.
@@ -162,7 +171,19 @@ export function useAutoQualityDownshift({
       if (longStallTimer !== undefined) clearTimeout(longStallTimer);
       longStallTimer = undefined;
     };
+    // A seek, pause, end, source reload or transport failure ends any stall
+    // in progress: the buffering that follows is not the link failing to keep
+    // up.
+    const onInterrupted = () => {
+      stalledAt = undefined;
+      clearLongStallTimer();
+      tracker.seeking();
+    };
     const check = () => {
+      if (transportTroubleRef.current?.()) {
+        onInterrupted();
+        return;
+      }
       // A paused element is not starved, whatever happened before the pause.
       if (done || video.paused || !tracker.shouldDownshift(Date.now())) return;
       done = true;
@@ -181,6 +202,7 @@ export function useAutoQualityDownshift({
       onDownshiftRef.current(estimate);
     };
     const onPlaying = () => {
+      if (transportTroubleRef.current?.()) onInterrupted();
       stalledAt = undefined;
       clearLongStallTimer();
       tracker.playing(Date.now());
@@ -203,13 +225,6 @@ export function useAutoQualityDownshift({
     };
     const onTimeUpdate = () => {
       if (stalledAt !== undefined && video.currentTime > stalledAt) onPlaying();
-    };
-    // A seek, pause, end or source reload ends any stall in progress: the
-    // buffering that follows is not the link failing to keep up.
-    const onInterrupted = () => {
-      stalledAt = undefined;
-      clearLongStallTimer();
-      tracker.seeking();
     };
     // A plan adopted while the element is already playing fires no `playing`.
     if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
