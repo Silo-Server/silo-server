@@ -13682,7 +13682,7 @@
     {
       "name": "server_connections_ok",
       "operation_id": "getServerConnections",
-      "scenario": "A signed-in client reads the addresses the deployment offers: the public URL, a connected provider with its overlay origin, and an installed provider whose plugin is not running.",
+      "scenario": "A signed-in client reads the addresses the deployment offers: the public URL, a connected provider with its overlay origin, and an installed provider whose plugin is not running, and the local route: the pin of the key the API listener presents over TLS and the admin-set local address.",
       "request": {
         "method": "GET",
         "path": "/api/v2/system/connections",
@@ -13694,7 +13694,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"251d40c6578ba4f568f974b66faed17c5fd6ea82251fdc08ebc30e12c2be477f\""
+        "ETag": "\"f02d0bc389d7b11796f920283bb52592f5dd2c549318452808ce0f4fe3dfee6e\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ServerConnectionsDocument",

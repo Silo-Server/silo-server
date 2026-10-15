@@ -69,6 +69,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
+	"github.com/Silo-Server/silo-server/internal/lantls"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
@@ -771,6 +772,13 @@ func main() {
 	dataCipher, err := secret.New(bc.SecretKey)
 	if err != nil {
 		log.Fatalf("secret cipher: %v", err)
+	}
+	// The API listener also answers TLS on its own port, with a key derived
+	// from SECRET_KEY, so signed-in clients can use the server's local-network
+	// address over a channel they authenticate by pin (internal/lantls).
+	lanTLS, err := lantls.New(bc.SecretKey)
+	if err != nil {
+		log.Fatalf("local network TLS: %v", err)
 	}
 
 	// Step 2: Connect to PostgreSQL (bootstrap pool with default max connections)
@@ -1613,6 +1621,7 @@ func main() {
 	// revoke, status pushes) and all three listeners (token validation).
 	networkAccess := netaccess.NewBroker()
 	deps.NetworkAccess = networkAccess
+	deps.LocalTLSPin = lanTLS.Pin()
 	if deps.DB != nil {
 		pluginCacheDir := resolvePluginCacheDir()
 		repositoryStore := plugins.NewRepositoryStore(deps.DB)
@@ -3873,7 +3882,7 @@ func main() {
 	} else {
 		go func() {
 			slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
-			if serveErr := srv.Serve(apiListener); serveErr != nil && serveErr != http.ErrServerClosed {
+			if serveErr := srv.Serve(lantls.NewListener(apiListener, lanTLS.Config(), 0)); serveErr != nil && serveErr != http.ErrServerClosed {
 				errCh <- fmt.Errorf("HTTP server error: %w", serveErr)
 			}
 		}()

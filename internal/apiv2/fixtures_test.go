@@ -1955,7 +1955,12 @@ func fixtureDeps() Dependencies {
 	deps.OrderedAndroidPush = new(fakeOrderedPush)
 	fixtureProviders := netaccess.NewStatusCache()
 	fixtureProviders.Report(netaccess.Status{InstallationID: 7, Provider: "stub", State: netaccess.StateConnected, Origin: "https://silo.overlay.example.test"})
-	deps.ServerConnections = ServerConnections{PublicURL: func() string { return "https://silo.example.test" }, Providers: fixtureProviders}
+	deps.ServerConnections = ServerConnections{
+		PublicURL:   func() string { return "https://silo.example.test" },
+		LocalURL:    func() string { return "http://silo.lan.example.test:8080" },
+		Providers:   fixtureProviders,
+		LocalTLSPin: "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
+	}
 	deps.SubtitleAIReads = &fakeSubtitleAIReads{}
 	deps.Downloads = &fakeDownloadRegistry{}
 	deps.DownloadCreation = &fakeDownloadCreation{row: &downloads.Download{ID: "entry", ContentID: "movie", MediaFileID: 42, Revision: 1, CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Status: downloads.StatusReady, Quality: downloads.QualityOriginal, EffectiveQuality: downloads.QualityOriginal, Format: downloads.FormatOriginal, DeviceID: "device-one"}, page: downloads.CreatePage{BatchID: "intent", Skipped: []downloads.SkippedDownload{{EpisodeID: "missing", Reason: "no_file"}}}}

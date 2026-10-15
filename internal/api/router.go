@@ -314,6 +314,11 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// LocalTLSPin is the pin of the key the API listener presents over TLS on
+	// its own port (internal/lantls), published in the connections document.
+	// Empty when the listener does not answer TLS (tests).
+	LocalTLSPin string
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -2467,12 +2472,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		v2deps.ServerIdentity = serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
 	}
-	v2deps.ServerConnections = apiv2.ServerConnections{PublicURL: func() string {
-		if cfg := deps.CurrentConfig(); cfg != nil {
-			return cfg.Server.PublicURL
-		}
-		return ""
-	}}
+	v2deps.ServerConnections = apiv2.ServerConnections{
+		PublicURL: func() string {
+			if cfg := deps.CurrentConfig(); cfg != nil {
+				return cfg.Server.PublicURL
+			}
+			return ""
+		},
+		LocalURL: func() string {
+			if cfg := deps.CurrentConfig(); cfg != nil {
+				return cfg.Server.LocalURL
+			}
+			return ""
+		},
+		LocalTLSPin: deps.LocalTLSPin,
+	}
 	if deps.NetworkAccess != nil {
 		v2deps.ServerConnections.Providers = deps.NetworkAccess.Status
 	}

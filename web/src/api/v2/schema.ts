@@ -29587,6 +29587,8 @@ export interface components {
         | components["schemas"]["ServerEndpointPublic"]
         | components["schemas"]["ServerEndpointProvider"]
       )[];
+      /** @description How to reach the API server directly on the local network; absent on a server whose API port does not answer TLS. */
+      local_route?: components["schemas"]["ServerLocalRoute"];
       /** @description Opaque revision of this document */
       revision: string;
       /** @description The same identity getServerIdentity reports */
@@ -29636,6 +29638,18 @@ export interface components {
        * @example 3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35
        */
       server_id: string;
+    };
+    ServerLocalRoute: {
+      /**
+       * @description Base64 SHA-256 of the SubjectPublicKeyInfo of the certificate the API listener presents over TLS on its own port. A client accepts a local-network address only when TLS there presents this key, and learns it only over an address it already trusts. Derived from SECRET_KEY, so it changes when that key is rotated.
+       * @example n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=
+       */
+      spki_sha256: string;
+      /**
+       * @description server.local_url: scheme://host[:port] of the API server on the local network, when an admin set one. Clients connect with https on the same host and port, whatever the scheme says, and require the pinned key. Absent when unset; clients may still find local addresses through LAN discovery.
+       * @example http://192.168.1.20:8080
+       */
+      url?: string;
     };
     SettingConstraint: {
       /**
