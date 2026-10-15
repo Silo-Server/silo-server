@@ -5,8 +5,6 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { AVAILABLE_FONTS } from "@/lib/themeTokens";
-
 /**
  * fonts.css copies each @fontsource-variable package's @font-face rules by
  * hand, only renaming "<Family> Variable" to the plain family name. A package
@@ -50,12 +48,15 @@ function sortFaces(faces: Face[]): Face[] {
   return [...faces].sort((a, b) => a.file.localeCompare(b.file));
 }
 
+/** The families fonts.css self-hosts: only Cinema Dark's UI font. */
+const UI_FONTS = ["Outfit"];
+
 const localFaces = parseFaces(fontsCss);
 
 describe("fonts.css", () => {
-  it("declares exactly the fonts the themes and token editor offer", () => {
+  it("declares exactly the UI fonts", () => {
     expect([...new Set(localFaces.map((face) => face.family))].sort()).toEqual(
-      [...AVAILABLE_FONTS].sort(),
+      [...UI_FONTS].sort(),
     );
   });
 
@@ -63,7 +64,7 @@ describe("fonts.css", () => {
     for (const face of localFaces) expect(face.display, face.file).toBe("swap");
   });
 
-  it.each(AVAILABLE_FONTS)("matches the @fontsource-variable package for %s", (family) => {
+  it.each(UI_FONTS)("matches the @fontsource-variable package for %s", (family) => {
     const packageCss = readFileSync(
       require.resolve(`@fontsource-variable/${family.toLowerCase()}/wght.css`),
       "utf8",

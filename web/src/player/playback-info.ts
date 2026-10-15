@@ -1,10 +1,13 @@
 import {
+  audioTrackHasAtmos,
+  audioTrackLabel,
   dolbyVisionLabel,
   formatBitrate,
   formatCodecLabel,
   formatFileSize,
   formatMbpsFromKbps,
   formatSampleRate,
+  mentionsAtmos,
 } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
 import type { DeliveryV3, EffectiveRecipeV3, PlanV3 } from "./protocol-v3";
@@ -40,6 +43,8 @@ interface BuildPlaybackInfoSectionsInput {
   currentSourceVersion?: PlayerFileVersion;
   requestedVersion?: PlayerFileVersion;
   runtimeStats: RuntimePlaybackStats;
+  /** True while the browser decode engine plays the stream instead of the media element. */
+  browserEngine?: boolean;
 }
 
 export function buildPlaybackInfoSections({
@@ -48,6 +53,7 @@ export function buildPlaybackInfoSections({
   currentSourceVersion,
   requestedVersion,
   runtimeStats,
+  browserEngine = false,
 }: BuildPlaybackInfoSectionsInput): PlaybackInfoSection[] {
   const videoTrack = currentSourceVersion ? pickVideoTrack(currentSourceVersion) : undefined;
   const audioTrack = currentSourceVersion ? pickAudioTrack(currentSourceVersion) : undefined;
@@ -62,7 +68,7 @@ export function buildPlaybackInfoSections({
     {
       title: "Player",
       rows: [
-        { label: "Player", value: "HTML Video Player" },
+        { label: "Player", value: browserEngine ? "Browser decoder" : "HTML Video Player" },
         { label: "Play method", value: formatDelivery(plan.delivery) },
         { label: "Protocol", value: formatProtocol(streamUrl) },
         { label: "Stream type", value: formatStreamType(plan) },
@@ -467,6 +473,11 @@ export function formatOriginalAudioCodec(
   track?: PlayerAudioTrack,
 ): string {
   const title = track?.title || track?.embedded_title;
+  // An Atmos track whose title does not say so, such as the codec's long
+  // name the scanner gives an untagged track, shows its family label.
+  if (track?.codec && audioTrackHasAtmos(track) && !mentionsAtmos(title)) {
+    return audioTrackLabel(track);
+  }
   if (title) {
     return title;
   }

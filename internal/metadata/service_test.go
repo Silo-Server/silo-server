@@ -526,6 +526,10 @@ type fakeFileRepo struct {
 	matchStamps         map[int]time.Time // fileID -> match_attempted_at
 	updateErrors        map[int]error
 	afterUpdate         func(fileID int, contentID string)
+	listErr             error
+	listErrIn           int // when > 0, the listErrIn-th next GetByContentID fails with listErr
+	listHook            func()
+	listHookIn          int // when > 0, the listHookIn-th next GetByContentID runs listHook
 	claimUnmatchedCalls int
 	claimNonSeriesCalls int
 	claimMixedCalls     int
@@ -584,6 +588,22 @@ func (r *fakeFileRepo) FindContentIDByRootPath(_ context.Context, folderID int, 
 func (r *fakeFileRepo) GetByContentID(_ context.Context, contentID string) ([]*models.MediaFile, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.listHookIn > 0 {
+		r.listHookIn--
+		if r.listHookIn == 0 {
+			r.listHook()
+		}
+	}
+	if r.listErrIn > 0 {
+		r.listErrIn--
+		if r.listErrIn == 0 {
+			err := r.listErr
+			r.listErr = nil
+			return nil, err
+		}
+	} else if r.listErr != nil {
+		return nil, r.listErr
+	}
 	out := make([]*models.MediaFile, 0)
 	for _, files := range r.groupFiles {
 		for _, file := range files {
@@ -1293,6 +1313,91 @@ func TestSyncRefreshDebtForItemPreservesRequestedEpisodeDebt(t *testing.T) {
 	}
 }
 
+func TestSyncRefreshDebtForItemWakesTerminalEpisodeDebtWhenRecentWindowCloses(t *testing.T) {
+	seed := func(t *testing.T, episode *models.Episode) (*testHarness, *fakeRefreshDebtRepo) {
+		t.Helper()
+		h := newTestHarness()
+		episodes := newFakeEpisodeRepo()
+		debts := newFakeRefreshDebtRepo()
+		h.service.episodeRepo = episodes
+		h.service.refreshDebtRepo = debts
+		rating := 7.5
+		h.itemRepo.items["series-1"] = &models.MediaItem{
+			ContentID:                 "series-1",
+			Type:                      "series",
+			Status:                    "matched",
+			Overview:                  "Complete",
+			PosterPath:                testPosterPath,
+			BackdropPath:              testBackdropPath,
+			RatingTMDB:                &rating,
+			EpisodeMetadataIncomplete: true,
+		}
+		if err := episodes.Upsert(context.Background(), episode); err != nil {
+			t.Fatalf("seed episode: %v", err)
+		}
+		debts.debts["series-1"] = &models.MetadataRefreshDebt{
+			TargetType:   RefreshTargetItem,
+			ContentID:    "series-1",
+			ReasonMask:   RefreshDebtReasonEpisodeIncomplete,
+			AttemptCount: refreshDebtEpisodeTerminalAttempts,
+		}
+		return h, debts
+	}
+	syncDebt := func(t *testing.T, h *testHarness, debts *fakeRefreshDebtRepo) *models.MetadataRefreshDebt {
+		t.Helper()
+		if err := h.service.syncRefreshDebtForItem(context.Background(), "series-1"); err != nil {
+			t.Fatalf("syncRefreshDebtForItem: %v", err)
+		}
+		debt, err := debts.Get(context.Background(), "series-1")
+		if err != nil {
+			t.Fatalf("Get debt: %v", err)
+		}
+		if debt.ReasonMask != RefreshDebtReasonEpisodeIncomplete {
+			t.Fatalf("reason mask = %d, want only episode incomplete", debt.ReasonMask)
+		}
+		return debt
+	}
+
+	t.Run("recent TBD episode caps the terminal delay", func(t *testing.T) {
+		aired := time.Now().UTC().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
+		h, debts := seed(t, &models.Episode{
+			ContentID:      "episode-recent-tbd",
+			SeriesID:       "series-1",
+			SeasonID:       "season-1",
+			SeasonNumber:   1,
+			EpisodeNumber:  1,
+			Title:          "TBD",
+			StillPath:      "s3://still.jpg",
+			AirDate:        &aired,
+			TmdbID:         "3812334",
+			MetadataSource: "provider",
+		})
+
+		debt := syncDebt(t, h, debts)
+		if want := aired.Add(EpisodeRecentStillWindow + time.Minute); !debt.NextRefreshAt.Equal(want) {
+			t.Fatalf("next refresh = %v, want %v (window close, not the %v terminal delay)", debt.NextRefreshAt, want, refreshDebtTerminalDelay)
+		}
+	})
+
+	t.Run("old fallback episode keeps the terminal delay", func(t *testing.T) {
+		h, debts := seed(t, &models.Episode{
+			ContentID:      "episode-fallback",
+			SeriesID:       "series-1",
+			SeasonID:       "season-1",
+			SeasonNumber:   1,
+			EpisodeNumber:  2,
+			Title:          "Episode 2",
+			MetadataSource: "scanner_fallback",
+		})
+
+		before := time.Now().UTC()
+		debt := syncDebt(t, h, debts)
+		if debt.NextRefreshAt.Before(before.Add(refreshDebtTerminalDelay)) {
+			t.Fatalf("next refresh = %v, want the %v terminal delay", debt.NextRefreshAt, refreshDebtTerminalDelay)
+		}
+	})
+}
+
 func TestSyncRefreshDebtForItemClearsDebtAfterSecondaryTMDBRejected(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
@@ -1385,6 +1490,14 @@ func TestShouldReanchorProviderContentIDRequiresManualRefreshOrCorrection(t *tes
 		{
 			name:      "scheduled refresh with a corrected identity",
 			contentID: anchoredID, mode: ModeScheduledRefresh, corrected: true,
+		},
+		{
+			name:      "initial match keeping the tag anchor",
+			contentID: anchoredID, mode: ModeInitialMatch,
+		},
+		{
+			name:      "initial match whose NFO ids replaced the tag anchor",
+			contentID: anchoredID, mode: ModeInitialMatch, corrected: true, want: true,
 		},
 		{
 			name:      "manual refresh",
@@ -1496,6 +1609,119 @@ func TestRefreshSeriesEpisodeMetadataStateUsesActionableDebt(t *testing.T) {
 		}
 		if !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) {
 			t.Fatalf("fallback debt reason mask = %d, want episode incomplete", debt.ReasonMask)
+		}
+	})
+
+	t.Run("old provider TBD episode clears while fallback episode keeps debt", func(t *testing.T) {
+		h := newTestHarness()
+		ctx := context.Background()
+		episodes := newFakeEpisodeRepo()
+		debts := newFakeRefreshDebtRepo()
+		h.service.episodeRepo = episodes
+		h.service.refreshDebtRepo = debts
+		h.itemRepo.items["series-mixed"] = &models.MediaItem{
+			ContentID:                 "series-mixed",
+			Type:                      "series",
+			EpisodeMetadataIncomplete: true,
+		}
+		old := now.Add(-400 * 24 * time.Hour)
+		for _, ep := range []*models.Episode{
+			{
+				ContentID:      "episode-tbd",
+				SeriesID:       "series-mixed",
+				SeasonID:       "season-mixed",
+				SeasonNumber:   1,
+				EpisodeNumber:  1,
+				Title:          "TBD",
+				Overview:       "Provider overview",
+				StillPath:      "s3://still.jpg",
+				AirDate:        &old,
+				TmdbID:         "3812334",
+				MetadataSource: "provider",
+			},
+			{
+				ContentID:      "episode-fallback",
+				SeriesID:       "series-mixed",
+				SeasonID:       "season-mixed",
+				SeasonNumber:   1,
+				EpisodeNumber:  2,
+				Title:          "Episode 2",
+				MetadataSource: "scanner_fallback",
+			},
+		} {
+			if err := episodes.Upsert(ctx, ep); err != nil {
+				t.Fatalf("seed %s: %v", ep.ContentID, err)
+			}
+		}
+		debts.debts[fakeRefreshDebtKey(RefreshTargetEpisode, "episode-tbd")] = &models.MetadataRefreshDebt{
+			TargetType:   RefreshTargetEpisode,
+			ContentID:    "episode-tbd",
+			ReasonMask:   RefreshDebtReasonEpisodeIncomplete,
+			AttemptCount: refreshDebtEpisodeTerminalAttempts,
+		}
+
+		h.service.refreshSeriesEpisodeMetadataState(ctx, "series-mixed", now)
+
+		if _, err := debts.GetTarget(ctx, RefreshTargetEpisode, "episode-tbd"); !errors.Is(err, ErrRefreshDebtNotFound) {
+			t.Fatalf("real TBD episode debt after refresh = %v, want ErrRefreshDebtNotFound", err)
+		}
+		debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "episode-fallback")
+		if err != nil || !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) {
+			t.Fatalf("fallback episode debt = %+v, %v; want episode incomplete", debt, err)
+		}
+		item, err := h.itemRepo.GetByID(ctx, "series-mixed")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if !item.EpisodeMetadataIncomplete {
+			t.Fatal("expected the fallback episode to keep the series incomplete flag")
+		}
+	})
+
+	t.Run("terminal recent TBD debt wakes when the recent window closes", func(t *testing.T) {
+		h := newTestHarness()
+		ctx := context.Background()
+		episodes := newFakeEpisodeRepo()
+		debts := newFakeRefreshDebtRepo()
+		h.service.episodeRepo = episodes
+		h.service.refreshDebtRepo = debts
+		h.itemRepo.items["series-recent"] = &models.MediaItem{ContentID: "series-recent", Type: "series"}
+		aired := now.Add(-10 * 24 * time.Hour)
+		if err := episodes.Upsert(ctx, &models.Episode{
+			ContentID:      "episode-recent-tbd",
+			SeriesID:       "series-recent",
+			SeasonID:       "season-recent",
+			SeasonNumber:   1,
+			EpisodeNumber:  1,
+			Title:          "TBD",
+			StillPath:      "s3://still.jpg",
+			AirDate:        &aired,
+			TmdbID:         "3812334",
+			MetadataSource: "provider",
+		}); err != nil {
+			t.Fatalf("seed recent TBD episode: %v", err)
+		}
+		debts.debts[fakeRefreshDebtKey(RefreshTargetEpisode, "episode-recent-tbd")] = &models.MetadataRefreshDebt{
+			TargetType:   RefreshTargetEpisode,
+			ContentID:    "episode-recent-tbd",
+			ReasonMask:   RefreshDebtReasonEpisodeIncomplete,
+			AttemptCount: refreshDebtEpisodeTerminalAttempts,
+		}
+
+		h.service.refreshSeriesEpisodeMetadataState(ctx, "series-recent", now)
+
+		debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "episode-recent-tbd")
+		if err != nil {
+			t.Fatalf("GetTarget recent TBD debt: %v", err)
+		}
+		want := aired.Add(EpisodeRecentStillWindow + time.Minute)
+		if !debt.NextRefreshAt.Equal(want) {
+			t.Fatalf("next refresh = %v, want %v (window close, not the %v terminal delay)", debt.NextRefreshAt, want, refreshDebtTerminalDelay)
+		}
+		if EpisodeHasActionableMetadataDebt(&models.Episode{
+			Title: "TBD", StillPath: "s3://still.jpg", AirDate: &aired, TmdbID: "3812334", MetadataSource: "provider",
+		}, want) {
+			t.Fatal("recent TBD episode still owes debt when the debt row wakes")
 		}
 	})
 }

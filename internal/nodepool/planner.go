@@ -3,6 +3,7 @@ package nodepool
 import (
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,16 @@ import (
 type Plan struct {
 	TranscodeNode *Node
 	ProxyNode     *Node
+	// Reservation is the capacity reservation this selection made, if any.
+	Reservation Reservation
+}
+
+// Reservation identifies one reservation a selection made. A later selection
+// for the same session replaces the stored reservation with a new one, so a
+// caller that gives back what it reserved releases only its own, even when the
+// newer reservation charges the same node. The zero value identifies none.
+type Reservation struct {
+	held *reservation
 }
 
 // RouteRequest describes the exact node topology a higher-level routing
@@ -26,6 +37,11 @@ type RouteRequest struct {
 	NeedsProxy           bool
 	TranscodeEligible    func(*Node) bool
 	ProxyEligible        func(*Node) bool
+	// Unreachable holds the URLs of nodes the caller found not answering
+	// during this request. They count as unhealthy, so they are never selected
+	// and they degrade their co-location group just as a failed health check
+	// would, without waiting for the next sweep.
+	Unreachable map[string]struct{}
 }
 
 // RoutePlanner selects and provisionally reserves exactly the nodes requested
@@ -116,6 +132,10 @@ type Planner struct {
 	// because a cluster reaches "no headroom anywhere" on its own schedule.
 	// Guarded by mu.
 	scratchGuardDropped bool
+	// unreachable, when set, takes MarkTranscodeNodeUnreachable reports so the
+	// health checker can recheck the node and tell other API servers. Without
+	// it a report only marks the pool.
+	unreachable atomic.Pointer[func(nodeURL string) bool]
 }
 
 // NewPlanner creates a planner over the given pools.
@@ -312,6 +332,7 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 			res.kbps = estBitrateKbps
 		}
 		p.reserved[sessionID] = res
+		plan.Reservation = Reservation{held: res}
 	}
 	return plan
 }
@@ -347,6 +368,21 @@ func (p *Planner) PlanRoute(request RouteRequest) Plan {
 	// eligibility restricts what may be selected, not co-location semantics.
 	// Shared-GPU load is summed over the same full pool, for the same reason.
 	groupHealthy := groupHealth(proxies, pooledTranscodes)
+	if len(request.Unreachable) > 0 {
+		for _, nodes := range [][]*Node{proxies, pooledTranscodes} {
+			for _, n := range nodes {
+				if _, down := request.Unreachable[n.URL]; down && n.Group != nil {
+					groupHealthy[*n.Group] = false
+				}
+			}
+		}
+		reachable := func(n *Node) bool {
+			_, down := request.Unreachable[n.URL]
+			return !down
+		}
+		proxies = filterNodes(proxies, reachable)
+		transcodes = filterNodes(transcodes, reachable)
+	}
 
 	var plan Plan
 	if request.TranscodeEligible != nil {
@@ -383,6 +419,7 @@ func (p *Planner) PlanRoute(request RouteRequest) Plan {
 			res.kbps = request.EstimatedBitrateKbps
 		}
 		p.reserved[request.SessionID] = res
+		plan.Reservation = Reservation{held: res}
 	}
 	return plan
 }
@@ -461,6 +498,21 @@ func (p *Planner) ReleaseSession(sessionID string) {
 	p.mu.Unlock()
 }
 
+// ReleaseReservation removes a session's reservation only while it is still
+// the one held identifies. A caller that reserved a node and then lost the
+// session to a concurrent replan uses it: the replan's selection replaced the
+// reservation under the same session id, and that one must stand.
+func (p *Planner) ReleaseReservation(sessionID string, held Reservation) {
+	if p == nil || held.held == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.reserved[sessionID] == held.held {
+		delete(p.reserved, sessionID)
+	}
+}
+
 // ReleaseSessionProxy drops only the proxy half of a session's reservation,
 // leaving its transcode node charged. A start that selected both nodes but ends
 // up publishing a URL the proxy does not serve (its egress grant could not be
@@ -508,7 +560,7 @@ func (p *Planner) ReserveTranscodeWorkWith(workID string, eligible func(*Node) b
 
 	var best *Node
 	for _, node := range p.transcodes.Nodes() {
-		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
+		if !node.TakesNewWork() || !p.underCap(node, now) {
 			continue
 		}
 		if eligible != nil && !eligible(node) {
@@ -542,7 +594,7 @@ func (p *Planner) TranscodeWorkAvailableWith(eligible func(*Node) bool) bool {
 	defer p.mu.Unlock()
 	now := p.now()
 	for _, node := range p.transcodes.Nodes() {
-		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
+		if !node.TakesNewWork() || !p.underCap(node, now) {
 			continue
 		}
 		if eligible == nil || eligible(node) {
@@ -619,7 +671,7 @@ func (p *Planner) pickNode(nodes []*Node, currentURL string, now time.Time, elig
 // still occupies the same GPU.
 func (p *Planner) pickTranscode(transcodes, pool, proxies []*Node, groupHealthy map[string]bool, currentURL string, estKbps int, now time.Time) *Node {
 	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
-		return p.transcodeEligible(n, proxies, groupHealthy, estKbps, now)
+		return admitsSession(n, currentURL) && p.transcodeEligible(n, proxies, groupHealthy, estKbps, now)
 	}, p.physicalGPULoadScore(pool, now))
 }
 
@@ -758,8 +810,8 @@ func (p *Planner) noteScratchGuardDropped(dropped bool) {
 //
 // Pools only hold enabled nodes, so a node disabled while its transcodes are
 // still running leaves the pool and stops counting against its group — the same
-// blind spot the primary least-jobs rule already has, since there is no drain
-// state between enabled and gone.
+// blind spot the primary least-jobs rule already has. A draining node does not
+// have it: it stays pooled, so its jobs keep counting until they finish.
 //
 // Job counts only. Live GPU utilization is a richer signal but a much worse
 // tie-breaker: it lags a newly admitted job by a sampling interval, so a burst
@@ -815,7 +867,7 @@ func (p *Planner) physicalGPULoadScore(pool []*Node, now time.Time) func(*Node) 
 // and group-healthy, with no proxy partner required.
 func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealthy map[string]bool, currentURL string, now time.Time) *Node {
 	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
-		return p.transcodeEligible(n, nil, groupHealthy, 0, now)
+		return admitsSession(n, currentURL) && p.transcodeEligible(n, nil, groupHealthy, 0, now)
 	}, p.physicalGPULoadScore(pool, now))
 }
 

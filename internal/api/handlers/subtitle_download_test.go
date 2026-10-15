@@ -97,3 +97,29 @@ func TestSubtitleUploadServiceAuthorizationAndAttribution(t *testing.T) {
 		t.Fatalf("invalid upload: %v", err)
 	}
 }
+
+// A provider result ID in the wrong shape is a client input problem: the
+// native service answers 400 at subtitle_id, and the frozen v1 bridge keeps
+// its existing 500 download_error.
+func TestSubtitleDownloadInvalidSubtitleIDIsBadRequest(t *testing.T) {
+	repo := newMockSubtitleRepoForHandler()
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
+	manager.RegisterProvider(&downloadRecordingProvider{err: subtitles.ErrInvalidSubtitleID})
+	h := NewSubtitleSearchHandler(manager, repo, nil)
+	h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: stubItemAccessChecker{}}
+
+	_, err := h.DownloadStoredSubtitle(t.Context(), catalog.AccessFilter{UserID: 1}, subtitles.DownloadRequest{MediaFileID: 42, ProviderName: "example", SubtitleID: "malformed", Language: "en"})
+	failure, ok := errors.AsType[*APIError](err)
+	if !ok || failure.Status != http.StatusBadRequest || failure.Code != "bad_request" || failure.Field != "subtitle_id" {
+		t.Fatalf("service error = %v", err)
+	}
+	if !errors.Is(err, subtitles.ErrInvalidSubtitleID) {
+		t.Fatalf("service error lost the invalid-ID cause: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.HandleDownload(rec, newSubtitleAuthRequest(http.MethodPost, "/subtitles/download", strings.NewReader(`{"media_file_id":42,"provider":"example","subtitle_id":"malformed","language":"en"}`)))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), `"error":"download_error"`) {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+}

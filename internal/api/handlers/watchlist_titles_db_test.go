@@ -89,7 +89,7 @@ func TestWatchlistTitleOffDB(t *testing.T) {
 	}
 	check(false, "promoted onto the library watchlist")
 
-	if err := store.RemoveFromWatchlist(ctx, "p1", prefix); err != nil {
+	if _, err := store.RemoveFromWatchlist(ctx, "p1", prefix); err != nil {
 		t.Fatal(err)
 	}
 	check(true, "library watchlist entry removed")
@@ -115,9 +115,9 @@ type failingRemoveStore struct {
 	fail *bool
 }
 
-func (s failingRemoveStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error {
+func (s failingRemoveStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
 	if *s.fail {
-		return fmt.Errorf("user store unavailable")
+		return false, fmt.Errorf("user store unavailable")
 	}
 	return s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
 }
@@ -191,7 +191,7 @@ func TestRemoveWatchlistTitleRetryKeepsFormerIDsDB(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, prefix, folder); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddToWatchlist(ctx, "p1", prefix); err != nil {
+	if _, err := store.AddToWatchlist(ctx, "p1", prefix); err != nil {
 		t.Fatal(err)
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 type deviceStartRequest struct {
@@ -95,8 +95,7 @@ func (h *AuthHandler) HandleDeviceStart(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req deviceStartRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, true) {
 		return
 	}
 
@@ -171,8 +170,7 @@ func (h *AuthHandler) HandleDevicePoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req devicePollRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 	if req.DeviceCode == "" {
@@ -273,6 +271,10 @@ func (h *AuthHandler) LookupDeviceLogin(ctx context.Context, input auth.DeviceLo
 		if errors.Is(err, auth.ErrDeviceLoginNotFound) {
 			return nil, apiError(http.StatusNotFound, "not_found", "Device login request not found")
 		}
+		var attempts *auth.QuickConnectAttemptsError
+		if errors.As(err, &attempts) {
+			return nil, quickConnectAttemptsError(attempts)
+		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load device login")
 	}
 	return info, nil
@@ -370,9 +372,10 @@ func (h *AuthHandler) ApproveDeviceLogin(ctx context.Context, input auth.DeviceL
 	return DeviceLoginDecision{Status: auth.DeviceLoginStatusApproved}, nil
 }
 
-// ApproveDeviceHandoff approves a remote-playback pairing request for the
-// caller's verified profile. v1 POST /auth/device/approve-handoff and v2
-// approveDeviceHandoff both call it.
+// ApproveDeviceHandoff approves a pairing request for the caller's verified
+// profile: a remote-playback request, or on v2 a Jellyfin Quick Connect
+// request (v1 never sets the lookup's AccountID, so it cannot find one). v1
+// POST /auth/device/approve-handoff and v2 approveDeviceHandoff both call it.
 func (h *AuthHandler) ApproveDeviceHandoff(ctx context.Context, input auth.DeviceLoginLookupInput, userID int, profileID string) (DeviceLoginDecision, error) {
 	if h.device == nil {
 		return DeviceLoginDecision{}, apiError(http.StatusServiceUnavailable, "unavailable", "Device login is not configured")
@@ -388,7 +391,7 @@ func (h *AuthHandler) ApproveDeviceHandoff(ctx context.Context, input auth.Devic
 	if claims := apimw.GetClaims(ctx); claims != nil {
 		ctx = auth.WithClaims(ctx, claims)
 	}
-	if err := h.device.ApproveRemotePlayback(ctx, input, userID, profileID); err != nil {
+	if err := h.device.ApproveForProfile(ctx, input, userID, profileID); err != nil {
 		return DeviceLoginDecision{}, deviceDecisionError(err)
 	}
 	return DeviceLoginDecision{Status: auth.DeviceLoginStatusApproved}, nil
@@ -415,8 +418,13 @@ func (h *AuthHandler) DenyDeviceLogin(ctx context.Context, input auth.DeviceLogi
 // deviceDecisionError maps a device-login service failure onto the v1
 // status and code; the cause is kept so a caller can still branch on it.
 func deviceDecisionError(err error) *APIError {
-	var out *APIError
+	var (
+		out      *APIError
+		attempts *auth.QuickConnectAttemptsError
+	)
 	switch {
+	case errors.As(err, &attempts):
+		out = quickConnectAttemptsError(attempts)
 	case errors.Is(err, auth.ErrDeviceLoginNotFound):
 		out = apiError(http.StatusNotFound, "not_found", "Device login request not found")
 	case errors.Is(err, auth.ErrDeviceLoginExpired):
@@ -443,6 +451,15 @@ func deviceDecisionError(err error) *APIError {
 	}
 	out.cause = err
 	return out
+}
+
+// quickConnectAttemptsError is the 429 a six-digit Quick Connect code
+// answers once the account has tried too many. Both listeners render
+// RetryAfter as the Retry-After header; only v2 can reach it.
+func quickConnectAttemptsError(err *auth.QuickConnectAttemptsError) *APIError {
+	e := apiError(http.StatusTooManyRequests, "rate_limited", "Too many Quick Connect codes tried. Try again later.")
+	e.RetryAfter = ratelimit.RetryAfterSeconds(err.RetryAfter)
+	return e
 }
 
 func (h *AuthHandler) HandleDeviceApprove(w http.ResponseWriter, r *http.Request) {

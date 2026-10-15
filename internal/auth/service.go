@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -199,10 +200,19 @@ func (s *Service) CompatLogin(ctx context.Context, username, password, deviceNam
 // CompatLoginWithLocalFallback selects a provider once and retries a rejected
 // password only with that local provider. It reports whether fallback succeeded
 // so the caller can verify the PIN it split from the original password.
+//
+// A local password longer than MaximumPasswordBytes cannot be the account's
+// own, and bcrypt compares only its first 72 bytes, so such a password goes
+// straight to the fallback: otherwise a 72-byte password followed by "#pin"
+// would match as the full password and lose its PIN.
 func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip string) (*TokenPair, *models.User, bool, error) {
 	providerID, err := s.routePasswordLogin(ctx, username)
 	if err != nil {
 		return nil, nil, false, err
+	}
+	if providerID == LocalProviderID && fallback != "" && len(password) > MaximumPasswordBytes {
+		pair, user, err := s.loginWithProvider(ctx, LocalProviderID, username, fallback, deviceName, ip, true)
+		return pair, user, err == nil, err
 	}
 	pair, user, err := s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
 	if providerID != LocalProviderID || fallback == "" || !errors.Is(err, ErrInvalidCredentials) {
@@ -210,6 +220,18 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 	}
 	pair, user, err = s.loginWithProvider(ctx, LocalProviderID, username, fallback, deviceName, ip, true)
 	return pair, user, err == nil, err
+}
+
+// SplitPasswordPIN splits the compatibility sign-ins' "password#pin" at the
+// last '#', giving the fallback password for CompatLoginWithLocalFallback and
+// the profile PIN to check when that fallback is what matched. Returns
+// ("", "") if there is no '#' or the split would produce empty parts.
+func SplitPasswordPIN(password string) (basePw, pin string) {
+	idx := strings.LastIndex(password, "#")
+	if idx <= 0 || idx >= len(password)-1 {
+		return "", ""
+	}
+	return password[:idx], password[idx+1:]
 }
 
 func (s *Service) LoginWithProvider(
@@ -1080,6 +1102,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
 		return nil, ErrSessionRevoked
 	}
+	if session.IsRemotePlayback() && (session.BoundProfileID == "" || session.AbsoluteExpiresAt == nil) {
+		// The schema refuses such a row; fail closed rather than refresh a
+		// handoff that names no profile or no end.
+		return nil, ErrSessionRevoked
+	}
 
 	user, err := s.users.GetByID(ctx, session.UserID)
 	if err != nil {
@@ -1138,6 +1165,12 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 			newExpiry = session.ExpiresAt
 		}
 	}
+	// A session with an absolute end (a remote-playback handoff) never
+	// slides past it; the database trigger holds the same limit for every
+	// other writer.
+	if session.AbsoluteExpiresAt != nil && session.AbsoluteExpiresAt.Before(newExpiry) {
+		newExpiry = *session.AbsoluteExpiresAt
+	}
 	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil {
 		switch {
 		case !IsSessionNotFound(err):
@@ -1151,13 +1184,17 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 
 	// An impersonating administrator is not the one who must change the
 	// password, so only the account's own sessions are restricted.
-	return s.generateTokenPair(Claims{
+	refreshed := Claims{
 		UserID:                 user.ID,
 		Role:                   user.Role,
 		SessionID:              session.ID,
 		ImpersonatorUserID:     session.ImpersonatorUserID,
 		PasswordChangeRequired: user.PasswordChangeRequired && session.ImpersonatorUserID == nil,
-	})
+	}
+	if session.IsRemotePlayback() {
+		refreshed = remotePlaybackClaims(refreshed, session)
+	}
+	return s.generateTokenPair(refreshed)
 }
 
 func (s *Service) validateImpersonator(ctx context.Context, impersonatorUserID *int) error {
@@ -1277,6 +1314,12 @@ func (s *Service) CurrentLoginSession(ctx context.Context, userID int, sessionID
 	return session, nil
 }
 
+// LoginSessionActive reports whether a login session is live: not revoked
+// and not expired. An error means the store could not be read.
+func (s *Service) LoginSessionActive(ctx context.Context, sessionID string) (bool, error) {
+	return s.sessions.IsValid(ctx, sessionID)
+}
+
 // RevokeSession revokes a specific session. It verifies the session belongs
 // to the given user before revoking.
 func (s *Service) RevokeSession(ctx context.Context, sessionID string, userID int) error {
@@ -1308,7 +1351,7 @@ func (s *Service) generateTokenPair(claims Claims) (*TokenPair, error) {
 	return &TokenPair{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int(s.jwt.AccessExpiry().Seconds()),
+		ExpiresIn:    s.jwt.accessExpiresIn(claims),
 		SessionID:    claims.SessionID,
 	}, nil
 }

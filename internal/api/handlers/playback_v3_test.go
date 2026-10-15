@@ -4189,6 +4189,21 @@ func TestResolveV3AudioIndexFallsBackWhenSelectionIsOutOfRange(t *testing.T) {
 	}
 }
 
+// The fallback never lands on a track FFmpeg cannot decode, while an explicit
+// choice of one is kept for the planner to refuse by name.
+func TestResolveV3AudioIndexAvoidsUndecodableFallback(t *testing.T) {
+	file := &models.MediaFile{ID: 1, AudioTracks: []models.AudioTrack{{Codec: "", Default: true}, {Codec: "eac3"}}}
+
+	out := 7
+	if index, degraded, err := resolveV3AudioIndex(file, "", &out); err != nil || !degraded || index != 1 {
+		t.Fatalf("out-of-range fallback = %d degraded=%v err=%v, want the decodable track 1", index, degraded, err)
+	}
+	explicit := 0
+	if index, degraded, err := resolveV3AudioIndex(file, "", &explicit); err != nil || degraded || index != 0 {
+		t.Fatalf("explicit undecodable choice = %d degraded=%v err=%v, want it kept", index, degraded, err)
+	}
+}
+
 func TestResolveV3AudioIndexRejectsNegativeIndex(t *testing.T) {
 	negative := -1
 	file := &models.MediaFile{ID: 1, AudioTracks: []models.AudioTrack{{Language: "eng"}}}

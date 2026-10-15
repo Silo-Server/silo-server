@@ -140,11 +140,11 @@ func (s stubStore) UpsertHomeDismissal(context.Context, userstore.HomeItemDismis
 func (s stubStore) DeleteHomeDismissal(context.Context, string, string, string) error {
 	panic("unused")
 }
-func (s stubStore) AddFavorite(context.Context, string, string) error { panic("unused") }
+func (s stubStore) AddFavorite(context.Context, string, string) (bool, error) { panic("unused") }
 func (s stubStore) AddFavoriteAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
-func (s stubStore) RemoveFavorite(context.Context, string, string) error {
+func (s stubStore) RemoveFavorite(context.Context, string, string) (bool, error) {
 	panic("unused")
 }
 func (s stubStore) ListFavorites(context.Context, string, int, int) ([]userstore.Favorite, error) {
@@ -163,14 +163,16 @@ func (s stubStore) GetFavorite(context.Context, string, string) (*userstore.Favo
 func (s stubStore) GetWatchlistEntry(context.Context, string, string) (*userstore.WatchlistEntry, error) {
 	panic("unused")
 }
-func (s stubStore) AddToWatchlist(context.Context, string, string) error { panic("unused") }
+func (s stubStore) AddToWatchlist(context.Context, string, string) (bool, error) { panic("unused") }
 func (s stubStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
 func (s stubStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {
 	return true, nil
 }
-func (s stubStore) RemoveFromWatchlist(context.Context, string, string) error { panic("unused") }
+func (s stubStore) RemoveFromWatchlist(context.Context, string, string) (bool, error) {
+	panic("unused")
+}
 func (s stubStore) ReplaceWatchlistOrder(context.Context, string, []string) error {
 	panic("unused")
 }

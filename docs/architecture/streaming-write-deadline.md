@@ -24,8 +24,10 @@ per-response; every JSON, image and other ordinary API route keeps it.
 - If the transport does not support per-response write deadlines, the wrapper degrades
   to a plain pass-through and the server-level `WriteTimeout` stays in effect.
 - A paused client that stops reading for longer than `window` has its connection
-  reaped. That is intended: the client's reconnect ladder resumes at its byte cursor,
+  reaped. That is intended: a range-capable stream resumes at the client's byte cursor,
   and this is a strict improvement on the 120s that applied to *all* streams before.
+  A progressive remux has no byte ranges, so its client reopens it at the paused
+  position instead ([playback protocol v3](playback-protocol-v3.md)).
 
 ### Bumps are throttled on `Write`, never on `ReadFrom`
 

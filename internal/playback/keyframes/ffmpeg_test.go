@@ -97,6 +97,18 @@ func TestReadMatroskaMatchesFFprobe(t *testing.T) {
 	}
 
 	got := readIndex(t, path).Keyframes
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyMatroska(f, info.Size()); err != nil {
+		t.Fatalf("FFmpeg's Cues failed the full check: %v", err)
+	}
 	if len(got) != len(want) {
 		t.Fatalf("keyframes = %v, ffprobe = %v", got, want)
 	}
@@ -111,7 +123,7 @@ func TestReadMatroskaMatchesFFprobe(t *testing.T) {
 // video, or the complete playlist would list durations the segments don't
 // have.
 func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
-	ffmpeg, ffprobe := requireFFmpeg(t)
+	ffmpeg, _ := requireFFmpeg(t)
 	// Regular 2s keyframes on a timeline that starts at 0.28s land exactly
 	// on every target, which float error in the planner must not skip.
 	// A second audio track FFmpeg doesn't select runs 10s past the video, so
@@ -129,11 +141,11 @@ func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
 	for name, path := range map[string]string{"irregular": makeTestMKV(t, ffmpeg), "regular with an offset": regular} {
-		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, ffprobe, path) })
+		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, path) })
 	}
 }
 
-func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, ffprobe, path string) {
+func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
 	dir := t.TempDir()
 	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
 		"-i", path, "-map", "0:v:0", "-map", "0:a:0",
@@ -148,10 +160,21 @@ func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, ffprobe, path string) {
 	}
 	written := playlistDurations(t, filepath.Join(dir, "stream.m3u8"))
 
-	// The plan ends where the selected video does, which FFmpeg's HLS output
-	// follows; the container's duration can run past it.
-	idx := readIndex(t, path)
-	planned := SegmentDurations(PlanSegments(idx.Keyframes, 2), videoEnd(t, ffprobe, path))
+	// Plan as a session does: from the verified index, to the video's end.
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := VerifyMatroska(f, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	planned := SegmentDurations(PlanSegments(idx.Keyframes, 2), idx.VideoEnd)
 	if len(planned) != len(written) {
 		t.Fatalf("planned %d segments %v, FFmpeg wrote %d %v", len(planned), planned, len(written), written)
 	}
@@ -170,30 +193,10 @@ func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, ffprobe, path string) {
 		plannedTotal += planned[i]
 		writtenTotal += written[i]
 	}
+	// Per-segment tolerances could hide drift that adds up.
 	if math.Abs(plannedTotal-writtenTotal) > 0.041 {
 		t.Fatalf("planned %.3fs in all, FFmpeg wrote %.3fs", plannedTotal, writtenTotal)
 	}
-}
-
-// videoEnd is when the first video stream's last frame ends, from ffprobe.
-func videoEnd(t *testing.T, ffprobe, path string) float64 {
-	t.Helper()
-	out, err := exec.Command(ffprobe, "-v", "error", "-select_streams", "v:0",
-		"-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", path).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var end float64
-	for _, line := range strings.Fields(string(out)) {
-		pts, duration, _ := strings.Cut(strings.TrimSuffix(line, ","), ",")
-		p, err1 := strconv.ParseFloat(pts, 64)
-		d, err2 := strconv.ParseFloat(duration, 64)
-		if err1 != nil || err2 != nil {
-			t.Fatalf("ffprobe packet %q", line)
-		}
-		end = max(end, p+d)
-	}
-	return end
 }
 
 func playlistDurations(t *testing.T, path string) []float64 {
@@ -216,4 +219,51 @@ func playlistDurations(t *testing.T, path string) []float64 {
 		}
 	}
 	return durations
+}
+
+// VerifyMatroska's video end is where ffprobe's last video frame ends, and
+// a longer audio track doesn't move it.
+func TestVerifyMatroskaVideoEndMatchesFFprobe(t *testing.T) {
+	ffmpeg, ffprobe := requireFFmpeg(t)
+	path := filepath.Join(t.TempDir(), "longer-audio.mkv")
+	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=30000/1001:duration=9.5",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=15",
+		"-c:v", "libx264", "-preset", "ultrafast", "-g", "60", "-bf", "2",
+		"-c:a", "aac", path).CombinedOutput()
+	if err != nil {
+		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
+	}
+	out, err = exec.Command(ffprobe, "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want float64
+	for line := range strings.FieldsSeq(string(out)) {
+		pts, duration, _ := strings.Cut(strings.TrimSuffix(line, ","), ",")
+		p, err1 := strconv.ParseFloat(pts, 64)
+		d, err2 := strconv.ParseFloat(duration, 64)
+		if err1 != nil || err2 != nil {
+			t.Fatalf("ffprobe packet %q", line)
+		}
+		want = max(want, p+d)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := VerifyMatroska(f, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(idx.VideoEnd-want) > 0.001 || idx.Duration < 14 {
+		t.Fatalf("video end %.3fs (container %.3fs), ffprobe's last frame ends at %.3fs", idx.VideoEnd, idx.Duration, want)
+	}
 }

@@ -25,7 +25,7 @@ func TestConfiguredBrowseStateSQLiteCountAndPage(t *testing.T) {
 		id := fmt.Sprintf("movie-%03d", i)
 		browse.items = append(browse.items, &models.MediaItem{ContentID: id, Type: "movie", Title: id})
 		if i%50 == 0 {
-			if err := store.AddFavorite(t.Context(), "p1", id); err != nil {
+			if _, err := store.AddFavorite(t.Context(), "p1", id); err != nil {
 				t.Fatal(err)
 			}
 			if err := store.SetProgressAt(t.Context(), "p1", id, 10, 100, false, now); err != nil {
@@ -184,7 +184,7 @@ func TestConfiguredParentEpisodesCountBeforePaging(t *testing.T) {
 					id := fmt.Sprintf("ep-%03d", i)
 					repo.all = append(repo.all, &models.Episode{ContentID: id, SeriesID: "series", SeasonID: "season", SeasonNumber: 2, EpisodeNumber: i + 1})
 					if i == 1 || i == 100 || i == 104 || i == 250 {
-						if err := store.AddFavorite(t.Context(), "p1", id); err != nil {
+						if _, err := store.AddFavorite(t.Context(), "p1", id); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -312,7 +312,7 @@ func TestConfiguredSeriesBrowseEnrichesSelectedPage(t *testing.T) {
 	store := newJellycompatUserStore(t)
 	now := time.Now().UTC()
 	for _, id := range []string{"done-first", "partial", "done-last"} {
-		if err := store.AddFavorite(t.Context(), "p1", id); err != nil {
+		if _, err := store.AddFavorite(t.Context(), "p1", id); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -124,6 +124,58 @@ func looksLikeDiagnosticURL(value string) bool {
 	return true
 }
 
+// assignmentKey matches the key half of a key=value pair in free text. The
+// value is not part of the match, so a non-secret pair such as desc=api_key=x
+// cannot swallow the secret assignment that follows it.
+var assignmentKey = regexp.MustCompile(`[A-Za-z0-9_.-]+=`)
+
+// RedactSecretAssignments masks the value of every key=value pair in free text
+// whose key is secret-bearing (api_key=, access_token=, password=, ...). It is
+// for error text that crosses a boundary as a plain string, such as a gRPC
+// status description, where no structured URL is left to sanitize.
+func RedactSecretAssignments(text string) string {
+	if !strings.Contains(text, "=") {
+		return text
+	}
+	var out strings.Builder
+	last := 0
+	for _, m := range assignmentKey.FindAllStringIndex(text, -1) {
+		if m[0] < last || !diagnosticSecretKey(text[m[0]:m[1]-1]) {
+			continue
+		}
+		start, end := assignmentValue(text, m[1])
+		if start == end {
+			continue
+		}
+		out.WriteString(text[last:start])
+		out.WriteString(Placeholder)
+		last = end
+	}
+	if last == 0 {
+		return text
+	}
+	out.WriteString(text[last:])
+	return out.String()
+}
+
+// assignmentValue returns the bounds of the value that starts at i. A quoted
+// value runs to its closing quote; a bare one ends at whitespace, a query or
+// list separator, a quote or a closing bracket.
+func assignmentValue(text string, i int) (start, end int) {
+	if i < len(text) && (text[i] == '"' || text[i] == '\'') {
+		quote := text[i]
+		if j := strings.IndexByte(text[i+1:], quote); j >= 0 {
+			return i + 1, i + 1 + j
+		}
+		return i + 1, len(text)
+	}
+	end = i
+	for end < len(text) && !strings.ContainsRune(" \t\r\n&;,\"')]}>", rune(text[end])) {
+		end++
+	}
+	return i, end
+}
+
 // secretAssignmentPattern matches a key=value or key: value pair whose key
 // names a credential, anywhere in free text. Matching on the key alone means a
 // non-secret outer assignment (desc = api_key=SECRET) cannot hide a nested one.

@@ -464,7 +464,9 @@ returned `content_id` differs from the path ID when the item moved: a `local-`
 item takes its provider-anchored ID, and an item whose match the choice
 corrects moves to the ID its new identity derives (see
 [deterministic content IDs](architecture/deterministic-content-id.md#re-anchor-on-a-corrected-match)).
-Callers holding the old ID should switch to the returned one. Neither web mutation automatically retries or refreshes
+Callers holding the old ID should switch to the returned one. Apply records the
+choice on the item: later refreshes keep it when a local `.nfo` names another
+title, instead of re-matching to the file's `<uniqueid>`. Neither web mutation automatically retries or refreshes
 and replays authentication. Frozen v1 responses and parsing order remain
 unchanged. These administration flows have web consumers; Apple, Android and
 Jellyfin have no corresponding caller in the migration inventory.
@@ -483,8 +485,10 @@ array. No current web, native or Jellyfin consumer needs migration for this rout
 
 `GET /api/v2/admin/items/{id}/images` requires acting-admin access and returns
 `items`, `page`, `current`, and optional `provider_errors`. Pages default to 50
-choices and accept `limit` 1–200. Choice metadata determines a stable order;
-continuation binds the content ID, authority, limit and complete choice digest.
+choices and accept `limit` 1–200. On movie and series lists, local sidecar
+choices come first, in discovery order. Provider choices follow by rating,
+highest first; choice metadata breaks ties, so the order is stable.
+Continuation binds the content ID, authority, limit and complete choice digest.
 Expiring display URLs are excluded from that digest. A provider choice change
 returns `invalid_cursor` and requires reloading. Each page fetches and resolves
 the provider list again; pagination bounds response size, not provider work or
@@ -492,11 +496,30 @@ memory, and stores no server-side snapshot. Provider failures expose generic
 messages. The web drains all pages under one captured authority and refuses
 repeated or invalid continuation rather than publishing a partial list.
 
+For a movie or series the list also offers its local sidecar artwork (the
+`poster.jpg`, `fanart.jpg` and similar files a refresh would use), found by
+Silo's own sidecar discovery whether or not the library's metadata chain uses
+the NFO provider. A `file://` URL from any other provider is not offered. These
+choices have `provider_id` `local`, a `file://` `original_url`, and a small
+WebP preview as a `data:` URI in `url`. A file that cannot be read under the
+library-root, symlink and size checks is left out, and `provider_errors`
+reports the failure under `local`. Banner, thumb, clear art and disc art
+sidecars, and image URLs an NFO names, are not offered. When the library's
+provider chain cannot be resolved, the movie or series list still returns `200`
+with its local choices and reports the failure under `chain` in
+`provider_errors`; other lists return `500`. Frozen v1 lists provider choices
+only. See
+[Local NFO metadata](architecture/local-nfo-metadata.md#admin-image-picker).
+
 `POST /api/v2/admin/items/{id}/images/apply` accepts `original_url`, `type`, and
 optional `provider_id`. An HTTP(S) `original_url` may name a public or
 local-network address; link-local, cloud metadata and other blocked addresses
 are refused (see
-[Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)).
+[Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)). A `file://`
+`original_url` is accepted for a movie or series only when the item's sidecar
+discovery offers that file for that image type; anything else returns a `422`
+validation problem. A failure to read or cache an offered file returns `500`.
+Frozen v1 does not accept local files.
 It preserves target validation before remote work,
 episode-to-still coercion, parent/season/episode cache identity, immutable upload,
 transactional catalog publication and orphan-GC scheduling after publication

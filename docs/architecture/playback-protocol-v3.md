@@ -207,7 +207,7 @@ constant:
 | Field | Omitted | Present |
 | --- | --- | --- |
 | `start_position` | The profile's saved resume point for this item, or `0` when there is none, it is already complete, or the file is one part of a multipart item (every part shares the item's resume point, so a part-local seek to it would land somewhere arbitrary). It is required when `progress_persistence` is `client` | Exactly that position. `0` means *start over* |
-| `audio_track_id` / `audio_track_index` | The profile's preferred audio track, resolved from the series preference, then the profile's audio-language setting, then the library override | Exactly that track. When the file has no track at that index (a selection carried over from another episode or version), the file's default track plays and the plan carries `audio_track_unavailable` |
+| `audio_track_id` / `audio_track_index` | The profile's preferred audio track, resolved from the series preference, then the profile's audio-language setting, then the library override. Only tracks FFmpeg can decode are candidates while the file has one, so a track ffprobe names no codec for (AVS3 audio, for example) is passed over | Exactly that track. When the file has no track at that index (a selection carried over from another episode or version), the file's default track plays and the plan carries `audio_track_unavailable`. A track FFmpeg cannot decode ends in the non-retryable `audio_conversion_unsupported` terminal |
 
 `progress_persistence` separates the live session clock from durable resume
 ownership. Omission (or `server`) means session progress may update the item's
@@ -637,7 +637,10 @@ path does not inherit evidence from a different playback engine.
 `original_http` never receives normalized-remux evidence. An HDR10 claim can
 carry `hdr10_max_width`, `hdr10_max_height`, `hdr10_max_frame_rate`, and
 `hdr10_max_bitrate_kbps`; these ceilings keep a successful format probe from
-admitting an untested stream class.
+admitting an untested stream class. When the viewer turns on the web player's
+browser decode engine, `original_http` instead carries
+`client_managed_dynamic_range_v1` (with WebGPU) and the engine tone-maps the
+original itself; see [web-decode-engine.md](web-decode-engine.md).
 
 ---
 
@@ -660,6 +663,18 @@ inventory, so selecting a non-default audio track does not by itself require
 the server to remux the file. Without the claim, the historical default-track
 gate remains. A claiming client that cannot honor the identity reports a typed
 playback failure so the bounded replan ladder can choose a packaged route.
+
+A `server_remux_progressive` stream is forward-only: it has no byte ranges, and
+a request for it always starts at the plan's position. The server closes it
+after it makes no write progress for the stream stall window (see
+[streaming write deadlines](streaming-write-deadline.md)), which a paused
+client causes once its buffer is full. A client cannot resume such a stream
+where it stopped and has to open a new one at that position. The web player
+does this with a `seek_reanchor` replan (§6) when playback resumes after a
+minute idle, and falls back to its reconnect (§6.2) when the replan is refused.
+It does not do this in a watch-together room, whose transport the room
+controls; a room member who pauses past the stall window is not recovered this
+way.
 
 `client_playback_context.deliveries` is keyed by **class**, because a client's
 answer to "can you play HLS" does not differ between a remux and a transcode —
@@ -894,6 +909,19 @@ Three shapes exist:
 position, `can_seek_anywhere` is true when the runtime is known, and
 `seek_restoration` is `player_position` — the client seeks locally.
 
+Source positions count from the start of the file: the container's first
+timestamp is position 0. Most files start at timestamp zero, but MPEG-TS
+recordings and files remuxed from them can start seconds (or more) in. Plan positions, playlist time,
+subtitle tracks, and subtitle windows (`?position=&duration=`) are all on this
+container-relative timeline. Encoded HLS segments can still carry the source's
+own timestamps, so place them by playlist time, not by their PTS.
+A direct-play engine may keep the container's own timestamps instead:
+Chrome does for Matroska, reporting `currentTime` equal to the container start
+time at its first frame. Such a client must subtract that origin as part of its
+timeline offset, or subtitles, seeks, and reported positions drift by it. The
+web player reads the origin from `currentTime` at `loadedmetadata`, before it
+seeks to `player_start`.
+
 **Copy remux over HLS** is served from FFmpeg's live, still-growing playlist,
 which starts at the preceding keyframe selected by FFmpeg's input seek.
 For HEVC HDR copy packaging, the frozen plan also controls the sample entry: a
@@ -994,11 +1022,15 @@ fallback to another media version must remap the selected subtitle. It
 prefers a version with an equivalent track; when none has one, playback
 continues with subtitles off and the plan carries `subtitle_track_unavailable`
 rather than ending in a terminal. A selection the effective file cannot honor
-on a direct start degrades the same way. A replan that would have to drop the
+on a direct start degrades the same way. When the file being planned was
+refused with `subtitle_conversion_unsupported` and the only other versions that
+play drop the subtitle, the server plays that file with subtitles off instead
+of moving to one of them, provided that plan can run; when no other version
+plays, the terminal stands. A replan that would have to drop the
 subtitle to return to the requested version stays on the version already
 playing, unless quality `original` pins the requested version; the requested
-version remains a fallback without the subtitle if no version that keeps it can
-play. Malformed
+version remains a fallback without the subtitle, ahead of any other version
+without it, if no version that keeps it can play. Malformed
 selections (a track identity that does not parse or names another file, or a
 negative index) are still rejected.
 
@@ -1199,6 +1231,20 @@ route, so a direct-play viewer would come back on a transcode. The web player
    the connection was lost and offers to try again. Leaving the player or
    starting other playback cancels the cycle.
 
+Keeping the current route eligible does not mean keeping a dead node. Every
+replan except `seek_reanchor` first asks the session's transcode node and egress
+proxy whether they answer, with a two-second bound. A node that does not answer
+is left out of that replan's plan and route: its capabilities don't count, its
+running transport is not reused even by a `track_change` that changes nothing,
+and the replacement starts elsewhere. A `failure_recovery` or
+`seek_failure_recovery` from such a node doesn't exclude the failed plan's key
+either: the node failed, not the recipe, so the same recipe can run on another
+node. If the dead node was the only proxy a progressive remux could use, the
+remux has no route left and is planned as HLS on a transcode node instead. The
+pool's health flag cannot be trusted for this: it changes only at the next health
+sweep, up to 30 seconds after the node went away, and until then the node still
+looks healthy.
+
 A network failure before a transport's own first frame stays on the ordinary
 failure path, even when an earlier transport of the same viewing played: the
 new route may be one this client cannot reach. If that recovery then cannot
@@ -1240,7 +1286,7 @@ The plan will play, but something the user might notice was given up.
 | `bandwidth_cap_applied` | `bandwidth_cap_kbps` limited the selection |
 | `evidence_insufficient_for_direct` | Evidence tier blocked a direct route |
 | `audio_track_unavailable` | The selected audio track is not on the effective file; its default track plays |
-| `subtitle_track_unavailable` | The selected subtitle has no equivalent on the effective file; playback starts with subtitles off |
+| `subtitle_track_unavailable` | The selected subtitle has no equivalent on the effective file, or is on it but cannot be shown there; playback continues with subtitles off. `message` says which |
 
 ### 7.3 Terminal reasons
 
@@ -1253,7 +1299,10 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 `source_metadata_incomplete`, `source_unavailable`, `source_unreadable`,
 `audio_conversion_unsupported`, `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
-`subtitle_conversion_unsupported`. `source_metadata_incomplete` is retryable:
+`subtitle_conversion_unsupported`. `audio_conversion_unsupported` is not
+retryable when the selected audio track has no codec FFmpeg can name, and so
+no decoder: the planner refuses it before any route is tried, and choosing
+another track is the remedy. `source_metadata_incomplete` is retryable:
 the file has not been probed yet or lacks a field a route needs.
 `source_unreadable` is not: ffprobe rejected the effective file (empty,
 corrupt, truncated) and it carries no stream metadata. The scanner and the

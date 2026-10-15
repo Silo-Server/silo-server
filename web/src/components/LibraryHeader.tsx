@@ -64,6 +64,7 @@ export default function LibraryHeader({
 
   return (
     <header
+      data-sticky-header
       className={cn("library-marquee-header", overlay && "is-overlay")}
       data-scrolled={overlay ? (scrolled ? "true" : "false") : undefined}
     >

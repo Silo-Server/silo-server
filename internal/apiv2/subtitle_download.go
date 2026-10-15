@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -43,6 +44,9 @@ func registerSubtitleDownloads(reg *Registry) {
 			return nil, catalogProblem(err, "body")
 		}
 		row, err := reg.deps.SubtitleDownloads.DownloadStoredSubtitle(ctx, access, subtitles.DownloadRequest{MediaFileID: id, ProviderName: in.Body.Provider, SubtitleID: string(in.Body.SubtitleID), Language: in.Body.Language, ReleaseName: in.Body.ReleaseName, Score: in.Body.Score, HearingImpaired: in.Body.HearingImpaired})
+		if apiErr, ok := errors.AsType[*handlers.APIError](err); ok && apiErr.Status == http.StatusBadRequest && apiErr.Field != "" {
+			return nil, validationProblem(locationBody+"."+apiErr.Field, codeInvalid, apiErr.Message)
+		}
 		if err != nil {
 			return nil, serviceProblem(err)
 		}

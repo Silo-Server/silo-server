@@ -12,6 +12,7 @@ import (
 	"testing/synctest"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -27,9 +28,9 @@ func TestNodeAwarePreparerCapabilityProbeDoesNotForwardJWTOnRedirect(t *testing.
 	}))
 	defer redirectTarget.Close()
 
-	var sourceAuthorization atomic.Value
+	var sourceSigned atomic.Bool
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sourceAuthorization.Store(r.Header.Get("Authorization"))
+		sourceSigned.Store(nodeauthtest.Signed(r, jwt))
 		http.Redirect(w, r, redirectTarget.URL+"/hw-capabilities", http.StatusFound)
 	}))
 	defer source.Close()
@@ -45,8 +46,8 @@ func TestNodeAwarePreparerCapabilityProbeDoesNotForwardJWTOnRedirect(t *testing.
 	preparer.probeClient = injectedClient
 
 	_, err := preparer.toneMapCapabilitiesForNode(context.Background(), source.URL)
-	if got, want := sourceAuthorization.Load(), "Bearer "+jwt; got != want {
-		t.Fatalf("source Authorization = %#v, want %q", got, want)
+	if !sourceSigned.Load() {
+		t.Fatal("source request was not signed with the shared secret")
 	}
 	if got := redirectTargetHits.Load(); got != 0 {
 		t.Fatalf("redirect target requests = %d, Authorization = %#v; want no redirect request", got, redirectTargetAuthorization.Load())

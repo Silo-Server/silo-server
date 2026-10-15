@@ -79,6 +79,7 @@ func (reg *Registry) getWatchTrickplay(ctx context.Context, in *WatchTrickplayIn
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
+	filter.OmitWatchArtwork = true
 	detail, err := reg.deps.Watch.WatchDetail(ctx, claims.UserID, profileFrom(ctx), string(in.ID), filter)
 	if err != nil {
 		return nil, watchDetailProblem(err)

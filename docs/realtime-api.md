@@ -110,10 +110,19 @@ refreshes the session, mints the ticket again with the new token, and does not
 sign out. The new ticket carries the new role, so the socket does not close
 again for the same change.
 
-The bridge events socket never sends this frame. It picks its channels from the
-access token's role once, at the handshake, so it rechecks the login session on
-the same interval and closes without a frame once the session ends or the
-account's role differs from the token's.
+The bridge events socket never sends this frame. It picks its channels once, at
+the handshake: an admin account gets the administrator channels and other
+accounts' events only while it is the acting admin (see
+[api-contract.md](architecture/api-contract.md)), judged on the handshake's
+`X-Profile-Id` or, without one, on the profile its ticket was minted for. Any
+other profile on the account, such as a child profile, connects with the user
+channels. A rejected ticket (expired, reused, or for another account) leaves the
+connection unbound and judged as acting with no profile, so on a household with
+a PIN-protected or limited profile it also gets the user channels until the
+client reconnects with a fresh ticket. The socket rechecks the login session on the same interval and closes
+without a frame once the session ends, the account's role differs from the
+token's, or a connection holding the administrator channels is no longer the
+acting admin or that check fails.
 The playback-control and Watch Together sockets share the recheck but still
 close without a frame or dedicated code when it fails.
 
@@ -152,10 +161,17 @@ lane only for the same account, profile and installation: it takes the lane
 over and the superseded connection is closed, so its later ack and result
 frames are never routed. Ack and result frames are applied only while the
 receiving registration still owns the lane, through the existing command
-tracker and stop-completion paths. Login authority and session ownership are
+tracker and stop-completion paths. A `completed` result for `pause` or
+`unpause` sets the session's pause state at once, so the administrator session
+views show it without waiting for the player's next progress report. Replaying
+already accepted progress does not undo a confirmation; progress accepted after
+its receipt supersedes a queued confirmation. A completed stop or terminate ends
+session authority before ordered watch-provider finalization. Login authority and session ownership are
 re-checked every 15 seconds and the connection ends when either is lost, at
 access-token expiry, or after four hours. The frames (`hello`, command, `ack`,
-`result`, event) are unchanged from the bridge socket.
+`result`, event) are unchanged from the bridge socket. A client message larger
+than 64 KiB closes the connection with `1009` (message too big); the bridge
+socket applies the same limit.
 
 `GET /api/v2/playback/sessions/control/capabilities` reports `available`, plus
 `protocol` only when this server serves the handshake. The web player mints
@@ -363,7 +379,7 @@ Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchToget
 
 The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline. Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
 
-The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
+The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. On both versions a client message larger than 64 KiB closes the connection with `1009` (message too big) and runs the same disconnect callback. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
 
 The actual web room/player hook obtains a fresh credential for each reconnect. It captures original room proof and profile authority, sends no authentication retry, uses no URL credentials, checks the negotiated protocol, and suppresses old sockets' messages/results after authority or room replacement. It subscribes to the existing AuthProvider so same-profile PIN replacement rebinds even when room props do not change. A fresh reconnect uses an already-rotated access token only while the original logical authority remains current; it does not replay a refused ticket request. Terminal ticket refusals stop reconnecting; transient failures retain the existing bounded reconnect delay. Existing room-proof expiry ends access; it is not automatically renewed or rebound. Native adoption and exact caller inventories remain separate gates. Ticket consumption handles socket admission; the room coordinator handles membership and playback synchronization.
 

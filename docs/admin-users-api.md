@@ -5,6 +5,13 @@ retain the demo write guard. Scoped API keys retain their existing account and
 access-group grants; they cannot impersonate accounts. A household primary
 profile is not a server administrator.
 
+An `admin:users` key cannot create or promote an administrator, or set an
+administrator account's password, recovery email (`email`), role, or break-glass
+flag. These writes return 403 (`insufficient_scope` in v1, `permission_denied`
+in v2), including on the key owner's own account. Email is a recovery credential
+because a reset link permits a full login session. Other account fields remain
+subject to the Owner rules, and ordinary accounts remain editable within the scope.
+
 `GET /api/v2/admin/users/capabilities` reports account management, guarded
 configuration, transactional default-profile creation, and access-group support.
 It also reports the account projections below that depend on optional services:
@@ -65,6 +72,21 @@ value; `0` explicitly allows unlimited bitrate. Both access-group fields
 default to `0`. Values are nonnegative integers in kbps. A policy edit changes
 new playback sessions, not streams already playing.
 
+`max_profiles` is the household profile limit and is a nullable account override
+as well. `null` inherits the access group's `max_profiles`, and a value of at least
+1 replaces it. An administrator or an account outside every group inherits 5, and
+an access group created without a value gets 5. `effective_policy.max_profiles` is
+the limit that profile creation enforces: an account at its limit gets
+`409 profile_limit_reached`, and profiles it already has above a lowered limit are
+kept. The bridge v1 body has no inherit state for this field, so its
+`max_profiles` reports the limit that applies. A v1 update stores an override,
+except that sending back the inherited limit an account reported leaves it
+inheriting, and an explicit `null` clears an override back to inherit, as with
+the other policy fields. The group's own limit is v2-only: the v1
+access-group body carries no `max_profiles`, so a group limit is set and read
+through the v2 access-group operations. `GET /api/v2/admin/users/capabilities` reports `profile_limits: true`
+when access groups and account overrides take `max_profiles`.
+
 `POST /api/v2/admin/users` returns 201 with `{ "id": "..." }` and `Location`.
 Default-profile creation, when requested, uses the existing transactional
 provisioner. Unsupported transactional profile storage fails before account
@@ -96,6 +118,21 @@ full access except that server-prepared downloads
 clients show where a default comes from without keeping their own copy. The
 values come from the server build. Account capabilities advertise
 `policy_defaults`. Existing `admin:users` keys may use this read.
+
+## Library lists
+
+An account's or access group's `library_ids` is `null` for every library and an
+array for exactly the listed ones, so `[]` allows none. Create and update return
+`422 validation_failed` at `body.library_ids` when the array names a library that
+does not exist; a guarded update checks its precondition first. Whichever API
+writes these lists, and the [invitation](invitations-api.md) lists too, the
+database keeps only libraries that exist, and a write racing a library delete
+waits for it as it would behind a foreign key.
+
+Deleting a library removes its ID from every account, access group and
+invitation in the same transaction. A list left with no IDs stays `[]` and never
+widens to `null`. The edited accounts and groups get new revisions, so an editor
+holding the old ETag gets 412 instead of writing the deleted library back.
 
 ## Passwords
 
@@ -139,13 +176,15 @@ instead. `link` returns the URL for the administrator to share with the account
 holder. The URL is a bearer credential for the account's password until it expires.
 
 An account holds at most one live link: issuing a new one replaces the old. The link
-works once. Any other password change also retires it. The public side of the flow
+works once. Changing the password or recovery email also retires it; changing only
+the email's letter case preserves it. The public side of the flow
 is described in [password reset links](auth-api.md#password-reset-links).
 
 | Condition | Result |
 |-----------|--------|
 | No such account | `404 not_found` |
 | Account without local password sign-in (`password_login` false), account disabled, or no email address for `email` | `409 conflict` |
+| Recovery email or account eligibility changed while issuing the link | `409 conflict`; reload the account before trying again |
 | Email not configured for `email` | `409 capability_not_configured` |
 | No server public URL (`server.public_url`) | `409 capability_not_configured` |
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,5 +242,44 @@ func TestNotificationDisplayCredentialScope(t *testing.T) {
 				t.Fatalf("%d: %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// reason_flags is notification data, not a settings value: the contract must
+// not borrow JSONValue's settings description for it.
+func TestNotificationItemReasonFlagsSchema(t *testing.T) {
+	NewHandler(Dependencies{testRegister: func(reg *Registry) {
+		item := reg.api.OpenAPI().Components.Schemas.Map()["NotificationItem"]
+		if item == nil {
+			t.Fatal("NotificationItem schema is not published")
+		}
+		flags := item.Properties["reason_flags"]
+		if flags == nil {
+			t.Fatal("NotificationItem.reason_flags is not declared")
+		}
+		if flags.Type != "object" || flags.AdditionalProperties != true {
+			t.Fatalf("reason_flags = type %q, additionalProperties %v; want an open object", flags.Type, flags.AdditionalProperties)
+		}
+		if flags.Extensions[extExtensionBag] != "notification-reason-flags" {
+			t.Fatalf("reason_flags extension bag = %v", flags.Extensions[extExtensionBag])
+		}
+		if !strings.Contains(flags.Description, "notification type") || strings.Contains(flags.Description, "value_schema") {
+			t.Fatalf("reason_flags description = %q", flags.Description)
+		}
+	}})
+}
+
+func TestNotificationReasonFlagsMarshal(t *testing.T) {
+	for _, tc := range []struct {
+		in   NotificationReasonFlags
+		want string
+	}{
+		{nil, `{}`},
+		{NotificationReasonFlags(`{"follower":true,"request_id":"request-1"}`), `{"follower":true,"request_id":"request-1"}`},
+	} {
+		got, err := json.Marshal(tc.in)
+		if err != nil || string(got) != tc.want {
+			t.Fatalf("marshal %q = %s, %v; want %s", tc.in, got, err, tc.want)
+		}
 	}
 }

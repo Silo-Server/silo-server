@@ -36,6 +36,11 @@ type Request struct {
 	LibraryID *int
 	Path      string
 	Trigger   string
+	// SidecarFolder resolves a local metadata sidecar (an .nfo document or
+	// sidecar artwork) in a video library to a subtree scan of its folder
+	// instead of rejecting it. File-change sources set it; the scan API does
+	// not.
+	SidecarFolder bool
 }
 
 // Target is a fully-resolved scan request. Folder is always non-nil for
@@ -244,6 +249,9 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 	if supportsMediaFile(cleanPath) {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgUnsupportedExt, Reason: ReasonUnsupportedExtension}
 	}
+	if dir, ok := localSidecarScope(cleanPath, matchedRoot, folder.Type); ok {
+		return &Target{Folder: folder, Mode: ModeSubtree, Path: dir, Trigger: trigger}, nil
+	}
 	scope := cleanPath
 	if filepath.Clean(scope) == filepath.Clean(matchedRoot) {
 		// A vanished entry directly under the root reconciles via a full
@@ -313,6 +321,11 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	}
 
 	mode, err := ClassifyLibraryPath(cleanPath, matchedRoot, folder.Type)
+	if reqErr, ok := errors.AsType[*RequestError](err); ok && reqErr.Reason == ReasonUnsupportedExtension && req.SidecarFolder {
+		if dir, ok := localSidecarScope(cleanPath, matchedRoot, folder.Type); ok {
+			mode, cleanPath, err = ModeSubtree, dir, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -384,6 +397,23 @@ func mediaFileTarget(cleanPath, matchedRoot, folderType string) (string, string,
 		return "", "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path must be a file or directory", Reason: ReasonPathNotFileOrDir}
 	}
 	return ModeSubtree, dir, nil
+}
+
+// localSidecarScope maps a local metadata sidecar (an .nfo document or sidecar
+// artwork) in a video library to a subtree scan of its directory: the scan
+// lists the directory's sidecars, and metadata re-applies the items there whose
+// sidecars changed. A sidecar directly under the library root is not mapped,
+// so one edit in a flat library never becomes a full library scan; the next
+// library scan picks it up.
+func localSidecarScope(cleanPath, matchedRoot, folderType string) (string, bool) {
+	if !scansVideoFiles(folderType) || !scanner.IsLocalMetadataSidecar(cleanPath) {
+		return "", false
+	}
+	dir := filepath.Dir(cleanPath)
+	if filepath.Clean(dir) == filepath.Clean(matchedRoot) || !PathWithinRoot(dir, matchedRoot) {
+		return "", false
+	}
+	return dir, true
 }
 
 // scansVideoFiles reports whether a library kind is served by the video
