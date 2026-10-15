@@ -249,6 +249,24 @@ describe("useAutoQualityDownshift", () => {
     expect(onDownshift).toHaveBeenCalledTimes(2);
   });
 
+  it("leaves no stall timer behind when the re-arm restarts a stall", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    const { unmount } = renderOnAuto(video, onDownshift);
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+
+    // A new stall begins just before the re-arm, then Auto is turned off.
+    vi.advanceTimersByTime(57_000);
+    fire(video, "waiting", 93_000);
+    vi.advanceTimersByTime(3_000);
+    unmount();
+    vi.advanceTimersByTime(20_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+  });
+
   it("downshifts a stall that began in startup and never recovered", () => {
     const video = fakeVideo();
     const onDownshift = vi.fn();

@@ -211,6 +211,7 @@ export function useAutoQualityDownshift({
         // again from here so it can downshift once more.
         if (stalledAt !== undefined) {
           tracker.waiting(Date.now());
+          clearLongStallTimer();
           longStallTimer = setTimeout(checkStall, LONG_STALL_MS);
         }
       }, REARM_AFTER_UNADOPTED_MS);
