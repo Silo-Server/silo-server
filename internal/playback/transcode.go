@@ -2759,7 +2759,10 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		return progress
 	}
 	if s.copyPlan != nil {
-		s.checkCopyPlan(timeline.entries, ffmpegPlaylistComplete(manifest))
+		// An ended playlist doesn't say FFmpeg finished cleanly; only the
+		// exit (checkCopyPlanOutput) knows, so this checks what FFmpeg has
+		// moved past.
+		s.checkCopyPlan(timeline.entries, false)
 	}
 
 	for _, entry := range timeline.entries {

@@ -236,6 +236,30 @@ func TestCheckCopyPlanOutputReadsFFmpegsPlaylist(t *testing.T) {
 	}
 }
 
+// Reading a failed run's progress doesn't reject the file either: its ended
+// playlist doesn't mean FFmpeg finished.
+func TestSegmentProgressDoesNotTrustAnEndedPlaylist(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source.mkv")
+	if err := os.WriteFile(source, []byte("not matroska"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	failed := "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.600000,\nseg_00000.m4s\n#EXTINF:1.200000,\nseg_00001.m4s\n#EXT-X-ENDLIST\n"
+	if err := os.WriteFile(filepath.Join(out, "stream.m3u8"), []byte(failed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &TranscodeSession{
+		outputDir: out,
+		opts:      TranscodeOpts{InputPath: source, SessionID: "failed", SegmentDuration: 2},
+		copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}},
+		waitErr:   errors.New("exit status 1"),
+	}
+	s.SegmentProgress(time.Now())
+	if _, err := keyframes.Load(source); errors.Is(err, keyframes.ErrIncompleteIndex) || s.copyPlanRejected {
+		t.Fatalf("a failed run's progress rejected the file (Load err %v)", err)
+	}
+}
+
 func TestCopySegmentPlanManifest(t *testing.T) {
 	plan := &copySegmentPlan{durations: []float64{2.6, 5.2, 0.4}}
 	got := string(plan.manifest(plannedOpts(), "segment/", "token=abc"))
