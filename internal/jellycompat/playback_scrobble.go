@@ -415,6 +415,9 @@ func compatScrobbleSource(
 			}
 		}
 	}
+	if source := playedMediaSource(playSession, ""); source != nil {
+		return source
+	}
 	return firstMediaSource(playSession)
 }
 
