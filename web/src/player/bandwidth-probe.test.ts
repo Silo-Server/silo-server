@@ -1,5 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Node delivers BroadcastChannel messages between test workers, so another
+// test file starting playback could reach this suite. An in-file fake keeps
+// cross-tab messages to the channels created here.
+class FakeBroadcastChannel {
+  static open: FakeBroadcastChannel[] = [];
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  constructor(readonly name: string) {
+    FakeBroadcastChannel.open.push(this);
+  }
+  postMessage(data: unknown): void {
+    for (const peer of FakeBroadcastChannel.open) {
+      if (peer !== this && peer.name === this.name) {
+        queueMicrotask(() => peer.onmessage?.(new MessageEvent("message", { data })));
+      }
+    }
+  }
+  close(): void {
+    FakeBroadcastChannel.open = FakeBroadcastChannel.open.filter((peer) => peer !== this);
+  }
+}
 const fetchWithSession = vi.fn();
 vi.mock("@/api/client", () => ({
   fetchWithSession: (...args: unknown[]) => fetchWithSession(...args),
@@ -38,6 +58,8 @@ function timedBody(chunks: number, chunkBytes: number, stepMs: number) {
 }
 
 beforeEach(() => {
+  // Re-stubbed per test because tests unstub all globals afterwards.
+  vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
   storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
   fetchWithSession.mockReset();
 });
@@ -308,8 +330,29 @@ describe("scheduleBandwidthProbe", () => {
     const signal = (fetchWithSession.mock.calls[0]![1] as RequestInit).signal!;
 
     // Another tab's playback start, as this tab's channel receives it.
-    new BroadcastChannel("silo-playback-start").postMessage("start");
+    const otherTab = new FakeBroadcastChannel("silo-playback-start");
+    otherTab.postMessage("start");
+    otherTab.close();
     await vi.waitFor(() => expect(signal.aborted).toBe(true));
+  });
+
+  it("lets playback start when the browser refuses cross-tab channels", () => {
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        constructor() {
+          throw new DOMException("denied", "SecurityError");
+        }
+      },
+    );
+    try {
+      // A stopped schedule has no channel, so the next start creates one.
+      stopBandwidthProbes();
+      expect(() => cancelBandwidthProbe()).not.toThrow();
+      expect(() => scheduleBandwidthProbe(1_000)).not.toThrow();
+    } finally {
+      vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    }
   });
 
   it("does nothing after it is stopped", async () => {
