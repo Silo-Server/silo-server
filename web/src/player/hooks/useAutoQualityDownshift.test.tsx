@@ -322,6 +322,66 @@ describe("useAutoQualityDownshift", () => {
     expect(onDownshift).toHaveBeenCalledTimes(1);
   });
 
+  it("watches a no-lower plan again after the cooldown", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    const { rerender } = renderHook(
+      ({ plan }: { plan: string }) =>
+        useAutoQualityDownshift({
+          videoRef: { current: video as unknown as HTMLVideoElement },
+          enabled: true,
+          sessionId: "s1",
+          planIdentity: plan,
+          deliveredKbps: 6_000,
+          onDownshift,
+        }),
+      { initialProps: { plan: "plan-1" } },
+    );
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+
+    rerender({ plan: "plan-2" }); // came back no lower
+    fire(video, "playing", 40_000);
+    fire(video, "waiting", 60_000);
+    vi.advanceTimersByTime(10_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+
+    fire(video, "playing", 80_000);
+    vi.setSystemTime(400_000);
+    fire(video, "waiting", 400_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(2);
+  });
+
+  it("times a stall that outlasts an outage from when the outage clears", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    let failing = true;
+    renderHook(() =>
+      useAutoQualityDownshift({
+        videoRef: { current: video as unknown as HTMLVideoElement },
+        enabled: true,
+        sessionId: "s1",
+        planIdentity: "plan-1",
+        deliveredKbps: 80_000,
+        onDownshift,
+        transportTrouble: () => failing,
+      }),
+    );
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    vi.advanceTimersByTime(8_000);
+    expect(onDownshift).not.toHaveBeenCalled();
+
+    failing = false; // requests succeed again, but the stall goes on
+    vi.advanceTimersByTime(5_000);
+    expect(onDownshift).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves an explicit quality alone", () => {
     const video = fakeVideo();
     const onDownshift = vi.fn();

@@ -3774,6 +3774,12 @@ export function VideoPlayer({
     handleQualitySelectRef.current = handleQualitySelect;
   }, [handleQualitySelect]);
 
+  // A new plan is a new transport; the previous one's failed requests say
+  // nothing about it.
+  useEffect(() => {
+    lastTransportErrorAtRef.current = 0;
+  }, [planRevision]);
+
   // Auto quality chose this stream from an estimate taken before playback. When
   // the link proves slower, record what it could not sustain and replan Auto,
   // which reads that lower estimate. Rooms have their own lower-quality offer.

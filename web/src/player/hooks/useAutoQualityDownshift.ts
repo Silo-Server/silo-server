@@ -23,6 +23,12 @@ const LONG_STALL_MS = 6_000;
  */
 const REARM_AFTER_UNADOPTED_MS = 60_000;
 /**
+ * How long a plan that came back no lower after a downshift is left alone.
+ * The plan may be the bottom of the ladder, or another replan's result that
+ * arrived first; after this it is watched again either way.
+ */
+const NO_LOWER_COOLDOWN_MS = 5 * 60_000;
+/**
  * The new estimate as a share of the bitrate that stalled. Auto plans for 80%
  * of an estimate, so the next stream targets about 56% of the one that failed:
  * a 4K remux steps to a 4K encode, a 1080p encode to 720p.
@@ -135,29 +141,36 @@ export function useAutoQualityDownshift({
     { sessionId: string; planIdentity: unknown; kbps: number } | undefined
   >(undefined);
   // A plan adopted after a downshift that turned out no lower.
-  const exhaustedPlanRef = useRef<{ sessionId: string; planIdentity: unknown } | undefined>(
-    undefined,
-  );
+  const exhaustedPlanRef = useRef<
+    { sessionId: string; planIdentity: unknown; until: number } | undefined
+  >(undefined);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!enabled || !video || deliveredKbps === undefined) return;
     const estimate = downshiftEstimateKbps(deliveredKbps);
     if (estimate === undefined) return;
-    const exhausted = exhaustedPlanRef.current;
-    if (exhausted?.sessionId === sessionId && exhausted.planIdentity === planIdentity) return;
     // The first plan adopted after a downshift settles it. No lower than the
-    // plan that stalled means the ladder has nothing further down: leave that
-    // plan alone. Lower means the step worked, and any later plan, even one
-    // an unrelated replan raised again, is watched as usual.
+    // plan that stalled means the ladder may have nothing further down, or
+    // another replan's plan arrived first: leave it alone for a while rather
+    // than replan in a loop. Lower means the step worked, and any later plan,
+    // even one an unrelated replan raised again, is watched as usual.
     const previous = lastDownshiftFromRef.current;
     if (previous?.sessionId === sessionId && previous.planIdentity !== planIdentity) {
       lastDownshiftFromRef.current = undefined;
       if (deliveredKbps >= previous.kbps) {
-        exhaustedPlanRef.current = { sessionId, planIdentity };
-        return;
+        exhaustedPlanRef.current = {
+          sessionId,
+          planIdentity,
+          until: Date.now() + NO_LOWER_COOLDOWN_MS,
+        };
       }
     }
+    const exhausted = exhaustedPlanRef.current;
+    const blockedUntil =
+      exhausted?.sessionId === sessionId && exhausted.planIdentity === planIdentity
+        ? exhausted.until
+        : 0;
 
     // Where playback stood when the current stall began; undefined when not
     // stalled. A stall can end without a `playing` event (the player itself
@@ -171,21 +184,17 @@ export function useAutoQualityDownshift({
       if (longStallTimer !== undefined) clearTimeout(longStallTimer);
       longStallTimer = undefined;
     };
-    // A seek, pause, end, source reload or transport failure ends any stall
-    // in progress: the buffering that follows is not the link failing to keep
-    // up.
+    // A seek, pause, end or source reload ends any stall in progress: the
+    // buffering that follows is not the link failing to keep up.
     const onInterrupted = () => {
       stalledAt = undefined;
       clearLongStallTimer();
       tracker.seeking();
     };
     const check = () => {
-      if (transportTroubleRef.current?.()) {
-        onInterrupted();
-        return;
-      }
+      if (done || transportTroubleRef.current?.() || Date.now() < blockedUntil) return;
       // A paused element is not starved, whatever happened before the pause.
-      if (done || video.paused || !tracker.shouldDownshift(Date.now())) return;
+      if (video.paused || !tracker.shouldDownshift(Date.now())) return;
       done = true;
       clearLongStallTimer();
       lastDownshiftFromRef.current = { sessionId, planIdentity, kbps: deliveredKbps };
@@ -202,7 +211,8 @@ export function useAutoQualityDownshift({
       onDownshiftRef.current(estimate);
     };
     const onPlaying = () => {
-      if (transportTroubleRef.current?.()) onInterrupted();
+      // A stall that overlapped an outage was the outage; do not count it.
+      if (transportTroubleRef.current?.()) tracker.seeking();
       stalledAt = undefined;
       clearLongStallTimer();
       tracker.playing(Date.now());
@@ -212,6 +222,12 @@ export function useAutoQualityDownshift({
     // period only becomes long enough some time after the first check.
     const checkStall = () => {
       longStallTimer = undefined;
+      // During an outage, time the stall again from when it clears, so a
+      // stall that outlasts the outage still counts.
+      if (transportTroubleRef.current?.() && stalledAt !== undefined) {
+        tracker.seeking();
+        tracker.waiting(Date.now());
+      }
       check();
       if (!done && stalledAt !== undefined)
         longStallTimer = setTimeout(checkStall, STALL_RECHECK_MS);
