@@ -17,8 +17,10 @@ type DevicePosition struct {
 type DevicePageOptions struct {
 	// Empty ProfileID selects the household; the application must authorize it.
 	ProfileID string
-	Limit     int
-	After     *DevicePosition
+	// DeviceID, when set, narrows the page to that device's rows.
+	DeviceID string
+	Limit    int
+	After    *DevicePosition
 }
 
 func (o DevicePageOptions) Validate() error {

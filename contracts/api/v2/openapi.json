@@ -146975,6 +146975,14 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -146988,8 +146996,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "No Content"
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceSettings"
+                }
+              }
+            },
+            "description": "OK"
           },
           "400": {
             "content": {
@@ -147117,7 +147132,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update a device's entry for the acting profile, or another household profile; omitted members are unchanged. Settings and login sessions are untouched.",
+        "summary": "Update a device's entry for the acting profile, or another household profile, and return it; omitted members are unchanged. Settings and login sessions are untouched.",
         "tags": [
           "devices"
         ],

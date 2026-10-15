@@ -72,12 +72,15 @@ describe("device settings v2", () => {
   ])("sends the name %s for the selected profile's device", async (name, sent) => {
     const { client, wrapper } = setup();
     const invalidate = vi.spyOn(client, "invalidateQueries");
-    request.mockResolvedValueOnce(undefined);
+    request.mockResolvedValueOnce({
+      ...device,
+      profile_id: "sibling",
+      custom_name: sent ?? undefined,
+    });
     const { result } = renderHook(() => useRenameDevice(), { wrapper });
     await act(async () => {
       await result.current.mutateAsync({
         device: { deviceId: "tv/shared", profileId: "sibling" },
-        owner: "sibling",
         name,
       });
     });
@@ -93,12 +96,13 @@ describe("device settings v2", () => {
     const own = { ...device, device_id: "tv" };
     const sibling = { ...device, device_id: "tv", profile_id: "sibling" };
     client.setQueryData(deviceKeys.list("household"), [own, sibling]);
-    request.mockResolvedValueOnce(undefined).mockRejectedValue(new Error("offline"));
+    request
+      .mockResolvedValueOnce({ ...own, custom_name: "Living Room" })
+      .mockRejectedValue(new Error("offline"));
     const { result } = renderHook(() => useRenameDevice(), { wrapper });
     await act(async () => {
       await result.current.mutateAsync({
         device: { deviceId: "tv" },
-        owner: "p",
         name: "  Living   Room ",
       });
     });

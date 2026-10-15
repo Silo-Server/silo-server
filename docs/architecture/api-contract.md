@@ -2399,7 +2399,8 @@ and bidirectional overrides, collapses spaces, and rejects a name with no visibl
 character (`422`). Registration never writes the custom name, so it survives the
 device being seen again, and the reported `device_name` is kept. `listDevices`
 returns `custom_name` only when one is set; clients show it in place of
-`device_name`. The operation answers `204` and is naturally idempotent. A name
+`device_name`. The operation answers `200` with the entry as `listDevices` renders it
+and is naturally idempotent. A name
 belongs to one profile's entry, so a device two profiles use is named separately for
 each. `supports_device_rename` on `getSettingsContractCapabilities` tells a client
 the operation exists. Administrator device reads and download device views still

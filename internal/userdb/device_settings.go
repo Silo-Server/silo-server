@@ -16,10 +16,10 @@ func (s *SQLiteUserStore) ListDeviceSettingsPage(ctx context.Context, opts users
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
-	args := []any{opts.ProfileID, opts.ProfileID}
+	args := []any{opts.ProfileID, opts.ProfileID, opts.DeviceID, opts.DeviceID}
 	sqlText := `SELECT d.profile_id,d.device_id,d.device_name,COALESCE(d.custom_name,''),d.device_platform,d.last_seen_at,COALESCE(p.name,''),COALESCE((SELECT json_group_array(k.key) FROM user_setting_values k WHERE k.scope='profile_device' AND k.profile_id=d.profile_id AND k.device_id=d.device_id), '[]')
  FROM user_devices d LEFT JOIN profiles p ON p.id=d.profile_id
- WHERE (?='' OR d.profile_id=?)`
+ WHERE (?='' OR d.profile_id=?) AND (?='' OR d.device_id=?)`
 	if opts.After != nil {
 		sqlText += ` AND (d.last_seen_at < ? OR (d.last_seen_at = ? AND (d.profile_id,d.device_id) > (?,?)))`
 		args = append(args, opts.After.LastSeenAt, opts.After.LastSeenAt, opts.After.ProfileID, opts.After.DeviceID)

@@ -120,52 +120,50 @@ type DeviceUpdate struct {
 }
 
 // UpdateDevice applies an update to a device under the same authorization as
-// forgetting it. The reported name is never changed, so the device can still
-// be identified by it.
-func (h *DeviceHandler) UpdateDevice(ctx context.Context, actor DeviceSettingsActor, profileID, deviceID string, update DeviceUpdate) error {
+// forgetting it and returns the entry as it now stands. The reported name is
+// never changed, so the device can still be identified by it.
+func (h *DeviceHandler) UpdateDevice(ctx context.Context, actor DeviceSettingsActor, profileID, deviceID string, update DeviceUpdate) (userstore.DeviceSettingsEntry, error) {
 	profileID = strings.TrimSpace(profileID)
 	deviceID = strings.TrimSpace(deviceID)
 	if deviceID == "" {
-		return apiError(http.StatusBadRequest, "bad_request", "A device id is required")
+		return userstore.DeviceSettingsEntry{}, apiError(http.StatusBadRequest, "bad_request", "A device id is required")
 	}
 	name := ""
 	if update.Rename && update.CustomName != nil {
 		name = deviceCustomName(*update.CustomName)
 		if name == "" {
-			return fieldError("custom_name", "A device name needs at least one visible character")
+			return userstore.DeviceSettingsEntry{}, fieldError("custom_name", "A device name needs at least one visible character")
 		}
 	}
 	store, err := h.deviceSettingsStore(ctx, actor, profileID, false)
 	if err != nil {
-		return err
+		return userstore.DeviceSettingsEntry{}, err
 	}
 	if profileID == "" {
 		profileID = actor.ProfileID
 	}
-	if !update.Rename {
-		registry, ok := store.(userstore.DeviceRegistry)
-		if !ok {
-			return apiError(http.StatusServiceUnavailable, "not_configured", "Device settings are unavailable")
+	notFound := apiError(http.StatusNotFound, "not_found", "Device not found")
+	if update.Rename {
+		err = store.RenameDevice(ctx, profileID, deviceID, name)
+		if errors.Is(err, userstore.ErrDeviceNotFound) {
+			return userstore.DeviceSettingsEntry{}, notFound
 		}
-		exists, err := registry.DeviceExists(ctx, profileID, deviceID)
 		if err != nil {
-			return err
+			return userstore.DeviceSettingsEntry{}, err
 		}
-		if !exists {
-			return apiError(http.StatusNotFound, "not_found", "Device not found")
-		}
-		return nil
+		// Identity only: the chosen name is the user's text and stays out of logs.
+		auditSettingsForOther(ctx, settingsAuditRecord{Action: "rename_device", ActorProfileID: apimw.GetProfileID(ctx), TargetProfileID: profileID, TargetUserID: actor.UserID, DeviceID: deviceID})
 	}
-	err = store.RenameDevice(ctx, profileID, deviceID, name)
-	if errors.Is(err, userstore.ErrDeviceNotFound) {
-		return apiError(http.StatusNotFound, "not_found", "Device not found")
-	}
+	// A forget that lands between the update and this read leaves nothing to
+	// return, which is the same answer as a device that was never there.
+	rows, err := store.ListDeviceSettingsPage(ctx, userstore.DevicePageOptions{ProfileID: profileID, DeviceID: deviceID, Limit: 1})
 	if err != nil {
-		return err
+		return userstore.DeviceSettingsEntry{}, err
 	}
-	// Identity only: the chosen name is the user's text and stays out of logs.
-	auditSettingsForOther(ctx, settingsAuditRecord{Action: "rename_device", ActorProfileID: apimw.GetProfileID(ctx), TargetProfileID: profileID, TargetUserID: actor.UserID, DeviceID: deviceID})
-	return nil
+	if len(rows) == 0 {
+		return userstore.DeviceSettingsEntry{}, notFound
+	}
+	return rows[0], nil
 }
 
 // deviceCustomName normalizes a chosen device name. Control characters, which

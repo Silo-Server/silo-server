@@ -45,16 +45,20 @@ func (f *fakeDeviceSettings) RemoveDeviceSettings(_ context.Context, a handlers.
 	}
 	return nil
 }
-func (f *fakeDeviceSettings) UpdateDevice(_ context.Context, a handlers.DeviceSettingsActor, p, d string, u handlers.DeviceUpdate) error {
+func (f *fakeDeviceSettings) UpdateDevice(_ context.Context, a handlers.DeviceSettingsActor, p, d string, u handlers.DeviceUpdate) (userstore.DeviceSettingsEntry, error) {
 	f.calls++
 	f.actor = a
 	f.targetProfile = p
 	f.targetDevice = d
 	f.update = u
 	if d == "missing" {
-		return &handlers.APIError{Status: 404, Code: "not_found", Message: "Device not found"}
+		return userstore.DeviceSettingsEntry{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device not found"}
 	}
-	return nil
+	entry := userstore.DeviceSettingsEntry{DeviceEntry: userstore.DeviceEntry{ProfileID: p, DeviceID: d, DeviceName: "Apple TV", DevicePlatform: "tvOS", LastSeenAt: "2026-01-02T03:04:05.123456Z"}, ProfileName: "Family"}
+	if u.Rename && u.CustomName != nil {
+		entry.CustomName = *u.CustomName
+	}
+	return entry, nil
 }
 func TestDeviceSettingsWire(t *testing.T) {
 	f := &fakeDeviceSettings{}
@@ -122,8 +126,12 @@ func TestUpdateDeviceWire(t *testing.T) {
 		{`{}`, "<unchanged>"},
 	} {
 		rec := do(t, h, http.MethodPatch, "/api/v2/devices/d-1?profile_id=p-family", c.body, headers)
-		if rec.Code != 204 || rec.Body.Len() != 0 || f.targetProfile != "p-family" || f.targetDevice != "d-1" || name(f.update) != c.want {
+		if rec.Code != 200 || f.targetProfile != "p-family" || f.targetDevice != "d-1" || name(f.update) != c.want {
 			t.Fatalf("%s: %d %q %s", c.body, rec.Code, name(f.update), rec.Body.String())
+		}
+		var got DeviceSettings
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.DeviceID != "d-1" || got.DeviceName != "Apple TV" || got.ProfileID != "p-family" || (c.want == "Living Room") != (got.CustomName == "Living Room") {
+			t.Fatalf("%s: representation %s", c.body, rec.Body.String())
 		}
 	}
 	before := f.calls
@@ -132,7 +140,7 @@ func TestUpdateDeviceWire(t *testing.T) {
 			t.Fatalf("invalid name reached the seam: %d %s", rec.Code, rec.Body.String())
 		}
 	}
-	if rec := do(t, h, http.MethodPatch, "/api/v2/devices/d-1", `{"custom_name":"`+strings.Repeat("é", 120)+`"}`, headers); rec.Code != 204 {
+	if rec := do(t, h, http.MethodPatch, "/api/v2/devices/d-1", `{"custom_name":"`+strings.Repeat("é", 120)+`"}`, headers); rec.Code != 200 {
 		t.Fatalf("120 runes: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := do(t, h, http.MethodPatch, "/api/v2/devices/missing", `{"custom_name":"x"}`, headers); rec.Code != 404 {

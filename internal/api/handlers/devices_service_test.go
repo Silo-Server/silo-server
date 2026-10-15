@@ -69,7 +69,7 @@ func TestDeviceSettingsProductionWrapper(t *testing.T) {
 	}
 	name := "Kitchen"
 	for _, update := range []DeviceUpdate{{Rename: true, CustomName: &name}, {}} {
-		if err := h.UpdateDevice(ctx, actor, "", "d", update); err != nil {
+		if _, err := h.UpdateDevice(ctx, actor, "", "d", update); err != nil {
 			t.Fatalf("wrapped update %+v: %v", update, err)
 		}
 	}
@@ -84,7 +84,7 @@ func TestUpdateDeviceRename(t *testing.T) {
 	h, store := newDevicesTestHandler(t)
 	seedDevice(t, store, "profile-1", "tv", "Apple TV")
 	seedDevice(t, store, "profile-2", "tv", "Apple TV")
-	status := func(err error) int {
+	status := func(_ userstore.DeviceSettingsEntry, err error) int {
 		var apiErr *APIError
 		if errors.As(err, &apiErr) {
 			return apiErr.Status
@@ -115,6 +115,10 @@ func TestUpdateDeviceRename(t *testing.T) {
 	}
 	if got := names()["profile-2"]; got != "Apple TV|Living Room" {
 		t.Fatalf("stored name: %q", got)
+	}
+	entry, err := h.UpdateDevice(ctx, member, "", "tv", DeviceUpdate{})
+	if err != nil || entry.ProfileID != "profile-2" || entry.DeviceID != "tv" || entry.CustomName != "Living Room" || entry.DeviceName != "Apple TV" {
+		t.Fatalf("returned entry: %+v %v", entry, err)
 	}
 	if got := status(h.UpdateDevice(ctx, member, "profile-1", "tv", rename("Den"))); got != http.StatusForbidden {
 		t.Fatalf("member renaming another profile's device: %d", got)

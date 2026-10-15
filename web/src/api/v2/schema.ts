@@ -7331,7 +7331,7 @@ export interface paths {
     delete: operations["forgetDevice"];
     options?: never;
     head?: never;
-    /** Update a device's entry for the acting profile, or another household profile; omitted members are unchanged. Settings and login sessions are untouched. */
+    /** Update a device's entry for the acting profile, or another household profile, and return it; omitted members are unchanged. Settings and login sessions are untouched. */
     patch: operations["updateDevice"];
     trace?: never;
   };
@@ -96789,6 +96789,7 @@ export interface operations {
         "X-Profile-Id": string;
         /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
         "X-Profile-Token"?: string;
+        "X-Silo-Device-Id"?: string;
       };
       path: {
         device_id: string;
@@ -96801,12 +96802,14 @@ export interface operations {
       };
     };
     responses: {
-      /** @description No Content */
-      204: {
+      /** @description OK */
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["DeviceSettings"];
+        };
       };
       /** @description Bad Request */
       400: {

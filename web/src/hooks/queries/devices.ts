@@ -75,15 +75,13 @@ export function useRenameDevice() {
         query: { profile_id: device.profileId },
         body: { custom_name: name },
       }),
-    // The saved name goes into every cached list first: a refetch that fails
-    // keeps the cache, and the editor closes on success either way. Spaces
-    // collapse as the server does; the refetch brings its exact name.
-    onSuccess: (_, { device, owner, name }) => {
-      const custom = name?.trim().replace(/\s+/g, " ") || undefined;
+    // The saved entry goes into every cached list first, so a refetch that
+    // fails still leaves the new name on screen when the editor closes.
+    onSuccess: (saved) => {
       qc.setQueriesData<UserDevice[]>({ queryKey: deviceKeys.all }, (devices) =>
         devices?.map((row) =>
-          row.device_id === device.deviceId && row.profile_id === owner
-            ? { ...row, custom_name: custom }
+          row.device_id === saved.device_id && row.profile_id === saved.profile_id
+            ? { ...row, custom_name: saved.custom_name }
             : row,
         ),
       );
@@ -95,8 +93,6 @@ export function useRenameDevice() {
 
 export interface RenameDeviceInput {
   device: DeviceTarget;
-  /** The profile whose row this is, which picks it out of the cached lists. */
-  owner: string;
   /** The new name, or `null` to show the reported name again. */
   name: string | null;
 }

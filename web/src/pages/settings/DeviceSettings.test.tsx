@@ -332,7 +332,6 @@ describe("DeviceSettings capability discovery", () => {
       expect(mocks.renameDevice).toHaveBeenCalledWith(
         {
           device: { deviceId: "living-room", profileId: undefined },
-          owner: "profile-1",
           name: "Den",
         },
         expect.anything(),
@@ -353,7 +352,6 @@ describe("DeviceSettings capability discovery", () => {
       expect(mocks.renameDevice).toHaveBeenCalledWith(
         {
           device: { deviceId: "living-room", profileId: undefined },
-          owner: "profile-1",
           name: null,
         },
         expect.anything(),

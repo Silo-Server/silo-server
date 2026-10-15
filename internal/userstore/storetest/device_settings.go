@@ -128,6 +128,10 @@ func RunDeviceRename(t *testing.T, newStore func(*testing.T) userstore.UserStore
 	if err := devices.RenameDevice(ctx, "a", "one", "Living Room"); err != nil {
 		t.Fatalf("repeating a rename: %v", err)
 	}
+	one, err := devices.ListDeviceSettingsPage(ctx, userstore.DevicePageOptions{ProfileID: "a", DeviceID: "one", Limit: 10})
+	if err != nil || len(one) != 1 || one[0].ProfileID != "a" || one[0].DeviceID != "one" || one[0].CustomName != "Living Room" {
+		t.Fatalf("one device's row: %+v %v", one, err)
+	}
 
 	if err := registry.RegisterDevice(ctx, userstore.DeviceEntry{ProfileID: "a", DeviceID: "one", DeviceName: "Apple TV 4K", LastSeenAt: "2026-01-03T03:04:05Z"}); err != nil {
 		t.Fatal(err)
