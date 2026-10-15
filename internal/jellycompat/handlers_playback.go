@@ -1786,6 +1786,13 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	} else {
 		reqBody.SourceAudioChannels = 0
 	}
+	// A text burn-in may first stage its subtitle on the node, which can fail
+	// after the node accepted a start that does not wait for readiness. A
+	// start that waits fails instead, where the fallback to another node or
+	// the API server runs.
+	if reqBody.SubtitleBurnIn && reqBody.SubtitleTrackIndex >= 0 && !playback.NeedsBurnIn(reqBody.SubtitleCodec) {
+		reqBody.RequireReady = true
+	}
 	if toneMapRecipe.mode != "" {
 		reqBody.ToneMapPolicy = toneMapRecipe.policy
 		reqBody.ToneMapMode = toneMapRecipe.mode

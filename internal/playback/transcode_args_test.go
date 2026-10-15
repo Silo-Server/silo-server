@@ -2,7 +2,6 @@ package playback
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -2247,108 +2245,4 @@ func TestEscapeFilterPathEscapesColons(t *testing.T) {
 	if got != want {
 		t.Fatalf("escapeFilterPath = %q, want %q", got, want)
 	}
-}
-
-// The subtitles filter never opens a relay URL: a text burn-in of a relayed
-// source is refused, whether or not its handle is still open. Copied video
-// renders no subtitle, bitmap burn-in reads the decoded stream, and a local
-// path burns in as before.
-func TestCheckSubtitleFilterInputRefusesARelayURL(t *testing.T) {
-	h := nodesourcetest.Relayed(t, writeTestSource(t))
-	opts := TranscodeOpts{InputPath: h.Input(), SubtitleBurnIn: true, SubtitleTrackIndex: 0, SubtitleCodec: "ass", TargetCodecVideo: "h264"}
-	if !RelayedTextBurnIn(opts) || !errors.Is(checkSubtitleFilterInput(opts), ErrRelayedTextBurnIn) {
-		t.Fatalf("relayed text burn-in = %v", checkSubtitleFilterInput(opts))
-	}
-	_ = h.Close()
-	if err := checkSubtitleFilterInput(opts); !errors.Is(err, ErrRelayedTextBurnIn) {
-		t.Fatalf("text burn-in of a released relay URL = %v", err)
-	}
-	for name, mutate := range map[string]func(*TranscodeOpts){
-		"copied video": func(o *TranscodeOpts) { o.TargetCodecVideo = "copy" },
-		"bitmap":       func(o *TranscodeOpts) { o.SubtitleCodec = "hdmv_pgs_subtitle" },
-		"local path":   func(o *TranscodeOpts) { o.InputPath = "/media/movie.mkv" },
-		"no burn-in":   func(o *TranscodeOpts) { o.SubtitleBurnIn = false },
-	} {
-		o := opts
-		mutate(&o)
-		if RelayedTextBurnIn(o) || checkSubtitleFilterInput(o) != nil {
-			t.Fatalf("%s: refused as a relayed text burn-in", name)
-		}
-	}
-}
-
-// StartTranscode refuses a text burn-in of a relayed source before FFmpeg
-// runs, and a local source (the API server's own, or a node's mount) still
-// burns its text subtitle in through the filter's alias.
-func TestStartTranscodeBurnsInTextOnlyFromALocalSource(t *testing.T) {
-	ffmpeg, runs := fakeFFmpeg(t)
-	source := writeTestSource(t)
-	start := func(input string) (*TranscodeSession, error) {
-		return StartTranscode(t.Context(), TranscodeOpts{
-			InputPath: input, SessionID: "burn-in", OutputDir: t.TempDir(), FFmpegPath: ffmpeg, HWAccel: HWAccelNone,
-			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, TotalDuration: 60,
-			SubtitleBurnIn: true, SubtitleTrackIndex: 0, SubtitleCodec: "subrip",
-		})
-	}
-
-	h := nodesourcetest.Relayed(t, source)
-	if session, err := start(h.Input()); !errors.Is(err, ErrRelayedTextBurnIn) {
-		if session != nil {
-			_ = session.Close()
-		}
-		t.Fatalf("relayed text burn-in = %v", err)
-	}
-	if got := ffmpegRuns(t, runs); len(got) != 0 {
-		t.Fatalf("a refused burn-in ran ffmpeg: %v", got)
-	}
-
-	session, err := start(source)
-	if err != nil {
-		t.Fatalf("local text burn-in = %v", err)
-	}
-	defer func() { _ = session.Close() }()
-	deadline := time.Now().Add(10 * time.Second)
-	for len(ffmpegRuns(t, runs)) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("local text burn-in never ran ffmpeg")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if args := ffmpegRuns(t, runs)[0]; !strings.Contains(args, "subtitles=") || !strings.Contains(args, subtitleFilterAliasName) {
-		t.Fatalf("local text burn-in ran ffmpeg %s", args)
-	}
-}
-
-func writeTestSource(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "source.mkv")
-	if err := os.WriteFile(path, []byte("source bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-// fakeFFmpeg writes a stand-in ffmpeg that records each run's argv, one
-// line per run, then waits to be killed.
-func fakeFFmpeg(t *testing.T) (bin, runs string) {
-	t.Helper()
-	dir := t.TempDir()
-	bin, runs = filepath.Join(dir, "ffmpeg"), filepath.Join(dir, "runs")
-	script := "#!/bin/sh\necho \"$*\" >> \"" + runs + "\"\nexec sleep 60\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return bin, runs
-}
-
-func ffmpegRuns(t *testing.T, path string) []string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }

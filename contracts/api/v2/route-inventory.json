@@ -38,7 +38,7 @@
       "id": "api",
       "entrypoint": "internal/api.NewRouter",
       "description": "Main Silo API listener: the /api/v1 namespace and the routes mounted beside it.",
-      "route_count": 710
+      "route_count": 711
     },
     {
       "id": "api_v2",
@@ -60,8 +60,8 @@
     }
   ],
   "totals": {
-    "routes": 881,
-    "conditional_routes": 699,
+    "routes": 882,
+    "conditional_routes": 700,
     "streaming_routes": 44,
     "websocket_routes": 4
   },
@@ -3681,6 +3681,35 @@
       "route_group": "/api/internal/nodes/sources",
       "handler": "(*internal/nodecontrol.Server).HandleSource",
       "handler_expr": "nodeControl.HandleSource",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 26,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/nodes/sources/subtitle",
+      "route_group": "/api/internal/nodes/sources",
+      "handler": "(*internal/nodecontrol.Server).HandleSubtitle",
+      "handler_expr": "nodeControl.HandleSubtitle",
       "handler_kind": "method",
       "handler_resolved": true,
       "middleware_chain": 26,

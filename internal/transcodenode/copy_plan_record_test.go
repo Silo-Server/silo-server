@@ -137,11 +137,13 @@ func TestOrphanSweepKeepsTheRecordDirectory(t *testing.T) {
 }
 
 // A rebuild whose start fails for a reason a later request may not meet (its
-// keyframe plan could not be read now) answers 503, which the client retries,
-// not 404; a changed source stays 410.
+// keyframe plan could not be read now, or the core could not provide the
+// subtitle to burn in) answers 503, which the client retries, not 404; a
+// changed source stays 410.
 func TestReconstructStartFailureThatMayPassIsUnavailable(t *testing.T) {
 	for name, err := range map[string]error{
 		"plan read": fmt.Errorf("plan rebuilt keyframe playlist: %w: %w", playback.ErrCopyPlanUnavailable, context.DeadlineExceeded),
+		"staging":   fmt.Errorf("%w: %w", playback.ErrSubtitleStagingUnavailable, context.DeadlineExceeded),
 	} {
 		rec := httptest.NewRecorder()
 		writeReconstructFailure(rec, reconstructStartError(err))

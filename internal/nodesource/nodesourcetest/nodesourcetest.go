@@ -38,10 +38,33 @@ func LocalRelay(t testing.TB) *nodesource.Relay {
 // CoreRelay returns a relay with core source access whose core approves any
 // grant that names an existing regular file by its absolute path (see Grant)
 // and serves that file's bytes, so the handles it opens are loopback URLs
-// that nodesource's registry knows. The core runs on a local test server.
+// that nodesource's registry knows. The core runs on a local test server and
+// answers subtitle bundle requests with 404.
 func CoreRelay(t testing.TB) *nodesource.Relay {
 	t.Helper()
-	core := httptest.NewServer(http.HandlerFunc(serveLocalPaths))
+	return CoreRelayWithSubtitles(t, nil)
+}
+
+// SubtitleFunc answers a nodesource.PathSubtitle request for the source at
+// path, the request's grant.
+type SubtitleFunc func(w http.ResponseWriter, r *http.Request, path string)
+
+// CoreRelayWithSubtitles is CoreRelay whose core answers subtitle bundle
+// requests with subtitles.
+func CoreRelayWithSubtitles(t testing.TB, subtitles SubtitleFunc) *nodesource.Relay {
+	t.Helper()
+	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == nodesource.PathSubtitle && subtitles != nil {
+			path := r.Header.Get(nodesource.HeaderSourceGrant)
+			if !filepath.IsAbs(path) || regularFile(path) == nil {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			subtitles(w, r, path)
+			return
+		}
+		serveLocalPaths(w, r)
+	}))
 	t.Cleanup(core.Close)
 	relay, err := nodesource.NewRelay(nodesource.RelayOptions{
 		Open:    approveLocalPath,

@@ -153,9 +153,8 @@ func EncodeSubtitleFontBundle(fonts []SubtitleFontAttachment) []SubtitleFontBund
 	return items
 }
 
-// dumpFontAttachments concatenates the selected attachments on stdout in one
-// FFmpeg process. Probed extradata sizes frame each font; a bounded pipe reader
-// rejects oversized or changed output without ever spilling font data to disk.
+// dumpFontAttachments reads the selected attachments into memory, each named
+// for display. Probed extradata sizes frame each font, within maxBytes in all.
 func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath string, streams []attachmentProbeStream, maxBytes int64) ([]SubtitleFontAttachment, error) {
 	var expected int64
 	for _, stream := range streams {
@@ -167,49 +166,79 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 		}
 		expected += stream.ExtraDataSize
 	}
-	if expected == 0 {
-		return nil, nil
-	}
-	args := []string{ffmpegHideBannerArg, "-nostats", ffmpegLogLevelArg, ffmpegErrorLogLevel}
-	for _, stream := range streams {
-		args = append(args, fmt.Sprintf("-dump_attachment:%d", stream.Index), "pipe:1")
-	}
-	args = append(args, "-i", inputPath, "-map", "0:t?", "-c", "copy", "-f", "null", "-")
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("subtitle fonts: start attachment extract: %w", err)
-	}
-	data, readErr := io.ReadAll(io.LimitReader(stdout, expected+1))
-	if readErr != nil || int64(len(data)) > expected {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return nil, errors.New("subtitle fonts: attachment data exceeds probed size or could not be read")
-	}
-	if err := cmd.Wait(); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, fmt.Errorf("subtitle fonts: extract attachments: %w", err)
-	}
-	if int64(len(data)) != expected {
-		return nil, errors.New("subtitle fonts: attachment data differs from probed size")
-	}
 	fonts := make([]SubtitleFontAttachment, 0, len(streams))
-	offset := 0
-	for i, stream := range streams {
-		end := offset + int(stream.ExtraDataSize)
+	err := streamFontAttachments(ctx, inputPath, ffmpegPath, streams, func(i int, stream attachmentProbeStream, data io.Reader) error {
+		font := make([]byte, stream.ExtraDataSize)
+		if _, err := io.ReadFull(data, font); err != nil {
+			return err
+		}
 		fonts = append(fonts, SubtitleFontAttachment{
 			StreamIndex: stream.Index,
 			Name:        safeAttachmentDisplayName(stream, fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream))),
-			Data:        data[offset:end:end],
+			Data:        font,
 		})
-		offset = end
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return fonts, nil
+}
+
+// streamFontAttachments runs one FFmpeg that writes the selected attachments
+// to its stdout, concatenated in order, and hands each to each as a reader of
+// exactly its probed extradata size, so font data never has to touch disk.
+// Output shorter or longer than the probed sizes fails. Attachments live in
+// the container header: -t 0 ends FFmpeg before it reads any media.
+func streamFontAttachments(ctx context.Context, inputPath, ffmpegPath string, streams []attachmentProbeStream, each func(int, attachmentProbeStream, io.Reader) error) error {
+	if len(streams) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(ffmpegPath) == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	args := []string{ffmpegHideBannerArg, ffmpegNoStatsArg, ffmpegNoStdinArg, ffmpegLogLevelArg, ffmpegErrorLogLevel}
+	for _, stream := range streams {
+		args = append(args, fmt.Sprintf("-dump_attachment:%d", stream.Index), ffmpegStdout)
+	}
+	args = append(args, "-i", inputPath, ffmpegMapArg, "0:t?", "-c", codecCopyV3, "-t", "0", "-f", "null", "-")
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd.WaitDelay = 5 * time.Second
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return processStartError{fmt.Errorf("subtitle fonts: start attachment extract: %w", err)}
+	}
+	fail := func(err error) error {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return err
+	}
+	for i, stream := range streams {
+		font := io.LimitReader(stdout, stream.ExtraDataSize)
+		if err := each(i, stream, font); err != nil {
+			if ctx.Err() != nil {
+				return fail(ctx.Err())
+			}
+			return fail(fmt.Errorf("subtitle fonts: attachment data differs from probed size or could not be read: %w", err))
+		}
+		// each may stop short of its font; the next one starts after it.
+		if _, err := io.Copy(io.Discard, font); err != nil {
+			return fail(errors.New("subtitle fonts: attachment data could not be read"))
+		}
+	}
+	if n, _ := io.CopyN(io.Discard, stdout, 1); n > 0 {
+		return fail(errors.New("subtitle fonts: attachment data exceeds probed size"))
+	}
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("subtitle fonts: extract attachments: %w", err)
+	}
+	return nil
 }
 
 func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePath string) ([]attachmentProbeStream, error) {
@@ -229,7 +258,7 @@ func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePa
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, processStartError{err}
 	}
 	const maxProbeBytes = 1 << 20
 	out, readErr := io.ReadAll(io.LimitReader(stdout, maxProbeBytes+1))

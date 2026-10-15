@@ -138,32 +138,63 @@ func TestCoreSourceKeyframePlaylistMatchesLocal(t *testing.T) {
 	}
 }
 
-// A text subtitle burn-in is refused, non-permanently, by a node reading its
-// source through the relay, before FFmpeg runs: the subtitles filter would
-// open the relay URL itself. The caller then runs the session on another node
-// or the API server. A node reading its own mount burns the subtitle in.
-func TestCoreSourceRefusesTextBurnIn(t *testing.T) {
+// fontconfigWithoutFonts hides the system's fonts from libass, so a subtitle
+// renders only with the fonts its source carries.
+func fontconfigWithoutFonts(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "fonts.conf")
+	if err := os.WriteFile(conf, []byte(`<?xml version="1.0"?><fontconfig><cachedir>`+dir+`</cachedir></fontconfig>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FONTCONFIG_FILE", conf)
+}
+
+// attachableFont returns a TrueType font and its family name, or skips.
+func attachableFont(t *testing.T) (path, family string) {
+	t.Helper()
+	for _, candidate := range []struct{ path, family string }{
+		{"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "DejaVu Sans"},
+		{"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "Liberation Sans"},
+		{"/usr/share/fonts/TTF/DejaVuSans.ttf", "DejaVu Sans"},
+	} {
+		if _, err := os.Stat(candidate.path); err == nil {
+			return candidate.path, candidate.family
+		}
+	}
+	t.Skip("no known TrueType font under /usr/share/fonts to attach")
+	return "", ""
+}
+
+// A text subtitle burned in from a relayed source renders as it does from
+// the node's own mount: the core's subtitle bundle carries the selected track
+// as an ASS script with the source's attached font, which, with the system's
+// fonts hidden, is the only font either way.
+func TestCoreSourceTextBurnInMatchesLocal(t *testing.T) {
 	ffmpeg, _ := requireFFmpeg(t)
 	if !hasEncoder(ffmpeg, "libx264") {
 		t.Skip("ffmpeg has no libx264 encoder for the burn-in transcode")
 	}
+	font, family := attachableFont(t)
 	dir := t.TempDir()
 	script := filepath.Join(dir, "sub.ass")
 	if err := os.WriteFile(script, []byte("[Script Info]\nScriptType: v4.00+\nPlayResX: 320\nPlayResY: 240\n\n[V4+ Styles]\n"+
 		"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"+
-		"Style: Default,Sans,28,&H0000FFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\n"+
+		"Style: Default,"+family+",28,&H0000FFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\n"+
 		"[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"+
-		"Dialogue: 0,0:00:00.20,0:00:01.80,Default,,0,0,0,,Hello: local\nDialogue: 0,0:00:02.20,0:00:03.80,Default,,0,0,0,,Second line\n"), 0o600); err != nil { //nolint:misspell // ASS event keyword
+		"Dialogue: 0,0:00:00.20,0:00:01.80,Default,,0,0,0,,Hello: relayed\nDialogue: 0,0:00:02.20,0:00:03.80,Default,,0,0,0,,Second line\n"), 0o600); err != nil { //nolint:misspell // ASS event keyword
 		t.Fatal(err)
 	}
 	fixture := filepath.Join(dir, "subtitled.mkv")
 	run(t, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=4",
 		"-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-i", script,
+		"-attach", font, "-metadata:s:t:0", "mimetype=application/x-truetype-font", "-metadata:s:t:0", "filename=../../escape.ttf",
 		"-map", "0", "-map", "1", "-map", "2", "-c:v", "libx264", "-g", "25", "-c:a", "aac", "-c:s", "ass", "-shortest", fixture)
+	fontconfigWithoutFonts(t)
 	const fileID = 52
 	local, core := integrationNodes(t, ffmpeg, integrationCatalog{fileID: fixture})
 
-	request := func(node integrationNode, id string, burnIn bool) TranscodeStartRequest {
+	start := func(node integrationNode, id string, burnIn bool) string {
 		req := TranscodeStartRequest{
 			SessionID: id + "-" + node.name, SourceGrant: node.grant(t, fileID), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
 			SegmentDuration: 2, TotalDuration: 4, RequireReady: true, HWAccel: playback.HWAccelNone, SubtitleTrackIndex: -1,
@@ -171,26 +202,19 @@ func TestCoreSourceRefusesTextBurnIn(t *testing.T) {
 		if burnIn {
 			req.SubtitleBurnIn, req.SubtitleTrackIndex, req.SubtitleCodec = true, 0, "ass"
 		}
-		return req
+		dir, _ := startSession(t, node, req)
+		return hlsVideo(t, ffmpeg, dir)
 	}
-
-	body, _ := json.Marshal(request(core, "burn-in", true))
-	rec := httptest.NewRecorder()
-	core.server.handleStart(rec, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), errRemoteTextBurnIn) {
-		t.Fatalf("relayed text burn-in = %d %s", rec.Code, rec.Body.String())
+	burned := bothModes(t, local, core, func(node integrationNode) string { return start(node, "burn-in", true) })
+	if plain := start(local, "plain", false); plain == burned {
+		t.Fatal("the burned-in subtitle rendered nothing")
 	}
-	core.server.mu.RLock()
-	_, registered := core.server.sessions["burn-in-"+core.name]
-	core.server.mu.RUnlock()
-	if registered {
-		t.Fatal("a refused burn-in registered a session")
+	staged, _ := filepath.Glob(filepath.Join(core.server.transcodeDir, "*", "subtitle-*", "fonts", "*"))
+	if len(staged) != 1 || filepath.Base(staged[0]) != "attachment-3.ttf" {
+		t.Fatalf("staged fonts %q, want the attachment under a generated name", staged)
 	}
-
-	burnedDir, _ := startSession(t, local, request(local, "burn-in", true))
-	plainDir, _ := startSession(t, local, request(local, "plain", false))
-	if burned, plain := hlsVideo(t, ffmpeg, burnedDir), hlsVideo(t, ffmpeg, plainDir); burned == "" || burned == plain {
-		t.Fatal("the local node's burned-in subtitle rendered nothing")
+	if escaped, _ := filepath.Glob(filepath.Join(core.server.transcodeDir, "*", "escape.ttf")); len(escaped) != 0 {
+		t.Fatalf("an attachment's own filename became a path: %q", escaped)
 	}
 }
 

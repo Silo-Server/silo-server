@@ -216144,7 +216144,7 @@
           },
           "required": true
         },
-        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. The input is the source source_grant names, opened through the core (POST /api/internal/nodes/self/sources/open) and renewed for the session's life; input_path is informational. A text subtitle burn-in from a core-access source is refused with 422 before FFmpeg runs, since the libass subtitles filter would open the relay URL itself; the caller runs the session on another node or the API server. Bitmap burn-in, and text burn-in from a node's own mount, are unaffected. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied.",
+        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. The input is the source source_grant names, opened through the core (POST /api/internal/nodes/self/sources/open) and renewed for the session's life; input_path is informational. A text subtitle burn-in from a core-access source first fetches the track's subtitle bundle from the core (GET /api/internal/nodes/sources/subtitle), which builds and caches it from its own copy of the source: the start returns once the session is preparing, FFmpeg starts when the bundle is unpacked in the session's directory, and manifest and segment requests wait meanwhile as for a slow FFmpeg start. RequireReady waits for the bundle within the request's own deadline, then for the manifest as usual; a core that cannot provide the bundle now answers 503, and a same-ID replacement retires the live session only once its bundle is staged. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -218663,7 +218663,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A live process-local session is served without a deny check: every relay checks the deny marker before it forwards. Missing process-local sessions may reconstruct from the recipe the core resolves (the forwarded signed token, or its stored recipe) through input and execution authority guards; a session the core reports denied returns410, as does a copy-video rebuild whose recorded keyframe plan names another revision of the source (no rebuild can serve its playlist); a rebuild that may succeed later (a core that cannot be reached, a keyframe plan that cannot be read now) returns503, and a missing/refused reconstruction returns404, including a recipe that burns in a text subtitle from a core-access source. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; unavailable manifest returns503. No-store response contains relative segment links.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without a deny check: every relay checks the deny marker before it forwards. Missing process-local sessions may reconstruct from the recipe the core resolves (the forwarded signed token, or its stored recipe) through input and execution authority guards; a session the core reports denied returns410, as does a copy-video rebuild whose recorded keyframe plan names another revision of the source (no rebuild can serve its playlist); a rebuild that may succeed later (a core that cannot be reached, a keyframe plan that cannot be read now, a subtitle bundle the core cannot provide now) returns503, and a missing/refused reconstruction returns404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; unavailable manifest returns503. No-store response contains relative segment links.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/master.m3u8",
@@ -218825,7 +218825,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A live process-local session is served without a deny check: every relay checks the deny marker before it forwards. Missing process-local sessions may reconstruct from the recipe the core resolves (the forwarded signed token, or its stored recipe) through input and execution authority guards; a session the core reports denied returns410, as does a copy-video rebuild whose recorded keyframe plan names another revision of the source (no rebuild can serve its playlist); a rebuild that may succeed later (a core that cannot be reached, a keyframe plan that cannot be read now) returns503, and a missing/refused reconstruction returns404, including a recipe that burns in a text subtitle from a core-access source. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without a deny check: every relay checks the deny marker before it forwards. Missing process-local sessions may reconstruct from the recipe the core resolves (the forwarded signed token, or its stored recipe) through input and execution authority guards; a session the core reports denied returns410, as does a copy-video rebuild whose recorded keyframe plan names another revision of the source (no rebuild can serve its playlist); a rebuild that may succeed later (a core that cannot be reached, a keyframe plan that cannot be read now, a subtitle bundle the core cannot provide now) returns503, and a missing/refused reconstruction returns404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/segment/{name}",
@@ -220246,6 +220246,131 @@
               }
             },
             "description": "Requested Range Not Satisfiable"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "description": "The source grant, from a dispatch request, a resolution or an open response. A header so that access logs on the way never record it.",
+            "in": "header",
+            "name": "X-Silo-Source-Grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The subtitle stream's ordinal among the source's subtitle streams.",
+            "in": "query",
+            "name": "track",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The subtitle stream's codec as FFmpeg names it.",
+            "in": "query",
+            "name": "codec",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "The subtitle bundle a text burn-in of the granted source needs, so a node that reads the source over HTTP never demuxes it whole through the relay: a tar of selected.ass, the track as an ASS script extracted with -copyts (text formats convert to ASS, ASS and SSA are copied), and fonts/, the source's font attachments under generated names. The core builds it from its own copy, after the same revision check as a source read, and caches it by revision, track and codec; builds share the subtitle cache's whole-source demux slots. No catalog read. A request waits up to 5 seconds for a build, then answers 202 and the node asks again. 400: the track or codec is missing or malformed, or the grant is not a media file's. 403: the grant does not verify, has expired, or is another node's. 410: the file is gone. 412: it changed. 422: the source cannot give the bundle (FFmpeg fails on the track, or it does not convert to ASS); the failure is cached, so a repeat within a minute answers 422 without building again. 503 is transient, including a failed build of the core's own (its disk, a process that cannot start), which is also cached for a minute.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "GET",
+        "path": "/api/internal/nodes/sources/subtitle",
+        "handler": "(*internal/nodecontrol.Server).HandleSubtitle",
+        "auth_class": "node_signed",
+        "responses": {
+          "200": {
+            "content": {
+              "application/x-tar": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The bundle, with Content-Length."
+          },
+          "202": {
+            "description": "The bundle is being built, or waits for a build slot; ask again."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "410": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           },
           "503": {
             "content": {

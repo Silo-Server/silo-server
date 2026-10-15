@@ -6,7 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
@@ -162,6 +165,112 @@ func (s *Server) HandleSource(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	playback.ServeOpenFile(w, r, f, info, claims.ETag())
+}
+
+// SubtitleBundles builds and caches the subtitle bundles a text burn-in of a
+// granted source needs. *playback.SubtitleCache implements it.
+type SubtitleBundles interface {
+	OpenSubtitleBundle(ctx context.Context, src playback.SubtitleBundleSource) (*os.File, error)
+}
+
+// subtitleBundleWait is how long HandleSubtitle waits for a bundle being built
+// before it answers 202. It stays under the node's wait for response headers.
+const subtitleBundleWait = 5 * time.Second
+
+// HandleSubtitle serves GET /api/internal/nodes/sources/subtitle: the
+// subtitle bundle (playback.SubtitleBundleSource) of one subtitle track of the
+// source granted by the nodesource.HeaderSourceGrant header, so a node that
+// reads the source over HTTP can burn the track in without demuxing the whole
+// source through the relay. The core builds the bundle from its own copy and
+// caches it; a request waits a few seconds for a build and otherwise answers
+// 202, and the node asks again. Like HandleSource it reads no catalog.
+//
+// 400: the track or codec is missing or malformed, or the grant is not a
+// media file's. 403: the grant does not verify, has expired, or is another
+// node's. 410: the file is gone. 412: its size or modification time changed.
+// 422: the source cannot give the bundle (playback.ErrSubtitleBundleFailed);
+// a repeat within a minute answers 422 without building again. 503: no bundle
+// can be built now.
+func (s *Server) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
+	id, ok := NodeID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	claims, status := s.verifyGrant(r.Context(), id, strings.TrimSpace(r.Header.Get(nodesource.HeaderSourceGrant)))
+	if status != 0 {
+		http.Error(w, http.StatusText(status), status)
+		return
+	}
+	query := r.URL.Query()
+	track, err := strconv.Atoi(query.Get(nodesource.QuerySubtitleTrack))
+	codec := strings.ToLower(query.Get(nodesource.QuerySubtitleCodec))
+	if err != nil || track < 0 || !validSubtitleCodec(codec) || claims.Kind != nodesource.KindFile {
+		http.Error(w, "invalid subtitle request", http.StatusBadRequest)
+		return
+	}
+	if s.opts.Subtitles == nil {
+		http.Error(w, "subtitle bundles unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	// The bundle is built from the granted path, after the same revision
+	// check an open makes; the subtitle cache keys it by that revision.
+	if _, err := claims.Check(); err != nil {
+		status := sourceStatus(err)
+		http.Error(w, http.StatusText(status), status)
+		return
+	}
+	ffmpeg := ""
+	if s.opts.FFmpegPath != nil {
+		ffmpeg = s.opts.FFmpegPath()
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), subtitleBundleWait)
+	defer cancel()
+	bundle, err := s.opts.Subtitles.OpenSubtitleBundle(ctx, playback.SubtitleBundleSource{
+		Path: claims.Path, Track: track, Codec: codec, FFmpegPath: ffmpeg, Matches: claims.Matches,
+	})
+	switch {
+	case errors.Is(err, nodesource.ErrSourceChanged) || errors.Is(err, nodesource.ErrSourceGone):
+		status := sourceStatus(err)
+		http.Error(w, http.StatusText(status), status)
+		return
+	case errors.Is(err, playback.ErrSubtitleBundlePending):
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusAccepted)
+		return
+	case errors.Is(err, playback.ErrSubtitleBundleFailed):
+		slog.WarnContext(r.Context(), "subtitle bundle cannot be built", "component", "nodecontrol",
+			"node_id", id, "media_file_id", claims.ID, "track", track, "error", err)
+		http.Error(w, "the subtitle track cannot be staged", http.StatusUnprocessableEntity)
+		return
+	case err != nil:
+		slog.WarnContext(r.Context(), "subtitle bundle unavailable", "component", "nodecontrol",
+			"node_id", id, "media_file_id", claims.ID, "track", track, "error", err)
+		http.Error(w, "subtitle bundle unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer func() { _ = bundle.Close() }()
+	info, err := bundle.Stat()
+	if err != nil {
+		http.Error(w, "subtitle bundle unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-tar")
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, "", info.ModTime(), bundle)
+}
+
+// validSubtitleCodec reports a codec name as FFmpeg spells one.
+func validSubtitleCodec(codec string) bool {
+	if codec == "" || len(codec) > 32 {
+		return false
+	}
+	for _, c := range codec {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // ignoredSourceConditions are the conditional request headers a source read

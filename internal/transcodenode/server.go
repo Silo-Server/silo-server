@@ -1723,12 +1723,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
 		opts.HWAccel = cfg.Playback.HWAccel
 	}
-	if playback.RelayedTextBurnIn(opts) {
-		slog.WarnContext(r.Context(), "refusing text subtitle burn-in from a core-access source", "component", "transcodenode",
-			"session", req.SessionID, "source", input.Identity())
-		http.Error(w, errRemoteTextBurnIn, http.StatusUnprocessableEntity)
-		return
-	}
 	if toneMapRecipeRequested(opts) {
 		if err := s.resolveToneMapRecipe(r.Context(), &opts); err != nil {
 			writeToneMapRecipeError(w, err)
@@ -1793,6 +1787,16 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	} else {
 		session, err = playback.StartTranscode(r.Context(), opts)
 	}
+	if err == nil && hasExisting {
+		// A same-ID start replaces a live session only with one that can
+		// run: a subtitle the replacement stages first must be staged before
+		// the live session is retired. A readiness-gated start has already
+		// waited for it.
+		if stageErr := session.WaitSubtitleStaged(r.Context()); stageErr != nil {
+			_ = session.Close()
+			session, err = nil, stageErr
+		}
+	}
 	var startupErr *playback.TranscodeStartupError
 	if errors.As(err, &startupErr) {
 		unlock()
@@ -1802,6 +1806,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+		if errors.Is(err, playback.ErrSubtitleStagingUnavailable) {
+			http.Error(w, "subtitle staging unavailable; retry shortly", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
 		return
 	}
@@ -1811,6 +1819,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case isToneMapRecipeError(err):
 			writeToneMapRecipeError(w, err)
+		case errors.Is(err, playback.ErrSubtitleStagingUnavailable):
+			http.Error(w, "subtitle staging unavailable; retry shortly", http.StatusServiceUnavailable)
 		default:
 			http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		}
@@ -1890,12 +1900,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 // its playback session ended.
 var errReconstructDenied = errors.New("transcode session denied")
 
-// errReconstructTextBurnIn is a lost session whose recipe burns in a text
-// subtitle from a core-access source, which this node refuses as it refuses
-// the start (errRemoteTextBurnIn). It answers 404 like any refused rebuild,
-// so the client's next plan puts the session elsewhere.
-var errReconstructTextBurnIn = errors.New(errRemoteTextBurnIn)
-
 // errReconstructUnavailable is a lost session the node could not ask the core
 // about: the core was unreachable, failing, or not wired. It is retryable, so
 // it must not read as the session not existing.
@@ -1912,12 +1916,11 @@ var errReconstructUnavailable = errors.New("recipe authority unavailable")
 // integrated server's token-carried reconstruct.
 //
 // Returns nil and errReconstructDenied when the core reports the session
-// denied, nil and errReconstructTextBurnIn for a text burn-in this node cannot
-// run from a core-access source, and nil and no error when the core refuses it
-// otherwise (no recipe, or a recipe that is not this node's); the caller
-// renders the last two as a not-found. Anything short of a refusal — a core
-// the node cannot reach, one that times out or fails — returns
-// errReconstructUnavailable, which the caller renders as a retryable 503.
+// denied, and nil and no error when the core refuses it otherwise (no recipe,
+// or a recipe that is not this node's), which the caller renders as a genuine
+// not-found. Anything short of a refusal — a core the node cannot reach, one
+// that times out or fails — returns errReconstructUnavailable, which the
+// caller renders as a retryable 503.
 //
 // requestedSegment is the segment the client is fetching, or negative on the
 // manifest path. Reconstruction is single-flighted per session id so
@@ -2019,11 +2022,6 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	opts.SegmentRetentionSeconds = cfg.Playback.SegmentRetentionSeconds
 	opts.NodeType = "transcode"
 	opts.ExecutionMode = "transcode_node"
-	if playback.RelayedTextBurnIn(opts) {
-		slog.WarnContext(r.Context(), "refusing to rebuild a text subtitle burn-in from a core-access source", "component", "transcodenode",
-			"session", sessionID, "source", input.Identity())
-		return nil, errReconstructTextBurnIn
-	}
 	if toneMapRecipeRequested(opts) {
 		err := s.resolveToneMapRecipe(context.WithoutCancel(r.Context()), &opts)
 		if err != nil {
@@ -2116,6 +2114,11 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 			if session.IsRunning() {
 				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
 					"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
+			} else if errors.Is(session.WaitError(), playback.ErrSubtitleStaging) {
+				// Software encoding would need the same staged subtitle.
+				stageErr := session.WaitError()
+				_ = session.Close()
+				return nil, reconstructStartError(stageErr)
 			} else {
 				// Keep the shared output directory: the retry writes into it.
 				_ = session.CloseProcess()
@@ -2185,11 +2188,12 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 }
 
 // reconstructStartError classifies a rebuild's failed start. One that may
-// succeed on a later request (the keyframe plan could not be worked out now)
-// is errReconstructUnavailable, a retryable 503, not a missing session;
+// succeed on a later request (the keyframe plan could not be worked out now,
+// or the core could not provide the subtitle to burn in) is
+// errReconstructUnavailable, a retryable 503, not a missing session;
 // ErrCopyPlanSourceChanged and the rest pass unchanged.
 func reconstructStartError(err error) error {
-	if errors.Is(err, playback.ErrCopyPlanUnavailable) {
+	if errors.Is(err, playback.ErrCopyPlanUnavailable) || errors.Is(err, playback.ErrSubtitleStagingUnavailable) {
 		return fmt.Errorf("%w: %w", errReconstructUnavailable, err)
 	}
 	return err
@@ -2238,12 +2242,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)
 		}
+		// Under the session's lifecycle lock, as every other teardown: a
+		// restart in flight, which holds it, finishes before the close, and
+		// none starts after it (the session is gone from the map).
+		unlock := s.lockSessionLifecycle(victim.id)
 		if err := s.closeSessionOffGPU(victim.session); err != nil {
 			errs = append(errs, fmt.Errorf("close session %s: %w", victim.id, err))
 		}
 		if s.tracker != nil {
 			s.tracker.Remove(ctx, victim.id)
 		}
+		unlock()
 	}
 	waitCtx, cancelWait := context.WithTimeout(ctx, progressiveRemuxShutdownTimeout)
 	defer cancelWait()
@@ -2530,8 +2539,6 @@ func writeReconstructFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errReconstructDenied):
 		writeStreamDenied(w)
-	case errors.Is(err, errReconstructTextBurnIn):
-		http.Error(w, errRemoteTextBurnIn, http.StatusNotFound)
 	case errors.Is(err, errReconstructUnavailable):
 		http.Error(w, "recipe authority unavailable", http.StatusServiceUnavailable)
 	case err != nil && isToneMapRecipeError(err):
@@ -2709,6 +2716,9 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		} else if session.IsRunning() {
 			// Non-numbered segment (e.g., init.mp4 for fMP4 HLS).
 			// Wait briefly — the init segment is written almost immediately.
+			// A session preparing its subtitle has not started FFmpeg: this
+			// waits 10 s and answers 404 if the staging runs on, as a
+			// numbered segment waits 12 s (SegmentRecoveryDecision).
 			segmentLease, err = session.WaitForOpenSegment(name, 10*time.Second)
 		}
 	}

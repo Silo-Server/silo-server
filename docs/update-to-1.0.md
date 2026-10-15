@@ -166,8 +166,7 @@ seconds of the API servers'.
    **Local library mount**, reads at the catalog paths through the node's own mount. A node with no
    library mount must be set to **Read from this server over HTTP** (`source_access: core`) first:
    it then reads each file from the API. A node left on the default without a mount refuses every
-   job. A node that reads over HTTP does not burn text subtitles into the video; those streams
-   run on a node with a library mount or, when the routing policy allows it, on the API server.
+   job.
 5. Start each node with `MODE=transcode`, `SILO_CORE_URL` set to an address of the API that the
    node can reach, and `SILO_NODE_KEY` set to its key. With several API replicas, point
    `SILO_CORE_URL` at their load-balanced address rather than at one replica, so a node keeps

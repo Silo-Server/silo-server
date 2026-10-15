@@ -56,14 +56,6 @@ func (s *Server) SetSourceOpener(sources SourceOpener) {
 	s.sources = sources
 }
 
-// errRemoteTextBurnIn refuses a text subtitle burn-in from a core-access
-// source (playback.RelayedTextBurnIn): the libass subtitles filter opens its
-// file itself and must not be given the relay URL. It names the limitation,
-// so the caller moves the work to another node or the API server rather than
-// reading the failure as a broken file. Bitmap burn-in reads the decoded
-// stream and is not refused.
-const errRemoteTextBurnIn = "text subtitle burn-in needs local source access on this node"
-
 // errSourceAuthorityUnavailable is a node that cannot ask the core about a
 // source right now.
 var errSourceAuthorityUnavailable = errors.New("source authority unavailable")

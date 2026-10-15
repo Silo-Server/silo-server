@@ -508,6 +508,49 @@ logs on the way (a reverse proxy in front of the core) never record it.
 There is no per-replica concurrency cap. The node control routes are excluded
 from the activity log and the request logger.
 
+### Subtitle bundles
+
+`GET /api/internal/nodes/sources/subtitle?track=<ordinal>&codec=<codec>`
+(`HandleSubtitle`), with the grant in the same header, answers what a text
+subtitle burn-in of the granted file needs (see
+[relayed text subtitle burn-in](#relayed-text-subtitle-burn-in)). A node never
+demuxes a relayed source whole for a subtitle track: the core does it from its
+own storage.
+
+1. The grant checks are those of a source read: `403`, then `410` or `412` from
+   a revision check of the granted path. No catalog query. A grant for a theme
+   is `400`, as is a missing or malformed track or codec.
+2. `playback.SubtitleCache.OpenSubtitleBundle` stats the path again, requires
+   the grant's revision (`412` otherwise), and returns the bundle cached under
+   that revision, keyed like every subtitle cache entry by path, track,
+   revision and format. A build commits only under the revision it began on,
+   so the bundle served is the granted revision's. On a miss it begins a build
+   in the background, in one of the cache's two
+   whole-source demux slots (shared with background warms), and waits up to 5
+   seconds, under the node's 10-second response header timeout, for it.
+3. `200` serves the bundle with `Content-Length`; `202` means the bundle is
+   still being built or waits for a slot, and the node asks again. A failed
+   build is remembered for a minute, so polling nodes do not start it again:
+   one that failed on the source's bytes (FFmpeg or ffprobe failed on it, or
+   their output failed its checks) answers `422`, one that failed for the
+   core's own reasons (its disk, a process that cannot start, the build
+   timeout) `503`.
+
+The bundle is a tar of `selected.ass`, the track extracted with `-copyts` so
+its events keep the container timestamps the transcode's frames carry (text
+formats convert to ASS, ASS and SSA are copied), and `fonts/`, every font
+attachment (`isFontAttachment`) under a generated name,
+`attachment-<stream index><ext>`. The fonts stream from `-dump_attachment` into
+the tar. The bounds, 256 MiB of script and 1,024 fonts or 256 MiB of fonts, only
+stop pathological files: libass loads every attachment, and the burn-in should
+render as it does from a mount. A build is bounded by the subtitle cache's
+30-minute warm timeout.
+
+Each API replica builds into its own subtitle cache. Behind a load balancer
+that spreads a node's requests, more than one replica can build the same
+bundle; each answers from its own build, so this costs repeated reads, not
+correctness.
+
 ### Local and core access
 
 `source_access` is a per-node admin setting (`local` by default, or `core`),
@@ -622,8 +665,8 @@ nanoseconds.
 loopback URL; `RestrictProbeArgs` does the same for ffprobe, whose input is
 positional. Any argument matching the loopback pattern is restricted, whether
 or not its handle is registered. The subtitle filter never takes a relay URL:
-`checkSubtitleFilterInput` refuses one, since that filter has no protocol
-whitelist (see [text subtitle burn-in](#text-subtitle-burn-in)).
+`checkSubtitleFilterInput` refuses one that was not staged (below), since that
+filter has no protocol whitelist.
 
 ## Consumers
 
@@ -634,37 +677,49 @@ whitelist (see [text subtitle burn-in](#text-subtitle-burn-in)).
 | Keyframe index cache | Keyed on identity and size. |
 | DV RPU probe | Keyed on `binary|nodesource.Identity(input)`; the probe now runs on relayed inputs instead of failing open. |
 | Copy-seek anchor and auto-transcode fallback caches | Keyed on `nodesource.InputKey`. |
-| Text subtitle burn-in | Refused; see below. Bitmap burn-in is unchanged. |
+| Text subtitle burn-in | The core's subtitle bundle; see below. Bitmap burn-in is unchanged. |
 | Trickplay sample concat | Relayed concat; see below. |
 
-### Text subtitle burn-in
+### Relayed text subtitle burn-in
 
-FFmpeg's `subtitles=` filter opens its file itself, with no protocol whitelist,
-so it must not be given a loopback URL. A core-mode node therefore refuses a
-text subtitle burn-in (`playback.RelayedTextBurnIn`: a text track burned into
-an encoded video whose input is a relay URL):
+FFmpeg's `subtitles=` filter opens its file with no protocol whitelist, so it
+must not be given a loopback URL. And loading a text track means demuxing the
+whole source, which through the relay would move the whole file over the
+network. So a core-mode session fetches the track's
+[subtitle bundle](#subtitle-bundles) from the core and unpacks it into
+`subtitle-*/` in its own output directory; the filter reads
+`selected.ass` (`si=0`) with the bundle's `fonts/` as its `fontsdir`. A local
+source keeps the symlink alias it always used. `escapeFilterPath` escapes
+`' [ ] ; , :`.
 
-- **Start.** `POST /transcode/start` answers `422 text subtitle burn-in needs
-  local source access on this node` before FFmpeg runs and releases the source.
-  The native v3 and Jellyfin-compatible dispatchers treat it like any failed
-  start: they exclude the node and try the next candidate, or the API server
-  when the routing policy allows local execution. The API server and local-mode
-  nodes burn the subtitle in through the symlink alias as before.
-- **Rebuild.** A lost session whose recipe asks for it is not rebuilt; the
-  manifest or segment request answers `404` with the same message, a refused
-  rebuild, and the client's next plan moves the session.
-- **Backstop.** `checkSubtitleFilterInput` refuses the same case in
-  `StartTranscode` and in seek restarts (`ErrRelayedTextBurnIn`), so no path
-  hands the filter a relay URL.
+- **Preparing sessions.** A start registers the session as preparing and
+  returns; FFmpeg launches once the bundle is unpacked. Meanwhile segment
+  requests wait up to 12 seconds and `init.mp4` up to 10 seconds, then answer
+  `404`, and the player retries. A `RequireReady` start waits for the bundle
+  within its request's own deadline, then gives FFmpeg the whole manifest wait.
+  A same-ID start retires the live session only once its replacement's bundle
+  is staged, so a failed staging leaves the live session running. The
+  Jellyfin-compatible dispatcher sets `RequireReady` on every text burn-in, as
+  the native dispatcher does on every start, so a staging failure fails the
+  start, where it falls back to another node or the API server.
+- **Fetch.** The session asks again after each `202`, at most once a second.
+  `422` and a refused source (`400`, `403`, `404`, `410`, `412`) fail the
+  staging; other failures, a download cut short or a bundle that does not
+  unpack included, are retried for 30 seconds, then fail it as
+  `ErrSubtitleStagingUnavailable`, which a start answers `503 subtitle staging
+  unavailable; retry shortly` and a rebuild `503`. The fetch ends with the
+  source's handle and within the core's build bound plus a minute.
+- **Lifetime.** The bundle is the session's: restarts, seeks and audio
+  switches reuse it, and a restart after a failed staging fetches again.
+  Closing the session cancels the fetch and waits for it before the output
+  directory goes. Retries, rebuilds and other nodes get the core's cached
+  bundle without another demux.
 
-Bitmap burn-in reads the decoded stream through FFmpeg's input and is not
-refused. `escapeFilterPath` escapes `' [ ] ; , :`.
-
-**Known limitation.** A cold text burn-in start of a large file can fail its
-first attempt on a local-mode node that mounts the library over NFS or SMB: the
-subtitles filter reads the whole file for its track before FFmpeg writes a
-manifest, at the network's speed, and `RequireReady` waits for that manifest
-for a bounded time.
+**Known limitation.** A cold burn-in start of a large file can fail its first
+`RequireReady` attempt in either mode: the core reads the whole file once to
+build the bundle, as libass does on a local mount, and that can outlast the
+start request. In core mode the build goes on, and the retry, on any node, gets
+the cached bundle.
 
 ### Keyframe plan records
 
