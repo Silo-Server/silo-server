@@ -48,9 +48,9 @@ type bandwidthProbeAccount struct {
 }
 
 // acquire reserves a probe slot and size bytes of the account's window. It
-// returns how long to wait before retrying when the account is over either
-// limit.
-func (l *bandwidthProbeLimiter) acquire(userID, size int, now time.Time) (bool, time.Duration) {
+// returns the window the reservation belongs to, for release, or how long to
+// wait before retrying when the account is over either limit.
+func (l *bandwidthProbeLimiter) acquire(userID, size int, now time.Time) (bool, time.Time, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	// Forget accounts with nothing running whose window has passed. Probes are
@@ -70,19 +70,21 @@ func (l *bandwidthProbeLimiter) acquire(userID, size int, now time.Time) (bool, 
 		account.windowStart, account.windowBytes = now, 0
 	}
 	if account.inFlight >= bandwidthProbeMaxInFlight {
-		return false, 5 * time.Second
+		return false, time.Time{}, 5 * time.Second
 	}
 	if account.windowBytes+size > bandwidthProbeWindowBytes {
-		return false, account.windowStart.Add(bandwidthProbeWindow).Sub(now)
+		return false, time.Time{}, account.windowStart.Add(bandwidthProbeWindow).Sub(now)
 	}
 	account.inFlight++
 	account.windowBytes += size
-	return true, 0
+	return true, account.windowStart, 0
 }
 
 // release frees the slot and refunds the bytes a probe reserved but did not
 // send, as when the client closed the connection once it had timed enough.
-func (l *bandwidthProbeLimiter) release(userID, unsent int, now time.Time) {
+// The refund only goes back to the window that granted it; a later window
+// never held the reservation.
+func (l *bandwidthProbeLimiter) release(userID, unsent int, granted, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	account := l.accounts[userID]
@@ -90,7 +92,9 @@ func (l *bandwidthProbeLimiter) release(userID, unsent int, now time.Time) {
 		return
 	}
 	account.inFlight--
-	account.windowBytes = max(0, account.windowBytes-unsent)
+	if account.windowStart.Equal(granted) {
+		account.windowBytes = max(0, account.windowBytes-unsent)
+	}
 	if account.inFlight <= 0 && now.Sub(account.windowStart) >= bandwidthProbeWindow {
 		delete(l.accounts, userID)
 	}
@@ -145,13 +149,13 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 			writeProblem(w, r, NewProblem(TypeAuthenticationRequired, "Authentication is required."))
 			return
 		}
-		admitted, wait := limiter.acquire(claims.UserID, size, time.Now())
+		admitted, window, wait := limiter.acquire(claims.UserID, size, time.Now())
 		if !admitted {
 			writeProblem(w, r, NewProblem(TypeRateLimited, "This account has reached its bandwidth probe limit on this server.").WithRetryAfter(max(1, int(wait.Round(time.Second)/time.Second))))
 			return
 		}
 		sent := &countingWriter{w: w}
-		defer func() { limiter.release(claims.UserID, size-sent.n, time.Now()) }()
+		defer func() { limiter.release(claims.UserID, size-sent.n, window, time.Now()) }()
 		streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID),
 			StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
 		w.Header().Set("Content-Type", playbackMediaBinary)
