@@ -10,6 +10,7 @@ import {
   buildDeliveriesV3,
   detectBandwidthEstimateKbpsV3,
   detectHLSSupport,
+  detectMeteredV3,
   type WebCapabilityProbe,
 } from "./client-context-v3";
 
@@ -298,5 +299,21 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
     withDownlink(0.05);
     expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+  });
+});
+
+describe("detectMeteredV3", () => {
+  it("flags Data Saver and cellular links", () => {
+    vi.stubGlobal("navigator", { connection: { saveData: true } });
+    expect(detectMeteredV3()).toBe(true);
+    vi.stubGlobal("navigator", { connection: { type: "cellular", downlink: 10 } });
+    expect(detectMeteredV3()).toBe(true);
+  });
+
+  it("assumes unmetered without a signal", () => {
+    vi.stubGlobal("navigator", { connection: { type: "wifi" } });
+    expect(detectMeteredV3()).toBe(false);
+    vi.stubGlobal("navigator", {});
+    expect(detectMeteredV3()).toBe(false);
   });
 });
