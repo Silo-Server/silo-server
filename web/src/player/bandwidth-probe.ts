@@ -353,8 +353,12 @@ function onOtherTabPlaybackStart(): void {
 
 function installMediaTracking(): void {
   if (!playbackChannel && typeof BroadcastChannel !== "undefined") {
-    playbackChannel = new BroadcastChannel(PLAYBACK_CHANNEL_NAME);
-    playbackChannel.onmessage = onOtherTabPlaybackStart;
+    try {
+      playbackChannel = new BroadcastChannel(PLAYBACK_CHANNEL_NAME);
+      playbackChannel.onmessage = onOtherTabPlaybackStart;
+    } catch {
+      // Cross-tab notice is optional; without it each tab guards itself.
+    }
   }
   if (mediaTrackingInstalled || typeof document === "undefined" || !lockManager()) return;
   mediaTrackingInstalled = true;
@@ -387,7 +391,11 @@ function probeAllowed(): boolean {
  */
 export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => void {
   stopBandwidthProbes();
-  installMediaTracking();
+  try {
+    installMediaTracking();
+  } catch {
+    // Cross-tab coordination is optional.
+  }
   const generation = scheduleGeneration;
   const schedule = (ms: number) => {
     if (generation !== scheduleGeneration) return;
@@ -464,18 +472,26 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
 export function cancelBandwidthProbe(): void {
   cancelEpoch++;
   lastPlaybackStartAt = Date.now();
-  // Tell other tabs: a probe running there stops now, and the lock keeps new
-  // ones off until the playing hold takes over or the start settles.
-  installMediaTracking();
-  playbackChannel?.postMessage("start");
-  holdMediaLock(new Promise<void>((resolve) => setTimeout(resolve, PLAYBACK_START_QUIET_MS)));
   activeProbe?.abort();
+  // Tell other tabs: a probe running there stops now, and the lock keeps new
+  // ones off until the playing hold takes over or the start settles. This is
+  // best effort: a browser that refuses cross-tab APIs (some privacy modes
+  // throw SecurityError) must never keep playback from starting.
+  try {
+    installMediaTracking();
+    playbackChannel?.postMessage("start");
+    holdMediaLock(new Promise<void>((resolve) => setTimeout(resolve, PLAYBACK_START_QUIET_MS)));
+  } catch {
+    // Local cancellation above already happened.
+  }
 }
 
 /** Stops the schedule and any running probe, e.g. on sign-out. */
 export function stopBandwidthProbes(): void {
   scheduleGeneration++;
   lastPlaybackStartAt = undefined;
+  playbackChannel?.close();
+  playbackChannel = undefined;
   if (scheduledTimer !== undefined) {
     clearTimeout(scheduledTimer);
     scheduledTimer = undefined;
