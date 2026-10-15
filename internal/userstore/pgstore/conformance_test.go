@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -558,6 +559,58 @@ func TestPostgresConcurrentProfileAndCollectionDeletes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("round %d: concurrent delete: %v", round, err)
 			}
+		}
+	}
+}
+
+// Deleting a profile while it reorders its own collections cannot deadlock:
+// both lock the collections in id order. The reorder may find the
+// collections gone, which is not a deadlock.
+func TestPostgresConcurrentProfileDeleteAndCollectionReorder(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	for round := range 20 {
+		var userID int
+		if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+			fmt.Sprintf("conf-reorderdelete-%d-%d", round, time.Now().UnixNano())).Scan(&userID); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID) })
+		store := newStore(pool, userID)
+		for _, id := range []string{"keep", "gone"} {
+			if err := store.CreateProfile(ctx, userstore.Profile{ID: id, Name: id}); err != nil {
+				t.Fatalf("CreateProfile %s: %v", id, err)
+			}
+		}
+		var ids []string
+		for i := range 6 {
+			c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "gone", Name: fmt.Sprintf("List %d", i)})
+			if err != nil {
+				t.Fatalf("CreateCollection: %v", err)
+			}
+			ids = append([]string{c.ID}, ids...)
+		}
+
+		var wg sync.WaitGroup
+		var deleteErr, reorderErr error
+		wg.Go(func() { deleteErr = newStore(pool, userID).DeleteProfile(ctx, "gone") })
+		wg.Go(func() { reorderErr = newStore(pool, userID).ReorderCollections(ctx, "gone", ids) })
+		wg.Wait()
+		if deleteErr != nil {
+			t.Fatalf("round %d: DeleteProfile: %v", round, deleteErr)
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(reorderErr, &pgErr) && pgErr.Code == "40P01" {
+			t.Fatalf("round %d: ReorderCollections deadlocked: %v", round, reorderErr)
 		}
 	}
 }

@@ -422,6 +422,13 @@ func (s *PostgresUserStore) reorderCollections(ctx context.Context, profileID st
 	if err := s.checkCollectionOrderRevision(ctx, tx, expected); err != nil {
 		return err
 	}
+	// The bulk update below locks rows in plan order; lock them in id order
+	// first, as a profile delete does, so the two cannot deadlock.
+	if _, err := tx.Exec(ctx,
+		`SELECT 1 FROM user_personal_collections WHERE user_id = $1 AND creator_profile_id = $2 AND native ORDER BY id FOR UPDATE`,
+		s.userID, profileID); err != nil {
+		return fmt.Errorf("locking collections for reorder: %w", err)
+	}
 
 	var updated, total int
 	if err := tx.QueryRow(ctx, `
