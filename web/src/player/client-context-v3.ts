@@ -164,7 +164,7 @@ function buildDeliveryCapability(
 /**
  * The browser decode engine's additions to the `original_http` class: what it
  * decodes on top of the media element, the audio track it can pick from the
- * whole file, and, when WebGPU can tone-map and the display is SDR, HDR and
+ * whole file, and, when its WebGPU presenter works and the display is SDR, HDR and
  * Dolby Vision originals (see docs/architecture/web-decode-engine.md). The
  * engine only presents SDR, so on an HDR display the claim stays off and HDR
  * sources keep the routes that preserve HDR.

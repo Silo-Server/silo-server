@@ -1,3 +1,4 @@
+import type { PictureColor } from "./pictureColor";
 import type { EngineSourceSpec } from "./source";
 
 /**
@@ -5,6 +6,13 @@ import type { EngineSourceSpec } from "./source";
  * played it means the connection went away, not that the route cannot work.
  */
 export const ENGINE_READ_FAILED = "browser_engine_read_failed";
+
+/**
+ * The video decoder reported an error. A hardware decoder also fails this way
+ * when the GPU process restarts under it, so the page retries a new decode run
+ * before treating it as final.
+ */
+export const ENGINE_VIDEO_DECODE_FAILED = "browser_engine_video_decode_failed";
 
 /**
  * Messages between the page, the engine worker, and the audio worklet.
@@ -26,6 +34,8 @@ export interface EngineMediaInfo {
     rotation: 0 | 90 | 180 | 270;
     /** Mirror the turned picture horizontally. */
     flip: boolean;
+    /** How the HDR presenter reads the stream's samples. */
+    color: PictureColor;
   };
   audio: { sampleRate: number; channels: number } | null;
 }
