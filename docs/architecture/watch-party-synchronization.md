@@ -128,9 +128,11 @@ skip from their own position, which stays on the old stream until the room's
 seek runs there, so a burst of presses on an older client repeats the pending
 target. Current clients hold their newest request on the timeline and build
 the next skip on it. The room's seeks for earlier presses move the player but
-do not release the request; the room's seek to it does, or a 5 second timeout
-when the room never runs it. A seek during an open barrier also keeps whether the room resumes
-playing, since the requester is paused by the barrier rather than by choice.
+do not release the request. The room's seek to it releases it, as does a newer
+command that replaced that seek before it ran, or a 5 second timeout when the
+room never runs it. A seek during an open barrier also keeps whether the room
+resumes playing, since the requester is paused by the barrier rather than by
+choice.
 A paused member that stays where its last correction found it cannot apply
 one in place (a transcode lands on segment boundaries) and is not corrected
 again until it moves.

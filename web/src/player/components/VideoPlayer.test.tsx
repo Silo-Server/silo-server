@@ -755,6 +755,53 @@ describe("VideoPlayer room catch-up", () => {
     expect(controls.current!.currentTime).toBe(190);
   });
 
+  it("releases a held skip when a newer command replaces its room seek", async () => {
+    const { connection, command, rerenderPlayer } = setup(100, 0, true);
+    const host = {
+      ...connection,
+      room: { ...connection.room!, self_can_manage_room: true, self_can_control_transport: true },
+    };
+    rerenderPlayer({ watchTogetherConnection: host });
+    act(() => controls.current!.onSkip!.forward());
+    expect(controls.current!.currentTime).toBe(130);
+
+    const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...host,
+        room: { ...host.room, playback_state: "waiting" as const },
+        transportCommand: {
+          ...command,
+          command_id: "seek-130",
+          action: "seek" as const,
+          position_seconds: 130,
+          playback_state: "waiting" as const,
+          execute_at: at(500),
+        },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    // A pause replaces the seek before it runs; the element stays at 100 s.
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...host,
+        room: { ...host.room, playback_state: "paused" as const, is_paused: true },
+        transportCommand: {
+          ...command,
+          command_id: "pause",
+          action: "pause" as const,
+          position_seconds: 100,
+          playback_state: "paused" as const,
+          execute_at: at(200),
+        },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(300));
+    expect(controls.current!.currentTime).toBe(100);
+    act(() => controls.current!.onSkip!.forward());
+    expect(controls.current!.currentTime).toBe(130);
+  });
+
   it("keeps the actual position when a room seek cannot be sent", () => {
     const { connection, rerenderPlayer } = setup(100);
     connection.room = { ...connection.room!, self_can_manage_room: true };

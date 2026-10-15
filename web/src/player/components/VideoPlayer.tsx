@@ -1229,10 +1229,15 @@ export function VideoPlayer({
   const [roomHeldSeek, setRoomHeldSeek] = useState<number | null>(null);
   const roomHeldSeekRef = useRef<number | null>(null);
   const roomHeldSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether the room's seek for the held request has arrived. Any command that
+  // runs after it, including one that replaced it before it ran, answers the
+  // request.
+  const roomHeldSeekAnsweredRef = useRef(false);
   const holdRoomSeek = useCallback(
     (seconds: number | null) => {
       if (roomHeldSeekTimerRef.current !== null) clearTimeout(roomHeldSeekTimerRef.current);
       roomHeldSeekTimerRef.current = null;
+      roomHeldSeekAnsweredRef.current = false;
       roomHeldSeekRef.current = seconds;
       setRoomHeldSeek(seconds);
       if (seconds === null) return;
@@ -1247,6 +1252,14 @@ export function VideoPlayer({
     },
     [releasePendingSeek],
   );
+  // The room answered the held request without running a seek to it here: the
+  // timeline goes back to the media, and so does the request's pending target.
+  const abandonRoomHeldSeek = useCallback(() => {
+    const seconds = roomHeldSeekRef.current;
+    if (seconds === null) return;
+    holdRoomSeek(null);
+    releasePendingSeek(seconds);
+  }, [holdRoomSeek, releasePendingSeek]);
   useEffect(
     () => () => {
       if (roomHeldSeekTimerRef.current !== null) clearTimeout(roomHeldSeekTimerRef.current);
@@ -3599,6 +3612,15 @@ export function VideoPlayer({
 
     lastRoomCommandIdRef.current = command.command_id;
     appliedRoomCommandIdRef.current = null;
+    // The room's seek for the held request. A seek for an earlier press in a
+    // burst does not answer it.
+    if (
+      command.action === "seek" &&
+      roomHeldSeekRef.current !== null &&
+      remainingRoomHeldSeek(roomHeldSeekRef.current, command.position_seconds) === null
+    ) {
+      roomHeldSeekAnsweredRef.current = true;
+    }
 
     if (roomCommandTimerRef.current !== null) {
       window.clearTimeout(roomCommandTimerRef.current);
@@ -3775,6 +3797,9 @@ export function VideoPlayer({
         appliedRoomCommandIdRef.current = command.command_id;
         roomReferenceRef.current = reference;
         roomCommandFinishedAtRef.current = performance.now();
+        // The room's seek for the held request, or a command that replaced it
+        // before it ran, ends the hold. A newer request since resets it.
+        if (roomHeldSeekAnsweredRef.current) abandonRoomHeldSeek();
         const playAllowed = applyRoomPosition(video);
 
         if (command.action === "seek") {
@@ -3857,6 +3882,7 @@ export function VideoPlayer({
       }
     };
   }, [
+    abandonRoomHeldSeek,
     canSeekAnywhere,
     elementMediaPosition,
     issueRoomSeek,
