@@ -285,10 +285,24 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 8, saveData: true } });
     localStorage.setItem(
       "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 4_200, measuredAt: Date.now(), observed: true }),
+      JSON.stringify({ kbps: 4_200, measuredAt: Date.now(), observed: true, metered: true }),
     );
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBe(4_200);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("does not carry a limit observed on Wi-Fi onto a metered link", () => {
+    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 56_000, measuredAt: Date.now(), observed: true }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+      expect(detectMeteredV3()).toBe(true);
     } finally {
       localStorage.removeItem("silo-bandwidth-estimate");
     }

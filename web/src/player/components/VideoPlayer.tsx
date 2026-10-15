@@ -3769,7 +3769,9 @@ export function VideoPlayer({
     enabled:
       activeQualityId === "auto" && !watchTogetherRoomActive && connectionStatus === "connected",
     sessionId,
-    planIdentity: plan,
+    // Only an adopted plan resets stall history; in-place plan updates such
+    // as a newly ready subtitle must not drop a stall in progress.
+    planIdentity: planRevision,
     deliveredKbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps,
     onDownshift: (estimateKbps) => {
       recordObservedBandwidthLimitKbps(estimateKbps);

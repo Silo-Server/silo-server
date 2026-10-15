@@ -11,7 +11,7 @@ import {
   forgetBandwidthEstimate,
   measureBandwidthKbps,
   readMeasuredBandwidthKbps,
-  readObservedBandwidthLimitKbps,
+  readMeteredObservedLimitKbps,
   recordObservedBandwidthLimitKbps,
   scheduleBandwidthProbe,
   stopBandwidthProbes,
@@ -172,21 +172,35 @@ describe("measured bandwidth cache", () => {
     expect(readMeasuredBandwidthKbps(now)).toBe(56_000);
   });
 
-  it("marks a lower probe result as observed without raising it", () => {
-    const now = Date.now();
-    storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, JSON.stringify({ kbps: 3_000, measuredAt: now }));
-    expect(readObservedBandwidthLimitKbps(now)).toBeUndefined();
+  it("marks a lower probe result as observed on a metered link without raising it", () => {
+    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
+    try {
+      const now = Date.now();
+      storage.set(
+        storage.KEYS.BANDWIDTH_ESTIMATE,
+        JSON.stringify({ kbps: 3_000, measuredAt: now }),
+      );
+      expect(readMeteredObservedLimitKbps(now)).toBeUndefined();
 
-    recordObservedBandwidthLimitKbps(4_200, now);
-    expect(readMeasuredBandwidthKbps(now)).toBe(3_000);
-    expect(readObservedBandwidthLimitKbps(now)).toBe(3_000);
+      recordObservedBandwidthLimitKbps(4_200, now);
+      expect(readMeasuredBandwidthKbps(now)).toBe(3_000);
+      expect(readMeteredObservedLimitKbps(now)).toBe(3_000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not offer a limit observed on an unmetered link to a metered one", () => {
+    recordObservedBandwidthLimitKbps(56_000);
+    expect(readMeasuredBandwidthKbps()).toBe(56_000);
+    expect(readMeteredObservedLimitKbps()).toBeUndefined();
   });
 
   it("keeps a recorded limit when localStorage refuses the write", () => {
     const set = vi.spyOn(storage, "set").mockImplementation(() => undefined);
     try {
       recordObservedBandwidthLimitKbps(14_000);
-      expect(readObservedBandwidthLimitKbps()).toBe(14_000);
+      expect(readMeasuredBandwidthKbps()).toBe(14_000);
     } finally {
       set.mockRestore();
     }

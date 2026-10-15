@@ -1617,9 +1617,10 @@ stalls of at least a second within two minutes, or one stall of six seconds.
 Stall time in the first ten seconds of a plan does not count, and buffering
 caused by a seek, pause or source reload is not a stall. It sends 70% of the
 delivered bitrate, so the next stream targets about 56% of the one that
-stalled. It keeps that lower estimate for the next 30 minutes, including on a
-metered link where it ignores probe results, and stops when a replan delivers
-no lower bitrate.
+stalled. It keeps that lower estimate for the next 30 minutes and stops when a
+replan delivers no lower bitrate. On a metered link it uses the estimate only if
+the stall was also observed on a metered link, since probe results and Wi-Fi
+observations do not describe that link.
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving

@@ -61,6 +61,8 @@ interface StoredEstimate {
    * applies on a metered connection.
    */
   observed?: boolean;
+  /** Set when the observed limit was recorded on a metered link. */
+  metered?: boolean;
 }
 
 function clampKbps(kbps: number): number | undefined {
@@ -84,7 +86,12 @@ function parseStored(raw: string | null | undefined, now: number): StoredEstimat
       return undefined;
     const kbps = clampKbps(parsed.kbps);
     if (kbps === undefined) return undefined;
-    return { kbps, measuredAt: parsed.measuredAt, observed: parsed.observed === true };
+    return {
+      kbps,
+      measuredAt: parsed.measuredAt,
+      observed: parsed.observed === true,
+      metered: parsed.metered === true,
+    };
   } catch {
     return undefined;
   }
@@ -100,9 +107,11 @@ function readStored(now: number): StoredEstimate | undefined {
 }
 
 function writeStored(kbps: number, now: number, observed = false): void {
-  const entry: StoredEstimate = observed
-    ? { kbps, measuredAt: now, observed }
-    : { kbps, measuredAt: now };
+  const entry: StoredEstimate = { kbps, measuredAt: now };
+  if (observed) {
+    entry.observed = true;
+    if (onMeteredConnection()) entry.metered = true;
+  }
   pageEntry = JSON.stringify(entry);
   storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, pageEntry);
 }
@@ -134,12 +143,13 @@ export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now())
 }
 
 /**
- * The cached limit playback observed, or undefined when there is none or the
- * cached value is only a probe result.
+ * The cached limit playback observed on a metered link, for planning on a
+ * metered link. A limit observed on Wi-Fi does not describe cellular, and a
+ * probe result never applies there.
  */
-export function readObservedBandwidthLimitKbps(now = Date.now()): number | undefined {
+export function readMeteredObservedLimitKbps(now = Date.now()): number | undefined {
   const stored = readStored(now);
-  return stored?.observed ? stored.kbps : undefined;
+  return stored?.observed && stored.metered ? stored.kbps : undefined;
 }
 
 /**
