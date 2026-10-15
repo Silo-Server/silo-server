@@ -117,6 +117,16 @@ describe("Requests settings: general", () => {
     });
   });
 
+  // The cross-links to access groups, users, notifications and Autoscan are
+  // Hidden tier: none of them is a request setting.
+  it("shows no Related links group", async () => {
+    serve({});
+    mount();
+    await screen.findByLabelText("Request limit");
+    expect(screen.queryByRole("group", { name: "Related" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Notifications" })).not.toBeInTheDocument();
+  });
+
   it("saves a request limit of 0 and refuses a negative or empty one", async () => {
     serve({
       handlers: {
@@ -171,6 +181,26 @@ describe("Requests settings: general", () => {
     expect(
       screen.queryByRole("switch", { name: "Request titles added to a watchlist" }),
     ).toBeNull();
+  });
+
+  it("shows the 4K-for-every-title switch and saves it", async () => {
+    serve({
+      handlers: {
+        "PUT /api/v2/admin/request-settings": (options) =>
+          reply(options, { ...settings, force_dual_quality: true }, '"saved"'),
+      },
+    });
+    mount();
+    await screen.findByLabelText("Request limit");
+    const general = within(group("General"));
+    const toggle = general.getByRole("switch", { name: /4K version of every title/ });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls("PUT /api/v2/admin/request-settings")).toHaveLength(1));
+    expect(calls("PUT /api/v2/admin/request-settings")[0]).toMatchObject({
+      body: { force_dual_quality: true },
+    });
   });
 });
 

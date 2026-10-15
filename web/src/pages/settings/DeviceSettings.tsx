@@ -3,6 +3,7 @@ import { ChevronLeft, Info, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import type { UserDevice } from "@/api/types";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -100,13 +101,11 @@ export default function DeviceSettings() {
     <div className="space-y-5">
       {/* Hidden below xl while the detail view is open: on a phone that screen
           is about one device, and its own header says which. */}
-      <header className={cn("space-y-2", showDetailOnMobile && "hidden xl:block")}>
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your devices</h2>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Every phone, tablet, TV and browser you watch on. Pick one to see what&apos;s set
-          differently there and change it — from here, whichever device you&apos;re holding.
-        </p>
-      </header>
+      <PageHeader
+        className={cn(showDetailOnMobile && "hidden xl:flex")}
+        title="Your Devices"
+        subtitle="Every phone, tablet, TV and browser you watch on. Pick one to see what's set differently there and change it — from here, whichever device you're holding."
+      />
 
       {/* Kept by this browser itself, not the server, so it sits apart from
           the device list, which edits server-held settings for any device. */}
@@ -428,7 +427,7 @@ function DeviceDetail({
           </strong>
           .
         </span>
-        <span className="text-muted-foreground/90 mt-1 block text-[12.5px]">
+        <span className="text-muted-foreground mt-1 block text-[13px]">
           {forSomeoneElse ? `${device.profile_name}'s` : "Your"} other devices, and anyone else who
           uses this one, are unaffected.
           {!device.is_current_device

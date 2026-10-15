@@ -171,7 +171,7 @@ function CollectionRadio({
       />
       <span className="min-w-0">
         <span className="block truncate text-sm font-semibold">{option.title}</span>
-        <span aria-hidden className="text-muted-foreground block truncate text-[12.5px]">
+        <span aria-hidden className="text-muted-foreground block truncate text-[13px]">
           {meta}
         </span>
         <span id={metaId} className="sr-only">
@@ -181,7 +181,7 @@ function CollectionRadio({
       {onPage ? (
         <span
           aria-hidden
-          className="bg-background/70 ring-border inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset"
+          className="bg-background/70 ring-border inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset"
         >
           <Check className="text-success size-3" />
           On {pageLabel}

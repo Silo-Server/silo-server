@@ -836,7 +836,6 @@ GET /api/v2/system/connections	non-media
 GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
-GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
 GET /api/v2/user/libraries	non-media
@@ -2103,7 +2102,6 @@ GET /api/v2/system/connections	non-media
 GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
-GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
 GET /api/v2/user/libraries	non-media

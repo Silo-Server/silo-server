@@ -88,7 +88,7 @@ export function RowPicker({
           orientation={narrow ? "horizontal" : "vertical"}
         />
         {narrow ? null : (
-          <p className="border-border text-muted-foreground mx-1 mt-3.5 border-t px-2 pt-3.5 text-[12.5px] leading-[1.55]">
+          <p className="border-border text-muted-foreground mx-1 mt-3.5 border-t px-2 pt-3.5 text-[13px] leading-[1.55]">
             Rows marked <b className="text-foreground font-medium">On {pageLabel}</b> are already
             here. You can add them again with other settings.
           </p>

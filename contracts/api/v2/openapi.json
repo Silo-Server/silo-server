@@ -864,6 +864,12 @@
           "max_playback_quality": {
             "type": "string"
           },
+          "max_profiles": {
+            "description": "Household profiles each member account may have, unless the account overrides it",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate ceiling in kbps; 0 means unlimited",
             "format": "int64",
@@ -909,6 +915,7 @@
           "max_transcodes",
           "max_remote_stream_bitrate_kbps",
           "max_local_stream_bitrate_kbps",
+          "max_profiles",
           "allowed_permissions",
           "requests_allowed",
           "is_default",
@@ -965,6 +972,12 @@
           },
           "max_playback_quality": {
             "type": "string"
+          },
+          "max_profiles": {
+            "description": "Household profiles each member account may have; 5 when a new group omits it",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -1059,6 +1072,12 @@
           "max_playback_quality": {
             "type": "string"
           },
+          "max_profiles": {
+            "description": "Household profiles each member account may have, unless the account overrides it",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate ceiling in kbps; 0 means unlimited",
             "format": "int64",
@@ -1109,6 +1128,7 @@
           "max_transcodes",
           "max_remote_stream_bitrate_kbps",
           "max_local_stream_bitrate_kbps",
+          "max_profiles",
           "allowed_permissions",
           "requests_allowed",
           "is_default",
@@ -1167,6 +1187,10 @@
             "description": "Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override",
             "type": "boolean"
           },
+          "profile_limits": {
+            "description": "Whether access groups and account policy overrides take max_profiles, the household profile limit; null on an account inherits its group's limit",
+            "type": "boolean"
+          },
           "profile_sections": {
             "description": "Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout",
             "type": "boolean"
@@ -1200,6 +1224,7 @@
           "default_profile",
           "exact_identity_filter",
           "access_groups",
+          "profile_limits",
           "password_reset_link",
           "password_reset_email",
           "ownership_transfer",
@@ -1289,9 +1314,13 @@
             ]
           },
           "max_profiles": {
+            "description": "Household profile limit override; null inherits the access group's limit",
             "format": "int64",
             "minimum": 1,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -1517,9 +1546,13 @@
             ]
           },
           "max_profiles": {
+            "description": "Household profile limit override; null inherits the access group's limit",
             "format": "int64",
             "minimum": 1,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -19298,12 +19331,16 @@
             ]
           },
           "max_profiles": {
-            "description": "Household profile limit",
+            "description": "Household profile limit override; null inherits the access group's limit",
             "examples": [
               5
             ],
             "format": "int64",
-            "type": "integer"
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate override in kbps; null inherits, 0 means unlimited",
@@ -21285,9 +21322,6 @@
           "branding_available": {
             "type": "boolean"
           },
-          "overrides_available": {
-            "type": "boolean"
-          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -21308,7 +21342,6 @@
         },
         "required": [
           "branding_available",
-          "overrides_available",
           "storage_available",
           "revision",
           "state"
@@ -28730,6 +28763,15 @@
             ],
             "type": "string"
           },
+          "max_profiles": {
+            "description": "Household profile limit",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate limit in kbps; 0 means unlimited",
             "examples": [
@@ -28791,6 +28833,7 @@
           "max_transcodes",
           "max_remote_stream_bitrate_kbps",
           "max_local_stream_bitrate_kbps",
+          "max_profiles",
           "transcode_allowed",
           "audio_transcode_allowed",
           "download_allowed",
@@ -29348,6 +29391,13 @@
           },
           "overview": {
             "type": "string"
+          },
+          "ratings": {
+            "description": "The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating.",
+            "items": {
+              "$ref": "#/components/schemas/CatalogRating"
+            },
+            "type": "array"
           },
           "runtime": {
             "description": "Minutes",
@@ -39992,6 +40042,15 @@
             ],
             "type": "string"
           },
+          "max_profiles": {
+            "description": "Household profile limit",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate limit in kbps; 0 means unlimited",
             "examples": [
@@ -40037,6 +40096,7 @@
           "max_transcodes",
           "max_remote_stream_bitrate_kbps",
           "max_local_stream_bitrate_kbps",
+          "max_profiles",
           "transcode_allowed",
           "audio_transcode_allowed",
           "download_allowed",
@@ -46920,22 +46980,6 @@
         },
         "required": [
           "container"
-        ],
-        "type": "object"
-      },
-      "ThemeOverrides": {
-        "additionalProperties": false,
-        "properties": {
-          "raw_css": {
-            "type": "string"
-          },
-          "vars": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "vars",
-          "raw_css"
         ],
         "type": "object"
       },
@@ -84792,7 +84836,7 @@
                 }
               }
             },
-            "description": "The job was already canceled."
+            "description": "The job is canceled: it was already canceled, or it was a queued image cache cleanup that this request canceled at once."
           },
           "202": {
             "content": {
@@ -157650,12 +157694,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.",
+        "summary": "Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
       "get": {
@@ -157954,12 +157998,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated.",
+        "summary": "Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -201107,79 +201151,6 @@
         "x-silo-service-backed": true
       }
     },
-    "/api/v2/theme/admin-css": {
-      "get": {
-        "operationId": "getThemeOverrides",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThemeOverrides"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "406": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Acceptable"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Read public pre-login theme overrides.",
-        "tags": [
-          "branding"
-        ],
-        "x-silo-class": "public",
-        "x-silo-service-backed": true
-      }
-    },
     "/api/v2/theme/branding": {
       "get": {
         "operationId": "getBranding",
@@ -209152,12 +209123,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's watchlist; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.",
+        "summary": "Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
       "get": {
@@ -209456,12 +209427,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's watchlist. Automatic retries are unsafe because provider and refresh effects are not change-gated.",
+        "summary": "Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },

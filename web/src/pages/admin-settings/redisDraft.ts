@@ -1,5 +1,7 @@
 import type { useSettingsForm } from "@/hooks/useSettingsForm";
 
+export const REDIS_KEYS = ["redis.url", "redis.db"];
+
 /** The part of a settings form the Redis fields stage their edits through. */
 type RedisDraft = Pick<
   ReturnType<typeof useSettingsForm>,

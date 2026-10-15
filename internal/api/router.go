@@ -1128,6 +1128,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.UserStoreProvider != nil {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
+		if accessGroupStore != nil {
+			profileHandler.AccessGroups = accessGroupStore
+		}
 		profileHandler.EventsHub = deps.EventsHub
 		if deps.DB != nil {
 			// Drops live in Postgres whichever store holds the profile.
@@ -2520,7 +2523,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
-		v2deps.ThemeOverrides = themeHandler
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService

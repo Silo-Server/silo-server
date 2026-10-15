@@ -101,10 +101,10 @@ func checkEpisodeCompletionUserStates(t *testing.T, pool *pgxpool.Pool, store us
 	if err := store.SetProgressAt(t.Context(), profileID, episode1, 100, 100, true, at); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddFavorite(t.Context(), profileID, series); err != nil {
+	if _, err := store.AddFavorite(t.Context(), profileID, series); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddToWatchlist(t.Context(), profileID, season); err != nil {
+	if _, err := store.AddToWatchlist(t.Context(), profileID, season); err != nil {
 		t.Fatal(err)
 	}
 	items := []*models.MediaItem{nil, {ContentID: series, Type: "series"}, {ContentID: season, Type: "season"}, {ContentID: empty, Type: "series"}, {ContentID: episode1, Type: "episode"}, {ContentID: series, Type: "series"}}

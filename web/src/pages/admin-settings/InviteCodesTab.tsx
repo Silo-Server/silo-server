@@ -126,7 +126,7 @@ export default function InviteCodesTab() {
           <p className="text-muted-foreground text-sm">
             Codes only work while public signups are on.{" "}
             <Link
-              to="/admin/settings/general"
+              to="/admin/settings/sign-in"
               className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
             >
               Public signups setting
@@ -140,7 +140,7 @@ export default function InviteCodesTab() {
               <span className="font-medium text-amber-500">Public signups are off</span> — these
               codes won't work until you enable them.{" "}
               <Link
-                to="/admin/settings/general"
+                to="/admin/settings/sign-in"
                 className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
               >
                 Public signups setting

@@ -753,7 +753,6 @@ export default function AdminCollections() {
   return (
     <div aria-busy={deleting} inert={deleting ? true : undefined}>
       <CalmPage
-        heading="page"
         title="Collections"
         subtitle="Server collections everyone can browse on each library's Collections tab and use in Sections."
         actions={

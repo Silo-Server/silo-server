@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Switch } from "@/components/ui/switch";
@@ -67,6 +68,10 @@ export default function RequestsSettings() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Requests"
+        subtitle="How you ask for titles this server doesn't have yet."
+      />
       <SettingsGroup
         title="Watchlist"
         description="What happens when you add a title the library doesn't have yet."

@@ -251,8 +251,9 @@ These rules were validated on frame-checked episodes and movies from several
 series; every start they placed early was checked against frames and cut no
 story.
 
-Automatic contribution to online providers stays intro-only; detected credits
-are contributed only on request.
+Automatic contribution to online providers shares detected credits as it does
+intros, when they meet the provider's minimum confidence. At the default 0.95,
+that is chapter credits and season-agreed audio credits that video moved.
 
 Credits versions and caches:
 

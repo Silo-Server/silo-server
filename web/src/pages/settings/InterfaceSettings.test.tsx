@@ -4,7 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { defaultWebPrimaryMenu } from "@/lib/uiCustomization";
+import {
+  defaultWebPrimaryMenu,
+  type PrimaryMenuDocument,
+  type PrimaryMenuItem,
+} from "@/lib/uiCustomization";
 
 const mocks = vi.hoisted(() => ({
   useUICustomization: vi.fn(),
@@ -26,37 +30,50 @@ vi.mock("@/hooks/queries/settingValues", () => ({
   useClearSettingValue: (...args: unknown[]) => mocks.useClearSettingValue(...args),
 }));
 
-// Title art has its own suite; it reads settings capabilities this page does not.
-vi.mock("@/pages/settings/TitleArtSettingsGroup", () => ({ TitleArtSettingsGroup: () => null }));
+// Shortcuts, badges, and the preview have their own tests; here it only
+// matters that they render whatever state the web customization is in.
+vi.mock("./CardOverlaySettings", () => ({
+  CardOverlaySettings: () => <section aria-label="Card overlays" />,
+}));
+vi.mock("./PosterCardPreview", () => ({
+  PosterCardPreview: () => <figure aria-label="Preview" />,
+}));
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 import InterfaceSettings from "./InterfaceSettings";
 
-describe("InterfaceSettings card resets", () => {
+const HOME: PrimaryMenuItem = { type: "builtin", destination: "home" };
+const MOVIES: PrimaryMenuItem = { type: "library", library_id: 7, label: "Movies" };
+const CALENDAR: PrimaryMenuItem = { type: "builtin", destination: "calendar" };
+const MOVIES_MENU: PrimaryMenuDocument = { items: [HOME, MOVIES, CALENDAR] };
+
+function customization(overrides: Record<string, unknown> = {}) {
+  return {
+    cardPresentation: { poster_size: "large", caption: "title" },
+    cardPresentationSource: "profile_client",
+    primaryMenu: defaultWebPrimaryMenu(),
+    primaryMenuSource: "profile_client",
+    shortcuts: { items: [] },
+    isSupported: true,
+    supportsAtomicShortcuts: true,
+    isLoading: false,
+    isUnavailable: false,
+    ...overrides,
+  };
+}
+
+describe("InterfaceSettings", () => {
   let clearMutateAsync: ReturnType<typeof vi.fn>;
   let setMutateAsync: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     mocks.useUICustomization.mockReset();
-    mocks.useUserLibraries.mockReset();
-    mocks.useSetSettingValue.mockReset();
-    mocks.useClearSettingValue.mockReset();
     clearMutateAsync = vi.fn().mockResolvedValue(undefined);
     setMutateAsync = vi.fn().mockResolvedValue(undefined);
-
-    mocks.useUICustomization.mockReturnValue({
-      cardPresentation: { poster_size: "large", caption: "title" },
-      cardPresentationSource: "profile_client",
-      primaryMenu: defaultWebPrimaryMenu(),
-      primaryMenuSource: "profile_client",
-      shortcuts: { items: [] },
-      isSupported: true,
-      supportsAtomicShortcuts: true,
-      isLoading: false,
-      isUnavailable: false,
-    });
+    mocks.useUICustomization.mockReturnValue(customization());
     mocks.useUserLibraries.mockReturnValue({ data: [] });
     mocks.useSetSettingValue.mockReturnValue({ isPending: false, mutateAsync: setMutateAsync });
     mocks.useClearSettingValue.mockReturnValue({
@@ -67,14 +84,33 @@ describe("InterfaceSettings card resets", () => {
 
   afterEach(cleanup);
 
-  it("resets the web-family card preference at profile_client scope", async () => {
+  it("saves poster size and caption the moment they are picked", async () => {
     render(<InterfaceSettings />);
 
-    const reset = screen.getByRole("button", { name: "Reset web-family card layout" });
-    expect(reset).toHaveAccessibleDescription(
-      "Remove the layout shared by web browsers and inherit the profile or app default.",
+    expect(screen.getByRole("radio", { name: "Large" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Compact" }));
+    await waitFor(() =>
+      expect(setMutateAsync).toHaveBeenCalledWith({
+        key: SETTING_KEYS.UI_CARD_PRESENTATION,
+        value: { poster_size: "compact", caption: "title" },
+        identity: { scope: "profile_client" },
+      }),
     );
-    fireEvent.click(reset);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Nothing" }));
+    await waitFor(() =>
+      expect(setMutateAsync).toHaveBeenLastCalledWith({
+        key: SETTING_KEYS.UI_CARD_PRESENTATION,
+        value: { poster_size: "large", caption: "artwork" },
+        identity: { scope: "profile_client" },
+      }),
+    );
+  });
+
+  it("resets poster settings at profile_client scope", async () => {
+    render(<InterfaceSettings />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset poster settings" }));
 
     await waitFor(() =>
       expect(clearMutateAsync).toHaveBeenCalledWith({
@@ -84,24 +120,19 @@ describe("InterfaceSettings card resets", () => {
     );
   });
 
-  it("keeps the device reset distinct from the web-family reset", async () => {
-    mocks.useUICustomization.mockReturnValue({
-      cardPresentation: { poster_size: "compact", caption: "artwork" },
-      cardPresentationSource: "profile_device",
-      primaryMenu: defaultWebPrimaryMenu(),
-      primaryMenuSource: "profile_client",
-      shortcuts: { items: [] },
-      isSupported: true,
-      supportsAtomicShortcuts: true,
-      isLoading: false,
-    });
+  it("offers to clear a browser override instead of editing under it", async () => {
+    mocks.useUICustomization.mockReturnValue(
+      customization({
+        cardPresentation: { poster_size: "compact", caption: "artwork" },
+        cardPresentationSource: "profile_device",
+      }),
+    );
 
     render(<InterfaceSettings />);
 
-    expect(
-      screen.queryByRole("button", { name: "Reset web-family card layout" }),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Use web-family layout" }));
+    expect(screen.queryByRole("button", { name: "Reset poster settings" })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Large" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Match my other browsers" }));
 
     await waitFor(() =>
       expect(clearMutateAsync).toHaveBeenCalledWith({
@@ -111,106 +142,71 @@ describe("InterfaceSettings card resets", () => {
     );
   });
 
-  it("follows the effective menu after clearing a web-family override", async () => {
-    const effectiveMenu = {
-      items: [
-        { type: "builtin" as const, destination: "home" as const },
-        { type: "library" as const, library_id: 7, label: "Movies" },
-      ],
-    };
-    let source = "profile_client";
-    mocks.useUICustomization.mockImplementation(() => ({
-      cardPresentation: { poster_size: "large", caption: "title" },
-      cardPresentationSource: "profile_client",
-      primaryMenu: effectiveMenu,
-      primaryMenuSource: source,
-      shortcuts: { items: [] },
-      isSupported: true,
-      supportsAtomicShortcuts: true,
-      isLoading: false,
-    }));
-    clearMutateAsync.mockImplementation(async () => {
-      source = "profile";
-    });
+  it("saves the menu on every edit, with no save button", async () => {
+    mocks.useUICustomization.mockReturnValue(customization({ primaryMenu: MOVIES_MENU }));
 
     render(<InterfaceSettings />);
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
+
     expect(screen.queryByText("Movies · Library")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
-
     await waitFor(() =>
-      expect(clearMutateAsync).toHaveBeenCalledWith({
+      expect(setMutateAsync).toHaveBeenCalledWith({
         key: SETTING_KEYS.NAV_PRIMARY_MENU,
+        value: {
+          items: [
+            { type: "builtin", destination: "home" },
+            { type: "builtin", destination: "calendar" },
+          ],
+        },
         identity: { scope: "profile_client" },
       }),
     );
-    expect(await screen.findByText("Movies · Library")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save menu" })).toBeDisabled();
   });
 
-  it("keeps a rapid post-save edit when the saved baseline refetch arrives", async () => {
-    let effectiveMenu = {
-      items: [
-        { type: "builtin" as const, destination: "home" as const },
-        { type: "library" as const, library_id: 7, label: "Movies" },
-        { type: "builtin" as const, destination: "calendar" as const },
-      ],
-    };
-    mocks.useUICustomization.mockImplementation(() => ({
-      cardPresentation: { poster_size: "large", caption: "title" },
-      cardPresentationSource: "profile_client",
-      primaryMenu: effectiveMenu,
-      primaryMenuSource: "profile_client",
-      shortcuts: { items: [] },
-      isSupported: true,
-      supportsAtomicShortcuts: true,
-      isLoading: false,
-    }));
+  it("keeps a saved edit on screen until the refetch replaces the menu", async () => {
+    let effectiveMenu = MOVIES_MENU;
+    mocks.useUICustomization.mockImplementation(() =>
+      customization({ primaryMenu: effectiveMenu }),
+    );
 
     const view = render(<InterfaceSettings />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Calendar up" }));
     await waitFor(() => expect(setMutateAsync).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save menu" })).toBeDisabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove Calendar" }));
-    effectiveMenu = {
-      items: [
-        { type: "builtin" as const, destination: "home" as const },
-        { type: "builtin" as const, destination: "calendar" as const },
-      ],
-    };
+    // The save resolved but the effective menu has not refetched yet.
     view.rerender(<InterfaceSettings />);
+    let labels = screen.getAllByRole("listitem").map((item) => item.textContent);
+    expect(labels).toEqual(["Home", "Calendar", "Movies · Library"]);
 
-    expect(screen.queryByText("Calendar")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save menu" })).toBeEnabled();
+    effectiveMenu = { items: [HOME, CALENDAR, MOVIES] };
+    view.rerender(<InterfaceSettings />);
+    labels = screen.getAllByRole("listitem").map((item) => item.textContent);
+    expect(labels).toEqual(["Home", "Calendar", "Movies · Library"]);
   });
 
-  it("clears a just-saved override before its effective refetch arrives", async () => {
-    mocks.useUICustomization.mockReturnValue({
-      cardPresentation: { poster_size: "large", caption: "title" },
-      cardPresentationSource: "profile_client",
-      primaryMenu: {
-        items: [
-          { type: "builtin" as const, destination: "home" as const },
-          { type: "library" as const, library_id: 7, label: "Movies" },
-        ],
-      },
-      primaryMenuSource: "profile",
-      shortcuts: { items: [] },
-      isSupported: true,
-      supportsAtomicShortcuts: true,
-      isLoading: false,
-    });
+  it("puts the menu back when a save fails", async () => {
+    mocks.useUICustomization.mockReturnValue(customization({ primaryMenu: MOVIES_MENU }));
+    setMutateAsync.mockRejectedValueOnce(new Error("nope"));
 
     render(<InterfaceSettings />);
     fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save menu" }));
-    await waitFor(() => expect(setMutateAsync).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save menu" })).toBeDisabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
+    expect(await screen.findByText("Movies · Library")).toBeInTheDocument();
+  });
+
+  it("can reset a just-saved menu before its effective refetch arrives", async () => {
+    mocks.useUICustomization.mockReturnValue(
+      customization({ primaryMenu: MOVIES_MENU, primaryMenuSource: "profile" }),
+    );
+
+    render(<InterfaceSettings />);
+    expect(screen.queryByRole("button", { name: "Reset menu" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
+    await waitFor(() => expect(setMutateAsync).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset menu" }));
 
     await waitFor(() =>
       expect(clearMutateAsync).toHaveBeenCalledWith({
@@ -218,75 +214,46 @@ describe("InterfaceSettings card resets", () => {
         identity: { scope: "profile_client" },
       }),
     );
-  });
-
-  it("discards an unsaved draft locally when no web-family override exists", async () => {
-    const effectiveMenu = {
-      items: [
-        { type: "builtin" as const, destination: "home" as const },
-        { type: "library" as const, library_id: 7, label: "Movies" },
-      ],
-    };
-    mocks.useUICustomization.mockReturnValue({
-      cardPresentation: { poster_size: "large", caption: "title" },
-      cardPresentationSource: "profile_client",
-      primaryMenu: effectiveMenu,
-      primaryMenuSource: "profile",
-      shortcuts: { items: [] },
-      isSupported: true,
-      supportsAtomicShortcuts: true,
-      isLoading: false,
-    });
-
-    render(<InterfaceSettings />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
-
-    expect(clearMutateAsync).not.toHaveBeenCalled();
     expect(await screen.findByText("Movies · Library")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save menu" })).toBeDisabled();
   });
 
-  it("hides revision-five controls when the server does not support them", () => {
-    mocks.useUICustomization.mockReturnValue({
-      cardPresentation: { poster_size: "standard", caption: "title_metadata" },
-      cardPresentationSource: "default",
-      primaryMenu: null,
-      primaryMenuSource: "default",
-      shortcuts: { items: [] },
-      isSupported: false,
-      supportsAtomicShortcuts: false,
-      isLoading: false,
-      isUnavailable: false,
-    });
+  it("explains an old server once and still shows shortcuts and badges", () => {
+    mocks.useUICustomization.mockReturnValue(
+      customization({
+        cardPresentationSource: "default",
+        primaryMenu: null,
+        primaryMenuSource: "default",
+        isSupported: false,
+        supportsAtomicShortcuts: false,
+      }),
+    );
 
     render(<InterfaceSettings />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Server upgrade required");
-    expect(screen.queryByRole("radiogroup", { name: "Poster size" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save menu" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Your server needs an update");
+    expect(screen.queryByRole("radiogroup", { name: "Size" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Menu links" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Card overlays" })).toBeInTheDocument();
+    expect(screen.getByRole("figure", { name: "Preview" })).toBeInTheDocument();
   });
 
   it("keeps editors closed when effective customization could not be loaded", () => {
-    mocks.useUICustomization.mockReturnValue({
-      cardPresentation: { poster_size: "standard", caption: "title_metadata" },
-      cardPresentationSource: "default",
-      primaryMenu: null,
-      primaryMenuSource: "default",
-      shortcuts: { items: [] },
-      isSupported: true,
-      supportsAtomicShortcuts: true,
-      isLoading: false,
-      isUnavailable: true,
-    });
+    mocks.useUICustomization.mockReturnValue(
+      customization({
+        cardPresentationSource: "default",
+        primaryMenu: null,
+        primaryMenuSource: "default",
+        isUnavailable: true,
+      }),
+    );
 
     render(<InterfaceSettings />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Customization unavailable");
-    expect(screen.getByRole("alert")).toHaveTextContent("Editing stays disabled");
-    expect(screen.queryByRole("radiogroup", { name: "Poster size" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save menu" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Editing is off until they load");
+    expect(screen.queryByRole("radiogroup", { name: "Size" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Menu links" })).not.toBeInTheDocument();
     expect(setMutateAsync).not.toHaveBeenCalled();
     expect(clearMutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByRole("region", { name: "Card overlays" })).toBeInTheDocument();
   });
 });
