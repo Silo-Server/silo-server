@@ -45,6 +45,7 @@ type publication struct {
 	store           *Store
 	work, version   string
 	prepareDeadline int64
+	admissibleUntil time.Time
 }
 
 func (p *publication) ID() string {
@@ -223,6 +224,16 @@ func (s *Store) ReconcileAccepted(ctx context.Context, work string, accepted *Ac
 // Acknowledged preparation is required before sending this script. A delayed
 // write cannot arrive after cancellation/expiry and recreate failed authority.
 var publishRecipeScript = redis.NewScript(`
+local ttl=tonumber(ARGV[2])
+local not_after=tonumber(ARGV[7]) or 0
+if ARGV[8] and ARGV[8]~='' and (KEYS[7]=='' or (redis.call('GET',KEYS[7]) or '0')~=ARGV[8]) then
+ return redis.error_reply('recipe predecessor authority revoked')
+end
+if not_after>0 then
+ local now=redis.call('TIME')
+ ttl=math.min(ttl,not_after-now[1]*1000-math.floor(now[2]/1000))
+ if ttl<=0 then return redis.error_reply('recipe restoration expired') end
+end
 if ARGV[5]=='1' then
  if redis.call('GET',KEYS[6])~=ARGV[4] then return redis.error_reply('recipe publication owner expired') end
  local receipt=redis.call('GET',KEYS[5])
@@ -241,18 +252,18 @@ if ARGV[5]=='1' then
   if ttl>=0 then expiry=now_ms+ttl end
   previous[i]={value,expiry}
  end
- redis.call('SET',KEYS[5],cjson.encode({state='published',candidate=ARGV[1],previous=previous,scope=prepared.scope,predecessor=prepared.predecessor,deadline=prepared.deadline}),'PXAT',math.max(now_ms+tonumber(ARGV[2]),prepared.deadline))
+ redis.call('SET',KEYS[5],cjson.encode({state='published',candidate=ARGV[1],previous=previous,scope=prepared.scope,predecessor=prepared.predecessor,deadline=prepared.deadline}),'PXAT',math.max(now_ms+ttl,prepared.deadline))
  redis.call('PEXPIREAT',KEYS[6],prepared.deadline)
 end
 local generation=false
 if KEYS[7]~='' then generation=redis.call('GET',KEYS[7]) or '0' end
-redis.call('SET',KEYS[1],ARGV[1],'PX',ARGV[2])
-redis.call('SET',KEYS[2],ARGV[4],'PX',ARGV[2])
+redis.call('SET',KEYS[1],ARGV[1],'PX',ttl)
+redis.call('SET',KEYS[2],ARGV[4],'PX',ttl)
 if generation then
- redis.call('SET',KEYS[3],generation,'PX',ARGV[2])
- redis.call('SET',KEYS[4],ARGV[3],'PX',ARGV[2])
+ redis.call('SET',KEYS[3],generation,'PX',ttl)
+ redis.call('SET',KEYS[4],ARGV[3],'PX',ttl)
 else redis.call('DEL',KEYS[3],KEYS[4]) end
-if ARGV[5]~='1' then redis.call('SET',KEYS[5],'committed','PX',ARGV[2]) end
+if ARGV[5]~='1' then redis.call('SET',KEYS[5],'committed','PX',ttl) end
 return 1`)
 
 var undoRecipePublicationScript = redis.NewScript(restorePublicationLua + terminalPublicationLua + `
@@ -310,6 +321,10 @@ func (s *Store) PublishWithUndo(ctx context.Context, work string, card playback.
 	return s.publish(ctx, work, card, data, s.ttl, true, accepted...)
 }
 func (s *Store) publish(ctx context.Context, work string, card playback.RecipeCard, data []byte, ttl time.Duration, undo bool, accepted ...*AcceptedPublication) (*publication, error) {
+	return s.publishWithAdmission(ctx, work, card, data, ttl, undo, publicationPrepareTTL, time.Time{}, "", accepted...)
+}
+
+func (s *Store) publishWithAdmission(ctx context.Context, work string, card playback.RecipeCard, data []byte, ttl time.Duration, undo bool, admission time.Duration, notAfter time.Time, generation string, accepted ...*AcceptedPublication) (*publication, error) {
 	version, err := publicationVersion()
 	if err != nil {
 		return nil, err
@@ -335,7 +350,19 @@ func (s *Store) publish(ctx context.Context, work string, card playback.RecipeCa
 		if timeErr != nil {
 			return receipt, timeErr
 		}
-		receipt.prepareDeadline = serverTime.Add(publicationPrepareTTL).UnixMilli()
+		if !notAfter.IsZero() {
+			admission = min(admission, notAfter.Sub(serverTime))
+			if deadline, ok := ctx.Deadline(); ok {
+				admission = min(admission, time.Until(deadline))
+			}
+			if admission <= 0 || ctx.Err() != nil {
+				return receipt, context.DeadlineExceeded
+			}
+		}
+		receipt.prepareDeadline = serverTime.Add(admission).UnixMilli()
+		// A local monotonic wait starting after the acknowledged TIME reply
+		// conservatively outlasts this server's fixed admission deadline.
+		receipt.admissibleUntil = time.Now().Add(admission)
 		args := append([]any{version, publicationPrepareTTL.Milliseconds(), publicationUndoKeyPrefix, restoredVersion}, evidence...)
 		args = append(args, receipt.prepareDeadline)
 		prepared, err := prepareRecipePublicationScript.Run(ctx, s.rdb, receipt.keys(), args...).Int()
@@ -351,7 +378,11 @@ func (s *Store) publish(ctx context.Context, work string, card playback.RecipeCa
 		capture = "1"
 	}
 	keys := append(receipt.keys(), nodeAuthorityGenerationKeyForCard(card))
-	err = publishRecipeScript.Run(ctx, s.rdb, keys, data, max(ttl.Milliseconds(), 1), nodeAuthorityRecordDigest(data), version, capture, publicationPrepareTTL.Milliseconds()).Err()
+	var absoluteExpiry int64
+	if !notAfter.IsZero() {
+		absoluteExpiry = notAfter.UnixMilli()
+	}
+	err = publishRecipeScript.Run(ctx, s.rdb, keys, data, max(ttl.Milliseconds(), 1), nodeAuthorityRecordDigest(data), version, capture, publicationPrepareTTL.Milliseconds(), absoluteExpiry, generation).Err()
 	return receipt, err
 }
 func (p *publication) Undo(ctx context.Context) error {

@@ -350,6 +350,19 @@ node and transport cannot confirm a superseded start. A newer plan that owns
 the same remote node and transport is preserved without adopting or deleting
 that successor.
 
+When a remote start fails or its route update is rejected, cleanup restores
+a stored reconstruction recipe only after the candidate acknowledges
+deletion and the exact predecessor is still live. A proven failure before
+dispatch leaves the recipe untouched and needs no remote DELETE. A process-
+local capture binds the recipe's existing revocation state and shortest
+expiry before dispatch. For a native attempt, restoration holds that row and
+the local lifecycle. It uses versioned receipts with a fixed, bounded
+admission deadline and never extends the captured authority. If a write
+reply is lost, restoration confirms retirement or retains ownership until
+the original command can no longer publish. Same-session stops wait for that
+boundary; unrelated memory sessions continue without a shared map mutex held
+over network I/O.
+
 Transparent moves that keep the same transport identity are currently refused
 for enrolled HTTP workers before dispatch. Their required recipe publication
 needs durable acceptance evidence across every native start, replan and

@@ -138,8 +138,12 @@ func (h *PlaybackHandler) acquireRehomeRouteV3(ctx context.Context, sessionID st
 }
 
 func validRehomeAttemptV3(record *playback.AttemptRecordV3, session *playback.Session) bool {
-	return record != nil && record.SessionID == session.ID && record.UserID == session.UserID && record.ProfileID == session.ProfileID &&
-		record.EffectiveMediaFileID == session.MediaFileID && record.StoppedAt == nil && record.ExpiresAt.After(time.Now())
+	return liveRehomeAttemptV3(record) && record.SessionID == session.ID && record.UserID == session.UserID && record.ProfileID == session.ProfileID &&
+		record.EffectiveMediaFileID == session.MediaFileID
+}
+
+func liveRehomeAttemptV3(record *playback.AttemptRecordV3) bool {
+	return record != nil && record.StoppedAt == nil && record.ExpiresAt.After(time.Now())
 }
 
 // adoptRehomeRouteV3 follows a move confirmed by another API. Only the SAME
@@ -211,8 +215,10 @@ func (h *PlaybackHandler) commitRehomeRouteV3(ctx context.Context, guard *rehome
 		if joinErr != nil && !errors.Is(joinErr, playback.ErrSessionNotFound) {
 			return false, fmt.Errorf("%w: %w", errRehomeOutcomeUnknown, errors.Join(err, joinErr))
 		}
-		if settled != nil && settled.FrozenRecipe.TranscodeNodeURL == next.NodeURL && settled.FrozenRecipe.TranscodeTransportID == next.TransportID && !original.Matches(settled, next.TransportID) {
-			// Another plan now owns this same transport. Its route proves
+		guard.record = settled
+		if liveRehomeAttemptV3(settled) && settled.FrozenRecipe.TranscodeTransportID == next.TransportID &&
+			(!original.Matches(settled, next.TransportID) || settled.FrozenRecipe.TranscodeNodeURL != dead.NodeURL && settled.FrozenRecipe.TranscodeNodeURL != next.NodeURL) {
+			// Another plan now owns this same transport on any executor. Its route proves
 			// neither acceptance of our old start nor permission to DELETE it.
 			return false, errors.Join(errRehomeOutcomeUnknown, playback.ErrReplanSupersededV3)
 		}

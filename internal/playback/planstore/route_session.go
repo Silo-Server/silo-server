@@ -132,3 +132,36 @@ func (s *postgresRouteSession) CompareAndSwap(ctx context.Context, expected play
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+func (s *postgresRouteSession) WithLiveRoute(ctx context.Context, expected playback.AttemptRecordV3, run func(context.Context) error) (bool, error) {
+	if s.closed || s.conn == nil {
+		return false, errors.New("route session ownership lost")
+	}
+	if expected.SessionID != s.sessionID {
+		return false, nil
+	}
+	tx, err := s.conn.Begin(ctx)
+	if err != nil {
+		s.discard()
+		return false, err
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := tx.Rollback(releaseCtx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			s.discard()
+		}
+	}()
+	// STOP does not take the route advisory lock. Own this row before the
+	// callback can take a process-local lifecycle lock or restore authority.
+	current, err := scanAttemptV3(tx.QueryRow(ctx, attemptSelectV3+` WHERE session_id=$1::uuid FOR UPDATE`, s.sessionID))
+	if err != nil {
+		return false, err
+	}
+	if !playback.SameLiveRouteV3(current, &expected) {
+		return false, nil
+	}
+	callbackCtx, cancel := context.WithDeadline(ctx, current.ExpiresAt)
+	defer cancel()
+	return true, run(callbackCtx)
+}

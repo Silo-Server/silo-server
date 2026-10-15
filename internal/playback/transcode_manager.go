@@ -365,15 +365,37 @@ func (m *TranscodeManager) LockSessionLifecycle(sessionID string) func() {
 	m.lifecycleMu.Unlock()
 
 	lk.mu.Lock()
-	return func() {
-		lk.mu.Unlock()
-		m.lifecycleMu.Lock()
-		lk.refs--
-		if lk.refs == 0 {
-			delete(m.lifecycleLocks, sessionID)
-		}
-		m.lifecycleMu.Unlock()
+	return func() { m.unlockSessionLifecycle(sessionID, lk) }
+}
+
+// TryLockSessionLifecycle never waits behind a stop while its caller owns a
+// durable row. A busy lifecycle leaves restoration for a later request.
+func (m *TranscodeManager) TryLockSessionLifecycle(sessionID string) (func(), bool) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.lifecycleLocks == nil {
+		m.lifecycleLocks = make(map[string]*lifecycleLock)
 	}
+	lk := m.lifecycleLocks[sessionID]
+	if lk == nil {
+		lk = &lifecycleLock{}
+		m.lifecycleLocks[sessionID] = lk
+	}
+	if !lk.mu.TryLock() {
+		return nil, false
+	}
+	lk.refs++
+	return func() { m.unlockSessionLifecycle(sessionID, lk) }, true
+}
+
+func (m *TranscodeManager) unlockSessionLifecycle(sessionID string, lk *lifecycleLock) {
+	lk.mu.Unlock()
+	m.lifecycleMu.Lock()
+	lk.refs--
+	if lk.refs == 0 {
+		delete(m.lifecycleLocks, sessionID)
+	}
+	m.lifecycleMu.Unlock()
 }
 
 // RestartSessionLocked re-spawns ts under the per-session lifecycle lock so a

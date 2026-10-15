@@ -7,12 +7,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -439,6 +442,10 @@ func (h *PlaybackHandler) moveTranscodeToLocalV3(
 	return nil
 }
 
+type nodeRecipeRestoreStoreV3 interface {
+	CaptureRestore(context.Context, string, playback.RecipeCard) (noderecipe.Restoration, error)
+}
+
 // moveTranscodeToNodeV3 starts the same transport on another transcode node and
 // points the session at it once the node has accepted it.
 func (h *PlaybackHandler) moveTranscodeToNodeV3(
@@ -454,6 +461,23 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 	requestedSegment int,
 ) error {
 	transportID := remoteTransportID(session)
+	predecessor := guard.record
+	var restoreStore nodeRecipeRestoreStoreV3
+	var restoration noderecipe.Restoration
+	if fromStore {
+		var supported bool
+		restoreStore, supported = h.NodeRecipeStore.(nodeRecipeRestoreStoreV3)
+		if !supported {
+			return errRehomeOutcomeUnknown
+		}
+		captureCtx, cancel := context.WithTimeout(ctx, nodeRecipeWriteTimeoutV3)
+		var captureErr error
+		restoration, captureErr = restoreStore.CaptureRestore(captureCtx, transportID, card)
+		cancel()
+		if captureErr != nil || restoration == nil {
+			return errors.Join(errRehomeOutcomeUnknown, captureErr)
+		}
+	}
 	classifyCtx, cancelClassify := context.WithTimeout(ctx, nodeRecipeWriteTimeoutV3)
 	requiresRecipe, classifyErr := nodehttp.RequiresRecipe(classifyCtx, node.URL)
 	cancelClassify()
@@ -497,9 +521,13 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 
 	var response transcodenode.TranscodeStartResponse
 	var status int
+	var connected atomic.Bool
 	err := h.tm.WithReconstructSlot(ctx, func() error {
 		var startErr error
-		response, status, startErr = h.startRemotePlaybackTransport(ctx, node.URL, req)
+		startCtx := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+			GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
+		})
+		response, status, startErr = h.startRemotePlaybackTransport(startCtx, node.URL, req)
 		return startErr
 	})
 	if err == nil && status != http.StatusAccepted {
@@ -516,9 +544,18 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		err = errors.New("transcode node did not confirm the tone-map recipe")
 	}
 	if err != nil {
-		// A start that timed out may still have begun; stopping is harmless when
-		// it did not.
-		h.rollBackMovedStartV3(ctx, session.ID, dead.NodeURL, transportID, node.URL, card, fromStore)
+		if !fromStore {
+			go h.tm.StopRemoteTranscode(transportID, node.URL)
+			return err
+		}
+		// A partial request or missing acknowledgement may still have started
+		// work. Only a proven connection failure permits skipping its stop.
+		var dialErr *net.OpError
+		undispatched := !connected.Load() && errors.As(err, &dialErr) && dialErr.Op == netOpDial
+		cleanupErr := h.rollBackMovedStartV3(ctx, guard, predecessor, session, dead, node.URL, restoration, !undispatched)
+		if cleanupErr != nil {
+			return errors.Join(err, cleanupErr)
+		}
 		return err
 	}
 
@@ -539,7 +576,13 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		// The route changed under the move: give back the planner reservation
 		// Resolve made on this node along with the job.
 		h.releaseMoveReservationV3(session.ID, reservation)
-		h.tm.StopRemoteTranscode(transportID, node.URL)
+		if !fromStore {
+			h.tm.StopRemoteTranscode(transportID, node.URL)
+			return err
+		}
+		if cleanupErr := h.rollBackMovedStartV3(ctx, guard, predecessor, session, dead, node.URL, restoration, true); cleanupErr != nil {
+			return errors.Join(err, cleanupErr)
+		}
 		return err
 	}
 	if fromStore {
@@ -629,27 +672,82 @@ func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string,
 	return req
 }
 
-// rollBackMovedStartV3 stops a start a candidate node refused or failed to
-// confirm. The stop makes the node delete the transport's stored recipe, which
-// a move for a tokenless session read its card from, so that card is written
-// back before the next candidate is tried. Without a stored card the stop is
-// not waited on. transportID is the resolved transport id (remoteTransportID),
-// which a legacy session's empty route field does not name.
-func (h *PlaybackHandler) rollBackMovedStartV3(ctx context.Context, sessionID, deadNodeURL, transportID, nodeURL string, card playback.RecipeCard, fromStore bool) {
-	if !fromStore {
-		go h.tm.StopRemoteTranscode(transportID, nodeURL)
-		return
+// rollBackMovedStartV3 settles a failed start or rejected route for a stored
+// recipe. It confirms authority before DELETE and restores only the captured
+// predecessor through its bounded publication fence. A proven failure before
+// dispatch leaves the existing recipe untouched and needs no candidate stop.
+func (h *PlaybackHandler) rollBackMovedStartV3(ctx context.Context, guard *rehomeRouteV3, predecessor *playback.AttemptRecordV3, session *playback.Session, dead playback.TranscodeRoute, nodeURL string, restoration noderecipe.Restoration, candidateMayBeRunning bool) error {
+	transportID := remoteTransportID(session)
+	current := guard.record
+	if guard.owned != nil {
+		freshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeRecipeWriteTimeoutV3)
+		var readErr error
+		current, readErr = guard.owned.GetAttempt(freshCtx)
+		cancel()
+		if readErr != nil && !errors.Is(readErr, playback.ErrSessionNotFound) {
+			return errors.Join(errRehomeOutcomeUnknown, readErr)
+		}
+		guard.record = current
 	}
-	h.tm.StopRemoteTranscode(transportID, nodeURL)
-	h.putNodeRecipeIfRouteV3(context.WithoutCancel(ctx), sessionID, playback.TranscodeRoute{NodeURL: deadNodeURL, TransportID: transportID}, card)
+	canRestore := playback.SameLiveRouteV3(current, predecessor) || predecessor == nil && current == nil
+	if liveRehomeAttemptV3(current) && current.FrozenRecipe.TranscodeTransportID == transportID && !canRestore {
+		return errors.Join(errRehomeOutcomeUnknown, playback.ErrReplanSupersededV3)
+	}
+	if candidateMayBeRunning {
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeRecipeWriteTimeoutV3)
+		stopErr := h.tm.CancelRemoteTranscode(stopCtx, transportID, nodeURL)
+		cancel()
+		if stopErr != nil {
+			return errors.Join(errRehomeOutcomeUnknown, stopErr)
+		}
+	}
+	if !canRestore {
+		return playback.ErrReplanSupersededV3
+	}
+	if restoration == nil {
+		return errRehomeOutcomeUnknown
+	}
+	restoreExpiry := restoration.ExpiresAt()
+	if current != nil && current.ExpiresAt.Before(restoreExpiry) {
+		restoreExpiry = current.ExpiresAt
+	}
+	restore := func(owned context.Context) error {
+		unlock, locked := h.tm.TryLockSessionLifecycle(session.ID)
+		if !locked {
+			return errRehomeOutcomeUnknown
+		}
+		defer unlock()
+		local, getErr := h.sessionMgr.GetSession(session.ID)
+		if getErr != nil || local.TranscodeNodeURL != dead.NodeURL || remoteTransportID(local) != transportID {
+			return playback.ErrReplanSupersededV3
+		}
+		if !candidateMayBeRunning {
+			return nil
+		}
+		return restoration.Restore(owned, restoreExpiry)
+	}
+	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeRecipeWriteTimeoutV3)
+	defer cancel()
+	var restoreErr error
+	if guard.owned == nil || predecessor == nil {
+		restoreErr = restore(restoreCtx)
+	} else {
+		var restored bool
+		restored, restoreErr = guard.owned.WithLiveRoute(restoreCtx, *predecessor, restore)
+		if restoreErr == nil && !restored {
+			return playback.ErrReplanSupersededV3
+		}
+	}
+	if restoreErr != nil {
+		return errors.Join(errRehomeOutcomeUnknown, restoreErr)
+	}
+	return nil
 }
 
-// putNodeRecipeIfRouteV3 writes a transport's stored recipe only while the
-// session still runs route. It holds the session lifecycle lock, under which a
-// stop or a replan deletes the recipe of the transport it ends, so a write
-// that lands after either cannot bring a stopped transport's recipe back.
-// route.TransportID is the resolved transport id, the store key, never the
-// empty route field of a legacy session.
+// putNodeRecipeIfRouteV3 writes an accepted executor move's card after its old
+// transport retirement, while the local session still names that route.
+// Rollbacks instead use a captured restoration and its publication fence.
+// route.TransportID is the resolved store key, including for legacy sessions.
 func (h *PlaybackHandler) putNodeRecipeIfRouteV3(ctx context.Context, sessionID string, route playback.TranscodeRoute, card playback.RecipeCard) {
 	unlock := h.tm.LockSessionLifecycle(sessionID)
 	defer unlock()
