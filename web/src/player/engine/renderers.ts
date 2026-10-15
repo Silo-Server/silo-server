@@ -52,16 +52,19 @@ function sizeCanvas(
   maxDimension = 16384,
 ): { width: number; height: number } {
   // Without the exact figure, CSS pixels times the ratio is off by at most a
-  // pixel, which only softens the picture slightly.
+  // pixel, which only softens the picture slightly. They come from the box the
+  // canvas fills: a layer about to be shown again is still hidden, and so
+  // measures nothing itself.
   const ratio = window.devicePixelRatio || 1;
   const exact = viewport.devicePixels;
+  const box = canvas.parentElement ?? canvas;
   const width = Math.max(
     1,
-    Math.min(maxDimension, exact ? exact.width : Math.round(canvas.clientWidth * ratio)),
+    Math.min(maxDimension, exact ? exact.width : Math.round(box.clientWidth * ratio)),
   );
   const height = Math.max(
     1,
-    Math.min(maxDimension, exact ? exact.height : Math.round(canvas.clientHeight * ratio)),
+    Math.min(maxDimension, exact ? exact.height : Math.round(box.clientHeight * ratio)),
   );
   if (canvas.width !== width) canvas.width = width;
   if (canvas.height !== height) canvas.height = height;
@@ -277,14 +280,15 @@ interface DeviceHolder {
  * A device with the presenter compiled for one canvas format. It subscribes
  * to its loss and uncaptured errors once and forwards them to whichever
  * renderer holds it, so a renderer that lets go leaves nothing behind on it.
+ * Both are also kept, for a renderer that takes the device after they came.
  */
 interface PresenterDevice {
   device: GPUDevice;
   pipelines: PresenterPipelines;
   format: GPUTextureFormat;
-  lost: boolean;
-  /** It reported an error, so it is not handed to another playback. */
-  errored: boolean;
+  lost: GPUDeviceLostInfo | null;
+  /** The first error it reported; such a device is not handed to another playback. */
+  error: string | null;
   holder: DeviceHolder | null;
 }
 
@@ -297,18 +301,19 @@ function adopt(
     device,
     pipelines,
     format,
-    lost: false,
-    errored: false,
+    lost: null,
+    error: null,
     holder: null,
   };
   void device.lost.then((info) => {
-    entry.lost = true;
+    entry.lost = info;
     if (spare === entry) spare = null;
     entry.holder?.deviceLost(info);
   });
   device.addEventListener("uncapturederror", (event) => {
-    entry.errored = true;
-    entry.holder?.deviceError((event as GPUUncapturedErrorEvent).error.message);
+    const message = (event as GPUUncapturedErrorEvent).error.message;
+    entry.error ??= message;
+    entry.holder?.deviceError(message);
   });
   return entry;
 }
@@ -336,7 +341,7 @@ function wakeSpareWaiters(): void {
 /** Hands a device to the page for the next playback, or releases it. */
 function offer(entry: PresenterDevice): void {
   entry.holder = null;
-  if (entry.lost || entry.errored) {
+  if (entry.lost || entry.error !== null) {
     entry.device.destroy();
     return;
   }
@@ -373,7 +378,7 @@ async function takeSpare(format: GPUTextureFormat): Promise<PresenterDevice | nu
   spare = null;
   if (!entry) return null;
   // An error can be reported after its playback handed the device back.
-  if (entry.lost || entry.errored || entry.format !== format) {
+  if (entry.lost || entry.error !== null || entry.format !== format) {
     entry.device.destroy();
     return null;
   }
@@ -646,7 +651,7 @@ async function testPresenter(adapter: GPUAdapter): Promise<boolean | null> {
   }
   if (entry.lost) return null;
   if (threw || error) {
-    entry.errored = true;
+    entry.error ??= error?.message ?? "The presenter's test draw failed.";
     // Withdraw it, unless a playback has already taken it.
     if (spare === entry) {
       spare = null;
@@ -678,8 +683,8 @@ export interface PresenterEvents {
  * with a fresh one, within a deadline and a per-session budget.
  */
 export class WebGPURenderer implements FrameRenderer, DeviceHolder {
-  private entry: PresenterDevice | null;
-  private presenter: GPUPresenter | null;
+  private entry: PresenterDevice | null = null;
+  private presenter: GPUPresenter | null = null;
   /** Bumped whenever a device replacement in flight stops being wanted. */
   private generation = 0;
   private recoveries = 0;
@@ -698,9 +703,7 @@ export class WebGPURenderer implements FrameRenderer, DeviceHolder {
     private readonly events: PresenterEvents,
     entry: PresenterDevice,
   ) {
-    this.entry = entry;
-    this.presenter = new GPUPresenter(entry.device, entry.pipelines, transfer, color);
-    entry.holder = this;
+    this.hold(entry);
   }
 
   static async create(
@@ -773,6 +776,19 @@ export class WebGPURenderer implements FrameRenderer, DeviceHolder {
     void this.recover(this.generation, reason);
   }
 
+  /**
+   * Draws with `entry` from now on. It can be lost or report an error
+   * between being built or handed over and this point, with nobody holding
+   * it to hear, so that is handled here as if it had just happened.
+   */
+  private hold(entry: PresenterDevice): void {
+    this.entry = entry;
+    this.presenter = new GPUPresenter(entry.device, entry.pipelines, this.transfer, this.color);
+    entry.holder = this;
+    if (entry.lost) this.deviceLost(entry.lost);
+    else if (entry.error !== null) this.deviceError(entry.error);
+  }
+
   /** Lets go of the current device: lost or failed ones are destroyed, sound ones kept. */
   private release(): void {
     this.presenter?.destroy();
@@ -795,10 +811,13 @@ export class WebGPURenderer implements FrameRenderer, DeviceHolder {
       // page's spare with it.
       const entry = await WebGPURenderer.connect(this.context, this.format, null, isCurrent);
       clearTimeout(deadline);
-      this.entry = entry;
-      this.presenter = new GPUPresenter(entry.device, entry.pipelines, this.transfer, this.color);
-      entry.holder = this;
-      this.events.onRestored();
+      if (!isCurrent()) {
+        offer(entry);
+        return;
+      }
+      this.hold(entry);
+      // Unless the new device was itself already lost or failed.
+      if (this.entry === entry && !this.failed) this.events.onRestored();
     } catch (error) {
       clearTimeout(deadline);
       if (!isCurrent()) return;
@@ -831,7 +850,7 @@ export class WebGPURenderer implements FrameRenderer, DeviceHolder {
       void device.popErrorScope().then(
         (error) => {
           if (!error) return;
-          entry.errored = true;
+          entry.error ??= error.message;
           if (entry === this.entry) this.deviceError(error.message);
         },
         // A lost device rejects the pop; the loss itself is handled above.

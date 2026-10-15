@@ -114,4 +114,19 @@ describe("probeEngineCapabilities", () => {
     await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS);
     await expect(result).resolves.toMatchObject({ hdr: false });
   });
+
+  it("trusts an adapter that answered after the deadline from the next probe on", async () => {
+    vi.useFakeTimers();
+    let answer!: (adapter: unknown) => void;
+    stubRuntime({ requestAdapter: () => new Promise((resolve) => (answer = resolve)) });
+    // The rest of the check never finishes.
+    presenter.probe.mockReturnValue(new Promise(() => {}));
+    const first = probeEngineCapabilities();
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS);
+    await expect(first).resolves.toMatchObject({ hdr: false });
+
+    answer(hardware);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(probeEngineCapabilities()).resolves.toMatchObject({ hdr: true });
+  });
 });

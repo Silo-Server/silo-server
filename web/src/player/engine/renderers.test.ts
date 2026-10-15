@@ -414,6 +414,33 @@ describe("WebGPURenderer", () => {
     expect(on.onRestored).toHaveBeenCalledTimes(MAX_DEVICE_RECOVERIES);
   });
 
+  it("replaces a device that was lost before it reached the renderer", async () => {
+    // Lost while its presenter compiled: the loss arrives before anyone holds it.
+    const lostEarly = new FakeDevice();
+    lostEarly.lose();
+    const fresh = new FakeDevice();
+    devices.push(lostEarly, fresh);
+    const { gpu, on } = await renderer();
+    await vi.waitFor(() => expect(on.onRestored).toHaveBeenCalledTimes(1));
+    expect(gpuContexts[0]!.configure).toHaveBeenLastCalledWith(
+      expect.objectContaining({ device: fresh }),
+    );
+    expect(gpu.draw(frame(RETAGGED), size, viewport)).toBe(true);
+    expect(fresh.importExternalTexture).toHaveBeenCalledTimes(1);
+    expect(on.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("counts a replacement that was lost before it was used against the budget", async () => {
+    const lineup = Array.from({ length: MAX_DEVICE_RECOVERIES + 1 }, () => new FakeDevice());
+    for (const device of lineup.slice(1)) device.lose();
+    devices.push(...lineup);
+    const { on } = await renderer();
+    lineup[0]!.lose();
+    await vi.waitFor(() => expect(on.onFailure).toHaveBeenCalledTimes(1));
+    expect(adapter.requestDevice).toHaveBeenCalledTimes(MAX_DEVICE_RECOVERIES + 1);
+    expect(on.onRestored).not.toHaveBeenCalled();
+  });
+
   it("fails over when a new device is not ready in time, and keeps it for later when it comes", async () => {
     vi.useFakeTimers();
     const first = new FakeDevice();
@@ -649,6 +676,24 @@ describe("HDRPresenter", () => {
 
     hdr.destroy();
     expect(surface.querySelector("canvas")).toBeNull();
+  });
+
+  it("sizes a layer from the session's box when it comes back from hiding", async () => {
+    const { hdr, surface, shown } = await presenter();
+    // Without exact device pixels (Safari), sizes come from CSS pixels; a
+    // hidden canvas measures nothing itself.
+    Object.defineProperty(surface, "clientWidth", { value: 1280 });
+    Object.defineProperty(surface, "clientHeight", { value: 720 });
+    hdr.draw(planes(), size, viewport);
+    hdr.draw(frame(HARDWARE_PQ), size, viewport);
+    hdr.draw(planes(), size, viewport);
+    hdr.draw(frame(HARDWARE_PQ), size, viewport);
+    expect(shown()).toEqual(["none", "block"]);
+    const canvases = [...surface.querySelectorAll("canvas")];
+    expect(canvases.map((canvas) => [canvas.width, canvas.height])).toEqual([
+      [1280, 720],
+      [1280, 720],
+    ]);
   });
 
   it("keeps the last picture up while its device is being replaced", async () => {

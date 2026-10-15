@@ -39,8 +39,9 @@ drawn through each path without a validation error (`probePresenter` in
 check gets `HDR_CHECK_GRACE_MS`, because every playback start waits for the
 probe and the check can take seconds on some Linux Vulkan drivers. A check
 still running then counts as passed when nothing has failed, because the
-presenter reports failures at runtime; its own answer applies the next time
-the player opens. A device lost during the check, or a presenter chunk that
+presenter reports failures at runtime. What the check learns after its
+deadline (its own answer, or a hardware adapter that answered late) applies
+the next time the player opens. A device lost during the check, or a presenter chunk that
 fails to load, leaves the answer open. Like the rest of the web block it is a declaration,
 not a decode of real media. A source that passes the probe and still cannot be
 decoded or presented fails with a typed classification, and the normal
@@ -106,9 +107,9 @@ VideoPlayer (page)
   `<video>`: one for SDR, and for HDR a WebGPU canvas plus a 2D canvas added
   when needed, because a canvas keeps the first context type it hands out. The
   box is observed in device pixels (`device-pixel-content-box`) so canvases
-  match the screen exactly; where the browser cannot report that (Safari), CSS
-  pixels times the device pixel ratio stand in, and a resolution media query
-  redraws on a ratio change.
+  match the screen exactly; where the browser cannot report that (Safari), the
+  box's CSS pixels times the device pixel ratio stand in, and a resolution
+  media query redraws on a ratio change.
 - **Readiness and autoplay.** The worker signals once enough audio has been sent
   to the worklet, because the worklet does not run while the AudioContext is
   suspended. `play()` refuses without events on a page that never had a user
@@ -172,7 +173,9 @@ source gamut to BT.709, sRGB encode. These match the server's tone-map recipes i
   compiles (its test draw can take seconds to report on some Linux drivers),
   and each playback hands it on when it ends unless it was lost or reported an
   error. The device subscribes to its loss and uncaptured errors once and
-  forwards them to whichever renderer holds it. A lost device is replaced in
+  forwards them to whichever renderer holds it; a renderer that takes a
+  device handles what it reported before then, such as a loss during
+  compilation, the same way. A lost device is replaced in
   place with a fresh one within `DEVICE_RECOVERY_TIMEOUT_MS`, at most
   `MAX_DEVICE_RECOVERIES` times per session. A hardware decoder dies with the
   GPU process too, so after a video decoder error `EnginePlayer` starts a new

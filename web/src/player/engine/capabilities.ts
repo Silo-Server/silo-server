@@ -113,6 +113,13 @@ export const HDR_CHECK_GRACE_MS = 1_000;
 
 /** The full HDR check's answer, once it has a definite one; later probes use it. */
 let presenterVerdict: boolean | undefined;
+/** The HDR check found a hardware adapter, even if only after its deadline. */
+let hardwareAdapter = false;
+
+/** The HDR answer as it stands: the full check's, else whether there is a hardware adapter. */
+function hdrAnswer(): boolean {
+  return presenterVerdict ?? hardwareAdapter;
+}
 
 /** `work`, or `fallback()` once `ms` pass first. */
 function withDeadline<T>(work: Promise<T>, ms: number, fallback: () => T): Promise<T> {
@@ -135,15 +142,14 @@ function withDeadline<T>(work: Promise<T>, ms: number, fallback: () => T): Promi
  * adapter is found, the rest of the check gets `HDR_CHECK_GRACE_MS`; past
  * that, and as long as nothing has failed, the adapter is answer enough, as
  * it was before the full check existed. The presenter reports any failure at
- * runtime, and the check's own answer applies to the probes after it.
+ * runtime, and what the check learns after its deadline applies to the
+ * probes after it.
  */
 async function supportsHDRPresentation(): Promise<boolean> {
   const gpu = (navigator as Navigator & { gpu?: GPU }).gpu;
   if (!gpu) return false;
-  let hardwareAdapter = false;
   let adapterFound!: () => void;
   const found = new Promise<void>((resolve) => (adapterFound = resolve));
-  const answer = () => presenterVerdict ?? hardwareAdapter;
   const check = (async (): Promise<boolean | null> => {
     const adapter = await gpu.requestAdapter();
     if (!adapter || isSoftwareAdapter(adapter)) return false;
@@ -156,10 +162,10 @@ async function supportsHDRPresentation(): Promise<boolean> {
     .catch(() => null)
     .then((verdict) => {
       if (verdict !== null) presenterVerdict = verdict;
-      return answer();
+      return hdrAnswer();
     });
-  const afterGrace = found.then(() => withDeadline(check, HDR_CHECK_GRACE_MS, answer));
-  return withDeadline(Promise.race([check, afterGrace]), PROBE_TIMEOUT_MS, answer);
+  const afterGrace = found.then(() => withDeadline(check, HDR_CHECK_GRACE_MS, hdrAnswer));
+  return withDeadline(Promise.race([check, afterGrace]), PROBE_TIMEOUT_MS, hdrAnswer);
 }
 
 async function probeCodecs(): Promise<Omit<EngineCapabilities, "hdr"> | null> {
@@ -208,14 +214,14 @@ let probePromise: Promise<EngineCapabilities | null> | null = null;
  */
 export function probeEngineCapabilities(): Promise<EngineCapabilities | null> {
   probePromise ??= probe().catch(() => null);
-  return probePromise.then((capabilities) =>
-    capabilities && presenterVerdict !== undefined && capabilities.hdr !== presenterVerdict
-      ? { ...capabilities, hdr: presenterVerdict }
-      : capabilities,
-  );
+  return probePromise.then((capabilities) => {
+    const hdr = hdrAnswer();
+    return capabilities && capabilities.hdr !== hdr ? { ...capabilities, hdr } : capabilities;
+  });
 }
 
 export function resetEngineCapabilitiesForTests(): void {
   probePromise = null;
   presenterVerdict = undefined;
+  hardwareAdapter = false;
 }
