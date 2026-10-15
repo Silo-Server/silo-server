@@ -29,6 +29,9 @@ type roomRuntime struct {
 	Command           *TransportCommand        `json:"command,omitempty"`
 	Members           map[string]runtimeMember `json:"members"`
 	BufferingWaitAt   time.Time                `json:"buffering_wait_at,omitzero"`
+	// PausedBeforePending is liveRoom.pausedBeforePending, so a node that
+	// adopts the room reads a pending command's requester state correctly.
+	PausedBeforePending bool `json:"paused_before_pending,omitempty"`
 }
 
 type runtimeMember struct {
@@ -207,7 +210,7 @@ func withRoomOperation[T any](ctx context.Context, s *Service, roomID string, fn
 func (s *Service) runtimeLocked(live *liveRoom) roomRuntime {
 	runtime := roomRuntime{
 		SelectionRevision: live.room.SelectionRevision, Command: live.command, BufferingWaitAt: live.bufferingWaitAt,
-		Members: make(map[string]runtimeMember, len(live.members)),
+		PausedBeforePending: live.pausedBeforePending, Members: make(map[string]runtimeMember, len(live.members)),
 	}
 	for key, m := range live.members {
 		runtime.Members[key] = runtimeMember{
@@ -231,6 +234,7 @@ func (s *Service) adoptRuntimeLocked(ctx context.Context, live *liveRoom, room R
 	live.room = room
 	live.command = state.Command
 	live.bufferingWaitAt = state.BufferingWaitAt
+	live.pausedBeforePending = state.PausedBeforePending
 	if selectionChanged {
 		live.command = nil
 		live.bufferingWaitAt = time.Time{}
