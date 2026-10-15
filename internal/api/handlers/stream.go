@@ -67,7 +67,7 @@ type StreamHandler struct {
 	// SessionRecipeStore is the PlaybackHandler's store of header-authenticated
 	// session recipes (same instance), the only reconstruction source for a
 	// session whose URLs carry no stream token. May be nil.
-	SessionRecipeStore recipeCardStoreV3
+	SessionRecipeStore sessionRecipeStoreV3
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig

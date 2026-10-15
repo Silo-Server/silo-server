@@ -34,7 +34,7 @@ type headerAuthRestartFixtureV3 struct {
 	configure func(*PlaybackHandler)
 }
 
-func newHeaderAuthRestartFixtureV3(t *testing.T) headerAuthRestartFixtureV3 {
+func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.StartRequestV3)) headerAuthRestartFixtureV3 {
 	t.Helper()
 	newNode := func() *httptest.Server {
 		var node *httptest.Server
@@ -96,6 +96,9 @@ func newHeaderAuthRestartFixtureV3(t *testing.T) headerAuthRestartFixtureV3 {
 	start := v3HandlerStartRequest()
 	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
 	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	for _, opt := range startOpts {
+		opt(&start)
+	}
 	rr := httptest.NewRecorder()
 	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
 	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &f.started) != nil || f.started.PlaybackPlan == nil {
@@ -182,6 +185,13 @@ func TestHeaderAuthenticatedTranscodeRecoversAfterAnAPIRestart(t *testing.T) {
 			},
 		},
 		{
+			// Redis being unreachable says nothing about the session either.
+			name: "recipe store unavailable", caller: owner, want: http.StatusInternalServerError,
+			mutate: func(_ *testing.T, f headerAuthRestartFixtureV3) {
+				f.recipes.lookupErr = errors.New("dial tcp: connection refused")
+			},
+		},
+		{
 			// The post-deploy reconnect wave can find Postgres busy. That must
 			// read as a retryable failure, not as the session being gone, which
 			// is the answer that makes a client tear playback down.
@@ -229,6 +239,31 @@ func TestHeaderAuthenticatedTranscodeRecoversAfterAnAPIRestart(t *testing.T) {
 				t.Fatalf("unauthenticated segment on the rebuilt session = %d, want 401", rr.Code)
 			}
 		})
+	}
+}
+
+// A client that owns its progress must not have the rebuilt session start
+// writing server-side resume state for it.
+func TestHeaderAuthenticatedRecoveryKeepsAClientOwnedProgressPolicy(t *testing.T) {
+	f := newHeaderAuthRestartFixtureV3(t, func(start *playback.StartRequestV3) {
+		position := 120.0
+		start.ProgressPersistence = playback.ProgressPersistenceClientV3
+		start.StartPosition = &position
+	})
+	restarted := f.restart()
+
+	rr := httptest.NewRecorder()
+	restarted.HandleGetTranscodeManifest(rr, transcodeServeRequestV3(newAuthorizedPlaybackContext(), f.started.SessionID, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("manifest after restart = %d (%s)", rr.Code, rr.Body.String())
+	}
+	session, err := restarted.sessionMgr.GetSession(f.started.SessionID)
+	if err != nil {
+		t.Fatalf("rebuilt session: %v", err)
+	}
+	if !session.DisableProgressPersistence || session.RequestedMediaFileID != 42 {
+		t.Fatalf("rebuilt session progress policy = disabled %v, requested file %d; want the start's client-owned policy and requested file 42",
+			session.DisableProgressPersistence, session.RequestedMediaFileID)
 	}
 }
 

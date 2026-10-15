@@ -20,6 +20,14 @@ import (
 // authority on whether the card may still be used: it must name the same plan,
 // belong to the caller and selected profile, and not be stopped.
 
+// sessionRecipeStoreV3 is the session-recipe key space (*noderecipe.Store): a
+// recipe store whose reads also report when Redis could not be read, so an
+// outage is not answered as a missing session.
+type sessionRecipeStoreV3 interface {
+	recipeCardStoreV3
+	Lookup(ctx context.Context, key string) (*playback.RecipeCard, bool, error)
+}
+
 // recordSessionRecipeV3 stores the recovery card of a header-authenticated
 // transport that has just committed under planID. The builders attach the base
 // card; the routing comes from the live session the commit produced, read under
@@ -51,6 +59,8 @@ func (h *PlaybackHandler) recordSessionRecipeV3(ctx context.Context, planID stri
 	}
 	card.PlanID = planID
 	card.RequireMediaAuthorization = true
+	card.RequestedMediaFileID = current.RequestedMediaFileID
+	card.DisableProgressPersistence = current.DisableProgressPersistence
 	stampLiveRouteV3(&card, current)
 	h.putSessionRecipeV3(ctx, card)
 }
@@ -116,8 +126,9 @@ func (h *PlaybackHandler) reusedSessionRecipeV3(ctx context.Context, sessionID, 
 // followSessionRecipeMoveV3 points the stored recovery card at the executor a
 // transcode moved to. A rebuilt session relays to the node named here, so a
 // card left on the dead node would send the next restart back to it. moved is
-// the card the move started the transport from; the plan binding and client
-// label stay those of the stored card, and the route is the live session's.
+// the card the move started the transport from; the plan binding, client label
+// and progress policy stay those of the stored card, and the route is the live
+// session's.
 func (h *PlaybackHandler) followSessionRecipeMoveV3(ctx context.Context, sessionID string, moved playback.RecipeCard) {
 	if h == nil || h.SessionRecipeStore == nil || !h.SessionRecipeStore.Enabled() {
 		return
@@ -136,6 +147,8 @@ func (h *PlaybackHandler) followSessionRecipeMoveV3(ctx context.Context, session
 	next.SessionID = sessionID
 	next.PlanID = stored.PlanID
 	next.RequireMediaAuthorization = true
+	next.RequestedMediaFileID = stored.RequestedMediaFileID
+	next.DisableProgressPersistence = stored.DisableProgressPersistence
 	next.ClientName = stored.ClientName
 	next.ClientVersion = stored.ClientVersion
 	next.ClientBuild = stored.ClientBuild
@@ -171,13 +184,17 @@ func deleteSessionRecipeV3(ctx context.Context, recipes recipeCardStoreV3, sessi
 // card's plan, belongs to that caller and selected profile, negotiated
 // header-authenticated media, has not expired, and has not been stopped.
 // Everything it checks happens before a session is registered or an executor
-// started. An error means the attempt row could not be read: the caller answers
-// a retryable failure rather than telling the client its session is gone.
-func storedSessionRecipeV3(ctx context.Context, recipes recipeCardStoreV3, attempts playback.PlanStoreV3, files FilePathResolver, sessionID string, userID int) (*playback.RecipeCard, error) {
+// started. An error means Redis or the attempt row could not be read: the
+// caller answers a retryable failure rather than telling the client its session
+// is gone.
+func storedSessionRecipeV3(ctx context.Context, recipes sessionRecipeStoreV3, attempts playback.PlanStoreV3, sessionID string, userID int) (*playback.RecipeCard, error) {
 	if userID == 0 || sessionID == "" || recipes == nil || !recipes.Enabled() || attempts == nil {
 		return nil, nil
 	}
-	card, ok := recipes.Get(ctx, sessionID)
+	card, ok, err := recipes.Lookup(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok || card == nil || card.SessionID != sessionID || card.UserID != userID ||
 		!card.RequireMediaAuthorization || card.PlanID == "" {
 		return nil, nil
@@ -200,30 +217,13 @@ func storedSessionRecipeV3(ctx context.Context, recipes recipeCardStoreV3, attem
 	if profileID := apimw.GetProfileID(ctx); profileID != "" && profileID != record.ProfileID {
 		return nil, nil
 	}
-	recovered := *card
-	recovered.RequestedMediaFileID = record.RequestedMediaFileID
-	recovered.DisableProgressPersistence = attemptDisablesProgressPersistenceV3(ctx, record, files)
-	return &recovered, nil
-}
-
-// attemptDisablesProgressPersistenceV3 is whether progress for this attempt
-// must stay out of server-side resume state: the client asked to own it, or the
-// file is one part of a multipart presentation (see sessionOwnsResumeTimelineV3).
-func attemptDisablesProgressPersistenceV3(ctx context.Context, record *playback.AttemptRecordV3, files FilePathResolver) bool {
-	if record.NormalizedRequest.ProgressPersistence == playback.ProgressPersistenceClientV3 {
-		return true
-	}
-	if files == nil {
-		return false
-	}
-	file, err := files.GetByID(ctx, record.EffectiveMediaFileID)
-	return err == nil && !sessionOwnsResumeTimelineV3(file)
+	return card, nil
 }
 
 func (h *PlaybackHandler) storedSessionRecipeV3(ctx context.Context, sessionID string, userID int) (*playback.RecipeCard, error) {
-	return storedSessionRecipeV3(ctx, h.SessionRecipeStore, h.PlanStoreV3, h.fileResolver, sessionID, userID)
+	return storedSessionRecipeV3(ctx, h.SessionRecipeStore, h.PlanStoreV3, sessionID, userID)
 }
 
 func (h *StreamHandler) storedSessionRecipeV3(ctx context.Context, sessionID string, userID int) (*playback.RecipeCard, error) {
-	return storedSessionRecipeV3(ctx, h.SessionRecipeStore, h.PlanStoreV3, h.fileResolver, sessionID, userID)
+	return storedSessionRecipeV3(ctx, h.SessionRecipeStore, h.PlanStoreV3, sessionID, userID)
 }

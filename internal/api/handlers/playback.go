@@ -233,7 +233,7 @@ type PlaybackHandler struct {
 	// any replica) can rebuild a session whose URLs carry no stream token. See
 	// playback_session_recipe.go. Without Redis behind it such a session answers
 	// 404 after a restart and the client starts a new attempt, as before.
-	SessionRecipeStore recipeCardStoreV3
+	SessionRecipeStore sessionRecipeStoreV3
 	ItemAccess         PlaybackItemAccessChecker // optional; enables file authorization checks
 	EpisodeLookup      PlaybackEpisodeLookup     // optional; resolves episode files to their series
 	ExtraLookup        PlaybackExtraLookup       // optional; resolves extras files to their parent item

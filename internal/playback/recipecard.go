@@ -73,8 +73,8 @@ type RecipeCard struct {
 	// under, so a card a later replan failed to overwrite cannot rebuild a
 	// superseded transport. RequireMediaAuthorization carries the mode onto the
 	// rebuilt session, whose UUID must stay a route identifier rather than a
-	// bearer. RequestedMediaFileID and DisableProgressPersistence are taken from
-	// the durable attempt at recovery time.
+	// bearer. RequestedMediaFileID and DisableProgressPersistence are the live
+	// session's when the card is written, so the rebuilt session keeps them.
 	PlanID                     string `json:"plan_id,omitempty"`
 	RequireMediaAuthorization  bool   `json:"require_media_authorization,omitempty"`
 	RequestedMediaFileID       int    `json:"requested_media_file_id,omitempty"`
