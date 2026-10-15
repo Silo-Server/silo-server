@@ -26,6 +26,24 @@ func TestBandwidthProbeLimiterBoundsInFlightProbesPerAccount(t *testing.T) {
 	}
 }
 
+func TestBandwidthProbeLimiterBoundsProbesPerNode(t *testing.T) {
+	limiter := &bandwidthProbeLimiter{accounts: map[int]*bandwidthProbeAccount{}}
+	now := time.Unix(1_000_000, 0)
+	for id := range bandwidthProbeNodeMaxInFlight {
+		if ok, _, _ := limiter.acquire(id, 1000, now); !ok {
+			t.Fatalf("refused account %d under the node limit", id)
+		}
+	}
+	ok, _, wait := limiter.acquire(bandwidthProbeNodeMaxInFlight, 1000, now)
+	if ok || wait != bandwidthProbeNodeRetryAfter {
+		t.Fatalf("admitted=%v wait=%v past the node limit", ok, wait)
+	}
+	limiter.release(0, 0, now, now)
+	if ok, _, _ := limiter.acquire(bandwidthProbeNodeMaxInFlight, 1000, now); !ok {
+		t.Fatal("a finished probe did not free a node slot")
+	}
+}
+
 func TestBandwidthProbeLimiterBoundsBytesPerWindow(t *testing.T) {
 	limiter := &bandwidthProbeLimiter{accounts: map[int]*bandwidthProbeAccount{}}
 	now := time.Unix(1_000_000, 0)
