@@ -114,17 +114,21 @@ export function useToggleNotInterested(itemId: string) {
     scheduleMediaSurfaceInvalidation(queryClient, { itemId, skipItemDetail: true });
   };
 
-  // Undo clears the mark as the profile that made it, whichever profile is
-  // active when it is clicked, and patches caches only while that profile is
-  // still the active one.
+  // Undo clears the mark only while the profile that made it is still the
+  // active one. After a switch it is refused rather than sent as the earlier
+  // profile: that would reuse its PIN authority from another profile.
   const undo = useMutation({
     ...personalStateMutationOptions,
-    mutationFn: (authority: ProfileRequestContextSnapshot) =>
-      v2("DELETE /api/v2/not-interested/{item_id}", {
+    mutationFn: (authority: ProfileRequestContextSnapshot) => {
+      if (!isCapturedProfileAuthorityActive(authority)) {
+        return Promise.reject(new UndoProfileChangedError());
+      }
+      return v2("DELETE /api/v2/not-interested/{item_id}", {
         path: { item_id: itemId },
         profileContext: authority,
         timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
-      }),
+      });
+    },
     onMutate: async (authority) => {
       if (!isCapturedProfileAuthorityActive(authority)) return;
       await cancelItemDetailQueries(queryClient, itemId);
@@ -133,7 +137,11 @@ export function useToggleNotInterested(itemId: string) {
         setDetailNotInterested(queryClient, itemId, false);
       }
     },
-    onError: (_err, authority) => {
+    onError: (err, authority) => {
+      if (err instanceof UndoProfileChangedError) {
+        toast.error("Switch back to the profile that marked this to undo it");
+        return;
+      }
       if (isCapturedProfileAuthorityActive(authority)) {
         setDetailNotInterested(queryClient, itemId, true);
       }
@@ -199,6 +207,9 @@ export function useToggleNotInterested(itemId: string) {
       toggle.mutateAsync({ marked, authority: captureProfileRequestContext() }),
   };
 }
+
+/** Undo was chosen after the profile that made the mark stopped being active. */
+class UndoProfileChangedError extends Error {}
 
 interface ToggleVariables {
   /** Whether the title is marked now. */

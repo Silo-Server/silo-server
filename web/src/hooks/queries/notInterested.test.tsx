@@ -107,7 +107,7 @@ describe("useToggleNotInterested", () => {
     );
   });
 
-  it("undoes a mark as the profile that made it after a profile switch", async () => {
+  it("refuses Undo after a profile switch rather than act as the earlier profile", async () => {
     const { result } = renderHook(() => useToggleNotInterested("movie:heat"), { wrapper });
     await act(() => result.current.mutateAsync(false));
     const [, options] = mocks.toastSuccess.mock.calls[0] as [
@@ -118,14 +118,25 @@ describe("useToggleNotInterested", () => {
     mocks.activeProfile = "p-other";
     queryClient.setQueryData(sectionKeys.homeItems("most_watched"), homeRow("most_watched"));
     act(() => options.action.onClick());
-    await waitFor(() => expect(mocks.fetchWithSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
 
-    const [url, init] = mocks.fetchWithSession.mock.calls[1] as [string, RequestInit];
-    expect(url).toContain("/api/v2/not-interested/movie%3Aheat");
+    // Nothing is sent with the earlier profile's authority.
+    expect(mocks.fetchWithSession).toHaveBeenCalledTimes(1);
+    expect(rowIDs(queryClient, "most_watched")).toEqual(["movie:heat", "movie:other"]);
+  });
+
+  it("undoes a mark while its profile is still active", async () => {
+    const { result } = renderHook(() => useToggleNotInterested("movie:heat"), { wrapper });
+    await act(() => result.current.mutateAsync(false));
+    const [, options] = mocks.toastSuccess.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ];
+    act(() => options.action.onClick());
+    await waitFor(() => expect(mocks.fetchWithSession).toHaveBeenCalledTimes(2));
+    const [, init] = mocks.fetchWithSession.mock.calls[1] as [string, RequestInit];
     expect(init.method).toBe("DELETE");
     expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("p-owner");
-    // The other profile's caches are left alone.
-    expect(rowIDs(queryClient, "most_watched")).toEqual(["movie:heat", "movie:other"]);
   });
 
   it("keeps a mark in flight on its profile when the profile switches", async () => {
