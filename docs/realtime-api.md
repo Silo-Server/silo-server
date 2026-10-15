@@ -437,10 +437,14 @@ host's reported position becomes the room anchor before the room resumes. A
 rebuilt stream that lands on a keyframe or segment boundary short of the
 target therefore resumes from where the host really is instead of holding the
 room until the waiting deadline. Position validation uses the same finite,
-nonnegative range as other playback reports. Buffering pause commands can be
-acknowledged at the member's actual position: they do not require rebuilding an
-otherwise usable stream to reach an unbuffered anchor. Playback correction
-still runs when the room resumes.
+nonnegative range as other playback reports. When a guest stalls, the room
+pauses where it is and that guest alone is sent a seek to the room's position.
+An acknowledgement that names that seek's `command_id` is accepted within five
+seconds of the destination either way, because a rebuilt stream often lands
+short and the client closes the rest by rate once the room plays. When the host
+stalls, or nobody else is watching, the room pauses at the stalled member's
+position, and that pause can be acknowledged where the member is. Playback
+correction still runs when the room resumes.
 
 Readiness is level-triggered on the web player. It evaluates the same guards on
 every media event that can indicate playable media (`canplay`,
@@ -460,6 +464,22 @@ the room snapshot marks its own member `is_ready`. It then stops readiness
 acknowledgements and returns to ordinary state reports every 1.5 s, even while
 other members are still waiting. A readiness reset for a new command enables
 retries again. Reports without `is_ready` are still ignored while waiting.
+
+Every `transport_command` carries the room's position at its `execute_at`, and
+the room anchors there too, so a client that runs the command at `execute_at`
+and projects from it at 1x is where the room says it is. A command that arrives
+late is projected forward from `execute_at`.
+
+Outside `waiting`, a `state_report` may carry the `command_id` of the last
+transport command the client applied. The server uses it to tell which reports
+predate a member's latest command: until that command's `execute_at` plus 1.5
+seconds, or for up to 10 seconds while a report names an older command, a report
+is neither corrected nor taken as the host's decision. A report that names the
+latest command ends that window early. Clients that omit the field get the time
+window alone. Reports from a host that has just re-attached are corrected like a
+guest's until one plays as its sync said, within the host band; only then is its
+pause or position a decision for the room. The host band is 10 seconds on the
+v2 socket and 2 seconds on the v1 socket.
 
 A viewer the room stopped waiting for sends `ready` while the room is `playing`
 or `paused`. The v2 snapshot shows this state as `self_ignore_wait: true`, or as

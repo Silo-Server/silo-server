@@ -94,8 +94,9 @@ arrives, and users cannot change playback speed in a room.
 
 The server corrects a member whose reports stay more than 1 second from the
 room, or whose pause state differs, and repeats a correction at most every 10
-seconds. A member already closing its drift by rate, within 5 seconds and
-closer than at its last report, is left to finish. A correction refreshes the
+seconds. A member of a playing room already closing its drift by rate, within
+5 seconds and closer than its best report since its last command, is left to
+finish; the first report after a command sets that best. A correction refreshes the
 client's reference; a client with the drift loop still closes up to 5 seconds
 by rate, and an older client without it is kept near the room. A command sent
 to a member starts this count over.
@@ -106,8 +107,16 @@ is neither corrected nor taken as the host's decision, unless it names that
 command as the last one its client applied, reports the play state the command
 set, and the member was also sent the room's latest command. A report naming
 an older command than the member was last sent is treated the same way for up
-to 10 seconds. A host that has run its re-attach sync may pause or resume the
-room again even while it closes the rest of its drift by rate.
+to 10 seconds. A host that has re-attached is corrected like a viewer until a
+report names its sync, plays as the sync said, and is within the host band; from
+then it may pause or resume the room again even while it closes the rest of its
+drift by rate. Naming the sync alone is not enough: a player whose play was
+refused (a browser blocking autoplay after a reload) or whose correction never
+loaded names it too.
+
+A play or pause request carries where the requester was. The lead is added only
+when the requester was playing, so a second play sent inside the lead by a
+member still paused does not start the room a lead later.
 
 Every command executes one lead from when it is sent, and never before the
 room's own latest command or anchor, so a member synced after the lead drops
@@ -166,7 +175,10 @@ miss the scene.
   and whenever the host has drifted by 10 seconds or less, the host is corrected
   like any viewer instead of moving the room anchor. Every client sends its
   seeks as requests, so passive drift is the host falling behind, not a
-  decision. A larger jump or a pause mismatch still moves the room.
+  decision. A larger jump or a pause mismatch still moves the room. The frozen
+  v1 room socket keeps its 2 second band, since its clients may report a host's
+  scrub instead of requesting it. A stalled host's position bounds where the
+  room pauses, measured from where the room is when the stall is reported.
 
 Stall times and the last buffering pause live in the room runtime, so every API
 server applies the same limits and a reconnect through another server does not
