@@ -101,8 +101,7 @@ type ItemsHandler struct {
 	detailSvc                *catalog.DetailService
 	storeProvider            userstore.UserStoreProvider
 	watchState               *watchstate.Service
-	profileStaler            ProfileStaler
-	profileRefreshRequester  ProfileRefreshRequester
+	signalsNotifier          SignalsChangedNotifier
 	metadataRefreshRequester MetadataRefreshRequester
 	trailerRefreshRequester  TrailerRefreshRequester
 	trailerItemAccess        trailerItemAccess
@@ -162,14 +161,10 @@ func (h *ItemsHandler) SetCompletionObserver(obs watchstate.CompletionObserver) 
 	h.watchState.WithCompletionObserver(obs)
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *ItemsHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *ItemsHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *ItemsHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequester) {
@@ -411,6 +406,8 @@ type seasonResponse struct {
 	PosterURL       string                  `json:"poster_url,omitempty"`
 	PosterThumbhash string                  `json:"poster_thumbhash,omitempty"`
 	UserData        *catalog.SeasonUserData `json:"user_data,omitempty"`
+	// MachineTranslatedFields reaches the v2 season row only; v1 is frozen.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // seasonsResponse wraps the seasons list for JSON serialization.
@@ -460,6 +457,14 @@ type episodeResponse struct {
 	UserData            *catalog.SeasonUserData `json:"user_data,omitempty"`
 	Files               []episodeFileResponse   `json:"files,omitempty"`
 	OverlaySummary      *models.OverlaySummary  `json:"overlay_summary,omitempty"`
+	// RatingIMDB and RatingTMDB feed the v2 episode's ratings; /api/v1 is
+	// frozen, so they stay off its wire.
+	RatingIMDB *float64 `json:"-"`
+	RatingTMDB *float64 `json:"-"`
+	// MachineTranslatedFields reaches the v2 episode row only; v1 is frozen.
+	MachineTranslatedFields []string `json:"-"`
+	// PendingTranslationLanguage reaches the v2 episode row only; v1 is frozen.
+	PendingTranslationLanguage string `json:"-"`
 }
 
 type episodeImageFallback struct {
@@ -1261,7 +1266,12 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 		ImdbID:              ep.ImdbID,
 		TmdbID:              ep.TmdbID,
 		TvdbID:              ep.TvdbID,
+		RatingIMDB:          ep.RatingIMDB,
+		RatingTMDB:          ep.RatingTMDB,
 		StillThumbhash:      stillThumbhash,
+
+		MachineTranslatedFields:    ep.MachineTranslatedFields,
+		PendingTranslationLanguage: ep.PendingTranslationLanguage,
 	}
 
 	if ep.AirDate != nil {
@@ -1860,6 +1870,8 @@ func (h *ItemsHandler) localizedSeasonResponse(
 		Overview:        s.Overview,
 		EpisodeCount:    episodeCount,
 		PosterThumbhash: s.PosterThumbhash,
+
+		MachineTranslatedFields: s.MachineTranslatedFields,
 	}
 	if s.AirDate != nil {
 		resp.AirDate = s.AirDate.Format("2006-01-02")
@@ -2446,7 +2458,11 @@ type watchedLeafTarget struct {
 	DurationSeconds float64
 }
 
-func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
+// resolveWatchedTargets checks access to contentID and resolves the leaf
+// targets a watched mark writes. Unwatching a series or season returns no
+// targets: the caller expands it with watchstate.ParentUnwatchTargets, which
+// also reaches watched episodes that no longer have a file.
+func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, played bool, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
 	item, err := h.itemRepo.GetByID(ctx, contentID)
 	switch {
 	case err == nil:
@@ -2466,6 +2482,9 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 		case "series":
 			if h.episodeRepo == nil {
 				return "", nil, catalog.ErrItemNotFound
+			}
+			if !played {
+				return "series", nil, nil
 			}
 			episodes, err := h.episodeRepo.ListBySeries(ctx, item.ContentID)
 			if err != nil {
@@ -2488,6 +2507,9 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 			}
 			if h.episodeRepo == nil {
 				return "", nil, catalog.ErrItemNotFound
+			}
+			if !played {
+				return "season", nil, nil
 			}
 			episodes, err := h.episodeRepo.ListBySeasonID(ctx, season.ContentID)
 			if err != nil {

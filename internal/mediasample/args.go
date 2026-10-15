@@ -159,13 +159,13 @@ func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []st
 }
 
 // buildSheetsArgs builds the arguments of a Sheets request whose video chain
-// is graph (see buildSheetsGraph). A Samples request reads its list as
-// buildSamplesArgs does, its entries lasting and its decoder skipping frames
-// as list says, and returns the list for stdin; a Window request, which a
+// is graph (see buildSheetsGraph). A Samples request reads a list of entries
+// as buildSamplesArgs does, each lasting and its decoder skipping frames as
+// list says, and returns the list for stdin; a Window request, which a
 // Samples request becomes for inputs the list cannot seek in, decodes the
 // window's keyframes. Either way the frames go to stdout raw, and hardware
 // attempts leave VideoToolbox frames in system memory, as images do.
-func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64, graph, packetTimingPath string, list sheetsList) ([]string, []byte, error) {
+func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []listEntry, graph, packetTimingPath string, list sheetsList) ([]string, []byte, error) {
 	if (req.Window == nil) == (req.Samples == nil) || req.Sheets == nil {
 		return nil, nil, errors.New("sheets need exactly one sampling mode")
 	}
@@ -182,12 +182,12 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart
 		args = append(args, "-threads", threads, "-filter_threads", threads)
 	}
 	if req.Samples != nil {
-		concat, err := buildConcatListSpan(req.Input, req.Samples.Seconds, inputStart, list.span)
+		concat, err := buildConcatListSpan(req.Input, entries, list.span)
 		if err != nil {
 			return nil, nil, err
 		}
 		args = append(args, decode...)
-		args = append(args, skipFrameOption, list.skip)
+		args = append(args, req.keyframeInputArgs(list.skip)...)
 		args = append(args, concatDemuxerArgs...)
 		args = append(args, "-i", concatListInput)
 		return append(args, sheetsOutputArgs(graph)...), concat, nil
@@ -195,7 +195,13 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart
 	// The window's duration bounds the input, not the output: an output -t
 	// drops frames after the filters logged them, and the log would no
 	// longer count the frames on stdout.
-	args = append(args, skipFrameOption, keyframeSkipFrame)
+	skip := keyframeSkipFrame
+	if req.Window.referencePictures {
+		// Non-keyframes are decoded only to keep the decoder's state; the
+		// graph still sees just the keyframes a keyframes-only read gives.
+		skip, graph = exactSkipFrame, "select=key,"+graph
+	}
+	args = append(args, req.keyframeInputArgs(skip)...)
 	args = append(args, decode...)
 	args = append(args,
 		"-ss", formatSeconds(req.Window.StartSeconds),

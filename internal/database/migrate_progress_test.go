@@ -351,14 +351,17 @@ func TestMigrationRollbackCandidatesListAppliedMigrationsAboveTheTarget(t *testi
 	}
 }
 
-// TestRegisteredGoMigrationsHaveNames covers the three Go migrations this
-// provider registers: goose leaves their source path empty, so without a name
-// their progress logs would carry name="".
+// TestRegisteredGoMigrationsHaveNames covers the Go migrations this provider
+// registers: goose leaves their source path empty, so without a name their
+// progress logs would carry name="".
 func TestRegisteredGoMigrationsHaveNames(t *testing.T) {
 	for _, m := range []*goose.Migration{
 		settingsBackfillMigration(),
 		displayPrefsMoveMigration(),
 		subtitleLanguageBackfillMigration(),
+		invalidIndexRebuildMigration(),
+		pushAttemptKeyScopeMigration(),
+		externalSubtitleNameBackfillMigration(),
 	} {
 		name := migrationName(&goose.Source{Type: goose.TypeGo, Path: m.Source, Version: m.Version})
 		if name == "" || name != m.Source {

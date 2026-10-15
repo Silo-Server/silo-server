@@ -18,6 +18,8 @@ import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/ove
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
+import MachineTranslatedLabel from "./MachineTranslatedLabel";
+import { hasMachineTranslation } from "./machineTranslation";
 
 /**
  * How much of a season stays visible before the section scrolls, so a long one
@@ -196,6 +198,11 @@ function SeasonEpisodeCard({
                 }).format(new Date(episode.air_date))}
               </span>
             )}
+            {episode.overview &&
+              !hideOverview &&
+              hasMachineTranslation(episode.machine_translated_fields) && (
+                <MachineTranslatedLabel compact />
+              )}
           </div>
           {episode.overview && !hideOverview && (
             <p className="text-muted-foreground line-clamp-2 text-xs leading-relaxed">

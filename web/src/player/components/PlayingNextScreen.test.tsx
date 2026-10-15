@@ -408,4 +408,24 @@ describe("PlayingNextScreen spoiler protection", () => {
     });
     expect(previewPlaceholder().className).not.toContain("blur-xl");
   });
+
+  it("labels an AI-translated overview only while the overview shows", () => {
+    const translated = {
+      ...nextWithoutUrl,
+      overview: "Une équipe prépare un dernier coup.",
+      machineTranslatedFields: ["overview"],
+    };
+    renderScreen({ nextEpisode: translated });
+    expect(screen.getByText("Translated by AI")).toBeTruthy();
+    cleanup();
+
+    renderScreen({ nextEpisode: { ...translated, machineTranslatedFields: undefined } });
+    expect(screen.queryByText("Translated by AI")).toBeNull();
+    cleanup();
+
+    mocks.spoilerPrefs = { hideImages: true, hideOverviews: true };
+    renderScreen({ nextEpisode: translated });
+    expect(screen.queryByText("Une équipe prépare un dernier coup.")).toBeNull();
+    expect(screen.queryByText("Translated by AI")).toBeNull();
+  });
 });

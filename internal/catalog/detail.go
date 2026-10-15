@@ -208,8 +208,12 @@ type ItemDetail struct {
 	// language that the description is missing — the on-view AI translation
 	// affordance keys off it.
 	PendingTranslationLanguage string `json:"pending_translation_language,omitempty"`
-	Runtime                    int    `json:"runtime,omitempty"`
-	ContentRating              string `json:"content_rating,omitempty"`
+	// MachineTranslatedFields names the localized fields ("overview",
+	// "tagline") that AI translation wrote. The native v2 document carries it;
+	// the frozen v1 JSON does not.
+	MachineTranslatedFields []string `json:"-"`
+	Runtime                 int      `json:"runtime,omitempty"`
+	ContentRating           string   `json:"content_rating,omitempty"`
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 renderer. Kept out of this JSON contract the way OriginalLanguage is:
 	// /api/v1 is frozen, so the fields ride the Go struct and apiv2 emits them
@@ -1094,6 +1098,16 @@ func (s *DetailService) seriesOriginalLanguage(ctx context.Context, seriesID str
 	return series.OriginalLanguage
 }
 
+// seriesOriginalLanguageChecked is seriesOriginalLanguage with its read
+// error, for the checked pending paths; a missing series has none.
+func (s *DetailService) seriesOriginalLanguageChecked(ctx context.Context, seriesID string, filter AccessFilter) (string, error) {
+	originalBySeries, err := s.seriesOriginalLanguages(ctx, []string{seriesID}, filter)
+	if err != nil {
+		return "", err
+	}
+	return originalBySeries[strings.TrimSpace(seriesID)], nil
+}
+
 // seriesOriginalLanguages is the batch equivalent of seriesOriginalLanguage.
 // A season or episode page usually contains many children of one series; load
 // each distinct parent once so original-language preferences do not introduce
@@ -1145,20 +1159,28 @@ func (s *DetailService) seriesOriginalLanguages(
 // the item's base metadata language, the base overview has text, and no
 // localized overview exists yet. Clients use it to offer (or auto-run)
 // on-view AI translation; it is pure data, independent of whether the AI
-// feature is enabled.
+// feature is enabled. A failed read reports nothing missing.
 func (s *DetailService) PendingTranslationLanguage(ctx context.Context, item *models.MediaItem, filter AccessFilter) string {
+	language, _ := s.PendingTranslationLanguageChecked(ctx, item, filter)
+	return language
+}
+
+// PendingTranslationLanguageChecked is PendingTranslationLanguage with its
+// read errors, for callers that must not mistake a failed read for nothing
+// missing. A presentation library that no longer exists is nothing missing.
+func (s *DetailService) PendingTranslationLanguageChecked(ctx context.Context, item *models.MediaItem, filter AccessFilter) (string, error) {
 	if item == nil || strings.TrimSpace(item.Overview) == "" || s.itemLocRepo == nil {
-		return ""
+		return "", nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter, item.OriginalLanguage)
+	language, err := s.pendingPresentationLanguage(ctx, filter, item.OriginalLanguage)
 	if err != nil || language == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) {
-		return ""
+		return "", err
 	}
 	loc, err := s.itemLocRepo.Get(ctx, item.ContentID, language)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return pendingTranslationLanguageWith(item, language, loc)
+	return pendingTranslationLanguageWith(item, language, loc), nil
 }
 
 // pendingTranslationLanguageWith is the shared core of PendingTranslationLanguage:
@@ -1177,37 +1199,131 @@ func pendingTranslationLanguageWith(item *models.MediaItem, language string, loc
 }
 
 // PendingSeasonTranslationLanguage is the season-row equivalent of
-// PendingTranslationLanguage.
+// PendingTranslationLanguage. A season page also lists its episodes, so the
+// language is pending while the season overview or any of its episodes'
+// overviews lacks a localization.
 func (s *DetailService) PendingSeasonTranslationLanguage(ctx context.Context, season *models.Season, filter AccessFilter) string {
-	if season == nil || strings.TrimSpace(season.Overview) == "" || s.seasonLocRepo == nil {
-		return ""
-	}
-	language, err := s.resolvePresentationLanguage(ctx, filter, s.seriesOriginalLanguage(ctx, season.SeriesID, filter))
-	if err != nil || language == "" || sameMetadataLanguage(season.DefaultMetadataLanguage, language) {
-		return ""
-	}
-	loc, err := s.seasonLocRepo.Get(ctx, season.ContentID, language)
-	if err != nil || (loc != nil && loc.Overview != "") {
-		return ""
-	}
+	language, _ := s.PendingSeasonTranslationLanguageChecked(ctx, season, filter)
 	return language
+}
+
+// PendingSeasonTranslationLanguageChecked is PendingSeasonTranslationLanguage
+// with its read errors.
+func (s *DetailService) PendingSeasonTranslationLanguageChecked(ctx context.Context, season *models.Season, filter AccessFilter) (string, error) {
+	return s.pendingSeasonTranslationLanguageChecked(ctx, season, filter, nil)
+}
+
+// pendingSeasonTranslationLanguage takes the season's episodes when the
+// caller already listed them; nil lists them here. A failed read reports
+// nothing missing.
+func (s *DetailService) pendingSeasonTranslationLanguage(ctx context.Context, season *models.Season, filter AccessFilter, episodes []*models.Episode) string {
+	language, _ := s.pendingSeasonTranslationLanguageChecked(ctx, season, filter, episodes)
+	return language
+}
+
+// pendingSeasonTranslationLanguageChecked is pendingSeasonTranslationLanguage
+// with its read errors.
+func (s *DetailService) pendingSeasonTranslationLanguageChecked(ctx context.Context, season *models.Season, filter AccessFilter, episodes []*models.Episode) (string, error) {
+	if season == nil || s.seasonLocRepo == nil {
+		return "", nil
+	}
+	original, err := s.seriesOriginalLanguageChecked(ctx, season.SeriesID, filter)
+	if err != nil {
+		return "", err
+	}
+	language, err := s.pendingPresentationLanguage(ctx, filter, original)
+	if err != nil || language == "" {
+		return "", err
+	}
+	if strings.TrimSpace(season.Overview) != "" && !sameMetadataLanguage(season.DefaultMetadataLanguage, language) {
+		loc, err := s.seasonLocRepo.Get(ctx, season.ContentID, language)
+		if err != nil {
+			return "", err
+		}
+		if loc == nil || loc.Overview == "" {
+			return language, nil
+		}
+	}
+	if episodes == nil {
+		if s.episodeRepo == nil {
+			return "", nil
+		}
+		episodes, err = s.episodeRepo.ListBySeasonID(ctx, season.ContentID)
+		if err != nil {
+			return "", err
+		}
+	}
+	missing, err := s.episodesMissingLanguage(ctx, episodes, language)
+	if err != nil || !missing {
+		return "", err
+	}
+	return language, nil
+}
+
+// episodesMissingLanguage reports whether any episode has a description in
+// another language and no localized description for language.
+func (s *DetailService) episodesMissingLanguage(ctx context.Context, episodes []*models.Episode, language string) (bool, error) {
+	if s.episodeLocRepo == nil {
+		return false, nil
+	}
+	ids := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		if episode != nil && strings.TrimSpace(episode.Overview) != "" && !sameMetadataLanguage(episode.DefaultMetadataLanguage, language) {
+			ids = append(ids, episode.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return false, nil
+	}
+	locs, err := s.episodeLocRepo.GetByEpisodeIDs(ctx, ids, language)
+	if err != nil {
+		return false, err
+	}
+	for _, id := range ids {
+		if loc := locs[id]; loc == nil || loc.Overview == "" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // PendingEpisodeTranslationLanguage is the episode-row equivalent of
 // PendingTranslationLanguage.
 func (s *DetailService) PendingEpisodeTranslationLanguage(ctx context.Context, episode *models.Episode, filter AccessFilter) string {
+	language, _ := s.PendingEpisodeTranslationLanguageChecked(ctx, episode, filter)
+	return language
+}
+
+// PendingEpisodeTranslationLanguageChecked is
+// PendingEpisodeTranslationLanguage with its read errors.
+func (s *DetailService) PendingEpisodeTranslationLanguageChecked(ctx context.Context, episode *models.Episode, filter AccessFilter) (string, error) {
 	if episode == nil || strings.TrimSpace(episode.Overview) == "" || s.episodeLocRepo == nil {
-		return ""
+		return "", nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter, s.seriesOriginalLanguage(ctx, episode.SeriesID, filter))
+	original, err := s.seriesOriginalLanguageChecked(ctx, episode.SeriesID, filter)
+	if err != nil {
+		return "", err
+	}
+	language, err := s.pendingPresentationLanguage(ctx, filter, original)
 	if err != nil || language == "" || sameMetadataLanguage(episode.DefaultMetadataLanguage, language) {
-		return ""
+		return "", err
 	}
 	loc, err := s.episodeLocRepo.Get(ctx, episode.ContentID, language)
 	if err != nil || (loc != nil && loc.Overview != "") {
-		return ""
+		return "", err
 	}
-	return language
+	return language, nil
+}
+
+// pendingPresentationLanguage resolves the presentation language for the
+// pending checks, where a presentation library that no longer exists means
+// nothing is missing rather than a failed read.
+func (s *DetailService) pendingPresentationLanguage(ctx context.Context, filter AccessFilter, originalLanguage string) (string, error) {
+	language, err := s.resolvePresentationLanguage(ctx, filter, originalLanguage)
+	if errors.Is(err, ErrItemNotFound) {
+		return "", nil
+	}
+	return language, err
 }
 
 func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentID string) error {
@@ -1471,8 +1587,10 @@ func (s *DetailService) LocalizeEpisodeModel(ctx context.Context, episode *model
 }
 
 // LocalizeEpisodeModels applies presentation-language localization to a batch
-// of episodes with a single lookup. Episodes without a localization row are
-// returned unchanged; the result preserves input order and length.
+// of episodes with a single lookup. An episode whose description is missing
+// in the presentation language comes back as a copy carrying
+// PendingTranslationLanguage; other episodes without a localization row are
+// returned unchanged. The result preserves input order and length.
 func (s *DetailService) LocalizeEpisodeModels(ctx context.Context, episodes []*models.Episode, filter AccessFilter) ([]*models.Episode, error) {
 	if len(episodes) == 0 {
 		return episodes, nil
@@ -1528,11 +1646,19 @@ func (s *DetailService) LocalizeEpisodeModels(ctx context.Context, episodes []*m
 		if ep == nil {
 			continue
 		}
-		if loc := locs[ep.ContentID]; loc != nil {
-			target := targets[ep.ContentID]
-			if target != "" && !sameMetadataLanguage(ep.DefaultMetadataLanguage, target) {
-				localized[i] = applyEpisodeLocalization(ep, loc)
+		target := targets[ep.ContentID]
+		if target == "" || sameMetadataLanguage(ep.DefaultMetadataLanguage, target) {
+			continue
+		}
+		loc := locs[ep.ContentID]
+		if loc != nil {
+			localized[i] = applyEpisodeLocalization(ep, loc)
+		}
+		if strings.TrimSpace(ep.Overview) != "" && (loc == nil || loc.Overview == "") {
+			if localized[i] == ep {
+				localized[i] = cloneEpisode(ep)
 			}
+			localized[i].PendingTranslationLanguage = target
 		}
 	}
 	return localized, nil
@@ -2242,6 +2368,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		Overview:                   item.Overview,
 		Tagline:                    item.Tagline,
 		PendingTranslationLanguage: pendingTranslation,
+		MachineTranslatedFields:    item.MachineTranslatedFields,
 		Runtime:                    item.Runtime,
 		ContentRating:              item.ContentRating,
 		AdvisoryAge:                item.AdvisoryAge,
@@ -2420,7 +2547,10 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 	photoPaths := make([]string, len(people))
 	paths := make([]string, 0, len(people))
 	seen := make(map[string]struct{}, len(people))
-	variant := imagesize.PluginVariantFeatured
+	// Without a requested size, ask plugins for their large headshot. The
+	// featured hint maps to TMDB's w185, which is softer than a cast card on a
+	// high-density screen; large maps to h632.
+	variant := imagesize.PluginVariantLarge
 	if filter.ImageSize != imagesize.Unset {
 		variant = sizeToVariant(string(filter.ImageSize))
 	}
@@ -3079,7 +3209,15 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 	}
 	localizationFilter := filter
 	localizationFilter.PresentationOriginalLanguage = series.OriginalLanguage
-	pendingTranslation := s.PendingSeasonTranslationLanguage(ctx, season, localizationFilter)
+
+	episodes := []*models.Episode{}
+	if s.episodeRepo != nil {
+		episodes, err = s.episodeRepo.ListBySeasonID(ctx, season.ContentID)
+		if err != nil {
+			return nil, fmt.Errorf("listing season episodes: %w", err)
+		}
+	}
+	pendingTranslation := s.pendingSeasonTranslationLanguage(ctx, season, localizationFilter, episodes)
 	localizedSeason, err := s.LocalizeSeasonModel(ctx, season, localizationFilter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing season detail: %w", err)
@@ -3088,14 +3226,6 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 	series, err = s.LocalizeItemModel(ctx, series, localizationFilter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing season series detail: %w", err)
-	}
-
-	episodes := []*models.Episode{}
-	if s.episodeRepo != nil {
-		episodes, err = s.episodeRepo.ListBySeasonID(ctx, season.ContentID)
-		if err != nil {
-			return nil, fmt.Errorf("listing season episodes: %w", err)
-		}
 	}
 
 	title := season.Title
@@ -3116,6 +3246,7 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		Title:                      title,
 		Overview:                   season.Overview,
 		PendingTranslationLanguage: pendingTranslation,
+		MachineTranslatedFields:    season.MachineTranslatedFields,
 		PosterThumbhash:            season.PosterThumbhash,
 		BackdropThumbhash:          series.BackdropThumbhash,
 		SeriesID:                   season.SeriesID,
@@ -3158,6 +3289,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		Title:                      episode.Title,
 		Overview:                   episode.Overview,
 		PendingTranslationLanguage: pendingTranslation,
+		MachineTranslatedFields:    episode.MachineTranslatedFields,
 		Runtime:                    episode.Runtime,
 		RatingIMDB:                 episode.RatingIMDB,
 		RatingTMDB:                 episode.RatingTMDB,

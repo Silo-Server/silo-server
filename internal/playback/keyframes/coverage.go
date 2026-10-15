@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"sort"
+	"slices"
 )
 
 // ErrIncompleteIndex means the file's Cues leave out some video keyframes.
@@ -33,36 +33,16 @@ const (
 	maxClusterChildren = 20_000
 )
 
-// cuePoint is one video cue: its timestamp in ticks and the position of the
-// cluster holding the keyframe, relative to the segment's data.
-type cuePoint struct {
-	ticks   uint64
-	cluster int64
-}
-
 // checkCueCoverage reads the video keyframes of a few clusters spread
 // through the segment, and of the cluster after each, and reports
-// ErrIncompleteIndex if any keyframe has no cue.
-func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, points []cuePoint) error {
-	cued := make(map[uint64]struct{}, len(points))
-	var clusters []int64
-	seen := map[int64]struct{}{}
-	for _, p := range points {
-		cued[p.ticks] = struct{}{}
-		if p.cluster < 0 {
-			continue
-		}
-		if _, ok := seen[p.cluster]; !ok {
-			seen[p.cluster] = struct{}{}
-			clusters = append(clusters, p.cluster)
-		}
-	}
+// ErrIncompleteIndex if any keyframe has no cue. ticks and clusters are the
+// sorted, unique cue times and cluster positions (cuePoints).
+func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, ticks []uint64, clusters []int64) error {
 	if len(clusters) == 0 {
 		// CueClusterPosition is mandatory; without it the Cues can't be
 		// checked, so they aren't trusted.
 		return ErrIncompleteIndex
 	}
-	sort.Slice(clusters, func(i, j int) bool { return clusters[i] < clusters[j] })
 
 	samples := min(coverageSamples, len(clusters))
 	for i := range samples {
@@ -75,7 +55,7 @@ func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, point
 				return fmt.Errorf("keyframes: check cluster at %d: %w", at, err)
 			}
 			for _, k := range keys {
-				if _, ok := cued[k]; !ok {
+				if _, ok := slices.BinarySearch(ticks, k); !ok {
 					return ErrIncompleteIndex
 				}
 			}
@@ -308,11 +288,9 @@ func (v videoEnd) seconds(timescale int64, frame float64) float64 {
 
 func verifyAllClusters(r io.ReaderAt, m matroskaIndex) (videoEnd, error) {
 	var end videoEnd
-	cued := make(map[uint64]struct{}, len(m.points))
-	for _, p := range m.points {
-		cued[p.ticks] = struct{}{}
-	}
-	found := make(map[uint64]struct{}, len(cued))
+	// found marks the cues whose keyframe has been seen.
+	found := make([]bool, len(m.ticks))
+	nFound := 0
 	for at := m.segStart; at < m.segEnd; {
 		id, size, headerLen, err := readElementHeader(r, at)
 		if err != nil {
@@ -327,10 +305,14 @@ func verifyAllClusters(r io.ReaderAt, m matroskaIndex) (videoEnd, error) {
 				return end, err
 			}
 			for _, k := range keys {
-				if _, ok := cued[k]; !ok {
+				i, ok := slices.BinarySearch(m.ticks, k)
+				if !ok {
 					return end, ErrIncompleteIndex
 				}
-				found[k] = struct{}{}
+				if !found[i] {
+					found[i] = true
+					nFound++
+				}
 			}
 			if next <= at {
 				return end, ErrIncompleteIndex
@@ -345,7 +327,7 @@ func verifyAllClusters(r io.ReaderAt, m matroskaIndex) (videoEnd, error) {
 		}
 		at += headerLen + size
 	}
-	if len(found) != len(cued) {
+	if nFound != len(m.ticks) {
 		// A cue on a frame that isn't a keyframe would put a planned
 		// boundary where FFmpeg can't cut.
 		return end, ErrIncompleteIndex

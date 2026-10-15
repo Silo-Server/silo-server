@@ -205,11 +205,7 @@ function RuleRow({
               )}
             >
               {rule.name}
-              {!rule.enabled ? (
-                <Badge variant="secondary" className="text-[10px]">
-                  Off
-                </Badge>
-              ) : null}
+              {!rule.enabled ? <Badge variant="secondary">Off</Badge> : null}
             </span>
             <span
               className={cn(

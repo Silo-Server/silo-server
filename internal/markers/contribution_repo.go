@@ -238,48 +238,58 @@ const episodeTargetKeySQL = `'episode|' ||
 		ELSE ''
 	END || '|' || e.season_number || '|' || e.episode_number`
 
-// CandidateLocalIntroFiles returns episode files carrying a local (scanner)
-// intro marker at or above minConfidence, highest confidence first. A file is
-// skipped while every listed provider holds a claim on its current target,
-// from this file or another version of the episode, that Claim would not hand
-// over; a claim on an older target, a stale in-flight claim, and an invalid
-// refusal due for its recheck leave the file eligible.
+// CandidateLocalMarkerFiles returns episode files carrying a local (scanner)
+// marker of kind, an intro or credits, at or above minConfidence, highest
+// confidence first. A file is skipped while every listed provider holds a
+// claim on its current target for that segment, from this file or another
+// version of the episode, that Claim would not hand over; a claim on an older
+// target, a stale in-flight claim, and an invalid refusal due for its recheck
+// leave the file eligible.
 // Paging is by keyset: pass the last candidate returned (nil for the first
 // page).
-func (s *ContributionStore) CandidateLocalIntroFiles(ctx context.Context, minConfidence float64, providers []string, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
+func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind MarkerKind, minConfidence float64, providers []string, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
 	if s == nil || s.pool == nil || len(providers) == 0 {
 		return nil, nil
+	}
+	if !autoContributedKind(kind) {
+		return nil, fmt.Errorf("automatic contribution does not share %q markers", markerKindName(kind))
 	}
 	afterConfidence, afterID := 2.0, 0
 	if after != nil {
 		afterConfidence, afterID = after.Confidence, after.FileID
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT mf.id, COALESCE(mf.intro_markers_confidence, 0) AS confidence
+		SELECT mf.id, seg.confidence
 		FROM media_files mf
 		JOIN episodes e ON e.content_id = mf.episode_id
 		LEFT JOIN media_items series ON series.content_id = e.series_id
-		WHERE mf.episode_id IS NOT NULL
-		  AND mf.intro_markers_source = $1
-		  AND mf.intro_start IS NOT NULL AND mf.intro_end IS NOT NULL
-		  AND COALESCE(mf.intro_markers_confidence, 0) >= $2
+		CROSS JOIN LATERAL (VALUES
+		    ('intro', mf.intro_markers_source, mf.intro_start, mf.intro_end, COALESCE(mf.intro_markers_confidence, 0)),
+		    ('credits', mf.credits_markers_source, mf.credits_start, mf.credits_end, COALESCE(mf.credits_markers_confidence, 0))
+		) AS seg(kind, source, start_s, end_s, confidence)
+		WHERE seg.kind = $11
+		  AND mf.episode_id IS NOT NULL
+		  AND seg.source = $1
+		  AND seg.start_s IS NOT NULL AND seg.end_s IS NOT NULL
+		  AND seg.confidence >= $2
 		  AND e.season_number > 0 AND e.episode_number > 0
-		  AND (COALESCE(mf.intro_markers_confidence, 0), -mf.id) < ($3::double precision, -$4::integer)
+		  AND (seg.confidence, -mf.id) < ($3::double precision, -$4::integer)
 		  AND (
 		      SELECT COUNT(DISTINCT mc.provider)
 		      FROM marker_contributions mc
-		      WHERE mc.segment_kind = 'intro'
+		      WHERE mc.segment_kind = seg.kind
 		        AND mc.claim_active
 		        AND mc.provider = ANY($5::text[])
 		        AND mc.target_key = `+episodeTargetKeySQL+`
 		        AND NOT (mc.status = $7 AND mc.updated_at < now() - ($8 * interval '1 second'))
 		        AND NOT (mc.status = $9 AND mc.updated_at < now() - ($10 * interval '1 second'))
 		  ) < cardinality($5::text[])
-		ORDER BY confidence DESC, mf.id
+		ORDER BY seg.confidence DESC, mf.id
 		LIMIT $6`,
 		models.MarkerSourceScanner, minConfidence, afterConfidence, afterID, providers, limit,
 		contributionStatusClaim, int64(contributionClaimLease/time.Second),
 		OutcomeStatusInvalid, int64(contributionInvalidRecheck/time.Second),
+		markerKindName(kind),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query contribution candidates: %w", err)

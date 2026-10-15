@@ -49,6 +49,10 @@ type SettingValuesHandler struct {
 	// successful write or delete. Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
 
+	// RecWorker is told when a profile's hidden libraries change, so its
+	// recommendations are rebuilt without them. Optional.
+	RecWorker SignalsChangedNotifier
+
 	// ProfileTokens enables household management for a PIN-locked primary
 	// profile naming another profile on its own account. Nil means that
 	// widening is simply unavailable — never that it is unguarded.
