@@ -21,7 +21,7 @@ func ProtocolLegacyStop() workerprotocol.Operation {
 	op := workerprotocol.Operation{
 		Listener: listener, Method: http.MethodDelete, Path: "/transcode/{session_id}", Handler: "(*internal/transcodenode.Server).handleStop", AuthClass: bearerClass,
 		RetrySafety: nonRetryable,
-		Description: "Stop a transport under its lifecycle lock. Progressive cancellation installs a process-local token-lifetime fence; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+		Description: "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
 		Parameters:  []*huma.Param{{Name: sessionParameter, In: pathParameter, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Transport identifier; not a durable stop receipt."}},
 		Responses:   map[string]*huma.Response{"204": {Description: "Legacy teardown and configured authority deletion completed; no body. Local file/session close errors are logged rather than changing this status."}},
 	}

@@ -2083,7 +2083,6 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 	remoteToLocal := recipe != nil && recipe.TranscodeNodeURL == "" && previousRecipe != nil && previousRecipe.TranscodeNodeURL != ""
 	oldNodeRecipeRemoved := false
 	if remoteToLocal {
-		h.tm.StopRemoteTranscode(upstreamSessionID, previousRecipe.TranscodeNodeURL)
 		if h.RecipeNodeStore != nil {
 			deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			err := h.RecipeNodeStore.Delete(deleteCtx, upstreamSessionID)
@@ -2129,6 +2128,13 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 			return errors.Join(updateErr, restoreErr, compatRestoreErr)
 		}
 		return updateErr
+	}
+	if remoteToLocal {
+		// Stop the replaced node job only once the local recipe has committed.
+		// The node fences a stopped transport against reconstruction, so a
+		// rollback that restored the remote recipe could not resume it; leaving
+		// the job running until here keeps that rollback playable.
+		h.tm.StopRemoteTranscode(upstreamSessionID, previousRecipe.TranscodeNodeURL)
 	}
 	return nil
 }

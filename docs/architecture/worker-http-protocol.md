@@ -252,8 +252,13 @@ modification time the token recorded. Video tokens remain limited to the
 media-file catalog.
 
 The transcode listener's legacy `DELETE /transcode/{session_id}` holds the same
-lifecycle lock as start and reconstruction. For legacy progressive remux,
-cancellation installs a process-local fence lasting the maximum token lifetime.
+lifecycle lock as start and reconstruction. Every stop installs a
+process-local fence lasting the maximum token lifetime: reconstruction from a
+stream token or stored recipe answers 410 for that ID, so a segment request
+still in flight when the stop lands cannot restart the encode. A fresh
+`POST /transcode/start` for the same ID lifts the HLS fence; the idle reaper
+installs none. Legacy progressive remux keeps its own fence against a new
+`/remux` request.
 Configured recipe deletion must succeed and progressive shutdown must finish
 before 204; either can return 503 after local teardown has already occurred.
 Session-close and file-removal errors are logged. A missing session and recipe
