@@ -42,6 +42,7 @@ type WatchSyncPluginConfigResolver func(context.Context, int) (*pluginv1.WatchSy
 type WatchSyncPluginConfigReady func(context.Context, int) (bool, error)
 
 type PluginCredentialRepository interface {
+	GetConnectionByID(ctx context.Context, id string) (Connection, bool, error)
 	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 }
 
@@ -467,6 +468,10 @@ func (p *PluginProvider) ExportHistory(ctx context.Context, _ ServerConfig, conn
 	}
 	if len(events) == 0 {
 		return result, nil
+	}
+	conn, err = p.latestCredentials(ctx, conn)
+	if err != nil {
+		return result, err
 	}
 	authContext, err := p.authenticatedContext(ctx, conn)
 	if err != nil {
@@ -1167,6 +1172,28 @@ func mergeWatchSyncProviderConfig(base, connection *pluginv1.WatchSyncProviderCo
 		}
 	}
 	return merged
+}
+
+// latestCredentials starts a plugin call from the credentials stored for
+// conn. A sync flow hands every call the connection it loaded at the start,
+// so after one call rotates the credentials, a later one would otherwise send
+// the old ones, and its own rotation could not be saved over the new ones.
+func (p *PluginProvider) latestCredentials(ctx context.Context, conn Connection) (Connection, error) {
+	if p.repository == nil || conn.ID == "" {
+		return conn, nil
+	}
+	stored, ok, err := p.repository.GetConnectionByID(ctx, conn.ID)
+	if err != nil {
+		return Connection{}, retryableProviderError{message: "watch sync plugin credentials could not be read"}
+	}
+	if !ok {
+		return Connection{}, retryableProviderError{message: "watch sync connection was removed during the sync"}
+	}
+	if stored.ProviderAccountID != conn.ProviderAccountID {
+		// Reconnected to another account: its credentials aren't this call's.
+		return conn, nil
+	}
+	return connectionWithTokens(conn, storedTokens(stored)), nil
 }
 
 func (p *PluginProvider) persistUpdatedCredentials(

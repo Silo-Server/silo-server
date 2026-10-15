@@ -221,6 +221,37 @@ func TestPluginProviderPersistsRotatedCredentialsOnlyOverTheOnesItUsed(t *testin
 			t.Fatalf("stored credentials overwritten: %+v", repo.saved)
 		}
 	})
+	t.Run("rotated again by a later call in the same flow", func(t *testing.T) {
+		repo := &fakePluginCredentialRepository{saved: used}
+		client := &fakeWatchSyncPluginClient{listResponses: []*pluginv1.WatchSyncListRemoteStateResponse{
+			{UpdatedCredentials: rotated},
+			{UpdatedCredentials: &pluginv1.WatchSyncCredentials{AccessToken: "rotated-again", RefreshToken: "rotated-again-refresh"}},
+		}}
+		provider, err := NewPluginProvider(PluginProviderOptions{
+			InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
+			Descriptor: &pluginv1.WatchSyncProviderDescriptor{
+				AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+				ImportWatched: true, MaxBatchSize: 25,
+			},
+			ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) { return client, nil },
+			Repository:    repo,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A flow hands both calls the connection it loaded at the start.
+		for range 2 {
+			if _, err := provider.FetchWatchedBatch(t.Context(), ServerConfig{}, used); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := client.listRequests[1].GetContext().GetCredentials().GetAccessToken(); got != "rotated" {
+			t.Fatalf("second call sent access token %q, want the rotated one", got)
+		}
+		if repo.saved.AccessToken != "rotated-again" {
+			t.Fatalf("stored access token = %q, want the second rotation", repo.saved.AccessToken)
+		}
+	})
 	t.Run("disconnected", func(t *testing.T) {
 		repo := &fakePluginCredentialRepository{err: ErrConnectionNotFound}
 		provider := &PluginProvider{repository: repo}
