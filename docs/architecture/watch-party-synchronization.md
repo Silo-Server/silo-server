@@ -117,11 +117,13 @@ loaded names it too.
 A play or pause request carries where the requester was, and the lead is added
 when the requester was playing. Once the room's latest command has run, the
 room's state says whether it was. While that command is still pending, the room
-already shows its outcome, so a pause is taken to come from a playing member
-and a play from a paused one: a second play inside the lead does not start the
-room a lead later, and a second pause still lands a lead after its press. The
-request's `is_paused` is not used for this, because clients send either their
-own state or the state they ask for.
+already shows its outcome, so the server uses the state the room had before the
+pending change, which members keep until they run it. A second play inside the
+lead does not start the room a lead later, a second pause still lands a lead
+after its press, and a press that undoes the pending command neither moves a
+paused room nor leaves a playing one behind. The request's `is_paused` is not
+used for this, because clients send either their own state or the state they
+ask for.
 
 Every command executes one lead from when it is sent, and never before the
 room's own latest command or anchor, so a member synced after the lead drops

@@ -810,3 +810,48 @@ func TestPauseFromAPlayingMemberRunsOnToExecuteAt(t *testing.T) {
 	f.now = f.now.Add(100 * time.Millisecond)
 	pause()
 }
+
+// A press that undoes a play or pause still waiting for its execute_at comes
+// from a member in the state before it: a pause canceling a pending play
+// leaves the paused room where it was, and a play canceling a pending pause
+// runs on to its own execute_at.
+func TestRequestInsideTheLeadUsesTheStateBeforeThePendingCommand(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.member("guest").lastPingMS = 2000
+	request := func(action TransportAction, position float64) TransportCommand {
+		t.Helper()
+		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+			TransportRequest{Action: action, PositionSeconds: &position, IsPaused: action == TransportActionPause}); err != nil {
+			t.Fatal(err)
+		}
+		return lastTransport(t, f.conns["guest"])
+	}
+	leadAfter := func(command TransportCommand) float64 {
+		t.Helper()
+		executeAt, err := time.Parse(time.RFC3339Nano, command.ExecuteAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return executeAt.Sub(f.now).Seconds()
+	}
+
+	request(TransportActionPause, 100)
+	f.now = f.now.Add(5 * time.Second)
+	request(TransportActionPlay, 100)
+	f.now = f.now.Add(time.Second)
+	if undo := request(TransportActionPause, 100); undo.PositionSeconds != 100 {
+		t.Fatalf("pause canceling a pending play lands at %.2f, want the paused 100", undo.PositionSeconds)
+	}
+
+	f.now = f.now.Add(5 * time.Second)
+	request(TransportActionPlay, 100)
+	f.now = f.now.Add(5 * time.Second)
+	position := f.expected()
+	request(TransportActionPause, position)
+	f.now = f.now.Add(time.Second)
+	position++
+	undo := request(TransportActionPlay, position)
+	if want := position + leadAfter(undo); math.Abs(undo.PositionSeconds-want) > 0.01 {
+		t.Fatalf("play canceling a pending pause lands at %.2f, want %.2f a lead after the still-playing requester", undo.PositionSeconds, want)
+	}
+}

@@ -378,6 +378,9 @@ type liveRoom struct {
 	bufferingWaitAt time.Time
 	// itemEnd caches the playing file's duration for the reconciler.
 	itemEnd itemEnd
+	// pausedBeforePending is whether the room was paused before the change
+	// pending at its future anchor. Members keep that state until they run it.
+	pausedBeforePending bool
 }
 
 type snapshotDispatch struct {
@@ -818,11 +821,12 @@ func (s *Service) handleTransportRequestForConnection(
 		// A play or pause carries where the requester was when it pressed;
 		// a requester that was playing runs on until the command executes. A
 		// seek target is absolute.
-		if request.Action != TransportActionSeek && requesterPlayingLocked(live, request.Action, now) {
+		if request.Action != TransportActionSeek && requesterPlayingLocked(live, now) {
 			position += executeAt.Sub(now).Seconds()
 		}
 	}
 
+	live.notePendingChangeLocked(now)
 	live.room.AnchorPositionSeconds = position
 	live.room.AnchorUpdatedAt = executeAt
 	var commandDispatches []commandDispatch
@@ -999,6 +1003,7 @@ func (s *Service) handleStateReportForConnection(
 		if !report.IsPaused {
 			position += executeAt.Sub(now).Seconds()
 		}
+		live.notePendingChangeLocked(now)
 		live.room.AnchorPositionSeconds = position
 		live.room.IsPaused = report.IsPaused
 		// A host that pauses or resumes from the system controls reports the
@@ -2104,7 +2109,9 @@ func (s *Service) maybeResumeFromWaitingLocked(
 
 	saved := live.room
 	// The room resumes when members run the command, not when it is sent.
-	executeAt := s.nextExecuteAtLocked(live, s.now())
+	now := s.now()
+	executeAt := s.nextExecuteAtLocked(live, now)
+	live.notePendingChangeLocked(now)
 	live.room.AnchorPositionSeconds = math.Max(0, live.room.AnchorPositionSeconds)
 	live.room.AnchorUpdatedAt = executeAt
 	action := TransportActionPause
@@ -2610,24 +2617,32 @@ func (s *Service) commandSettlingLocked(live *liveRoom, member *memberState, rep
 	return err == nil && now.Before(executeAt.Add(commandSettleWindow))
 }
 
-// noteCommandSentLocked starts the member's settle window for a command, from
-// its execute_at or, for a command delivered late, from now. Drift measured
-// before the command is not evidence about the state after it, so the
-// member's strikes and convergence start over.
+// notePendingChangeLocked records the room's paused state before it schedules a
+// change at a future anchor. A change made while another is still pending
+// keeps the state from before the first, since members have run neither.
+func (live *liveRoom) notePendingChangeLocked(now time.Time) {
+	if !live.room.AnchorUpdatedAt.After(now) {
+		live.pausedBeforePending = live.room.IsPaused
+	}
+}
+
 // requesterPlayingLocked reports whether a member sending a play or pause
 // now is playing. The room's state says so once its latest command has run.
 // While that command is still pending (the anchor lies at its execute_at),
-// the room already shows its outcome, so the requester is still where it was
-// before: a pause comes from a playing member and a play from a paused one.
-// The request's is_paused is no help: clients disagree on whether it is the
-// requester's state or the one it asks for.
-func requesterPlayingLocked(live *liveRoom, action TransportAction, now time.Time) bool {
+// the room already shows its outcome and the requester is still in the state
+// from before it. The request's is_paused is no help: clients disagree on
+// whether it is the requester's state or the one it asks for.
+func requesterPlayingLocked(live *liveRoom, now time.Time) bool {
 	if live.room.AnchorUpdatedAt.After(now) {
-		return action == TransportActionPause
+		return !live.pausedBeforePending
 	}
 	return !live.room.IsPaused
 }
 
+// noteCommandSentLocked starts the member's settle window for a command, from
+// its execute_at or, for a command delivered late, from now. Drift measured
+// before the command is not evidence about the state after it, so the
+// member's strikes and convergence start over.
 func (s *Service) noteCommandSentLocked(member *memberState, command TransportCommand) {
 	now := s.now()
 	member.driftStrikes = 0
@@ -2709,6 +2724,7 @@ func (s *Service) enterWaitingLocked(
 	if live.room.Phase != RoomPhasePlaying {
 		return nil, false
 	}
+	live.notePendingChangeLocked(s.now())
 	live.room.AnchorPositionSeconds = math.Max(0, positionSeconds)
 	live.room.IsPaused = true
 	live.room.PlaybackState = RoomPlaybackStateWaiting
