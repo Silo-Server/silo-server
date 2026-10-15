@@ -56,7 +56,8 @@ are exempt from stream caps, like the Jellyfin-compatible `/Playback/BitrateTest
 The web app probes in the background a few seconds after sign-in, skips Data
 Saver and cellular connections and pages that are already playing media,
 cancels the probe when playback starts, and caches the result for 30 minutes,
-measuring again when it expires. On a metered link (Data Saver or cellular) it
+measuring again when it expires. Tabs share the cached result, and a Web Lock
+lets only one of them probe at a time. On a metered link (Data Saver or cellular) it
 sends no cached measurement, so the planner's metered limit applies.
 
 Every mutation body carries the `installation_id` the client read from

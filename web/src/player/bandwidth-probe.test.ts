@@ -203,6 +203,39 @@ describe("scheduleBandwidthProbe", () => {
     expect(fetchWithSession).toHaveBeenCalledTimes(2);
   });
 
+  it("leaves the probe to the tab that holds the lock", async () => {
+    const request = vi.fn(
+      async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
+        callback(null),
+    );
+    vi.stubGlobal("navigator", { ...navigator, locks: { request } });
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(request).toHaveBeenCalledWith(
+      "silo-bandwidth-probe",
+      { ifAvailable: true },
+      expect.any(Function),
+    );
+    expect(fetchWithSession).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("probes while holding the lock", async () => {
+    const request = vi.fn(
+      async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
+        callback({ name: "silo-bandwidth-probe" }),
+    );
+    vi.stubGlobal("navigator", { ...navigator, locks: { request } });
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
   it("does nothing after it is stopped", async () => {
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     const stop = scheduleBandwidthProbe(1000);
