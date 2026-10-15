@@ -217,11 +217,8 @@ const (
 
 // TranscodeSession manages a running ffmpeg HLS transcode process.
 type TranscodeSession struct {
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
-	// releaseKeyframeCheck ends the session's hold on a background keyframe
-	// check. cancel stops only the current process, which a restart replaces.
-	releaseKeyframeCheck context.CancelFunc
+	cmd                  *exec.Cmd
+	cancel               context.CancelFunc
 	opts                 TranscodeOpts
 	outputDir            string
 	running              bool
@@ -270,6 +267,9 @@ type TranscodeSession struct {
 	// copyPlan is the planned segment list served instead of FFmpeg's
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
+	// copyPlanRejected is set once FFmpeg has cut a segment the plan
+	// doesn't list (checkCopyPlan).
+	copyPlanRejected bool
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -426,18 +426,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	// The session's lifetime, which outlasts each FFmpeg process a restart
-	// replaces: a background keyframe check the plan starts reads only while
-	// a session that wants it lasts (#2453). shutdown ends it.
-	keyframeHolder, releaseKeyframeCheck := context.WithCancel(context.WithoutCancel(ctx))
-	copyPlan := resolveCopyPlan(ctx, keyframeHolder, opts)
-	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
-		// Rebuilding without the plan would serve FFmpeg's playlist to a
-		// player that may hold the planned one; a later request rebuilds.
-		releaseKeyframeCheck()
-		releaseHWDevice()
-		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", ctx.Err())
-	}
+	copyPlan := resolveCopyPlan(opts)
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
 	}
@@ -448,7 +437,6 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s := &TranscodeSession{
 		cancel:               cancel,
-		releaseKeyframeCheck: releaseKeyframeCheck,
 		opts:                 opts,
 		outputDir:            opts.OutputDir,
 		running:              true,
@@ -476,7 +464,6 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		releaseKeyframeCheck()
 		releaseHWDevice()
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
@@ -491,7 +478,6 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if err := cmd.Start(); err != nil {
 		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
-		releaseKeyframeCheck()
 		releaseHWDevice()
 		s.logFFmpegEvent(ctx, "ffmpeg process exit error", err.Error())
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
@@ -2771,6 +2757,9 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 	if err != nil {
 		return progress
 	}
+	if s.copyPlan != nil {
+		s.checkCopyPlan(timeline.entries)
+	}
 
 	for _, entry := range timeline.entries {
 		segmentPath := filepath.Join(s.outputDir, segmentFilename(entry.number, opts))
@@ -3014,9 +3003,6 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	// Cancel the context to kill the process (no mutex needed for cancel).
 	if s.cancel != nil {
 		s.cancel()
-	}
-	if s.releaseKeyframeCheck != nil {
-		s.releaseKeyframeCheck()
 	}
 
 	// Wait for the monitor goroutine to finish reaping the process.

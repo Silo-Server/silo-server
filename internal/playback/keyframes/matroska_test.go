@@ -371,9 +371,9 @@ func TestReadMatroskaCuesCostBoundedMemory(t *testing.T) {
 }
 
 // manyClusters builds a file with ten clusters, each holding two video
-// keyframes, and Cues for all of them except dropTicks. The sampled check
-// reads clusters 0, 3, 6 and 9 and the ones after them; cluster 2 is only
-// read by the full check.
+// keyframes, and Cues for all of them except dropTicks, plus extraCue in its
+// cluster if set. The sampled check reads clusters 0, 3, 6 and 9 and the
+// ones after them, and the tail check cluster 9; nothing reads cluster 2.
 func manyClusters(dropTicks uint64, extraCue uint64) []byte {
 	head := slices.Concat(info, tracks)
 	var clusters [][]byte
@@ -411,30 +411,49 @@ func manyClusters(dropTicks uint64, extraCue uint64) []byte {
 	return slices.Concat(ebmlHeader, el(idSegment, body))
 }
 
-func verify(f []byte) (Index, error) {
-	return VerifyMatroska(bytes.NewReader(f), int64(len(f)))
-}
-
-func TestVerifyMatroskaChecksEveryCluster(t *testing.T) {
-	complete := manyClusters(1<<62, 0)
-	if idx, err := verify(complete); err != nil || len(idx.Keyframes) != 20 {
+// A keyframe left out of the Cues where no check reads is the cost of not
+// reading every cluster (#2453): ReadMatroska accepts the file, and a playback
+// that finds FFmpeg cutting elsewhere rejects it (keyframes.Reject).
+func TestReadMatroskaChecksTheSamplesAndTheTail(t *testing.T) {
+	idx, err := read(manyClusters(1<<62, 0))
+	if err != nil || len(idx.Keyframes) != 20 {
 		t.Fatalf("complete cues: %d keyframes, %v; want 20 and no error", len(idx.Keyframes), err)
 	}
-
-	// A keyframe in cluster 2 without a cue gets past the sampled check but
-	// not the full one.
-	missing := manyClusters(2*4000+2000, 0)
-	if _, err := read(missing); err != nil {
-		t.Fatalf("sampled check: %v, want it to miss cluster 2", err)
-	}
-	if _, err := verify(missing); !errors.Is(err, ErrIncompleteIndex) {
-		t.Fatalf("full check err = %v, want ErrIncompleteIndex", err)
+	// The last frame is at 38s, 1.96s after the one before it.
+	if math.Abs(idx.VideoEnd-39.96) > 1e-9 {
+		t.Fatalf("VideoEnd = %v, want 39.96", idx.VideoEnd)
 	}
 
-	// A cue on a frame that isn't a keyframe would plan a boundary FFmpeg
-	// can't cut at.
-	if _, err := verify(manyClusters(1<<62, 2*4000+40)); !errors.Is(err, ErrIncompleteIndex) {
-		t.Fatalf("cue on a non-keyframe err = %v, want ErrIncompleteIndex", err)
+	if _, err := read(manyClusters(2*4000+2000, 0)); err != nil {
+		t.Fatalf("a cue missing from cluster 2: %v, want it unread", err)
+	}
+	// After the last cue, every keyframe needs one.
+	if _, err := read(manyClusters(9*4000+2000, 0)); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("the last keyframe uncued: err = %v, want ErrIncompleteIndex", err)
+	}
+	// A last cue on a frame that isn't a keyframe would plan a boundary
+	// FFmpeg can't cut at.
+	if _, err := read(manyClusters(1<<62, 9*4000+2040)); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("a last cue on no keyframe: err = %v, want ErrIncompleteIndex", err)
+	}
+}
+
+// Cues that stop long before the end leave the tail unindexed; reading on to
+// the end would read the file.
+func TestReadMatroskaRejectsCuesThatStopEarly(t *testing.T) {
+	var clusters [][]byte
+	for c := range maxTailElements + 1 {
+		clusters = append(clusters, cluster(uint64(c)*40, block(videoTrack, 0, c == 0)))
+	}
+	head := slices.Concat(info, tracks)
+	cuesFor := func(pos uint64) []byte {
+		return el(idCues, el(idCuePoint, uintEl(idCueTime, 0),
+			el(idCueTrackPos, uintEl(idCueTrack, videoTrack), uintEl(idCueClusterPosition, pos))))
+	}
+	pos := uint64(len(head) + len(cuesFor(0)))
+	f := slices.Concat(ebmlHeader, el(idSegment, slices.Concat(head, cuesFor(pos), slices.Concat(clusters...))))
+	if _, err := read(f); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("err = %v, want ErrIncompleteIndex", err)
 	}
 }
 
@@ -497,8 +516,8 @@ func TestReadBlockGroupDuration(t *testing.T) {
 }
 
 // The fixture's last video frame is at 4.258s, 40ms after the one before.
-func TestVerifyMatroskaVideoEnd(t *testing.T) {
-	idx, err := verify(file(layout{}))
+func TestReadMatroskaVideoEnd(t *testing.T) {
+	idx, err := read(file(layout{}))
 	if err != nil {
 		t.Fatal(err)
 	}

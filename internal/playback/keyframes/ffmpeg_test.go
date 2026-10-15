@@ -97,18 +97,6 @@ func TestReadMatroskaMatchesFFprobe(t *testing.T) {
 	}
 
 	got := readIndex(t, path).Keyframes
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := VerifyMatroska(f, info.Size()); err != nil {
-		t.Fatalf("FFmpeg's Cues failed the full check: %v", err)
-	}
 	if len(got) != len(want) {
 		t.Fatalf("keyframes = %v, ffprobe = %v", got, want)
 	}
@@ -160,7 +148,7 @@ func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
 	}
 	written := playlistDurations(t, filepath.Join(dir, "stream.m3u8"))
 
-	// Plan as a session does: from the verified index, to the video's end.
+	// Plan as a session does: from the index, to the video's end.
 	f, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +158,7 @@ func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx, err := VerifyMatroska(f, info.Size())
+	idx, err := ReadMatroska(f, info.Size())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,9 +209,9 @@ func playlistDurations(t *testing.T, path string) []float64 {
 	return durations
 }
 
-// VerifyMatroska's video end is where ffprobe's last video frame ends, and
-// a longer audio track doesn't move it.
-func TestVerifyMatroskaVideoEndMatchesFFprobe(t *testing.T) {
+// ReadMatroska's video end is where ffprobe's last video frame ends, and a
+// longer audio track doesn't move it.
+func TestReadMatroskaVideoEndMatchesFFprobe(t *testing.T) {
 	ffmpeg, ffprobe := requireFFmpeg(t)
 	path := filepath.Join(t.TempDir(), "longer-audio.mkv")
 	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -259,11 +247,66 @@ func TestVerifyMatroskaVideoEndMatchesFFprobe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx, err := VerifyMatroska(f, info.Size())
+	idx, err := ReadMatroska(f, info.Size())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if math.Abs(idx.VideoEnd-want) > 0.001 || idx.Duration < 14 {
 		t.Fatalf("video end %.3fs (container %.3fs), ffprobe's last frame ends at %.3fs", idx.VideoEnd, idx.Duration, want)
+	}
+}
+
+// regionReaderAt records which 1 MiB regions of the file are read. On network
+// storage a small read fetches a chunk around it, so the regions touched, not
+// the bytes, are what reading costs there.
+type regionReaderAt struct {
+	r       *os.File
+	regions map[int64]bool
+}
+
+func (c *regionReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n, err := c.r.ReadAt(p, off)
+	for region := off >> 20; region <= (off+int64(max(n, 1))-1)>>20; region++ {
+		c.regions[region] = true
+	}
+	return n, err
+}
+
+// Reading the index touches a few regions of the file however long it is:
+// planning shouldn't read the file a second time alongside playback (#2453).
+func TestReadMatroskaReadsLittleOfTheFile(t *testing.T) {
+	ffmpeg, _ := requireFFmpeg(t)
+	path := filepath.Join(t.TempDir(), "long.mkv")
+	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+		"-t", "120", "-c:v", "libx264", "-preset", "ultrafast", "-g", "50",
+		"-c:a", "aac", path).CombinedOutput()
+	if err != nil {
+		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &regionReaderAt{r: f, regions: map[int64]bool{}}
+	idx, err := ReadMatroska(r, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.Keyframes) < 60 || idx.VideoEnd < 119 {
+		t.Fatalf("%d keyframes, video end %.3fs; want a keyframe every 2s to 120s", len(idx.Keyframes), idx.VideoEnd)
+	}
+	total := (info.Size() + 1<<20 - 1) >> 20
+	t.Logf("read %d of the file's %d MiB regions", len(r.regions), total)
+	// The header and Cues, four sampled clusters and the ones after them,
+	// and the tail.
+	if len(r.regions) > 12 || int64(len(r.regions)) >= total/2 {
+		t.Fatalf("read %d of %d regions, want at most 12", len(r.regions), total)
 	}
 }

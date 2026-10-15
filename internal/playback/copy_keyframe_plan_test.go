@@ -21,7 +21,7 @@ import (
 func stubKeyframeIndex(t *testing.T, idx keyframes.Index, err error) {
 	t.Helper()
 	previous := loadKeyframeIndex
-	loadKeyframeIndex = func(context.Context, string) (keyframes.Index, error) { return idx, err }
+	loadKeyframeIndex = func(string) (keyframes.Index, error) { return idx, err }
 	t.Cleanup(func() { loadKeyframeIndex = previous })
 }
 
@@ -42,7 +42,7 @@ func TestPlanCopySegments(t *testing.T) {
 	// video at 10s.
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, Duration: 12, VideoEnd: 10}, nil)
 
-	plan := planCopySegments(t.Context(), t.Context(), plannedOpts())
+	plan := planCopySegments(plannedOpts())
 	if plan == nil {
 		t.Fatal("no plan for an eligible session")
 	}
@@ -62,7 +62,7 @@ func TestPlanCopySegments(t *testing.T) {
 // A source whose timestamps start later than zero plans the same segments.
 func TestPlanCopySegmentsForALaterStart(t *testing.T) {
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{7, 8, 9.6, 14.0, 14.4, 16.0}, VideoEnd: 17}, nil)
-	plan := planCopySegments(t.Context(), t.Context(), plannedOpts())
+	plan := planCopySegments(plannedOpts())
 	if plan == nil {
 		t.Fatal("no plan for a source starting at 7s")
 	}
@@ -86,7 +86,7 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			opts := plannedOpts()
 			change(&opts)
-			if plan := planCopySegments(t.Context(), t.Context(), opts); plan != nil {
+			if plan := planCopySegments(opts); plan != nil {
 				t.Fatalf("plan = %v, want none", plan.durations)
 			}
 		})
@@ -94,119 +94,104 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 
 	t.Run("unknown video end", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}}, nil)
-		if plan := planCopySegments(t.Context(), t.Context(), plannedOpts()); plan != nil {
+		if plan := planCopySegments(plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("no index", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrNoIndex)
-		if plan := planCopySegments(t.Context(), t.Context(), plannedOpts()); plan != nil {
+		if plan := planCopySegments(plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("unreadable source", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, errors.New("permission denied"))
-		if plan := planCopySegments(t.Context(), t.Context(), plannedOpts()); plan != nil {
+		if plan := planCopySegments(plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 }
 
 // A session rebuilt from its recipe serves the playlist its player has, even
-// if the file's index became available since it started.
+// if the file's index changed since it started.
 func TestResolveCopyPlanFollowsTheRecordedDecision(t *testing.T) {
 	opts := plannedOpts()
 	opts.OutputDir = t.TempDir()
 
-	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	if plan := resolveCopyPlan(t.Context(), t.Context(), opts); plan != nil {
-		t.Fatal("planned while the index is being checked")
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrNoIndex)
+	if plan := resolveCopyPlan(opts); plan != nil {
+		t.Fatal("planned without an index")
 	}
-	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
-	stubKeyframeIndex(t, verified, nil)
-	if plan := resolveCopyPlan(t.Context(), t.Context(), opts); plan != nil {
+	indexed := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
+	stubKeyframeIndex(t, indexed, nil)
+	if plan := resolveCopyPlan(opts); plan != nil {
 		t.Fatal("a rebuilt session switched to a keyframe playlist")
 	}
 
 	planned := plannedOpts()
 	planned.OutputDir = t.TempDir()
-	first := resolveCopyPlan(t.Context(), t.Context(), planned)
+	first := resolveCopyPlan(planned)
 	if first == nil {
-		t.Fatal("no plan with a verified index")
+		t.Fatal("no plan with an index")
 	}
-	// The record stands in for the index, which a cold process may not have
-	// verified yet.
-	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	again := resolveCopyPlan(t.Context(), t.Context(), planned)
+	// A playback rejected the file since; the player still has the plan.
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrIncompleteIndex)
+	again := resolveCopyPlan(planned)
 	if again == nil || !slices.Equal(again.durations, first.durations) {
 		t.Fatalf("rebuilt plan = %+v, want the recorded %+v", again, first)
 	}
 }
 
 // A clean shutdown removes the output directory and its plan record. The
-// rebuilt session plans again from the verified index, waiting for the check
-// a cold process hasn't run yet, and gets the same plan.
+// rebuilt session plans again from the index and gets the same plan.
 func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
-	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
-	stubKeyframeIndex(t, verified, nil)
+	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}, nil)
 	first := plannedOpts()
 	first.OutputDir = t.TempDir()
-	original := resolveCopyPlan(t.Context(), t.Context(), first)
+	original := resolveCopyPlan(first)
 	if original == nil {
-		t.Fatal("no plan with a verified index")
+		t.Fatal("no plan with an index")
 	}
-
-	// A cold process: the cache has no result yet, and the full check gives
-	// the same index.
-	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	previous := loadVerifiedKeyframeIndex
-	verifiedLoads := 0
-	loadVerifiedKeyframeIndex = func(context.Context, string) (keyframes.Index, error) { verifiedLoads++; return verified, nil }
-	t.Cleanup(func() { loadVerifiedKeyframeIndex = previous })
 
 	rebuilt := plannedOpts()
 	rebuilt.OutputDir = t.TempDir()
 	rebuilt.Reconstructed = true
-	again := resolveCopyPlan(t.Context(), t.Context(), rebuilt)
-	if again == nil || !slices.Equal(again.durations, original.durations) || verifiedLoads != 1 {
-		t.Fatalf("rebuilt plan = %+v after %d verified loads, want the original %+v", again, verifiedLoads, original)
-	}
-
-	// A first start still doesn't wait for the check.
-	fresh := plannedOpts()
-	fresh.OutputDir = t.TempDir()
-	if plan := resolveCopyPlan(t.Context(), t.Context(), fresh); plan != nil || verifiedLoads != 1 {
-		t.Fatalf("a first start planned (%v) or waited for the check (%d loads)", plan != nil, verifiedLoads)
+	again := resolveCopyPlan(rebuilt)
+	if again == nil || !slices.Equal(again.durations, original.durations) {
+		t.Fatalf("rebuilt plan = %+v, want the original %+v", again, original)
 	}
 }
 
-// A rebuild whose request goes away during the keyframe check records nothing,
-// so the next rebuild plans instead of following a fallback.
-func TestResolveCopyPlanLeavesNoRecordWhenTheRebuildIsCanceled(t *testing.T) {
-	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
-	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
-	previous := loadVerifiedKeyframeIndex
-	loadVerifiedKeyframeIndex = func(ctx context.Context, _ string) (keyframes.Index, error) {
-		if err := ctx.Err(); err != nil {
-			return keyframes.Index{}, err
-		}
-		return verified, nil
-	}
-	t.Cleanup(func() { loadVerifiedKeyframeIndex = previous })
-
-	rebuilt := plannedOpts()
-	rebuilt.OutputDir = t.TempDir()
-	rebuilt.Reconstructed = true
-	gone, cancel := context.WithCancel(t.Context())
-	cancel()
-	if plan := resolveCopyPlan(gone, t.Context(), rebuilt); plan != nil {
-		t.Fatal("planned without the keyframe check")
-	}
-	if _, err := os.Stat(filepath.Join(rebuilt.OutputDir, copyPlanRecordFile)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a canceled rebuild left a plan record: %v", err)
-	}
-	if plan := resolveCopyPlan(t.Context(), t.Context(), rebuilt); plan == nil {
-		t.Fatal("the next rebuild didn't plan")
+// A segment FFmpeg cut where the plan doesn't rejects the file, so later
+// playbacks keep FFmpeg's playlist (#2453).
+func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
+	plan := []float64{2.6, 4.4, 1.0}
+	for name, tc := range map[string]struct {
+		written []manifestSegmentEntry
+		reject  bool
+	}{
+		"matches": {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.401}, {2, 1.04}}},
+		// FFmpeg cut at a keyframe the Cues left out.
+		"shorter segment": {written: []manifestSegmentEntry{{0, 2.6}, {1, 2.2}}, reject: true},
+		"extra segment":   {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}, {2, 1.0}, {3, 0.5}}, reject: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Not Matroska: Load reports ErrNoIndex, and ErrIncompleteIndex
+			// only once the file is rejected.
+			source := filepath.Join(t.TempDir(), "source.mkv")
+			if err := os.WriteFile(source, []byte("not matroska"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			s := &TranscodeSession{
+				opts:     TranscodeOpts{InputPath: source, SessionID: "checked"},
+				copyPlan: &copySegmentPlan{durations: plan},
+			}
+			s.checkCopyPlan(tc.written)
+			_, err := keyframes.Load(source)
+			if rejected := errors.Is(err, keyframes.ErrIncompleteIndex); rejected != tc.reject || s.copyPlanRejected != tc.reject {
+				t.Fatalf("rejected = %v (session %v, Load err %v), want %v", rejected, s.copyPlanRejected, err, tc.reject)
+			}
+		})
 	}
 }
 
@@ -316,11 +301,6 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
 
-	// Planned sessions use a fully checked index; check it now rather than
-	// in the background.
-	if _, err := keyframes.LoadVerified(t.Context(), source); err != nil {
-		t.Fatal(err)
-	}
 	opts := TranscodeOpts{
 		InputPath:        source,
 		OutputDir:        filepath.Join(dir, "out"),
@@ -385,6 +365,14 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 		}
 	}
 	checkWritten("from the start")
+	// The session compares FFmpeg's segments with the plan as it reads them.
+	s.SegmentProgress(time.Now())
+	s.mu.Lock()
+	rejected := s.copyPlanRejected
+	s.mu.Unlock()
+	if rejected {
+		t.Fatal("the session rejected a plan FFmpeg followed")
+	}
 
 	if _, ok, err := s.RestartSegment(ctx, 9); err != nil || !ok {
 		t.Fatalf("RestartSegment = %v, %v", ok, err)
