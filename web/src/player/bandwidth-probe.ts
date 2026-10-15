@@ -149,9 +149,9 @@ export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now())
   // link. Otherwise keep the lower value but record it for the current link,
   // so a metered link honors it.
   const sameLink = current?.link === meteredLink();
-  if (current?.observed && sameLink && current.kbps <= observed) return;
   // A cached value caps the new limit unless it came from another kind of
-  // metered link, which does not describe this one.
+  // metered link, which does not describe this one. Writing even when the
+  // lower value is kept restarts its TTL: the link just confirmed it.
   const cap = current && (sameLink || !current.link) ? current.kbps : observed;
   writeStored(Math.min(observed, cap), now, true);
 }

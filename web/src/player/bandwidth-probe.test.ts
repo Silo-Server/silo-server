@@ -266,6 +266,14 @@ describe("measured bandwidth cache", () => {
     expect(readMeasuredBandwidthKbps(now)).toBe(90_000);
   });
 
+  it("restarts the TTL when a stall confirms a lower limit", () => {
+    const start = Date.now();
+    recordObservedBandwidthLimitKbps(10_000, start);
+    const later = start + BANDWIDTH_ESTIMATE_TTL_MS - 1_000;
+    recordObservedBandwidthLimitKbps(20_000, later);
+    expect(readMeasuredBandwidthKbps(later + 10 * 60_000)).toBe(10_000);
+  });
+
   it("records a limit when nothing was measured", () => {
     recordObservedBandwidthLimitKbps(14_000);
     expect(readMeasuredBandwidthKbps()).toBe(14_000);
