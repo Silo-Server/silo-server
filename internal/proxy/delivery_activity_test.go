@@ -182,3 +182,30 @@ func TestMountedProxyDoesNotRecordDeliveryForFailedSegment(t *testing.T) {
 		t.Fatalf("failed segment recorded delivery %v", recent)
 	}
 }
+
+// A HEAD on a local remux route returns before the remux starts. It must not
+// count as a stream, nor remove the entry of a GET already playing the session.
+func TestMountedProxyLocalRemuxHeadKeepsTheTrackedStream(t *testing.T) {
+	rdb := deliveryRedisTestClient(t)
+	const secret = "proxy-remux-head-secret"
+	sessionID := uniqueDeliverySessionID(t)
+	token, err := streamtoken.Sign(streamtoken.Claims{SessionID: sessionID, MediaPath: writeSocketProxyMedia(t), PlayMethod: "remux"}, secret, time.Minute)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	srv := newSocketProxyServer(t, secret, nil)
+	srv.tracker = nodesessions.NewTracker(rdb, "http://proxy", "proxy", "proxy")
+	t.Cleanup(func() { srv.tracker.Remove(context.Background(), sessionID) })
+	// The GET already streaming this session.
+	srv.tracker.Track(context.Background(), nodesessions.SessionInfo{SessionID: sessionID, Type: "remux"})
+	server := httptest.NewServer(srv.Handler())
+	t.Cleanup(server.Close)
+
+	got := socketProxyRequest(t, server.Client(), http.MethodHead, server.URL+"/stream/remux/"+token, nil)
+	if got.status != http.StatusOK {
+		t.Fatalf("HEAD status = %d, want 200", got.status)
+	}
+	if count := srv.tracker.ActiveCount(); count != 1 {
+		t.Fatalf("active sessions after HEAD = %d, want the GET's 1", count)
+	}
+}

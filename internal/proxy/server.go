@@ -979,9 +979,13 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 	// See serveDirectPlayClaims: shared by the token and grant routes.
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
-	info := sessionInfo(s.tracker, claims, "remux")
-	s.tracker.Track(r.Context(), info)
-	defer s.tracker.Remove(r.Context(), claims.SessionID)
+	// A HEAD probe returns before the remux starts, so it is not an active
+	// stream: counting it would consume capacity, and its Remove would drop
+	// the entry of a GET already playing the same session.
+	if r.Method != http.MethodHead {
+		s.tracker.Track(r.Context(), sessionInfo(s.tracker, claims, "remux"))
+		defer s.tracker.Remove(r.Context(), claims.SessionID)
+	}
 
 	seekSeconds := 0.0
 	if seekStr := r.URL.Query().Get("seek"); seekStr != "" {

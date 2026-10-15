@@ -559,6 +559,23 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		return err
 	}
 
+	contentType := opts.ContentType
+	if contentType == "" {
+		contentType = containerMIME(outputFormat)
+	}
+	setStreamHeaders := func() {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Transfer-Encoding", "chunked")
+	}
+	// net/http discards a HEAD response's body, so a remux started for one
+	// would run ffmpeg over the whole file for nothing. Answer with the
+	// headers a GET sends instead.
+	if r.Method == http.MethodHead {
+		setStreamHeaders()
+		w.WriteHeader(http.StatusOK)
+		return nil
+	}
+
 	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly, opts.SourceAudioChannels, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps, opts.DropResumeLeadingPictures)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
@@ -586,12 +603,7 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		}()
 	}
 
-	contentType := opts.ContentType
-	if contentType == "" {
-		contentType = containerMIME(outputFormat)
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Transfer-Encoding", "chunked")
+	setStreamHeaders()
 	w.WriteHeader(http.StatusOK)
 
 	// Stream ffmpeg output to the HTTP response.
