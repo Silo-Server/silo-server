@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -32,12 +31,20 @@ func (b *fakeBundles) OpenSubtitleBundle(_ context.Context, src playback.Subtitl
 	if b.err != nil {
 		return nil, b.err
 	}
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("bundle-%d", len(b.asked)))
-	if err := os.WriteFile(path, []byte(b.bundle), 0o600); err != nil {
+	f, err := os.CreateTemp("", "bundle-*")
+	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = os.Remove(path) }()
-	return os.Open(path)
+	_ = os.Remove(f.Name())
+	if _, err := f.WriteString(b.bundle); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 // newSubtitleFixture is a source fixture whose core serves subtitle bundles
@@ -65,9 +72,26 @@ func TestSubtitleServesTheGrantedFilesBundle(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || string(body) != "tar bytes" || resp.Header.Get("Content-Type") != "application/x-tar" {
 		t.Fatalf("bundle = %d %q %v", resp.StatusCode, body, resp.Header)
 	}
-	want := playback.SubtitleBundleSource{Path: f.path, Track: 2, Codec: "subrip", FFmpegPath: "/opt/ffmpeg/ffmpeg"}
-	if len(bundles.asked) != 1 || bundles.asked[0] != want {
-		t.Fatalf("asked for %+v, want %+v", bundles.asked, want)
+	if len(bundles.asked) != 1 {
+		t.Fatalf("asked %d times", len(bundles.asked))
+	}
+	asked := bundles.asked[0]
+	if asked.Path != f.path || asked.Track != 2 || asked.Codec != "subrip" || asked.FFmpegPath != "/opt/ffmpeg/ffmpeg" {
+		t.Fatalf("asked for %+v", asked)
+	}
+	// The bundle must be built from the granted revision.
+	info, err := os.Stat(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked.Matches == nil || !asked.Matches(info) {
+		t.Fatal("the bundle is not bound to the granted revision")
+	}
+	if err := os.WriteFile(f.path, []byte("another revision"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ = os.Stat(f.path); asked.Matches(info) {
+		t.Fatal("another revision matches the grant")
 	}
 }
 
@@ -82,6 +106,7 @@ func TestSubtitleAnswers(t *testing.T) {
 		{name: "building", err: playback.ErrSubtitleBundlePending, status: http.StatusAccepted},
 		{name: "unbuildable", err: fmt.Errorf("%w: no such stream", playback.ErrSubtitleBundleFailed), status: http.StatusUnprocessableEntity},
 		{name: "passing failure", err: context.DeadlineExceeded, status: http.StatusServiceUnavailable},
+		{name: "changed under the build", err: fmt.Errorf("subtitle bundle: %w", nodesource.ErrSourceChanged), status: http.StatusPreconditionFailed},
 		{name: "no track", path: nodesource.PathSubtitle + "?codec=ass", status: http.StatusBadRequest},
 		{name: "negative track", path: subtitlePath("-1", "ass"), status: http.StatusBadRequest},
 		{name: "odd codec", path: subtitlePath("0", "../ass"), status: http.StatusBadRequest},

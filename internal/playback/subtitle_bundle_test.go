@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 // A bundle carries the selected track as an ASS script, with its container
@@ -249,5 +251,36 @@ func TestUnpackSubtitleBundleRefusesOtherEntries(t *testing.T) {
 	}
 	if err := unpackSubtitleBundle(bytes.NewReader(rawBundle(t, script, font("fonts/a.ttf"))), t.TempDir()); err != nil {
 		t.Fatalf("a valid bundle = %v", err)
+	}
+}
+
+// A bundle is built and served only for the revision its caller expects.
+func TestOpenSubtitleBundleChecksTheRevision(t *testing.T) {
+	transcodeDir := t.TempDir()
+	cache := NewSubtitleCache(func() string { return transcodeDir })
+	ffmpeg, runs := fakeExtractFFmpeg(t, 0)
+	src := SubtitleBundleSource{Path: writeSource(t), Track: 0, Codec: "ass", FFmpegPath: ffmpeg,
+		Matches: func(info os.FileInfo) bool { return info.Size() == 1 }}
+	if _, err := cache.OpenSubtitleBundle(t.Context(), src); !errors.Is(err, nodesource.ErrSourceChanged) {
+		t.Fatalf("open of another revision = %v", err)
+	}
+	src.Path = filepath.Join(t.TempDir(), "gone.mkv")
+	if _, err := cache.OpenSubtitleBundle(t.Context(), src); !errors.Is(err, nodesource.ErrSourceGone) {
+		t.Fatalf("open of a missing source = %v", err)
+	}
+	if n := countExtractRuns(t, runs); n != 0 {
+		t.Fatalf("%d extractions for a refused revision", n)
+	}
+}
+
+// A build that fails for the core's own reasons, here an FFmpeg that cannot
+// start, is no fault of the source's: it is not ErrSubtitleBundleFailed.
+func TestOpenSubtitleBundleTellsTheCoresFailuresApart(t *testing.T) {
+	transcodeDir := t.TempDir()
+	cache := NewSubtitleCache(func() string { return transcodeDir })
+	src := SubtitleBundleSource{Path: writeSource(t), Track: 0, Codec: "ass", FFmpegPath: filepath.Join(t.TempDir(), "no-ffmpeg")}
+	_, err := cache.OpenSubtitleBundle(t.Context(), src)
+	if err == nil || errors.Is(err, ErrSubtitleBundleFailed) || errors.Is(err, ErrSubtitleBundlePending) {
+		t.Fatalf("open with an FFmpeg that cannot start = %v", err)
 	}
 }

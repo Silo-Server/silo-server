@@ -246,6 +246,25 @@ func TestStagedSubtitleFailures(t *testing.T) {
 			t.Errorf("status %d: %d requests", tc.status, requests)
 		}
 	}
+
+	// A download cut short, or a bundle that does not unpack, is retried as
+	// a passing failure.
+	core := newFakeBundleCore(t)
+	fastSubtitlePolls(t, 100*time.Millisecond)
+	core.bundle = core.bundle[:len(core.bundle)/2]
+	close(core.release)
+	opts := relayedOpts(t, core.relayed(t, writeSource(t)))
+	st, err := stageRelayedSubtitle(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStaged(t, st)
+	if !errors.Is(st.err, ErrSubtitleStagingUnavailable) || core.requests.Load() < 2 {
+		t.Fatalf("truncated bundle: staging = %v after %d requests", st.err, core.requests.Load())
+	}
+	if entries, _ := os.ReadDir(opts.OutputDir); len(entries) != 0 {
+		t.Fatalf("failed unpacks left %d entries", len(entries))
+	}
 }
 
 // Stopping a staging cancels its request and waits for it, so nothing

@@ -188,8 +188,9 @@ const subtitleBundleWait = 5 * time.Second
 // 400: the track or codec is missing or malformed, or the grant is not a
 // media file's. 403: the grant does not verify, has expired, or is another
 // node's. 410: the file is gone. 412: its size or modification time changed.
-// 422: the source cannot give the bundle (playback.ErrSubtitleBundleFailed).
-// 503: no bundle can be built now.
+// 422: the source cannot give the bundle (playback.ErrSubtitleBundleFailed);
+// a repeat within a minute answers 422 without building again. 503: no bundle
+// can be built now.
 func (s *Server) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	id, ok := NodeID(r.Context())
 	if !ok {
@@ -226,9 +227,13 @@ func (s *Server) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), subtitleBundleWait)
 	defer cancel()
 	bundle, err := s.opts.Subtitles.OpenSubtitleBundle(ctx, playback.SubtitleBundleSource{
-		Path: claims.Path, Track: track, Codec: codec, FFmpegPath: ffmpeg,
+		Path: claims.Path, Track: track, Codec: codec, FFmpegPath: ffmpeg, Matches: claims.Matches,
 	})
 	switch {
+	case errors.Is(err, nodesource.ErrSourceChanged) || errors.Is(err, nodesource.ErrSourceGone):
+		status := sourceStatus(err)
+		http.Error(w, http.StatusText(status), status)
+		return
 	case errors.Is(err, playback.ErrSubtitleBundlePending):
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusAccepted)

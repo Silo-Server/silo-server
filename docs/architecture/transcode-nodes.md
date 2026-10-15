@@ -520,15 +520,21 @@ own storage.
 1. The grant checks are those of a source read: `403`, then `410` or `412` from
    a revision check of the granted path. No catalog query. A grant for a theme
    is `400`, as is a missing or malformed track or codec.
-2. `playback.SubtitleCache.OpenSubtitleBundle` returns the cached bundle, keyed
-   like every subtitle cache entry by path, track, revision and format. On a
-   miss it begins a build in the background, in one of the cache's two
+2. `playback.SubtitleCache.OpenSubtitleBundle` stats the path again, requires
+   the grant's revision (`412` otherwise), and returns the bundle cached under
+   that revision, keyed like every subtitle cache entry by path, track,
+   revision and format. A build commits only under the revision it began on,
+   so the bundle served is the granted revision's. On a miss it begins a build
+   in the background, in one of the cache's two
    whole-source demux slots (shared with background warms), and waits up to 5
    seconds, under the node's 10-second response header timeout, for it.
 3. `200` serves the bundle with `Content-Length`; `202` means the bundle is
-   still being built or waits for a slot, and the node asks again. A build that
-   fails on the source's bytes is remembered for a minute and answered `422`;
-   other failures are `503`.
+   still being built or waits for a slot, and the node asks again. A failed
+   build is remembered for a minute, so polling nodes do not start it again:
+   one that failed on the source's bytes (FFmpeg or ffprobe failed on it, or
+   their output failed its checks) answers `422`, one that failed for the
+   core's own reasons (its disk, a process that cannot start, the build
+   timeout) `503`.
 
 The bundle is a tar of `selected.ass`, the track extracted with `-copyts` so
 its events keep the container timestamps the transcode's frames carry (text
@@ -692,10 +698,14 @@ source keeps the symlink alias it always used. `escapeFilterPath` escapes
   `404`, and the player retries. A `RequireReady` start waits for the bundle
   within its request's own deadline, then gives FFmpeg the whole manifest wait.
   A same-ID start retires the live session only once its replacement's bundle
-  is staged, so a failed staging leaves the live session running.
+  is staged, so a failed staging leaves the live session running. The
+  Jellyfin-compatible dispatcher sets `RequireReady` on every text burn-in, as
+  the native dispatcher does on every start, so a staging failure fails the
+  start, where it falls back to another node or the API server.
 - **Fetch.** The session asks again after each `202`, at most once a second.
   `422` and a refused source (`400`, `403`, `404`, `410`, `412`) fail the
-  staging; other failures are retried for 30 seconds, then fail it as
+  staging; other failures, a download cut short or a bundle that does not
+  unpack included, are retried for 30 seconds, then fail it as
   `ErrSubtitleStagingUnavailable`, which a start answers `503 subtitle staging
   unavailable; retry shortly` and a rebuild `503`. The fetch ends with the
   source's handle and within the core's build bound plus a minute.

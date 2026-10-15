@@ -209,7 +209,7 @@ func streamFontAttachments(ctx context.Context, inputPath, ffmpegPath string, st
 		return err
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("subtitle fonts: start attachment extract: %w", err)
+		return processStartError{fmt.Errorf("subtitle fonts: start attachment extract: %w", err)}
 	}
 	fail := func(err error) error {
 		_ = cmd.Process.Kill()
@@ -258,7 +258,7 @@ func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePa
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, processStartError{err}
 	}
 	const maxProbeBytes = 1 << 20
 	out, readErr := io.ReadAll(io.LimitReader(stdout, maxProbeBytes+1))

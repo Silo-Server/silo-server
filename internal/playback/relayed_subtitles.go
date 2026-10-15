@@ -137,15 +137,18 @@ func fetchSubtitleBundle(ctx context.Context, h *nodesource.Handle, opts Transco
 		asked := time.Now()
 		body, err := h.FetchSubtitle(ctx, opts.SubtitleTrackIndex, strings.ToLower(opts.SubtitleCodec))
 		if err == nil {
-			dir, err := unpackRelayedSubtitle(body, opts.OutputDir)
+			// A download cut short fails the unpack: it passes like any
+			// failure to reach the core, as would a bundle the core sent
+			// malformed, once the session gives up on it.
+			var dir string
+			dir, err = unpackRelayedSubtitle(body, opts.OutputDir)
 			_ = body.Close()
-			if err != nil {
-				return "", fmt.Errorf("%w: %w", ErrSubtitleStaging, err)
+			if err == nil {
+				slog.InfoContext(ctx, "relayed subtitle staged", "component", "playback",
+					"playback_session_id", opts.SessionID, "source", h.Identity(), "track", opts.SubtitleTrackIndex,
+					"elapsed_ms", time.Since(started).Milliseconds())
+				return dir, nil
 			}
-			slog.InfoContext(ctx, "relayed subtitle staged", "component", "playback",
-				"playback_session_id", opts.SessionID, "source", h.Identity(), "track", opts.SubtitleTrackIndex,
-				"elapsed_ms", time.Since(started).Milliseconds())
-			return dir, nil
 		}
 		var status *nodesource.StatusError
 		switch {
