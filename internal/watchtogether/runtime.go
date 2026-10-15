@@ -45,6 +45,7 @@ type runtimeMember struct {
 	IgnoreWait        bool              `json:"ignore_wait"`
 	LastPingMS        int64             `json:"last_ping_ms"`
 	CorrectionCommand *TransportCommand `json:"correction_command,omitempty"`
+	PausedCorrections int               `json:"paused_corrections,omitempty"`
 	WaitingCommand    *TransportCommand `json:"waiting_command,omitempty"`
 	SyncingToRoom     bool              `json:"syncing_to_room,omitempty"`
 	LobbyReady        bool              `json:"lobby_ready,omitempty"`
@@ -214,8 +215,9 @@ func (s *Service) runtimeLocked(live *liveRoom) roomRuntime {
 			UserID: m.userID, ProfileID: m.profileID, DisplayName: m.displayName, ConnectionID: m.connectionID,
 			Connected: memberConnected(m), LeaseUntil: m.leaseUntil, DisconnectedAt: m.disconnectedAt,
 			SessionID: m.sessionID, IsReady: m.isReady, IsBuffering: m.isBuffering, IgnoreWait: m.ignoreWait,
-			LastPingMS: m.lastPingMS, CorrectionCommand: m.correctionCommand, WaitingCommand: m.waitingCommand,
-			SyncingToRoom: m.syncingToRoom, LobbyReady: m.lobbyReady, LastStallAt: m.lastStallAt,
+			LastPingMS: m.lastPingMS, CorrectionCommand: m.correctionCommand, PausedCorrections: m.pausedCorrections,
+			WaitingCommand: m.waitingCommand, SyncingToRoom: m.syncingToRoom, LobbyReady: m.lobbyReady,
+			LastStallAt: m.lastStallAt,
 		}
 	}
 	return runtime
@@ -243,8 +245,8 @@ func (s *Service) adoptRuntimeLocked(ctx context.Context, live *liveRoom, room R
 			connectionID: stored.ConnectionID, leaseUntil: stored.LeaseUntil, disconnectedAt: stored.DisconnectedAt,
 			sessionID: stored.SessionID, isReady: stored.IsReady, isBuffering: stored.IsBuffering,
 			ignoreWait: stored.IgnoreWait, lastPingMS: stored.LastPingMS, waitingCommand: stored.WaitingCommand,
-			correctionCommand: stored.CorrectionCommand,
-			remoteConnected:   stored.Connected, syncingToRoom: stored.SyncingToRoom, lobbyReady: stored.LobbyReady,
+			correctionCommand: stored.CorrectionCommand, pausedCorrections: stored.PausedCorrections,
+			remoteConnected: stored.Connected, syncingToRoom: stored.SyncingToRoom, lobbyReady: stored.LobbyReady,
 			lastStallAt: stored.LastStallAt,
 		}
 		if old := live.members[key]; old != nil && old.connectionID == stored.ConnectionID && stored.Connected {

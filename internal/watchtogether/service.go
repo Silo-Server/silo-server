@@ -66,6 +66,9 @@ const (
 	// applied. A later report retries the correction if the guest remains out of
 	// sync after this bounded interval.
 	guestCorrectionRetryInterval = 5 * time.Second
+	// maxPausedCorrections bounds how often a paused member is sent the same
+	// paused room position; see pausedCorrectionsExhausted.
+	maxPausedCorrections = 3
 	// maxBufferingAnchorDriftSeconds bounds how far a buffering member's
 	// reported position may move the shared room anchor.
 	maxBufferingAnchorDriftSeconds = 5.0
@@ -248,6 +251,9 @@ type memberState struct {
 	// changes: staging a different item, starting, or switching modes.
 	lobbyReady bool
 	lastPingMS int64
+	// pausedCorrections counts the corrections sent for the paused position in
+	// correctionCommand. It means nothing once that record is cleared.
+	pausedCorrections int
 }
 
 // resetForSelection drops everything bound to the previous playback epoch.
@@ -926,7 +932,12 @@ func (s *Service) handleStateReportForConnection(
 			IssuedAt:        now.UTC().Format(time.RFC3339Nano),
 			PlaybackState:   live.room.PlaybackState,
 		}
-		if !correctionCommandPending(member, command, now) {
+		if !correctionCommandPending(member, command, now) && (pauseMismatch || !pausedCorrectionsExhausted(member, command)) {
+			if pausedPositionCorrected(member, command) {
+				member.pausedCorrections++
+			} else {
+				member.pausedCorrections = 1
+			}
 			member.correctionCommand = &command
 			correctionDispatches = s.targetedCommandDispatchesLocked(live, report.SessionID, command)
 		}
@@ -2332,6 +2343,31 @@ func correctionCommandPending(member *memberState, command TransportCommand, now
 		age = 0
 	}
 	return age < guestCorrectionRetryInterval
+}
+
+// pausedCorrectionsExhausted reports whether member was already sent
+// command's paused room position maxPausedCorrections times. A paused member
+// does not move, so retrying cannot close drift that a correction did not: a
+// rebuilt stream can start at the keyframe before the target, and a player may
+// leave a paused member where it is. Each retry would rebuild the stream again.
+// The bounded retries still recover a correction that was lost. The room's
+// next play or seek realigns the member, and any room command clears the
+// record.
+func pausedCorrectionsExhausted(member *memberState, command TransportCommand) bool {
+	return pausedPositionCorrected(member, command) && member.pausedCorrections >= maxPausedCorrections
+}
+
+// pausedPositionCorrected reports whether member's last correction sent
+// command's paused room position.
+func pausedPositionCorrected(member *memberState, command TransportCommand) bool {
+	if member == nil || member.correctionCommand == nil || command.PlaybackState != RoomPlaybackStatePaused {
+		return false
+	}
+	sent := member.correctionCommand
+	return sent.SessionID == command.SessionID &&
+		sent.SelectionRevision == command.SelectionRevision &&
+		sent.PlaybackState == RoomPlaybackStatePaused &&
+		sent.PositionSeconds == command.PositionSeconds
 }
 
 func (s *Service) runCommandDispatches(dispatches []commandDispatch) {

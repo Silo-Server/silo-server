@@ -433,6 +433,68 @@ func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 	}
 }
 
+func TestPausedGuestCorrectionsToTheSamePositionAreBounded(t *testing.T) {
+	now := time.Date(2026, 4, 9, 12, 0, 20, 0, time.UTC)
+	current := now
+	repo := &stubRepo{room: baseRoom(now)}
+	repo.room.PlaybackState = RoomPlaybackStatePaused
+	repo.room.IsPaused = true
+	repo.room.AnchorPositionSeconds = 880.97
+	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
+	service.now = func() time.Time { return current }
+	conn := &recordingConn{}
+	service.rooms[repo.room.ID].members[buildMemberKey(8, "guest")] = &memberState{
+		userID:     8,
+		profileID:  "guest",
+		sessionID:  "session-1",
+		connection: conn,
+		isReady:    true,
+	}
+	reg := registrationFor(repo.room.ID, 8, "guest", conn)
+	report := func(position float64, paused bool) {
+		t.Helper()
+		if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", StateReport{
+			SessionID: "session-1", PositionSeconds: position, IsPaused: paused,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantCorrections := func(want int, context string) {
+		t.Helper()
+		if got := transportCount(conn); got != want {
+			t.Fatalf("%s: %d corrections in total, want %d", context, got, want)
+		}
+	}
+
+	// The guest's rebuilt stream parks on the keyframe 2.2 s before the paused
+	// room. Retries recover a lost correction, up to the bound.
+	report(878.75, true)
+	wantCorrections(1, "first paused drift report")
+	if first := lastTransport(t, conn); first.Action != TransportActionPause || first.PositionSeconds != 880.97 {
+		t.Fatalf("correction = %s at %v, want pause at 880.97", first.Action, first.PositionSeconds)
+	}
+	report(878.75, true)
+	wantCorrections(1, "report inside the retry interval")
+	for range maxPausedCorrections + 5 {
+		current = current.Add(guestCorrectionRetryInterval)
+		report(878.75, true)
+	}
+	wantCorrections(maxPausedCorrections, "guest parked short of the paused room")
+
+	// A guest that plays in a paused room is still paused, without a bound.
+	report(878.75, false)
+	wantCorrections(maxPausedCorrections+1, "play-state mismatch")
+	current = current.Add(guestCorrectionRetryInterval)
+	report(879, false)
+	wantCorrections(maxPausedCorrections+2, "persisting play-state mismatch")
+
+	// Reaching the room clears the record, so later drift is corrected afresh.
+	current = current.Add(guestCorrectionRetryInterval)
+	report(880.97, true)
+	report(870, true)
+	wantCorrections(maxPausedCorrections+3, "drift after reaching the room")
+}
+
 // transportCount counts the transport commands a connection received,
 // ignoring snapshots.
 func transportCount(conn *recordingConn) int {
@@ -466,6 +528,7 @@ func TestCorrectionCommandRoundTripsRoomRuntime(t *testing.T) {
 		profileID:         "guest",
 		sessionID:         command.SessionID,
 		correctionCommand: command,
+		pausedCorrections: 2,
 		syncingToRoom:     true,
 		lobbyReady:        true,
 	}
@@ -490,6 +553,9 @@ func TestCorrectionCommandRoundTripsRoomRuntime(t *testing.T) {
 	got := adopted.members[key].correctionCommand
 	if got == nil || got.CommandID != command.CommandID || got.SessionID != command.SessionID {
 		t.Fatalf("adopted correction command = %+v, want %+v", got, command)
+	}
+	if count := adopted.members[key].pausedCorrections; count != 2 {
+		t.Fatalf("adopted paused correction count = %d, want 2", count)
 	}
 	if !adopted.members[key].syncingToRoom || !adopted.members[key].lobbyReady {
 		t.Fatal("runtime adoption dropped syncing or lobby readiness")

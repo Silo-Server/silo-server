@@ -115,6 +115,17 @@ previous one took, up to 10 seconds. After two sustained stalls within 5
 minutes, the player offers a lower quality for the same source file. Explicit
 room seeks are never delayed by this budget.
 
+In a paused room, a viewer who is paused but more than 1 second from the room
+position is sent that position at most three times, at least 5 seconds apart. A
+paused viewer does not move, so retrying cannot close drift that a correction
+did not: a rebuilt stream can start at the keyframe before the target, and a
+player may leave a paused viewer where it is rather than rebuild its stream.
+Each retry would only rebuild the stream again; the bounded retries still
+recover a lost correction. The count starts over when the viewer reaches the
+room or re-attaches, or when any room command runs. A viewer who plays while the
+room is paused is corrected without a bound. The room's next play or seek
+realigns every viewer.
+
 Pausing cancels pending browser reports, and the server ignores delayed
 buffering reports for a paused room. Viewer status identifies who is still
 buffering or syncing. The timeline remains at the requested seek position while
