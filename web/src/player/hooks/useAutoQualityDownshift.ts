@@ -59,15 +59,16 @@ export function createStallTracker(): StallTracker {
   let firstWaitingAt: number | undefined;
   let stallStartedAt: number | undefined;
   let stalls: number[] = [];
-  // A stall that reached LONG_STALL_MS before it ended still counts as long:
-  // its timer can run late, after playback has already recovered.
-  let longStallEnded = false;
+  // When a stall that reached LONG_STALL_MS ended. It still counts as long,
+  // since its timer can run late after playback recovered, but only within
+  // the stall window like any other stall.
+  let longStallEndedAt: number | undefined;
   return {
     playing(now) {
       firstPlayingAt ??= now;
       if (stallStartedAt !== undefined) {
         const duration = now - stallStartedAt;
-        if (duration >= LONG_STALL_MS) longStallEnded = true;
+        if (duration >= LONG_STALL_MS) longStallEndedAt = now;
         else if (duration >= STALL_MIN_MS) stalls.push(now);
       }
       stallStartedAt = undefined;
@@ -83,7 +84,7 @@ export function createStallTracker(): StallTracker {
       stallStartedAt = undefined;
     },
     shouldDownshift(now) {
-      if (longStallEnded) return true;
+      if (longStallEndedAt !== undefined && now - longStallEndedAt < STALL_WINDOW_MS) return true;
       if (stallStartedAt !== undefined && now - stallStartedAt >= LONG_STALL_MS) return true;
       stalls = stalls.filter((at) => now - at < STALL_WINDOW_MS);
       return stalls.length >= STALLS_BEFORE_DOWNSHIFT;

@@ -80,6 +80,14 @@ describe("createStallTracker", () => {
     expect(tracker.shouldDownshift(17_000)).toBe(true);
   });
 
+  it("forgets a finished long stall after the stall window", () => {
+    const tracker = createStallTracker();
+    tracker.playing(0);
+    tracker.waiting(20_000);
+    tracker.playing(27_000);
+    expect(tracker.shouldDownshift(27_000 + 2 * 60_000 + 1)).toBe(false);
+  });
+
   it("does not blame the network for a seek", () => {
     const tracker = createStallTracker();
     tracker.playing(0);
