@@ -3765,7 +3765,9 @@ export function VideoPlayer({
   // which reads that lower estimate. Rooms have their own lower-quality offer.
   useAutoQualityDownshift({
     videoRef,
-    enabled: activeQualityId === "auto" && !watchTogetherRoomActive,
+    // Buffering while the session reconnects is the outage, not a slow link.
+    enabled:
+      activeQualityId === "auto" && !watchTogetherRoomActive && connectionStatus === "connected",
     sessionId,
     planIdentity: plan,
     deliveredKbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps,

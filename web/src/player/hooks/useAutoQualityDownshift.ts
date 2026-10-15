@@ -17,6 +17,12 @@ const STALL_WINDOW_MS = 2 * 60_000;
 /** One stall this long is enough on its own. */
 const LONG_STALL_MS = 6_000;
 /**
+ * A downshift whose replan was not adopted leaves the same plan playing. After
+ * this long the hook watches it again, so a transient replan failure does not
+ * end automatic downshifting for the rest of the plan.
+ */
+const REARM_AFTER_UNADOPTED_MS = 60_000;
+/**
  * The new estimate as a share of the bitrate that stalled. Auto plans for 80%
  * of an estimate, so the next stream targets about 56% of the one that failed:
  * a 4K remux steps to a 4K encode, a 1080p encode to 720p.
@@ -28,7 +34,10 @@ export interface StallTracker {
   playing(now: number): void;
   /** The element ran out of data. Seeks are excluded by the caller. */
   waiting(now: number): void;
-  /** A seek began; a stall in progress was the seek's, not the network's. */
+  /**
+   * A seek, pause or reload began; a stall in progress was caused by that,
+   * not by the network.
+   */
   seeking(): void;
   /** Whether stall history so far says the link cannot keep up. */
   shouldDownshift(now: number): boolean;
@@ -105,24 +114,36 @@ export function useAutoQualityDownshift({
     const previous = lastDownshiftFromRef.current;
     if (previous?.sessionId === sessionId && deliveredKbps >= previous.kbps) return;
 
-    const tracker = createStallTracker();
+    // Where playback stood when the current stall began; undefined when not
+    // stalled. A stall can end without a `playing` event (the player itself
+    // clears buffering on `timeupdate`), so advancing time also ends it.
+    let stalledAt: number | undefined;
+    let tracker = createStallTracker();
     let done = false;
     let longStallTimer: ReturnType<typeof setTimeout> | undefined;
+    let rearmTimer: ReturnType<typeof setTimeout> | undefined;
     const clearLongStallTimer = () => {
       if (longStallTimer !== undefined) clearTimeout(longStallTimer);
       longStallTimer = undefined;
     };
     const check = () => {
-      if (done || !tracker.shouldDownshift(Date.now())) return;
+      // A paused element is not starved, whatever happened before the pause.
+      if (done || video.paused || !tracker.shouldDownshift(Date.now())) return;
       done = true;
       clearLongStallTimer();
       lastDownshiftFromRef.current = { sessionId, kbps: deliveredKbps };
+      // An adopted replan changes planIdentity and tears this effect down,
+      // cancelling the re-arm. Still being here means it was not adopted.
+      rearmTimer = setTimeout(() => {
+        rearmTimer = undefined;
+        done = false;
+        stalledAt = undefined;
+        tracker = createStallTracker();
+        tracker.playing(Date.now() - STARTUP_GRACE_MS);
+        lastDownshiftFromRef.current = undefined;
+      }, REARM_AFTER_UNADOPTED_MS);
       onDownshiftRef.current(estimate);
     };
-    // Where playback stood when the current stall began; undefined when not
-    // stalled. A stall can end without a `playing` event (the player itself
-    // clears buffering on `timeupdate`), so advancing time also ends it.
-    let stalledAt: number | undefined;
     const onPlaying = () => {
       stalledAt = undefined;
       clearLongStallTimer();
@@ -139,7 +160,9 @@ export function useAutoQualityDownshift({
     const onTimeUpdate = () => {
       if (stalledAt !== undefined && video.currentTime > stalledAt) onPlaying();
     };
-    const onSeeking = () => {
+    // A seek, pause, end or source reload ends any stall in progress: the
+    // buffering that follows is not the link failing to keep up.
+    const onInterrupted = () => {
       stalledAt = undefined;
       clearLongStallTimer();
       tracker.seeking();
@@ -150,13 +173,15 @@ export function useAutoQualityDownshift({
     }
     video.addEventListener("playing", onPlaying);
     video.addEventListener("waiting", onWaiting);
-    video.addEventListener("seeking", onSeeking);
+    const interruptions = ["seeking", "pause", "ended", "emptied"] as const;
+    for (const type of interruptions) video.addEventListener(type, onInterrupted);
     video.addEventListener("timeupdate", onTimeUpdate);
     return () => {
       clearLongStallTimer();
+      if (rearmTimer !== undefined) clearTimeout(rearmTimer);
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("waiting", onWaiting);
-      video.removeEventListener("seeking", onSeeking);
+      for (const type of interruptions) video.removeEventListener(type, onInterrupted);
       video.removeEventListener("timeupdate", onTimeUpdate);
     };
   }, [videoRef, enabled, sessionId, planIdentity, deliveredKbps]);

@@ -149,6 +149,59 @@ describe("useAutoQualityDownshift", () => {
     expect(onDownshift).not.toHaveBeenCalled();
   });
 
+  function renderOnAuto(video: EventTarget, onDownshift: () => void) {
+    return renderHook(() =>
+      useAutoQualityDownshift({
+        videoRef: { current: video as unknown as HTMLVideoElement },
+        enabled: true,
+        sessionId: "s1",
+        planIdentity: "plan-1",
+        deliveredKbps: 80_000,
+        onDownshift,
+      }),
+    );
+  }
+
+  it("does not count a stall the viewer paused", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    renderOnAuto(video, onDownshift);
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    video.paused = true;
+    fire(video, "pause", 31_000);
+    vi.advanceTimersByTime(10_000);
+    expect(onDownshift).not.toHaveBeenCalled();
+  });
+
+  it("does not downshift a paused element when the timer fires", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    renderOnAuto(video, onDownshift);
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    video.paused = true;
+    vi.advanceTimersByTime(10_000);
+    expect(onDownshift).not.toHaveBeenCalled();
+  });
+
+  it("tries again when the replan was not adopted", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    renderOnAuto(video, onDownshift);
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+
+    // Same plan still playing a minute later: the replan failed.
+    fire(video, "playing", 40_000);
+    vi.advanceTimersByTime(60_000);
+    fire(video, "waiting", 100_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(2);
+  });
+
   it("leaves an explicit quality alone", () => {
     const video = fakeVideo();
     const onDownshift = vi.fn();
