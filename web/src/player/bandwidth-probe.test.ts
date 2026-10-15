@@ -192,6 +192,16 @@ describe("measured bandwidth cache", () => {
     }
   });
 
+  it("prefers a newer result another tab stored over this page's own", () => {
+    const now = Date.now();
+    recordObservedBandwidthLimitKbps(14_000, now - 60_000);
+    storage.set(
+      storage.KEYS.BANDWIDTH_ESTIMATE,
+      JSON.stringify({ kbps: 90_000, measuredAt: now - 1_000 }),
+    );
+    expect(readMeasuredBandwidthKbps(now)).toBe(90_000);
+  });
+
   it("records a limit when nothing was measured", () => {
     recordObservedBandwidthLimitKbps(14_000);
     expect(readMeasuredBandwidthKbps()).toBe(14_000);

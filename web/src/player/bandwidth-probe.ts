@@ -75,8 +75,7 @@ function clampKbps(kbps: number): number | undefined {
  */
 let pageEntry: string | undefined;
 
-function readStored(now: number): StoredEstimate | undefined {
-  const raw = pageEntry ?? storage.get(storage.KEYS.BANDWIDTH_ESTIMATE);
+function parseStored(raw: string | null | undefined, now: number): StoredEstimate | undefined {
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw) as Partial<StoredEstimate>;
@@ -89,6 +88,15 @@ function readStored(now: number): StoredEstimate | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The newer of this page's entry and the shared one another tab may have written. */
+function readStored(now: number): StoredEstimate | undefined {
+  const page = parseStored(pageEntry, now);
+  const shared = parseStored(storage.get(storage.KEYS.BANDWIDTH_ESTIMATE), now);
+  if (!page) return shared;
+  if (!shared) return page;
+  return shared.measuredAt > page.measuredAt ? shared : page;
 }
 
 function writeStored(kbps: number, now: number, observed = false): void {
