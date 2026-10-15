@@ -24,13 +24,13 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 
 const embeddingLockSettingKey = "recommendations.embedding_lock"
 
-const minHNSWEfSearch = 200
-
-// maxHNSWEfSearch is the largest hnsw.ef_search pgvector accepts. A larger
-// value fails set_config, so the candidate scan never runs. With iterative
-// scans the index keeps returning rows past ef_search, so the cap does not
-// stop a larger LIMIT at 1000 candidates.
-const maxHNSWEfSearch = 1000
+// hnswEfSearch is the hnsw.ef_search candidate scans run with, whatever their
+// LIMIT. With iterative scans the index keeps returning rows past ef_search,
+// up to hnsw.max_scan_tuples, so a larger value only widens each step of the
+// search. Raised with the LIMIT, it made the planner price the index above
+// reading every embedding, so large candidate scans ran as exact scans,
+// several times slower, for nearly the same candidates.
+const hnswEfSearch = 200
 
 // watchedActivityCTE unifies video watch progress and ebook reader progress
 // into one activity stream. Episodes roll up to their parent series via
@@ -220,11 +220,7 @@ func NewRepo(pool *pgxpool.Pool) *Repo {
 	return &Repo{pool: pool, titleCounts: newTitleCountCache()}
 }
 
-func hnswEfSearch(candidateLimit int) int {
-	return min(max(candidateLimit, minHNSWEfSearch), maxHNSWEfSearch)
-}
-
-func (r *Repo) withHNSWCandidateScan(ctx context.Context, candidateLimit int, fn func(pgx.Tx) error) error {
+func (r *Repo) withHNSWCandidateScan(ctx context.Context, fn func(pgx.Tx) error) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin hnsw candidate scan tx: %w", err)
@@ -234,7 +230,7 @@ func (r *Repo) withHNSWCandidateScan(ctx context.Context, candidateLimit int, fn
 	_, err = tx.Exec(ctx, `
 		SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true),
 		       set_config('hnsw.ef_search', $1, true)
-	`, fmt.Sprintf("%d", hnswEfSearch(candidateLimit)))
+	`, fmt.Sprintf("%d", hnswEfSearch))
 	if err != nil {
 		return fmt.Errorf("configure hnsw candidate scan: %w", err)
 	}
@@ -398,7 +394,7 @@ func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs 
 			LIMIT  $3`, strings.Join(conditions, " AND "))
 
 	var items []ScoredItem
-	err := r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
+	err := r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
@@ -542,7 +538,7 @@ func (r *Repo) findTasteProfileCandidates(
 
 	var items []ScoredItem
 	genreMap := make(map[string][]string, limit)
-	err := r.withHNSWCandidateScan(ctx, annLimit, func(tx pgx.Tx) error {
+	err := r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
@@ -975,7 +971,7 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 
 	allowedPeerRatings := compatiblePeerContentRatings(maxContentRating)
 	var users []UserSimilarity
-	err = r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
+	err = r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT p.user_id,
 			       p.profile_id,

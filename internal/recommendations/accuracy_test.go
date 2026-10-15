@@ -85,30 +85,6 @@ func TestApplyGenreCapIgnoresItemsWithoutGenres(t *testing.T) {
 	}
 }
 
-func TestHNSWEfSearchStaysWithinPgvectorRange(t *testing.T) {
-	tests := []struct {
-		name           string
-		candidateLimit int
-		want           int
-	}{
-		{name: "raises small scans", candidateLimit: 40, want: minHNSWEfSearch},
-		{name: "keeps exact floor", candidateLimit: minHNSWEfSearch, want: minHNSWEfSearch},
-		{name: "keeps larger scans", candidateLimit: 900, want: 900},
-		{name: "keeps pgvector maximum", candidateLimit: maxHNSWEfSearch, want: maxHNSWEfSearch},
-		{name: "caps just above maximum", candidateLimit: maxHNSWEfSearch + 1, want: maxHNSWEfSearch},
-		{name: "caps genre discover pool", candidateLimit: 1200, want: maxHNSWEfSearch},
-		{name: "caps largest ANN limit", candidateLimit: 2000, want: maxHNSWEfSearch},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := hnswEfSearch(tt.candidateLimit); got != tt.want {
-				t.Fatalf("hnswEfSearch(%d) = %d, want %d", tt.candidateLimit, got, tt.want)
-			}
-		})
-	}
-}
-
 // typedRow returns n items of mediaType named prefix00, prefix01, …, scored
 // from top down, and records their type.
 func typedRow(prefix, mediaType string, n int, top float64, types map[string]string) []ScoredItem {
