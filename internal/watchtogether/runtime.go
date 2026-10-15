@@ -253,6 +253,7 @@ func (s *Service) adoptRuntimeLocked(ctx context.Context, live *liveRoom, room R
 				m.remoteConnected = false
 				m.lastPingMS = old.lastPingMS
 				m.driftStrikes, m.settleUntil, m.lastSentCommandID = old.driftStrikes, old.settleUntil, old.lastSentCommandID
+				m.lastSentPaused, m.lastSentAt, m.bestDrift = old.lastSentPaused, old.lastSentAt, old.bestDrift
 				if m.leaseUntil.Sub(now) <= connectionLease-leaseRefreshInterval {
 					m.leaseUntil = now.Add(connectionLease)
 				}
@@ -361,9 +362,13 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		force := s.skipUnreadyMembersLocked(live, s.now())
 		snapshots, commands := s.maybeResumeFromWaitingLocked(ctx, live, force)
 		state := s.runtimeLocked(live)
+		// Snapshots show neither leases, latency, nor the commands a member
+		// was sent, so changes to them alone send nobody a snapshot.
 		for key, member := range state.Members {
 			member.LeaseUntil = time.Time{}
 			member.LastPingMS = 0
+			member.CorrectionCommand = nil
+			member.WaitingCommand = nil
 			state.Members[key] = member
 		}
 		fingerprint, _ := json.Marshal(struct {

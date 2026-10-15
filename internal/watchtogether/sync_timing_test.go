@@ -279,8 +279,10 @@ func TestStalledHostPausesTheRoomAtItsPosition(t *testing.T) {
 	}
 }
 
-// A report naming the command its client last applied describes the state
-// after that command, so a host's system pause is taken at once.
+// A report naming the command its client last applied, with the play state
+// that command set, describes the state after it and is taken at once. One
+// that contradicts the command inside its settle window can trail the player
+// by a sample, so it waits for the window to end.
 func TestReportNamingTheLatestCommandEndsTheSettleWindow(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
@@ -288,24 +290,57 @@ func TestReportNamingTheLatestCommandEndsTheSettleWindow(t *testing.T) {
 		TransportRequest{Action: TransportActionPlay}); err != nil {
 		t.Fatal(err)
 	}
-	play := lastTransport(t, f.conns["host"])
-	f.now = f.now.Add(time.Second) // inside execute_at + commandSettleWindow
-	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
-		StateReport{SessionID: "host-session", CommandID: play.CommandID, PositionSeconds: f.expected(), IsPaused: true}); err != nil {
-		t.Fatal(err)
+	play := lastTransport(t, f.conns["guest"])
+	hostReport := func(paused bool) {
+		t.Helper()
+		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
+			StateReport{SessionID: "host-session", CommandID: play.CommandID, PositionSeconds: f.expected(), IsPaused: paused}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	guestReport := func() {
+		t.Helper()
+		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("guest"), f.userID("guest"), "guest",
+			StateReport{SessionID: "guest-session", CommandID: play.CommandID, PositionSeconds: f.expected() - 3}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Matching the play, the guest's drift counts at once.
+	f.now = f.now.Add(time.Second)
+	before := transportCount(f.conns["guest"])
+	for range guestCorrectionStrikes + 1 {
+		guestReport()
+	}
+	if transportCount(f.conns["guest"]) == before {
+		t.Fatal("drift reported after the guest ran the play was held by the settle window")
+	}
+
+	// A paused report naming the play, inside its window, is not taken.
+	hostReport(true)
+	if f.repo.room.PlaybackState != RoomPlaybackStatePlaying {
+		t.Fatalf("a report contradicting the play inside its window moved the room to %s", f.repo.room.PlaybackState)
+	}
+	// After the window the same report is the host's decision.
+	f.now = f.now.Add(commandSettleWindow + time.Second)
+	hostReport(true)
 	if f.repo.room.PlaybackState != RoomPlaybackStatePaused {
-		t.Fatalf("host's pause after applying the play was held: room %s", f.repo.room.PlaybackState)
+		t.Fatalf("the host's pause after the window was not taken: room %s", f.repo.room.PlaybackState)
 	}
 }
 
-// Drift measured before a correction says nothing about the state after it:
-// a correction needs two fresh out-of-band reports, not one.
+// A member that is not closing its drift is corrected; drift measured before a
+// correction says nothing about the state after it, so the count starts over.
 func TestCorrectionStartsTheStrikesOver(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
-	f.report("guest", f.expected()-3)
-	f.report("guest", f.expected()-3)
+	stuck := func() {
+		t.Helper()
+		for range guestCorrectionStrikes + 1 {
+			f.report("guest", f.expected()-3)
+		}
+	}
+	stuck()
 	first := transportCount(f.conns["guest"])
 	if first == 0 {
 		t.Fatal("sustained drift was not corrected")
@@ -316,7 +351,177 @@ func TestCorrectionStartsTheStrikesOver(t *testing.T) {
 		t.Fatalf("one report after a correction was corrected again (%d corrections)", got)
 	}
 	f.report("guest", f.expected()-2.5)
+	f.report("guest", f.expected()-2.5)
 	if got := transportCount(f.conns["guest"]); got != first+1 {
-		t.Fatalf("two reports after a correction dispatched %d corrections, want 1", got-first)
+		t.Fatalf("sustained drift after a correction dispatched %d corrections, want 1", got-first)
+	}
+}
+
+// A member closing its drift by rate is left to it; correcting it again would
+// only restart its convergence. One that stops closing it is corrected.
+func TestConvergingMemberIsNotCorrectedAgain(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.now = f.now.Add(10 * time.Second)
+	drift := 3.0
+	for range 20 { // about 30 s at 4 percent
+		f.now = f.now.Add(1500 * time.Millisecond)
+		f.report("guest", f.expected()-drift)
+		drift -= 0.06
+	}
+	if got := transportCount(f.conns["guest"]); got != 0 {
+		t.Fatalf("a converging member was corrected %d times", got)
+	}
+	for range 3 {
+		f.now = f.now.Add(1500 * time.Millisecond)
+		f.report("guest", f.expected()-drift)
+	}
+	if got := transportCount(f.conns["guest"]); got != 1 {
+		t.Fatalf("a member that stopped converging got %d corrections, want 1", got)
+	}
+}
+
+// A command scheduled after the lead drops never runs before the room's own
+// play, which would start its member ahead of everyone.
+func TestCommandsNeverRunBeforeTheRoomsOwnCommand(t *testing.T) {
+	f := newBufferingRoom(t, "ann", "far")
+	f.member("far").lastPingMS = 1800
+	position := f.expected()
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(5 * time.Second)
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionPlay}); err != nil {
+		t.Fatal(err)
+	}
+	play := lastTransport(t, f.conns["ann"])
+	if err := f.s.HandlePingForConnection(t.Context(), f.reg("far"), f.userID("far"), "far", 100); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(100 * time.Millisecond)
+	f.s.mu.Lock()
+	dispatches := f.s.syncMemberToRoomLocked(f.s.rooms[f.repo.room.ID], "ann-session")
+	f.s.mu.Unlock()
+	f.s.sendCommandDispatches(t.Context(), dispatches)
+	sync := lastTransport(t, f.conns["ann"])
+	if sync.CommandID == play.CommandID {
+		t.Fatal("no sync was sent")
+	}
+	if sync.ExecuteAt < play.ExecuteAt || sync.PositionSeconds != play.PositionSeconds {
+		t.Fatalf("sync %+v runs before the room's play %+v", sync, play)
+	}
+}
+
+// A report naming an older command than the member was last sent predates the
+// newest one, however slow the member is, until namedCommandWait.
+func TestReportNamingAnOlderCommandPredatesTheNewest(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.now = f.now.Add(10 * time.Second)
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionPlay}); err != nil {
+		t.Fatal(err)
+	}
+	older := lastTransport(t, f.conns["host"])
+	f.now = f.now.Add(10 * time.Second)
+	position := f.expected()
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
+		t.Fatal(err)
+	}
+	// Past the pause's settle window, a slow host's report still names the play.
+	f.now = f.now.Add(4 * time.Second)
+	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
+		StateReport{SessionID: "host-session", CommandID: older.CommandID, PositionSeconds: position + 4}); err != nil {
+		t.Fatal(err)
+	}
+	if f.repo.room.PlaybackState != RoomPlaybackStatePaused {
+		t.Fatalf("a report from before the pause resumed the room: %s", f.repo.room.PlaybackState)
+	}
+}
+
+// A report naming the member's last command settles early only if the room's
+// latest command reached the member too; on another API server it may not have.
+func TestReportNamingItsCommandWaitsForAnUndeliveredRoomCommand(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.now = f.now.Add(10 * time.Second)
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionPlay}); err != nil {
+		t.Fatal(err)
+	}
+	play := lastTransport(t, f.conns["host"])
+	f.now = f.now.Add(10 * time.Second)
+	position := f.expected()
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
+		t.Fatal(err)
+	}
+	// As if the pause came from another server and was not yet forwarded here.
+	host := f.member("host")
+	host.lastCommandID, host.lastSentCommandID, host.lastSentPaused = play.CommandID, play.CommandID, false
+	host.settleUntil = time.Time{}
+	f.now = f.now.Add(500 * time.Millisecond)
+	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
+		StateReport{SessionID: "host-session", CommandID: play.CommandID, PositionSeconds: position + 0.5}); err != nil {
+		t.Fatal(err)
+	}
+	if f.repo.room.PlaybackState != RoomPlaybackStatePaused {
+		t.Fatalf("a report from before an undelivered pause resumed the room: %s", f.repo.room.PlaybackState)
+	}
+}
+
+// A host still closing a gap by rate after a sync has run it: a pause from its
+// system controls is the room's again once the sync has settled.
+func TestSyncingHostThatRanItsSyncCanPause(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.now = f.now.Add(10 * time.Second)
+	f.s.mu.Lock()
+	dispatches := f.s.syncMemberToRoomLocked(f.s.rooms[f.repo.room.ID], "host-session")
+	f.member("host").syncingToRoom = true
+	f.s.mu.Unlock()
+	f.s.sendCommandDispatches(t.Context(), dispatches)
+	sync := lastTransport(t, f.conns["host"])
+	f.now = f.now.Add(commandSettleWindow + time.Second)
+	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
+		StateReport{SessionID: "host-session", CommandID: sync.CommandID, PositionSeconds: f.expected() - 3, IsPaused: true}); err != nil {
+		t.Fatal(err)
+	}
+	if f.repo.room.PlaybackState != RoomPlaybackStatePaused || f.member("host").syncingToRoom {
+		t.Fatalf("the syncing host's pause was not taken: room %s, syncing %v", f.repo.room.PlaybackState, f.member("host").syncingToRoom)
+	}
+}
+
+// Snapshots show no member's commands, so a correction alone sends the room
+// no snapshot on reconciliation.
+func TestCorrectionsDoNotBroadcastSnapshots(t *testing.T) {
+	f := newBufferingRoom(t, "ann", "bob")
+	if err := f.s.reconcileRoom(t.Context(), f.repo.room.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(10 * time.Second)
+	snapshots := func() int {
+		n := 0
+		for _, p := range f.conns["bob"].payloads {
+			if p[clusterMessageTypeKey] == snapshotMessageType {
+				n++
+			}
+		}
+		return n
+	}
+	for range guestCorrectionStrikes + 1 {
+		f.report("ann", f.expected()-30)
+	}
+	if f.member("ann").correctionCommand == nil {
+		t.Fatal("ann was not corrected")
+	}
+	before := snapshots()
+	if before == 0 {
+		t.Fatal("bob received no snapshots at all; the count is not measuring anything")
+	}
+	if err := f.s.reconcileRoom(t.Context(), f.repo.room.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshots(); got != before {
+		t.Fatalf("a correction sent bob %d snapshots", got-before)
 	}
 }

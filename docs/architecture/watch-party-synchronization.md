@@ -92,15 +92,26 @@ drift against it about twice a second. That loop only changes the rate; it
 never seeks. Rate and play state change when a command executes, never when it
 arrives, and users cannot change playback speed in a room.
 
-The server corrects a member only when two consecutive reports are more than 1
-second from the room, or its pause state differs, and repeats a correction at
-most every 10 seconds. A correction refreshes the client's reference; a client
-with the drift loop still closes up to 5 seconds by rate, and an older client
-without it is kept near the room. Reports within 1.5 seconds after a command's
-`execute_at` can describe the state before it, so they are neither corrected nor
-taken as the host's decision, unless the report's `command_id` names that
-command as the last one its client applied. A command sent to a member starts
-its count of out-of-sync reports over.
+The server corrects a member whose reports stay more than 1 second from the
+room, or whose pause state differs, and repeats a correction at most every 10
+seconds. A member already closing its drift by rate, within 5 seconds and
+closer than at its last report, is left to finish. A correction refreshes the
+client's reference; a client with the drift loop still closes up to 5 seconds
+by rate, and an older client without it is kept near the room. A command sent
+to a member starts this count over.
+
+Reports can trail the commands they follow. One sent within 1.5 seconds after
+a command's `execute_at` (or after the command was sent, if it went out late)
+is neither corrected nor taken as the host's decision, unless it names that
+command as the last one its client applied, reports the play state the command
+set, and the member was also sent the room's latest command. A report naming
+an older command than the member was last sent is treated the same way for up
+to 10 seconds. A host that has run its re-attach sync may pause or resume the
+room again even while it closes the rest of its drift by rate.
+
+Every command executes one lead from when it is sent, and never before the
+room's own latest command or anchor, so a member synced after the lead drops
+never starts ahead of the room.
 
 ## Buffering policy
 
