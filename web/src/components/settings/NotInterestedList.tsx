@@ -48,8 +48,17 @@ function NotInterestedRow({ item }: { item: BrowseItem }) {
  * way to put it back in recommendations.
  */
 export function NotInterestedList() {
-  const { data, isPending, isError, hasNextPage, fetchNextPage, isFetchingNextPage } =
-    useNotInterestedList();
+  const {
+    data,
+    isPending,
+    isError,
+    isFetchNextPageError,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    refetch,
+    isRefetching,
+  } = useNotInterestedList();
   const items = data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
@@ -68,30 +77,70 @@ export function NotInterestedList() {
           </div>
           {isPending ? (
             <p className="text-muted-foreground text-sm">Loading…</p>
-          ) : isError ? (
-            <p className="text-muted-foreground text-sm">
-              Couldn't load your Not interested titles.
-            </p>
-          ) : items.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              Nothing yet. Choose Not Interested from a movie or show's menu.
-            </p>
+          ) : !data ? (
+            <div className="flex items-center gap-3">
+              <p className="text-muted-foreground text-sm">
+                Couldn't load your Not interested titles.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isRefetching}
+                onClick={() => void refetch()}
+              >
+                Retry
+              </Button>
+            </div>
           ) : (
             <>
-              <ul className="divide-border divide-y">
-                {items.map((item) => (
-                  <NotInterestedRow key={item.content_id} item={item} />
-                ))}
-              </ul>
+              {items.length > 0 ? (
+                <ul className="divide-border divide-y">
+                  {items.map((item) => (
+                    <NotInterestedRow key={item.content_id} item={item} />
+                  ))}
+                </ul>
+              ) : (
+                !hasNextPage && (
+                  <p className="text-muted-foreground text-sm">
+                    Nothing yet. Choose Not Interested from a movie or show's menu.
+                  </p>
+                )
+              )}
+              {isError && !isFetchNextPageError && (
+                <div className="flex items-center gap-3">
+                  <p className="text-muted-foreground text-sm">
+                    Couldn't refresh this list; it may be out of date.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isRefetching}
+                    onClick={() => void refetch()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
               {hasNextPage && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={isFetchingNextPage}
-                  onClick={() => void fetchNextPage()}
-                >
-                  {isFetchingNextPage ? "Loading…" : "Show more"}
-                </Button>
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isFetchingNextPage}
+                    onClick={() => void fetchNextPage()}
+                  >
+                    {isFetchingNextPage
+                      ? "Loading…"
+                      : isFetchNextPageError
+                        ? "Retry loading more"
+                        : "Show more"}
+                  </Button>
+                  {isFetchNextPageError && !isFetchingNextPage && (
+                    <span className="text-muted-foreground text-sm">
+                      Couldn't load more titles.
+                    </span>
+                  )}
+                </div>
               )}
             </>
           )}

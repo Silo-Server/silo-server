@@ -226,3 +226,70 @@ func TestAversionInterestShare(t *testing.T) {
 		}
 	}
 }
+
+// clusterRowIDs returns the item IDs of persona p's cluster rows, by cluster
+// index, as built with no turned-away titles.
+func clusterRowIDs(r personaRows) map[int][]string {
+	out := map[int][]string{}
+	for _, row := range r.clusters {
+		out[row.ClusterIndex] = scoredItemIDs(row.Items)
+	}
+	return out
+}
+
+// When marks drop a dominant interest, the small interest left fetches again
+// for the slots it gained: the main row keeps its length rather than ending
+// where the small interest's first, small fetch ran out.
+func TestAversionRefillsTheMainRowAfterDroppingAnInterest(t *testing.T) {
+	c := newToyCatalog()
+	a := relevancePersonas(c)["A"]
+	before := buildPersonaRows(t, c, a)
+	clusters := clustersHeaviestFirst(before.store.clusters)
+	heavy, light := clusters[0], clusters[len(clusters)-1]
+	anchors := []mainRowAnchor{
+		{embedding: heavy.Embedding, weight: 9},
+		{embedding: light.Embedding, weight: 1},
+	}
+	if slots := allocateAnchorSlots([]float64{9, 1}, CacheCandidateLimit); anchorPoolFactor*slots[1] >= CacheCandidateLimit {
+		t.Fatalf("slots %v leave the light anchor a full row of candidates; the test needs it short", slots)
+	}
+	b, _, exclude := personaBuilder(t, c, a, func(*toyStore) {})
+	marked := clusterRowIDs(before)[heavy.ClusterIdx][:20]
+	b.aversion = &aversion{}
+	for _, id := range marked {
+		b.aversion.titles = append(b.aversion.titles, aversionTitle{embedding: c.byID[id].vec, weight: 1})
+	}
+	row, _, allAverted, err := b.anchoredRow(t.Context(), anchors, CacheCandidateLimit, append(exclude, marked...), catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allAverted {
+		t.Fatal("the light interest was turned away too; the test needs it kept")
+	}
+	if len(row) != CacheCandidateLimit {
+		t.Fatalf("composed row of %d after dropping the dominant interest, want %d", len(row), CacheCandidateLimit)
+	}
+}
+
+// A profile that turned away every interest gets no main row, rather than a
+// row around its averaged taste that would serve those interests again.
+func TestAversionDropsTheMainRowWhenEveryInterestIsTurnedAway(t *testing.T) {
+	c := newToyCatalog()
+	a := relevancePersonas(c)["A"]
+	var marked []string
+	for _, ids := range clusterRowIDs(buildPersonaRows(t, c, a)) {
+		marked = append(marked, ids[:min(len(ids), 25)]...)
+	}
+	b, _, exclude := personaBuilder(t, c, a, func(*toyStore) {})
+	b.aversion = &aversion{}
+	for _, id := range marked {
+		b.aversion.titles = append(b.aversion.titles, aversionTitle{embedding: c.byID[id].vec, weight: 1})
+	}
+	main, err := b.mainRow(t.Context(), 1, "p", CacheCandidateLimit, append(exclude, marked...), catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if main != nil {
+		t.Fatalf("main row of %d items after every interest was turned away, want none", len(main.Items))
+	}
+}

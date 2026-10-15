@@ -2,6 +2,11 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { toast } from "sonner";
 import type { BrowseItem } from "@/api/types";
 import { catalogItemFromV2 } from "@/api/v2/catalog";
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
 import { v2 } from "@/api/v2/request";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { notInterestedKeys } from "./keys";
@@ -109,19 +114,31 @@ export function useToggleNotInterested(itemId: string) {
     scheduleMediaSurfaceInvalidation(queryClient, { itemId, skipItemDetail: true });
   };
 
+  // Undo clears the mark as the profile that made it, whichever profile is
+  // active when it is clicked, and patches caches only while that profile is
+  // still the active one.
   const undo = useMutation({
     ...personalStateMutationOptions,
-    mutationFn: () =>
+    mutationFn: (authority: ProfileRequestContextSnapshot) =>
       v2("DELETE /api/v2/not-interested/{item_id}", {
         path: { item_id: itemId },
+        profileContext: authority,
         timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
       }),
-    onMutate: () => setDetailNotInterested(queryClient, itemId, false),
-    onError: () => {
-      setDetailNotInterested(queryClient, itemId, true);
+    onMutate: async (authority) => {
+      if (!isCapturedProfileAuthorityActive(authority)) return;
+      await cancelItemDetailQueries(queryClient, itemId);
+      setDetailNotInterested(queryClient, itemId, false);
+    },
+    onError: (_err, authority) => {
+      if (isCapturedProfileAuthorityActive(authority)) {
+        setDetailNotInterested(queryClient, itemId, true);
+      }
       toast.error("Failed to undo Not interested");
     },
-    onSettled: settle,
+    onSettled: (_data, _err, authority) => {
+      if (isCapturedProfileAuthorityActive(authority)) settle();
+    },
   });
 
   return useMutation({
@@ -137,23 +154,29 @@ export function useToggleNotInterested(itemId: string) {
             timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
           }),
     onMutate: async (currentlyMarked: boolean) => {
+      const authority = captureProfileRequestContext();
       await cancelItemDetailQueries(queryClient, itemId);
       setDetailNotInterested(queryClient, itemId, !currentlyMarked);
+      return { authority };
     },
     onError: (_err, currentlyMarked) => {
       setDetailNotInterested(queryClient, itemId, currentlyMarked);
       toast.error("Failed to update Not interested");
     },
-    onSuccess: (_data, currentlyMarked) => {
+    onSuccess: (_data, currentlyMarked, context) => {
       if (currentlyMarked) {
         toast.success("Back in your recommendations");
         return;
       }
       removeItemFromHomeSectionCaches(queryClient, itemId, NOT_INTERESTED_HIDING_SECTION_TYPES);
       bumpHomeRefreshSignal(queryClient);
-      toast.success("We won't recommend this", {
-        action: { label: "Undo", onClick: () => undo.mutate() },
-      });
+      const authority = context?.authority;
+      toast.success(
+        "We won't recommend this",
+        authority
+          ? { action: { label: "Undo", onClick: () => undo.mutate(authority) } }
+          : undefined,
+      );
     },
     onSettled: settle,
   });

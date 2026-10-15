@@ -191,7 +191,9 @@ func withoutMainRowItems(rows []ForYouRow, main []ScoredItem) []ForYouRow {
 // mainRowAnchors), whose every prefix holds each interest's share by weight;
 // any other, or one whose anchors find nothing, a row of the candidates
 // nearest its averaged taste vector, ranked by MMR, whose served window the
-// genre pass then shapes. The genre pass leaves a composed row alone: capping
+// genre pass then shapes. A profile that turned away every one of its
+// interests gets no main row (see anchoredRow). The genre pass leaves a
+// composed row alone: capping
 // a genre at half the window would cut an interest heavier than half the
 // profile below its share. Type supplements fill the rest of either row.
 func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (*ForYouRow, error) {
@@ -209,8 +211,14 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 
 	var row, pool []ScoredItem
 	if anchors := mainRowAnchors(clusters); len(anchors) > 0 {
-		if row, pool, err = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter); err != nil {
+		var allAverted bool
+		if row, pool, allAverted, err = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter); err != nil {
 			return nil, err
+		}
+		if allAverted {
+			// The profile turned away every interest; a row around the
+			// averaged taste vector would serve them all again.
+			return nil, nil
 		}
 	}
 	if len(row) == 0 {

@@ -99,14 +99,19 @@ func collaborativeCandidates(peers []peerLikes) map[string]collaborativeCandidat
 // similar taste profiles. Scores are weighted by the similarity of each peer
 // user to the requesting user. Items the target profile already rated, those
 // in its recommendation exclusion set, those filter does not admit and those
-// not of recommendableMediaTypes are filtered out before ranking. Applies MMR
-// re-ranking for diversity. Below the account floors it returns an empty list.
+// not of recommendableMediaTypes are filtered out before ranking, which also
+// ranks against the profile's turned-away titles. Applies MMR re-ranking for
+// diversity. Below the account floors it returns an empty list.
 func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get recommendation exclusions for user %d profile %s: %w", userID, profileID, err)
 	}
-	return e.similarUsersLiked(ctx, e.rowBuilder(), userID, profileID, limit, excluded, filter)
+	builder := e.rowBuilder()
+	if builder.aversion, err = e.loadAversion(ctx, userID, profileID, builder.now); err != nil {
+		return nil, fmt.Errorf("get turned-away titles for user %d profile %s: %w", userID, profileID, err)
+	}
+	return e.similarUsersLiked(ctx, builder, userID, profileID, limit, excluded, filter)
 }
 
 // similarUsersLiked is SimilarUsersLiked with the exclusion set given, ranked

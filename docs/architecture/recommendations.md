@@ -384,6 +384,9 @@ library sections, which scope the whole row to their libraries.
   anchor or cluster of weight `W` keeps `W / (W + 4 × Σ weights)` of its
   share, its main-row slots are re-split by the reduced weights, and under
   0.3 the anchor leaves the main row and the cluster row is cached empty.
+  The anchors left fetch again for the slots they gained, so the row keeps
+  its length. A profile whose every anchor leaves gets no main row: a row
+  around the averaged taste vector would serve those interests again.
   The pushes only reorder the pool, so rows keep their length. A profile
   with no turned-away title gets exactly the rows it would without the
   step. Rows are not built while the turned-away titles, or a pool's

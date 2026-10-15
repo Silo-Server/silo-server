@@ -445,7 +445,8 @@ function handleUserStateEvent(
       ? {
           itemId: payload.content_id,
           skipItemDetail: detailFullyPatched,
-          skipSimilarItems: true,
+          // A mark changes which titles More like this lists.
+          skipSimilarItems: payload.change !== "not_interested",
           knownRelatedIds,
         }
       : { skipSimilarItems: true },

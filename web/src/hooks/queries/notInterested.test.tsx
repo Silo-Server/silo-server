@@ -7,6 +7,7 @@ import type { HomeSectionItemsResponse } from "@/api/types";
 import { sectionKeys } from "./keys";
 
 const mocks = vi.hoisted(() => ({
+  activeProfile: "p-owner",
   fetchWithSession: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -15,6 +16,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/api/client", () => ({
   fetchWithSession: (...args: unknown[]) => mocks.fetchWithSession(...args),
   reportProfileUnverified: vi.fn(),
+  captureProfileRequestContext: () => ({
+    accessToken: "token",
+    authContextVersion: 1,
+    serverOrigin: "",
+    profileId: mocks.activeProfile,
+    profileToken: null,
+  }),
+  isCapturedProfileAuthorityActive: (snapshot: { profileId: string }) =>
+    snapshot.profileId === mocks.activeProfile,
 }));
 
 vi.mock("sonner", () => ({
@@ -59,6 +69,7 @@ describe("useToggleNotInterested", () => {
     mocks.fetchWithSession.mockReset();
     mocks.fetchWithSession.mockImplementation(() => Promise.resolve(noContent()));
     mocks.toastSuccess.mockReset();
+    mocks.activeProfile = "p-owner";
     mocks.toastError.mockReset();
     for (const sectionType of ["most_watched", "recommended_for_you", "continue_watching"]) {
       queryClient.setQueryData(sectionKeys.homeItems(sectionType), homeRow(sectionType));
@@ -93,6 +104,27 @@ describe("useToggleNotInterested", () => {
     expect((mocks.fetchWithSession.mock.calls[1] as [string, RequestInit])[1].method).toBe(
       "DELETE",
     );
+  });
+
+  it("undoes a mark as the profile that made it after a profile switch", async () => {
+    const { result } = renderHook(() => useToggleNotInterested("movie:heat"), { wrapper });
+    await act(() => result.current.mutateAsync(false));
+    const [, options] = mocks.toastSuccess.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ];
+
+    mocks.activeProfile = "p-other";
+    queryClient.setQueryData(sectionKeys.homeItems("most_watched"), homeRow("most_watched"));
+    act(() => options.action.onClick());
+    await waitFor(() => expect(mocks.fetchWithSession).toHaveBeenCalledTimes(2));
+
+    const [url, init] = mocks.fetchWithSession.mock.calls[1] as [string, RequestInit];
+    expect(url).toContain("/api/v2/not-interested/movie%3Aheat");
+    expect(init.method).toBe("DELETE");
+    expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("p-owner");
+    // The other profile's caches are left alone.
+    expect(rowIDs(queryClient, "most_watched")).toEqual(["movie:heat", "movie:other"]);
   });
 
   it("clears a mark without touching the rows", async () => {
