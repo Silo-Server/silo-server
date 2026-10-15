@@ -937,7 +937,7 @@ func (s *Server) router() chi.Router {
 	s.startIdleReaper()
 	r := chi.NewRouter()
 	r.Get("/api/v1/health", s.handleHealth)
-	// Unauthenticated, matching the API listener's own /metrics posture: a
+	// Unauthenticated, matching the main server's dedicated metrics listener: a
 	// scrape target that needs a credential is a scrape target that goes
 	// unmonitored, and the exposure is host resource counters, not media.
 	r.Method(http.MethodGet, "/metrics", promhttp.Handler())
@@ -1448,7 +1448,8 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 			}
 		}
 	}
-	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1, playback.TransportFeatureTrickplayExtractV1)
+	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
+		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }

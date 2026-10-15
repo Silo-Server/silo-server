@@ -19,12 +19,12 @@ func (s *PostgresUserStore) ListDeviceSettingsPage(ctx context.Context, opts use
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
-	args := []any{s.userID, opts.ProfileID}
-	sqlText := `SELECT d.profile_id,d.device_id,d.device_name,d.device_platform,d.last_seen_at,COALESCE(p.name,''),COALESCE((SELECT json_agg(k.key) FROM user_setting_values k WHERE k.user_id=d.user_id AND k.scope='profile_device' AND k.profile_id=d.profile_id AND k.device_id=d.device_id), '[]')
+	args := []any{s.userID, opts.ProfileID, opts.DeviceID}
+	sqlText := `SELECT d.profile_id,d.device_id,d.device_name,COALESCE(d.custom_name,''),d.device_platform,d.last_seen_at,COALESCE(p.name,''),COALESCE((SELECT json_agg(k.key) FROM user_setting_values k WHERE k.user_id=d.user_id AND k.scope='profile_device' AND k.profile_id=d.profile_id AND k.device_id=d.device_id), '[]')
  FROM user_devices d LEFT JOIN user_profiles p ON p.user_id=d.user_id AND p.id=d.profile_id
- WHERE d.user_id = $1 AND ($2='' OR d.profile_id=$2)`
+ WHERE d.user_id = $1 AND ($2='' OR d.profile_id=$2) AND ($3='' OR d.device_id=$3)`
 	if opts.After != nil {
-		sqlText += ` AND (d.last_seen_at < $3::timestamptz OR (d.last_seen_at = $3::timestamptz AND (d.profile_id,d.device_id) > ($4,$5)))`
+		sqlText += ` AND (d.last_seen_at < $4::timestamptz OR (d.last_seen_at = $4::timestamptz AND (d.profile_id,d.device_id) > ($5,$6)))`
 		args = append(args, opts.After.LastSeenAt, opts.After.ProfileID, opts.After.DeviceID)
 	}
 	sqlText += " ORDER BY d.last_seen_at DESC,d.profile_id,d.device_id LIMIT " + fmt.Sprintf("$%d", len(args)+1)
@@ -39,7 +39,7 @@ func (s *PostgresUserStore) ListDeviceSettingsPage(ctx context.Context, opts use
 		var entry userstore.DeviceSettingsEntry
 		var raw []byte
 		var lastSeen time.Time
-		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.DevicePlatform, &lastSeen, &entry.ProfileName, &raw); err != nil {
+		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.CustomName, &entry.DevicePlatform, &lastSeen, &entry.ProfileName, &raw); err != nil {
 			return nil, err
 		}
 		entry.LastSeenAt = lastSeen.UTC().Format(time.RFC3339Nano)
@@ -104,4 +104,15 @@ func (s *PostgresUserStore) RemoveDeviceSettings(ctx context.Context, profileID,
 		return nil, err
 	}
 	return keys, nil
+}
+
+func (s *PostgresUserStore) RenameDevice(ctx context.Context, profileID, deviceID, name string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE user_devices SET custom_name=NULLIF($4,'') WHERE user_id=$1 AND profile_id=$2 AND device_id=$3`, s.userID, profileID, deviceID, name)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return userstore.ErrDeviceNotFound
+	}
+	return nil
 }

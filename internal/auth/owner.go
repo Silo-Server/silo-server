@@ -134,6 +134,7 @@ func changesAccessPolicy(target *models.User, input models.UpdateUserInput) bool
 		changesOverride(input.MaxTranscodes, target.MaxTranscodes) ||
 		changesOverride(input.MaxRemoteStreamBitrateKbps, target.MaxRemoteStreamBitrateKbps) ||
 		changesOverride(input.MaxLocalStreamBitrateKbps, target.MaxLocalStreamBitrateKbps) ||
+		changesOverride(input.MaxProfiles, target.MaxProfiles) ||
 		changesOverride(input.TranscodeAllowed, target.TranscodeAllowed) ||
 		changesOverride(input.AudioTranscodeAllowed, target.AudioTranscodeAllowed) ||
 		changesOverride(input.DownloadAllowed, target.DownloadAllowed) ||

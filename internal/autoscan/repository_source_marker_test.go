@@ -440,8 +440,9 @@ func TestUpdateConnectionMarkerReset(t *testing.T) {
 				t.Fatalf("create source: %v", err)
 			}
 			t.Cleanup(func() { _ = repo.DeleteSource(ctx, failedFirst.ID) })
-			if err := repo.RecordError(ctx, failedFirst.ID, "connection refused"); err != nil {
-				t.Fatalf("record error: %v", err)
+			recorded, err := repo.RecordError(ctx, PollFailure{Source: failedFirst, Message: "connection refused"})
+			if err != nil || !recorded {
+				t.Fatalf("record error = %v, %v; want true, nil", recorded, err)
 			}
 
 			conn, err := repo.GetConnection(ctx, *bound.ConnectionID)

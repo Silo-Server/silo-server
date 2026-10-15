@@ -86,6 +86,12 @@ type UserStore interface {
 	MarkProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error
 	ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error
 	ClearProgress(ctx context.Context, profileID, mediaItemID string) error
+	// ClearResumePosition sets a visible resume position to 0 and reports
+	// whether there was one. It keeps the watched latch, the duration and
+	// watch history, never inserts a row, and stamps updated_at and event_at
+	// no earlier than at, so delta sync carries the change and an older
+	// provider resume point loses to it.
+	ClearResumePosition(ctx context.Context, profileID, mediaItemID string, at time.Time) (bool, error)
 	GetProgress(ctx context.Context, profileID, mediaItemID string) (*WatchProgress, error)
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]WatchProgress, error)
 	// ListProgressPage is the keyset form of ListProgress: the same status
@@ -137,10 +143,11 @@ type UserStore interface {
 	UpsertHomeDismissal(ctx context.Context, dismissal HomeItemDismissal) error
 	DeleteHomeDismissal(ctx context.Context, profileID, surface, mediaItemID string) error
 
-	// Favorites & Watchlist
-	AddFavorite(ctx context.Context, profileID, mediaItemID string) error
+	// Favorites & Watchlist. Each add and remove reports whether it changed
+	// a row: false for an item already on the list or already absent.
+	AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
-	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	ListFavorites(ctx context.Context, profileID string, limit, offset int) ([]Favorite, error)
 	// ListFavoritesPage is the keyset form of ListFavorites: ordered by
 	// (added_at DESC, media_item_id DESC), returning at most limit rows
@@ -151,9 +158,9 @@ type UserStore interface {
 	// GetFavorite answers the profile's favorite entry for the item, nil when
 	// the item is not a favorite.
 	GetFavorite(ctx context.Context, profileID, mediaItemID string) (*Favorite, error)
-	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
-	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	// ReplaceWatchlistOrder mirrors a provider's watchlist order: the given ids
 	// get sort_index 0..N-1 in order; all other rows reset to added_at ordering.
 	ReplaceWatchlistOrder(ctx context.Context, profileID string, orderedMediaItemIDs []string) error

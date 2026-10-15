@@ -48,6 +48,11 @@ type Request struct {
 	// the lowest CPU priority (nice 19) and in the idle I/O class; elsewhere it
 	// runs like any other request.
 	Background bool `json:"background,omitempty"`
+	// skipFrame replaces the keyframe -skip_frame value for a Sheets run
+	// once the input is probed, and lowDelay adds the decoder's low-delay
+	// mode; see keyframeSkipFor and keyframeLowDelayFor.
+	skipFrame string
+	lowDelay  bool
 }
 
 // Window is a contiguous span of the input, in media seconds.
@@ -57,6 +62,11 @@ type Window struct {
 	// KeyframesOnly decodes only video keyframes. It needs a video output
 	// (Stats); audio outputs still read every audio frame.
 	KeyframesOnly bool `json:"keyframes_only,omitempty"`
+	// referencePictures makes a Sheets window decode every reference
+	// picture and keep only the keyframes, so a decoder that drops
+	// keyframes over skipped pictures keeps its state whole. It is set only
+	// by the samples fallback, never sent to another node.
+	referencePictures bool
 }
 
 // Samples decodes, for each time, the video keyframe at or before it, and
@@ -198,12 +208,25 @@ func (r Request) Validate() error {
 		if err := r.Images.validate(); err != nil {
 			return err
 		}
+		if r.Images.ToneMap != nil && r.Images.ToneMap.Source != "" {
+			return errors.New("images keep their tone-map chains and take no source signal")
+		}
 	}
 	if r.Sheets != nil {
 		if r.Samples == nil || r.Stats != nil {
 			return errors.New("sheets need samples and no other output")
 		}
 		if err := r.Sheets.validate(); err != nil {
+			return err
+		}
+		run := *r.Sheets
+		if run.UseInputAspect {
+			// The probe sets the tile height, and samples checks the run
+			// again with it before any tile is decoded. Until then, only a
+			// run too large at any height is refused.
+			run.TileHeight = minSheetTile
+		}
+		if err := run.validateRun(len(r.Samples.Seconds)); err != nil {
 			return err
 		}
 	}
@@ -373,4 +396,52 @@ func countSet(values ...bool) int {
 
 func finite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// keyframeSkip returns skip, or for keyframeSkipFrame the probed codec's
+// own keyframe -skip_frame value (see keyframeSkipFor).
+func (r Request) keyframeSkip(skip string) string {
+	if skip == keyframeSkipFrame && r.skipFrame != "" {
+		return r.skipFrame
+	}
+	return skip
+}
+
+// keyframeInputArgs are the input options a Sheets run decodes with skip
+// under, before -i.
+func (r Request) keyframeInputArgs(skip string) []string {
+	args := []string{skipFrameOption, r.keyframeSkip(skip)}
+	if r.lowDelay {
+		args = append(args, "-flags:v", "+low_delay")
+	}
+	return args
+}
+
+// keyframeSkipFor returns the -skip_frame value that keeps codec's
+// keyframes, or "" for keyframeSkipFrame. Interlaced MPEG-2 often codes a
+// keyframe as an I field paired with a P field, which the decoder reports
+// as a P frame and "nokey" discards (one of 80 samples of a DVD-sourced
+// episode decoded). The MPEG-1/2 decoder honors only "noref" and "nokey"
+// ("nointra" acts as "noref"), so keeping the keyframe's P field means
+// decoding every P picture: about two and a half times the work of "nokey".
+// MPEG-1 has no field pictures, and "nokey" keeps its keyframes.
+func keyframeSkipFor(codec string) string {
+	if codec == "mpeg2video" {
+		return exactSkipFrame
+	}
+	return ""
+}
+
+// keyframeLowDelayFor reports whether codec's keyframes need the decoder's
+// low-delay mode. An MPEG-4 Part 2 decoder (XviD, DivX) holds each picture
+// back for B-frames that a keyframes-only read never sends, and releases it
+// with the next keyframe's time: every sample of a packed-bitstream AVI
+// showed the keyframe a whole GOP before its own, and the first had none.
+// Without B-frames to reorder, low delay hands each keyframe out at once.
+func keyframeLowDelayFor(codec string) bool {
+	switch codec {
+	case "mpeg4", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "msmpeg4":
+		return true
+	}
+	return false
 }

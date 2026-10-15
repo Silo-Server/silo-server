@@ -154,8 +154,8 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.BackdropImageTags = tags
 	}
 	// Advertise the logo as Jellyfin does, so clients that check ImageTags
-	// know it exists. Episodes carry no logo of their own; theirs belongs to
-	// the series.
+	// know it exists. Episodes carry no logo of their own; applySeriesImages
+	// points their ParentLogoItemId at the series instead.
 	if item.LogoURL != "" && item.Type != "episode" {
 		dto.ImageTags["Logo"] = m.imageTagSigner.Tag(
 			imageTagSeed(item.ContentID, "Logo", compatCardImageSize, item.LogoPath, "", item.UpdatedAt),
@@ -475,11 +475,15 @@ type seriesImageSet struct {
 	BackdropURL       string
 	BackdropPath      string
 	BackdropThumbhash string
+	LogoURL           string
+	LogoPath          string
 	UpdatedAt         time.Time
 }
 
 // applySeriesImages sets series/parent image tags on an episode DTO so clients
-// can display the series poster and backdrop in Continue Watching / Next Up.
+// can display the series poster, backdrop and logo in Continue Watching / Next
+// Up and the player. Jellyfin points an episode's ParentLogoItemId at its
+// series; clients read the show logo from there, never from the episode.
 func (m *mapper) applySeriesImages(dto *baseItemDTO, series seriesImageSet) {
 	if dto.SeriesID == "" {
 		return
@@ -503,6 +507,15 @@ func (m *mapper) applySeriesImages(dto *baseItemDTO, series seriesImageSet) {
 		dto.ParentBackdropItemID = dto.SeriesID
 		dto.ParentThumbImageTag = tag
 		dto.ParentThumbItemID = dto.SeriesID
+	}
+	if series.LogoURL != "" {
+		// Seeded as the series' own ImageTags["Logo"] is, so both name one
+		// cached image.
+		dto.ParentLogoItemID = dto.SeriesID
+		dto.ParentLogoImageTag = m.imageTagSigner.Tag(
+			imageTagSeed(series.ContentID, "Logo", compatCardImageSize, series.LogoPath, "", series.UpdatedAt),
+			series.LogoURL,
+		)
 	}
 }
 

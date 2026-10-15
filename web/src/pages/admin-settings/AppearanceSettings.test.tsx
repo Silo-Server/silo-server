@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const useSettingsFormMock = vi.fn();
+const brandingState = { storageAvailable: true };
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -15,7 +16,7 @@ vi.mock("@/hooks/useRestartKeys", () => ({
 
 vi.mock("@/hooks/useBranding", () => ({
   useBranding: () => ({
-    storageAvailable: true,
+    storageAvailable: brandingState.storageAvailable,
     wordmarkUrl: null,
     markUrl: null,
     faviconUrl: null,
@@ -25,28 +26,6 @@ vi.mock("@/hooks/useBranding", () => ({
 
 vi.mock("@/components/admin/BrandingAssetField", () => ({
   BrandingAssetField: ({ label }: { label: string }) => <div>{label}</div>,
-}));
-
-vi.mock("@/components/theme/TokenEditor", () => ({
-  TokenEditor: ({ onSetVar }: { onSetVar: (token: "primary", value: string) => void }) => (
-    <button type="button" onClick={() => onSetVar("primary", "#112233")}>
-      Set primary token
-    </button>
-  ),
-}));
-
-vi.mock("@/components/theme/RawCssEditor", () => ({
-  RawCssEditor: ({ value, onChange }: { value: string; onChange: (css: string) => void }) => (
-    <textarea
-      aria-label="Custom CSS editor"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    />
-  ),
-}));
-
-vi.mock("@/components/theme/ThemePreviewCard", () => ({
-  ThemePreviewCard: () => null,
 }));
 
 vi.mock("@/components/overlays/OverlayPreviewCard", () => ({
@@ -98,56 +77,48 @@ let form: ReturnType<typeof makeForm>;
 describe("AppearanceSettings", () => {
   beforeEach(() => {
     localStorage.clear();
+    brandingState.storageAvailable = true;
     form = makeForm();
     useSettingsFormMock.mockReset();
     useSettingsFormMock.mockImplementation(() => form);
   });
 
-  it("stages the accent color and its theme tokens instead of saving immediately", () => {
+  it("points unavailable uploads at artwork storage, not an S3 bucket", () => {
+    brandingState.storageAvailable = false;
+    render(<AppearanceSettings />);
+
+    expect(
+      screen.getByText(/Image uploads need artwork storage \(local disk or S3\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/public S3 bucket/)).not.toBeInTheDocument();
+  });
+
+  // The accent is the only color an admin picks: it is staged as the one
+  // branding key, with no token overrides or custom CSS beside it.
+  it("stages the accent color alone and offers no other theme controls", () => {
     render(<AppearanceSettings />);
 
     const keys = useSettingsFormMock.mock.calls[0]?.[0]?.keys as string[];
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "branding.accent_color",
-        "ui.admin_theme_vars",
-        "ui.admin_custom_css",
-        "overlays.enabled",
-        "defaults.card_overlays",
-      ]),
-    );
-    expect(keys).not.toContain("branding.server_name");
-    expect(keys).not.toContain("branding.login_subtitle");
-    expect(keys).not.toContain("branding.default_theme");
-    expect(keys).not.toContain("theme.catalog_url");
+    expect(keys).toEqual(["branding.accent_color", "overlays.enabled", "defaults.card_overlays"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Use accent #10b981" }));
 
     expect(form.save).not.toHaveBeenCalled();
+    expect(form.setValue).toHaveBeenCalledTimes(1);
     expect(form.setValue).toHaveBeenCalledWith("branding.accent_color", "#10b981");
-    expect(form.setValue).toHaveBeenCalledWith(
-      "ui.admin_theme_vars",
-      JSON.stringify({ primary: "#10b981", ring: "#10b981", "sidebar-primary": "#10b981" }),
-    );
+
+    expect(screen.queryByText("Custom CSS")).toBeNull();
+    expect(screen.queryByText("Individual colors and fonts")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reset to Cinema Dark/ })).toBeNull();
   });
 
-  // Like restoring badge defaults, the reset is a staged edit confirmed
-  // through the SaveBar.
-  it("stages a reset of accent, tokens and CSS back to Cinema Dark", () => {
-    form = makeForm({
-      "branding.accent_color": "#10b981",
-      "ui.admin_theme_vars": JSON.stringify({ primary: "#10b981", background: "#000000" }),
-      "ui.admin_custom_css": "body { color: red; }",
-    });
+  it("clears the accent with the default swatch", () => {
+    form = makeForm({ "branding.accent_color": "#10b981" });
     render(<AppearanceSettings />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Reset to Cinema Dark/ }));
-    expect(form.setValue).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use theme default accent" }));
 
     expect(form.setValue).toHaveBeenCalledWith("branding.accent_color", "");
-    expect(form.setValue).toHaveBeenCalledWith("ui.admin_theme_vars", "{}");
-    expect(form.setValue).toHaveBeenCalledWith("ui.admin_custom_css", "");
     expect(form.save).not.toHaveBeenCalled();
   });
 
@@ -170,20 +141,17 @@ describe("AppearanceSettings", () => {
     expect(form.setValue).not.toHaveBeenCalledWith("overlays.enabled", expect.anything());
   });
 
-  it("stages sanitized CSS while the editor keeps showing what was typed", () => {
+  it("lists every badge in view and stages a badge edit", () => {
     render(<AppearanceSettings />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Advanced · 2 settings/ }));
-    const editor = screen.getByRole("textbox", { name: "Custom CSS editor" });
-    fireEvent.change(editor, {
-      target: { value: '@import "https://example.invalid/x.css"; .card { color: red; }' },
-    });
+    expect(screen.queryByRole("button", { name: /^Advanced/ })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("switch", { name: "Show Resolution" });
+    const wasOn = toggle.getAttribute("aria-checked") === "true";
+    fireEvent.click(toggle);
 
-    expect(form.save).not.toHaveBeenCalled();
-    expect(form.setValue).toHaveBeenCalledWith(
-      "ui.admin_custom_css",
-      "/* [blocked @import] */ .card { color: red; }",
-    );
-    expect(editor).toHaveValue('@import "https://example.invalid/x.css"; .card { color: red; }');
+    expect(form.setValue).toHaveBeenCalledTimes(1);
+    const [key, value] = form.setValue.mock.calls[0] as [string, string];
+    expect(key).toBe("defaults.card_overlays");
+    expect(JSON.parse(value).items.resolution.enabled).toBe(!wasOn);
   });
 });

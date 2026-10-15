@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
+import { PageHeader } from "@/components/page/PageHeader";
 import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import { useOperationalLogs } from "@/hooks/queries/admin/logs";
@@ -240,49 +241,48 @@ export default function AdminActivity() {
   if (searchParams.get("view") === "preparations") {
     return <Navigate to="/admin/downloads?tab=preparation" replace />;
   }
-  if (isLoading) return <div className="text-muted-foreground p-8">Loading activity...</div>;
+  if (isLoading) return <div className="text-muted-foreground pb-8">Loading activity...</div>;
 
   return (
     <div className="space-y-5 lg:space-y-6">
-      {/* Header */}
-      <div className="page-header">
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <h1 className="page-title text-[clamp(2rem,4vw,3.25rem)]">Activity</h1>
+      <PageHeader
+        title="Activity"
+        subtitle={
+          sessions.length === 0
+            ? "No active streams"
+            : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${routeNodes.length} node${routeNodes.length !== 1 ? "s" : ""}`
+        }
+        actions={
+          <>
             {sessions.length > 0 && (
               <span className="live-badge flex items-center gap-1.5">
                 <Radio className="h-3 w-3" />
                 {sessions.length} live
               </span>
             )}
-          </div>
-          <p className="page-subtitle text-sm sm:text-base">
-            {sessions.length === 0
-              ? "No active streams"
-              : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${routeNodes.length} node${routeNodes.length !== 1 ? "s" : ""}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-w-[8.25rem] justify-center"
-            onClick={() => void refreshActivity({ manual: true })}
-            disabled={isManualRefreshPending}
-            aria-busy={isManualRefreshPending}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`} />
-            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
-          </Button>
-          <div className="min-w-[8.75rem] px-1 text-right">
-            <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-              Realtime Updates
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-[8.25rem] justify-center"
+              onClick={() => void refreshActivity({ manual: true })}
+              disabled={isManualRefreshPending}
+              aria-busy={isManualRefreshPending}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
+              />
+              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+            </Button>
+            <div className="min-w-[8.75rem] px-1 text-right">
+              <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+                Realtime Updates
+              </div>
+              <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
+              {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
             </div>
-            <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
-            {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* IP Lookup */}
       <details

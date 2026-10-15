@@ -1,4 +1,5 @@
 import { useState, useId, useMemo, useRef } from "react";
+import { flushSync } from "react-dom";
 import type { FormEvent, ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import type { AdminUser, CreateUserRequest } from "@/api/types";
@@ -21,9 +22,11 @@ import {
   policyDefaultSource,
   policyInheritHints,
   policyStateFromUser,
+  type LimitPolicyKey,
 } from "@/components/UserPolicyFields";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -221,6 +224,61 @@ function AdminUsersPage() {
           onError={setActionError}
         />
       )}
+      <PageHeader
+        title="Users"
+        subtitle="Manage access, defaults, and invite flow for the people using Silo."
+        actions={
+          <>
+            {serverSettings !== undefined && (
+              <Link
+                to="/admin/settings/sign-in"
+                className="inline-flex w-fit items-center gap-1 hover:opacity-80"
+              >
+                <Badge
+                  variant={signupsEnabled ? "outline" : "secondary"}
+                  className={
+                    signupsEnabled
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                      : undefined
+                  }
+                >
+                  {signupsEnabled ? "Public signups on" : "Public signups off"}
+                  <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                </Badge>
+              </Link>
+            )}
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/admin/access-groups">
+                <Settings2 className="mr-1 h-4 w-4" /> Access Groups
+              </Link>
+            </Button>
+            <Dialog
+              open={dialogOpen}
+              onOpenChange={(open) => {
+                if (formBusy.current || (open && !available)) return;
+                setDialogOpen(open);
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="mr-1 h-4 w-4" /> Add User
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Create User</DialogTitle>
+                </DialogHeader>
+                <CreateUserForm
+                  onBusy={(value) => {
+                    formBusy.current = value;
+                  }}
+                  onClose={() => setDialogOpen(false)}
+                />
+              </DialogContent>
+            </Dialog>
+          </>
+        }
+      />
       {actionError && <p role="alert">{actionError}</p>}
       {usersQuery.isError && (
         <div role="alert">
@@ -229,63 +287,6 @@ function AdminUsersPage() {
         </div>
       )}
       {!available && <p role="status">User administration is unavailable.</p>}
-      <div className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Users</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Manage access, defaults, and invite flow for the people using Silo.
-          </p>
-          {serverSettings !== undefined && (
-            <Link
-              to="/admin/settings/general"
-              className="inline-flex w-fit items-center gap-1 hover:opacity-80"
-            >
-              <Badge
-                variant={signupsEnabled ? "outline" : "secondary"}
-                className={
-                  signupsEnabled
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
-                    : undefined
-                }
-              >
-                {signupsEnabled ? "Public signups on" : "Public signups off"}
-                <ArrowRight className="h-3 w-3" aria-hidden="true" />
-              </Badge>
-            </Link>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/admin/access-groups">
-              <Settings2 className="mr-1 h-4 w-4" /> Access Groups
-            </Link>
-          </Button>
-          <Dialog
-            open={dialogOpen}
-            onOpenChange={(open) => {
-              if (formBusy.current || (open && !available)) return;
-              setDialogOpen(open);
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-1 h-4 w-4" /> Add User
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Create User</DialogTitle>
-              </DialogHeader>
-              <CreateUserForm
-                onBusy={(value) => {
-                  formBusy.current = value;
-                }}
-                onClose={() => setDialogOpen(false)}
-              />
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList variant="line" className="border-border w-full justify-start border-b">
@@ -729,7 +730,20 @@ function CreateUserForm({
   const [permissions, setPermissions] = useState<string[]>([PERMISSION_MARKER_EDIT]);
   // Policy fields inherit from the access group unless explicitly overridden.
   const [policy, setPolicy] = useState(() => policyStateFromUser(null));
-  const [maxProfiles, setMaxProfiles] = useState(5);
+  const [invalidLimitDrafts, setInvalidLimitDrafts] = useState<ReadonlyMap<LimitPolicyKey, string>>(
+    new Map(),
+  );
+  const [dialogTab, setDialogTab] = useState("account");
+  const formRef = useRef<HTMLFormElement>(null);
+  function handleInvalidLimitDraftChange(key: LimitPolicyKey, draft: string | undefined) {
+    setInvalidLimitDrafts((current) => {
+      if (current.get(key) === draft) return current;
+      const next = new Map(current);
+      if (draft === undefined) next.delete(key);
+      else next.set(key, draft);
+      return next;
+    });
+  }
   const usernameId = useId();
   const emailId = useId();
   const passwordId = useId();
@@ -737,7 +751,6 @@ function CreateUserForm({
   const roleId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
-  const maxProfilesId = useId();
   const accessGroupSelectId = useId();
   const createMutation = useCreateUser();
   // The group picker starts on the default group (undefined until picked),
@@ -785,6 +798,15 @@ function CreateUserForm({
       setError(INVALID_EMAIL_MESSAGE);
       return;
     }
+    // A cleared or half-typed limit is not in the policy state, which still
+    // holds the last valid value; saving now would send that instead.
+    if (invalidLimitDrafts.size > 0) {
+      // The Limits fields mount only once the tab has rendered, so render it
+      // now and then let the browser point at the invalid field.
+      flushSync(() => setDialogTab("limits"));
+      formRef.current?.reportValidity();
+      return;
+    }
     busy.current = true;
     onBusy(true);
     setError("");
@@ -797,7 +819,6 @@ function CreateUserForm({
         role,
         permissions,
         create_default_profile: createDefaultProfile,
-        max_profiles: maxProfiles,
         ...policyCreateFields(policy),
         ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
       };
@@ -813,7 +834,7 @@ function CreateUserForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
+    <form ref={formRef} onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
       {error && <p role="alert">{error}</p>}
       <label className="mb-3 flex items-center gap-2">
         <input
@@ -826,7 +847,7 @@ function CreateUserForm({
           " (unavailable; uncheck to create only the account)"}
       </label>
 
-      <Tabs defaultValue="account" className="min-h-0 flex-1">
+      <Tabs value={dialogTab} onValueChange={setDialogTab} className="min-h-0 flex-1">
         <TabsList variant="line" className="border-border mb-4 w-full justify-start border-b pb-1">
           <TabsTrigger value="account" className="flex-none px-1">
             Account
@@ -989,17 +1010,9 @@ function CreateUserForm({
               onChange={setPolicy}
               source={hintSource}
               effective={inheritHints}
+              invalidLimitDrafts={invalidLimitDrafts}
+              onInvalidLimitDraftChange={handleInvalidLimitDraftChange}
             />
-            <div className="space-y-1">
-              <Label htmlFor={maxProfilesId}>Max Profiles</Label>
-              <Input
-                id={maxProfilesId}
-                type="number"
-                min={1}
-                value={maxProfiles}
-                onChange={(e) => setMaxProfiles(Number(e.target.value))}
-              />
-            </div>
           </TabsContent>
         </div>
       </Tabs>

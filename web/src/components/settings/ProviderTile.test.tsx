@@ -1,22 +1,26 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ProviderTile, ProviderTileGrid } from "@/components/settings/ProviderTile";
 
 describe("ProviderTileGrid", () => {
-  it("stops at two columns so tile headers do not truncate the provider name", () => {
-    const { container } = render(
+  it("lists providers as rows, with the button on the provider's own line", () => {
+    render(
       <ProviderTileGrid>
-        <ProviderTile name="OpenSubtitles" tagline="Community subtitles" state="connected" />
+        <ProviderTile
+          name="OpenSubtitles"
+          tagline="Community subtitles"
+          state="not_connected"
+          primaryAction={{ label: "Connect", onClick: () => {} }}
+        />
       </ProviderTileGrid>,
     );
 
-    expect(screen.getByRole("group", { name: "OpenSubtitles" })).toBeInTheDocument();
-    expect(screen.getByText("Community subtitles")).toBeInTheDocument();
-    const grid = container.firstElementChild;
-    expect(grid).toHaveClass("sm:grid-cols-2");
-    expect(grid?.className).not.toMatch(/grid-cols-3/);
+    const row = screen.getByRole("group", { name: "OpenSubtitles" });
+    expect(row).toHaveClass("provider-row");
+    expect(within(row).getByText("Community subtitles")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Connect" })).toBeInTheDocument();
   });
 });
 

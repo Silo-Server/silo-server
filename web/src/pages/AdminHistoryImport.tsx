@@ -30,6 +30,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1490,15 +1491,11 @@ function AdminHistoryImportPage() {
   if (sourcesError && sources.length === 0)
     return <p role="alert">Saved servers could not be loaded.</p>;
   return (
-    <div className="page-shell space-y-8 py-4 sm:py-6">
-      <div className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">History Import</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Import watch history from external servers into Silo user profiles.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-8 pb-4 sm:pb-6">
+      <PageHeader
+        title="History Import"
+        subtitle="Import watch history from external servers into Silo user profiles."
+      />
 
       {/* Source selector */}
       <SourceBar

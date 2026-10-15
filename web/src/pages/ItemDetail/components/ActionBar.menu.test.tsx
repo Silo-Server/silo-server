@@ -73,7 +73,7 @@ describe("ActionBar marker re-detection", () => {
     }
     expect(within(dialog).getByRole("link", { name: "Change marker settings" })).toHaveAttribute(
       "href",
-      "/admin/settings/library",
+      "/admin/settings/playback",
     );
   });
 
@@ -256,6 +256,42 @@ describe("ActionBar shuffle", () => {
 
     await userEvent.click(screen.getByTitle("More"));
     expect(screen.queryByRole("menuitem", { name: "Shuffle" })).toBeNull();
+  });
+});
+
+describe("ActionBar reset progress", () => {
+  it("offers Reset Progress after Play from Beginning and runs it", async () => {
+    const onResetProgress = vi.fn();
+    render(
+      <MemoryRouter>
+        <ActionBar
+          contentId="movie-1"
+          playHref="/watch/movie-1"
+          playLabel="Resume"
+          restartHref="/watch/movie-1?restart=1"
+          onResetProgress={onResetProgress}
+        />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(labels.indexOf("Reset Progress")).toBe(labels.indexOf("Play from Beginning") + 1);
+    await userEvent.click(screen.getByRole("menuitem", { name: "Reset Progress" }));
+
+    expect(onResetProgress).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("leaves Reset Progress out without a resume position", async () => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="movie-1" playHref="/watch/movie-1" />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.queryByRole("menuitem", { name: "Reset Progress" })).toBeNull();
   });
 });
 

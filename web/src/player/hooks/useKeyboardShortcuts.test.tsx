@@ -48,3 +48,30 @@ it("toggles fullscreen with F", () => {
   fireEvent.keyDown(document.body, { key: "F" });
   expect(toggleFullscreen).toHaveBeenCalledTimes(2);
 });
+
+it("leaves Space to a focused player menu item", () => {
+  const handlePlayPause = vi.fn();
+  renderHook(() =>
+    useKeyboardShortcuts(
+      { current: document.createElement("video") },
+      vi.fn(),
+      handlePlayPause,
+      { back: vi.fn(), forward: vi.fn() },
+      vi.fn(),
+      vi.fn(),
+      undefined,
+      true,
+    ),
+  );
+  const menu = document.createElement("div");
+  menu.setAttribute("role", "menu");
+  const item = document.createElement("button");
+  menu.appendChild(item);
+  document.body.appendChild(menu);
+
+  expect(fireEvent.keyDown(item, { key: " " })).toBe(true);
+  expect(handlePlayPause).not.toHaveBeenCalled();
+  fireEvent.keyDown(document.body, { key: " " });
+  expect(handlePlayPause).toHaveBeenCalledOnce();
+  menu.remove();
+});

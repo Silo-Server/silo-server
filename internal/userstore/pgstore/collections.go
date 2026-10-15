@@ -299,6 +299,9 @@ func (s *PostgresUserStore) deleteCollection(ctx context.Context, id string, exp
 		return fmt.Errorf("beginning transaction for collection delete: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.lockCollectionRow(ctx, tx, id); err != nil {
+		return err
+	}
 	if err := s.checkCollectionRevision(ctx, tx, id, expected); err != nil {
 		return err
 	}
@@ -353,6 +356,9 @@ func (s *PostgresUserStore) reorderCollectionItems(ctx context.Context, collecti
 		return fmt.Errorf("beginning collection item reorder: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.lockCollectionRow(ctx, tx, collectionID); err != nil {
+		return err
+	}
 	if err := s.checkCollectionRevision(ctx, tx, collectionID, expected); err != nil {
 		return err
 	}
@@ -415,6 +421,13 @@ func (s *PostgresUserStore) reorderCollections(ctx context.Context, profileID st
 	defer tx.Rollback(ctx) //nolint:errcheck
 	if err := s.checkCollectionOrderRevision(ctx, tx, expected); err != nil {
 		return err
+	}
+	// The bulk update below locks rows in plan order; lock them in id order
+	// first, as a profile delete does, so the two cannot deadlock.
+	if _, err := tx.Exec(ctx,
+		`SELECT 1 FROM user_personal_collections WHERE user_id = $1 AND creator_profile_id = $2 AND native ORDER BY id FOR UPDATE`,
+		s.userID, profileID); err != nil {
+		return fmt.Errorf("locking collections for reorder: %w", err)
 	}
 
 	var updated, total int

@@ -314,6 +314,11 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// LocalTLSPin is the pin of the key the API listener presents over TLS on
+	// its own port (internal/lantls), published in the connections document.
+	// Empty when the listener does not answer TLS (tests).
+	LocalTLSPin string
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -351,6 +356,18 @@ func (deps Dependencies) themeRouter(playbackHandler *handlers.PlaybackHandler) 
 		router.Planner = deps.NodePlanner
 	}
 	return router
+}
+
+// recommendationReader builds a cache-backed recommendations reader. Its
+// reads queue profile refreshes only while recommendations are enabled.
+func (deps Dependencies) recommendationReader(repo *recommendations.Repo, ratingsRepo *catalog.RatingsRepo) *recommendations.Reader {
+	var refresh recommendations.ReadRefreshRequester
+	if deps.RecWorker != nil {
+		refresh = deps.RecWorker
+	}
+	return recommendations.NewReader(repo, ratingsRepo, refresh, deps.UserStoreProvider).
+		WithUserStoreOutsidePostgres(deps.Config != nil && deps.Config.UserDB.Backend == "sqlite").
+		WithPersonalRows(deps.Config == nil || deps.Config.Recommendations.Enabled)
 }
 
 // invalidateNodeCapabilities drops every cached view of one node's hardware.
@@ -1128,11 +1145,22 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.UserStoreProvider != nil {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
+		if accessGroupStore != nil {
+			profileHandler.AccessGroups = accessGroupStore
+		}
 		profileHandler.EventsHub = deps.EventsHub
+		if deps.RecWorker != nil {
+			profileHandler.RecWorker = deps.RecWorker
+		}
 		if deps.DB != nil {
 			// Drops live in Postgres whichever store holds the profile.
 			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
 			profileHandler.WatchlistTitlesPurger = watchlistTitles
+			// So do ratings and recommendation state; the Postgres store
+			// already deleted them with the profile.
+			profileHandler.RecommendationsPurger = recommendations.NewRepo(deps.DB)
+			// Ebook reading data lives there too.
+			profileHandler.EbookReaderPurger = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		}
 		if watchlistRequestWithdrawer != nil {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
@@ -1201,6 +1229,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
 		settingsHandler.DeviceSightings = deviceSightings
 		settingsHandler.EventsHub = deps.EventsHub
+		// A profile's hidden libraries are part of the scope its
+		// recommendations are built under.
+		if deps.RecWorker != nil {
+			settingsHandler.RecWorker = deps.RecWorker
+		}
 		if settingsRepo != nil {
 			settingsHandler.SetServerSettings(settingsRepo)
 		}
@@ -1212,6 +1245,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 			settingValuesHandler.DeviceSightings = deviceSightings
 			settingValuesHandler.EventsHub = deps.EventsHub
+			if deps.RecWorker != nil {
+				settingValuesHandler.RecWorker = deps.RecWorker
+			}
 			// Household management: a primary profile acting for another
 			// profile on its own account. Without the token service a
 			// PIN-locked primary cannot widen rather than widening unguarded.
@@ -1254,28 +1290,26 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 	// Build ratings handler if both repo and itemRepo are available.
 	var ratingsHandler *handlers.RatingsHandler
-	var recsRepoForStale *recommendations.Repo
 	if ratingsRepo != nil && itemRepo != nil {
 		ratingsHandler = handlers.NewRatingsHandler(ratingsRepo, itemRepo)
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalRatingEventDispatcher); ok {
 			ratingsHandler.SetLocalRatingEventDispatcher(dispatcher)
 		}
-		if deps.DB != nil {
-			recsRepoForStale = recommendations.NewRepo(deps.DB)
-			ratingsHandler.SetProfileStaler(recsRepoForStale)
-			ratingsHandler.SetProfileRefreshRequester(deps.RecWorker)
-			if personalDataHandler != nil {
-				personalDataHandler.SetProfileStaler(recsRepoForStale)
-				personalDataHandler.SetProfileRefreshRequester(deps.RecWorker)
-			}
-			if progressHandler != nil {
-				progressHandler.SetProfileStaler(recsRepoForStale)
-				progressHandler.SetProfileRefreshRequester(deps.RecWorker)
-			}
-			if itemsHandler != nil {
-				itemsHandler.SetProfileStaler(recsRepoForStale)
-				itemsHandler.SetProfileRefreshRequester(deps.RecWorker)
-			}
+	}
+	// Ratings, favorites, watchlist, progress and watched-state writes rebuild
+	// the profile's recommendations when they are enabled.
+	if deps.RecWorker != nil {
+		if ratingsHandler != nil {
+			ratingsHandler.SetSignalsChangedNotifier(deps.RecWorker)
+		}
+		if personalDataHandler != nil {
+			personalDataHandler.SetSignalsChangedNotifier(deps.RecWorker)
+		}
+		if progressHandler != nil {
+			progressHandler.SetSignalsChangedNotifier(deps.RecWorker)
+		}
+		if itemsHandler != nil {
+			itemsHandler.SetSignalsChangedNotifier(deps.RecWorker)
 		}
 	}
 
@@ -1410,9 +1444,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if subtitleRepo != nil {
 			playbackHandler.SubtitleRepo = subtitleRepo
 		}
-		if recsRepoForStale != nil {
-			playbackHandler.SetProfileStaler(recsRepoForStale)
-			playbackHandler.SetProfileRefreshRequester(deps.RecWorker)
+		if deps.RecWorker != nil {
+			playbackHandler.SetSignalsChangedNotifier(deps.RecWorker)
 		}
 		playbackHandler.StartCapabilityWarmupV3(deps.AppContext)
 		// The health sweep sees a node's capability hash change long before this
@@ -1620,9 +1653,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.OnServerSettingUpdated != nil {
 			adminHandler.OnServerSettingUpdated = deps.OnServerSettingUpdated
 		}
+		if deps.RecWorker != nil {
+			adminHandler.RecWorker = deps.RecWorker
+		}
 	}
 	if accessGroupStore != nil {
 		accessGroupHandler = handlers.NewAccessGroupHandler(accessGroupStore)
+		if deps.RecWorker != nil {
+			accessGroupHandler.RecWorker = deps.RecWorker
+		}
 	}
 	if deps.DB != nil {
 		jobRepo := adminjob.NewRepository(deps.DB)
@@ -1634,7 +1673,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		} else if api := blobstore.NewBucketAPI(deps.Blobs.Operational); api != nil {
 			privateStore = api
 		}
-		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB)), jobRepo, privateStore)
+		catalogSeedService := catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB))
+		if deps.Config != nil {
+			catalogSeedService.WithEmbeddingModel(deps.Config.Recommendations.EmbeddingModel)
+		}
+		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogSeedService, jobRepo, privateStore)
 		catalogSeedHandler.RealtimeHub = deps.RealtimeHub
 		adminJobsHandler = handlers.NewAdminJobsHandler(jobRepo, privateStore)
 		adminJobsHandler.CancelRegistry = deps.AdminJobCancelRegistry
@@ -1677,6 +1720,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.Scanner,
 			deps.FolderRepo,
 		)
+		if deps.RecWorker != nil {
+			adminSplitHandler.SetRecommendationStaler(recommendations.NewRepo(deps.DB))
+		}
 	}
 
 	// Build admin image handler for poster/backdrop/logo selection.
@@ -1959,7 +2005,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			sectionFetcher.RecommendationRepo = recommendations.NewRepo(deps.DB)
 			if ratingsRepo != nil {
-				sectionFetcher.RecommendationReader = recommendations.NewReader(sectionFetcher.RecommendationRepo, ratingsRepo, deps.RecWorker, deps.UserStoreProvider)
+				sectionFetcher.RecommendationReader = deps.recommendationReader(sectionFetcher.RecommendationRepo, ratingsRepo)
 			}
 		}
 		sections.InstallRecipeDelegate(sectionFetcher)
@@ -2164,7 +2210,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		var recsReader *recommendations.Reader
 		if deps.DB != nil {
 			recsRepo = recommendations.NewRepo(deps.DB)
-			recsReader = recommendations.NewReader(recsRepo, ratingsRepo, deps.RecWorker, deps.UserStoreProvider)
+			recsReader = deps.recommendationReader(recsRepo, ratingsRepo)
 		}
 		recsHandler = handlers.NewRecommendationsHandler(deps.Recommender, recsReader, deps.UserStoreProvider, ratingsRepo, recsRepo, deps.Recommender != nil)
 		if deps.DB != nil {
@@ -2318,12 +2364,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.EventsHub != nil {
 			historyImportSvc.AddObserver(evt.NewHistoryImportObserver(deps.EventsHub))
 		}
+		if deps.RecWorker != nil {
+			historyImportSvc.SetSignalsChangedNotifier(deps.RecWorker)
+		}
 		historyImportSvc.StartBackgroundWork()
 		historyImportHandler = handlers.NewHistoryImportHandler(historyImportSvc)
 		if deps.UserStoreProvider != nil {
 			webhookSyncSvc := webhooksync.NewService(webhooksync.NewRepository(deps.DB, deps.SecretCipher), historyRepo, deps.UserStoreProvider)
 			webhookSyncSvc.SetLocalNetworkAccess(localNetworkAccess)
 			webhookSyncSvc.SetStableIdentityResolver(historyIdentity)
+			if deps.RecWorker != nil {
+				webhookSyncSvc.SetSignalsChangedNotifier(deps.RecWorker)
+			}
 			webhookSyncHandler = handlers.NewWebhookSyncHandler(webhookSyncSvc)
 		}
 	}
@@ -2422,12 +2474,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		v2deps.ServerIdentity = serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
 	}
-	v2deps.ServerConnections = apiv2.ServerConnections{PublicURL: func() string {
-		if cfg := deps.CurrentConfig(); cfg != nil {
-			return cfg.Server.PublicURL
-		}
-		return ""
-	}}
+	v2deps.ServerConnections = apiv2.ServerConnections{
+		PublicURL: func() string {
+			if cfg := deps.CurrentConfig(); cfg != nil {
+				return cfg.Server.PublicURL
+			}
+			return ""
+		},
+		LocalURL: func() string {
+			if cfg := deps.CurrentConfig(); cfg != nil {
+				return cfg.Server.LocalURL
+			}
+			return ""
+		},
+		LocalTLSPin: deps.LocalTLSPin,
+	}
 	if deps.NetworkAccess != nil {
 		v2deps.ServerConnections.Providers = deps.NetworkAccess.Status
 	}
@@ -2516,11 +2577,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.ObserveThemeAudio = func(method string, handler http.Handler) http.Handler {
 		return observeNative(deps.StreamTelemetry, method, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", handler.ServeHTTP)
 	}
+	v2deps.ObserveDownloadDelivery = func(method, pattern string, handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, method, pattern, handler.ServeHTTP)
+	}
 
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
-		v2deps.ThemeOverrides = themeHandler
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService
@@ -3882,6 +3945,24 @@ func newChiRouter(deps Dependencies) chi.Router {
 						metadataAIHandler.ItemAccess = itemRepo
 						metadataAIHandler.SeasonLookup = seasonRepo
 						metadataAIHandler.EpisodeLookup = episodeRepo
+						if deps.FolderRepo != nil {
+							metadataAIHandler.Libraries = deps.FolderRepo
+						} else if deps.DB != nil {
+							metadataAIHandler.Libraries = catalog.NewFolderRepository(deps.DB)
+						}
+						if detailSvc != nil {
+							metadataAIHandler.Pending = detailSvc
+						}
+						metadataAIHandler.ItemLibraries = itemRepo
+						// The budget caps provider spend, so like the profile
+						// PIN limiter it counts in Redis whenever Redis is
+						// configured, whatever ratelimit.backend says, and per
+						// node only without Redis.
+						if deps.RedisClient != nil {
+							metadataAIHandler.Limiter = ratelimit.NewRedisLimiter(deps.RedisClient)
+						} else {
+							metadataAIHandler.Limiter = ratelimit.NewMemoryLimiter()
+						}
 						r.With(householdProfileGate).Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
 					}
 				} else {

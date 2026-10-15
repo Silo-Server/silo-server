@@ -1,8 +1,8 @@
 # Outbound address guard
 
 Some features make Silo send HTTP requests to an address a user typed or a
-third party supplied: history import, webhook sync, notification webhooks, and
-collection posters set from a URL.
+third party supplied: history import, webhook sync, notification webhooks,
+collection posters set from a URL, and artwork URLs from metadata providers.
 The server sits on a network the user may not: a household LAN, or a cluster
 with its database, cache, transcode nodes, and a cloud metadata endpoint. An
 unchecked address lets anyone who can sign in probe that network from the
@@ -95,8 +95,10 @@ it. See [Notifications](notifications.md#trust-model-and-ssrf-guard).
 ## Artwork downloads
 
 Artwork Silo downloads on its own (metadata refresh, image-cache jobs, person
-images) comes from Public addresses only (`imagecache`). An image an admin
-applies through `POST /api/v2/admin/items/{id}/images/apply` (and its v1
+images) comes from Public addresses only (`imagecache`). Provider artwork URLs
+are untrusted, so these downloads use the netguard transport too, checked on
+every dial and redirect; the cache keeps no address list of its own. An image
+an admin applies through `POST /api/v2/admin/items/{id}/images/apply` (and its v1
 counterpart) is trusted with the local network, like the import sources an
 admin configures. That covers a URL the admin typed and one picked from the
 provider list, since the server cannot tell them apart. The handler marks the
@@ -104,6 +106,30 @@ request with `netguard.WithPrivateAccess`, and the download uses the netguard
 transport, which still refuses Blocked addresses on every dial and redirect.
 Only acting admins reach that route, so this does not widen what any other
 account can make the server request.
+
+## Serving catalog artwork
+
+Catalog artwork is not always in Silo's own storage. A provider URL stays on
+the item until its image-cache job succeeds, and stays for good when caching
+fails, so an address the cache refused can still be served. Three places fetch
+catalog artwork themselves instead of handing the URL to the client: the
+jellycompat image proxy (Infuse, and requests with a proxy tag), offline
+download artwork, and collection collages. Each uses a netguard transport, and
+`artworkurl.FetchContext` decides the trust per URL:
+
+- A direct URL to the artwork store is trusted with the local network, where
+  S3-compatible storage often runs. It must match the scheme, host, and path
+  prefix (bucket and key prefix, or the read endpoint's path) of the URLs the
+  store's `DirectURL` issues, with no dot segments in its path.
+- Any other URL is Public only. A refused proxy request answers 502 and a
+  refused download asset reports the asset not found, so clients don't retry
+  it; neither returns anything from the refused address.
+
+Local artwork storage serves signed `/api/` routes on this server, which the
+proxy redirects to and downloads read from the store, so neither goes over
+HTTP. A provider URL under the artwork store's own prefix is trusted like a
+store URL. Trust carries across redirects, as for every netguard request, so
+the store is relied on not to redirect into the local network.
 
 ## Collection artwork
 
@@ -121,9 +147,8 @@ client (`newCollectionImageClient` in `internal/api/handlers`):
   operations) are trusted with the local network, like an image an admin
   applies to an item. Only acting admins reach those routes.
 - **Collages.** A collage fetches its titles' posters as the server resolved
-  them, usually from its own artwork storage, which may be on the local
-  network. No request supplies those URLs, so the fetch is trusted with the
-  local network.
+  them. Those are artwork store URLs or uncached provider URLs, trusted as
+  described in [Serving catalog artwork](#serving-catalog-artwork).
 
 Blocked addresses stay refused in all three cases, on every dial and redirect.
 
@@ -135,3 +160,9 @@ answer, as it could from its own machine. In a container with bridge
 networking the server cannot see the host's public address, so a request to
 it is not recognized as the server's own. Run the container behind a firewall
 that also applies to traffic from the container if that matters.
+
+A resolver that answers public names with addresses netguard classes as
+Private makes those hosts unreachable for untrusted requests, provider artwork
+downloads included. Two setups do this: proxy routers in fake-IP DNS mode,
+which answer from `198.18.0.0/15`, and DNS64 on an IPv6-only network, which
+answers IPv4-only hosts with `64:ff9b::/96` addresses.

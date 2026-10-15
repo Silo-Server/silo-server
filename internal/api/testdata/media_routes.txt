@@ -194,6 +194,9 @@ GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
 PUT /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation	non-media
+GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel	non-media
 GET /api/v2/admin/literary-works/items/{content_id}/candidates	non-media
 POST /api/v2/admin/literary-works/link	non-media
 POST /api/v2/admin/literary-works/matches/confirm	non-media
@@ -284,6 +287,7 @@ PATCH /api/v2/admin/rate-limits/config	non-media
 GET /api/v2/admin/rate-limits/status	non-media
 GET /api/v2/admin/rating-sources	non-media
 GET /api/v2/admin/rating-sources/capabilities	non-media
+POST /api/v2/admin/recommendations/embeddings/reset	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
@@ -524,6 +528,7 @@ GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
 DELETE /api/v2/devices/{device_id}	non-media
+PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
 GET /api/v2/diagnostics/capabilities	non-media
 POST /api/v2/diagnostics/reports	non-media
@@ -558,13 +563,13 @@ PATCH /api/v2/downloads/subscriptions/{id}	non-media
 DELETE /api/v2/downloads/{id}	non-media
 PATCH /api/v2/downloads/{id}	non-media
 GET /api/v2/downloads/{id}/artwork/{kind}	non-media
-GET /api/v2/downloads/{id}/file	non-media
-HEAD /api/v2/downloads/{id}/file	non-media
-GET /api/v2/downloads/{id}/file-proxy	non-media
-HEAD /api/v2/downloads/{id}/file-proxy	non-media
+GET /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+GET /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
 GET /api/v2/downloads/{id}/manifest	non-media
 POST /api/v2/downloads/{id}/prepare	non-media
-GET /api/v2/downloads/{id}/subtitles/{ref}	non-media
+GET /api/v2/downloads/{id}/subtitles/{ref}	media	transfer	viewer_egress	false	true
 GET /api/v2/ebooks/{content_id}/annotations	non-media
 POST /api/v2/ebooks/{content_id}/annotations	non-media
 DELETE /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
@@ -616,6 +621,8 @@ GET /api/v2/libraries/skipped-roots	non-media
 GET /api/v2/libraries/stale-ids	non-media
 POST /api/v2/libraries/stale-ids/{content_id}/rematch	non-media
 GET /api/v2/libraries/unmatched-items	non-media
+DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
+PUT /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
 DELETE /api/v2/libraries/{id}	non-media
 PATCH /api/v2/libraries/{id}	non-media
 POST /api/v2/libraries/{id}/check-mount	non-media
@@ -736,6 +743,8 @@ DELETE /api/v2/profiles/{id}/avatar	non-media
 PUT /api/v2/profiles/{id}/avatar	non-media
 POST /api/v2/profiles/{id}/verify-pin	non-media
 GET /api/v2/progress	non-media
+GET /api/v2/progress/capabilities	non-media
+DELETE /api/v2/progress/{media_item_id}/position	non-media
 GET /api/v2/ratings	non-media
 DELETE /api/v2/ratings/{item_id}	non-media
 GET /api/v2/ratings/{item_id}	non-media
@@ -836,7 +845,6 @@ GET /api/v2/system/connections	non-media
 GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
-GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
 GET /api/v2/user/libraries	non-media
@@ -1461,6 +1469,9 @@ GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
 PUT /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation	non-media
+GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel	non-media
 GET /api/v2/admin/literary-works/items/{content_id}/candidates	non-media
 POST /api/v2/admin/literary-works/link	non-media
 POST /api/v2/admin/literary-works/matches/confirm	non-media
@@ -1551,6 +1562,7 @@ PATCH /api/v2/admin/rate-limits/config	non-media
 GET /api/v2/admin/rate-limits/status	non-media
 GET /api/v2/admin/rating-sources	non-media
 GET /api/v2/admin/rating-sources/capabilities	non-media
+POST /api/v2/admin/recommendations/embeddings/reset	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
@@ -1791,6 +1803,7 @@ GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
 DELETE /api/v2/devices/{device_id}	non-media
+PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
 GET /api/v2/diagnostics/capabilities	non-media
 POST /api/v2/diagnostics/reports	non-media
@@ -1825,13 +1838,13 @@ PATCH /api/v2/downloads/subscriptions/{id}	non-media
 DELETE /api/v2/downloads/{id}	non-media
 PATCH /api/v2/downloads/{id}	non-media
 GET /api/v2/downloads/{id}/artwork/{kind}	non-media
-GET /api/v2/downloads/{id}/file	non-media
-HEAD /api/v2/downloads/{id}/file	non-media
-GET /api/v2/downloads/{id}/file-proxy	non-media
-HEAD /api/v2/downloads/{id}/file-proxy	non-media
+GET /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+GET /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
 GET /api/v2/downloads/{id}/manifest	non-media
 POST /api/v2/downloads/{id}/prepare	non-media
-GET /api/v2/downloads/{id}/subtitles/{ref}	non-media
+GET /api/v2/downloads/{id}/subtitles/{ref}	media	transfer	viewer_egress	false	true
 GET /api/v2/ebooks/{content_id}/annotations	non-media
 POST /api/v2/ebooks/{content_id}/annotations	non-media
 DELETE /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
@@ -1883,6 +1896,8 @@ GET /api/v2/libraries/skipped-roots	non-media
 GET /api/v2/libraries/stale-ids	non-media
 POST /api/v2/libraries/stale-ids/{content_id}/rematch	non-media
 GET /api/v2/libraries/unmatched-items	non-media
+DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
+PUT /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
 DELETE /api/v2/libraries/{id}	non-media
 PATCH /api/v2/libraries/{id}	non-media
 POST /api/v2/libraries/{id}/check-mount	non-media
@@ -2003,6 +2018,8 @@ DELETE /api/v2/profiles/{id}/avatar	non-media
 PUT /api/v2/profiles/{id}/avatar	non-media
 POST /api/v2/profiles/{id}/verify-pin	non-media
 GET /api/v2/progress	non-media
+GET /api/v2/progress/capabilities	non-media
+DELETE /api/v2/progress/{media_item_id}/position	non-media
 GET /api/v2/ratings	non-media
 DELETE /api/v2/ratings/{item_id}	non-media
 GET /api/v2/ratings/{item_id}	non-media
@@ -2103,7 +2120,6 @@ GET /api/v2/system/connections	non-media
 GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
-GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
 GET /api/v2/user/libraries	non-media

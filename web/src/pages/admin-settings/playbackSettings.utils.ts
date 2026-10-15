@@ -90,14 +90,19 @@ export function hasUsableTranscodeNode(nodes: StreamNode[] | undefined): boolean
   return (nodes ?? []).some((node) => node.type === "transcode" && node.enabled && node.healthy);
 }
 
-/** True when a node can extract seek previews with its current capability snapshot. */
+/**
+ * True when a node can extract seek previews with its current capability
+ * snapshot. Mirrors the server's rule (internal/trickplay makesTrickplay): only
+ * a node advertising trickplay_extract_v2, which reads the tone-map source
+ * signal, is sent work.
+ */
 export function hasUsableTrickplayNode(nodes: StreamNode[] | undefined): boolean {
   return (nodes ?? []).some(
     (node) =>
       node.type === "transcode" &&
       node.enabled &&
       node.healthy &&
-      node.capabilities?.transport_features?.includes("trickplay_extract_v1") &&
+      node.capabilities?.transport_features?.includes("trickplay_extract_v2") &&
       (node.advertised_capabilities_hash === undefined ||
         (node.advertised_capabilities_hash !== "" &&
           node.advertised_capabilities_hash === node.capabilities_hash)),

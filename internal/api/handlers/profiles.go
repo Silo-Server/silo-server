@@ -29,6 +29,9 @@ type ProfileHandler struct {
 	UserRepo       interface {
 		GetByID(ctx context.Context, id int) (*models.User, error)
 	}
+	// AccessGroups resolves the profile limit an account inherits from its
+	// access group. Nil resolves every account as ungrouped.
+	AccessGroups   access.GroupPolicyProvider
 	ProfileTokens  *access.ProfileTokenService
 	AvatarStore    profileAvatarStore
 	AvatarResolver artworkurl.Resolver
@@ -50,6 +53,18 @@ type ProfileHandler struct {
 	WatchlistTitlesPurger interface {
 		PurgeProfile(ctx context.Context, userID int, profileID string) error
 	}
+	// EbookReaderPurger removes a deleted profile's ebook reading progress,
+	// reader settings and annotations, which live in Postgres whichever
+	// store holds the profile.
+	EbookReaderPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
+	// RecommendationsPurger removes a deleted profile's ratings, taste
+	// profile and cached recommendations, which live in Postgres whichever
+	// store holds the profile.
+	RecommendationsPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
 	// WatchlistRequestWithdrawer cancels the unsent requests a deleted
 	// profile's watchlist made, as removing each title would.
 	WatchlistRequestWithdrawer interface {
@@ -63,6 +78,9 @@ type ProfileHandler struct {
 	// ratelimit.ProfilePINPolicy). The router always sets it; nil, as in
 	// tests that do not exercise the limit, allows every attempt.
 	PINAttempts *ratelimit.AttemptLimiter
+	// RecWorker is told when an update changes a profile's access scope, so
+	// its recommendations are rebuilt under the new one. Optional.
+	RecWorker SignalsChangedNotifier
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -396,9 +414,15 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		if err != nil {
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
 		}
-		if user != nil && user.MaxProfiles >= 1 && len(existingProfiles) >= user.MaxProfiles {
-			return none, apiError(http.StatusConflict, "profile_limit_reached",
-				fmt.Sprintf("This account has reached its profile limit (%d)", user.MaxProfiles))
+		if user != nil {
+			effective, err := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
+			if err != nil {
+				return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
+			}
+			if limit := effective.MaxProfiles; limit >= 1 && len(existingProfiles) >= limit {
+				return none, apiError(http.StatusConflict, "profile_limit_reached",
+					fmt.Sprintf("This account has reached its profile limit (%d)", limit))
+			}
 		}
 	}
 
@@ -654,6 +678,9 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		h.PINAttempts.Reset(resetCtx, ratelimit.ProfilePINKey(userID, profileID))
 		cancel()
 	}
+	if profileScopeSet(req) {
+		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
+	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
 		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
 			slog.WarnContext(ctx, "profile avatar cleanup failed after update", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
@@ -793,6 +820,20 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		defer cancel()
 		if purgeErr := h.WatchlistTitlesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
 			slog.WarnContext(ctx, "profile watchlist-title purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.EbookReaderPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.EbookReaderPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile ebook reader purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.RecommendationsPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.RecommendationsPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile recommendation purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 	return nil

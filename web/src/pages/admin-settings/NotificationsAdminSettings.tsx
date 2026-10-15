@@ -2,12 +2,9 @@ import { useId, useMemo, useRef, useState } from "react";
 import { MobilePushPrivacyDisclosure } from "@/components/notifications/MobilePushPrivacyDisclosure";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  Bell,
-  BookOpen,
   Bot,
   Check,
   ChevronDown,
-  ChevronRight,
   Copy,
   ExternalLink,
   Inbox,
@@ -17,12 +14,11 @@ import {
   Megaphone,
   MonitorSmartphone,
   RadioTower,
-  Rss,
   TriangleAlert,
   Webhook,
-  Workflow,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import {
   captureProfileRequestContext,
@@ -36,7 +32,6 @@ import {
   clearNotificationRelay,
   type NotificationRelayRegistration,
 } from "@/api/v2/notificationRelay";
-import { TestEmailRow } from "@/components/admin/EmailTestRow";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -65,8 +60,14 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
-import { SettingField } from "./SettingField";
+import { SettingField, SettingFieldStatus } from "./SettingField";
 import ServerNotificationChannels from "./ServerNotificationChannels";
+
+/**
+ * Operator kill switches for the whole pipeline. Both default on and only
+ * come off to stop a flood or chase a problem, so they sit under Advanced.
+ */
+const PIPELINE_KEYS = ["notifications.release_events_enabled", "notifications.fanout_enabled"];
 
 /** Batching and flood control; all advanced. */
 const FANOUT_KEYS = [
@@ -82,6 +83,9 @@ const RETENTION_KEYS = [
   "notifications.retention.event_days",
 ];
 
+/** The page's one foot-of-page Advanced area. */
+const PROCESSING_KEYS = [...PIPELINE_KEYS, ...FANOUT_KEYS, ...RETENTION_KEYS];
+
 /** Personal webhook limits and the SSRF escape hatch; all advanced. */
 const WEBHOOK_ADVANCED_KEYS = [
   "notifications.webhooks.max_per_profile",
@@ -89,21 +93,40 @@ const WEBHOOK_ADVANCED_KEYS = [
   "notifications.webhooks.allow_private_destinations",
 ];
 
-/**
- * Outbound mail. The SMTP server used to be its own tab; it now lives in the
- * Email channel card because "email notifications don't arrive" is always an
- * SMTP question.
- */
-const EMAIL_KEYS = [
-  "email.enabled",
-  "email.smtp_host",
-  "email.smtp_port",
-  "email.smtp_security",
-  "email.smtp_username",
-  "email.smtp_password",
-  "email.from_address",
-  "email.from_name",
+const PUSH_DELIVERY_KEYS = [
+  "notifications.apple_push_delivery_enabled",
+  "notifications.android_push_delivery_enabled",
 ];
+
+/**
+ * Rows in the relay card's Advanced section: the per-platform switches (the
+ * card's own switch flips both), the relay URL, and the deployment ID. Only the
+ * switches go through the settings form.
+ */
+const PUSH_RELAY_ADVANCED_KEYS = [
+  ...PUSH_DELIVERY_KEYS,
+  "notifications.push_relay_url",
+  "notifications.push_relay_deployment_id",
+];
+
+const EMAIL_CHANNEL_ADVANCED_KEYS = ["notifications.email.digest_hour"];
+
+const DISCORD_ADVANCED_KEYS = [
+  "notifications.discord.poster_mode",
+  "notifications.discord.digest_hour",
+];
+
+const SERVER_CHANNELS_ADVANCED_KEYS = [
+  "notifications.server_channels.batch_seconds",
+  "notifications.server_channels.mention_requesters",
+];
+
+/**
+ * Read for the Email channel's status line only. The mail server itself is
+ * edited on the Email page, since invitations and password resets send
+ * through it too.
+ */
+const MAIL_STATUS_KEYS = ["email.enabled", "email.smtp_host", "email.from_address"];
 
 /**
  * The Discord application. Saved by its own card inside the Discord channel
@@ -113,13 +136,11 @@ const EMAIL_KEYS = [
 const DISCORD_APP_KEYS = ["discord.client_id", "discord.client_secret", "discord.bot_token"];
 
 const KEYS = [
-  "notifications.release_events_enabled",
-  "notifications.fanout_enabled",
+  ...PIPELINE_KEYS,
   "notifications.ui_enabled",
   "notifications.webhooks_enabled",
   "notifications.web_push_enabled",
-  "notifications.apple_push_delivery_enabled",
-  "notifications.android_push_delivery_enabled",
+  ...PUSH_DELIVERY_KEYS,
   // Relay lifecycle fields are read for status but are never edited through
   // the shared settings form; credential endpoints replace them atomically.
   "notifications.push_relay_url",
@@ -131,16 +152,14 @@ const KEYS = [
   ...WEBHOOK_ADVANCED_KEYS,
   "notifications.email_enabled",
   "notifications.email.allow_per_episode",
-  "notifications.email.digest_hour",
+  ...EMAIL_CHANNEL_ADVANCED_KEYS,
   "notifications.discord_enabled",
   "notifications.discord.allow_per_episode",
-  "notifications.discord.digest_hour",
-  "notifications.discord.poster_mode",
+  ...DISCORD_ADVANCED_KEYS,
   "notifications.server_channels_enabled",
-  "notifications.server_channels.batch_seconds",
-  "notifications.server_channels.mention_requesters",
+  ...SERVER_CHANNELS_ADVANCED_KEYS,
   ...RETENTION_KEYS,
-  ...EMAIL_KEYS,
+  ...MAIL_STATUS_KEYS,
   ...DISCORD_APP_KEYS,
 ];
 
@@ -163,7 +182,7 @@ function Chip({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap",
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
         tone === "neutral" && "border-border/70 text-muted-foreground",
         tone === "positive" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
         tone === "warning" && "border-amber-500/30 bg-amber-500/10 text-amber-500",
@@ -174,42 +193,16 @@ function Chip({
   );
 }
 
-function ZoneHeading({ title }: { title: string }) {
+/**
+ * A labelled cluster inside an Advanced disclosure. One element per cluster
+ * means the disclosure's child rule draws a single hairline between clusters,
+ * with the rows keeping their own inside each.
+ */
+function AdvancedCluster({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <h3 className="text-muted-foreground px-1 text-xs font-semibold tracking-[0.22em] uppercase">
-      {title}
-    </h3>
-  );
-}
-
-interface PipelineStageProps {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  /** Visually de-emphasize the stage when an upstream stage is switched off. */
-  dimmed?: boolean;
-  control: React.ReactNode;
-}
-
-function PipelineStage({ icon: Icon, title, description, dimmed, control }: PipelineStageProps) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <div className={cn("min-w-0 transition-opacity", dimmed && "opacity-50")}>
-        <div className="flex items-center gap-2">
-          <Icon className="text-muted-foreground h-4 w-4 shrink-0" />
-          <span className="text-sm font-medium">{title}</span>
-        </div>
-        <p className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</p>
-      </div>
-      {control}
-    </div>
-  );
-}
-
-function PipelineArrow() {
-  return (
-    <div className="hidden items-center md:flex">
-      <ChevronRight className="text-muted-foreground/50 h-4 w-4" />
+    <div>
+      <SettingsSubheading>{label}</SettingsSubheading>
+      {children}
     </div>
   );
 }
@@ -225,10 +218,14 @@ interface ChannelCardProps {
 }
 
 /**
- * One delivery channel: an always-visible header row (icon, title, status
- * chips, enable switch) with settings tucked behind an expandable body.
+ * One delivery channel as a settings row: icon, title, status chips and the
+ * enable switch, with the channel's setup in an expandable body below it.
  * Settings stay editable while the channel is off so admins can configure
  * before enabling.
+ *
+ * The body is the channel's main content (credentials, destinations, the
+ * privacy disclosure), not an Advanced tier, so it is this card's own
+ * expand/collapse; tuning inside it sits behind an `AdvancedSection`.
  */
 function ChannelCard({
   icon: Icon,
@@ -266,8 +263,8 @@ function ChannelCard({
   );
 
   return (
-    <div className="surface-panel overflow-hidden rounded-2xl border-0">
-      <div className="flex items-center gap-3 p-4 sm:px-5">
+    <div>
+      <div className="flex items-center gap-3 py-3.5">
         {expandable ? (
           <button
             type="button"
@@ -300,7 +297,7 @@ function ChannelCard({
       {expandable && open && (
         <div
           id={bodyId}
-          className="border-border/60 animate-in fade-in-0 slide-in-from-top-1 border-t px-4 pt-1 pb-4 duration-200 sm:px-5"
+          className="animate-in fade-in-0 slide-in-from-top-1 pb-4 pl-[3.25rem] duration-200"
         >
           {children}
         </div>
@@ -347,7 +344,9 @@ function RegisterRelayRow({
       : `Expires ${expiration.toLocaleString()}; Silo renews automatically.`
     : configured
       ? "Expiration unknown; Silo refreshes the credential on its next renewal."
-      : "No relay credential is registered.";
+      : reregistrationRequired
+        ? "No relay credential is registered."
+        : "Not registered yet; Silo registers on its first push.";
 
   const registerRelay = async () => {
     if (inFlight.current) return;
@@ -489,59 +488,38 @@ function discordInviteUrl(clientId: string): string {
 }
 
 function DiscordSetupGuide() {
-  const [open, setOpen] = useState(false);
-  const guideId = useId();
-
   return (
-    <div className="py-2">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={guideId}
-        onClick={() => setOpen((current) => !current)}
-        className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium transition-colors"
-      >
-        <BookOpen className="h-3.5 w-3.5" />
-        {open ? "Hide setup guide" : "Show setup guide"}
-        <ChevronDown
-          className={cn("h-3.5 w-3.5 transition-transform duration-200", open && "rotate-180")}
-        />
-      </button>
-      {open && (
-        <div
-          id={guideId}
-          className="text-muted-foreground animate-in fade-in-0 mt-3 space-y-1.5 text-xs leading-relaxed duration-200"
-        >
-          <p>Set up at discord.com/developers/applications:</p>
-          <ol className="list-decimal space-y-1.5 pl-4">
-            <li>Create an application (or open an existing one).</li>
-            <li>
-              OAuth2 page: copy the <strong>Client ID</strong>, reset and copy the{" "}
-              <strong>Client Secret</strong>, and under Redirects add
-              <code className="bg-muted mx-1 rounded px-1">
-                {"<public URL>"}/api/v2/notifications/discord/link/callback
-              </code>
-              using this server&apos;s public URL — it must match exactly.
-            </li>
-            <li>
-              Bot page: reset and copy the <strong>Token</strong>. Leave all Privileged Gateway
-              Intents (Presence, Server Members, Message Content) <strong>off</strong> — Silo never
-              connects to the gateway; it only sends DMs.
-            </li>
-            <li>
-              Keep <strong>Requires OAuth2 Code Grant</strong> off, or the invite link below
-              won&apos;t work. Enable <strong>Public Bot</strong> only if someone other than the
-              application owner will be inviting it.
-            </li>
-            <li>
-              Paste the three credentials below, save, then use the invite button to add the bot to
-              your Discord server. It needs <strong>no role permissions</strong> — membership alone
-              lets it DM members, and users must share that server with the bot to receive DMs.
-            </li>
-          </ol>
-        </div>
-      )}
-    </div>
+    <AdvancedSection id="notifications.discord.setup-guide" title="Setup guide">
+      <div className="text-muted-foreground space-y-1.5 py-3 text-xs leading-relaxed">
+        <p>Set up at discord.com/developers/applications:</p>
+        <ol className="list-decimal space-y-1.5 pl-4">
+          <li>Create an application (or open an existing one).</li>
+          <li>
+            OAuth2 page: copy the <strong>Client ID</strong>, reset and copy the{" "}
+            <strong>Client Secret</strong>, and under Redirects add
+            <code className="bg-muted mx-1 rounded px-1">
+              {"<public URL>"}/api/v2/notifications/discord/link/callback
+            </code>
+            using this server&apos;s public URL — it must match exactly.
+          </li>
+          <li>
+            Bot page: reset and copy the <strong>Token</strong>. Leave all Privileged Gateway
+            Intents (Presence, Server Members, Message Content) <strong>off</strong> — Silo never
+            connects to the gateway; it only sends DMs.
+          </li>
+          <li>
+            Keep <strong>Requires OAuth2 Code Grant</strong> off, or the invite link below
+            won&apos;t work. Enable <strong>Public Bot</strong> only if someone other than the
+            application owner will be inviting it.
+          </li>
+          <li>
+            Paste the three credentials below, save, then use the invite button to add the bot to
+            your Discord server. It needs <strong>no role permissions</strong> — membership alone
+            lets it DM members, and users must share that server with the bot to receive DMs.
+          </li>
+        </ol>
+      </div>
+    </AdvancedSection>
   );
 }
 
@@ -819,7 +797,6 @@ export default function NotificationsAdminSettings() {
     return (
       <div className="space-y-6">
         <Skeleton className="h-7 w-44" />
-        <Skeleton className="h-36 w-full rounded-2xl" />
         <div className="space-y-3">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-[72px] w-full rounded-2xl" />
@@ -894,9 +871,10 @@ export default function NotificationsAdminSettings() {
   const allowPrivate =
     form.getValue("notifications.webhooks.allow_private_destinations") === "true";
 
-  // Mail readiness mirrors the server's rule (shared with the overview tile):
-  // the outbound switch, a server, AND a sender address — legacy rows and
-  // single-key writes can store enabled-without-sender, which cannot send.
+  // Mail readiness mirrors the server's rule (shared with the Dashboard's
+  // attention notice): the outbound switch, a server, AND a sender address —
+  // legacy rows and single-key writes can store enabled-without-sender, which
+  // cannot send.
   const mailReady = emailReady(
     form.getValue("email.enabled") === "true",
     form.getValue("email.smtp_host"),
@@ -911,91 +889,40 @@ export default function NotificationsAdminSettings() {
     form.sensitiveConfigured.includes("discord.client_secret") &&
     form.sensitiveConfigured.includes("discord.bot_token");
 
-  const channelStates = [
-    uiOn,
-    webPushOn,
-    mobilePushOn,
-    emailOn,
-    discordOn,
-    webhooksOn,
-    serverChannelsOn,
-  ];
-  const enabledChannelCount = channelStates.filter(Boolean).length;
-
   const failingServerChannels = (serverChannels ?? []).filter(
     (channel) =>
       channel.last_failure_at != null &&
       (channel.last_success_at == null || channel.last_failure_at > channel.last_success_at),
   ).length;
 
+  // The kill switches live under Advanced, so a pipeline someone switched off
+  // has to say so up here: every channel below is idle while it is.
   const pausedMessage = !releaseEventsOn
-    ? "New content is not being recorded, so nothing can be sent."
+    ? "New content is not being recorded, so nothing can be sent. Turn it back on under Processing."
     : !fanoutOn
-      ? "Sending is paused; new content waits in the queue."
+      ? "Sending is paused; new content waits in the queue. Turn it back on under Processing."
       : null;
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader className="mb-6" title="Notifications" />
+      <SettingsPageHeader title="Notifications" />
 
       <div className="flex-1 space-y-5">
-        {/* ── Pipeline: the master switches, framed as the flow they gate ── */}
-        <div className="surface-panel rounded-2xl border-0 p-4 sm:p-5">
-          <div className="text-muted-foreground mb-4 text-xs font-semibold tracking-[0.22em] uppercase">
-            Pipeline
+        {pausedMessage && (
+          <div
+            role="status"
+            className="flex items-start gap-2 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-xs text-amber-600 dark:text-amber-400"
+          >
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>{pausedMessage}</p>
           </div>
-          <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr_auto_1fr] md:gap-3">
-            <PipelineStage
-              icon={Rss}
-              title="Notice new content"
-              description="Record new items during library scans."
-              control={
-                <Switch
-                  checked={releaseEventsOn}
-                  onCheckedChange={setToggle("notifications.release_events_enabled")}
-                  aria-label="Enable release events"
-                />
-              }
-            />
-            <PipelineArrow />
-            <PipelineStage
-              icon={Workflow}
-              title="Work out who wants it"
-              description="Match each item against everyone's preferences."
-              dimmed={!releaseEventsOn}
-              control={
-                <Switch
-                  checked={fanoutOn}
-                  onCheckedChange={setToggle("notifications.fanout_enabled")}
-                  aria-label="Enable fanout"
-                />
-              }
-            />
-            <PipelineArrow />
-            <PipelineStage
-              icon={Bell}
-              title="Send it"
-              description="Hand queued messages to the channels below."
-              dimmed={!releaseEventsOn || !fanoutOn}
-              control={
-                <Chip>
-                  {enabledChannelCount}/{channelStates.length} channels on
-                </Chip>
-              }
-            />
-          </div>
-          {pausedMessage && (
-            <div className="mt-4 flex items-start gap-2 text-xs text-amber-500">
-              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <p>{pausedMessage}</p>
-            </div>
-          )}
-        </div>
+        )}
 
         {/* ── Delivery channels ── */}
-        <section className="space-y-3">
-          <ZoneHeading title="Delivery Channels" />
-
+        <FieldGroup
+          label="Delivery channels"
+          description="Where notifications go. A channel's setup stays editable while it is off, so it can be ready before it is turned on."
+        >
           <ChannelCard
             icon={Inbox}
             title="In-App"
@@ -1027,53 +954,66 @@ export default function NotificationsAdminSettings() {
               ) : pushRelayAPIKeyReady ? (
                 <Chip tone="positive">Relay configured</Chip>
               ) : (
-                <Chip tone={mobilePushOn ? "warning" : "neutral"}>Relay registration required</Chip>
+                // A server that never registered does so on its first send
+                // (internal/notifications/push_sender.go), so a fresh install
+                // has nothing to fix here.
+                <Chip>Registers on first send</Chip>
               )
             }
           >
             <div className="settings-field-list">
               <MobilePushPrivacyDisclosure />
-              <SettingField
-                label="Apple Push (APNs)"
-                type="toggle"
-                value={String(applePushOn)}
-                onChange={(value) =>
-                  form.setValue("notifications.apple_push_delivery_enabled", value)
+              <AdvancedSection
+                id="notifications.push-relay"
+                count={PUSH_RELAY_ADVANCED_KEYS.length}
+                forceOpen={
+                  anyDirty(PUSH_DELIVERY_KEYS) ||
+                  pushRelayURLEdited ||
+                  pushRelayReregistrationRequired
                 }
-                restartRequired={needsRestart("notifications.apple_push_delivery_enabled")}
-              />
-              <SettingField
-                label="Android Push (FCM)"
-                type="toggle"
-                value={String(androidPushOn)}
-                onChange={(value) =>
-                  form.setValue("notifications.android_push_delivery_enabled", value)
-                }
-                restartRequired={needsRestart("notifications.android_push_delivery_enabled")}
-              />
-              <SettingField
-                label="Relay URL"
-                description="Saved when you register below."
-                type="text"
-                value={pushRelayURL}
-                onChange={(v) => setPushRelayURLDraft(v)}
-                restartRequired={needsRestart("notifications.push_relay_url")}
-              />
-              <RegisterRelayRow
-                key={notificationScope()}
-                relayURL={pushRelayURL}
-                deploymentID={pushRelayDeploymentID}
-                keyPrefix={pushRelayKeyPrefix}
-                expiresAt={pushRelayExpiresAt}
-                reregistrationRequired={pushRelayReregistrationRequired}
-                urlEdited={pushRelayURLEdited}
-                onRegistered={(submittedRelayURL) =>
-                  setPushRelayURLDraft((currentDraft) => {
-                    const currentURL = currentDraft ?? savedPushRelayURL;
-                    return currentURL === submittedRelayURL ? null : currentDraft;
-                  })
-                }
-              />
+              >
+                <SettingField
+                  label="Apple Push (APNs)"
+                  type="toggle"
+                  value={String(applePushOn)}
+                  onChange={(value) =>
+                    form.setValue("notifications.apple_push_delivery_enabled", value)
+                  }
+                  restartRequired={needsRestart("notifications.apple_push_delivery_enabled")}
+                />
+                <SettingField
+                  label="Android Push (FCM)"
+                  type="toggle"
+                  value={String(androidPushOn)}
+                  onChange={(value) =>
+                    form.setValue("notifications.android_push_delivery_enabled", value)
+                  }
+                  restartRequired={needsRestart("notifications.android_push_delivery_enabled")}
+                />
+                <SettingField
+                  label="Relay URL"
+                  description="Saved when you register below."
+                  type="text"
+                  value={pushRelayURL}
+                  onChange={(v) => setPushRelayURLDraft(v)}
+                  restartRequired={needsRestart("notifications.push_relay_url")}
+                />
+                <RegisterRelayRow
+                  key={notificationScope()}
+                  relayURL={pushRelayURL}
+                  deploymentID={pushRelayDeploymentID}
+                  keyPrefix={pushRelayKeyPrefix}
+                  expiresAt={pushRelayExpiresAt}
+                  reregistrationRequired={pushRelayReregistrationRequired}
+                  urlEdited={pushRelayURLEdited}
+                  onRegistered={(submittedRelayURL) =>
+                    setPushRelayURLDraft((currentDraft) => {
+                      const currentURL = currentDraft ?? savedPushRelayURL;
+                      return currentURL === submittedRelayURL ? null : currentDraft;
+                    })
+                  }
+                />
+              </AdvancedSection>
             </div>
           </ChannelCard>
 
@@ -1085,92 +1025,34 @@ export default function NotificationsAdminSettings() {
             onEnabledChange={setToggle("notifications.email_enabled")}
             chips={
               <>
-                {mailReady ? (
-                  <Chip tone="positive">Mail server set up</Chip>
-                ) : (
-                  <Chip tone={emailOn ? "warning" : "neutral"}>Mail server not set up</Chip>
-                )}
+                {/* Neutral either way: a server that runs without mail on
+                    purpose is not broken, and the Dashboard lists what is. */}
+                <Chip tone={mailReady ? "positive" : "neutral"}>
+                  {mailReady ? "Mail server set up" : "Mail server not set up"}
+                </Chip>
                 <Chip>
                   Summary at {digestHourLabel(form.getValue("notifications.email.digest_hour"))}
                 </Chip>
               </>
             }
           >
-            <SettingsSubheading>Mail Server</SettingsSubheading>
             <div className="settings-field-list">
-              <SettingField
-                label="Send email from this server"
-                description="Covers every email Silo sends, not just notifications."
-                type="toggle"
-                value={form.getValue("email.enabled")}
-                onChange={(v) => form.setValue("email.enabled", v)}
-                restartRequired={needsRestart("email.enabled")}
-              />
-              <SettingField
-                label="From address"
-                hint="silo@example.com"
-                value={form.getValue("email.from_address")}
-                onChange={(v) => form.setValue("email.from_address", v)}
-                restartRequired={needsRestart("email.from_address")}
-              />
-              <SettingField
-                label="From name"
-                hint="Silo"
-                value={form.getValue("email.from_name")}
-                onChange={(v) => form.setValue("email.from_name", v)}
-                restartRequired={needsRestart("email.from_name")}
-              />
-              <SettingField
-                label="Mail server address"
-                hint="smtp.example.com"
-                value={form.getValue("email.smtp_host")}
-                onChange={(v) => form.setValue("email.smtp_host", v)}
-                restartRequired={needsRestart("email.smtp_host")}
-              />
-              <SettingField
-                label="Port"
-                description="587 for STARTTLS (typical), 465 for implicit TLS"
-                type="number"
-                value={form.getValue("email.smtp_port")}
-                onChange={(v) => form.setValue("email.smtp_port", v)}
-                restartRequired={needsRestart("email.smtp_port")}
-              />
-              <SettingField
-                label="Encryption"
-                description="Use whatever your mail provider documents."
-                type="select"
-                options={[
-                  { value: "starttls", label: "STARTTLS" },
-                  { value: "tls", label: "TLS (implicit)" },
-                  { value: "none", label: "None (insecure)" },
-                ]}
-                value={form.getValue("email.smtp_security") || "starttls"}
-                onChange={(v) => form.setValue("email.smtp_security", v)}
-                restartRequired={needsRestart("email.smtp_security")}
-              />
-              <SettingField
-                label="Username"
-                description="Leave empty if the mail server needs no sign-in."
-                value={form.getValue("email.smtp_username")}
-                onChange={(v) => form.setValue("email.smtp_username", v)}
-                restartRequired={needsRestart("email.smtp_username")}
-              />
-              <SecretField
-                label="Password"
-                value={form.getValue("email.smtp_password")}
-                configured={form.sensitiveConfigured.includes("email.smtp_password")}
-                onKeep={() => form.resetValue("email.smtp_password")}
-                // The username above can be emptied for a relay that needs no
-                // sign-in; without this the password could not follow it.
-                onClear={() => form.setValue("email.smtp_password", "")}
-                cleared={form.isClearStaged("email.smtp_password")}
-                onChange={(v) => form.setValue("email.smtp_password", v)}
-                restartRequired={needsRestart("email.smtp_password")}
-              />
-              <TestEmailRow />
-            </div>
-            <SettingsSubheading>Delivery</SettingsSubheading>
-            <div className="settings-field-list">
+              <div className="py-3.5">
+                <SettingFieldStatus tone={mailReady ? "ok" : "muted"}>
+                  <span>
+                    {mailReady
+                      ? "Mail server set up. Change it on the "
+                      : "Mail server not set up. No email can send until it is; set it up on the "}
+                    <Link
+                      to="/admin/settings/email"
+                      className="text-foreground font-medium underline underline-offset-2"
+                    >
+                      Email page
+                    </Link>
+                    .
+                  </span>
+                </SettingFieldStatus>
+              </div>
               <SettingField
                 label="Let people pick an email per episode"
                 description="Off sends them the daily summary instead."
@@ -1179,15 +1061,21 @@ export default function NotificationsAdminSettings() {
                 onChange={(v) => form.setValue("notifications.email.allow_per_episode", v)}
                 restartRequired={needsRestart("notifications.email.allow_per_episode")}
               />
-              <SettingField
-                label="Daily summary hour"
-                description="In the server's own time zone."
-                unit="0-23"
-                type="number"
-                value={numberValue("notifications.email.digest_hour", "8")}
-                onChange={(v) => form.setValue("notifications.email.digest_hour", v)}
-                restartRequired={needsRestart("notifications.email.digest_hour")}
-              />
+              <AdvancedSection
+                id="notifications.email"
+                count={EMAIL_CHANNEL_ADVANCED_KEYS.length}
+                forceOpen={anyDirty(EMAIL_CHANNEL_ADVANCED_KEYS)}
+              >
+                <SettingField
+                  label="Daily summary hour"
+                  description="In the server's own time zone."
+                  unit="0-23"
+                  type="number"
+                  value={numberValue("notifications.email.digest_hour", "8")}
+                  onChange={(v) => form.setValue("notifications.email.digest_hour", v)}
+                  restartRequired={needsRestart("notifications.email.digest_hour")}
+                />
+              </AdvancedSection>
             </div>
           </ChannelCard>
 
@@ -1221,30 +1109,35 @@ export default function NotificationsAdminSettings() {
                 onChange={(v) => form.setValue("notifications.discord.allow_per_episode", v)}
                 restartRequired={needsRestart("notifications.discord.allow_per_episode")}
               />
-              <SettingField
-                label="Daily summary hour"
-                description="In the server's own time zone."
-                unit="0-23"
-                type="number"
-                value={numberValue("notifications.discord.digest_hour", "8")}
-                onChange={(v) => form.setValue("notifications.discord.digest_hour", v)}
-                restartRequired={needsRestart("notifications.discord.digest_hour")}
-              />
+              <AdvancedSection
+                id="notifications.discord"
+                count={DISCORD_ADVANCED_KEYS.length}
+                forceOpen={anyDirty(DISCORD_ADVANCED_KEYS)}
+              >
+                <SettingField
+                  label="Artwork"
+                  description="Server images reveal your server URL to anyone who sees the message."
+                  type="select"
+                  value={form.getValue("notifications.discord.poster_mode") || "provider"}
+                  options={[
+                    { value: "provider", label: "Provider images only" },
+                    { value: "server", label: "Provider and server images" },
+                    { value: "off", label: "No artwork" },
+                  ]}
+                  onChange={(v) => form.setValue("notifications.discord.poster_mode", v)}
+                  restartRequired={needsRestart("notifications.discord.poster_mode")}
+                />
+                <SettingField
+                  label="Daily summary hour"
+                  description="In the server's own time zone."
+                  unit="0-23"
+                  type="number"
+                  value={numberValue("notifications.discord.digest_hour", "8")}
+                  onChange={(v) => form.setValue("notifications.discord.digest_hour", v)}
+                  restartRequired={needsRestart("notifications.discord.digest_hour")}
+                />
+              </AdvancedSection>
             </div>
-            <SettingsSubheading>Appearance</SettingsSubheading>
-            <SettingField
-              label="Artwork"
-              description="Server images reveal your server URL to anyone who sees the message."
-              type="select"
-              value={form.getValue("notifications.discord.poster_mode") || "provider"}
-              options={[
-                { value: "provider", label: "Provider images only" },
-                { value: "server", label: "Provider and server images" },
-                { value: "off", label: "No artwork" },
-              ]}
-              onChange={(v) => form.setValue("notifications.discord.poster_mode", v)}
-              restartRequired={needsRestart("notifications.discord.poster_mode")}
-            />
           </ChannelCard>
 
           <ChannelCard
@@ -1271,7 +1164,10 @@ export default function NotificationsAdminSettings() {
               />
               <SettingField
                 label="Deliveries per person"
-                description="Calls over the limit are dropped; the inbox notification still arrives."
+                // The limiter is in memory on each process
+                // (internal/notifications/webhook_sender.go), so a cluster
+                // allows this many per process, not per server.
+                description="Counted by each server process on its own. Calls over the limit are dropped; the inbox notification still arrives."
                 unit="per minute"
                 type="number"
                 value={numberValue(
@@ -1327,110 +1223,127 @@ export default function NotificationsAdminSettings() {
             }
           >
             <div className="settings-field-list">
-              <SettingField
-                label="Batch window"
-                description="New content waits this long so a season posts as one message."
-                unit="seconds"
-                type="number"
-                value={numberValue("notifications.server_channels.batch_seconds", "300")}
-                onChange={(v) => form.setValue("notifications.server_channels.batch_seconds", v)}
-                restartRequired={needsRestart("notifications.server_channels.batch_seconds")}
-              />
-              <SettingField
-                label="Mention the requester on Discord"
-                description="Unlinked accounts show their Silo username instead."
-                type="toggle"
-                value={form.getValue("notifications.server_channels.mention_requesters")}
-                onChange={(v) =>
-                  form.setValue("notifications.server_channels.mention_requesters", v)
-                }
-                restartRequired={needsRestart("notifications.server_channels.mention_requesters")}
-              />
-              <div className="pt-3">
+              <div className="py-3">
                 <ServerNotificationChannels />
               </div>
-            </div>
-          </ChannelCard>
-        </section>
-
-        {/* ── Tuning: everything here has a working default ── */}
-        <section className="space-y-3">
-          <ZoneHeading title="Tuning" />
-          {/* Full width, not a two-up grid: the settings column is clamped to
-              max-w-3xl, so side-by-side groups left each row with a ~140px
-              label column beside its control and every description wrapped to
-              six lines. */}
-          <div className="space-y-3">
-            <FieldGroup label="Grouping and flood control" restartAll={allRestart(FANOUT_KEYS)}>
               <AdvancedSection
-                id="notifications.fanout"
-                count={FANOUT_KEYS.length}
-                forceOpen={anyDirty(FANOUT_KEYS)}
+                id="notifications.server-channels"
+                count={SERVER_CHANNELS_ADVANCED_KEYS.length}
+                forceOpen={anyDirty(SERVER_CHANNELS_ADVANCED_KEYS)}
               >
                 <SettingField
-                  label="Settle window"
-                  description="Items that finish scanning together arrive as one notification."
+                  label="Batch window"
+                  description="New content waits this long so a season posts as one message."
                   unit="seconds"
                   type="number"
-                  value={numberValue("notifications.fanout.settle_seconds", "30")}
-                  onChange={(v) => form.setValue("notifications.fanout.settle_seconds", v)}
-                  restartRequired={needsRestart("notifications.fanout.settle_seconds")}
+                  value={numberValue("notifications.server_channels.batch_seconds", "300")}
+                  onChange={(v) => form.setValue("notifications.server_channels.batch_seconds", v)}
+                  restartRequired={needsRestart("notifications.server_channels.batch_seconds")}
                 />
                 <SettingField
-                  label="Max messages per show"
-                  description="Anything past this is skipped for that batch."
-                  type="number"
-                  value={numberValue("notifications.fanout.max_series_burst", "3")}
-                  onChange={(v) => form.setValue("notifications.fanout.max_series_burst", v)}
-                  restartRequired={needsRestart("notifications.fanout.max_series_burst")}
-                />
-                <SettingField
-                  label="Max content age"
-                  description="Older items are dropped instead of arriving as stale news."
-                  unit="hours"
-                  type="number"
-                  value={numberValue("notifications.fanout.max_event_age_hours", "72")}
-                  onChange={(v) => form.setValue("notifications.fanout.max_event_age_hours", v)}
-                  restartRequired={needsRestart("notifications.fanout.max_event_age_hours")}
+                  label="Mention the requester on Discord"
+                  description="Unlinked accounts show their Silo username instead."
+                  type="toggle"
+                  value={form.getValue("notifications.server_channels.mention_requesters")}
+                  onChange={(v) =>
+                    form.setValue("notifications.server_channels.mention_requesters", v)
+                  }
+                  restartRequired={needsRestart("notifications.server_channels.mention_requesters")}
                 />
               </AdvancedSection>
-            </FieldGroup>
+            </div>
+          </ChannelCard>
+        </FieldGroup>
 
-            <FieldGroup label="Retention" restartAll={allRestart(RETENTION_KEYS)}>
-              <AdvancedSection
-                id="notifications.retention"
-                count={RETENTION_KEYS.length}
-                forceOpen={anyDirty(RETENTION_KEYS)}
-              >
-                <SettingField
-                  label="Read notifications"
-                  unit="days"
-                  type="number"
-                  value={numberValue("notifications.retention.read_days", "90")}
-                  onChange={(v) => form.setValue("notifications.retention.read_days", v)}
-                  restartRequired={needsRestart("notifications.retention.read_days")}
-                />
-                <SettingField
-                  label="Unread notifications"
-                  unit="days"
-                  type="number"
-                  value={numberValue("notifications.retention.unread_days", "180")}
-                  onChange={(v) => form.setValue("notifications.retention.unread_days", v)}
-                  restartRequired={needsRestart("notifications.retention.unread_days")}
-                />
-                <SettingField
-                  label="Sent history"
-                  description="Record of what Silo already notified about."
-                  unit="days"
-                  type="number"
-                  value={numberValue("notifications.retention.event_days", "30")}
-                  onChange={(v) => form.setValue("notifications.retention.event_days", v)}
-                  restartRequired={needsRestart("notifications.retention.event_days")}
-                />
-              </AdvancedSection>
-            </FieldGroup>
-          </div>
-        </section>
+        {/* ── Processing: everything here has a working default ── */}
+        <FieldGroup
+          label="Processing"
+          description="How Silo notices new content, groups it into messages, and how long it keeps them."
+          restartAll={allRestart(PROCESSING_KEYS)}
+          dirty={anyDirty(PROCESSING_KEYS)}
+        >
+          <AdvancedSection
+            id="notifications.processing"
+            count={PROCESSING_KEYS.length}
+            // A switched-off pipeline is the one thing in here that stops every
+            // channel, so it does not stay folded away.
+            forceOpen={anyDirty(PROCESSING_KEYS) || pausedMessage !== null}
+          >
+            <AdvancedCluster label="Pipeline">
+              <SettingField
+                label="Notice new content"
+                description="Record new items during library scans."
+                type="toggle"
+                value={toggleValue("notifications.release_events_enabled")}
+                onChange={(v) => form.setValue("notifications.release_events_enabled", v)}
+                restartRequired={needsRestart("notifications.release_events_enabled")}
+              />
+              <SettingField
+                label="Work out who wants it"
+                description="Match each item against everyone's preferences."
+                type="toggle"
+                value={toggleValue("notifications.fanout_enabled")}
+                onChange={(v) => form.setValue("notifications.fanout_enabled", v)}
+                restartRequired={needsRestart("notifications.fanout_enabled")}
+              />
+            </AdvancedCluster>
+            <AdvancedCluster label="Grouping and flood control">
+              <SettingField
+                label="Settle window"
+                description="Items that finish scanning together arrive as one notification."
+                unit="seconds"
+                type="number"
+                value={numberValue("notifications.fanout.settle_seconds", "30")}
+                onChange={(v) => form.setValue("notifications.fanout.settle_seconds", v)}
+                restartRequired={needsRestart("notifications.fanout.settle_seconds")}
+              />
+              <SettingField
+                label="Max messages per show"
+                description="Anything past this is skipped for that batch."
+                type="number"
+                value={numberValue("notifications.fanout.max_series_burst", "3")}
+                onChange={(v) => form.setValue("notifications.fanout.max_series_burst", v)}
+                restartRequired={needsRestart("notifications.fanout.max_series_burst")}
+              />
+              <SettingField
+                label="Max content age"
+                description="Older items are dropped instead of arriving as stale news."
+                unit="hours"
+                type="number"
+                value={numberValue("notifications.fanout.max_event_age_hours", "72")}
+                onChange={(v) => form.setValue("notifications.fanout.max_event_age_hours", v)}
+                restartRequired={needsRestart("notifications.fanout.max_event_age_hours")}
+              />
+            </AdvancedCluster>
+            <AdvancedCluster label="Retention">
+              <SettingField
+                label="Read notifications"
+                unit="days"
+                type="number"
+                value={numberValue("notifications.retention.read_days", "90")}
+                onChange={(v) => form.setValue("notifications.retention.read_days", v)}
+                restartRequired={needsRestart("notifications.retention.read_days")}
+              />
+              <SettingField
+                label="Unread notifications"
+                unit="days"
+                type="number"
+                value={numberValue("notifications.retention.unread_days", "180")}
+                onChange={(v) => form.setValue("notifications.retention.unread_days", v)}
+                restartRequired={needsRestart("notifications.retention.unread_days")}
+              />
+              <SettingField
+                label="Sent history"
+                description="Record of what Silo already notified about."
+                unit="days"
+                type="number"
+                value={numberValue("notifications.retention.event_days", "30")}
+                onChange={(v) => form.setValue("notifications.retention.event_days", v)}
+                restartRequired={needsRestart("notifications.retention.event_days")}
+              />
+            </AdvancedCluster>
+          </AdvancedSection>
+        </FieldGroup>
       </div>
 
       <SaveBar

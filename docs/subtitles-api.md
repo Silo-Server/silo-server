@@ -131,7 +131,9 @@ Stored subtitle IDs and file IDs are strings. Search result IDs remain opaque
 provider identifiers. Timestamps use UTC with millisecond precision; an unknown
 search upload date is omitted. Arrays are empty rather than null. Stored object
 keys and uploader identities are not exposed. Provider failures preserve partial
-results with a generic warning; their raw error details are not part of v2.
+results with a generic warning; their raw error details are not part of v2. The
+`/api/v1` bridge names each failed provider as `<provider>: search failed`, and
+the server log keeps the cause with credentials masked.
 
 Search accepts compatibility inputs including ISO 639-2 aliases (`ara`), case
 and underscore variants, and legacy English display names (`Arabic`). The

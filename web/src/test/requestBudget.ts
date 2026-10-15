@@ -50,7 +50,6 @@ const PUBLIC_OPERATIONS = new Set<string>([
   "GET /api/v2/auth/signup",
   "GET /api/v2/capabilities/password-reset",
   "GET /api/v2/theme/branding",
-  "GET /api/v2/theme/admin-css",
   "POST /api/v2/auth/refresh",
 ]);
 

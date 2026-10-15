@@ -123,8 +123,9 @@ func registerSubtitleReads(reg *Registry) {
 			}
 			out.Results = append(out.Results, result)
 		}
-		// Provider errors can contain credential-bearing upstream URLs. The
-		// bridge preserves its old warnings; v2 exposes only a bounded summary.
+		// Provider errors can contain credential-bearing upstream URLs, so the
+		// manager reports each failed provider by name only; v2 goes further and
+		// exposes one bounded summary.
 		if len(view.Warnings) > 0 {
 			out.Warnings = append(out.Warnings, "One or more subtitle providers could not complete the search.")
 		}

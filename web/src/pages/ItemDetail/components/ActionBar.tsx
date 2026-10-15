@@ -31,6 +31,7 @@ import {
   RotateCcw,
   Shuffle,
   Tags,
+  TimerReset,
   UsersRound,
   Hand,
   Zap,
@@ -184,6 +185,8 @@ export interface ActionBarProps {
   playLabel?: string;
   playProgress?: number;
   restartHref?: string;
+  /** Clears the resume position without marking the item watched. */
+  onResetProgress?: () => void;
   resumePositionSeconds?: number;
   resumeDurationSeconds?: number;
   resumeResolution?: string;
@@ -260,6 +263,7 @@ export default function ActionBar({
   playLabel = "Play",
   playProgress,
   restartHref,
+  onResetProgress,
   resumePositionSeconds,
   resumeDurationSeconds,
   watchedLabel,
@@ -570,6 +574,7 @@ export default function ActionBar({
   };
   const hasOverflowActions = Boolean(
     restartHref ||
+    onResetProgress ||
     onShuffle ||
     onToggleWatchlist ||
     onDownload ||
@@ -804,6 +809,12 @@ export default function ActionBar({
                 >
                   <RotateCcw className="size-4" />
                   Play from Beginning
+                </DetailOverflowMenuItem>
+              )}
+              {onResetProgress && (
+                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onResetProgress}>
+                  <TimerReset className="size-4" />
+                  Reset Progress
                 </DetailOverflowMenuItem>
               )}
               {onToggleWatchlist && (

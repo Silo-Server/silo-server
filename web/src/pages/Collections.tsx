@@ -110,7 +110,6 @@ export default function Collections() {
   return (
     <div className="page-shell py-4 sm:py-6">
       <CalmPage
-        heading="page"
         title="Collections"
         subtitle={
           multiProfile

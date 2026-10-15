@@ -30,6 +30,9 @@ type ServerConfig struct {
 	// LANDiscovery advertises the API server on the local network with
 	// DNS-SD (see internal/landiscovery). Settings key server.lan_discovery.
 	LANDiscovery bool `yaml:"-"`
+	// LocalURL is the API server's local-network address for signed-in
+	// clients. Settings key server.local_url; empty when unset.
+	LocalURL string `yaml:"-"`
 }
 
 // DatabaseConfig holds the primary PostgreSQL connection settings.

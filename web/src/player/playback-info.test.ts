@@ -63,6 +63,39 @@ function rowValue(
 }
 
 describe("playback info helpers", () => {
+  it("names Atmos for a source track whose title is the codec's long name", () => {
+    const sourceAudio = (track: NonNullable<PlayerFileVersion["audio_tracks"]>[number]) =>
+      rowValue(
+        buildPlaybackInfoSections({
+          streamUrl: "https://app.example.com/api/v1/stream/abc123",
+          plan: fixturePlanV3({ delivery: "original_http" }),
+          currentSourceVersion: makeVersion({ audio_tracks: [{ ...track, default: true }] }),
+          runtimeStats: {
+            playerWidth: 1920,
+            playerHeight: 1080,
+            videoWidth: 3840,
+            videoHeight: 2160,
+            droppedFrames: 0,
+            corruptedFrames: 0,
+          },
+        }),
+        "Current Source File",
+        "Audio codec",
+      );
+    const longName = "ATSC A/52B (AC-3, E-AC-3)";
+    expect(
+      sourceAudio({ codec: "eac3", title: longName, profile: "Dolby Digital Plus + Dolby Atmos" }),
+    ).toBe("DD+ Atmos");
+    expect(sourceAudio({ codec: "eac3", title: longName })).toBe(longName);
+    expect(
+      sourceAudio({
+        codec: "eac3",
+        title: "Atmospheric score",
+        profile: "Dolby Digital Plus + Dolby Atmos",
+      }),
+    ).toBe("DD+ Atmos");
+  });
+
   it("formats a direct-play session with source metadata and live runtime stats", () => {
     const sections = buildPlaybackInfoSections({
       streamUrl: "https://app.example.com/api/v1/stream/abc123",
@@ -430,5 +463,19 @@ describe("lowerQualityOption", () => {
     );
     // A copy delivery reports no bitrate; the top transcode rung is lower.
     expect(lowerQualityOption(options, "auto")?.id).toBe("2160p-medium");
+  });
+});
+
+describe("buildPlaybackInfoSections player row", () => {
+  it("names the browser decoder while it plays the stream", () => {
+    const rows = (browserEngine: boolean) =>
+      buildPlaybackInfoSections({
+        streamUrl: "https://silo.example/stream",
+        plan: fixturePlanV3(),
+        runtimeStats: {},
+        browserEngine,
+      })[0]!.rows;
+    expect(rows(true)[0]).toEqual({ label: "Player", value: "Browser decoder" });
+    expect(rows(false)[0]).toEqual({ label: "Player", value: "HTML Video Player" });
   });
 });

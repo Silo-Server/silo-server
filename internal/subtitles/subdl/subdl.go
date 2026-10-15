@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -97,7 +98,8 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("subdl: search request: %w", err)
+		// The request URL carries the API key; keep it out of the error text.
+		return nil, fmt.Errorf("subdl: search request: %w", logredact.SanitizeURLError(err))
 	}
 	defer resp.Body.Close()
 
@@ -152,7 +154,7 @@ func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.S
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, "", fmt.Errorf("subdl: download request: %w", err)
+		return nil, "", fmt.Errorf("subdl: download request: %w", logredact.SanitizeURLError(err))
 	}
 	defer resp.Body.Close()
 

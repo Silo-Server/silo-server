@@ -630,6 +630,43 @@ func RunPersonalListPage(t *testing.T, newStore func(t *testing.T) userstore.Use
 	})
 }
 
+// RunPersonalListMembership checks that each favorites and watchlist add and
+// remove reports whether it changed a row: the API seam notifies providers,
+// recommendations, and clients only for a change, so a repeated write must
+// report false.
+func RunPersonalListMembership(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("FavoritesMembership", func(t *testing.T) {
+		store := newStore(t)
+		testPersonalListMembership(t, store, store.AddFavorite, store.RemoveFavorite)
+	})
+	t.Run("WatchlistMembership", func(t *testing.T) {
+		store := newStore(t)
+		testPersonalListMembership(t, store, store.AddToWatchlist, store.RemoveFromWatchlist)
+	})
+}
+
+func testPersonalListMembership(t *testing.T, store userstore.UserStore, add, remove func(ctx context.Context, profileID, mediaItemID string) (bool, error)) {
+	ctx := context.Background()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	for _, step := range []struct {
+		name string
+		do   func(ctx context.Context, profileID, mediaItemID string) (bool, error)
+		want bool
+	}{
+		{"add", add, true},
+		{"repeated add", add, false},
+		{"remove", remove, true},
+		{"repeated remove", remove, false},
+	} {
+		changed, err := step.do(ctx, "p1", listA)
+		if err != nil || changed != step.want {
+			t.Fatalf("%s = %v, %v; want %v", step.name, changed, err, step.want)
+		}
+	}
+}
+
 func testPersonalListPage(t *testing.T, store userstore.UserStore,
 	add func(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error),
 	page func(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.ListKey, error),
