@@ -340,6 +340,17 @@ describe("DeviceSettings capability discovery", () => {
       expect(screen.queryByRole("textbox", { name: "Device name" })).not.toBeInTheDocument();
     });
 
+    it("allows 120 characters counted as the server counts them", async () => {
+      const user = userEvent.setup();
+      render(<DeviceSettings />);
+
+      await user.click(screen.getByRole("button", { name: "Rename" }));
+      const input = screen.getByRole("textbox", { name: "Device name" });
+      await user.type(input, "📺".repeat(121));
+
+      expect(Array.from((input as HTMLInputElement).value)).toHaveLength(120);
+    });
+
     it("clears the name when the field is emptied", async () => {
       const user = userEvent.setup();
       mocks.ownDevices = [device({ custom_name: "Den" })];

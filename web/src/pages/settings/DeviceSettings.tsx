@@ -617,10 +617,11 @@ function DeviceNameEditor({
       <Input
         aria-label="Device name"
         autoFocus
-        maxLength={120}
         value={value}
         placeholder={device.device_name || "Device name"}
-        onChange={(event) => setValue(event.target.value)}
+        // The server counts code points, not the UTF-16 units maxLength
+        // counts, so an emoji takes one of the 120 rather than two.
+        onChange={(event) => setValue(Array.from(event.target.value).slice(0, 120).join(""))}
         onKeyDown={(event) => {
           // Closing mid-save would drop the result, error included.
           if (event.key === "Escape" && !rename.isPending) onDone();
