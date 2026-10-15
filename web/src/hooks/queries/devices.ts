@@ -61,6 +61,26 @@ export interface DeviceTarget {
   profileId?: string;
 }
 
+/**
+ * Give a device a name of the profile's choosing, or clear it with `null` so the
+ * device shows the name it reports again. Only the device list reads the name.
+ */
+export function useRenameDevice() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ device, name }: { device: DeviceTarget; name: string | null }) =>
+      v2("PATCH /api/v2/devices/{device_id}", {
+        path: { device_id: device.deviceId },
+        query: { profile_id: device.profileId },
+        body: { custom_name: name },
+      }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: deviceKeys.all });
+    },
+  });
+}
+
 /** Remove the device's settings and drop it from the registry. */
 export function useForgetDevice() {
   return useDeviceMutation(true);
@@ -82,4 +102,9 @@ export function deviceRecencyGroup(device: UserDevice, now: number): DeviceRecen
   const seen = Date.parse(device.last_seen_at);
   if (Number.isNaN(seen)) return "earlier";
   return now - seen < 7 * 24 * 60 * 60 * 1000 ? "week" : "earlier";
+}
+
+/** What to call a device: the name its profile gave it, else the one it reports. */
+export function deviceDisplayName(device: Pick<UserDevice, "custom_name" | "device_name">): string {
+  return device.custom_name || device.device_name || "Unknown device";
 }

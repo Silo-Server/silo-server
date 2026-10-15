@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -102,4 +103,85 @@ func (h *DeviceHandler) RemoveDeviceSettings(ctx context.Context, actor DeviceSe
 	}
 	auditSettingsForOther(ctx, settingsAuditRecord{Action: action, ActorProfileID: apimw.GetProfileID(ctx), TargetProfileID: profileID, TargetUserID: actor.UserID, DeviceID: deviceID, Scope: string(settingscontract.ScopeProfileDevice)})
 	return nil
+}
+
+// MaxDeviceNameRunes bounds a device name, reported or chosen, so both fit the
+// same rows and layouts.
+const MaxDeviceNameRunes = 120
+
+// DeviceUpdate changes one profile's registry entry for a device. A zero
+// update changes nothing but is still authorized and must name a known device.
+type DeviceUpdate struct {
+	// Rename is true when the update sets or clears the custom name.
+	Rename bool
+	// CustomName is the name the profile chose; nil clears it, so the device
+	// shows its reported name again.
+	CustomName *string
+}
+
+// UpdateDevice applies an update to a device under the same authorization as
+// forgetting it. The reported name is never changed, so the device can still
+// be identified by it.
+func (h *DeviceHandler) UpdateDevice(ctx context.Context, actor DeviceSettingsActor, profileID, deviceID string, update DeviceUpdate) error {
+	profileID = strings.TrimSpace(profileID)
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return apiError(http.StatusBadRequest, "bad_request", "A device id is required")
+	}
+	name := ""
+	if update.Rename && update.CustomName != nil {
+		name = deviceCustomName(*update.CustomName)
+		if name == "" {
+			return fieldError("custom_name", "A device name needs at least one visible character")
+		}
+	}
+	store, err := h.deviceSettingsStore(ctx, actor, profileID, false)
+	if err != nil {
+		return err
+	}
+	if profileID == "" {
+		profileID = actor.ProfileID
+	}
+	if !update.Rename {
+		registry, ok := store.(userstore.DeviceRegistry)
+		if !ok {
+			return apiError(http.StatusServiceUnavailable, "not_configured", "Device settings are unavailable")
+		}
+		exists, err := registry.DeviceExists(ctx, profileID, deviceID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return apiError(http.StatusNotFound, "not_found", "Device not found")
+		}
+		return nil
+	}
+	err = store.RenameDevice(ctx, profileID, deviceID, name)
+	if errors.Is(err, userstore.ErrDeviceNotFound) {
+		return apiError(http.StatusNotFound, "not_found", "Device not found")
+	}
+	if err != nil {
+		return err
+	}
+	// Identity only: the chosen name is the user's text and stays out of logs.
+	auditSettingsForOther(ctx, settingsAuditRecord{Action: "rename_device", ActorProfileID: apimw.GetProfileID(ctx), TargetProfileID: profileID, TargetUserID: actor.UserID, DeviceID: deviceID})
+	return nil
+}
+
+// deviceCustomName removes control characters, which a JSON body can carry but
+// a header cannot (and Postgres text rejects NUL): a tab or line break becomes
+// a space and the rest are dropped. It then trims and bounds the name like a
+// reported one.
+func deviceCustomName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		switch {
+		case !unicode.IsControl(r):
+			return r
+		case unicode.IsSpace(r):
+			return ' '
+		default:
+			return -1
+		}
+	}, name)
+	return clampHeaderValue(name, MaxDeviceNameRunes)
 }

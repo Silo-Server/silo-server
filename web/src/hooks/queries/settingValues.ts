@@ -604,7 +604,10 @@ export type SettingsCapabilities = Pick<
   Partial<
     Pick<
       V2Result<"GET /api/v2/settings/contract/capabilities">,
-      "supports_batched_effective" | "supports_idempotent_writes" | "supports_atomic_shortcuts"
+      | "supports_batched_effective"
+      | "supports_idempotent_writes"
+      | "supports_atomic_shortcuts"
+      | "supports_device_rename"
     >
   >;
 

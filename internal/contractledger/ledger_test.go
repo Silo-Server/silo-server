@@ -1133,6 +1133,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"resumeAdminNode":                          "V2-only lift of a transcode node drain request (v1 is frozen): it clears the request, so a replay converges on the same state.",
 	"ignoreUnmatchedItem":                      "V2-only mark of an unmatched item as intentionally unmatched (v1 is frozen): it keeps the first time the mark was set, so a replay converges on the same mark.",
 	"unignoreUnmatchedItem":                    "V2-only clear of that mark, the inverse of ignoreUnmatchedItem. Clearing an unmarked item is a no-op, so a replay converges on no mark.",
+	"updateDevice":                             "V2-only rename of a profile's device entry (v1 is frozen): it sets or clears custom_name on one registry row, so a replay converges on the same name.",
 	"startAdminChatGPTLogin":                   "V2-only administrator ChatGPT sign-in: each request supersedes the pending attempt and creates fresh PKCE, state and nonce values, so an uncertain result must not be replayed automatically.",
 	"completeAdminChatGPTLogin":                "V2-only administrator ChatGPT sign-in completion: it consumes a single-use authorization code and pending attempt, so a replay is refused without exchanging the code twice.",
 	"selectAdminChatGPTAccount":                "V2-only administrator ChatGPT account selection: it changes the active account and cancels a pending sign-in, so replaying it after intervening account activity must not happen automatically.",

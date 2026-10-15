@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 
@@ -66,7 +67,76 @@ func TestDeviceSettingsProductionWrapper(t *testing.T) {
 	if err := h.RemoveDeviceSettings(ctx, actor, "", "d", false); err != nil {
 		t.Fatal(err)
 	}
+	name := "Kitchen"
+	for _, update := range []DeviceUpdate{{Rename: true, CustomName: &name}, {}} {
+		if err := h.UpdateDevice(ctx, actor, "", "d", update); err != nil {
+			t.Fatalf("wrapped update %+v: %v", update, err)
+		}
+	}
 	if err := h.RemoveDeviceSettings(ctx, actor, "", "d", true); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Renaming follows forgetting's authorization, keeps the reported name, and
+// stores only visible text.
+func TestUpdateDeviceRename(t *testing.T) {
+	h, store := newDevicesTestHandler(t)
+	seedDevice(t, store, "profile-1", "tv", "Apple TV")
+	seedDevice(t, store, "profile-2", "tv", "Apple TV")
+	status := func(err error) int {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			return apiErr.Status
+		}
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return http.StatusNoContent
+	}
+	rename := func(name string) DeviceUpdate { return DeviceUpdate{Rename: true, CustomName: &name} }
+	names := func() map[string]string {
+		t.Helper()
+		page, err := store.(userstore.DeviceSettingsStore).ListDeviceSettingsPage(t.Context(), userstore.DevicePageOptions{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, entry := range page {
+			got[entry.ProfileID] = entry.DeviceName + "|" + entry.CustomName
+		}
+		return got
+	}
+
+	member := DeviceSettingsActor{UserID: 1, ProfileID: "profile-2"}
+	ctx := devicesRequest(http.MethodPatch, "/devices/tv", "profile-2").Context()
+	if got := status(h.UpdateDevice(ctx, member, "", "tv", rename(" \x00Living\tRoom\n "))); got != http.StatusNoContent {
+		t.Fatalf("own rename: %d", got)
+	}
+	if got := names()["profile-2"]; got != "Apple TV|Living Room" {
+		t.Fatalf("stored name: %q", got)
+	}
+	if got := status(h.UpdateDevice(ctx, member, "profile-1", "tv", rename("Den"))); got != http.StatusForbidden {
+		t.Fatalf("member renaming another profile's device: %d", got)
+	}
+	if got := status(h.UpdateDevice(ctx, member, "", "tv", rename("\t\x00 "))); got != http.StatusBadRequest {
+		t.Fatalf("blank name: %d", got)
+	}
+	for _, update := range []DeviceUpdate{rename("Den"), {}} {
+		if got := status(h.UpdateDevice(ctx, member, "", "missing", update)); got != http.StatusNotFound {
+			t.Fatalf("unknown device %+v: %d", update, got)
+		}
+	}
+	if got := status(h.UpdateDevice(ctx, member, "", "tv", DeviceUpdate{})); got != http.StatusNoContent {
+		t.Fatalf("empty update: %d", got)
+	}
+
+	primary := DeviceSettingsActor{UserID: 1, ProfileID: "profile-1"}
+	ctx = devicesRequest(http.MethodPatch, "/devices/tv", "profile-1").Context()
+	if got := status(h.UpdateDevice(ctx, primary, "profile-2", "tv", DeviceUpdate{Rename: true})); got != http.StatusNoContent {
+		t.Fatalf("household clear: %d", got)
+	}
+	if got := names(); got["profile-2"] != "Apple TV|" || got["profile-1"] != "Apple TV|" {
+		t.Fatalf("after clear: %v", got)
 	}
 }
