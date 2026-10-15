@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -154,39 +155,47 @@ const (
 )
 
 // checkCopyPlan compares the segments FFmpeg has written, from its own
-// playlist, with the plan. The plan comes from the file's Cues, which only a
+// playlist, with the plan; complete says FFmpeg finished the playlist
+// (#EXT-X-ENDLIST), which must then list every planned segment. The plan comes from the file's Cues, which only a
 // few sampled clusters vouch for (#2453). Cues that leave out keyframes
 // elsewhere make FFmpeg cut where the plan doesn't, so the first mismatch
 // rejects the file (keyframes.Reject): later playbacks keep FFmpeg's
 // playlist. This session goes on serving the plan, which its player already
 // has.
-func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry) {
+func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry, complete bool) {
 	durations := s.copyPlan.durations
 	s.mu.Lock()
 	if s.copyPlanRejected {
 		s.mu.Unlock()
 		return
 	}
-	mismatch := -1
-	var written float64
+	var mismatch string
+	seen := make([]bool, len(durations))
 	for _, entry := range entries {
 		if entry.number < 0 {
 			continue
 		}
 		if entry.number >= len(durations) {
-			mismatch, written = entry.number, entry.duration
+			mismatch = fmt.Sprintf("FFmpeg wrote segment %d, past the keyframe playlist's %d", entry.number, len(durations))
 			break
 		}
+		seen[entry.number] = true
 		tolerance := planSegmentTolerance
 		if entry.number == len(durations)-1 {
 			tolerance = planLastSegmentTolerance
 		}
 		if math.Abs(entry.duration-durations[entry.number]) > tolerance {
-			mismatch, written = entry.number, entry.duration
+			mismatch = fmt.Sprintf("FFmpeg wrote segment %d as %.3fs, the keyframe playlist has %.3fs",
+				entry.number, entry.duration, durations[entry.number])
 			break
 		}
 	}
-	if mismatch < 0 {
+	if mismatch == "" && complete {
+		if missing := slices.Index(seen, false); missing >= 0 {
+			mismatch = fmt.Sprintf("FFmpeg finished without segment %d of the keyframe playlist's %d", missing, len(durations))
+		}
+	}
+	if mismatch == "" {
 		s.mu.Unlock()
 		return
 	}
@@ -194,13 +203,7 @@ func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry) {
 	opts := s.opts
 	s.mu.Unlock()
 
-	if mismatch < len(durations) {
-		log.Printf("playback: session %s: FFmpeg wrote segment %d as %.3fs, the keyframe playlist has %.3fs; later playbacks of %s use FFmpeg's playlist",
-			opts.SessionID, mismatch, written, durations[mismatch], opts.InputPath)
-	} else {
-		log.Printf("playback: session %s: FFmpeg wrote segment %d, past the keyframe playlist's %d; later playbacks of %s use FFmpeg's playlist",
-			opts.SessionID, mismatch, len(durations), opts.InputPath)
-	}
+	log.Printf("playback: session %s: %s; later playbacks of %s use FFmpeg's playlist", opts.SessionID, mismatch, opts.InputPath)
 	if err := keyframes.Reject(opts.InputPath); err != nil {
 		log.Printf("playback: reject keyframe index for %s: %v", opts.SessionID, err)
 	}
@@ -221,7 +224,13 @@ func (s *TranscodeSession) checkCopyPlanOutput() {
 	if err != nil {
 		return
 	}
-	s.checkCopyPlan(timeline.entries)
+	s.checkCopyPlan(timeline.entries, ffmpegPlaylistComplete(manifest))
+}
+
+// ffmpegPlaylistComplete reports whether FFmpeg finished its playlist. Its
+// HLS muxer ends it only when the stream ends, not when it is killed.
+func ffmpegPlaylistComplete(manifest []byte) bool {
+	return bytes.Contains(manifest, []byte("#EXT-X-ENDLIST"))
 }
 
 // plannedSegmentWait is how long a request for a segment FFmpeg hasn't

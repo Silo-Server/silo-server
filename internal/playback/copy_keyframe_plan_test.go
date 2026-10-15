@@ -167,10 +167,13 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 	plan := []float64{2.6, 4.4, 1.0}
 	for name, tc := range map[string]struct {
-		written []manifestSegmentEntry
-		reject  bool
+		written  []manifestSegmentEntry
+		complete bool
+		reject   bool
 	}{
-		"matches": {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.401}, {2, 1.04}}},
+		"matches":        {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.401}, {2, 1.04}}, complete: true},
+		"still running":  {written: []manifestSegmentEntry{{0, 2.6}}},
+		"finished short": {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}}, complete: true, reject: true},
 		// FFmpeg cut at a keyframe the Cues left out.
 		"shorter segment": {written: []manifestSegmentEntry{{0, 2.6}, {1, 2.2}}, reject: true},
 		"extra segment":   {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}, {2, 1.0}, {3, 0.5}}, reject: true},
@@ -186,7 +189,7 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 				opts:     TranscodeOpts{InputPath: source, SessionID: "checked"},
 				copyPlan: &copySegmentPlan{durations: plan},
 			}
-			s.checkCopyPlan(tc.written)
+			s.checkCopyPlan(tc.written, tc.complete)
 			_, err := keyframes.Load(source)
 			if rejected := errors.Is(err, keyframes.ErrIncompleteIndex); rejected != tc.reject || s.copyPlanRejected != tc.reject {
 				t.Fatalf("rejected = %v (session %v, Load err %v), want %v", rejected, s.copyPlanRejected, err, tc.reject)
@@ -361,6 +364,9 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 		written, err := os.ReadFile(filepath.Join(opts.OutputDir, "stream.m3u8"))
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !ffmpegPlaylistComplete(written) {
+			t.Fatalf("%s: FFmpeg finished without ending its playlist, so a session can't tell it's complete", label)
 		}
 		got := extinfDurations(t, written)
 		if len(got) != len(planned) {

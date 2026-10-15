@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -134,6 +135,14 @@ func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
 	key := cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}
 	if _, err := storeFirst(key, got, nil); !errors.Is(err, ErrIncompleteIndex) {
 		t.Fatalf("a late load's store err = %v, want the rejection kept", err)
+	}
+
+	// Evicting the results doesn't forget the rejection.
+	for i := range maxCachedFiles + 1 {
+		storeFirst(cacheKey{path: filepath.Join("evict", strconv.Itoa(i))}, Index{}, ErrNoIndex)
+	}
+	if _, err := Load(path); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("after evictions err = %v, want the rejection kept", err)
 	}
 
 	later := stamp.Add(time.Hour)

@@ -2759,7 +2759,7 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		return progress
 	}
 	if s.copyPlan != nil {
-		s.checkCopyPlan(timeline.entries)
+		s.checkCopyPlan(timeline.entries, ffmpegPlaylistComplete(manifest))
 	}
 
 	for _, entry := range timeline.entries {

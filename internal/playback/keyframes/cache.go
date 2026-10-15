@@ -26,15 +26,21 @@ type cacheEntry struct {
 	err   error
 }
 
+// maxRejectedFiles bounds the rejections kept. A file is rejected only when a
+// playback finds its Cues wrong, which mainstream muxers don't produce.
+const maxRejectedFiles = 4096
+
 // indexCache holds read results, including files without a usable index, so
 // a later playback, a rebuilt session or a second viewer doesn't read the
 // file again. An entry is keyed by the file's size and modification time, so
-// a replaced file is read afresh.
+// a replaced file is read afresh. Rejections (Reject) are kept apart from the
+// results, so evicting results never forgets one.
 var indexCache = struct {
 	sync.Mutex
-	order   *list.List
-	entries map[cacheKey]*list.Element
-}{order: list.New(), entries: map[cacheKey]*list.Element{}}
+	order    *list.List
+	entries  map[cacheKey]*list.Element
+	rejected map[cacheKey]struct{}
+}{order: list.New(), entries: map[cacheKey]*list.Element{}, rejected: map[cacheKey]struct{}{}}
 
 // Load returns the keyframe index of the media file at path (ReadMatroska).
 // It reads only the file's metadata and a few clusters' block headers, so a
@@ -75,7 +81,17 @@ func Reject(path string) error {
 	if err != nil {
 		return err
 	}
-	store(cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}, Index{}, ErrIncompleteIndex)
+	key := cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}
+	indexCache.Lock()
+	defer indexCache.Unlock()
+	if len(indexCache.rejected) >= maxRejectedFiles {
+		// Forget an arbitrary one: its file is read and checked again.
+		for k := range indexCache.rejected {
+			delete(indexCache.rejected, k)
+			break
+		}
+	}
+	indexCache.rejected[key] = struct{}{}
 	return nil
 }
 
@@ -97,6 +113,9 @@ func settle(idx Index, err error) (Index, error) {
 func cached(key cacheKey) (Index, error, bool) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
+	if _, ok := indexCache.rejected[key]; ok {
+		return Index{}, ErrIncompleteIndex, true
+	}
 	el, ok := indexCache.entries[key]
 	if !ok {
 		return Index{}, nil, false
@@ -112,6 +131,9 @@ func cached(key cacheKey) (Index, error, bool) {
 func storeFirst(key cacheKey, idx Index, err error) (Index, error) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
+	if _, ok := indexCache.rejected[key]; ok {
+		return Index{}, ErrIncompleteIndex
+	}
 	if el, ok := indexCache.entries[key]; ok {
 		indexCache.order.MoveToFront(el)
 		entry, _ := el.Value.(*cacheEntry)
@@ -119,12 +141,6 @@ func storeFirst(key cacheKey, idx Index, err error) (Index, error) {
 	}
 	storeLocked(key, idx, err)
 	return idx, err
-}
-
-func store(key cacheKey, idx Index, err error) {
-	indexCache.Lock()
-	defer indexCache.Unlock()
-	storeLocked(key, idx, err)
 }
 
 func storeLocked(key cacheKey, idx Index, err error) {
