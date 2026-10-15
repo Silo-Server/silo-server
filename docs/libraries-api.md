@@ -48,8 +48,9 @@ ignored; a matched item or a book answers `409 conflict` (books keep their own
 enrichment), and an unknown item `404`. Ignoring an ignored item again keeps its first
 `ignored_at`. While the mark is set, automatic matching skips the item: the matcher
 queues drop its files, a scan neither retries it nor reports it as still unmatched, a
-library refresh leaves it out, and an item, season, or episode refresh does nothing for
-it. The item stays in its library and playable with its local metadata. Match Item
+library refresh leaves it out, an item refresh completes without changes, and a season
+or episode refresh stops before any provider search and counts as a failed attempt. The
+item stays in its library and playable with its local metadata. Match Item
 still works, and a successful match clears the mark.
 
 `DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore`
