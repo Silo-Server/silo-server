@@ -267,6 +267,19 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     }
   });
 
+  it("ignores a cached measurement on cellular and uses the current downlink", () => {
+    vi.stubGlobal("navigator", { connection: { downlink: 4.5, type: "cellular" } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBe(4500);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
   it("drops missing and implausibly low readings", () => {
     withDownlink(undefined);
     expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();

@@ -7,8 +7,11 @@ vi.mock("@/api/client", () => ({
 
 import {
   BANDWIDTH_ESTIMATE_TTL_MS,
+  cancelBandwidthProbe,
   measureBandwidthKbps,
   readMeasuredBandwidthKbps,
+  scheduleBandwidthProbe,
+  stopBandwidthProbes,
 } from "./bandwidth-probe";
 import { storage } from "@/utils/storage";
 
@@ -99,5 +102,61 @@ describe("measured bandwidth cache", () => {
       JSON.stringify({ kbps: "fast", measuredAt: Date.now() }),
     );
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
+  });
+});
+
+describe("scheduleBandwidthProbe", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000_000);
+  });
+  afterEach(() => {
+    stopBandwidthProbes();
+    vi.useRealTimers();
+  });
+
+  it("waits for a fresh measurement to expire, then measures again", async () => {
+    storage.set(
+      storage.KEYS.BANDWIDTH_ESTIMATE,
+      JSON.stringify({ kbps: 250_000, measuredAt: Date.now() }),
+    );
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    scheduleBandwidthProbe(0);
+
+    await vi.advanceTimersByTimeAsync(BANDWIDTH_ESTIMATE_TTL_MS - 1000);
+    expect(fetchWithSession).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps trying after a probe is cancelled for playback", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    fetchWithSession.mockImplementationOnce(
+      (_url: string, init: RequestInit) =>
+        new Promise((resolve, reject) => {
+          release = resolve;
+          init.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+
+    cancelBandwidthProbe();
+    release(undefined);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(fetchWithSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("does nothing after it is stopped", async () => {
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    const stop = scheduleBandwidthProbe(1000);
+    stop();
+    await vi.advanceTimersByTimeAsync(BANDWIDTH_ESTIMATE_TTL_MS * 2);
+    expect(fetchWithSession).not.toHaveBeenCalled();
   });
 });

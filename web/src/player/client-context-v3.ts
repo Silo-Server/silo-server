@@ -23,7 +23,11 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
-import { networkInformation, readMeasuredBandwidthKbps } from "./bandwidth-probe";
+import {
+  networkInformation,
+  onMeteredConnection,
+  readMeasuredBandwidthKbps,
+} from "./bandwidth-probe";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
 
@@ -256,20 +260,19 @@ const DOWNLINK_CEILING_MBPS = 10;
 /**
  * Best-effort downlink estimate in kbps for the planner's ladder choice.
  *
- * A fresh measurement from the background bandwidth probe wins, unless Data
- * Saver is on: the planner applies its metered limit only when no estimate is
- * sent, and a measurement taken before the viewer turned Data Saver on must not
- * override that choice. Otherwise
+ * A fresh measurement from the background bandwidth probe wins, unless the
+ * link is metered (Data Saver or cellular): that measurement was taken on
+ * another link, and the planner applies its metered limit only when no
+ * estimate is sent. Otherwise
  * `connection.downlink` is a coarse, rounded, deliberately fingerprint-resistant
  * hint, used only below the browser's ceiling. Returns undefined rather than a
  * fabricated value when neither source has a usable reading, which lets Auto
  * plan from the device and the source alone.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
-  const connection = networkInformation();
-  const measured = connection?.saveData === true ? undefined : readMeasuredBandwidthKbps();
+  const measured = onMeteredConnection() ? undefined : readMeasuredBandwidthKbps();
   if (measured !== undefined) return measured;
-  const downlinkMbps = connection?.downlink;
+  const downlinkMbps = networkInformation()?.downlink;
   if (typeof downlinkMbps !== "number" || !Number.isFinite(downlinkMbps)) return undefined;
   if (downlinkMbps >= DOWNLINK_CEILING_MBPS) return undefined;
   const kbps = Math.round(downlinkMbps * 1000);
