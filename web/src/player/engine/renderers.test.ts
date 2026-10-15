@@ -22,7 +22,12 @@ const size = { width: 1920, height: 1080, rotation: 0 as const, flip: false };
 const frame = (colorSpace: { transfer?: string | null; primaries?: string | null }) =>
   ({
     kind: "frame",
-    frame: { colorSpace, close: vi.fn() } as unknown as VideoFrame,
+    frame: {
+      colorSpace,
+      displayWidth: 1920,
+      displayHeight: 1080,
+      close: vi.fn(),
+    } as unknown as VideoFrame,
     timestamp: 0,
     duration: 0,
   }) satisfies EnginePicture;
@@ -62,11 +67,18 @@ class FakeDevice {
   compilerMessages: Array<{ type: string; message: string; lineNum: number }> = [];
   readonly limits = { maxTextureDimension2D: 8192 };
   readonly uniforms: Float32Array[] = [];
+  /** What successive read-back buffers hold: the frame check reads the import, then the copy. */
+  readbacks: Uint8Array[] = [];
+  /** Set to make copying a VideoFrame throw, as Firefox does. */
+  copyUnsupported = false;
   readonly queue = {
     writeBuffer: vi.fn((_buffer: unknown, _offset: number, data: ArrayBuffer) =>
       this.uniforms.push(new Float32Array(data.slice(0))),
     ),
     writeTexture: vi.fn(),
+    copyExternalImageToTexture: vi.fn(() => {
+      if (this.copyUnsupported) throw new TypeError("'source' could not be converted");
+    }),
     submit: vi.fn(),
     onSubmittedWorkDone: async () => {},
   };
@@ -99,8 +111,14 @@ class FakeDevice {
   popErrorScope() {
     return this.pendingPop ?? Promise.resolve(this.scopeErrors.shift() ?? null);
   }
-  createBuffer() {
-    return { destroy: vi.fn() };
+  createBuffer({ usage }: { usage: number }) {
+    const readable = (usage & GPUBufferUsage.MAP_READ) !== 0;
+    const contents = (readable && this.readbacks.shift()) || new Uint8Array(256 * 8);
+    return {
+      destroy: vi.fn(),
+      mapAsync: async () => {},
+      getMappedRange: () => contents.buffer,
+    };
   }
   createSampler() {
     return {};
@@ -108,12 +126,29 @@ class FakeDevice {
   createBindGroup() {
     return {};
   }
-  createTexture() {
-    return { createView: () => ({}), destroy: vi.fn() };
+  /** Every texture made, to check that frame copies are let go. */
+  readonly textures: Array<{ format: string; destroy: ReturnType<typeof vi.fn> }> = [];
+  createTexture({ size, format }: { size: [number, number]; format: string }) {
+    const texture = {
+      width: size[0],
+      height: size[1],
+      format,
+      createView: () => ({}),
+      destroy: vi.fn(),
+    };
+    this.textures.push(texture);
+    return texture;
+  }
+  /** Whether every texture a frame was copied into has been let go. */
+  copiesReleased() {
+    return this.textures
+      .filter((texture) => texture.format === "rgba16float")
+      .every((texture) => texture.destroy.mock.calls.length > 0);
   }
   createCommandEncoder() {
     return {
       beginRenderPass: () => ({ setPipeline() {}, setBindGroup() {}, draw() {}, end() {} }),
+      copyTextureToBuffer() {},
       finish: () => ({}),
     };
   }
@@ -134,6 +169,11 @@ class FakeDevice {
     this.resolveLost({ reason: "destroyed", message: "" } as GPUDeviceLostInfo);
   }
 }
+
+/** How many times a frame reached `device`, imported or copied. */
+const framesSent = (device: FakeDevice) =>
+  device.importExternalTexture.mock.calls.length +
+  device.queue.copyExternalImageToTexture.mock.calls.length;
 
 let devices: Array<FakeDevice | Promise<FakeDevice>>;
 let adapter: { info: { isFallbackAdapter: boolean }; requestDevice: ReturnType<typeof vi.fn> };
@@ -161,9 +201,16 @@ const chromiumCanvas = (transfer: string, code: number) =>
 class FakeVideoFrame {
   readonly colorSpace: VideoColorSpaceInit;
   readonly code: number;
-  constructor(data: Uint8Array, init: { colorSpace: VideoColorSpaceInit }) {
+  readonly displayWidth: number;
+  readonly displayHeight: number;
+  constructor(
+    data: Uint8Array,
+    init: { colorSpace: VideoColorSpaceInit; codedWidth: number; codedHeight: number },
+  ) {
     this.colorSpace = init.colorSpace;
     this.code = (data[0]! - 16) / 219;
+    this.displayWidth = init.codedWidth;
+    this.displayHeight = init.codedHeight;
   }
   close() {}
 }
@@ -186,8 +233,14 @@ beforeEach(() => {
     },
   });
   vi.stubGlobal("GPUShaderStage", { VERTEX: 1, FRAGMENT: 2 });
-  vi.stubGlobal("GPUBufferUsage", { UNIFORM: 64, COPY_DST: 8 });
-  vi.stubGlobal("GPUTextureUsage", { TEXTURE_BINDING: 4, COPY_DST: 2, RENDER_ATTACHMENT: 16 });
+  vi.stubGlobal("GPUBufferUsage", { UNIFORM: 64, COPY_DST: 8, MAP_READ: 1 });
+  vi.stubGlobal("GPUMapMode", { READ: 1 });
+  vi.stubGlobal("GPUTextureUsage", {
+    COPY_SRC: 1,
+    COPY_DST: 2,
+    TEXTURE_BINDING: 4,
+    RENDER_ATTACHMENT: 16,
+  });
   vi.stubGlobal("VideoFrame", FakeVideoFrame);
   vi.stubGlobal("devicePixelRatio", 1);
   gpuContexts = [];
@@ -369,6 +422,51 @@ describe("WebGPURenderer", () => {
     expect(on.onFailure).toHaveBeenCalledTimes(1);
   });
 
+  it("copies frames until a check shows the import matches the copy, then imports them", async () => {
+    const device = new FakeDevice();
+    devices.push(device);
+    const { gpu, on } = await renderer();
+    gpu.draw(frame(RETAGGED), size, viewport);
+    // The first frame goes both ways into the check, then by copy to the screen.
+    expect(device.queue.copyExternalImageToTexture).toHaveBeenCalledTimes(2);
+    expect(device.importExternalTexture).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    gpu.draw(frame(RETAGGED), size, viewport);
+    expect(device.importExternalTexture).toHaveBeenCalledTimes(2);
+    expect(device.queue.copyExternalImageToTexture).toHaveBeenCalledTimes(2);
+    expect(device.copiesReleased()).toBe(true);
+    expect(on.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("keeps copying frames where the import disagrees with the copy, as in WebKit", async () => {
+    const device = new FakeDevice();
+    // The import of a 10-bit frame comes out far off what the copy holds.
+    device.readbacks = [new Uint8Array(256 * 8).fill(200), new Uint8Array(256 * 8).fill(60)];
+    devices.push(device);
+    const { gpu } = await renderer();
+    gpu.draw(frame(RETAGGED), size, viewport);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    gpu.draw(frame(RETAGGED), size, viewport);
+    expect(device.queue.copyExternalImageToTexture).toHaveBeenCalledTimes(3);
+    expect(device.importExternalTexture).toHaveBeenCalledTimes(1);
+    expect(device.copiesReleased()).toBe(false);
+  });
+
+  it("imports frames where the browser cannot copy them, as in Firefox", async () => {
+    const device = new FakeDevice();
+    device.copyUnsupported = true;
+    devices.push(device);
+    const { gpu, on } = await renderer();
+    expect(gpu.draw(frame(RETAGGED), size, viewport)).toBe(true);
+    gpu.draw(frame(RETAGGED), size, viewport);
+    // Tried once, then only imported.
+    expect(device.queue.copyExternalImageToTexture).toHaveBeenCalledTimes(1);
+    expect(device.importExternalTexture).toHaveBeenCalledTimes(3);
+    expect(device.copiesReleased()).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(on.onFailure).not.toHaveBeenCalled();
+  });
+
   it("replaces a lost device with a fresh one and asks for the picture again", async () => {
     const first = new FakeDevice();
     const second = new FakeDevice();
@@ -381,8 +479,8 @@ describe("WebGPURenderer", () => {
       expect.objectContaining({ device: second }),
     );
     expect(gpu.draw(frame(RETAGGED), size, viewport)).toBe(true);
-    expect(second.importExternalTexture).toHaveBeenCalledTimes(1);
-    expect(first.importExternalTexture).not.toHaveBeenCalled();
+    expect(framesSent(second)).toBeGreaterThan(0);
+    expect(framesSent(first)).toBe(0);
     // Whatever the old device still reports is no longer this renderer's business.
     first.emitUncapturedError("late");
     expect(on.onFailure).not.toHaveBeenCalled();
@@ -426,7 +524,7 @@ describe("WebGPURenderer", () => {
       expect.objectContaining({ device: fresh }),
     );
     expect(gpu.draw(frame(RETAGGED), size, viewport)).toBe(true);
-    expect(fresh.importExternalTexture).toHaveBeenCalledTimes(1);
+    expect(framesSent(fresh)).toBeGreaterThan(0);
     expect(on.onFailure).not.toHaveBeenCalled();
   });
 
@@ -671,7 +769,7 @@ describe("HDRPresenter", () => {
     expect(shown()).toEqual(["none", "block"]);
 
     hdr.draw(frame(RETAGGED), size, viewport);
-    expect(device.importExternalTexture).toHaveBeenCalledTimes(1);
+    expect(framesSent(device)).toBeGreaterThan(0);
     expect(shown()).toEqual(["block", "none"]);
 
     hdr.destroy();

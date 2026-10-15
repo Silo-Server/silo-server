@@ -132,14 +132,21 @@ source gamut to BT.709, sRGB encode. These match the server's tone-map recipes i
   BT.709/sRGB so the browser applies only the Y'CbCr matrix when a GPU-backed
   frame is imported with `importExternalTexture`, leaving the PQ/HLG codes for
   the shader. Chromium imports these through an 8-bit surface, so this path
-  quantizes before tone mapping.
+  quantizes before tone mapping. WebKit imports 10-bit hardware-decoded frames
+  wrongly (the samples come out as if read at 8 bits), so each presenter draws
+  its first frame both ways, imported and copied with
+  `copyExternalImageToTexture` into a half-float texture, at 8x8 and compares
+  them. Where they agree it imports from then on; where they differ (WebKit's
+  10-bit frames) it copies every frame, at the cost of one GPU copy per frame.
+  It copies until the answer arrives, and imports where the browser cannot copy
+  a VideoFrame (Firefox).
 - **Routing.** Each picture goes to the path its kind and tag call for
   (`routePicture` in `engine/renderers.ts`):
 
   | Picture | Path |
   | --- | --- |
   | Uploaded planes | WebGPU, planes pipeline |
-  | Frame tagged BT.709 primaries and sRGB transfer (the re-tag held) | WebGPU, external texture |
+  | Frame tagged BT.709 primaries and sRGB transfer (the re-tag held) | WebGPU, external texture or a copy (see above) |
   | Frame tagged PQ or HLG (a hardware decoder ignored the re-tag: VideoToolbox, D3D11, VA-API) | 2D canvas, which tone-maps the way the browser's `<video>` does, when `canvasMapsHDR` |
   | Anything else | `browser_engine_presentation_failed` |
 

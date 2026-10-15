@@ -2,11 +2,13 @@
  * WGSL for the engine's WebGPU presenter. The color functions mirror
  * colorMath.ts, which carries the reference implementation and its tests.
  *
- * Two entry points read the picture differently and share the conversion:
+ * Three entry points read the picture differently and share the conversion.
  * `fragmentExternal` samples a GPU-backed frame whose R'G'B' the browser has
  * already derived with the YUV matrix (the decoder was told the frame is
- * sRGB-tagged so no transfer is applied), and `fragmentPlanes` reconstructs
- * R'G'B' from uploaded 10/12-bit Y'CbCr codes, keeping full precision.
+ * sRGB-tagged so no transfer is applied); `fragmentCopied` samples the same
+ * R'G'B' after the frame was copied into a half-float texture, for browsers
+ * that import some frames wrongly; and `fragmentPlanes` reconstructs R'G'B'
+ * from uploaded 10/12-bit Y'CbCr codes, keeping full precision.
  *
  * A picture drawn smaller than its own size would alias with one sample per
  * pixel, so each entry averages an N x N grid of bilinear samples across the
@@ -191,6 +193,26 @@ fn fragmentExternal(in: VertexOut) -> @location(0) vec4f {
       let o = tapOffset(i, j, n);
       let uv = in.uv + du * o.x + dv * o.y;
       sum += textureSampleBaseClampToEdge(externalPicture, pictureSampler, uv).rgb;
+    }
+  }
+  return toneMap(sum / f32(n * n));
+}
+
+@group(1) @binding(0) var copiedPicture: texture_2d<f32>;
+
+@fragment
+fn fragmentCopied(in: VertexOut) -> @location(0) vec4f {
+  // Derivatives first, while control flow is still uniform.
+  let du = dpdx(in.uv);
+  let dv = dpdy(in.uv);
+  let size = vec2f(textureDimensions(copiedPicture));
+  let n = tapCount(du * size, dv * size);
+  var sum = vec3f(0.0);
+  for (var j = 0; j < n; j++) {
+    for (var i = 0; i < n; i++) {
+      let o = tapOffset(i, j, n);
+      let uv = in.uv + du * o.x + dv * o.y;
+      sum += textureSampleLevel(copiedPicture, pictureSampler, uv, 0.0).rgb;
     }
   }
   return toneMap(sum / f32(n * n));
