@@ -155,8 +155,11 @@ const (
 )
 
 // checkCopyPlan compares the segments FFmpeg has written, from its own
-// playlist, with the plan; complete says FFmpeg finished the playlist
-// (#EXT-X-ENDLIST), which must then list every planned segment. The plan comes from the file's Cues, which only a
+// playlist, with the plan. complete says FFmpeg finished the stream cleanly
+// and ended its playlist; the playlist must then list every planned segment.
+// Otherwise the last segment listed isn't compared: a run that failed, for
+// example on a read error, ends its last segment early, which says nothing
+// about the file's Cues. A segment past the plan's end always counts. The plan comes from the file's Cues, which only a
 // few sampled clusters vouch for (#2453). Cues that leave out keyframes
 // elsewhere make FFmpeg cut where the plan doesn't, so the first mismatch
 // rejects the file (keyframes.Reject): later playbacks keep FFmpeg's
@@ -171,7 +174,7 @@ func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry, complet
 	}
 	var mismatch string
 	seen := make([]bool, len(durations))
-	for _, entry := range entries {
+	for i, entry := range entries {
 		if entry.number < 0 {
 			continue
 		}
@@ -180,6 +183,9 @@ func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry, complet
 			break
 		}
 		seen[entry.number] = true
+		if !complete && i == len(entries)-1 {
+			break
+		}
 		tolerance := planSegmentTolerance
 		if entry.number == len(durations)-1 {
 			tolerance = planLastSegmentTolerance
@@ -210,9 +216,10 @@ func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry, complet
 }
 
 // checkCopyPlanOutput runs checkCopyPlan on FFmpeg's playlist as an FFmpeg
-// process exits, having finished or been stopped. Nothing else need read the
-// session's progress (SegmentProgress) for its plan to be checked.
-func (s *TranscodeSession) checkCopyPlanOutput() {
+// process exits, having finished, failed (waitErr) or been stopped. Nothing
+// else need read the session's progress (SegmentProgress) for its plan to be
+// checked.
+func (s *TranscodeSession) checkCopyPlanOutput(waitErr error) {
 	if s.copyPlan == nil {
 		return
 	}
@@ -224,7 +231,7 @@ func (s *TranscodeSession) checkCopyPlanOutput() {
 	if err != nil {
 		return
 	}
-	s.checkCopyPlan(timeline.entries, ffmpegPlaylistComplete(manifest))
+	s.checkCopyPlan(timeline.entries, waitErr == nil && ffmpegPlaylistComplete(manifest))
 }
 
 // ffmpegPlaylistComplete reports whether FFmpeg finished its playlist. Its

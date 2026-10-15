@@ -508,7 +508,7 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 	s.waitErr = waitErr
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
-	s.checkCopyPlanOutput()
+	s.checkCopyPlanOutput(waitErr)
 	close(done)
 }
 

@@ -163,7 +163,8 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 }
 
 // A segment FFmpeg cut where the plan doesn't rejects the file, so later
-// playbacks keep FFmpeg's playlist (#2453).
+// playbacks keep FFmpeg's playlist (#2453). The last segment of a run that
+// didn't finish cleanly isn't evidence.
 func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 	plan := []float64{2.6, 4.4, 1.0}
 	for name, tc := range map[string]struct {
@@ -171,12 +172,14 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 		complete bool
 		reject   bool
 	}{
-		"matches":        {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.401}, {2, 1.04}}, complete: true},
-		"still running":  {written: []manifestSegmentEntry{{0, 2.6}}},
-		"finished short": {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}}, complete: true, reject: true},
-		// FFmpeg cut at a keyframe the Cues left out.
-		"shorter segment": {written: []manifestSegmentEntry{{0, 2.6}, {1, 2.2}}, reject: true},
+		"matches":       {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.401}, {2, 1.04}}, complete: true},
+		"still running": {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}}},
+		// FFmpeg cut at a keyframe the Cues left out, then went on.
+		"shorter segment": {written: []manifestSegmentEntry{{0, 2.6}, {1, 2.2}, {2, 2.2}}, reject: true},
 		"extra segment":   {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}, {2, 1.0}, {3, 0.5}}, reject: true},
+		"finished short":  {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}}, complete: true, reject: true},
+		// A failed run ended segment 1 early and stopped.
+		"failed run": {written: []manifestSegmentEntry{{0, 2.6}, {1, 1.2}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Not Matroska: Load reports ErrNoIndex, and ErrIncompleteIndex
@@ -199,25 +202,37 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 }
 
 // A session checks its plan as FFmpeg exits, even if nothing read its
-// progress while it ran.
+// progress while it ran. A clean finish vouches for the whole playlist; a
+// failed one only for the segments before its last.
 func TestCheckCopyPlanOutputReadsFFmpegsPlaylist(t *testing.T) {
-	source := filepath.Join(t.TempDir(), "source.mkv")
-	if err := os.WriteFile(source, []byte("not matroska"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out := t.TempDir()
-	written := "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.600000,\nseg_00000.m4s\n#EXTINF:2.200000,\nseg_00001.m4s\n"
-	if err := os.WriteFile(filepath.Join(out, "stream.m3u8"), []byte(written), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	s := &TranscodeSession{
-		outputDir: out,
-		opts:      TranscodeOpts{InputPath: source, SessionID: "exited"},
-		copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}},
-	}
-	s.checkCopyPlanOutput()
-	if _, err := keyframes.Load(source); !errors.Is(err, keyframes.ErrIncompleteIndex) || !s.copyPlanRejected {
-		t.Fatalf("Load err = %v, session rejected = %v; want the file rejected", err, s.copyPlanRejected)
+	short := "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.600000,\nseg_00000.m4s\n#EXTINF:1.200000,\nseg_00001.m4s\n#EXT-X-ENDLIST\n"
+	for name, tc := range map[string]struct {
+		waitErr error
+		reject  bool
+	}{
+		"finished": {reject: true},
+		"failed":   {waitErr: errors.New("exit status 1")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := filepath.Join(t.TempDir(), "source.mkv")
+			if err := os.WriteFile(source, []byte("not matroska"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out := t.TempDir()
+			if err := os.WriteFile(filepath.Join(out, "stream.m3u8"), []byte(short), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			s := &TranscodeSession{
+				outputDir: out,
+				opts:      TranscodeOpts{InputPath: source, SessionID: "exited"},
+				copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}},
+			}
+			s.checkCopyPlanOutput(tc.waitErr)
+			_, err := keyframes.Load(source)
+			if rejected := errors.Is(err, keyframes.ErrIncompleteIndex); rejected != tc.reject || s.copyPlanRejected != tc.reject {
+				t.Fatalf("rejected = %v (session %v, Load err %v), want %v", rejected, s.copyPlanRejected, err, tc.reject)
+			}
+		})
 	}
 }
 
