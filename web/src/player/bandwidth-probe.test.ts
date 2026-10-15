@@ -302,6 +302,26 @@ describe("scheduleBandwidthProbe", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not start a probe whose lock arrives after playback started", async () => {
+    let grant: (() => Promise<void>) | undefined;
+    const request = vi.fn(
+      (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
+        new Promise<void>((resolve) => {
+          grant = () => callback({ name: "silo-bandwidth-probe" }).then(resolve);
+        }),
+    );
+    vi.stubGlobal("navigator", { ...navigator, locks: { request } });
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    cancelBandwidthProbe();
+    await grant!();
+    expect(fetchWithSession).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("does nothing after it is stopped", async () => {
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     const stop = scheduleBandwidthProbe(1000);
