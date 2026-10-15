@@ -169,8 +169,62 @@ func (r *serviceFakeRepo) UpdateConnectionTokens(ctx context.Context, expected, 
 		return Connection{}, ErrStaleConnection
 	}
 	current = connectionWithTokens(current, storedTokens(updated))
-	current.LastError = updated.LastError
+	if updated.LastError != expected.LastError {
+		current.LastError = updated.LastError
+	}
 	return r.UpsertConnection(ctx, current)
+}
+
+func (r *serviceFakeRepo) UpdateConnectionSyncState(_ context.Context, id string, update ConnectionSyncUpdate) error {
+	if id == "" {
+		return nil
+	}
+	for key, conn := range r.connections {
+		if conn.ID == id {
+			r.connections[key] = applyConnectionSyncUpdateForTest(conn, update)
+		}
+	}
+	for i, conn := range r.scrobbleConnections {
+		if conn.ID == id {
+			r.scrobbleConnections[i] = applyConnectionSyncUpdateForTest(conn, update)
+		}
+	}
+	return nil
+}
+
+// applyConnectionSyncUpdateForTest mirrors UpdateConnectionSyncState's SQL.
+func applyConnectionSyncUpdateForTest(conn Connection, update ConnectionSyncUpdate) Connection {
+	conn = cloneConnectionForTest(conn)
+	for _, field := range []struct {
+		dst **time.Time
+		src *time.Time
+	}{
+		{&conn.LastInboundSyncAt, update.LastInboundSyncAt},
+		{&conn.LastProgressSyncAt, update.LastProgressSyncAt},
+		{&conn.LastOutboundSyncAt, update.LastOutboundSyncAt},
+		{&conn.LastFavoritesSyncAt, update.LastFavoritesSyncAt},
+		{&conn.LastWatchlistSyncAt, update.LastWatchlistSyncAt},
+	} {
+		if field.src != nil {
+			at := *field.src
+			*field.dst = &at
+		}
+	}
+	deferred := update.ClearRateLimitBy != nil && conn.RateLimitedUntil != nil &&
+		conn.RateLimitedUntil.After(*update.ClearRateLimitBy)
+	if update.LastError != nil && (*update.LastError != "" || !deferred) {
+		conn.LastError = *update.LastError
+	}
+	switch {
+	case update.RateLimitedUntil != nil:
+		until := *update.RateLimitedUntil
+		conn.RateLimitedUntil = &until
+	case update.ClearRateLimitBy != nil && conn.RateLimitedUntil != nil &&
+		!conn.RateLimitedUntil.After(*update.ClearRateLimitBy):
+		conn.RateLimitedUntil = nil
+	}
+	conn.SyncCursors = mergeSyncCursors(conn.SyncCursors, update.SyncCursors)
+	return conn
 }
 
 func (r *serviceFakeRepo) DeferConnectionsForAccount(
