@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "content_id": "movie:d",
+      "title": "Delta",
+      "year": 2004,
+      "content_type": "movie",
+      "library_id": "1",
+      "library_name": "Movies",
+      "status": "unmatched",
+      "ignored_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "has_more": false
+  },
+  "total": 1
+}

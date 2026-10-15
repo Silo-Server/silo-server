@@ -1279,6 +1279,8 @@ func main() {
 	// OnServerSettingUpdated closure, which only runs on admin requests after
 	// startup completes.
 	var ipResolver *clientip.Resolver
+	// Assigned below when recommendations start; nil (a no-op) otherwise.
+	var settingsRecWorker *recommendations.Worker
 	var shutdownWork []<-chan struct{}
 	registerShutdownWork := func(done <-chan struct{}) {
 		shutdownWork = append(shutdownWork, done)
@@ -1333,6 +1335,11 @@ func main() {
 				if loadErr := ipResolver.ReloadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
 					slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
 				}
+			}
+			// Cached recommendation rows of profiles with a rating ceiling
+			// are built under the unrated-content decision.
+			if key == config.AccessUnratedContentSettingKey {
+				settingsRecWorker.NotifyUnratedContentChanged(context.Background(), config.UnratedContentCacheTTL+time.Second)
 			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
@@ -2048,6 +2055,11 @@ func main() {
 			personRepo,
 			deps.FileRepo, skippedRootRepo, staleIDRepo, rootClaimRepo,
 		)
+		// Catalog merges and splits mark stale the recommendations of the
+		// profiles whose user state they moved.
+		if cfg.Recommendations.Enabled && deps.DB != nil {
+			metadataService.SetRecommendationStaler(recommendations.NewRepo(deps.DB))
+		}
 		// Drop the resolved-chain cache whenever a plugin is installed, enabled,
 		// disabled, updated, or uninstalled. The installation-enabled check is
 		// served from the plugins service's in-memory cache (invalidated on the
@@ -2512,7 +2524,7 @@ func main() {
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
-			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB)).
+			WithRatingStore(catalog.NewRatingsRepo(deps.DB)).
 			WithDroppedStore(notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), notificationSystem))
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if compatTerminalRecoveryReady != nil {
@@ -2695,7 +2707,19 @@ func main() {
 			catalog.NewPersonRepository(deps.DB),
 			userStoreProvider,
 			cfg.Recommendations,
-		).WithUnratedContentPolicy(unratedContent)
+		).WithUnratedContentPolicy(unratedContent).
+			WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+		if userStoreProvider != nil {
+			// Cached rows are built under the scope the API resolves for the
+			// profile's own requests, so reads do not filter them down.
+			recUserRepo := auth.NewUserRepository(deps.DB)
+			if policySystem != nil {
+				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent))
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent))
+			}
+		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
 
@@ -2711,7 +2735,31 @@ func main() {
 		if err != nil {
 			slog.Error("failed to create recommendation worker", "error", err)
 		} else {
+			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB)).
+				WithPolicyCheck(policySystem.Current).
+				WithSavedConfig(func(ctx context.Context) (config.RecommendationsConfig, error) {
+					saved, err := settingsRepo.GetAll(ctx)
+					if err != nil {
+						return config.RecommendationsConfig{}, err
+					}
+					savedCfg, err := config.LoadFromDB(saved)
+					if err != nil {
+						return config.RecommendationsConfig{}, err
+					}
+					return savedCfg.Recommendations, nil
+				})
 			deps.RecWorker = recWorker
+			settingsRecWorker = recWorker
+			// Watch-provider syncs rebuild a profile's recommendations once
+			// per run that imported something.
+			if watchProviderService != nil {
+				watchProviderService.WithSignalsChangedNotifier(recWorker)
+			}
+			// A scope policy can change every profile's scope, and cached
+			// rows are built under it. The first node to load a new policy
+			// generation marks every profile stale; refreshes wait until
+			// their node has loaded it (WithPolicyCheck above).
+			policySystem.OnChangeApplied(recWorker.NotifyPolicyChanged)
 		}
 	}
 
@@ -3017,6 +3065,9 @@ func main() {
 			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
+		if recEngine != nil {
+			catalogSearchIndexer.WithSemanticModelProvider(recEngine)
+		}
 		taskMgr.Register(tasks.NewSyncCatalogSearchIndexTask(catalogSearchIndexer))
 		taskMgr.Register(tasks.NewRebuildCatalogSearchIndexTask(catalogSearchIndexer))
 		maintenanceSteps = append(maintenanceSteps, tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
@@ -3289,7 +3340,11 @@ func main() {
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		historyResolver := watchstate.NewStableIdentityResolver(nil, reconcileEpisodeRepo, reconcileProviderIDRepo)
 		historyReconciler := watchstate.NewHistoryReconciler(deps.DB, historyResolver)
-		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
+		providerIDRepairer := metadata.NewProviderIDIntegrityRepairer(deps.DB)
+		if recWorker != nil {
+			providerIDRepairer.WithRecommendationStaler(recommendations.NewRepo(deps.DB))
+		}
+		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(providerIDRepairer, historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
 		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
 		if audiobookEnricher != nil {
@@ -3534,7 +3589,8 @@ func main() {
 		}
 		adminJobRunner = adminjob.NewRunner(
 			adminjob.NewRepository(deps.DB),
-			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)),
+			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)).
+				WithEmbeddingModel(cfg.Recommendations.EmbeddingModel),
 			artifactStore,
 			itemRefreshExecutor,
 			libraryRefreshExecutor,
@@ -3555,11 +3611,13 @@ func main() {
 			recWorker.Start()
 			defer recWorker.Stop()
 
-			// Check if this is first run (no embeddings yet).
-			embCount, _ := recommendations.NewRepo(deps.DB).EmbeddingCount(appCtx)
-			if embCount == 0 {
-				slog.Info("first run detected, triggering initial embedding")
-				recWorker.RunEmbeddingsNow()
+			// Resume a first or interrupted backfill now rather than at the
+			// next catch-up tick.
+			if needed, err := recEngine.NeedsEmbedding(appCtx); err != nil {
+				slog.WarnContext(appCtx, "checking for items that need embeddings failed", "component", "recommendations", "error", err)
+			} else if needed {
+				slog.InfoContext(appCtx, "items need embeddings; starting the embedding catch-up", "component", "recommendations")
+				recWorker.EmbedMissingNow()
 			}
 		}
 
@@ -3682,6 +3740,23 @@ func main() {
 			compatDeps.Downloads = compatDownloads
 
 			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
+
+			// /Movies/Recommendations reads the cached rows the native API
+			// reads. With recommendations disabled it has no reader and
+			// answers an empty list, so rows cached before are not served.
+			if cfg.Recommendations.Enabled {
+				var compatRecRefresh recommendations.ReadRefreshRequester
+				if recWorker != nil {
+					compatRecRefresh = recWorker
+				}
+				compatDeps.RecommendationReader = recommendations.NewReader(recommendations.NewRepo(deps.DB), catalog.NewRatingsRepo(deps.DB), compatRecRefresh, userStoreProvider).
+					WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+			}
+			// /Items/{id}/Similar ranks by embeddings when recommendations
+			// are enabled, and by genre otherwise.
+			if recEngine != nil {
+				compatDeps.Recommender = recEngine
+			}
 
 			// Construct auth service for jellycompat login.
 			userRepo := auth.NewUserRepository(deps.DB)

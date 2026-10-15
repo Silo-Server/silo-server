@@ -60,6 +60,7 @@ export const v2Operations = {
   "DELETE /api/v2/favorites/{item_id}": "deleteFavorite",
   "DELETE /api/v2/home/dismissals/{surface}/{item_id}": "undismissHomeItem",
   "DELETE /api/v2/libraries/roots/override": "deleteRootOverride",
+  "DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore": "unignoreUnmatchedItem",
   "DELETE /api/v2/libraries/{id}": "deleteLibrary",
   "DELETE /api/v2/libraries/{id}/poster": "deleteLibraryPoster",
   "DELETE /api/v2/library-playback-prefs/{library_id}": "deleteLibraryPlaybackPreference",
@@ -172,6 +173,8 @@ export const v2Operations = {
   "GET /api/v2/admin/libraries/{library_id}/collection-groups": "listAdminCollectionGroups",
   "GET /api/v2/admin/libraries/{library_id}/collection-groups/order":
     "getAdminCollectionGroupOrder",
+  "GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs":
+    "listLibraryMetadataTranslationJobs",
   "GET /api/v2/admin/literary-works/items/{content_id}/candidates": "listAdminLiteraryCandidates",
   "GET /api/v2/admin/logs/app": "listAdminOperationalLogs",
   "GET /api/v2/admin/logs/audit": "listAdminAuditLogs",
@@ -621,6 +624,9 @@ export const v2Operations = {
   "POST /api/v2/admin/jellyfin-compat/web/remove": "removeAdminJellyfinCompatWeb",
   "POST /api/v2/admin/jobs/{id}/cancel": "cancelAdminJob",
   "POST /api/v2/admin/libraries/{library_id}/collection-groups": "createAdminCollectionGroup",
+  "POST /api/v2/admin/libraries/{library_id}/metadata-translation": "translateLibraryMetadata",
+  "POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel":
+    "cancelLibraryMetadataTranslation",
   "POST /api/v2/admin/literary-works/link": "linkAdminLiteraryItems",
   "POST /api/v2/admin/literary-works/matches/confirm": "confirmAdminLiteraryMatch",
   "POST /api/v2/admin/literary-works/matches/ignore": "ignoreAdminLiteraryMatch",
@@ -658,6 +664,7 @@ export const v2Operations = {
   "POST /api/v2/admin/policy/documents/{id}/versions": "createAdminPolicyVersion",
   "POST /api/v2/admin/policy/simulate": "simulateAdminPolicy",
   "POST /api/v2/admin/policy/validate": "validateAdminPolicy",
+  "POST /api/v2/admin/recommendations/embeddings/reset": "resetAdminRecommendationEmbeddings",
   "POST /api/v2/admin/recommendations/trigger/cowatch": "triggerAdminRecommendationCowatch",
   "POST /api/v2/admin/recommendations/trigger/embeddings": "triggerAdminRecommendationEmbeddings",
   "POST /api/v2/admin/recommendations/trigger/recommendations": "triggerAdminRecommendationRefresh",
@@ -870,6 +877,7 @@ export const v2Operations = {
   "PUT /api/v2/favorites/{item_id}": "addFavorite",
   "PUT /api/v2/home/dismissals/{surface}/{item_id}": "dismissHomeItem",
   "PUT /api/v2/libraries/roots/override": "setRootOverride",
+  "PUT /api/v2/libraries/unmatched-items/{content_id}/ignore": "ignoreUnmatchedItem",
   "PUT /api/v2/libraries/{id}/poster": "uploadLibraryPoster",
   "PUT /api/v2/libraries/{id}/providers": "setLibraryProviders",
   "PUT /api/v2/markers/files/{file_id}": "setFileMarkers",

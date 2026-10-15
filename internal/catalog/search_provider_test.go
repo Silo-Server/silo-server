@@ -599,7 +599,7 @@ func TestMeilisearchSearchRequestFallsBackWhenEmbeddingFails(t *testing.T) {
 			SemanticEnabled:  true,
 			SemanticRatio:    DefaultMeilisearchSemanticRatio,
 			Embedder:         DefaultMeilisearchEmbedder,
-			Vectorizer:       &fakeCatalogSearchVectorizer{err: errors.New("embedding offline")},
+			Vectorizer:       &fakeCatalogSearchVectorizer{err: errors.New(`Post "https://embed.example/v1?key=secret-key": dial tcp: connection refused`)},
 		},
 	}
 	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
@@ -608,8 +608,9 @@ func TestMeilisearchSearchRequestFallsBackWhenEmbeddingFails(t *testing.T) {
 	if req.Vector != nil || req.Hybrid != nil {
 		t.Fatalf("fallback request should be keyword-only: %#v", req)
 	}
-	if !strings.Contains(fallback, "semantic query embedding failed") {
-		t.Fatalf("fallback = %q, want semantic query failure", fallback)
+	// Every searching user sees the reason, so it must not quote the provider error.
+	if fallback != "semantic query embedding failed" {
+		t.Fatalf("fallback = %q, want the fixed semantic query failure reason", fallback)
 	}
 }
 

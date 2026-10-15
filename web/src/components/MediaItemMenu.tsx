@@ -97,6 +97,13 @@ function prefetchMetadataDialogs() {
 
 type MediaItemType = ItemDetail["type"];
 
+// Favorites and the watchlist are kept at the title level. The server rejects
+// season writes, and the lists' default views and Home rows leave episodes
+// out, so neither offers to be added.
+function canAddToPersonalLists(mediaType: MediaItemType) {
+  return mediaType !== "season" && mediaType !== "episode";
+}
+
 function useHasFinePointer() {
   // Reads the observed pointer, not the media query: Chromium on some Windows
   // machines with a touchscreen reports no fine pointer while a mouse is in
@@ -142,7 +149,10 @@ interface MediaItemMenuProps {
   libraryId?: number;
   userState?: MediaItemUserState;
   variant?: "poster" | "wide";
-  /** When false, hides favorites and watchlist actions (e.g. for episodes). Defaults to true. */
+  /**
+   * When false, hides favorites and watchlist actions. Defaults to true. Seasons and episodes
+   * never offer adding to either list; see canAddToPersonalLists.
+   */
   showCollectionActions?: boolean;
   /** Hides only the poster heart shortcut while retaining collection actions in the menu. */
   showFavoriteShortcut?: boolean;
@@ -189,20 +199,24 @@ export function buildMediaItemMenuModel({
     });
   }
 
-  if (userState) {
-    if (showCollectionActions) {
-      entries.push(
-        {
-          kind: "action",
-          key: "toggleFavorite",
-          label: userState.is_favorite ? "Remove from Favorites" : "Add to Favorites",
-        },
-        {
-          kind: "action",
-          key: "toggleWatchlist",
-          label: userState.in_watchlist ? "Remove from Watchlist" : "Add to Watchlist",
-        },
-      );
+  if (userState && showCollectionActions) {
+    // A season or episode can already be on a list (saved by another client,
+    // imported from another server, or saved by an older web build), so it
+    // keeps the Remove entry.
+    const canAdd = canAddToPersonalLists(mediaType);
+    if (canAdd || userState.is_favorite) {
+      entries.push({
+        kind: "action",
+        key: "toggleFavorite",
+        label: userState.is_favorite ? "Remove from Favorites" : "Add to Favorites",
+      });
+    }
+    if (canAdd || userState.in_watchlist) {
+      entries.push({
+        kind: "action",
+        key: "toggleWatchlist",
+        label: userState.in_watchlist ? "Remove from Watchlist" : "Add to Watchlist",
+      });
     }
   }
 
@@ -1276,9 +1290,12 @@ export default function MediaItemMenu({
     },
     enabled: model.length > 0,
   });
+  // The model can still hold Remove for a season or episode already on the
+  // list; that stays in the menu rather than a heart that vanishes on click.
   const showPosterFavorite =
     hasFinePointer &&
     variant === "poster" &&
+    canAddToPersonalLists(mediaType) &&
     showFavoriteShortcut &&
     showsFavoriteQuickAction(quickActionMode) &&
     model.some((entry) => entry.kind === "action" && entry.key === "toggleFavorite");

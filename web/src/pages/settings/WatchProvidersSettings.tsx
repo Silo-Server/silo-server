@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { V2ProblemError } from "@/api/v2/request";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -71,7 +72,7 @@ function StatusPill({ variant, children }: { variant: StatusVariant; children: R
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
         STATUS_PILL_STYLES[variant],
       )}
     >
@@ -137,7 +138,7 @@ function booleanSettingValue(
 function StatCell({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
         {label}
       </div>
       <div className="mt-0.5 truncate text-sm font-medium">{value}</div>
@@ -499,7 +500,7 @@ function WatchProviderCard({
       const username = connection.provider_username || displayName;
       return `${username} · ${formatLastSync(connection, latestRun)}`;
     }
-    if (!connection.credentials_configured) return "Server credentials required.";
+    if (!connection.credentials_configured) return "Server setup required.";
     if (usesAPIKey)
       return `Connect with your ${displayName} API key to import watch history and scrobble playback.`;
     return "Connect to start importing watch history and scrobbling playback.";
@@ -946,13 +947,10 @@ export default function WatchProvidersSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Watch Providers</h2>
-        <p className="text-muted-foreground text-[13px] leading-relaxed sm:text-sm">
-          Connect external trackers to import watch history, sync paused progress, and scrobble
-          playback in real time.
-        </p>
-      </div>
+      <PageHeader
+        title="Watch Providers"
+        subtitle="Connect external trackers to import watch history, sync paused progress, and scrobble playback in real time."
+      />
 
       {providers.length === 0 ? (
         <section className="surface-panel rounded-[1.7rem] border-0 px-4 py-5 shadow-none sm:px-6">

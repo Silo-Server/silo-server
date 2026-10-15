@@ -248,7 +248,7 @@ func TestRunSheetsRepairsARecoveredRepeat(t *testing.T) {
 // clamped there: the same keyframe gives both samples the same time.
 func TestSourceSecondsFollowsAClampedInpoint(t *testing.T) {
 	a := newSheetAssembler(SheetsOutput{TileWidth: 16, TileHeight: 16, Columns: 1, Rows: 1, Quality: 80}, []float64{0, 0.1}, true, 0, 0.5)
-	a.inputStart = -0.042
+	a.plan = samplePlan(a.times, -0.042)
 	// The keyframe at container time 0 (input time 0.042) opens both entries:
 	// the first at its clamped inpoint 0, the second 0.058 before its inpoint.
 	first := a.sourceSeconds(sheetFrameMeta{seconds: 0, hasTime: true}, 0)

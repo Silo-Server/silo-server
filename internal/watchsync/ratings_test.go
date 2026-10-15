@@ -2,7 +2,6 @@ package watchsync
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sort"
 	"strings"
@@ -97,9 +96,6 @@ func TestSyncRatingsFirstSyncUnionsBothSides(t *testing.T) {
 	}
 	if result.Imported != 2 || result.Sent != 1 || result.RemoteFound != 2 || result.LocalFound != 1 {
 		t.Fatalf("result = %#v", result)
-	}
-	if !h.stale {
-		t.Fatal("imports must mark the profile's recommendations stale")
 	}
 	if s := h.state(ratingTestMovieB); s == nil || s.SyncedRating != 4 || !s.RemoteSeen {
 		t.Fatalf("imported base = %#v, want 4 stars seen", s)
@@ -852,25 +848,58 @@ func TestDeleteConnectionWaitsForTheRatingSyncLock(t *testing.T) {
 	}
 }
 
-func TestSyncRatingsMarksTheProfileStaleWhenBookkeepingFailsAfterAnImport(t *testing.T) {
+// A run whose rating bookkeeping fails after an import committed still
+// reports the import, once, with a live context, so the profile's
+// recommendations are rebuilt.
+func TestExecuteSyncRunReportsAnImportWhenBookkeepingFailsAfterIt(t *testing.T) {
 	h := newRatingHarness(t)
 	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)] = h.conn
 	// The run's deadline ends right after the import commits.
 	ctx, cancel := context.WithCancel(context.Background())
 	h.repo.upsertRatingErr = context.Canceled
 	h.store.afterWrite = cancel
-	staleCtxErr := errors.New("unset")
-	h.staleCtx = func(ctx context.Context) { staleCtxErr = ctx.Err() }
-	if _, err := h.service.syncRatings(ctx, h.conn, ServerConfig{}, h.provider); err == nil {
+	if _, err := h.service.executeSyncRun(ctx, h.conn, h.newRun()); err == nil {
 		t.Fatal("want the bookkeeping error")
 	}
-	if staleCtxErr != nil {
-		t.Fatalf("stale mark ran with context error %v, want a live context", staleCtxErr)
+	if h.store.stars(ratingTestMovieB) != 4 {
+		t.Fatalf("movieB=%d, want the import committed", h.store.stars(ratingTestMovieB))
 	}
-	if h.store.stars(ratingTestMovieB) != 4 || !h.stale {
-		t.Fatalf("movieB=%d stale=%v, want the committed import to mark recommendations stale", h.store.stars(ratingTestMovieB), h.stale)
+	h.signals.assert(t, 1)
+	if h.signals.ctxErrs[0] != nil {
+		t.Fatalf("notification ran with context error %v, want a live context", h.signals.ctxErrs[0])
 	}
+}
+
+// A sync run reports signal changes once however many items it imported,
+// and not at all when it imported nothing.
+func TestExecuteSyncRunReportsImportsOncePerRun(t *testing.T) {
+	h := newRatingHarness(t)
+	h.provider.batch = RatingImportBatch{
+		Rows:          []RemoteRating{h.remoteRow(ratingTestMovieB, 7), h.remoteRow(ratingTestSeries, 10)},
+		SnapshotKinds: []string{historyimport.KindMovie, historyimport.KindSeries},
+	}
+	run, err := h.service.executeSyncRun(context.Background(), h.conn, h.newRun())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.InboundRatingsImported != 2 {
+		t.Fatalf("imported = %d, want 2", run.InboundRatingsImported)
+	}
+	h.signals.assert(t, 1)
+	if h.signals.userID != ratingTestUserID || h.signals.profileID != ratingTestProfileID {
+		t.Fatalf("notified %d/%s, want the connection's profile", h.signals.userID, h.signals.profileID)
+	}
+
+	// The same ratings again import nothing; sending a local rating is not a
+	// signal change either.
+	h.store.set(ratingTestMovieA, 3)
+	if _, err := h.service.executeSyncRun(context.Background(), h.conn, h.newRun()); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.provider.exported) == 0 {
+		t.Fatal("precondition: the second run sent the local rating")
+	}
+	h.signals.assert(t, 1)
 }
 
 func TestSyncRatingsLeavesRatingsToARunHoldingTheLock(t *testing.T) {
@@ -907,9 +936,39 @@ type ratingHarness struct {
 	conn     Connection
 	media    map[string]LocalFavorite
 	watched  map[string]bool
-	stale    bool
-	// staleCtx, when set, sees the context the stale mark ran with.
-	staleCtx func(context.Context)
+	signals  *recordingSignalsNotifier
+}
+
+// recordingSignalsNotifier records signal change notifications.
+type recordingSignalsNotifier struct {
+	calls     int
+	userID    int
+	profileID string
+	ctxErrs   []error
+}
+
+func (n *recordingSignalsNotifier) NotifySignalsChanged(ctx context.Context, userID int, profileID string) {
+	n.calls++
+	n.userID, n.profileID = userID, profileID
+	n.ctxErrs = append(n.ctxErrs, ctx.Err())
+}
+
+func (n *recordingSignalsNotifier) assert(t *testing.T, want int) {
+	t.Helper()
+	if n.calls != want {
+		t.Fatalf("signal change notifications = %d, want %d", n.calls, want)
+	}
+}
+
+func (h *ratingHarness) newRun() SyncRun {
+	h.t.Helper()
+	h.provider.exported, h.provider.removed = nil, nil
+	h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)] = h.conn
+	run, err := h.repo.CreateSyncRun(context.Background(), SyncRun{ConnectionID: h.conn.ID, Provider: h.conn.Provider})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return run
 }
 
 func newRatingHarness(t *testing.T) *ratingHarness {
@@ -920,6 +979,7 @@ func newRatingHarness(t *testing.T) *ratingHarness {
 		store:    newFakeRatingStore(),
 		provider: &ratingProviderStub{},
 		watched:  map[string]bool{},
+		signals:  &recordingSignalsNotifier{},
 		media: map[string]LocalFavorite{
 			ratingTestMovieA: {MediaItemID: ratingTestMovieA, Kind: historyimport.KindMovie, IMDbID: "tt0101", TMDBID: "101", ProviderItemKey: "tmdb:101"},
 			ratingTestMovieB: {MediaItemID: ratingTestMovieB, Kind: historyimport.KindMovie, TMDBID: "102", ProviderItemKey: "tmdb:102"},
@@ -939,12 +999,8 @@ func newRatingHarness(t *testing.T) *ratingHarness {
 	h.service = NewService(h.repo, registry).
 		WithMatcher(ratingMatcherStub{media: h.media}).
 		WithUserStoreProvider(ratingHistoryStoreProvider{watched: h.watched}).
-		WithRatingStore(h.store, ratingStalerFunc(func(ctx context.Context) {
-			h.stale = true
-			if h.staleCtx != nil {
-				h.staleCtx(ctx)
-			}
-		}))
+		WithRatingStore(h.store).
+		WithSignalsChangedNotifier(h.signals)
 	return h
 }
 
@@ -1054,13 +1110,6 @@ func (s *fakeRatingStore) DeleteIfUnchanged(_ context.Context, _ int, _ string, 
 	}
 	delete(s.ratings, id)
 	return true, nil
-}
-
-type ratingStalerFunc func(context.Context)
-
-func (f ratingStalerFunc) MarkProfileStale(ctx context.Context, _ int, _ string) error {
-	f(ctx)
-	return nil
 }
 
 // ratingMatcherStub matches remote rows by kind and TMDB id.

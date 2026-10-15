@@ -17,6 +17,7 @@ import { audiobookFilesFromVersions } from "@/lib/audiobooks/files";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 import { coldResumePosition } from "@/pages/audiobooks/player/smartRewind";
 import { getAudiobookSmartRewind } from "@/pages/audiobooks/player/useAudiobookPrefs";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 function formatSeconds(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "";
@@ -164,6 +165,7 @@ export default function AudiobookContent({
       />
 
       <DetailHero
+        overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
         title={item.title}
         topNav={<PageBack />}
         context="Audiobook"

@@ -29,7 +29,10 @@ operations are in `internal/apiv2/library_monitoring.go` and are described in
 Two switches control monitoring:
 
 - `scanner.realtime_monitoring`, the server-wide switch (default `true`). It
-  hot-reloads through the config watcher and needs no restart.
+  hot-reloads through the config watcher and needs no restart. Admins turn
+  monitoring on or off per library, so Library & Metadata shows this switch
+  only while it is saved off, which is where the library editor sends an admin
+  to turn it back on.
 - `media_folders.realtime_monitoring`, the per-library switch (default `true`
   for existing and new libraries). It is exposed on `/api/v2/libraries` only;
   the frozen `/api/v1` routes neither return nor change it.

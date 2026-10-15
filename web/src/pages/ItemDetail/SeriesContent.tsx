@@ -35,6 +35,8 @@ import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { hasMachineTranslation } from "./components/machineTranslation";
+import EpisodesTranslationAction from "./components/EpisodesTranslationAction";
 
 /** Series lead with their creators; one without Creator credits keeps showing its directors. */
 const SERIES_LEAD_JOBS = ["Creator", "Director"] as const;
@@ -92,6 +94,21 @@ export default function SeriesContent({
 
   const primaryAction = resolveSeriesPrimaryAction(item);
   const singleSeasonEpisodesQuery = useItemEpisodes(singleSeason?.content_id);
+  // A single-season show lists its episodes here rather than on a season
+  // page, so this page starts the season's on-view translation (the season
+  // job covers its episodes) when an episode reports a missing description.
+  const singleSeasonPendingLanguage = singleSeasonEpisodesQuery.data?.episodes.find(
+    (episode) => episode.pending_translation_language,
+  )?.pending_translation_language;
+  const { translating: episodesTranslating, onTranslate: onTranslateEpisodes } =
+    useOnViewTranslation(
+      singleSeason
+        ? {
+            content_id: singleSeason.content_id,
+            pending_translation_language: singleSeasonPendingLanguage,
+          }
+        : undefined,
+    );
   const singleSeasonEpisodeLinkState = singleSeason
     ? {
         parentSeasonHref: `/item/${singleSeason.content_id}`,
@@ -154,6 +171,11 @@ export default function SeriesContent({
             overview={item.overview}
             overviewTranslating={overviewTranslating}
             onTranslateOverview={onTranslateOverview}
+            overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+            taglineMachineTranslated={hasMachineTranslation(
+              item.machine_translated_fields,
+              "tagline",
+            )}
             crewLine={
               <HeroCrewLine
                 crew={item.crew ?? []}
@@ -220,9 +242,15 @@ export default function SeriesContent({
                 <section>
                   <div className="mb-5 flex items-center justify-between gap-3">
                     <h2 className="text-xl font-semibold tracking-tight">Episodes</h2>
-                    <span className="text-muted-foreground text-sm">
-                      {singleSeason.episode_count} total
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <EpisodesTranslationAction
+                        translating={episodesTranslating}
+                        onTranslate={onTranslateEpisodes}
+                      />
+                      <span className="text-muted-foreground text-sm">
+                        {singleSeason.episode_count} total
+                      </span>
+                    </div>
                   </div>
                   <SeasonEpisodeGrid
                     episodes={singleSeasonEpisodesQuery.data?.episodes ?? []}

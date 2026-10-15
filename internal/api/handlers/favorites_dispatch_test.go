@@ -67,11 +67,9 @@ func TestPersonalListWritesNotifyOnlyWhenMembershipChanges(t *testing.T) {
 			}
 
 			dispatcher := &recordingListDispatcher{}
-			staler := &countingProfileStaler{}
-			refresher := &countingProfileRefresher{}
+			notifier := &countingSignalsNotifier{}
 			handler.SetLocalListEventDispatcher(dispatcher)
-			handler.SetProfileStaler(staler)
-			handler.SetProfileRefreshRequester(refresher)
+			handler.SetSignalsChangedNotifier(notifier)
 			handler.EventsHub = evt.NewHub("test", &cache.NoopEventBus{})
 			events, unsubscribe := handler.EventsHub.Subscribe()
 			defer unsubscribe()
@@ -79,9 +77,9 @@ func TestPersonalListWritesNotifyOnlyWhenMembershipChanges(t *testing.T) {
 			call(tc.write)
 			call(tc.write)
 
-			if len(dispatcher.events) != 1 || staler.calls != 1 || refresher.calls != 1 || len(events) != 1 {
-				t.Fatalf("two identical writes: %d list events, %d stale marks, %d refresh requests, %d user-state events; want 1 each",
-					len(dispatcher.events), staler.calls, refresher.calls, len(events))
+			if len(dispatcher.events) != 1 || notifier.calls != 1 || len(events) != 1 {
+				t.Fatalf("two identical writes: %d list events, %d signal notices, %d user-state events; want 1 each",
+					len(dispatcher.events), notifier.calls, len(events))
 			}
 			if dispatcher.canceled != 0 {
 				t.Fatal("the list event arrived on the abandoned request's canceled context")

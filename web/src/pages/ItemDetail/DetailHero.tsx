@@ -6,6 +6,7 @@ import { useShowTitleArt } from "@/hooks/useTitleArt";
 import "./detailLayout.css";
 import DetailOverview from "./components/DetailOverview";
 import DetailTitle from "./DetailTitle";
+import MachineTranslatedLabel from "./components/MachineTranslatedLabel";
 
 interface DetailHeroProps {
   title: string;
@@ -31,6 +32,10 @@ interface DetailHeroProps {
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
   onTranslateOverview?: () => void;
+  /** Labels the overview as machine-translated by AI. */
+  overviewMachineTranslated?: boolean;
+  /** Marks the tagline as machine-translated by AI. */
+  taglineMachineTranslated?: boolean;
   /** Spoiler protection: keep the overview behind a reveal button. */
   overviewHidden?: boolean;
   onRevealOverview?: () => void;
@@ -61,6 +66,8 @@ export default function DetailHero({
   overview,
   overviewTranslating = false,
   onTranslateOverview,
+  overviewMachineTranslated = false,
+  taglineMachineTranslated = false,
   overviewHidden = false,
   onRevealOverview,
   actions,
@@ -294,6 +301,9 @@ export default function DetailHero({
                     }`}
                   >
                     {tagline || subtitle}
+                    {tagline && taglineMachineTranslated && (
+                      <MachineTranslatedLabel compact className="ml-1.5 align-middle not-italic" />
+                    )}
                   </div>
                 )}
 
@@ -309,6 +319,7 @@ export default function DetailHero({
                     clamp={isViewportBounded}
                     translating={overviewTranslating}
                     onTranslate={onTranslateOverview}
+                    machineTranslated={overviewMachineTranslated}
                     hidden={overviewHidden}
                     onReveal={onRevealOverview}
                   />

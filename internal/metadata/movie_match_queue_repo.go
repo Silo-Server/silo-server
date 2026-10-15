@@ -45,8 +45,11 @@ func requirePositiveMovieQueueID(label string, value int) error {
 //
 // Files beneath a root skipped as misplaced series are excluded durably:
 // their content_id is never set, so without the exclusion every library sync
-// would re-enqueue them only for the worker to skip them again.
+// would re-enqueue them only for the worker to skip them again. Files of an
+// item an admin ignored are excluded the same way, even for a requested
+// rerun, so syncs drop their rows instead of keeping them pending or parked.
 const movieQueueFileBaseEligibleCond = `folders.enabled = true
+	  AND mi.match_ignored_at IS NULL
 	  AND (
 		lower(trim(folders.type)) IN ('movie', 'movies') OR
 		(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')

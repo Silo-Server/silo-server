@@ -140,4 +140,18 @@ describe("AppearanceSettings", () => {
     expect(form.save).not.toHaveBeenCalled();
     expect(form.setValue).not.toHaveBeenCalledWith("overlays.enabled", expect.anything());
   });
+
+  it("lists every badge in view and stages a badge edit", () => {
+    render(<AppearanceSettings />);
+
+    expect(screen.queryByRole("button", { name: /^Advanced/ })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("switch", { name: "Show Resolution" });
+    const wasOn = toggle.getAttribute("aria-checked") === "true";
+    fireEvent.click(toggle);
+
+    expect(form.setValue).toHaveBeenCalledTimes(1);
+    const [key, value] = form.setValue.mock.calls[0] as [string, string];
+    expect(key).toBe("defaults.card_overlays");
+    expect(JSON.parse(value).items.resolution.enabled).toBe(!wasOn);
+  });
 });

@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -139,37 +140,35 @@ function AdminLogsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Logs</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Search application logs and request audit trails without leaving the admin UI.
-          </p>
-        </div>
-        <div className="text-right">
-          <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
-            Stream
+      <PageHeader
+        title="Logs"
+        subtitle="Search application logs and request audit trails without leaving the admin UI."
+        actions={
+          <div className="text-right">
+            <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
+              Stream
+            </div>
+            <div className="text-sm">
+              {browsingHistory
+                ? "Historical results"
+                : formatConnectionState(activeStream.connectionState)}
+            </div>
+            {!browsingHistory && activeStream.error && (
+              <div className="text-muted-foreground text-xs">{activeStream.error}</div>
+            )}
+            {!browsingHistory && activeStream.connectionState === "disconnected" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-1 h-7 px-2 text-xs"
+                onClick={activeStream.reconnect}
+              >
+                Reconnect
+              </Button>
+            )}
           </div>
-          <div className="text-sm">
-            {browsingHistory
-              ? "Historical results"
-              : formatConnectionState(activeStream.connectionState)}
-          </div>
-          {!browsingHistory && activeStream.error && (
-            <div className="text-muted-foreground text-xs">{activeStream.error}</div>
-          )}
-          {!browsingHistory && activeStream.connectionState === "disconnected" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="mt-1 h-7 px-2 text-xs"
-              onClick={activeStream.reconnect}
-            >
-              Reconnect
-            </Button>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       <div className="surface-panel rounded-2xl border-0 px-3 py-3">
         <div className="flex flex-wrap items-center gap-2">

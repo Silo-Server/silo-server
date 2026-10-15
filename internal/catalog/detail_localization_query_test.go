@@ -153,6 +153,10 @@ func TestBuildMediaItemDetailLocalizationErrors(t *testing.T) {
 	t.Run("advisory language error remains suppressed before required retry", func(t *testing.T) {
 		folder := &failingDetailFolder{delegate: NewFolderRepository(pool), err: errors.New("transient folder failure"), once: true}
 		service.folderRepo = folder
+		if _, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); err == nil {
+			t.Fatal("checked pending language hid a transient folder failure")
+		}
+		folder.calls = 0
 		detail, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)
 		if err != nil || detail == nil || detail.Title != item.Title || detail.PendingTranslationLanguage != "" || folder.calls != 2 {
 			t.Fatalf("detail=%#v error=%v folder calls=%d", detail, err, folder.calls)
@@ -163,6 +167,10 @@ func TestBuildMediaItemDetailLocalizationErrors(t *testing.T) {
 		service.folderRepo = folder
 		if got := service.PendingTranslationLanguage(t.Context(), item, filter); got != "" {
 			t.Fatalf("pending language on failure = %q", got)
+		}
+		// A presentation library that no longer exists has nothing missing.
+		if got, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); got != "" || err != nil {
+			t.Fatalf("checked pending language for a missing library = %q, %v", got, err)
 		}
 		folder.calls = 0
 		_, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)
@@ -183,6 +191,9 @@ func TestBuildMediaItemDetailLocalizationErrors(t *testing.T) {
 		}
 		if got := service.PendingTranslationLanguage(t.Context(), item, filter); got != "" {
 			t.Fatalf("pending language on localization failure = %q", got)
+		}
+		if _, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); err == nil {
+			t.Fatal("checked pending language hid a localization failure")
 		}
 		*tracer = detailLocalizationTracer{}
 		_, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)

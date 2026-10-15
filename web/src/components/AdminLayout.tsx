@@ -4,6 +4,7 @@ import AdminSidebar from "@/components/AdminSidebar";
 import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialog";
 import ServerActivity from "@/components/ServerActivity";
 import { RestartBanner } from "@/components/admin/RestartBanner";
+import { PageFrame } from "@/components/page/PageHeader";
 import {
   Sheet,
   SheetClose,
@@ -19,7 +20,6 @@ import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { resolveAdminDocumentTitle } from "@/lib/documentTitle";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
-import { cn } from "@/lib/utils";
 import { Menu, Search, X } from "lucide-react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
@@ -96,9 +96,9 @@ export default function AdminLayout() {
         Skip to content
       </a>
       <div className="from-primary/6 pointer-events-none fixed inset-x-0 top-0 z-0 h-40 bg-gradient-to-b to-transparent blur-3xl" />
-      {/* Desktop sidebar */}
+      {/* Desktop sidebar, with the admin search at its top */}
       <div className="hidden lg:block">
-        <AdminSidebar />
+        <AdminSidebar onSearch={() => setCommandOpen(true)} />
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -128,7 +128,7 @@ export default function AdminLayout() {
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <AdminSearchButton onClick={() => setCommandOpen(true)} className="h-11 w-11" />
+            <AdminSearchButton onClick={() => setCommandOpen(true)} />
             <ServerActivity className="h-11 w-11" />
           </div>
         </div>
@@ -161,14 +161,13 @@ export default function AdminLayout() {
         </SheetContent>
       </Sheet>
 
-      {/* Desktop header controls */}
+      {/* Desktop activity indicator; search lives in the sidebar */}
       <div className="fixed top-5 right-5 z-40 hidden items-center gap-2 lg:flex">
-        <AdminSearchButton onClick={() => setCommandOpen(true)} showShortcut />
         <ServerActivity />
       </div>
 
-      {/* `lg:pt-16` starts the content below the fixed Search/activity
-          controls (top-5, h-9 → they end 3.5rem down). With less, a page
+      {/* `lg:pt-16` starts the content below the fixed activity control
+          (top-5, h-9 → it ends 3.5rem down). With less, a page
           header's right-aligned buttons sit underneath them until the capped
           content column pulls away from the viewport's right edge.
           `--page-gutter` is published so fixed page chrome (the collection
@@ -180,7 +179,7 @@ export default function AdminLayout() {
           hasBackgroundBar ? "pb-32 sm:pb-36" : ""
         }`}
       >
-        <div className="admin-shell">
+        <PageFrame className="admin-shell">
           {/* Above the routed page and inside the content column, so every
               admin page carries the prompt and none of them can be covered by
               it. */}
@@ -189,41 +188,23 @@ export default function AdminLayout() {
             restartSignal={serverStatus?.restart_mark_count}
           />
           <Outlet />
-        </div>
+        </PageFrame>
       </main>
     </div>
   );
 }
 
-function AdminSearchButton({
-  onClick,
-  className,
-  showShortcut = false,
-}: {
-  onClick: () => void;
-  className?: string;
-  showShortcut?: boolean;
-}) {
+/** The phone header's search button; desktop has the field in the sidebar. */
+function AdminSearchButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label="Search admin sections"
       title={`Search admin sections (${SEARCH_SHORTCUT_LABEL})`}
-      className={cn(
-        "text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring/60 border-border/70 bg-surface/70 flex h-9 items-center justify-center gap-2 rounded-xl border px-2.5 transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
-        className,
-      )}
+      className="text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring/60 border-border/70 bg-surface/70 flex h-11 w-11 items-center justify-center rounded-xl border transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
     >
       <Search className="h-4 w-4" aria-hidden="true" />
-      {showShortcut ? (
-        <>
-          <span className="hidden text-[13px] font-medium xl:inline">Search</span>
-          <kbd className="border-border/70 pointer-events-none rounded border px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap select-none">
-            {SEARCH_SHORTCUT_LABEL}
-          </kbd>
-        </>
-      ) : null}
     </button>
   );
 }

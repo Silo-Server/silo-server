@@ -13,6 +13,7 @@ import {
 } from "@/components/AppSidebar.logic";
 import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
+import { useSidebarEntrance, type SidebarSwap } from "@/hooks/useSidebarSwap";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
@@ -178,6 +179,19 @@ function SidebarSectionHeader({
 interface AppSidebarProps {
   onNavigate?: () => void;
   collapsed?: boolean;
+  /** Set when this sidebar just replaced the settings sidebar; see useSidebarSwap. */
+  swap?: SidebarSwap | null;
+}
+
+/**
+ * The menu's Settings item opens the settings shell on its first page. Loading
+ * their code when the menu opens means the click lands on a drawn page rather
+ * than a blank frame while the chunks arrive.
+ */
+function preloadSettings() {
+  void import("@/pages/SettingsLayout");
+  void import("@/components/settings/UserSettingsSidebar");
+  void import("@/pages/settings/PlaybackSettings");
 }
 
 interface ResolvedPrimaryMenuLink {
@@ -187,7 +201,8 @@ interface ResolvedPrimaryMenuLink {
   icon: ReactNode;
 }
 
-export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebarProps) {
+export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
+  const entrance = useSidebarEntrance(swap);
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
   const params = useParams<{ libraryId: string }>();
@@ -474,7 +489,10 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
           across it. The blur lives here rather than on the frame precisely
           because this layer never moves relative to the viewport — its 40px
           backdrop is sampled from a region that never changes. */}
-      <div className="bg-sidebar/88 sidebar-inner flex h-full w-[260px] flex-col backdrop-blur-2xl">
+      <div
+        data-sidebar-entrance={entrance}
+        className="bg-sidebar/88 sidebar-inner flex h-full w-[260px] flex-col backdrop-blur-2xl"
+      >
         {/* Logo — the wordmark and the mark cross-fade in place. Swapping the
           variant outright would pop at the very start of the collapse. */}
         <ViewTransitionLink
@@ -982,6 +1000,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
               if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
               hoverTimerRef.current = null;
               setProfileMenuOpen(open);
+              if (open) preloadSettings();
               if (!open && !collapsed) return;
               setHovered(open);
             }}

@@ -2,7 +2,7 @@ import { act, useRef } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import type { ItemDetail } from "@/api/types";
+import type { ItemDetail, MediaItemUserState } from "@/api/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MediaItemMenu, { buildMediaItemMenuModel, MetadataActionDialogHost } from "./MediaItemMenu";
 
@@ -125,7 +125,7 @@ describe("buildMediaItemMenuModel", () => {
 
   it("omits favorites and watchlist when showCollectionActions is false", () => {
     const model = buildMediaItemMenuModel({
-      mediaType: "episode",
+      mediaType: "movie",
       userState: {
         played: false,
         is_favorite: false,
@@ -138,6 +138,36 @@ describe("buildMediaItemMenuModel", () => {
 
     expect(actions).toHaveLength(1);
     expect(actions[0]?.label).toBe("Mark Watched");
+  });
+
+  it.each(["episode", "season"] as const)(
+    "does not offer adding %s items to favorites or the watchlist",
+    (mediaType) => {
+      const model = buildMediaItemMenuModel({
+        mediaType,
+        userState: { played: false, is_favorite: false, in_watchlist: false },
+        isAdmin: false,
+      });
+      const keys = model.flatMap((item) => (item.kind === "action" ? [item.key] : []));
+
+      expect(keys).toEqual(["toggleWatched"]);
+    },
+  );
+
+  it("keeps Remove for an episode that is already on a list", () => {
+    const labelsFor = (userState: MediaItemUserState) =>
+      buildMediaItemMenuModel({ mediaType: "episode", userState, isAdmin: false }).flatMap(
+        (item) => (item.kind === "action" ? [item.label] : []),
+      );
+
+    expect(labelsFor({ played: false, is_favorite: true, in_watchlist: false })).toEqual([
+      "Mark Watched",
+      "Remove from Favorites",
+    ]);
+    expect(labelsFor({ played: false, is_favorite: false, in_watchlist: true })).toEqual([
+      "Mark Watched",
+      "Remove from Watchlist",
+    ]);
   });
 
   it("shows watched toggle and admin actions when showCollectionActions is false for admins", () => {
@@ -164,7 +194,7 @@ describe("buildMediaItemMenuModel", () => {
 
   it("omits admin actions for non-admin users", () => {
     const model = buildMediaItemMenuModel({
-      mediaType: "episode",
+      mediaType: "movie",
       userState: {
         played: false,
         is_favorite: false,
@@ -812,6 +842,46 @@ describe("MediaItemMenu trigger visibility", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.getByRole("menuitem", { name: "Remove from Favorites" })).toBeTruthy();
+  });
+
+  it("shows no favorite heart or Add entries on an episode card", async () => {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="episode-1"
+          mediaType="episode"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Add to favorites" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Mark Watched" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Add to Favorites" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Add to Watchlist" })).toBeNull();
+  });
+
+  it("removes an episode that is already a favorite from its menu, not a heart", async () => {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="episode-1"
+          mediaType="episode"
+          userState={{ played: false, is_favorite: true, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Remove from favorites" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Remove from Favorites" }));
+
+    expect(mocks.toggleFavorite).toHaveBeenCalledWith(true);
   });
 
   it("toggles on a short pointer release even when a carousel consumes the click", async () => {
