@@ -119,18 +119,28 @@ export function useAutoQualityDownshift({
       lastDownshiftFromRef.current = { sessionId, kbps: deliveredKbps };
       onDownshiftRef.current(estimate);
     };
+    // Where playback stood when the current stall began; undefined when not
+    // stalled. A stall can end without a `playing` event (the player itself
+    // clears buffering on `timeupdate`), so advancing time also ends it.
+    let stalledAt: number | undefined;
     const onPlaying = () => {
+      stalledAt = undefined;
       clearLongStallTimer();
       tracker.playing(Date.now());
       check();
     };
     const onWaiting = () => {
       if (video.seeking || video.paused) return;
+      stalledAt = video.currentTime;
       tracker.waiting(Date.now());
       clearLongStallTimer();
       longStallTimer = setTimeout(check, LONG_STALL_MS);
     };
+    const onTimeUpdate = () => {
+      if (stalledAt !== undefined && video.currentTime > stalledAt) onPlaying();
+    };
     const onSeeking = () => {
+      stalledAt = undefined;
       clearLongStallTimer();
       tracker.seeking();
     };
@@ -141,11 +151,13 @@ export function useAutoQualityDownshift({
     video.addEventListener("playing", onPlaying);
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("seeking", onSeeking);
+    video.addEventListener("timeupdate", onTimeUpdate);
     return () => {
       clearLongStallTimer();
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("seeking", onSeeking);
+      video.removeEventListener("timeupdate", onTimeUpdate);
     };
   }, [videoRef, enabled, sessionId, planIdentity, deliveredKbps]);
 }

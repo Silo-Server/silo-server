@@ -93,7 +93,9 @@ describe("useAutoQualityDownshift", () => {
       seeking: boolean;
       paused: boolean;
       readyState: number;
+      currentTime: number;
     };
+    video.currentTime = 0;
     video.seeking = false;
     video.paused = false;
     video.readyState = 0;
@@ -122,6 +124,29 @@ describe("useAutoQualityDownshift", () => {
     fire(video, "waiting", 30_000);
     vi.advanceTimersByTime(6_000);
     expect(onDownshift).toHaveBeenCalledExactlyOnceWith(56_000);
+  });
+
+  it("treats advancing time as the end of a stall", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    renderHook(() =>
+      useAutoQualityDownshift({
+        videoRef: { current: video as unknown as HTMLVideoElement },
+        enabled: true,
+        sessionId: "s1",
+        planIdentity: "plan-1",
+        deliveredKbps: 80_000,
+        onDownshift,
+      }),
+    );
+    fire(video, "playing", 0);
+    video.currentTime = 30;
+    fire(video, "waiting", 30_000);
+    // Recovered without a `playing` event.
+    video.currentTime = 30.5;
+    fire(video, "timeupdate", 30_400);
+    vi.advanceTimersByTime(10_000);
+    expect(onDownshift).not.toHaveBeenCalled();
   });
 
   it("leaves an explicit quality alone", () => {
