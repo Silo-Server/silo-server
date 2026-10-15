@@ -42,8 +42,10 @@ membership, command-aware readiness, and ready/buffering/syncing member status.
 `GET /api/v2/playback/bandwidth-probe?size=N` (feature `bandwidth_probe_v1`)
 sends `N` random bytes, 1 to 100,000,000, default 1,000,000, as
 `application/octet-stream` with `Cache-Control: no-store`. It needs an
-authenticated account but no profile. An account may run two probes at once
-on a server; a third gets `429 rate_limited` with `Retry-After`. The bytes are random so a compressing
+authenticated account but no profile. On each server an account may run two
+probes at once and draw up to 400 MB per 10 minutes; bytes a client does not
+read because it closed the connection early are not counted. Beyond either
+limit the probe gets `429 rate_limited` with `Retry-After`. The bytes are random so a compressing
 proxy cannot inflate the result. A client times the transfer from its first
 byte, may close the connection once it has timed enough, and sends the result
 as `bandwidth_estimate_kbps` on start and replan. Without a measurement a

@@ -3,31 +3,72 @@ package apiv2
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 func TestBandwidthProbeLimiterBoundsInFlightProbesPerAccount(t *testing.T) {
-	limiter := &bandwidthProbeLimiter{inFlight: map[int]int{}}
+	limiter := &bandwidthProbeLimiter{accounts: map[int]*bandwidthProbeAccount{}}
+	now := time.Unix(1_000_000, 0)
 	for range bandwidthProbeMaxInFlight {
-		if !limiter.acquire(1) {
+		if ok, _ := limiter.acquire(1, 1000, now); !ok {
 			t.Fatal("refused a probe under the limit")
 		}
 	}
-	if limiter.acquire(1) {
+	if ok, _ := limiter.acquire(1, 1000, now); ok {
 		t.Fatal("admitted a probe over the limit")
 	}
-	if !limiter.acquire(2) {
+	if ok, _ := limiter.acquire(2, 1000, now); !ok {
 		t.Fatal("one account's probes blocked another account")
 	}
-	limiter.release(1)
-	if !limiter.acquire(1) {
+	limiter.release(1, 0, now)
+	if ok, _ := limiter.acquire(1, 1000, now); !ok {
 		t.Fatal("a finished probe did not free its slot")
 	}
-	for range bandwidthProbeMaxInFlight {
-		limiter.release(1)
+}
+
+func TestBandwidthProbeLimiterBoundsBytesPerWindow(t *testing.T) {
+	limiter := &bandwidthProbeLimiter{accounts: map[int]*bandwidthProbeAccount{}}
+	now := time.Unix(1_000_000, 0)
+	const size = 100_000_000
+	for i := range bandwidthProbeWindowBytes / size {
+		ok, _ := limiter.acquire(1, size, now)
+		if !ok {
+			t.Fatalf("refused probe %d inside the budget", i)
+		}
+		limiter.release(1, 0, now)
 	}
-	limiter.release(2)
-	if len(limiter.inFlight) != 0 {
-		t.Fatalf("released accounts still tracked: %v", limiter.inFlight)
+	ok, wait := limiter.acquire(1, size, now.Add(time.Minute))
+	if ok {
+		t.Fatal("admitted a probe past the byte budget")
+	}
+	if wait != bandwidthProbeWindow-time.Minute {
+		t.Fatalf("retry after %v, want the rest of the window", wait)
+	}
+	if ok, _ := limiter.acquire(1, size, now.Add(bandwidthProbeWindow)); !ok {
+		t.Fatal("a new window did not restore the budget")
+	}
+}
+
+func TestBandwidthProbeLimiterRefundsUnsentBytes(t *testing.T) {
+	limiter := &bandwidthProbeLimiter{accounts: map[int]*bandwidthProbeAccount{}}
+	now := time.Unix(1_000_000, 0)
+	for range 50 {
+		ok, _ := limiter.acquire(1, 40_000_000, now)
+		if !ok {
+			t.Fatal("refused a probe the client cut short")
+		}
+		// The client closed the connection after 2 MB.
+		limiter.release(1, 38_000_000, now)
+	}
+}
+
+func TestBandwidthProbeLimiterForgetsIdleAccounts(t *testing.T) {
+	limiter := &bandwidthProbeLimiter{accounts: map[int]*bandwidthProbeAccount{}}
+	now := time.Unix(1_000_000, 0)
+	limiter.acquire(1, 1000, now)
+	limiter.release(1, 0, now.Add(bandwidthProbeWindow))
+	if len(limiter.accounts) != 0 {
+		t.Fatalf("idle account still tracked: %v", limiter.accounts)
 	}
 }
 
