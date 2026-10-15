@@ -79,10 +79,10 @@ and a listener on one address serves only one link. A listener on
 unavailable, port 5353 taken) is logged once without affecting the server and
 retried every check interval. The advertisement reaches only the networks the
 process itself is attached to, and it carries the port the process listens
-on, not a port a container runtime publishes it under. For such a deployment (a
-Docker bridge network, typically) an admin sets `server.local_url`, which
-signed-in clients read from `GET /api/v2/system/connections` and use as a local
-route candidate.
+on, not a port a container runtime publishes it under. `server.local_url`
+covers those deployments (a Docker bridge network, typically): signed-in
+clients read it from `GET /api/v2/system/connections` as a local route
+candidate.
 
 ## Overlay network: the provider's short name
 

@@ -26,16 +26,14 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 const (
 	// hkdfInfo domain-separates the TLS key from every other use of the
 	// master key (the data-encryption key uses "silo/data-encryption/v1").
 	hkdfInfo = "silo/lan-tls/v1"
-
-	// minMasterKeyLen matches the SECRET_KEY floor the bootstrap loader and
-	// internal/secret enforce.
-	minMasterKeyLen = 32
 
 	// maxDeriveAttempts bounds the search for a P-256 scalar. A 32-byte HKDF
 	// output is out of range with probability below 2^-32, so a second
@@ -61,8 +59,8 @@ type Identity struct {
 // The same master key always yields the same key and pin; the certificate
 // around it is minted per process and carries no meaning of its own.
 func New(masterKey []byte) (*Identity, error) {
-	if len(masterKey) < minMasterKeyLen {
-		return nil, fmt.Errorf("lantls: master key must be at least %d bytes, got %d", minMasterKeyLen, len(masterKey))
+	if len(masterKey) < secret.MinMasterKeyLen {
+		return nil, fmt.Errorf("lantls: master key must be at least %d bytes, got %d", secret.MinMasterKeyLen, len(masterKey))
 	}
 	key, err := deriveKey(masterKey)
 	if err != nil {

@@ -69,8 +69,14 @@ func NewListener(inner net.Listener, config *tls.Config, sniffTimeout time.Durat
 	return l
 }
 
-// Accept returns the next classified connection.
+// Accept returns the next classified connection. Once Close has run it
+// returns net.ErrClosed, even when a classified connection is waiting.
 func (l *Listener) Accept() (net.Conn, error) {
+	select {
+	case <-l.done:
+		return nil, net.ErrClosed
+	default:
+	}
 	select {
 	case conn := <-l.ready:
 		return conn, nil
@@ -212,6 +218,17 @@ func (c *replayConn) Read(p []byte) (int, error) {
 	p[0] = c.first
 	c.pending = false
 	return 1, nil
+}
+
+// CloseWrite lets the HTTP server half-close a connection it answers without
+// reading the whole request (an early 413, say), as it does for a bare
+// *net.TCPConn: without the half-close the client can lose that response to a
+// reset.
+func (c *replayConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return errors.ErrUnsupported
 }
 
 // ReadFrom keeps the HTTP server's sendfile path for responses: it writes to

@@ -126,9 +126,11 @@ Client rules for using a local address (the local route):
 
 1. Candidates are `local_route.url` and `_silo._tcp` adverts whose TXT
    `id` matches the saved server's identity
-   ([server-discovery.md](server-discovery.md)). Each is reduced to an IP
-   address in a private range (RFC 1918 or IPv6 ULA) and tried as `https` on
-   the same port, whatever scheme the endpoint names.
+   ([server-discovery.md](server-discovery.md)). Each is reduced to a private
+   IPv4 address (RFC 1918) and tried as `https` on the same port, whatever
+   scheme the endpoint names. Public certificate authorities do not issue
+   certificates for those addresses, and App Transport Security exempts them,
+   so the pin is the only trust that applies.
 2. The connection is accepted only when the presented key matches the pin. No
    other certificate is ever accepted for a candidate, publicly valid or not,
    and redirects are not followed.

@@ -189,7 +189,7 @@ const ServerLANDiscoverySettingKey = "server.lan_discovery"
 // for a deployment whose LAN advertisement cannot reach the network or names
 // the wrong port (Docker bridge networking). Signed-in clients read it from the
 // connections document and use it, over TLS pinned to the deployment key, while
-// they can reach it (docs/architecture/server-discovery.md, "Local route").
+// they can reach it (docs/architecture/server-identity.md, "Local network TLS").
 // Read per request, so a change applies without restart.
 const ServerLocalURLSettingKey = "server.local_url"
 
