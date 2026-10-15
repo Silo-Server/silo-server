@@ -100,5 +100,5 @@ func TestSQLiteProfilePINRevision(t *testing.T) {
 }
 
 func TestSQLiteDeleteProfileRemovesProfileState(t *testing.T) {
-	storetest.RunDeleteProfileRemovesProfileState(t, newConformanceStore)
+	storetest.RunDeleteProfileRemovesProfileState(t, newConformanceStore, false)
 }

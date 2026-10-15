@@ -2,7 +2,9 @@ package pgstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -378,6 +380,16 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
 
+	// Jellyfin display preferences carry the profile in their key.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM jellycompat_displayprefs WHERE user_id = $1 AND left(prefs_id, length($2)) = $2`,
+		s.userID, userstore.ProfileDisplayPrefsPrefix(id)); err != nil {
+		return fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
+	}
+	if err := deleteProfileSectionOverrides(ctx, tx, s.userID, id); err != nil {
+		return err
+	}
+
 	for _, table := range profileCascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {
 			return fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
@@ -419,4 +431,48 @@ func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string
 		return false, fmt.Errorf("comparing PIN for profile %s: %w", profileID, err)
 	}
 	return true, nil
+}
+
+// deleteProfileSectionOverrides takes a profile's entries out of the account's
+// section-override settings, which hold every profile's overrides for one
+// scope and library in one JSON value (see SaveSectionOverrides). A value left
+// with no entries is deleted, as ResetSectionOverrides does.
+func deleteProfileSectionOverrides(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
+	rows, err := tx.Query(ctx,
+		`SELECT key, value FROM user_settings WHERE user_id = $1 AND key LIKE 'section\_overrides:%' FOR UPDATE`, userID)
+	if err != nil {
+		return fmt.Errorf("reading section overrides for profile %s: %w", profileID, err)
+	}
+	type setting struct{ key, value string }
+	settings, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (setting, error) {
+		var s setting
+		err := row.Scan(&s.key, &s.value)
+		return s, err
+	})
+	if err != nil {
+		return fmt.Errorf("reading section overrides for profile %s: %w", profileID, err)
+	}
+	for _, st := range settings {
+		var overrides []userstore.SectionOverride
+		if err := json.Unmarshal([]byte(st.value), &overrides); err != nil {
+			return fmt.Errorf("decoding section overrides %s: %w", st.key, err)
+		}
+		kept := slices.DeleteFunc(overrides, func(o userstore.SectionOverride) bool { return o.ProfileID == profileID })
+		if len(kept) == len(overrides) {
+			continue
+		}
+		if len(kept) == 0 {
+			_, err = tx.Exec(ctx, `DELETE FROM user_settings WHERE user_id = $1 AND key = $2`, userID, st.key)
+		} else {
+			var data []byte
+			if data, err = json.Marshal(kept); err != nil {
+				return fmt.Errorf("encoding section overrides %s: %w", st.key, err)
+			}
+			_, err = tx.Exec(ctx, `UPDATE user_settings SET value = $3 WHERE user_id = $1 AND key = $2`, userID, st.key, string(data))
+		}
+		if err != nil {
+			return fmt.Errorf("writing section overrides %s: %w", st.key, err)
+		}
+	}
+	return nil
 }

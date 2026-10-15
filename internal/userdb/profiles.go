@@ -357,6 +357,8 @@ func DeleteProfile(db *sql.DB, id string) error {
 		"series_playback_preferences",
 		"library_playback_preferences",
 		"profile_onboarding",
+		"profile_section_overrides",
+		"user_devices",
 		"user_device_settings",
 		"user_setting_values",
 	}
@@ -368,6 +370,12 @@ func DeleteProfile(db *sql.DB, id string) error {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s = ?", table, column), id); err != nil {
 			return fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
 		}
+	}
+
+	// Jellyfin display preferences carry the profile in their key.
+	prefix := userstore.ProfileDisplayPrefsPrefix(id)
+	if _, err := tx.Exec(`DELETE FROM jellycompat_displayprefs WHERE substr(prefs_id, 1, length(?)) = ?`, prefix, prefix); err != nil {
+		return fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
 	}
 
 	// Delete the profile itself.

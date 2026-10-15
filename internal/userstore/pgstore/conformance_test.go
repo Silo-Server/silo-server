@@ -338,7 +338,7 @@ func TestPostgresDeleteProfileRemovesProfileState(t *testing.T) {
 		// Deleting the user cascades to every user-scoped table.
 		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID) })
 		return newStore(pool, userID)
-	})
+	}, true)
 }
 
 // profileTablesClearedElsewhere are the user tables with a profile_id that
@@ -348,10 +348,12 @@ var profileTablesClearedElsewhere = map[string]string{
 	"user_downloads": "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
 }
 
-// Every user table keyed by (user_id, profile_id) is cleared when a profile
-// is deleted: by profileCascadeTables, by a foreign key to user_profiles that
-// cascades, or by a step named in profileTablesClearedElsewhere. A new table
-// fails this test until it is given one of the three.
+// Every user-store table (user_*) keyed by (user_id, profile_id) is cleared
+// when a profile is deleted: by profileCascadeTables, by a foreign key to
+// user_profiles that cascades, or by a step named in
+// profileTablesClearedElsewhere. A new table fails this test until it is given
+// one of the three. Tables other packages own (ebook reading data, downloads,
+// notifications and the like) are purged by those packages' own steps.
 func TestPostgresDeleteProfileCoversEveryProfileTable(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
