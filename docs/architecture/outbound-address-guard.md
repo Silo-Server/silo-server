@@ -107,6 +107,30 @@ transport, which still refuses Blocked addresses on every dial and redirect.
 Only acting admins reach that route, so this does not widen what any other
 account can make the server request.
 
+## Serving catalog artwork
+
+Catalog artwork is not always in Silo's own storage. A provider URL stays on
+the item until its image-cache job succeeds, and stays for good when caching
+fails, so an address the cache refused can still be served. Three places fetch
+catalog artwork themselves instead of handing the URL to the client: the
+jellycompat image proxy (Infuse, and requests with a proxy tag), offline
+download artwork, and collection collages. Each uses a netguard transport, and
+`artworkurl.FetchContext` decides the trust per URL:
+
+- A direct URL to the artwork store is trusted with the local network, where
+  S3-compatible storage often runs. It must match the scheme, host, and path
+  prefix (bucket and key prefix, or the read endpoint's path) of the URLs the
+  store's `DirectURL` issues, with no dot segments in its path.
+- Any other URL is Public only. A refused proxy request answers 502 and a
+  refused download asset reports the asset unavailable; neither returns
+  anything from the refused address.
+
+Local artwork storage serves signed `/api/` routes on this server, which the
+proxy redirects to and downloads read from the store, so neither goes over
+HTTP. A provider URL under the artwork store's own prefix is trusted like a
+store URL. Trust carries across redirects, as for every netguard request, so
+the store is relied on not to redirect into the local network.
+
 ## Collection artwork
 
 Collection artwork downloads use the netguard transport with no fallback
@@ -123,9 +147,8 @@ client (`newCollectionImageClient` in `internal/api/handlers`):
   operations) are trusted with the local network, like an image an admin
   applies to an item. Only acting admins reach those routes.
 - **Collages.** A collage fetches its titles' posters as the server resolved
-  them, usually from its own artwork storage, which may be on the local
-  network. No request supplies those URLs, so the fetch is trusted with the
-  local network.
+  them. Those are artwork store URLs or uncached provider URLs, trusted as
+  described in [Serving catalog artwork](#serving-catalog-artwork).
 
 Blocked addresses stay refused in all three cases, on every dial and redirect.
 

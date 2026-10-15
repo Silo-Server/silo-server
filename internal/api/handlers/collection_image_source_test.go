@@ -217,7 +217,8 @@ func TestCollectionImageDownloadsNeedAClient(t *testing.T) {
 
 // Collage sources are catalog posters the server resolves, often to artwork
 // storage on its own network, so the default personal collage generator still
-// fetches them from loopback. Blocked ranges stay refused.
+// fetches those from loopback. A poster off the artwork store is a provider's
+// URL and stays Public only; blocked ranges stay refused.
 func TestPersonalCollageFetchesLocalArtworkStorage(t *testing.T) {
 	var poster bytes.Buffer
 	if err := png.Encode(&poster, image.NewNRGBA(image.Rect(0, 0, 20, 30))); err != nil {
@@ -227,10 +228,11 @@ func TestPersonalCollageFetchesLocalArtworkStorage(t *testing.T) {
 		_, _ = w.Write(poster.Bytes())
 	}))
 	t.Cleanup(server.Close)
+	other, otherHits := countingImageServer(t)
 
 	detail := &catalog.DetailService{}
 	detail.SetImageResolver(collageSourceResolver{})
-	gen := NewPersonalCollectionCollageGenerator(blobstoretest.New(), detail, nil)
+	gen := NewPersonalCollectionCollageGenerator(blobstoretest.NewDirect(server.URL), detail, nil)
 	if gen == nil {
 		t.Fatal("no collage generator")
 	}
@@ -239,7 +241,13 @@ func TestPersonalCollageFetchesLocalArtworkStorage(t *testing.T) {
 	if _, _, err := gen.ComposeCollectionCollage(t.Context(), "c1", key, []string{server.URL + "/a.png", server.URL + "/b.png"}); err != nil {
 		t.Fatalf("compose from loopback storage: %v", err)
 	}
-	_, _, err := gen.ComposeCollectionCollage(t.Context(), "c1", key, []string{server.URL + "/a.png", "http://169.254.10.10/b.png"})
+	// A poster that is not on the artwork store is a metadata provider's
+	// URL, which may not reach the local network.
+	_, _, err := gen.ComposeCollectionCollage(t.Context(), "c1", key, []string{server.URL + "/a.png", other.URL + "/b.png"})
+	if !errors.Is(err, netguard.ErrPrivateDestination) || otherHits.Load() != 0 {
+		t.Fatalf("collage with a local provider source = %v (hits %d), want ErrPrivateDestination", err, otherHits.Load())
+	}
+	_, _, err = gen.ComposeCollectionCollage(t.Context(), "c1", key, []string{server.URL + "/a.png", "http://169.254.10.10/b.png"})
 	if !errors.Is(err, netguard.ErrBlockedDestination) {
 		t.Fatalf("collage with a link-local source = %v, want ErrBlockedDestination", err)
 	}
