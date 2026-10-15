@@ -119,8 +119,9 @@ credentials there. `internal/lantls` does that without a public certificate:
 - **A pin over a trusted address.** `GET /api/v2/system/connections` carries
   `local_route.spki_sha256`, the base64 SHA-256 of the key's
   SubjectPublicKeyInfo. Clients learn and replace the pin only through a saved
-  address they already authenticate (HTTPS with a system-trusted certificate);
-  a saved plain-HTTP address cannot vouch for a key.
+  address they already authenticate (HTTPS with a system-trusted certificate),
+  and follow no redirect on that read: a saved plain-HTTP address, or one a
+  redirect leads to, cannot vouch for a key.
 
 Client rules for using a local address (the local route):
 
