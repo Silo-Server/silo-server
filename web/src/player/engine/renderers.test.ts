@@ -20,13 +20,17 @@ import {
 const viewport: Viewport = { fit: "contain", devicePixels: null };
 const size = { width: 1920, height: 1080, rotation: 0 as const, flip: false };
 
-const frame = (colorSpace: { transfer?: string | null; primaries?: string | null }) =>
+const frame = (
+  colorSpace: { transfer?: string | null; primaries?: string | null },
+  displayWidth = 1920,
+  displayHeight = 1080,
+) =>
   ({
     kind: "frame",
     frame: {
       colorSpace,
-      displayWidth: 1920,
-      displayHeight: 1080,
+      displayWidth,
+      displayHeight,
       close: vi.fn(),
     } as unknown as VideoFrame,
     timestamp: 0,
@@ -482,16 +486,25 @@ describe("WebGPURenderer", () => {
     expect(device.copiesReleased()).toBe(true);
   });
 
-  it("imports a frame larger than a texture can be instead of copying it", async () => {
+  it("imports a frame larger than a texture can be, and checks the frames that fit", async () => {
     const device = new FakeDevice();
     Object.assign(device.limits, { maxTextureDimension2D: 1024 });
+    device.readbacks = [detailed(), detailed()];
     devices.push(device);
     const { gpu, on } = await renderer();
-    expect(gpu.draw(frame(RETAGGED), size, viewport)).toBe(true);
+    expect(gpu.draw(frame(RETAGGED, 1920, 1080), size, viewport)).toBe(true);
+    // Imported, with nothing copied or settled.
     expect(device.queue.copyExternalImageToTexture).not.toHaveBeenCalled();
     expect(device.textures.some((texture) => texture.format === "rgba16float")).toBe(false);
-    expect(device.importExternalTexture).toHaveBeenCalled();
+    expect(device.importExternalTexture).toHaveBeenCalledTimes(1);
+    // Frames that fit are copied until a later check finds the import right.
+    for (let index = 0; index <= FRAME_CHECK_RETRY_FRAMES; index++) {
+      gpu.draw(frame(RETAGGED, 960, 540), size, viewport);
+    }
+    expect(device.queue.copyExternalImageToTexture).toHaveBeenCalled();
     await settle();
+    gpu.draw(frame(RETAGGED, 960, 540), size, viewport);
+    expect(device.copiesReleased()).toBe(true);
     expect(on.onFailure).not.toHaveBeenCalled();
   });
 

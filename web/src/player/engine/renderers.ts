@@ -403,6 +403,8 @@ const UNIFORM_FLOATS = 40;
 /** How a GPU-backed frame reaches the shader. */
 type FrameTransfer = "import" | "copy";
 
+type FramePicture = Extract<EnginePicture, { kind: "frame" }>;
+
 /** Side, in pixels, of the square the two ways of drawing a frame are compared at. */
 const FRAME_CHECK_SIZE = 8;
 /**
@@ -597,20 +599,22 @@ class GPUPresenter {
     return this.planeBindGroup!;
   }
 
+  /** Whether `frame` fits in a texture on this device, so that it can be copied. */
+  private fitsTexture(frame: VideoFrame): boolean {
+    const limit = this.device.limits.maxTextureDimension2D;
+    return frame.displayWidth <= limit && frame.displayHeight <= limit;
+  }
+
   /**
    * Copies `frame` into the presenter's half-float texture, keeping its
-   * R'G'B' codes. Null where the browser cannot copy a VideoFrame (Firefox),
-   * or the frame is larger than a texture can be, which leaves importing as
-   * the only way.
+   * R'G'B' codes. Null where the frame is larger than a texture can be (that
+   * frame is imported), or the browser cannot copy a VideoFrame at all
+   * (Firefox), which leaves importing as the only way.
    */
   private copyFrame(frame: VideoFrame): GPUBindGroup | null {
+    if (!this.fitsTexture(frame)) return null;
     const width = frame.displayWidth;
     const height = frame.displayHeight;
-    const limit = this.device.limits.maxTextureDimension2D;
-    if (width > limit || height > limit) {
-      this.useImport();
-      return null;
-    }
     if (
       !this.copied ||
       this.copied.texture.width !== width ||
@@ -659,7 +663,13 @@ class GPUPresenter {
    * are imported from then on where the two agree, and copied where not. A
    * picture with too little in it decides nothing; a later frame is tried.
    */
-  private async checkFrameImport(picture: EnginePicture, size: PictureSize): Promise<void> {
+  private async checkFrameImport(picture: FramePicture, size: PictureSize): Promise<void> {
+    if (!this.fitsTexture(picture.frame)) {
+      // A frame that cannot be copied cannot be compared.
+      this.framesUntilCheck = FRAME_CHECK_RETRY_FRAMES;
+      this.frameChecking = false;
+      return;
+    }
     const side = FRAME_CHECK_SIZE;
     const target = () =>
       this.device.createTexture({
