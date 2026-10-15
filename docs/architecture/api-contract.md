@@ -2330,15 +2330,18 @@ for limits), without volatile metadata. Integration reads include persisted publ
 configuration and check status, all covered by the row revision, and a credential
 presence flag. API credentials are write-only. A blank update preserves the saved
 credential and retains the existing requirement to re-enter it when changing the
-base URL. Plugin validation happens before the storage transaction; an intervening
-edit still fails the final comparison instead of overwriting it. A failed plugin
+base URL, which applies only when a credential is saved; clearing the base URL
+counts as changing it. Plugin validation happens before the storage
+transaction; an intervening edit still fails the final comparison instead of overwriting it. A failed plugin
 validation uses structured v2 problem errors for the web's inline field messages.
 
 A v2 integration's `base_url` is normalized before option loading and before
 create or update: `http://` is assumed when no scheme is given and a trailing
 slash is dropped, so the saved address is the one the options probe used. An
 address with credentials, a query or a fragment, or another scheme, is a
-`validation_failed` problem on `body.base_url`. When `POST
+`validation_failed` problem on `body.base_url`. An options request that leaves
+`base_url` out tests the saved address; one that sends it blank tests a router
+that declares `base_url_optional` without an address. When `POST
 /admin/request-integrations/{id}/options` fails, the host answers with its own
 sentences and never echoes the plugin's upstream text. What the admin must fix
 is a `validation_failed` problem on `body.base_url` (wrong address, missing URL

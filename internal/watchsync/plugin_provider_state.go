@@ -761,9 +761,11 @@ func remoteFavoriteFromProto(provider string, state *pluginv1.WatchSyncRemoteSta
 		return RemoteFavorite{}, err
 	}
 	row := identity.favorite(provider, providerItemKey)
-	row.FavoritedAt = time.Now().UTC()
 	if value := timePointer(listed.GetListedAt()); value != nil {
 		row.FavoritedAt = *value
+	} else {
+		row.FavoritedAt = time.Now().UTC()
+		row.FavoritedAtGuessed = true
 	}
 	return row, nil
 }

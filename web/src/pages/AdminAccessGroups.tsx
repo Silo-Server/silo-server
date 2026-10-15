@@ -16,6 +16,7 @@ import type { AccessGroup, AccessGroupInput } from "@/api/types";
 import { EditorConflict } from "@/components/admin/EditorConflict";
 import { RequestLimitFields } from "@/components/admin/RequestLimitFields";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
+import { PageHeader } from "@/components/page/PageHeader";
 import { StreamBitrateLimitInput } from "@/components/StreamBitrateLimitInput";
 import {
   AlertDialog,
@@ -228,7 +229,7 @@ function AccessGroupsPage() {
 
   if (selected && available) {
     return (
-      <div className="page-shell space-y-6 py-4 sm:py-6">
+      <div className="space-y-6 pb-4 sm:pb-6">
         <Button
           type="button"
           variant="ghost"
@@ -256,23 +257,20 @@ function AccessGroupsPage() {
   }
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Access Groups</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            The shared policy layer for a set of users. A group supplies the value for every field
-            its members leave on Inherit; a per-user override replaces the group value in either
-            direction.
-          </p>
-        </div>
-        {!creating && available && (
-          <Button type="button" onClick={() => setCreating(true)}>
-            <Plus className="size-4" />
-            New group
-          </Button>
-        )}
-      </div>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="Access Groups"
+        subtitle="The shared policy layer for a set of users. A group supplies the value for every field its members leave on Inherit; a per-user override replaces the group value in either direction."
+        actions={
+          !creating &&
+          available && (
+            <Button type="button" onClick={() => setCreating(true)}>
+              <Plus className="size-4" />
+              New group
+            </Button>
+          )
+        }
+      />
 
       {!available && <p role="status">Access group editing is unavailable.</p>}
       {error && <p role="alert">{error}</p>}

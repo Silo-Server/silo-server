@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,13 +13,11 @@ import (
 )
 
 const (
-	// semanticCoverageEnableRatio is the per-type vector-coverage fraction at or
-	// above which semantic search becomes eligible for that type.
-	semanticCoverageEnableRatio = 0.90
-	// semanticCoverageDisableRatio is the per-type fraction below which semantic
-	// search is disabled for that type. The gap to the enable ratio is the
-	// hysteresis band that prevents flapping near the threshold.
-	semanticCoverageDisableRatio = 0.80
+	// semanticCoverageReadyRatio is the per-type vector-coverage fraction at or
+	// above which semantic search serves that type. It is a single threshold,
+	// not a latch, so every node decides the same from the same counts.
+	// Coverage changes in embedding-batch steps, so readiness does not flap.
+	semanticCoverageReadyRatio = 0.85
 	// semanticCoverageRefreshInterval is how often the background tracker
 	// recomputes the coverage snapshot.
 	semanticCoverageRefreshInterval = 2 * time.Minute
@@ -40,9 +39,9 @@ type coverageQuerier interface {
 //
 // Ratio and Ready are populated by computeCoverageSnapshot, not by the raw
 // catalogSemanticCoverageByType count query (which leaves them zero): Ratio is
-// Vectorized/Eligible, and Ready is the hysteresis-latched readiness decision
-// for the type. Carrying them on the same struct lets a published snapshot store
-// counts and the derived gate state together.
+// Vectorized/Eligible, and Ready is the readiness decision for the type.
+// Carrying them on the same struct lets a published snapshot store counts and
+// the derived gate state together.
 type catalogTypeCoverage struct {
 	Type       string
 	Eligible   int
@@ -164,17 +163,12 @@ type semanticCoverageSnapshot struct {
 	UpdatedAt time.Time
 }
 
-// computeCoverageSnapshot derives a fresh snapshot from raw per-type counts. It
-// applies hysteresis per type: at or above the enable ratio a type is ready;
-// below the disable ratio it is not; inside the band it holds the previous
-// snapshot's latch for that type (defaulting to not-ready when no prior latch
-// exists). A type with no eligible items is never ready. Overall is the global
-// vectorized/eligible fraction across the supplied types.
-//
-// prev supplies only the previous per-type Ready latches for band entries;
-// callers pass nil to start fresh (e.g. immediately after a model collapse) so a
-// stale latch can never carry into a new model.
-func computeCoverageSnapshot(types []catalogTypeCoverage, model string, prev *semanticCoverageSnapshot, now time.Time) *semanticCoverageSnapshot {
+// computeCoverageSnapshot derives a fresh snapshot from raw per-type counts. A
+// type is ready when it has eligible items and at least
+// semanticCoverageReadyRatio of them carry a current-model vector. The decision
+// depends only on the counts, so nodes refreshing from the same database agree.
+// Overall is the global vectorized/eligible fraction across the supplied types.
+func computeCoverageSnapshot(types []catalogTypeCoverage, model string, now time.Time) *semanticCoverageSnapshot {
 	per := make(map[string]catalogTypeCoverage, len(types))
 	sumEligible, sumVectorized := 0, 0
 	for _, c := range types {
@@ -182,22 +176,7 @@ func computeCoverageSnapshot(types []catalogTypeCoverage, model string, prev *se
 		if c.Eligible > 0 {
 			ratio = float64(c.Vectorized) / float64(c.Eligible)
 		}
-		ready := false
-		switch {
-		case c.Eligible == 0:
-			ready = false // no data to gate on
-		case ratio >= semanticCoverageEnableRatio:
-			ready = true
-		case ratio < semanticCoverageDisableRatio:
-			ready = false
-		default:
-			// Hysteresis band [disable, enable): hold the previous latch.
-			if prev != nil {
-				if pc, ok := prev.PerType[c.Type]; ok {
-					ready = pc.Ready
-				}
-			}
-		}
+		ready := c.Eligible > 0 && ratio >= semanticCoverageReadyRatio
 		per[c.Type] = catalogTypeCoverage{
 			Type:       c.Type,
 			Eligible:   c.Eligible,
@@ -264,8 +243,8 @@ func (t *semanticCoverageTracker) now() time.Time {
 // under mu and fails safe: if the active model cannot be resolved or the count
 // query errors, the last-good snapshot is retained (no zeroed snapshot is
 // published). When the active model changes, the prior snapshot is collapsed to
-// not-ready before recompute so stale per-type latches cannot leak across
-// models.
+// not-ready before recompute, so a failed recount cannot leave the old model's
+// readiness in place.
 func (t *semanticCoverageTracker) Refresh(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -292,16 +271,14 @@ func (t *semanticCoverageTracker) Refresh(ctx context.Context) error {
 		return nil
 	}
 
-	prev := t.snap.Load()
-	if prev != nil && prev.Model != model {
-		// Model changed: collapse immediately and drop stale latches so the
-		// recompute below cannot inherit readiness from the previous model.
+	if prev := t.snap.Load(); prev != nil && prev.Model != model {
+		// Model changed: collapse immediately so a failed recount below cannot
+		// leave the previous model's readiness published.
 		t.snap.Store(&semanticCoverageSnapshot{
 			PerType:   map[string]catalogTypeCoverage{},
 			Model:     model,
 			UpdatedAt: t.now(),
 		})
-		prev = nil
 	}
 
 	types, err := t.fetch(ctx, model)
@@ -311,16 +288,16 @@ func (t *semanticCoverageTracker) Refresh(ctx context.Context) error {
 		return err
 	}
 
-	t.snap.Store(computeCoverageSnapshot(types, model, prev, t.now()))
+	t.snap.Store(computeCoverageSnapshot(types, model, t.now()))
 	return nil
 }
 
 // CoverageReady reports whether semantic search may serve the requested item
 // types. It is lock-free and fail-safe: a not-yet-computed (nil/empty) snapshot
 // reports not-ready. An explicit scope is an AND over its types; the first
-// not-ready type's reason is returned. An empty scope requires every snapshot
-// type to be ready. Requested types absent from the snapshot (no eligible items)
-// are not gated; a scope consisting only of such types reports not-ready.
+// not-ready type's reason is returned. An empty scope requires every type with
+// eligible items to be ready. Types with no eligible items are not gated; a
+// scope consisting only of such types reports not-ready.
 func (t *semanticCoverageTracker) CoverageReady(itemTypes []string) (bool, string) {
 	s := t.snap.Load()
 	if s == nil || len(s.PerType) == 0 {
@@ -333,12 +310,14 @@ func (t *semanticCoverageTracker) CoverageReady(itemTypes []string) (bool, strin
 		for k := range s.PerType {
 			requested = append(requested, k)
 		}
+		// Map order is random; sorting keeps the reported type stable.
+		slices.Sort(requested)
 	}
 
 	anyPresent := false
 	for _, ty := range requested {
 		c, ok := s.PerType[ty]
-		if !ok {
+		if !ok || c.Eligible == 0 {
 			// No eligible items of this type: nothing to gate.
 			continue
 		}

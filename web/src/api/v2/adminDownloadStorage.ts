@@ -1,6 +1,5 @@
 import type { ProfileRequestContextSnapshot } from "@/api/client";
-import { adminKeys } from "@/hooks/queries/keys";
-import { adminAuthorityScope, requireAdminAuthority } from "./adminAuthority";
+import { requireAdminAuthority } from "./adminAuthority";
 import { v2, type V2Query, type V2Result } from "./request";
 
 export type AdminDownloadStorage = V2Result<"GET /api/v2/admin/downloads/storage">;
@@ -27,10 +26,6 @@ export const ADMIN_DOWNLOAD_STORAGE_PAGE_SIZE = 50;
 export const ADMIN_DOWNLOAD_STORAGE_DELETE_MAX_IDS = 500;
 /** Most download ids one revoke request may carry. */
 export const ADMIN_DOWNLOAD_REVOKE_MAX_IDS = 500;
-
-export function adminDownloadStorageRootKey(context: ProfileRequestContextSnapshot | null) {
-  return [...adminKeys.downloadStorage(), adminAuthorityScope(context)] as const;
-}
 
 async function read<T>(context: ProfileRequestContextSnapshot, run: () => Promise<T>): Promise<T> {
   requireAdminAuthority(context);

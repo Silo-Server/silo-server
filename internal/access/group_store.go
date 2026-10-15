@@ -593,6 +593,19 @@ func moveGroupMembersToDefault(ctx context.Context, tx pgx.Tx, id int64) ([]*aud
 		auditmutation.Changes(map[string]any{"access_group_id": id}, map[string]any{"access_group_id": defaultID}))
 }
 
+// MemberIDs lists the accounts in access group id.
+func (s *GroupStore) MemberIDs(ctx context.Context, id int64) ([]int, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM users WHERE access_group_id = $1 ORDER BY id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("listing access group %d members: %w", id, err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	if err != nil {
+		return nil, fmt.Errorf("listing access group %d members: %w", id, err)
+	}
+	return ids, nil
+}
+
 // GetPolicyForUser returns the access-group policy for a user, or nil when
 // the user has no group.
 func (s *GroupStore) GetPolicyForUser(ctx context.Context, userID int) (*GroupPolicy, error) {

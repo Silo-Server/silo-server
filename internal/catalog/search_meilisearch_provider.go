@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sort"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 )
 
 const (
@@ -26,6 +28,14 @@ const (
 	meilisearchCircuitCooldown         = 30 * time.Second
 	meilisearchQueryVectorCacheTTL     = 15 * time.Minute
 	meilisearchQueryVectorCacheMax     = 1024
+	// meilisearchQueryVectorTimeout bounds embedding one search query. The
+	// embedding client retries for minutes on a failing provider; a search
+	// falls back to keyword results instead of waiting for it.
+	meilisearchQueryVectorTimeout = 2 * time.Second
+	// meilisearchQueryVectorFailureCooldown is how long this node skips the
+	// embedding provider for search queries after a query failed to embed,
+	// so an outage does not cost every search the timeout.
+	meilisearchQueryVectorFailureCooldown = time.Minute
 	// meilisearchIndexStateCacheTTL bounds how long the provider serves the
 	// cached catalog_search_index_state row (and the informational pending
 	// count) before refetching. The state only changes on rebuild/sync, so this
@@ -87,6 +97,11 @@ type MeilisearchSearchProvider struct {
 	vecMu          sync.Mutex
 	vectorCache    map[string]cachedCatalogSearchQueryVector
 	vectorCacheSeq int64
+	// vectorFailedUntil ends the cooldown that follows a failed query
+	// embedding; until then queries skip the provider.
+	vectorFailedUntil time.Time
+	// vectorClock is the query-vector cache's clock; nil means time.Now.
+	vectorClock func() time.Time
 
 	// stateMu guards the cached index state + pending count (see
 	// meilisearchIndexStateCacheTTL).
@@ -491,7 +506,13 @@ func (p *MeilisearchSearchProvider) buildMeilisearchSearchRequest(ctx context.Co
 	}
 	vector, err := p.cachedQueryVector(ctx, req.Query)
 	if err != nil {
-		return searchReq, "semantic query embedding failed: " + err.Error()
+		// The reason reaches every searching user, so it never carries the
+		// provider error: that can quote endpoint URLs and response bodies.
+		// The failure that started a cooldown was logged already.
+		if !errors.Is(err, errQueryVectorCoolingDown) {
+			slog.WarnContext(ctx, "catalog search: semantic query embedding failed", "component", "catalog", "err", err)
+		}
+		return searchReq, semanticQueryEmbeddingFailedReason
 	}
 	if len(vector) == 0 {
 		return searchReq, "semantic query embedding returned no vector"
@@ -669,6 +690,25 @@ func catalogSearchQueryTerms(query string) []string {
 	return strings.Fields(normalized)
 }
 
+// semanticQueryEmbeddingFailedReason is the fallback reason searchers see
+// when their query could not be embedded, whatever the cause.
+const semanticQueryEmbeddingFailedReason = "semantic query embedding failed"
+
+// errQueryVectorCoolingDown reports a query not embedded because a recent
+// query failed to embed on this node.
+var errQueryVectorCoolingDown = errors.New("semantic query embedding is cooling down after a failure")
+
+func (p *MeilisearchSearchProvider) vectorNow() time.Time {
+	if p.vectorClock != nil {
+		return p.vectorClock()
+	}
+	return time.Now()
+}
+
+// cachedQueryVector embeds a search query, or returns its cached vector. The
+// provider gets meilisearchQueryVectorTimeout; when it fails, this node skips
+// it for meilisearchQueryVectorFailureCooldown and callers fall back to
+// keyword search.
 func (p *MeilisearchSearchProvider) cachedQueryVector(ctx context.Context, query string) ([]float32, error) {
 	if p == nil || p.config.Vectorizer == nil {
 		return nil, fmt.Errorf("semantic query vectorizer is unavailable")
@@ -678,7 +718,7 @@ func (p *MeilisearchSearchProvider) cachedQueryVector(ctx context.Context, query
 		return nil, nil
 	}
 	cacheKey := strings.ToLower(normalized)
-	now := time.Now()
+	now := p.vectorNow()
 
 	p.vecMu.Lock()
 	if cached, ok := p.vectorCache[cacheKey]; ok && now.Before(cached.expiresAt) {
@@ -686,14 +726,27 @@ func (p *MeilisearchSearchProvider) cachedQueryVector(ctx context.Context, query
 		p.vecMu.Unlock()
 		return vector, nil
 	}
+	if now.Before(p.vectorFailedUntil) {
+		p.vecMu.Unlock()
+		return nil, errQueryVectorCoolingDown
+	}
 	p.vecMu.Unlock()
 
-	vector, err := p.config.Vectorizer.EmbedSearchQuery(ctx, normalized)
-	if err != nil {
-		return nil, err
+	embedCtx, cancel := context.WithTimeout(ctx, meilisearchQueryVectorTimeout)
+	vector, err := p.config.Vectorizer.EmbedSearchQuery(embedCtx, normalized)
+	cancel()
+	if err == nil {
+		vector, err = embeddingvectors.EnsureCanonicalDimensions(vector)
 	}
-	vector, err = embeddingvectors.EnsureCanonicalDimensions(vector)
 	if err != nil {
+		// A caller that gave up, and a query the provider refused (such as
+		// an overlong search, including a local model's context-length
+		// 5xx), say nothing about the provider.
+		if ctx.Err() == nil && !embeddings.InputRefused(err) {
+			p.vecMu.Lock()
+			p.vectorFailedUntil = p.vectorNow().Add(meilisearchQueryVectorFailureCooldown)
+			p.vecMu.Unlock()
+		}
 		return nil, err
 	}
 

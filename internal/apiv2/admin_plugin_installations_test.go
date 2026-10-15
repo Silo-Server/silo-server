@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
+
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
@@ -215,3 +218,25 @@ type noPublicURLOAuth struct{ fakeOAuth }
 func (noPublicURLOAuth) PostLogoutRedirectURL() string { return "" }
 
 func (noPublicURLOAuth) NativeSignInAvailable() bool { return false }
+
+// A request_router.v1 capability says which request server fields its plugin
+// can do without; other capability types carry no request_router.
+func TestAdminPluginCapabilitiesCarryRequestRouterFlags(t *testing.T) {
+	caps, err := adminPluginCapabilitiesOf([]handlers.PluginCapabilityView{
+		{Type: sdkcapability.RequestRouter, ID: "local", RequestRouter: &pluginv1.RequestRouterDescriptor{ApiKeyOptional: true, BaseUrlOptional: true}},
+		{Type: sdkcapability.RequestRouter, ID: "arr"},
+		{Type: sdkcapability.ScheduledTask, ID: "task"},
+	})
+	if err != nil {
+		t.Fatalf("adminPluginCapabilitiesOf: %v", err)
+	}
+	if got := caps[0].RequestRouter; got == nil || !got.APIKeyOptional || !got.BaseURLOptional {
+		t.Fatalf("local request_router = %+v, want both fields optional", got)
+	}
+	if got := caps[1].RequestRouter; got == nil || got.APIKeyOptional || got.BaseURLOptional {
+		t.Fatalf("arr request_router = %+v, want both fields needed", got)
+	}
+	if caps[2].RequestRouter != nil {
+		t.Fatalf("task request_router = %+v, want none", caps[2].RequestRouter)
+	}
+}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -22,7 +22,39 @@ vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({ profile: mocks.useAuth()?.profile ?? null }),
 }));
 
+import UserSettingsSidebar from "@/components/settings/UserSettingsSidebar";
+
 import SettingsLayout from "./SettingsLayout";
+
+// The settings route as the app mounts it: `Layout` renders the settings
+// sidebar in the app sidebar's place, beside the routed settings page.
+function SettingsShell() {
+  return (
+    <>
+      <UserSettingsSidebar backTo="/movies" />
+      <SettingsLayout />
+    </>
+  );
+}
+
+function renderSettings(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/settings/*" element={<SettingsShell />}>
+          <Route path="*" element={<div data-testid="settings-page" />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+function stubDesktop(matches: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => ({ matches, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+  );
+}
 
 describe("SettingsLayout", () => {
   beforeEach(() => {
@@ -60,7 +92,7 @@ describe("SettingsLayout", () => {
 
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/settings/playback"]}>
-        <SettingsLayout />
+        <SettingsShell />
       </MemoryRouter>,
     );
 
@@ -78,7 +110,7 @@ describe("SettingsLayout", () => {
 
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/settings/profiles"]}>
-        <SettingsLayout />
+        <SettingsShell />
       </MemoryRouter>,
     );
 
@@ -89,11 +121,7 @@ describe("SettingsLayout", () => {
   });
 
   it("filters personal settings sections from the search box", async () => {
-    render(
-      <MemoryRouter initialEntries={["/settings/playback"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
+    renderSettings("/settings/playback");
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "pin");
 
@@ -108,11 +136,7 @@ describe("SettingsLayout", () => {
   });
 
   it("finds Home Screen when searching for home rows", async () => {
-    render(
-      <MemoryRouter initialEntries={["/settings/playback"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
+    renderSettings("/settings/playback");
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "home rows");
 
@@ -122,11 +146,7 @@ describe("SettingsLayout", () => {
   it.each(["hide watched items", "export layout", "import layout", "reset home"])(
     "finds Home Screen when searching for %s",
     async (query) => {
-      render(
-        <MemoryRouter initialEntries={["/settings/playback"]}>
-          <SettingsLayout />
-        </MemoryRouter>,
-      );
+      renderSettings("/settings/playback");
 
       await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), query);
 
@@ -160,17 +180,9 @@ describe("SettingsLayout", () => {
     expect(searchBox).toHaveFocus();
   });
 
-  it("does not consume Cmd+K when the detail search is hidden", () => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn(() => ({ matches: false })),
-    );
-
-    render(
-      <MemoryRouter initialEntries={["/settings/playback"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
+  it("does not consume Cmd+K while the settings sidebar is hidden", () => {
+    stubDesktop(false);
+    renderSettings("/settings/playback");
 
     const event = new KeyboardEvent("keydown", {
       key: "k",
@@ -181,27 +193,33 @@ describe("SettingsLayout", () => {
     expect(document.dispatchEvent(event)).toBe(true);
     expect(event.defaultPrevented).toBe(false);
   });
-  // jsdom can't measure layout; the real check is a 390px browser walk. The
-  // app shell, the page shell and this pane each pad a phone by 16px, which
-  // leaves Home Screen's rows too narrow to read their titles.
-  it("lets Home Screen use the pane's full width on a phone", () => {
-    function paneAt(path: string) {
-      const view = render(
-        <MemoryRouter initialEntries={[`/settings/${path}`]}>
-          <Routes>
-            <Route path="/settings/*" element={<SettingsLayout />}>
-              <Route path="*" element={<div data-testid="settings-page" />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>,
-      );
-      const pane = screen.getByTestId("settings-page").parentElement?.parentElement;
-      const classes = pane?.className ?? "";
-      view.unmount();
-      return classes;
-    }
+  it("opens the first settings page at the root on desktop", () => {
+    stubDesktop(true);
+    renderSettings("/settings");
 
-    expect(paneAt("home-screen")).toContain("max-sm:px-0");
-    expect(paneAt("playback")).not.toContain("max-sm:px-0");
+    expect(screen.getByTestId("settings-page")).toBeInTheDocument();
+    const sidebar = screen.getByRole("navigation", { name: "Settings" });
+    expect(within(sidebar).getByRole("link", { name: "Playback" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("lists every settings page at the root on a phone", () => {
+    stubDesktop(false);
+    renderSettings("/settings");
+
+    const index = screen.getByRole("navigation", { name: "Settings pages" });
+    expect(within(index).getByRole("link", { name: /^Playback/ })).toHaveAttribute(
+      "href",
+      "/settings/playback",
+    );
+    expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
+  });
+
+  it("leads back to the page settings were opened from", () => {
+    renderSettings("/settings/playback");
+
+    expect(screen.getByRole("link", { name: "Back to App" })).toHaveAttribute("href", "/movies");
   });
 });

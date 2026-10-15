@@ -14,6 +14,7 @@ import {
   useSetNodeDrain,
   useToggleNode,
 } from "@/hooks/queries/admin/nodes";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,6 +73,7 @@ import {
   nodeUsesCUDADevices,
   parseHWDeviceOverride,
 } from "./adminNodesPresentation";
+import { NodeRoutingSettings } from "@/pages/admin-settings/NodeRoutingSettings";
 
 type NodeType = "proxy" | "transcode";
 
@@ -1306,19 +1308,14 @@ export default function AdminNodes() {
     }
   }
 
-  if (isLoading) return <div className="page-shell py-8">Loading nodes...</div>;
+  if (isLoading) return <div className="pb-8">Loading nodes...</div>;
 
   return (
-    <div className="page-shell space-y-8 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Stream Nodes</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Manage proxy and transcode workers that distribute playback load across your
-            infrastructure.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-8 pb-4 sm:pb-6">
+      <PageHeader
+        title="Stream Nodes"
+        subtitle="Manage proxy and transcode workers that distribute playback load across your infrastructure."
+      />
 
       <NodeGroupFilter
         options={groupOptions}
@@ -1393,6 +1390,13 @@ export default function AdminNodes() {
           </div>
         }
       />
+
+      <section aria-labelledby="node-routing-heading" className="max-w-3xl space-y-3">
+        <h2 id="node-routing-heading" className="text-lg font-semibold">
+          Routing
+        </h2>
+        <NodeRoutingSettings />
+      </section>
 
       <Dialog open={dialogOpen} onOpenChange={handleDialogChange}>
         <DialogContent>

@@ -895,3 +895,18 @@ func TestToSectionOverridesPropagatesUserAddedFields(t *testing.T) {
 		t.Errorf("legacy customization leaked user-added fields: %+v", got[1])
 	}
 }
+
+func TestSectionLocalizationAccessScopesLibraryRows(t *testing.T) {
+	viewer := catalog.AccessFilter{ProfilePreferredLanguage: ""}
+	libraryID := 7
+	scoped := sectionLocalizationAccess(viewer, &libraryID)
+	if scoped.PresentationLibraryID == nil || *scoped.PresentationLibraryID != 7 {
+		t.Fatalf("library rows: PresentationLibraryID = %v, want 7", scoped.PresentationLibraryID)
+	}
+	if viewer.PresentationLibraryID != nil {
+		t.Fatal("the viewer's filter was modified")
+	}
+	if home := sectionLocalizationAccess(viewer, nil); home.PresentationLibraryID != nil {
+		t.Fatalf("home rows: PresentationLibraryID = %v, want nil", *home.PresentationLibraryID)
+	}
+}

@@ -733,6 +733,8 @@ export interface Season {
   poster_url: string;
   poster_thumbhash: string;
   user_data?: SeasonUserData;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface SeasonsResponse {
@@ -1156,6 +1158,11 @@ export interface ItemDetail {
    * keys off this.
    */
   pending_translation_language?: string;
+  /**
+   * Localized fields ("overview", "tagline") whose text was machine-translated
+   * by AI rather than supplied by a metadata provider or a person.
+   */
+  machine_translated_fields?: string[];
   runtime: number;
   content_rating: string;
   /**
@@ -1313,6 +1320,10 @@ export interface EpisodeListItem {
   user_data?: LeafItemUserData;
   files: EpisodeFile[];
   overlay_summary?: OverlaySummary | null;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
+  /** This profile's language when the episode's description is not in it yet. */
+  pending_translation_language?: string;
 }
 
 export interface EpisodesResponse {
@@ -3866,6 +3877,8 @@ export interface PluginCapability {
   callback_url?: string;
   /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */
   post_logout_redirect_url?: string;
+  /** A request_router.v1 capability: the request server fields its plugin can do without. */
+  request_router?: { api_key_optional: boolean; base_url_optional: boolean };
 }
 
 export interface PluginRoute {
@@ -4464,6 +4477,10 @@ export interface SectionItem {
   badges?: string[];
   user_state?: MediaItemUserState;
   upcoming_event?: SectionItemUpcomingEvent | null;
+  /** This profile's language when the card's description is not in it yet. */
+  pending_translation_language?: string;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface ResolvedSection {
@@ -5348,6 +5365,8 @@ export interface UnmatchedLibraryItem {
   library_id: number;
   library_name: string;
   status: string;
+  /** When an admin marked the item as intentionally unmatched; absent unless ignored. */
+  ignored_at?: string;
 }
 
 export interface FilesystemBrowseEntry {

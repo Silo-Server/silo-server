@@ -15,6 +15,11 @@ describe("shuffleNextEpisodeRef", () => {
     expect(ref.watchState).toBeUndefined();
   });
 
+  it("carries the AI marker so the post-roll labels a machine-translated overview", () => {
+    const ref = shuffleNextEpisodeRef(shuffleWith({ machine_translated_fields: ["overview"] }));
+    expect(ref.machineTranslatedFields).toEqual(["overview"]);
+  });
+
   it("passes an episode's played flag and position", () => {
     const ref = shuffleNextEpisodeRef(
       shuffleWith({

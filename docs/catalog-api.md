@@ -357,6 +357,16 @@ marks an episode only when every one of its files is unreadable, since any
 readable version still plays. `/api/v1` episode listings do not carry the
 field.
 
+## Episode ratings
+
+Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` carries
+`ratings`, its IMDb and TMDB ratings in the same `CatalogRating` shape a title
+page's `ratings` uses: a 0-100 `score`, the source's own `display`, and the
+source's `name`. They are built from the episode's stored rating columns by the
+same rules as a title page, so a stored 0 (unrated) or a value off the 0-10
+scale is left out, and an episode with no rating omits the field. `/api/v1`
+episode listings do not carry ratings.
+
 ## Section quality badges
 
 Home and library section cards derive `overlay_summary` from the best accessible,
@@ -1094,3 +1104,42 @@ issue #937. They need V2 discovery and fixtures, settings, playback, and lifecyc
 support before enabling it. Provider downloads, theme videos, uploads, remote
 URLs, and HLS theme transcoding are outside this local-file capability. No V1
 route or V1 item-detail shape changes.
+
+## Description translation
+
+Silo can translate descriptions with an AI model into a profile's metadata
+language (`metadata_ai` settings). Localized text reaches clients through the
+ordinary localized fields; these members describe it:
+
+- `machine_translated_fields` on the item detail, season rows and episode rows
+  lists the localized fields whose text an AI translation wrote: `overview`
+  and, on items, `tagline`. It is absent when no shown field was
+  machine-translated, and it is never set for provider or manually entered
+  text. Clients label exactly the fields it names; an AI `tagline` alone says
+  nothing about the overview. The frozen v1 JSON does not carry it.
+- `pending_translation_language` on the item detail is this profile's
+  metadata language when the item's description is not available in it yet.
+  `POST /api/v2/catalog/items/{id}/translate-description` with that value as
+  `target_language` queues the translation, and a later detail read carries
+  the translated text. Reading the detail queues nothing. `on_view` from
+  `GET /api/v2/capabilities/metadata-ai` says when a client sends that
+  request: as soon as it shows such an item (`auto`), when the viewer asks
+  for it (`button`), or never (`off`).
+- On-view translation covers what the page shows: a movie or series its own
+  overview and tagline, a season its overview and its episodes' overviews, an
+  episode itself. A season's `pending_translation_language` is therefore also
+  set while any of its episodes lacks the language, and v2 episode rows carry
+  their own `pending_translation_language`, so a client that lists episodes
+  inline (a single-season series) can translate that season. Children whose
+  source text is already in the target language are skipped.
+- Home and library section cards carry the profile's localized title and
+  overview (an episode card its episode's), with the same
+  `pending_translation_language` and `machine_translated_fields` members as
+  the detail document. A library's rows resolve the language as a detail
+  page opened in that library does, so a profile without a metadata language
+  sees the library's. Cards keep the source poster, backdrop, and logo, and an
+  episode card's `series_title` stays the source title. Shuffle and Watch
+  Together picker cards come from the item detail and carry them too. Other
+  card lists, such as recommendations and Watch Tonight, are not localized
+  and never carry these members. The web Featured hero uses them to translate the
+  slide on screen; other cards only display them.

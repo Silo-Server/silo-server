@@ -51,7 +51,7 @@ import {
   isDownloadPreparationProgressEvent,
   type AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
-import { adminDownloadStorageRootKey } from "@/api/v2/adminDownloadStorage";
+import { adminDownloadStorageRootKey } from "@/api/v2/adminDownloadStorageCache";
 import { adminStatsKey } from "@/hooks/queries/admin/stats";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";

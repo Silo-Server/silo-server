@@ -1312,6 +1312,28 @@ func TestPluginProviderRejectsIncrementalOrderedWatchlist(t *testing.T) {
 	}
 }
 
+func TestPluginProviderMarksGuessedListTime(t *testing.T) {
+	state := &pluginv1.WatchSyncRemoteState{
+		ProviderItemKey: "imdb:tt0137523",
+		Media: &pluginv1.WatchSyncMedia{
+			MediaType: pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
+			Title:     "Movie", ExternalIds: map[string]string{"imdb": "tt0137523"},
+		},
+	}
+	listedAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	dated, err := remoteFavoriteFromProto(testPluginProviderKey, state, &pluginv1.WatchSyncRemoteListState{ListedAt: timestamppb.New(listedAt)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	undated, err := remoteFavoriteFromProto(testPluginProviderKey, state, &pluginv1.WatchSyncRemoteListState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dated.FavoritedAtGuessed || !dated.FavoritedAt.Equal(listedAt) || !undated.FavoritedAtGuessed || undated.FavoritedAt.IsZero() {
+		t.Fatalf("dated = %v/%v, undated = %v/%v", dated.FavoritedAt, dated.FavoritedAtGuessed, undated.FavoritedAt, undated.FavoritedAtGuessed)
+	}
+}
+
 func TestPluginProviderDecodesKeyOnlyListTombstone(t *testing.T) {
 	row, err := remoteFavoriteFromProto(testPluginProviderKey, &pluginv1.WatchSyncRemoteState{
 		ProviderItemKey: "remote-1",

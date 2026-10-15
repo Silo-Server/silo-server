@@ -189,7 +189,7 @@ func TestHDCopyDropsTheServers4KFlag(t *testing.T) {
 	fc := &fulfillContext{integrations: []Integration{{ID: "radarr-4k", Name: "Radarr 4K", Enabled: true, CapabilityID: "arr",
 		InstallationID: &install, APIKeyRef: "k", PluginConfig: map[string]any{"service_kind": "radarr", "is_4k": true}}}}
 	for q, want := range map[Quality]bool{Quality1080p: false, Quality2160p: true} {
-		conn, _, _, err := routedConnection(fc, RouteDecision{RouteName: "Everything else", IntegrationID: "radarr-4k"}, MediaTypeMovie, q)
+		conn, _, _, err := (&Service{}).routedConnection(context.Background(), fc, RouteDecision{RouteName: "Everything else", IntegrationID: "radarr-4k"}, MediaTypeMovie, q)
 		if err != nil {
 			t.Fatal(err)
 		}

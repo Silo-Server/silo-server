@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import { useDateTimeFormat, useDateTimeFormatSettings } from "@/hooks/useDateTimeFormat";
@@ -34,7 +35,10 @@ export default function AccessibilitySettings() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Accessibility</h2>
+      <PageHeader
+        title="Accessibility"
+        subtitle="Text size, weight, contrast, and date and time formats."
+      />
 
       <SettingsGroup
         title="Readability"
@@ -138,7 +142,7 @@ export default function AccessibilitySettings() {
             This sample paragraph reflects your current text size, weight, and contrast preferences.
             Adjustments take effect across the entire interface.
           </p>
-          <p className="text-muted-foreground/70 text-xs">
+          <p className="text-muted-foreground text-xs">
             Secondary text &middot; Metadata &middot; Captions
           </p>
         </div>

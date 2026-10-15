@@ -63,12 +63,63 @@ type ffprobeChapter struct {
 type ffprobeSideData = mediaprobe.SideData
 type ffprobeDisp = mediaprobe.Disposition
 
+// probeLimits bounds ProbeFile's ffprobe runs. Reading a file's format,
+// streams, and chapters touches its header and index, which takes seconds
+// even on network storage, so a probe still running after two minutes is
+// stalled on its storage. The packet scan reads the whole file, so it gets
+// the longer of packetsMinimum and the time to read the file at
+// packetsBytesPerSecond: 30 minutes reads a 4 GB file at 2.2 MB/s, and
+// 10 MB/s is about the rate a 4K remux plays at.
+type probeLimits struct {
+	probe                 time.Duration
+	packetsMinimum        time.Duration
+	packetsBytesPerSecond float64
+	// waitDelay bounds how long a killed ffprobe's output may stay open,
+	// which a child it started, as a wrapper script does, can hold.
+	waitDelay time.Duration
+}
+
+var defaultProbeLimits = probeLimits{
+	probe:                 2 * time.Minute,
+	packetsMinimum:        30 * time.Minute,
+	packetsBytesPerSecond: 10_000_000,
+	waitDelay:             5 * time.Second,
+}
+
+// packetScan is the deadline of a packet scan of a file of size bytes, or of
+// unknown size when size is not positive.
+func (l probeLimits) packetScan(size int64) time.Duration {
+	read := time.Duration(float64(max(size, 0)) / l.packetsBytesPerSecond * float64(time.Second))
+	return max(l.packetsMinimum, read.Round(time.Second))
+}
+
+// errProbeTimeout reports an ffprobe run killed at its deadline. It wraps
+// neither the process's exit error nor context.DeadlineExceeded:
+// IsProbeRejection must not take the kill for ffprobe refusing the file,
+// and scan loops take a context error for the end of the whole scan.
+var errProbeTimeout = errors.New("ffprobe timed out")
+
+// probeTimedOut reports whether runCtx, made from ctx with an ffprobe run's
+// deadline, expired while ctx was still live: the run was killed at its own
+// deadline, not canceled by the caller.
+func probeTimedOut(ctx, runCtx context.Context) bool {
+	return ctx.Err() == nil && errors.Is(runCtx.Err(), context.DeadlineExceeded)
+}
+
 // ProbeFile runs ffprobe on the given file and returns parsed ProbeData.
 // ffprobePath is the path to the ffprobe binary. filePath is the media file to probe.
+// A run that does not finish within its deadline is killed and fails with a
+// timeout, which IsProbeRejection does not count against the file.
 func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
+	return probeFileWithin(ctx, ffprobePath, filePath, defaultProbeLimits)
+}
+
+func probeFileWithin(ctx context.Context, ffprobePath string, filePath string, limits probeLimits) (*ProbeData, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, limits.probe)
+	defer cancel()
 	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
 	// can tell an unreadable source from damaged content; stdout stays JSON.
-	cmd := exec.CommandContext(ctx, ffprobePath,
+	cmd := exec.CommandContext(probeCtx, ffprobePath,
 		"-v", "error",
 		"-print_format", "json",
 		"-show_format",
@@ -76,10 +127,15 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 		"-show_chapters",
 		filePath,
 	)
+	killProcessGroupOnCancel(cmd)
+	cmd.WaitDelay = limits.waitDelay
 
 	output, err := cmd.Output()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, ctx.Err())
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
 	if err != nil {
+		if probeTimedOut(ctx, probeCtx) {
+			return nil, fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
+		}
 		return nil, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
 	}
 
@@ -96,8 +152,17 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 			// track metadata that already parsed successfully: callers persist
 			// the partial probe, and the repair layer retries rows whose
 			// duration is still unknown.
-			if duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate); packetErr == nil && duration > 0 {
+			size, _ := strconv.ParseInt(raw.Format.Size, 10, 64)
+			duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate, limits.packetScan(size), limits.waitDelay)
+			if packetErr == nil && duration > 0 {
 				probe.Duration = duration
+			}
+			if errors.Is(packetErr, errProbeTimeout) {
+				slog.WarnContext(ctx, "scanner: ffprobe packet scan timed out; the duration stays unknown until a later probe",
+					"component", "scanner",
+					"path", filePath,
+					"error", packetErr,
+				)
 			}
 		}
 	}
@@ -652,26 +717,41 @@ func probeVideoPacketDuration(
 	ffprobePath string,
 	filePath string,
 	frameRate string,
+	timeout time.Duration,
+	waitDelay time.Duration,
 ) (int, error) {
-	cmd := exec.CommandContext(ctx, ffprobePath,
+	packetCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(packetCtx, ffprobePath,
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time",
 		"-of", "csv=p=0",
 		filePath,
 	)
+	killProcessGroupOnCancel(cmd)
+	cmd.WaitDelay = waitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return 0, fmt.Errorf("opening ffprobe packet output: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		processmetrics.Record(processmetrics.Probe, nil, err, ctx.Err())
+		processmetrics.Record(processmetrics.Probe, nil, err, packetCtx.Err())
 		return 0, fmt.Errorf("starting ffprobe packet scan: %w", err)
 	}
 
+	// WaitDelay does not reach a pipe read before Wait, so the deadline
+	// closes it too, for a child that outlives the killed ffprobe.
+	stopClose := context.AfterFunc(packetCtx, func() { _ = stdout.Close() })
 	duration := estimateVideoPacketDuration(stdout, frameRate)
+	stopClose()
 	waitErr := cmd.Wait()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, ctx.Err())
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, packetCtx.Err())
+	// A deadline that closed the pipe may have cut the read short, so its
+	// estimate is not trusted even when ffprobe itself exited cleanly.
+	if probeTimedOut(ctx, packetCtx) {
+		return 0, fmt.Errorf("%w: packet scan of %s did not finish within %s", errProbeTimeout, filePath, timeout)
+	}
 	if err := waitErr; err != nil {
 		return 0, fmt.Errorf("ffprobe packet scan failed for %s: %w", filePath, err)
 	}

@@ -349,7 +349,7 @@ func (s *Service) PreviewRoute(ctx context.Context, viewer Viewer, mediaType Med
 			if in != nil {
 				tier.IntegrationName = in.Name
 			}
-			tier.Reason = routedServerProblem(in, mediaType)
+			tier.Reason = s.routedServerProblem(ctx, fc, in, mediaType)
 		}
 		preview.Tiers = append(preview.Tiers, tier)
 	}
@@ -359,7 +359,7 @@ func (s *Service) PreviewRoute(ctx context.Context, viewer Viewer, mediaType Med
 // routedServerProblem explains why a tier routed to the server would fail
 // when sent, in the cases routedConnection refuses it, and is "" when the
 // server can take it.
-func routedServerProblem(in *Integration, mediaType MediaType) string {
+func (s *Service) routedServerProblem(ctx context.Context, fc *fulfillContext, in *Integration, mediaType MediaType) string {
 	const fails = ", so this tier would fail."
 	switch {
 	case in == nil:
@@ -368,7 +368,10 @@ func routedServerProblem(in *Integration, mediaType MediaType) string {
 		return in.Name + " is disabled" + fails
 	case in.InstallationID == nil || in.CapabilityID == "":
 		return in.Name + " is not bound to a plugin installation (re-save it)" + fails
-	case strings.TrimSpace(in.APIKeyRef) == "":
+	}
+	missing, _ := s.missingAPIKey(ctx, fc, *in)
+	switch {
+	case missing:
 		return in.Name + " has no API key" + fails
 	case !integrationSupportsMediaType(*in, mediaType):
 		return in.Name + " does not take " + mediaTypePlural(mediaType) + fails

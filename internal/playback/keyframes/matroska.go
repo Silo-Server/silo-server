@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"sort"
+	"slices"
 )
 
 // ErrNoIndex means the file has no usable keyframe index: no Cues, or none
@@ -69,11 +69,15 @@ const (
 	unknownSize       int64 = -1
 )
 
-// Upper bounds on what the reader loads into memory. Cues for a long film
-// with every keyframe indexed are a few megabytes; the metadata elements are
-// small. Anything larger is treated as a damaged file.
+// Upper bounds on what the reader loads into memory; anything larger is
+// treated as a damaged file. The metadata elements are small. FFmpeg writes
+// a video cue point in 17 to 24 bytes, so a film with a keyframe every few
+// seconds has Cues well under a megabyte, and 16 MiB holds about 700,000
+// points: every frame of 8 hours at 24 fps, or of 3 hours at 60 fps.
+// Reading Cues costs at most about three times their size (cuePoints), so
+// the limit also bounds what a crafted file can cost.
 const (
-	maxCuesSize     = 64 << 20
+	maxCuesSize     = 16 << 20
 	maxMetadataSize = 16 << 20
 )
 
@@ -93,8 +97,9 @@ type matroskaIndex struct {
 	Index
 	segStart, segEnd int64
 	video            uint64
-	points           []cuePoint
-	timescale        int64
+	// ticks holds the video cue times, sorted and without duplicates.
+	ticks     []uint64
+	timescale int64
 	// frameSeconds is the video track's default frame duration, or 0.
 	frameSeconds float64
 }
@@ -246,32 +251,24 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 		return matroskaIndex{}, ErrNoIndex
 	}
 
-	points, complete := cuePoints(cues, video)
-	if !complete || len(points) == 0 {
+	ticks, clusters, complete := cuePoints(cues, video)
+	if !complete || len(ticks) == 0 {
 		// A malformed cue point ends the list early; the points read so
 		// far would leave out later keyframes.
 		return matroskaIndex{}, ErrNoIndex
 	}
-	if err := checkCueCoverage(r, segStart, segEnd, video, points); err != nil {
+	if err := checkCueCoverage(r, segStart, segEnd, video, ticks, clusters); err != nil {
 		return matroskaIndex{}, err
 	}
-	ticks := make([]uint64, len(points))
-	for i, p := range points {
-		ticks[i] = p.ticks
-	}
-	sort.Slice(ticks, func(i, j int) bool { return ticks[i] < ticks[j] })
-	idx := Index{Keyframes: make([]float64, 0, len(ticks))}
+	idx := Index{Keyframes: make([]float64, len(ticks))}
 	for i, t := range ticks {
-		if i > 0 && t == ticks[i-1] {
-			continue
-		}
-		idx.Keyframes = append(idx.Keyframes, float64(t)*float64(timescale)/1e9)
+		idx.Keyframes[i] = float64(t) * float64(timescale) / 1e9
 	}
 	if duration > 0 {
 		idx.Duration = duration * float64(timescale) / 1e9
 	}
 	return matroskaIndex{
-		Index: idx, segStart: segStart, segEnd: segEnd, video: video, points: points,
+		Index: idx, segStart: segStart, segEnd: segEnd, video: video, ticks: ticks,
 		timescale: timescale, frameSeconds: float64(frameNS) / 1e9,
 	}, nil
 }
@@ -485,13 +482,42 @@ func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool)
 	return number, frameNS, scaled, found
 }
 
-// cuePoints returns every cue point that indexes the video track, with the
-// position of the cluster holding it (-1 when the cue doesn't say). Matroska
+// cuePoints returns the times, in ticks, of the cue points that index the
+// video track, and the positions of the clusters holding them, relative to
+// the segment's data; both are sorted and without duplicates. Matroska
 // muxers index video keyframes, so the times are keyframe times; whether
 // every keyframe has one is checked separately (checkCueCoverage).
 // It reports false when a malformed cue point stopped the walk early.
-func cuePoints(cues []byte, video uint64) ([]cuePoint, bool) {
-	var points []cuePoint
+//
+// A crafted Cues element can hold over a million points, so it counts them
+// first and allocates each list once, at its final length.
+func cuePoints(cues []byte, video uint64) (ticks []uint64, clusters []int64, ok bool) {
+	var nTicks, nClusters int
+	if !walkCuePoints(cues, video, func(_ uint64, cluster int64) {
+		nTicks++
+		if cluster >= 0 {
+			nClusters++
+		}
+	}) {
+		return nil, nil, false
+	}
+	ticks = make([]uint64, 0, nTicks)
+	clusters = make([]int64, 0, nClusters)
+	walkCuePoints(cues, video, func(t uint64, cluster int64) {
+		ticks = append(ticks, t)
+		if cluster >= 0 {
+			clusters = append(clusters, cluster)
+		}
+	})
+	slices.Sort(ticks)
+	slices.Sort(clusters)
+	return slices.Compact(ticks), slices.Compact(clusters), true
+}
+
+// walkCuePoints calls fn for each cue point that indexes the video track,
+// with the position of the cluster holding it (negative when the cue doesn't
+// say). It reports false when a malformed cue point stopped the walk early.
+func walkCuePoints(cues []byte, video uint64, fn func(ticks uint64, cluster int64)) bool {
 	complete := true
 	complete = childrenComplete(cues, func(id uint64, point []byte) {
 		if id != idCuePoint {
@@ -531,8 +557,8 @@ func cuePoints(cues []byte, video uint64) ([]cuePoint, bool) {
 			complete = false
 		}
 		if hasTime && isVideo {
-			points = append(points, cuePoint{ticks: t, cluster: cluster})
+			fn(t, cluster)
 		}
 	}) && complete
-	return points, complete
+	return complete
 }

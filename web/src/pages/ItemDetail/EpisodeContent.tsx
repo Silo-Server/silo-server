@@ -51,6 +51,7 @@ import {
 import { isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -334,6 +335,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
           overview={item.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
+          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
           overviewHidden={overviewHidden}
           onRevealOverview={() => setRevealedOverviewId(item.content_id)}
           crewLine={<HeroCrewLine crew={item.crew ?? []} />}
