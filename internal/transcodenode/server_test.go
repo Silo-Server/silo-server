@@ -3881,3 +3881,48 @@ func TestShutdownDrainsProgressiveRemuxAndRejectsLateRequests(t *testing.T) {
 	}
 
 }
+
+// Shutdown closes each session under its lifecycle lock, so a restart in
+// flight, which holds it, finishes before the close.
+func TestShutdownClosesUnderTheLifecycleLock(t *testing.T) {
+	server := newTestServer(t)
+	dir := server.sessionOutputDir("held")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.sessions["held"] = playback.NewTranscodeSessionForTest(dir)
+	server.activeJobs.Add(1)
+	unlock := server.lockSessionLifecycle("held")
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- server.Shutdown(context.Background()) }()
+	waiting := func() bool {
+		server.lifecycleMu.Lock()
+		defer server.lifecycleMu.Unlock()
+		lk := server.lifecycleLocks["held"]
+		return lk != nil && lk.refs == 2
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for !waiting() {
+		select {
+		case err := <-shutdown:
+			unlock()
+			t.Fatalf("Shutdown (%v) closed the session without its lifecycle lock", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			unlock()
+			t.Fatal("Shutdown never waited for the lifecycle lock")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("the session closed while its lifecycle lock was held: %v", err)
+	}
+	unlock()
+	if err := <-shutdown; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the session's output survived Shutdown: %v", err)
+	}
+}
