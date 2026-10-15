@@ -256,6 +256,17 @@ describe("scheduleBandwidthProbe", () => {
     vi.unstubAllGlobals();
   });
 
+  it("holds off a scheduled probe while playback is starting", async () => {
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    scheduleBandwidthProbe(5_000);
+    cancelBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetchWithSession).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+  });
+
   it("does nothing after it is stopped", async () => {
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     const stop = scheduleBandwidthProbe(1000);

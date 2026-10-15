@@ -180,6 +180,14 @@ let scheduleGeneration = 0;
  * lock when playback starts does not begin once the lock arrives.
  */
 let cancelEpoch = 0;
+/**
+ * When playback last started. Media is still loading, and its element still
+ * paused, for a while after a start, so the playing-media check alone would
+ * let a timer that fires then probe during startup.
+ */
+let lastPlaybackStartAt: number | undefined;
+/** How long after a playback start a probe holds off. */
+const PLAYBACK_START_QUIET_MS = 60_000;
 /** Web Lock that lets one tab at a time run a probe. */
 const PROBE_LOCK_NAME = "silo-bandwidth-probe";
 let activeProbe: AbortController | undefined;
@@ -205,8 +213,11 @@ export function onMeteredConnection(): boolean {
 }
 
 function probeAllowed(): boolean {
-  // A probe beside a playing stream would both slow it and under-measure.
-  return !onMeteredConnection() && !mediaPlaying();
+  // A probe beside a playing or starting stream would both slow it and
+  // under-measure.
+  const startingPlayback =
+    lastPlaybackStartAt !== undefined && Date.now() - lastPlaybackStartAt < PLAYBACK_START_QUIET_MS;
+  return !onMeteredConnection() && !mediaPlaying() && !startingPlayback;
 }
 
 /**
@@ -279,17 +290,20 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
 }
 
 /**
- * Stops a running probe so it does not compete with playback. The schedule
+ * Called when playback starts: stops a running probe so it does not compete
+ * with playback, and holds off new ones while the media loads. The schedule
  * continues and tries again later.
  */
 export function cancelBandwidthProbe(): void {
   cancelEpoch++;
+  lastPlaybackStartAt = Date.now();
   activeProbe?.abort();
 }
 
 /** Stops the schedule and any running probe, e.g. on sign-out. */
 export function stopBandwidthProbes(): void {
   scheduleGeneration++;
+  lastPlaybackStartAt = undefined;
   if (scheduledTimer !== undefined) {
     clearTimeout(scheduledTimer);
     scheduledTimer = undefined;
