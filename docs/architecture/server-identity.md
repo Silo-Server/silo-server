@@ -153,8 +153,11 @@ with the public identity operation, keeps those whose ID matches, and opens
 device login at the first reachable match. If the overlay address fails, the
 provider's display name drives setup help and the public endpoint, when
 present, is the explicit fallback. The address that worked is what the TV
-saves; the phone's preferred address does not change. Automatic mid-playback
-route switching is out of scope.
+saves; the phone's preferred address does not change, and the flow never
+changes a saved address later. The only automatic routing change is the local
+route above, which leaves the saved address in place: a stream already playing
+is not moved onto it, and a stream on it that fails reconnects from the saved
+address.
 
 ## jellycompat
 
