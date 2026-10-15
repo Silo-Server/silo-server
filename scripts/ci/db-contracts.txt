@@ -173,6 +173,8 @@
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
+./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 

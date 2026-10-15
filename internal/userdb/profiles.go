@@ -301,8 +301,9 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 	return nil
 }
 
-// DeleteProfile removes a profile and cascades deletion to favorites,
-// watchlist, watch_progress, and personal_collections (plus their items).
+// DeleteProfile removes a profile and every row of its own: lists, watch
+// progress and history, preferences, settings and personal collections
+// (plus their items), matching the Postgres store.
 func DeleteProfile(db *sql.DB, id string) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -330,7 +331,11 @@ func DeleteProfile(db *sql.DB, id string) error {
 	if err != nil {
 		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
-	if _, err := tx.Exec(`DELETE FROM personal_collection_profiles WHERE profile_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`
+		DELETE FROM personal_collection_profiles
+		WHERE profile_id = ? OR collection_id IN (
+			SELECT id FROM personal_collections WHERE creator_profile_id = ?
+		)`, id, id); err != nil {
 		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
 
@@ -341,11 +346,18 @@ func DeleteProfile(db *sql.DB, id string) error {
 		"favorites",
 		"watchlist",
 		"watch_progress",
+		"watch_history",
+		"hidden_history_items",
+		"home_item_dismissals",
 		"collection_sort_preferences",
 		"personal_collections",
 		"profile_allowed_libraries",
+		sqliteAudioPreferencesTable,
+		sqliteSubtitlePreferencesTable,
 		"series_playback_preferences",
 		"library_playback_preferences",
+		"profile_onboarding",
+		"user_device_settings",
 		"user_setting_values",
 	}
 	for _, table := range cascadeTables {

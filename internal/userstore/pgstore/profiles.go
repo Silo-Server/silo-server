@@ -306,6 +306,42 @@ func updateProfile(
 	return nil
 }
 
+// profileCascadeTables are the tables DeleteProfile clears of the profile's
+// rows by (user_id, profile_id). Tables are listed rather than left to a
+// foreign key so both backends delete identically: the per-user SQLite store
+// has no foreign keys at all. Account-scope rows carry a NULL profile_id and
+// are untouched, which is what removing one household member has to mean.
+// TestPostgresDeleteProfileCoversEveryProfileTable keeps the list complete.
+var profileCascadeTables = []string{
+	"user_favorites",
+	"user_watchlist",
+	"user_watch_progress",
+	"user_watch_history",
+	"user_history_hidden_items",
+	"user_home_item_dismissals",
+	"user_collection_sort_preferences",
+	"user_personal_collections",
+	"user_personal_collection_profiles",
+	"user_audio_preferences",
+	"user_subtitle_preferences",
+	"user_series_playback_preferences",
+	"user_library_playback_preferences",
+	"user_profile_allowed_libraries",
+	"user_profile_onboarding",
+	"user_setting_values",
+	"user_dropped_series",
+	// Leaves titles no profile watchlists any more; the profile
+	// handler's watchlist-title purge sweeps those under the title lock.
+	"user_watchlist_titles",
+	// Recommendation state. A deleted profile's ratings would otherwise
+	// keep shaping other accounts' Similar Users rows, and its taste
+	// would be rebuilt every night.
+	"user_ratings",
+	"user_taste_profiles",
+	"user_taste_clusters",
+	"recommendation_cache",
+}
+
 func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -332,32 +368,17 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
 
-	// user_setting_values is listed rather than left to its composite profile
-	// FK so both backends delete identically: the per-user SQLite store has no
-	// foreign keys at all. Account-scope rows carry a NULL profile_id and are
-	// untouched, which is what removing one household member has to mean.
-	cascadeTables := []string{
-		"user_favorites",
-		"user_watchlist",
-		"user_watch_progress",
-		"user_collection_sort_preferences",
-		"user_personal_collections",
-		"user_series_playback_preferences",
-		"user_library_playback_preferences",
-		"user_setting_values",
-		"user_dropped_series",
-		// Leaves titles no profile watchlists any more; the profile
-		// handler's watchlist-title purge sweeps those under the title lock.
-		"user_watchlist_titles",
-		// Recommendation state. A deleted profile's ratings would otherwise
-		// keep shaping other accounts' Similar Users rows, and its taste
-		// would be rebuilt every night.
-		"user_ratings",
-		"user_taste_profiles",
-		"user_taste_clusters",
-		"recommendation_cache",
+	// Visibility rows of the profile's own collections go with them, as
+	// their items do.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_personal_collection_profiles
+		WHERE user_id = $1 AND collection_id IN (
+			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
+		)`, s.userID, id); err != nil {
+		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
-	for _, table := range cascadeTables {
+
+	for _, table := range profileCascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {
 			return fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
 		}
