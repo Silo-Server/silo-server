@@ -12,10 +12,16 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
+    // Declined: 7 app findings, all optional promise or cleanup returns.
+    // "noImplicitReturns": true,
+    "noImplicitOverride": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
+    // Declined: optional-property and index-signature trials had about 990/897 diagnostics.
+    // "exactOptionalPropertyTypes": true,
+    // "noPropertyAccessFromIndexSignature": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

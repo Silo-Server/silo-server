@@ -56,8 +56,7 @@ lint:
 	golangci-lint run
 	cd web && pnpm run lint
 
-# Lint the Go packages this branch touched, on the lines it changed. Same
-# findings as CI's changed-lines step at a fraction of the cost of ./... .
+# Lint changed lines in the Go packages this branch touched.
 # BASE_REF=origin/<pr-base> when not main.
 lint-changed:
 	BASE_REF=$(BASE_REF) scripts/lint-changed.sh
@@ -73,6 +72,18 @@ verify-shellcheck:
 
 # hadolint: not measured; adoption needs a pinned binary, a seeded-defect trial, and reviewed findings and cost.
 # Makefile shell lint: not measured; recipe expansion needs a prototype that preserves Make's shell context.
+
+.PHONY: verify-size-ratchet verify-bidi
+verify-size-ratchet:
+	@base=$$(git merge-base "$(BASE_REF)" HEAD) && \
+		go run ./scripts/ci/sizeratchet -base "$$base"
+
+# grep status 1 means no controls; unsupported PCRE and other errors refuse.
+verify-bidi:
+	@status=0; git grep -I -nP '[\x{061c}\x{200e}\x{200f}\x{202a}-\x{202e}\x{2066}-\x{2069}]' -- . || status=$$?; \
+		if [ "$$status" -eq 1 ]; then exit 0; fi; \
+		if [ "$$status" -eq 0 ]; then echo 'Bidi controls are not permitted in tracked text' >&2; exit 1; fi; \
+		exit "$$status"
 
 # Frontend test files that fail on main today. This list is shrink-only: delete
 # an entry along with its fix, and never extend it to land a change. The Go
@@ -223,13 +234,15 @@ verify-route-inventory:
 	@go run ./cmd/route-inventory -check $(ROUTE_INVENTORY) \
 		|| { echo "::error::$(ROUTE_INVENTORY) is stale or a route is unaccounted for; run make route-inventory"; exit 1; }
 
-# Run the route inventory's router-recovery lint rule over the whole tree, not
-# only changed lines. It is the one gocritic check the repo enables (see
-# .golangci.yml), and the tree passes it today, so this can gate CI while the
-# rest of `make lint` cannot.
+.PHONY: verify-v1-route-freeze
+verify-v1-route-freeze:
+	@base=$$(git merge-base "$(BASE_REF)" HEAD) && \
+		python3 -c 'import json, subprocess, sys; path="contracts/api/v2/route-inventory.json"; project=lambda doc: sorted((r["method"], r["path"]) for r in doc["routes"] if r["namespace"] == "api_v1"); before=json.loads(subprocess.check_output(["git", "show", sys.argv[1]+":"+path])); after=json.load(open(path)); sys.exit("v1 routes changed; the bridge contract is frozen" if project(before) != project(after) else 0)' "$$base"
+
+# Run only the route inventory's router-recovery rule over the whole tree.
 # Tests are excluded from this rule, so do not analyze their package variants.
 lint-router-recovery:
-	golangci-lint run --tests=false --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
+	golangci-lint run --config .golangci-router-recovery.yml --tests=false --max-same-issues=0 --max-issues-per-linter=0 --uniq-by-line=false ./...
 MIGRATION_LEDGER := contracts/api/v2/migration.json
 
 # CI gives test-go ownership of these Go assertions and passes 0 to avoid
@@ -414,6 +427,16 @@ migrate-create:
 # Validate Goose migration annotations and SQL parsing without touching a database.
 migrate-validate:
 	$(GOOSE) -dir $(GOOSE_DIR) validate
+
+.PHONY: verify-migrations verify-prometheus-rules
+verify-migrations: migrate-validate
+	@base=$$(git merge-base "$(BASE_REF)" HEAD) && \
+		go run ./scripts/ci/migrationcheck -base "$$base"
+
+# Use the same Prometheus release locally and in CI.
+PROMTOOL ?= docker run --rm --pull=never --entrypoint promtool -v "$(CURDIR)/deploy/observability:/rules:ro" -w /rules prom/prometheus:v3.5.0
+verify-prometheus-rules:
+	$(PROMTOOL) test rules silo.rules.test.yml
 
 # Show Goose migration status through Silo's bootstrapping runner.
 migrate-status:

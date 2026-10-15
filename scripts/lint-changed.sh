@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Analyze the Go packages a branch touched and report findings on changed lines.
-# Local runs include committed, staged, unstaged and untracked edits and enable
-# gocritic. CI sets LINT_CHANGED_CI=1 because it runs gocritic full-tree separately.
+# Local runs include committed, staged, unstaged and untracked edits.
+# Gocritic runs on changed lines through .golangci.yml locally and in CI.
 #
 # Usage: scripts/lint-changed.sh [golangci-lint flags...]
 # BASE_REF defaults to origin/main. LINT_CHANGED_BASE_MODE defaults to merge-base
