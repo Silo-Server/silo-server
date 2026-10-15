@@ -77,6 +77,7 @@ describe("device settings v2", () => {
     await act(async () => {
       await result.current.mutateAsync({
         device: { deviceId: "tv/shared", profileId: "sibling" },
+        owner: "sibling",
         name,
       });
     });
@@ -86,5 +87,24 @@ describe("device settings v2", () => {
       body: { custom_name: sent },
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
+  });
+  it("keeps the saved name on screen when the refresh after it fails", async () => {
+    const { client, wrapper } = setup();
+    const own = { ...device, device_id: "tv" };
+    const sibling = { ...device, device_id: "tv", profile_id: "sibling" };
+    client.setQueryData(deviceKeys.list("household"), [own, sibling]);
+    request.mockResolvedValueOnce(undefined).mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(() => useRenameDevice(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        device: { deviceId: "tv" },
+        owner: "p",
+        name: "  Living   Room ",
+      });
+    });
+    expect(client.getQueryData(deviceKeys.list("household"))).toEqual([
+      { ...own, custom_name: "Living Room" },
+      sibling,
+    ]);
   });
 });

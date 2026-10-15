@@ -173,7 +173,8 @@ func (h *DeviceHandler) UpdateDevice(ctx context.Context, actor DeviceSettingsAc
 // and bidirectional overrides, which could make the name read as other text,
 // are removed; a tab or line break counts as a space. Runs of spaces collapse
 // to one, and the name is bounded like a reported one. It returns "" when no
-// visible character remains, such as a name of only zero-width spaces.
+// visible character remains, such as a name of only zero-width spaces or
+// variation selectors.
 func deviceCustomName(name string) string {
 	name = strings.Map(func(r rune) rune {
 		switch {
@@ -186,8 +187,16 @@ func deviceCustomName(name string) string {
 		}
 	}, name)
 	name = clampHeaderValue(strings.Join(strings.Fields(name), " "), MaxDeviceNameRunes)
-	if strings.IndexFunc(name, func(r rune) bool { return !unicode.IsSpace(r) && !unicode.Is(unicode.Cf, r) }) < 0 {
+	if strings.IndexFunc(name, visibleRune) < 0 {
 		return ""
 	}
 	return name
+}
+
+// visibleRune reports whether r draws something by itself: not a space, a
+// format character such as a zero-width space, a variation selector, or
+// another default-ignorable code point such as the combining grapheme joiner.
+// Such characters stay inside a visible name; they only can't make one.
+func visibleRune(r rune) bool {
+	return !unicode.IsSpace(r) && !unicode.In(r, unicode.Cf, unicode.Variation_Selector, unicode.Other_Default_Ignorable_Code_Point)
 }

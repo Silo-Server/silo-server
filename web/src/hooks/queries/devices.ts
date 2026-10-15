@@ -69,16 +69,36 @@ export function useRenameDevice() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ device, name }: { device: DeviceTarget; name: string | null }) =>
+    mutationFn: ({ device, name }: RenameDeviceInput) =>
       v2("PATCH /api/v2/devices/{device_id}", {
         path: { device_id: device.deviceId },
         query: { profile_id: device.profileId },
         body: { custom_name: name },
       }),
-    // Awaited, so the mutation settles only once the list carries the new
-    // name and an editor that closes on success never shows the old one.
+    // The saved name goes into every cached list first: a refetch that fails
+    // keeps the cache, and the editor closes on success either way. Spaces
+    // collapse as the server does; the refetch brings its exact name.
+    onSuccess: (_, { device, owner, name }) => {
+      const custom = name?.trim().replace(/\s+/g, " ") || undefined;
+      qc.setQueriesData<UserDevice[]>({ queryKey: deviceKeys.all }, (devices) =>
+        devices?.map((row) =>
+          row.device_id === device.deviceId && row.profile_id === owner
+            ? { ...row, custom_name: custom }
+            : row,
+        ),
+      );
+    },
+    // Awaited, so a successful refresh lands before the editor closes.
     onSettled: () => qc.invalidateQueries({ queryKey: deviceKeys.all }),
   });
+}
+
+export interface RenameDeviceInput {
+  device: DeviceTarget;
+  /** The profile whose row this is, which picks it out of the cached lists. */
+  owner: string;
+  /** The new name, or `null` to show the reported name again. */
+  name: string | null;
 }
 
 /** Remove the device's settings and drop it from the registry. */

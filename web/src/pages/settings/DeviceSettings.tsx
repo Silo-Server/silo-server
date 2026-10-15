@@ -595,7 +595,7 @@ function DeviceNameEditor({
       return;
     }
     rename.mutate(
-      { device: target, name },
+      { device: target, owner: device.profile_id, name },
       {
         onSuccess: () => {
           toast.success(name ? "Device renamed" : "Device name reset");

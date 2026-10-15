@@ -330,7 +330,11 @@ describe("DeviceSettings capability discovery", () => {
       await user.type(input, "  Den  {Enter}");
 
       expect(mocks.renameDevice).toHaveBeenCalledWith(
-        { device: { deviceId: "living-room", profileId: undefined }, name: "Den" },
+        {
+          device: { deviceId: "living-room", profileId: undefined },
+          owner: "profile-1",
+          name: "Den",
+        },
         expect.anything(),
       );
       expect(mocks.toastSuccess).toHaveBeenCalledWith("Device renamed");
@@ -347,7 +351,11 @@ describe("DeviceSettings capability discovery", () => {
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       expect(mocks.renameDevice).toHaveBeenCalledWith(
-        { device: { deviceId: "living-room", profileId: undefined }, name: null },
+        {
+          device: { deviceId: "living-room", profileId: undefined },
+          owner: "profile-1",
+          name: null,
+        },
         expect.anything(),
       );
     });

@@ -150,6 +150,8 @@ func TestDeviceCustomName(t *testing.T) {
 		"Kids\x00 TV":             "Kids TV",
 		"👨\u200d👩\u200d👧 room":    "👨\u200d👩\u200d👧 room",
 		"\u200b":                  "",
+		"\ufe0f\u034f":            "",
+		"TV\ufe0f":                "TV\ufe0f",
 	} {
 		if got := deviceCustomName(in); got != want {
 			t.Errorf("deviceCustomName(%q) = %q, want %q", in, got, want)
