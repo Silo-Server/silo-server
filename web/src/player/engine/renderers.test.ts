@@ -482,6 +482,19 @@ describe("WebGPURenderer", () => {
     expect(device.copiesReleased()).toBe(true);
   });
 
+  it("imports a frame larger than a texture can be instead of copying it", async () => {
+    const device = new FakeDevice();
+    Object.assign(device.limits, { maxTextureDimension2D: 1024 });
+    devices.push(device);
+    const { gpu, on } = await renderer();
+    expect(gpu.draw(frame(RETAGGED), size, viewport)).toBe(true);
+    expect(device.queue.copyExternalImageToTexture).not.toHaveBeenCalled();
+    expect(device.textures.some((texture) => texture.format === "rgba16float")).toBe(false);
+    expect(device.importExternalTexture).toHaveBeenCalled();
+    await settle();
+    expect(on.onFailure).not.toHaveBeenCalled();
+  });
+
   it("imports frames where the browser cannot copy them, as in Firefox", async () => {
     const device = new FakeDevice();
     device.copyUnsupported = true;

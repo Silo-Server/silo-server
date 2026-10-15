@@ -600,11 +600,17 @@ class GPUPresenter {
   /**
    * Copies `frame` into the presenter's half-float texture, keeping its
    * R'G'B' codes. Null where the browser cannot copy a VideoFrame (Firefox),
-   * which leaves importing as the only way.
+   * or the frame is larger than a texture can be, which leaves importing as
+   * the only way.
    */
   private copyFrame(frame: VideoFrame): GPUBindGroup | null {
     const width = frame.displayWidth;
     const height = frame.displayHeight;
+    const limit = this.device.limits.maxTextureDimension2D;
+    if (width > limit || height > limit) {
+      this.useImport();
+      return null;
+    }
     if (
       !this.copied ||
       this.copied.texture.width !== width ||
