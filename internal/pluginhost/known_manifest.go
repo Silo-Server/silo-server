@@ -14,7 +14,8 @@ import (
 // own copy arrives over gRPC with them kept. Reading the live copy the same way
 // lets a plugin built on a newer SDK match its installed manifest.
 func knownManifest(manifest *pluginv1.PluginManifest) *pluginv1.PluginManifest {
-	out := proto.Clone(manifest).(*pluginv1.PluginManifest)
+	out := &pluginv1.PluginManifest{}
+	proto.Merge(out, manifest)
 	dropUnknown(out.ProtoReflect())
 	return out
 }

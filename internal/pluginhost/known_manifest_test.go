@@ -24,7 +24,7 @@ func TestKnownManifestMatchesHowInstallReadsIt(t *testing.T) {
 	    "type": "metadata_provider.v1", "id": "fixture",
 	    "descriptorFromANewerSdk": {"flag": true},
 	    "configSchema": [{"key": "connection", "adminForm": {"fields": [
-	      {"key": "colour", "control": "ADMIN_FORM_CONTROL_FROM_A_NEWER_SDK"},
+	      {"key": "accent", "control": "ADMIN_FORM_CONTROL_FROM_A_NEWER_SDK"},
 	      {"key": "name", "control": "ADMIN_FORM_CONTROL_TEXT"}
 	    ]}}]
 	  }]
@@ -36,7 +36,8 @@ func TestKnownManifestMatchesHowInstallReadsIt(t *testing.T) {
 
 	// The plugin's own copy keeps the newer fields as unknown bytes and the
 	// newer control as a bare number.
-	live := proto.Clone(&installed).(*pluginv1.PluginManifest)
+	live := &pluginv1.PluginManifest{}
+	proto.Merge(live, &installed)
 	unknownField := protowire.AppendVarint(protowire.AppendTag(nil, 9999, protowire.VarintType), 1)
 	live.ProtoReflect().SetUnknown(unknownField)
 	live.GetCapabilities()[0].ProtoReflect().SetUnknown(unknownField)
