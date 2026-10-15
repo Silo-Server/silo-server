@@ -241,13 +241,14 @@ export function buildDeliveriesV3(
 }
 
 /**
- * Whether the user is on a connection they would rather not spend. Only
- * Data Saver is a real signal in a browser — cellular detection via
- * `connection.type` is unimplemented nearly everywhere — so we report exactly
- * that and let the server treat the absence as "unknown, assume unmetered".
+ * Whether the user is on a connection they would rather not spend: Data Saver
+ * is on, or the browser reports cellular. `connection.type` is missing on
+ * desktop browsers, so its absence means "unknown, assume unmetered". The
+ * same test decides when a probe measurement is ignored, so a link without
+ * one is still flagged and the planner's metered limit can apply.
  */
 export function detectMeteredV3(): boolean {
-  return networkInformation()?.saveData === true;
+  return onMeteredConnection();
 }
 
 /**
