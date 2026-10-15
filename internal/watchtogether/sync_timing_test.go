@@ -1,6 +1,7 @@
 package watchtogether
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -473,6 +474,49 @@ func TestReportNamingItsCommandWaitsForAnUndeliveredRoomCommand(t *testing.T) {
 // A host still closing a gap by rate after a sync has run it: a pause from its
 // system controls is the room's again once the sync has settled.
 func TestSyncingHostThatRanItsSyncCanPause(t *testing.T) {
+	f, sync := newSyncingHost(t)
+	f.now = f.now.Add(commandSettleWindow + time.Second)
+	f.hostReport(sync.CommandID, f.expected(), false)
+	if f.member("host").syncingToRoom {
+		t.Fatal("a host playing its sync at the room's position is still syncing")
+	}
+	f.now = f.now.Add(1500 * time.Millisecond)
+	f.hostReport(sync.CommandID, f.expected(), true)
+	if f.repo.room.PlaybackState != RoomPlaybackStatePaused {
+		t.Fatalf("the synced host's pause was not taken: room %s", f.repo.room.PlaybackState)
+	}
+}
+
+// A host whose play was refused (a browser blocking autoplay after a reload)
+// names its sync while paused. That is not a pause the room should follow.
+func TestSyncingHostWhosePlayWasRefusedDoesNotPauseTheRoom(t *testing.T) {
+	f, sync := newSyncingHost(t)
+	before := transportCount(f.conns["host"])
+	f.now = f.now.Add(commandSettleWindow + time.Second)
+	f.hostReport(sync.CommandID, f.expected()-3, true)
+	if f.repo.room.PlaybackState != RoomPlaybackStatePlaying || !f.member("host").syncingToRoom {
+		t.Fatalf("a host that never started its sync paused the room: room %s, syncing %v",
+			f.repo.room.PlaybackState, f.member("host").syncingToRoom)
+	}
+	if transportCount(f.conns["host"]) == before {
+		t.Fatal("the paused host was not corrected back to the room")
+	}
+}
+
+// A host whose sync correction never loaded names the sync from its old
+// stream. Far from the room, that is not a decision to rewind everyone to.
+func TestSyncingHostFarFromTheRoomDoesNotRewindIt(t *testing.T) {
+	f, sync := newSyncingHost(t)
+	f.now = f.now.Add(commandSettleWindow + time.Second)
+	expected := f.expected()
+	f.hostReport(sync.CommandID, expected-60, false)
+	if got := f.expected(); math.Abs(got-expected) > 0.5 || !f.member("host").syncingToRoom {
+		t.Fatalf("room moved from %.1f to %.1f (syncing %v)", expected, got, f.member("host").syncingToRoom)
+	}
+}
+
+func newSyncingHost(t *testing.T) (*bufferingRoom, TransportCommand) {
+	t.Helper()
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
 	f.s.mu.Lock()
@@ -480,16 +524,90 @@ func TestSyncingHostThatRanItsSyncCanPause(t *testing.T) {
 	f.member("host").syncingToRoom = true
 	f.s.mu.Unlock()
 	f.s.sendCommandDispatches(t.Context(), dispatches)
-	sync := lastTransport(t, f.conns["host"])
-	f.now = f.now.Add(commandSettleWindow + time.Second)
-	if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("host"), 7, "host",
-		StateReport{SessionID: "host-session", CommandID: sync.CommandID, PositionSeconds: f.expected() - 3, IsPaused: true}); err != nil {
-		t.Fatal(err)
-	}
-	if f.repo.room.PlaybackState != RoomPlaybackStatePaused || f.member("host").syncingToRoom {
-		t.Fatalf("the syncing host's pause was not taken: room %s, syncing %v", f.repo.room.PlaybackState, f.member("host").syncingToRoom)
+	return f, lastTransport(t, f.conns["host"])
+}
+
+func (f *bufferingRoom) hostReport(commandID string, position float64, paused bool) {
+	f.t.Helper()
+	if _, err := f.s.HandleStateReportForConnection(f.t.Context(), f.reg("host"), 7, "host",
+		StateReport{SessionID: "host-session", CommandID: commandID, PositionSeconds: position, IsPaused: paused}); err != nil {
+		f.t.Fatal(err)
 	}
 }
+
+// A second play sent inside the lead by a member still paused where the
+// first one was sent starts the room from the same point, not a lead later.
+func TestRepeatedPlayInsideTheLeadKeepsThePausedPosition(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.member("guest").lastPingMS = 2000
+	position := 100.0
+	request := func(action TransportAction) TransportCommand {
+		t.Helper()
+		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+			TransportRequest{Action: action, PositionSeconds: &position, IsPaused: true}); err != nil {
+			t.Fatal(err)
+		}
+		return lastTransport(t, f.conns["guest"])
+	}
+	request(TransportActionPause)
+	f.now = f.now.Add(5 * time.Second)
+	first := request(TransportActionPlay)
+	f.now = f.now.Add(100 * time.Millisecond)
+	second := request(TransportActionPlay)
+	if first.PositionSeconds != 100 || second.PositionSeconds != 100 {
+		t.Fatalf("plays carry %.2f and %.2f, want both at the paused 100", first.PositionSeconds, second.PositionSeconds)
+	}
+}
+
+// A member of a paused room cannot close drift by rate, so its first report
+// out of sync is a strike, not progress.
+func TestPausedRoomMemberIsCorrectedAfterTwoReports(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	position := 100.0
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(10 * time.Second)
+	before := transportCount(f.conns["guest"])
+	for range guestCorrectionStrikes {
+		f.now = f.now.Add(1500 * time.Millisecond)
+		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("guest"), f.userID("guest"), "guest",
+			StateReport{SessionID: "guest-session", PositionSeconds: 103, IsPaused: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := transportCount(f.conns["guest"]) - before; got != 1 {
+		t.Fatalf("a paused member 3 s off got %d corrections after %d reports, want 1", got, guestCorrectionStrikes)
+	}
+}
+
+// The /api/v1 room socket keeps its host band: its clients may report a
+// host's scrub instead of requesting it.
+func TestLegacySocketHostKeepsTheNarrowBand(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		f := newBufferingRoom(t, "guest")
+		f.now = f.now.Add(10 * time.Second)
+		var conn RoomConnection = f.conns["host"]
+		if legacy {
+			conn = legacyRoomConn{f.conns["host"]}
+		}
+		f.member("host").connection = conn
+		expected := f.expected()
+		if _, err := f.s.HandleStateReportForConnection(t.Context(), registrationFor(f.repo.room.ID, 7, "host", conn), 7, "host",
+			StateReport{SessionID: "host-session", PositionSeconds: expected + 4}); err != nil {
+			t.Fatal(err)
+		}
+		moved := math.Abs(f.expected()-expected) > 2
+		if moved != legacy {
+			t.Fatalf("legacy socket %v: a 4 s host scrub moved the room = %v", legacy, moved)
+		}
+	}
+}
+
+type legacyRoomConn struct{ *recordingConn }
+
+func (legacyRoomConn) LegacyRoomProtocol() bool { return true }
 
 // Snapshots show no member's commands, so a correction alone sends the room
 // no snapshot on reconciliation.
@@ -644,5 +762,21 @@ func TestSeekBackToTargetAfterAHostLandingIsNotARepeat(t *testing.T) {
 	}
 	if again := lastTransport(t, f.conns["guest"]); again.CommandID == seek.CommandID || again.PositionSeconds != 1500 {
 		t.Fatalf("the seek back to 1500 was dropped as a repeat: %+v", again)
+	}
+}
+
+// A stalled host pauses the room where it is, within the bound measured from
+// where the room is now; the scheduling lead does not narrow it.
+func TestStalledHostWithinTheBoundPausesTheRoomAtItsPosition(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.member("guest").lastPingMS = 2000
+	f.now = f.now.Add(30 * time.Second)
+	stalledAt := f.expected() - 4
+	if _, err := f.s.HandleBufferingForConnection(t.Context(), f.reg("host"), 7, "host",
+		StateReport{SessionID: "host-session", PositionSeconds: stalledAt}); err != nil {
+		t.Fatal(err)
+	}
+	if anchor := f.repo.room.AnchorPositionSeconds; anchor != stalledAt {
+		t.Fatalf("a host stalled 4 s behind paused the room at %.2f, want its position %.2f", anchor, stalledAt)
 	}
 }
