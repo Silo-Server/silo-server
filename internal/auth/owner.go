@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 )
@@ -264,8 +267,21 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 	if err := moveOwnership(ctx, tx, fromID, toID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionOwnershipTransferred, auditmutation.TargetUser,
+		strconv.Itoa(toID), http.StatusNoContent,
+		auditmutation.Changes(map[string]any{auditFieldOwner: fromID}, map[string]any{auditFieldOwner: toID}))
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return nil
 }
+
+// auditFieldOwner names the server Owner's account in an ownership transfer.
+const auditFieldOwner = "owner_user_id"
 
 // moveOwnership clears the current Owner before marking the next: the
 // single-Owner index is checked row by row. The new Owner becomes a

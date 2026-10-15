@@ -95,6 +95,7 @@ func registerAccount(reg *Registry) {
 		RetrySafety: RetrySafetyNaturalIdempotent,
 		Class:       ClassProfileScoped, ProfileOptional: true, ServiceBacked: true,
 		RateLimitBucket: bucketPasswordChange,
+		Audited:         true,
 	}, reg.changePassword)
 }
 

@@ -307,11 +307,41 @@ func updateProfile(
 }
 
 func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
+	return s.DeleteProfileAudited(ctx, id, nil)
+}
+
+var _ userstore.AuditedProfileDeleter = (*PostgresUserStore)(nil)
+
+// DeleteProfileAudited is DeleteProfile with audit run in the delete's
+// transaction before it commits; a nil audit records nothing. The profile row
+// is locked before it is read, so audit sees the image that was deleted.
+func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *userstore.Profile) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning transaction for profile delete: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var deleted *userstore.Profile
+	if audit != nil {
+		// Setting clears delete user_setting_values rows and then update the
+		// profile's legacy columns under this account lock. Taking it before
+		// the profile row lock keeps that order; locking the profile first
+		// and then deleting its settings would deadlock against a clear.
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)",
+			preferenceSettingsAdvisoryClass, int32(s.userID)); err != nil {
+			return fmt.Errorf("locking preference settings transaction: %w", err)
+		}
+		if _, err := tx.Exec(ctx, "SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR UPDATE", s.userID, id); err != nil {
+			return fmt.Errorf("locking profile %s: %w", id, err)
+		}
+		if deleted, err = getProfile(ctx, tx, s.userID, id); err != nil {
+			return err
+		}
+		if deleted == nil {
+			return fmt.Errorf("profile %s not found", id)
+		}
+	}
 
 	// Preferences belong to viewers, not creators, so remove every override
 	// for collections owned by the profile before those collections disappear.
@@ -369,6 +399,11 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	}
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("profile %s not found", id)
+	}
+	if audit != nil {
+		if err := audit(tx, deleted); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit(ctx)

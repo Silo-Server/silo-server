@@ -3,8 +3,11 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 )
@@ -149,16 +152,22 @@ func (r *APIKeyRepository) UpdateTierConditional(ctx context.Context, id int64, 
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err = lockAPIKeyMetadata(ctx, tx, id, guard); err != nil {
+	before, err := lockAPIKeyMetadata(ctx, tx, id, guard)
+	if err != nil {
 		return nil, err
 	}
 	current, err := scanAPIKeyMetadata(tx.QueryRow(ctx, `UPDATE api_keys ak SET rate_tier=$2 WHERE ak.id=$1 RETURNING `+apiKeyMetadataColumns, id, tier))
 	if err != nil {
 		return nil, err
 	}
+	audit, err := recordAPIKeyMutation(ctx, tx, before, current)
+	if err != nil {
+		return nil, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return current, nil
 }
 func (r *APIKeyRepository) DeleteByAdminConditional(ctx context.Context, id int64, guard APIKeyPrecondition) error {
@@ -170,13 +179,50 @@ func (r *APIKeyRepository) DeleteByAdminConditional(ctx context.Context, id int6
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err = lockAPIKeyMetadata(ctx, tx, id, guard); err != nil {
+	before, err := lockAPIKeyMetadata(ctx, tx, id, guard)
+	if err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM api_keys WHERE id=$1`, id); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	audit, err := recordAPIKeyMutation(ctx, tx, before, nil)
+	if err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return nil
+}
+
+// apiKeyAuditValues is the API key audit allowlist: the key's configuration,
+// never the credential, its prefix or its usage.
+func apiKeyAuditValues(key *models.APIKeyMetadata) map[string]any {
+	if key == nil {
+		return nil
+	}
+	scopes := key.Scopes
+	if scopes == nil {
+		scopes = []string{}
+	}
+	return map[string]any{"user_id": key.UserID, "label": key.Label, "rate_tier": key.RateTier, "scopes": scopes}
+}
+
+// recordAPIKeyMutation records an API key creation (nil before), deletion
+// (nil after) or configuration change in the caller's transaction. A write
+// that changed no allowlisted value records nothing.
+func recordAPIKeyMutation(ctx context.Context, tx pgx.Tx, before, after *models.APIKeyMetadata) (*auditmutation.Entry, error) {
+	action, status, target := auditmutation.ActionAPIKeyUpdated, http.StatusOK, before
+	switch {
+	case before == nil:
+		action, status, target = auditmutation.ActionAPIKeyCreated, http.StatusCreated, after
+	case after == nil:
+		action, status = auditmutation.ActionAPIKeyDeleted, http.StatusNoContent
+	}
+	return auditmutation.RecordMutation(ctx, tx, action, auditmutation.TargetAPIKey, strconv.FormatInt(target.ID, 10), status,
+		auditmutation.Changes(apiKeyAuditValues(before), apiKeyAuditValues(after)))
 }
 
 // ListByUserAdminPage is a bounded metadata-only account projection.

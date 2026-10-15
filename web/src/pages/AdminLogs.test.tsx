@@ -347,3 +347,64 @@ it("shows object change values as JSON", () => {
   mount("/admin/logs?tab=audit");
   expect(screen.getByText("max streams").parentElement).toHaveTextContent('{"a":1} → 2');
 });
+
+it.each([
+  ["false", "true", "pin: set"],
+  ["true", "false", "pin: cleared"],
+  ["true", "true", "pin: changed"],
+  [undefined, "true", "pin: absent → set"],
+])("shows a profile PIN marker %s → %s without a value", (before, after, expected) => {
+  vi.mocked(useAdminLogStream).mockReturnValue({
+    rows: [
+      {
+        id: 903,
+        timestamp: "2026-10-08T10:00:00Z",
+        client_ip: "192.0.2.1",
+        method: "PATCH",
+        path: "/api/v2/profiles/3f2b47eb",
+        status_code: 200,
+        duration_ms: 1,
+        user_id: 4,
+        action: before === undefined ? "profile.created" : "profile.updated",
+        target_type: "profile",
+        target_id: "3f2b47eb",
+        changes: [{ field: "pin", before, after }],
+      },
+    ],
+    isConnecting: false,
+    isLive: true,
+    connectionState: "live",
+    reconnect: vi.fn(),
+  });
+  mount("/admin/logs?tab=audit");
+  expect(screen.getByText("profile #3f2b47eb")).toBeInTheDocument();
+  expect(screen.getByText("pin").parentElement).toHaveTextContent(expected);
+});
+
+it("labels API key targets", () => {
+  vi.mocked(useAdminLogStream).mockReturnValue({
+    rows: [
+      {
+        id: 904,
+        timestamp: "2026-10-08T10:00:00Z",
+        client_ip: "192.0.2.1",
+        method: "PUT",
+        path: "/api/v2/admin/api-keys/12/tier",
+        status_code: 200,
+        duration_ms: 1,
+        user_id: 1,
+        action: "api_key.updated",
+        target_type: "api_key",
+        target_id: "12",
+        changes: [{ field: "rate_tier", before: '"standard"', after: '"elevated"' }],
+      },
+    ],
+    isConnecting: false,
+    isLive: true,
+    connectionState: "live",
+    reconnect: vi.fn(),
+  });
+  mount("/admin/logs?tab=audit");
+  expect(screen.getByText("API key #12")).toBeInTheDocument();
+  expect(screen.getByText("rate tier").parentElement).toHaveTextContent("standard → elevated");
+});

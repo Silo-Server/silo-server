@@ -30,7 +30,7 @@ type requestedLink struct {
 	minAge    time.Duration
 }
 
-func (f *fakeRepo) Issue(_ context.Context, _ int, _, tokenHash string, _ *int, _ time.Time) error {
+func (f *fakeRepo) Issue(_ context.Context, _ int, _, tokenHash string, _ *int, _ time.Time, _ Delivery) error {
 	f.issued = append(f.issued, tokenHash)
 	return nil
 }

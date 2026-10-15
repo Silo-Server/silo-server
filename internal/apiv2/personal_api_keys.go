@@ -61,6 +61,8 @@ func personalAPIKeyAccount(ctx context.Context) (int, *Problem) {
 func registerPersonalAPIKeys(reg *Registry) {
 	op := func(method, path, id string) Operation {
 		o := Operation{Operation: humaOp(method, Prefix+path, id, "api-keys", "Manage the login account's API keys."), Class: ClassAuthenticated, DemoRestricted: isMutatingMethod(method), ServiceBacked: true}
+		// Creating and revoking a key are credential actions the audit log records.
+		o.Audited = isMutatingMethod(method)
 		if method == http.MethodPost {
 			o.RetrySafety = RetrySafetyNonRetryable
 			o.DefaultStatus = http.StatusCreated

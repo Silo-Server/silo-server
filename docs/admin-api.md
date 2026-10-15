@@ -3202,21 +3202,54 @@ against `/api/v2`.
 
 ### Account and permission audit details (v2)
 
-Successful v2 administrator account and access-group mutations record an audit
-row in the mutation transaction. Actions are `user.created`, `user.updated`,
-`user.deleted`, `access_group.created`, `access_group.updated`, and
-`access_group.deleted`. `target_type` and `target_id` identify the affected
-entity; `user_id` identifies the authenticated subject, and a present
-`impersonator_user_id` identifies the acting administrator. Actor filters use
+Successful v2 account, permission and credential mutations record an audit
+row in the mutation transaction. `target_type` and `target_id` identify the
+affected entity, and an action's prefix is its target type. `user_id`
+identifies the authenticated subject, and a present `impersonator_user_id`
+identifies the acting administrator. Actor filters use
 `COALESCE(impersonator_user_id, user_id)`.
 
-`changes` lists changed allowlisted identity/policy fields. `before` and `after`
-are optional strings containing canonical JSON values: JSON null represents an
-unset account override, while an absent side represents creation/deletion.
-A password change includes only `{ "field": "password" }`; passwords, hashes,
-tokens, arbitrary request bodies and headers are excluded. Permission arrays
-show the exact prior and resulting membership. Rollbacks record no successful
-domain action, and a repeated identical policy write has no change details.
+| Action | Operation | `changes` |
+| --- | --- | --- |
+| `user.created`, `user.updated`, `user.deleted` | v2 account administration | allowlisted identity and policy fields |
+| `access_group.created`, `access_group.updated`, `access_group.deleted` | v2 access-group administration | allowlisted group policy fields |
+| `user.impersonation_started` | `impersonateAdminUser` | `impersonation_session_id` (after) |
+| `user.impersonation_ended` | `endImpersonation` | `impersonation_session_id` (before) |
+| `user.ownership_transferred` | `transferAdminUserOwnership`; target is the new Owner | `owner_user_id` |
+| `user.password_reset_link_created` | `createAdminUserPasswordReset` | `delivery`, `expires_at` |
+| `user.password_reset_completed` | `completePasswordReset` | `password` (field name only) |
+| `user.password_changed` | `changePassword` | `password` (field name only) |
+| `user.login_session_revoked` | `deleteSession`, `deleteAdminUserLoginSession` | `login_session_id` (before) |
+| `user.login_sessions_revoked` | `deleteAdminUserLoginSessions` | `revoked_login_sessions` count |
+| `api_key.created`, `api_key.updated`, `api_key.deleted` | `createAdminAPIKey`, `updateAdminAPIKeyTier`, `deleteAdminAPIKey`, `createPersonalAPIKey`, `revokePersonalAPIKey` | `user_id` (owner), `label`, `rate_tier`, `scopes` |
+| `profile.created`, `profile.updated`, `profile.deleted` | `createProfile`, `updateProfile`, `deleteProfile` | `name`, `is_child`, `is_primary`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`, `library_restrictions_enabled`, `allowed_library_ids`, `max_playback_quality`, `pin` |
+
+`changes` lists changed allowlisted fields. `before` and `after` are optional
+strings containing canonical JSON values: JSON null represents an unset account
+override, while an absent side represents creation/deletion. Permission arrays
+show the exact prior and resulting membership. A password change or reset
+includes only `{ "field": "password" }`. A profile's `pin` is `true` or
+`false` for whether the profile has a PIN; `true` on both sides is a PIN
+replaced by another. A profile row's `user_id` is the account that owns the
+profile. Login session IDs identify sessions and are not credentials.
+
+Audit rows never contain a password, password or PIN hash, PIN, access or
+refresh token, API key or its prefix, reset link, its token or digest, or an
+arbitrary request body or header. The path of `completePasswordReset` is stored
+with its link token replaced by `[redacted]`, and that row has no `user_id`
+because the request is unauthenticated.
+
+Rollbacks and refused requests record no domain action, and neither does a
+write that changes no allowlisted value: a repeated identical policy write,
+a profile update that only changes playback preferences or the avatar, or
+revoking a login session that had already ended. A committed domain row
+replaces the request's own row when both carry the same status. Outside
+`/api/v2/admin/`, only the operations listed above record domain rows (the
+v2 registry's `Audited` declaration); the frozen v1 routes keep request rows
+only. `requestPasswordReset` records none: it is anonymous, answers alike
+whether an account matched, and issues the link in the background, so its
+request row is the record. Profile rows require the PostgreSQL user store;
+the SQLite user store records request rows only.
 
 Audit history and live streams accept `action`, `actor_user_id`, `target_type`,
 and `target_id` alongside existing filters. History cursors bind these filters.

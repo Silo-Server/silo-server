@@ -12,10 +12,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -455,7 +457,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync); err != nil {
+	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, req.PIN, settingsSync); err != nil {
 		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
@@ -468,20 +470,6 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 	created := *createdPtr
 
-	// If PIN was provided, update the profile to set it.
-	if req.PIN != "" {
-		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
-			PIN: &req.PIN,
-		}); err != nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
-		}
-		// Re-read the profile to get the updated state.
-		p, err := store.GetProfile(ctx, created.ID)
-		if err != nil || p == nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after PIN set")
-		}
-		created = *p
-	}
 	if req.ShowForcedSubtitles != nil && !*req.ShowForcedSubtitles {
 		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
 			ShowForcedSubtitles: req.ShowForcedSubtitles,
@@ -780,9 +768,24 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		return apiError(http.StatusConflict, "primary_profile_protected", "The primary profile cannot be deleted. Delete the user account instead.")
 	}
 
-	if err := store.DeleteProfile(ctx, profileID); err != nil {
+	var audit *auditmutation.Entry
+	var auditErr error
+	var deleteErr error
+	if deleter, ok := store.(userstore.AuditedProfileDeleter); ok && auditmutation.Recording(ctx) {
+		deleteErr = deleter.DeleteProfileAudited(ctx, profileID, func(tx pgx.Tx, deleted *userstore.Profile) error {
+			audit, auditErr = recordProfileMutation(ctx, tx, deleted, nil)
+			return auditErr
+		})
+	} else {
+		deleteErr = store.DeleteProfile(ctx, profileID)
+	}
+	if auditErr != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete profile")
+	}
+	if deleteErr != nil {
 		return apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	if h.WatchlistRequestWithdrawer != nil {
 		withdrawCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()

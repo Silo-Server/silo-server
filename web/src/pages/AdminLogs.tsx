@@ -582,6 +582,32 @@ function auditChangeValue(value: string | undefined, targetType?: string, field?
   }
 }
 
+// A profile PIN is audited as a set/not-set marker; true → true is a PIN
+// replaced by another one.
+function auditPINChange(before: string | undefined, after: string | undefined): string {
+  if (before !== undefined && after !== undefined) {
+    if (before === after) return "changed";
+    return after === "true" ? "set" : "cleared";
+  }
+  const label = (value: string | undefined) =>
+    value === undefined ? "absent" : value === "true" ? "set" : "not set";
+  return `${label(before)} → ${label(after)}`;
+}
+
+type AuditChange = NonNullable<AuditLogEntry["changes"]>[number];
+
+function auditChangeSummary(change: AuditChange, targetType?: string): string {
+  if (change.before === undefined && change.after === undefined) return "changed";
+  if (targetType === "profile" && change.field === "pin") {
+    return auditPINChange(change.before, change.after);
+  }
+  return `${auditChangeValue(change.before, targetType, change.field)} → ${auditChangeValue(change.after, targetType, change.field)}`;
+}
+
+function auditTargetLabel(targetType: string): string {
+  return targetType === "api_key" ? "API key" : targetType.replaceAll("_", " ");
+}
+
 const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry }) {
   useDateTimeFormat();
   return (
@@ -592,14 +618,12 @@ const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry 
         {entry.changes?.map((change) => (
           <div key={change.field} className="text-muted-foreground text-xs break-words">
             <span className="font-medium">{change.field.replaceAll("_", " ")}</span>:{" "}
-            {change.before === undefined && change.after === undefined
-              ? "changed"
-              : `${auditChangeValue(change.before, entry.target_type, change.field)} → ${auditChangeValue(change.after, entry.target_type, change.field)}`}
+            {auditChangeSummary(change, entry.target_type)}
           </div>
         ))}
       </TableCell>
       <TableCell className="whitespace-nowrap">
-        {entry.target_type ? `${entry.target_type} #${entry.target_id}` : "-"}
+        {entry.target_type ? `${auditTargetLabel(entry.target_type)} #${entry.target_id}` : "-"}
       </TableCell>
       <TableCell>{entry.method}</TableCell>
       <TableCell>
