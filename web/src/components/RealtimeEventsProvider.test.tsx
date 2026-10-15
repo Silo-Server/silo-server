@@ -1252,6 +1252,43 @@ describe("RealtimeEventsProvider", () => {
       expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
     });
 
+    it("catches up on the next return after the socket dropped while visible", async () => {
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+
+      // A visible page reconnects without a catch-up, as before.
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose();
+      });
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      // A quick switch before the reconnect lands catches up what it lost.
+      await act(async () => {
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+
+      // Once caught up, the next quick switch costs nothing.
+      await act(async () => {
+        vi.advanceTimersByTime(1_000);
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+    });
+
     it("drops a pending catch-up when the account signs out while hidden", async () => {
       const signedInUser = mockState.user;
       const queryClient = new QueryClient();

@@ -508,6 +508,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const shouldCatchUpOnFocusRef = useRef(false);
   const hiddenAtRef = useRef<number | null>(null);
   const hideCountRef = useRef(0);
+  // An unexpected drop on a visible page is not caught up at once, but the
+  // next return from a hide catches up the frames it lost.
+  const droppedSinceCatchUpRef = useRef(false);
   const [hiddenGraceExpired, setHiddenGraceExpired] = useState(false);
   // Bumping these replaces the socket, or runs a catch-up while the page is visible.
   const [socketGeneration, setSocketGeneration] = useState(0);
@@ -879,6 +882,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         setSocketGeneration((generation) => generation + 1);
       }
     }
+    if (hiddenAt !== null && droppedSinceCatchUpRef.current) {
+      shouldCatchUpOnFocusRef.current = true;
+    }
     if (!shouldCatchUpOnFocusRef.current) {
       return;
     }
@@ -893,6 +899,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     }
 
     shouldCatchUpOnFocusRef.current = false;
+    droppedSinceCatchUpRef.current = false;
     void queryClient.refetchQueries({
       type: "active",
       predicate: (query) => !isDashboardQueryKey(query.queryKey),
@@ -1115,7 +1122,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           authorityActive()
         ) {
           handleAccessChanged();
-        } else if (
+        } else if (!closedByEffect) {
+          droppedSinceCatchUpRef.current = true;
+        }
+        if (
+          event.code !== EVENTS_ACCESS_CHANGED_CLOSE_CODE &&
           !closedByEffect &&
           (hiddenAtRef.current !== null || hideCountRef.current !== hideCountAtOpen)
         ) {
