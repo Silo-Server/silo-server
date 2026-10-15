@@ -130,7 +130,7 @@ require (
 )
 
 require (
-	github.com/Silo-Server/silo-plugin-sdk v0.25.0
+	github.com/Silo-Server/silo-plugin-sdk v0.26.0
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.14 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.30 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.30 // indirect
@@ -170,5 +170,3 @@ require (
 )
 
 replace github.com/zishang520/webtransport-go => ./internal/compat/zishang520-webtransport-go
-
-replace github.com/Silo-Server/silo-plugin-sdk => github.com/blurbery/silo-plugin-sdk v0.19.1-0.20261014034126-8336f8041811
