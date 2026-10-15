@@ -697,6 +697,64 @@ describe("VideoPlayer room catch-up", () => {
     expect(controls.current!.currentTime).toBe(target + 0.5);
   });
 
+  it("keeps the newest skip held while the room's seeks for earlier skips land", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100, 0, true);
+    const host = {
+      ...connection,
+      room: { ...connection.room!, self_can_manage_room: true, self_can_control_transport: true },
+    };
+    rerenderPlayer({ watchTogetherConnection: host });
+    const requested = () =>
+      vi
+        .mocked(host.sendRoomMessage)
+        .mock.calls.map(([message]) => message as Record<string, unknown>)
+        .filter((message) => message.type === "transport_request")
+        .map((message) => message.position_seconds);
+    const roomSeek = async (id: string, target: number) => {
+      rerenderPlayer({
+        watchTogetherConnection: {
+          ...host,
+          room: { ...host.room, playback_state: "waiting" as const },
+          transportCommand: {
+            ...command,
+            command_id: id,
+            action: "seek" as const,
+            position_seconds: target,
+            playback_state: "waiting" as const,
+          },
+        },
+      });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+    };
+
+    act(() => controls.current!.onSkip!.forward());
+    act(() => controls.current!.onSkip!.forward());
+    expect(requested()).toEqual([130, 160]);
+
+    // The room's seek for the first skip lands; the second is still held.
+    await roomSeek("seek-130", 130);
+    video.currentTime = 130;
+    fireEvent.seeked(video);
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(160);
+    act(() => controls.current!.onSkip!.forward());
+    expect(requested()).toEqual([130, 160, 190]);
+
+    // The room's seek to the held request releases it.
+    await roomSeek("seek-190", 190);
+    video.currentTime = 190;
+    fireEvent.seeked(video);
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(190);
+
+    // A request the room never runs stops holding the timeline.
+    act(() => controls.current!.onSkip!.forward());
+    expect(controls.current!.currentTime).toBe(220);
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(190);
+  });
+
   it("keeps the actual position when a room seek cannot be sent", () => {
     const { connection, rerenderPlayer } = setup(100);
     connection.room = { ...connection.room!, self_can_manage_room: true };

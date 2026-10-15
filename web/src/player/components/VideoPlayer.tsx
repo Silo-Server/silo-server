@@ -48,7 +48,11 @@ import type {
   PlaybackRealtimeCommandEnvelope,
   PlaybackRealtimeEventEnvelope,
 } from "../realtime-protocol";
-import { resolvePendingSeekTime } from "../utils/pendingSeek";
+import {
+  remainingRoomHeldSeek,
+  resolvePendingSeekTime,
+  ROOM_HELD_SEEK_TIMEOUT_MS,
+} from "../utils/pendingSeek";
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { HlsStartupGuard } from "../utils/hlsStartupGuard";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
@@ -1218,6 +1222,38 @@ export function VideoPlayer({
     if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
   }, []);
 
+  // This viewer's newest room seek request the room has not run yet: the
+  // origin of the next relative skip and the position the controls show (see
+  // remainingRoomHeldSeek). The element, its room reports and the markers
+  // follow the room's seeks as they run.
+  const [roomHeldSeek, setRoomHeldSeek] = useState<number | null>(null);
+  const roomHeldSeekRef = useRef<number | null>(null);
+  const roomHeldSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdRoomSeek = useCallback(
+    (seconds: number | null) => {
+      if (roomHeldSeekTimerRef.current !== null) clearTimeout(roomHeldSeekTimerRef.current);
+      roomHeldSeekTimerRef.current = null;
+      roomHeldSeekRef.current = seconds;
+      setRoomHeldSeek(seconds);
+      if (seconds === null) return;
+      // A request the room never ran (dropped while reconnecting, or folded
+      // into a seek that already landed) puts the timeline back on the media.
+      roomHeldSeekTimerRef.current = setTimeout(() => {
+        roomHeldSeekTimerRef.current = null;
+        roomHeldSeekRef.current = null;
+        setRoomHeldSeek(null);
+        releasePendingSeek(seconds);
+      }, ROOM_HELD_SEEK_TIMEOUT_MS);
+    },
+    [releasePendingSeek],
+  );
+  useEffect(
+    () => () => {
+      if (roomHeldSeekTimerRef.current !== null) clearTimeout(roomHeldSeekTimerRef.current);
+    },
+    [],
+  );
+
   // Ends an active room catch-up nudge; any seek or local stop returns the
   // element to the base rate so a stale rate never survives a context change.
   const resetRoomCatchupRate = useCallback(() => {
@@ -1416,12 +1452,14 @@ export function VideoPlayer({
           // a relative skip before then extends this target.
           rememberPendingSeek(seconds);
           setCurrentTime(seconds);
+          holdRoomSeek(seconds);
         }
         return result.ok;
       }
       return performPlayerSeek(seconds);
     },
     [
+      holdRoomSeek,
       performPlayerSeek,
       rememberPendingSeek,
       sessionId,
@@ -1440,10 +1478,16 @@ export function VideoPlayer({
   // remux playback whose HTML media clock starts at a nonzero offset. A seek
   // still in flight (a reanchor being replanned, a remux reload) is the origin
   // rather than the element clock, so a skip right after a scrub extends the
-  // scrub instead of snapping back to where the element still is.
+  // scrub instead of snapping back to where the element still is. In a room,
+  // the viewer's held request comes first: the room's seeks for earlier skips
+  // in a burst move the element without answering it.
   const handleSkip = useCallback(
     (direction: "back" | "forward") => {
-      const now = pendingSeekTimeRef.current ?? elementMediaPosition() ?? currentTimeRef.current;
+      const now =
+        roomHeldSeekRef.current ??
+        pendingSeekTimeRef.current ??
+        elementMediaPosition() ??
+        currentTimeRef.current;
       const seconds = direction === "back" ? seekIntervals.back : seekIntervals.forward;
       handlePlayerSeek(
         skipTarget(now, durationRef.current, direction === "back" ? -seconds : seconds),
@@ -2652,8 +2696,15 @@ export function VideoPlayer({
       directPlayOriginPendingRef.current
         ? { currentTime: pendingSeekTime ?? subtitleFetchAnchorRef.current, pendingSeekTime }
         : resolvePendingSeekTime(actualTime, pendingSeekTime);
+    // The media reached the viewer's held room request: the controls follow
+    // the media again.
+    const releaseHeldSeekAt = (actualTime: number) => {
+      if (directPlayOriginPendingRef.current || roomHeldSeekRef.current === null) return;
+      if (remainingRoomHeldSeek(roomHeldSeekRef.current, actualTime) === null) holdRoomSeek(null);
+    };
     const onTimeUpdate = () => {
       const nextTime = toMediaTime(video.currentTime, timelineOffsetRef.current);
+      releaseHeldSeekAt(nextTime);
       const resolved = resolveSeekAt(nextTime);
       setCurrentTime(resolved.currentTime);
       if (resolved.pendingSeekTime !== pendingSeekTime) {
@@ -2679,7 +2730,9 @@ export function VideoPlayer({
       }
     };
     const onSeeked = () => {
-      const resolved = resolveSeekAt(toMediaTime(video.currentTime, timelineOffsetRef.current));
+      const seekedTime = toMediaTime(video.currentTime, timelineOffsetRef.current);
+      releaseHeldSeekAt(seekedTime);
+      const resolved = resolveSeekAt(seekedTime);
       setCurrentTime(resolved.currentTime);
       setPendingSeekTime(resolved.pendingSeekTime);
       // Reloading a stream can finish an older native seek. It does not settle
@@ -2810,6 +2863,7 @@ export function VideoPlayer({
     // room snapshot churn doesn't re-subscribe every listener.
   }, [
     applyElementDuration,
+    holdRoomSeek,
     pendingSeekTime,
     reportConnectionLost,
     reportCurrentPlanFailure,
@@ -3492,10 +3546,33 @@ export function VideoPlayer({
         issuedAtMs: performance.now(),
         commandId,
       };
+      if (
+        roomHeldSeekRef.current !== null &&
+        remainingRoomHeldSeek(roomHeldSeekRef.current, seconds) === null
+      ) {
+        holdRoomSeek(null);
+      }
       return performPlayerSeekRef.current(seconds);
     },
-    [],
+    [holdRoomSeek],
   );
+
+  // A held request belongs to a live room connection; with none, nothing will
+  // answer it.
+  useEffect(() => {
+    if (
+      !watchTogetherRoomId ||
+      watchTogether.closedReason ||
+      watchTogether.connectionState !== "connected"
+    ) {
+      holdRoomSeek(null);
+    }
+  }, [
+    holdRoomSeek,
+    watchTogether.closedReason,
+    watchTogether.connectionState,
+    watchTogetherRoomId,
+  ]);
 
   useEffect(() => {
     const command = watchTogether.transportCommand;
@@ -4723,7 +4800,7 @@ export function VideoPlayer({
           skipSeconds={seekIntervals}
           onSkip={skipActions}
           playing={playing}
-          currentTime={currentTime}
+          currentTime={roomHeldSeek ?? currentTime}
           duration={duration}
           buffered={buffered}
           chapters={chapters}
