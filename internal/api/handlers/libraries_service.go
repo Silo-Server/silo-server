@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
@@ -944,39 +945,44 @@ func (h *LibraryHandler) SetUnmatchedItemIgnored(ctx context.Context, contentID 
 	if contentID == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Missing content ID")
 	}
-	tag, err := h.pool.Exec(ctx, `
-		UPDATE media_items
-		SET match_ignored_at = CASE WHEN $2 THEN COALESCE(match_ignored_at, NOW()) END
-		WHERE content_id = $1
-		  AND (NOT $2 OR (
-			lower(trim(status)) IN ('pending', 'unmatched', 'ambiguous')
-			AND type IN ('movie', 'series')
-		  ))
-	`, contentID, ignored)
+	const ignorable = `lower(trim(status)) IN ('pending', 'unmatched', 'ambiguous') AND type IN ('movie', 'series')`
+	// Each statement writes only when the mark changes, so a repeated request
+	// leaves the matcher queues alone.
+	update := `UPDATE media_items SET match_ignored_at = NULL WHERE content_id = $1 AND match_ignored_at IS NOT NULL`
+	if ignored {
+		update = `UPDATE media_items SET match_ignored_at = NOW() WHERE content_id = $1 AND match_ignored_at IS NULL AND ` + ignorable
+	}
+	tag, err := h.pool.Exec(ctx, update, contentID)
 	if err != nil {
 		slog.ErrorContext(ctx, "setting media item match ignore", "component", "api", "content_id", contentID, "ignored", ignored, "error", err)
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to update item")
 	}
 	if tag.RowsAffected() > 0 {
-		h.requeueItemMatchWork(ctx, contentID)
+		h.requeueItemMatchWork(ctx, contentID, !ignored)
 		return nil
 	}
-	var exists bool
-	if err := h.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1)`, contentID).Scan(&exists); err != nil {
+	var canIgnore bool
+	if err := h.pool.QueryRow(ctx, `SELECT `+ignorable+` FROM media_items WHERE content_id = $1`, contentID).Scan(&canIgnore); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apiError(http.StatusNotFound, "not_found", "Item not found")
+		}
 		slog.ErrorContext(ctx, "checking media item for match ignore", "component", "api", "content_id", contentID, "error", err)
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to update item")
 	}
-	if !exists {
-		return apiError(http.StatusNotFound, "not_found", "Item not found")
+	if !ignored || canIgnore {
+		// Already in the requested state.
+		return nil
 	}
 	return apiError(http.StatusConflict, "conflict", "Only an unmatched movie or series can be ignored")
 }
 
 // requeueItemMatchWork re-evaluates the matcher queue rows of the item's
 // present files, so an ignored item leaves the matcher backlog at once and a
-// restored one is queued for another match attempt. A failure is only
-// logged: the next scan's queue sync reaches the same rows.
-func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID string) {
+// restored one is queued for another match attempt. A restore also wakes a
+// series root's row that stayed queued, parked or backed off, for another item
+// sharing the root. A failure is only logged: the next scan's queue sync
+// reaches the same rows.
+func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID string, restored bool) {
 	if h.MovieMatchQueueRepo == nil && h.SeriesMatchQueueRepo == nil {
 		return
 	}
@@ -1043,6 +1049,12 @@ func (h *LibraryHandler) requeueItemMatchWork(ctx context.Context, contentID str
 		for _, root := range roots {
 			if err := h.SeriesMatchQueueRepo.EnqueueSeriesRoot(ctx, root.folderID, root.path); err != nil {
 				slog.WarnContext(ctx, "requeueing series match work", "component", "api", "content_id", contentID, "library_id", root.folderID, "error", err)
+				continue
+			}
+			if restored {
+				if err := h.SeriesMatchQueueRepo.WakeRoot(ctx, root.folderID, root.path); err != nil {
+					slog.WarnContext(ctx, "waking series match work", "component", "api", "content_id", contentID, "library_id", root.folderID, "error", err)
+				}
 			}
 		}
 	}

@@ -264,6 +264,7 @@ type fakeSeriesMatchQueue struct {
 }
 
 func (f *fakeSeriesMatchQueue) EnqueueSeriesRoot(context.Context, int, string) error { return nil }
+func (f *fakeSeriesMatchQueue) WakeRoot(context.Context, int, string) error          { return nil }
 func (f *fakeSeriesMatchQueue) SyncForFolder(context.Context, int) error             { return nil }
 func (f *fakeSeriesMatchQueue) DeleteByFolder(context.Context, int) (int, error) {
 	return 0, nil

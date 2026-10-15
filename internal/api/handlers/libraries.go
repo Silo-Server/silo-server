@@ -134,6 +134,7 @@ type libraryMovieMatchQueue interface {
 
 type librarySeriesMatchQueue interface {
 	EnqueueSeriesRoot(ctx context.Context, folderID int, observedRootPath string) error
+	WakeRoot(ctx context.Context, folderID int, observedRootPath string) error
 	SyncForFolder(ctx context.Context, folderID int) error
 	DeleteByFolder(ctx context.Context, folderID int) (int, error)
 	CountStatesByFolder(ctx context.Context, folderID int) (pending int, parked int, err error)

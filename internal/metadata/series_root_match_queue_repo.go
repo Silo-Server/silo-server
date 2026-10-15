@@ -769,6 +769,34 @@ func (r *SeriesRootMatchQueueRepository) RetryNowByFolder(ctx context.Context, f
 	return int(tag.RowsAffected()), nil
 }
 
+// WakeRoot returns one root's parked or backed-off row to pending so the
+// worker claims it again. Unlike RetryNowByFolder it requests no rerun, so
+// files under the root that are already matched stay out of the attempt. A
+// root without a queued row is left alone.
+func (r *SeriesRootMatchQueueRepository) WakeRoot(ctx context.Context, folderID int, observedRootPath string) error {
+	if err := r.requireConfigured(); err != nil {
+		return err
+	}
+	if err := requirePositiveSeriesQueueID("folder id", folderID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(observedRootPath) == "" {
+		return errors.New("observed root path is required")
+	}
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE series_root_match_queue
+		SET state = 'pending',
+			available_at = CASE WHEN lease_token = '' THEN NOW() ELSE available_at END,
+			deterministic_attempt_count = 0,
+			failure_kind = '', failure_detail = '{}'::jsonb, last_error = '', parked_at = NULL,
+			updated_at = NOW()
+		WHERE media_folder_id = $1 AND observed_root_path = $2
+	`, folderID, filepath.Clean(observedRootPath)); err != nil {
+		return fmt.Errorf("waking series root queue row: %w", err)
+	}
+	return nil
+}
+
 func (r *SeriesRootMatchQueueRepository) WakeForChangedInputs(ctx context.Context) (int, error) {
 	if err := r.requireConfigured(); err != nil {
 		return 0, err

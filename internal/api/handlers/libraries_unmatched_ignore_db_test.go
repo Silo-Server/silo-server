@@ -257,4 +257,42 @@ func TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB(t *testing.T) {
 	if got := seriesQueued(); got != 1 {
 		t.Fatalf("after unignoring the series: series queue rows = %d, want 1", got)
 	}
+
+	// A partial split leaves a second provisional item under the same root.
+	// Ignoring one keeps the root's row for the other, and a restore must wake
+	// that row even when the matcher had parked it.
+	splitID := seriesID + "-split"
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, splitID) })
+	if err := items.Upsert(ctx, &models.MediaItem{ContentID: splitID, Type: "series", Title: tag + " Series Split", Status: "unmatched"}); err != nil {
+		t.Fatalf("seed split series: %v", err)
+	}
+	if _, err := files.Upsert(ctx, models.MediaFile{ContentID: splitID, MediaFolderID: seriesFolder, FilePath: seriesRoot + "/Season 02/S02E01.mkv", ObservedRootPath: seriesRoot, FileSize: 1024, BaseType: "series"}); err != nil {
+		t.Fatalf("seed split episode file: %v", err)
+	}
+	if err := h.SeriesMatchQueueRepo.EnqueueSeriesRoot(ctx, seriesFolder, seriesRoot); err != nil {
+		t.Fatalf("queue shared series root: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE series_root_match_queue SET state = 'parked', parked_at = NOW(), deterministic_attempt_count = 3 WHERE media_folder_id = $1`, seriesFolder); err != nil {
+		t.Fatalf("park shared series root: %v", err)
+	}
+	seriesState := func(step string) string {
+		t.Helper()
+		var state string
+		if err := pool.QueryRow(ctx, `SELECT state FROM series_root_match_queue WHERE media_folder_id = $1`, seriesFolder).Scan(&state); err != nil {
+			t.Fatalf("%s: read series queue row: %v", step, err)
+		}
+		return state
+	}
+	if err := h.SetUnmatchedItemIgnored(ctx, seriesID, true); err != nil {
+		t.Fatalf("ignore series sharing a root: %v", err)
+	}
+	if got := seriesState("after ignoring one item of a shared root"); got != "parked" {
+		t.Fatalf("after ignoring one item of a shared root: series queue row = %s, want parked", got)
+	}
+	if err := h.SetUnmatchedItemIgnored(ctx, seriesID, false); err != nil {
+		t.Fatalf("unignore series sharing a root: %v", err)
+	}
+	if got := seriesState("after restoring one item of a shared root"); got != "pending" {
+		t.Fatalf("after restoring one item of a shared root: series queue row = %s, want pending", got)
+	}
 }
