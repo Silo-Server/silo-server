@@ -1692,7 +1692,15 @@ func (h *ItemsHandler) HandleGenres(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	total := len(items)
+	// Jellyfin returns every genre when Limit is absent and none for Limit=0;
+	// parseItemsQuery's default page size is for item browsing.
+	if query.limitDefaulted {
+		query.limit = total
+	}
 	items = slicePage(items, query.startIndex, query.limit)
+	if query.countOnly {
+		items = []baseItemDTO{}
+	}
 	if !query.enableTotalRecordCount {
 		total = 0
 	}
