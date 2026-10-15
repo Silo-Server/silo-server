@@ -140,11 +140,13 @@ export async function measureBandwidthKbps(
           clearTimeout(firstByteTimer);
           firstByteTimer = undefined;
           // Ends a read that stops returning, which the check below would
-          // never reach: cancelling resolves the pending read as done.
-          budgetTimer = setTimeout(
-            () => void reader.cancel().catch(() => undefined),
-            PROBE_TIME_BUDGET_MS + PROBE_STALLED_READ_GRACE_MS,
-          );
+          // never reach: cancelling resolves the pending read as done. The
+          // silent stretch counts against the rate, so the window ends now
+          // rather than at the last chunk.
+          budgetTimer = setTimeout(() => {
+            now = clock();
+            void reader.cancel().catch(() => undefined);
+          }, PROBE_TIME_BUDGET_MS + PROBE_STALLED_READ_GRACE_MS);
           continue;
         }
         bytes += value.byteLength;
