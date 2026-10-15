@@ -113,6 +113,16 @@ type fakePluginCredentialRepository struct {
 	err   error
 }
 
+func (r *fakePluginCredentialRepository) GetConnectionByID(_ context.Context, id string) (Connection, bool, error) {
+	if r.err != nil {
+		return Connection{}, false, r.err
+	}
+	if r.saved.ID != id {
+		return Connection{}, false, nil
+	}
+	return r.saved, true, nil
+}
+
 func (r *fakePluginCredentialRepository) UpdateConnectionTokens(_ context.Context, expected, updated Connection) (Connection, error) {
 	if r.err != nil {
 		return Connection{}, r.err
