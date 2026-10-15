@@ -136,9 +136,11 @@ export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now())
   const observed = clampKbps(kbps);
   if (observed === undefined) return;
   const current = readStored(now);
-  if (current?.observed && current.kbps <= observed) return;
-  // A lower probe result still caps it, but the entry becomes observed so a
-  // metered link honors it.
+  // Nothing to add when a lower limit is already recorded for this kind of
+  // link. Otherwise keep the lower value but record it for the current link,
+  // so a metered link honors it.
+  const sameLink = current?.metered === true || !onMeteredConnection();
+  if (current?.observed && sameLink && current.kbps <= observed) return;
   writeStored(Math.min(observed, current?.kbps ?? observed), now, true);
 }
 

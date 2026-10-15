@@ -190,6 +190,19 @@ describe("measured bandwidth cache", () => {
     }
   });
 
+  it("re-records a lower Wi-Fi limit for a metered link that stalls", () => {
+    const now = Date.now();
+    recordObservedBandwidthLimitKbps(3_000, now);
+    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
+    try {
+      expect(readMeteredObservedLimitKbps(now)).toBeUndefined();
+      recordObservedBandwidthLimitKbps(4_200, now);
+      expect(readMeteredObservedLimitKbps(now)).toBe(3_000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("does not offer a limit observed on an unmetered link to a metered one", () => {
     recordObservedBandwidthLimitKbps(56_000);
     expect(readMeasuredBandwidthKbps()).toBe(56_000);
