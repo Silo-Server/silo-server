@@ -148,6 +148,9 @@ export async function measureBandwidthKbps(
 let scheduledTimer: ReturnType<typeof setTimeout> | undefined;
 let activeProbe: AbortController | undefined;
 
+/** How soon to look again when a probe could not run or did not finish. */
+const PROBE_RETRY_MS = 5 * 60 * 1000;
+
 function mediaPlaying(): boolean {
   if (typeof document === "undefined") return false;
   return Array.from(document.querySelectorAll("video, audio")).some(
@@ -155,23 +158,44 @@ function mediaPlaying(): boolean {
   );
 }
 
-function probeAllowed(): boolean {
+/**
+ * Whether the viewer pays for this link by the byte: Data Saver is on or the
+ * browser reports cellular. Such a link is not probed, and a measurement
+ * taken on another link does not describe it.
+ */
+export function onMeteredConnection(): boolean {
   const connection = networkInformation();
-  // Data Saver and cellular are links the viewer pays for by the byte, and a
-  // probe beside a playing stream would both slow it and under-measure.
-  return connection?.saveData !== true && connection?.type !== "cellular" && !mediaPlaying();
+  return connection?.saveData === true || connection?.type === "cellular";
+}
+
+function probeAllowed(): boolean {
+  // A probe beside a playing stream would both slow it and under-measure.
+  return !onMeteredConnection() && !mediaPlaying();
 }
 
 /**
- * Measures in the background unless a fresh measurement is cached. Runs once
- * the first screen has had time to settle, and never alongside playback: a
- * playback start calls cancelBandwidthProbe. Returns a cleanup function.
+ * Keeps a measurement cached while the app is signed in. Starts once the first
+ * screen has had time to settle, measures again when the cached one expires,
+ * and while a probe is not allowed (metered link, media playing) looks again
+ * every few minutes. Returns a function that stops the schedule.
  */
 export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => void {
-  cancelBandwidthProbe();
-  scheduledTimer = setTimeout(() => {
+  stopBandwidthProbes();
+  const schedule = (ms: number) => {
+    scheduledTimer = setTimeout(run, Math.max(0, ms));
+  };
+  const run = () => {
     scheduledTimer = undefined;
-    if (readMeasuredBandwidthKbps() !== undefined || !probeAllowed()) return;
+    const now = Date.now();
+    const stored = readStored(now);
+    if (stored) {
+      schedule(stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - now + 1000);
+      return;
+    }
+    if (!probeAllowed()) {
+      schedule(PROBE_RETRY_MS);
+      return;
+    }
     const controller = new AbortController();
     activeProbe = controller;
     void measureBandwidthKbps(controller.signal)
@@ -182,18 +206,37 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
         // Best effort: without a measurement playback plans as it did before.
       })
       .finally(() => {
-        if (activeProbe === controller) activeProbe = undefined;
+        if (activeProbe !== controller) return;
+        activeProbe = undefined;
+        // A stored result schedules its own expiry; a failed or aborted probe
+        // waits out the retry interval.
+        const stored = readStored(Date.now());
+        schedule(
+          stored
+            ? stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - Date.now() + 1000
+            : PROBE_RETRY_MS,
+        );
       });
-  }, delayMs);
-  return cancelBandwidthProbe;
+  };
+  schedule(delayMs);
+  return stopBandwidthProbes;
 }
 
-/** Stops a pending or running probe so it does not compete with playback. */
+/**
+ * Stops a running probe so it does not compete with playback. The schedule
+ * continues and tries again later.
+ */
 export function cancelBandwidthProbe(): void {
+  activeProbe?.abort();
+}
+
+/** Stops the schedule and any running probe, e.g. on sign-out. */
+export function stopBandwidthProbes(): void {
   if (scheduledTimer !== undefined) {
     clearTimeout(scheduledTimer);
     scheduledTimer = undefined;
   }
-  activeProbe?.abort();
+  const probe = activeProbe;
   activeProbe = undefined;
+  probe?.abort();
 }
