@@ -1278,18 +1278,20 @@ func TestReadyAcknowledgesCurrentSeek(t *testing.T) {
 			member := &memberState{userID: 7, profileID: "host", sessionID: "session", connection: conn}
 			live.members[buildMemberKey(7, "host")] = member
 			reg := registrationFor(repo.room.ID, 7, "host", conn)
-			seek := func() TransportCommand {
+			seek := func(target float64) TransportCommand {
 				t.Helper()
 				_, err := service.HandleTransportRequestForConnection(t.Context(), reg, 7, "host", TransportRequest{
-					Action: TransportActionSeek, PositionSeconds: new(1500.0),
+					Action: TransportActionSeek, PositionSeconds: &target,
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
 				return conn.payloads[len(conn.payloads)-1]["command"].(TransportCommand)
 			}
-			previous := seek()
-			current := seek()
+			// A repeat of the pending target is the same seek, so the earlier
+			// seek goes elsewhere.
+			previous := seek(1400)
+			current := seek(1500)
 			commandID := current.CommandID
 			if test.staleCommand {
 				commandID = previous.CommandID

@@ -97,6 +97,17 @@ const (
 	// member is not corrected again; a correction would only restart it.
 	convergingDriftSeconds    = 5.0
 	convergingProgressSeconds = 0.1
+	// seekRepeatSeconds is how close a seek request may be to the seek the
+	// room is already waiting on and still be the same seek. Clients compute
+	// a relative skip from their own position, which stays on the old stream
+	// until the room's seek runs there, so a burst of presses repeats the
+	// pending target; each repeat would restart the barrier for everyone.
+	seekRepeatSeconds = 1.0
+	// stuckCorrectionSeconds is how far a paused member must move after a
+	// correction before it is corrected again. One that has not moved cannot
+	// apply it in place (a transcode lands on segment boundaries), and
+	// repeating it changes nothing.
+	stuckCorrectionSeconds = 0.1
 	// stallSeekToleranceSeconds is how close a stalled guest must land to the
 	// waiting room's position before it counts as ready, when its ready names
 	// the seek it ran. A rebuilt stream lands on a segment boundary, often
@@ -298,6 +309,9 @@ type memberState struct {
 	// unless they name lastSentCommandID as the command they last applied.
 	settleUntil       time.Time
 	lastSentCommandID string
+	// correctedFrom is the position the member reported when its pending
+	// correction was sent.
+	correctedFrom float64
 	// lastSentPaused is whether that command left the member paused, and
 	// lastSentAt when it was sent.
 	lastSentPaused bool
@@ -769,6 +783,12 @@ func (s *Service) handleTransportRequestForConnection(
 	// An explicit transport request is the member's intent, which supersedes
 	// any pending sync to the room's position.
 	member.syncingToRoom = false
+	if s.repeatsWaitingSeekLocked(live, request) {
+		snapshot := s.buildSnapshotLocked(live, userID, profileID)
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	waiting := live.room.PlaybackState == RoomPlaybackStateWaiting
 
 	// Every command carries the room's position at its execute_at, and the
 	// anchor is taken there too, so the room's model and the members it
@@ -814,7 +834,11 @@ func (s *Service) handleTransportRequestForConnection(
 			executeAt,
 		)
 	case TransportActionSeek:
-		live.room.ResumeOnReady = !request.IsPaused
+		// During an open barrier the requester is paused by the barrier, not
+		// by choice, so a further seek keeps whether the room resumes.
+		if !waiting {
+			live.room.ResumeOnReady = !request.IsPaused
+		}
 		live.room.IsPaused = true
 		live.room.PlaybackState = RoomPlaybackStateWaiting
 		s.resetMemberReadinessLocked(live, false)
@@ -1014,6 +1038,10 @@ func (s *Service) handleStateReportForConnection(
 		// Closer than before: the member is converging, so it is left to it.
 		member.bestDrift = drift
 		member.driftStrikes = 0
+	} else if live.room.IsPaused && !pauseMismatch && member.correctionCommand != nil &&
+		math.Abs(report.PositionSeconds-member.correctedFrom) < stuckCorrectionSeconds {
+		// Paused where its last correction found it: it cannot apply one.
+		member.driftStrikes = 0
 	} else if member.driftStrikes++; pauseMismatch || member.driftStrikes >= guestCorrectionStrikes {
 		executeAt := s.nextExecuteAtLocked(live, now)
 		command := TransportCommand{
@@ -1034,6 +1062,7 @@ func (s *Service) handleStateReportForConnection(
 		}
 		if !correctionCommandPending(member, command, now) {
 			member.correctionCommand = &command
+			member.correctedFrom = report.PositionSeconds
 			correctionDispatches = s.targetedCommandDispatchesLocked(live, report.SessionID, command)
 		}
 	}
@@ -2507,6 +2536,16 @@ func memberCommandLogAttrs(roomID string, userID int, dispatch commandDispatch) 
 		"session_id", command.SessionID, "command_id", command.CommandID, "action", command.Action,
 		"playback_state", command.PlaybackState, "target_position_seconds", command.PositionSeconds,
 	}
+}
+
+// repeatsWaitingSeekLocked reports whether request is a seek to where the room
+// is already waiting to seek. Must be called with s.mu held.
+func (s *Service) repeatsWaitingSeekLocked(live *liveRoom, request TransportRequest) bool {
+	command := live.command
+	return request.Action == TransportActionSeek && request.PositionSeconds != nil &&
+		live.room.PlaybackState == RoomPlaybackStateWaiting && command != nil &&
+		command.Action == TransportActionSeek && command.SelectionRevision == live.room.SelectionRevision &&
+		math.Abs(*request.PositionSeconds-command.PositionSeconds) <= seekRepeatSeconds
 }
 
 // commandSettlingLocked reports whether a state report at now may predate the

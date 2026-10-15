@@ -253,7 +253,7 @@ func (s *Service) adoptRuntimeLocked(ctx context.Context, live *liveRoom, room R
 				m.remoteConnected = false
 				m.lastPingMS = old.lastPingMS
 				m.driftStrikes, m.settleUntil, m.lastSentCommandID = old.driftStrikes, old.settleUntil, old.lastSentCommandID
-				m.lastSentPaused, m.lastSentAt, m.bestDrift = old.lastSentPaused, old.lastSentAt, old.bestDrift
+				m.lastSentPaused, m.lastSentAt, m.bestDrift, m.correctedFrom = old.lastSentPaused, old.lastSentAt, old.bestDrift, old.correctedFrom
 				if m.leaseUntil.Sub(now) <= connectionLease-leaseRefreshInterval {
 					m.leaseUntil = now.Add(connectionLease)
 				}

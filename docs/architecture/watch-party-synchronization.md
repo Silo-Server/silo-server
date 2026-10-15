@@ -113,6 +113,16 @@ Every command executes one lead from when it is sent, and never before the
 room's own latest command or anchor, so a member synced after the lead drops
 never starts ahead of the room.
 
+A seek request within 1 second of the seek the room is already waiting on is
+the same seek: it does not restart the barrier. Clients compute a relative
+skip from their own position, which stays on the old stream until the room's
+seek runs there, so a burst of presses on an older client repeats the pending
+target. A seek during an open barrier also keeps whether the room resumes
+playing, since the requester is paused by the barrier rather than by choice.
+A paused member that stays where its last correction found it cannot apply
+one in place (a transcode lands on segment boundaries) and is not corrected
+again until it moves.
+
 ## Buffering policy
 
 The room waits for a viewer once, then lets them catch up. One slow connection

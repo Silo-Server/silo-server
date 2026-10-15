@@ -525,3 +525,89 @@ func TestCorrectionsDoNotBroadcastSnapshots(t *testing.T) {
 		t.Fatalf("a correction sent bob %d snapshots", got-before)
 	}
 }
+
+// A burst of relative skips from a client whose position has not caught up
+// with the pending seek repeats that seek's target. The repeat is the same
+// seek, so the barrier does not restart, and a seek during the barrier keeps
+// whether the room resumes playing.
+func TestRepeatedSeekDuringABarrierIsTheSameSeek(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.now = f.now.Add(10 * time.Second)
+	seek := func(target float64, paused bool) {
+		t.Helper()
+		if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+			TransportRequest{Action: TransportActionSeek, PositionSeconds: &target, IsPaused: paused}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seek(140, false)
+	first := lastTransport(t, f.conns["guest"])
+	generation := f.repo.room.Generation
+	f.ready("guest", 140)
+
+	// The host is paused by the barrier now; its repeat carries that.
+	f.now = f.now.Add(300 * time.Millisecond)
+	seek(140.3, true)
+	if got := lastTransport(t, f.conns["guest"]); got.CommandID != first.CommandID || f.repo.room.Generation != generation {
+		t.Fatalf("a repeat of the pending seek restarted the barrier: %+v", got)
+	}
+	if !f.member("guest").isReady {
+		t.Fatal("a repeat of the pending seek reset readiness")
+	}
+
+	// A real further skip restarts it, and the room still resumes playing.
+	seek(170, true)
+	second := lastTransport(t, f.conns["guest"])
+	if second.CommandID == first.CommandID || second.PositionSeconds != 170 {
+		t.Fatalf("a further skip was dropped: %+v", second)
+	}
+	f.resumeAll()
+	if f.repo.room.PlaybackState != RoomPlaybackStatePlaying {
+		t.Fatalf("seeks during the barrier left the room %s, want playing", f.repo.room.PlaybackState)
+	}
+}
+
+// A paused member that cannot apply a correction in place (it stays where the
+// correction found it) is not corrected again and again.
+func TestPausedMemberThatCannotMoveIsNotCorrectedAgain(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.now = f.now.Add(10 * time.Second)
+	position := f.expected()
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionPause, PositionSeconds: &position}); err != nil {
+		t.Fatal(err)
+	}
+	pause := lastTransport(t, f.conns["guest"])
+	report := func(at float64) {
+		t.Helper()
+		if _, err := f.s.HandleStateReportForConnection(t.Context(), f.reg("guest"), f.userID("guest"), "guest",
+			StateReport{SessionID: "guest-session", CommandID: pause.CommandID, PositionSeconds: at, IsPaused: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.now = f.now.Add(commandSettleWindow + time.Second)
+	stuck := pause.PositionSeconds - 1.6
+	before := transportCount(f.conns["guest"])
+	for range guestCorrectionStrikes + 1 {
+		report(stuck)
+	}
+	corrections := transportCount(f.conns["guest"])
+	if corrections != before+1 {
+		t.Fatalf("the first correction was not sent (%d)", corrections-before)
+	}
+	for range 6 {
+		f.now = f.now.Add(guestCorrectionRetryInterval + commandSettleWindow)
+		report(stuck)
+		report(stuck)
+	}
+	if got := transportCount(f.conns["guest"]); got != corrections {
+		t.Fatalf("a paused member that cannot move got %d more corrections", got-corrections)
+	}
+	// Once it moves, it is corrected again if it is still off.
+	f.now = f.now.Add(guestCorrectionRetryInterval)
+	report(stuck - 2)
+	report(stuck - 2)
+	if got := transportCount(f.conns["guest"]); got != corrections+1 {
+		t.Fatalf("a paused member that moved further off got %d corrections, want 1", got-corrections)
+	}
+}
