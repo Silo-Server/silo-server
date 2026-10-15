@@ -273,10 +273,11 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		process.Kill()
 		return nil, fmt.Errorf("plugin runtime returned an empty manifest")
 	}
-	// Read the plugin's own manifest the way the installed one was read, so
-	// fields and enum values from a newer SDK don't count as a mismatch.
-	liveManifest := knownManifest(liveManifestResponse.GetManifest())
-	if !proto.Equal(req.Manifest, liveManifest) {
+	// Fields and enum values from a newer SDK don't count as a mismatch: both
+	// copies are compared without them, and the client keeps the live copy
+	// that way.
+	liveManifest := KnownManifest(liveManifestResponse.GetManifest())
+	if !proto.Equal(KnownManifest(req.Manifest), liveManifest) {
 		_ = protocol.Close()
 		process.Kill()
 		return nil, fmt.Errorf("plugin runtime manifest does not match installed manifest")

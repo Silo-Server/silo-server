@@ -7,13 +7,17 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
-// knownManifest returns a copy of the manifest a running plugin reported,
-// keeping only what this server's SDK knows: unknown fields are dropped, and
-// so are enum values it has no name for. The installed manifest was read from
-// JSON with protojson's DiscardUnknown, which drops both, while the plugin's
-// own copy arrives over gRPC with them kept. Reading the live copy the same way
-// lets a plugin built on a newer SDK match its installed manifest.
-func knownManifest(manifest *pluginv1.PluginManifest) *pluginv1.PluginManifest {
+// KnownManifest returns a copy of a plugin manifest keeping only what this
+// server's SDK knows: unknown fields are dropped, and so are enum values it has
+// no name for. A manifest from a plugin built on a newer SDK carries both. Read
+// from JSON with protojson's DiscardUnknown, unknown fields and unknown enum
+// names are dropped but enum numbers are kept; over gRPC, both are kept.
+// Comparing two copies of a manifest through KnownManifest ignores whatever a
+// newer SDK added, however each copy was read.
+func KnownManifest(manifest *pluginv1.PluginManifest) *pluginv1.PluginManifest {
+	if manifest == nil {
+		return nil
+	}
 	out := &pluginv1.PluginManifest{}
 	proto.Merge(out, manifest)
 	dropUnknown(out.ProtoReflect())

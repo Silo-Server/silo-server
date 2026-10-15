@@ -46,10 +46,39 @@ func TestKnownManifestMatchesHowInstallReadsIt(t *testing.T) {
 		t.Fatal("live manifest matches before it is read; the test no longer covers anything")
 	}
 
-	if got := knownManifest(live); !proto.Equal(&installed, got) {
-		t.Fatalf("knownManifest(live) = %v, want the installed manifest %v", got, &installed)
+	if got := KnownManifest(live); !proto.Equal(KnownManifest(&installed), got) {
+		t.Fatalf("KnownManifest(live) = %v, want the installed manifest %v", got, &installed)
 	}
 	if live.GetCapabilities()[0].GetConfigSchema()[0].GetAdminForm().GetFields()[0].GetControl() != 99 {
-		t.Fatal("knownManifest changed the manifest it was given")
+		t.Fatal("KnownManifest changed the manifest it was given")
+	}
+}
+
+// An installed manifest can carry an enum value the server doesn't know as a
+// JSON number, which protojson keeps even with DiscardUnknown. Both copies
+// still compare equal once each is read through KnownManifest.
+func TestKnownManifestMatchesAnInstalledEnumNumber(t *testing.T) {
+	installedJSON := `{
+	  "pluginId": "test.plugin", "version": "1.0.0", "siloApiVersion": "v1",
+	  "checksum": "` + strings.Repeat("a", 64) + `",
+	  "supportedPlatforms": [{"os": "linux", "arch": "amd64"}],
+	  "capabilities": [{"type": "metadata_provider.v1", "id": "fixture",
+	    "configSchema": [{"key": "connection", "adminForm": {"fields": [{"key": "accent", "control": 99}]}}]}]
+	}`
+	var installed pluginv1.PluginManifest
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal([]byte(installedJSON), &installed); err != nil {
+		t.Fatal(err)
+	}
+	if installed.GetCapabilities()[0].GetConfigSchema()[0].GetAdminForm().GetFields()[0].GetControl() != 99 {
+		t.Fatal("protojson dropped the enum number; the test no longer covers anything")
+	}
+	live := &pluginv1.PluginManifest{}
+	proto.Merge(live, &installed)
+
+	if !proto.Equal(KnownManifest(&installed), KnownManifest(live)) {
+		t.Fatalf("KnownManifest(installed) = %v, KnownManifest(live) = %v, want them equal", KnownManifest(&installed), KnownManifest(live))
+	}
+	if KnownManifest(nil) != nil {
+		t.Fatal("KnownManifest(nil) is not nil")
 	}
 }

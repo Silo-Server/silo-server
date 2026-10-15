@@ -891,7 +891,9 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 			)
 			return client, nil
 		}
-		if cachedManifest != nil && proto.Equal(cachedManifest, installedManifest) {
+		// Compared without fields and enum values from a newer SDK, as the
+		// host compares them at start.
+		if cachedManifest != nil && proto.Equal(pluginhost.KnownManifest(cachedManifest), pluginhost.KnownManifest(installedManifest)) {
 			return client, nil
 		}
 		slog.WarnContext(ctx, "plugin client manifest drift detected; restarting", "component", "plugins",
