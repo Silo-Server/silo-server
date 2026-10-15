@@ -238,7 +238,18 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 	case DynamicRangeHDR10, DynamicRangeHDR10Plus:
 		candidate = SourcePQ
 	case DynamicRangeHLG:
+		// Cameras also record HLG with BT.709 primaries. Declaring those as
+		// BT.2020 oversaturates the conversion, and their decoded frames fail
+		// the source preflight. SourceHLGBT709 declares a BT.709 matrix too,
+		// while its preflight also accepts BT.2020-matrix frames, so it needs
+		// both tags. Any other mix keeps the BT.2020 kind, whose preflight
+		// rejects it rather than decoding it with the wrong matrix.
+		primaries := normalizeColorValue(source.ColorPrimaries)
+		matrix := normalizeColorValue(source.ColorSpace)
 		candidate = SourceHLG
+		if colorIsBT709(primaries) && colorIsBT709(matrix) {
+			candidate = SourceHLGBT709
+		}
 	case DynamicRangeDolbyVision:
 		// Legacy rows omit the presence facts, so their default zero values
 		// cannot establish a base layer.
