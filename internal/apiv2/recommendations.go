@@ -209,13 +209,13 @@ func registerRecommendations(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/rows", "listForYouRows", "recommendations",
 		"The acting profile's For You rows, one per taste cluster.")), reg.listForYouRows)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/popular", "listPopular", "recommendations",
-		"The server's most played items over the window, minus what the acting profile has watched.")), reg.listPopular)
+		"The server's most played items over the window, minus what the acting profile has watched or marked Not interested.")), reg.listPopular)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/recently-added", "listRecentlyAdded", "recommendations",
-		"Items added over the window, minus what the acting profile has watched.")), reg.listRecentlyAdded)
+		"Items added over the window, minus what the acting profile has watched or marked Not interested.")), reg.listRecentlyAdded)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/section/{kind}", "getRecommendationSection", "recommendations",
 		"One recommendation row in full, for a dedicated see-all page; empty when the profile has no such row.")), reg.getRecommendationSection)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/similar/{item_id}", "listSimilar", "recommendations",
-		"Cards similar to the item by content; not personalised beyond the acting profile's access.")), reg.listSimilar)
+		"Cards similar to the item by content; personalised only by the acting profile's access and by leaving out the titles it marked Not interested.")), reg.listSimilar)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/similar-users", "listSimilarUsersLiked", "recommendations",
 		"Cards profiles with similar taste liked.")), reg.listSimilarUsersLiked)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/taste-profile", "getTasteProfile", "recommendations",

@@ -350,6 +350,11 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		} else {
 			items, total, title, err = f.fetchGenreRouletteWithTitle(ctx, resolved, libraryID, libraryIDs, filter)
 		}
+		if err == nil {
+			// Refetching would choose another spotlight, so marked titles
+			// only leave the one chosen.
+			items, total, err = f.withoutNotInterested(ctx, resolved, userID, profileID, items, total, nil)
+		}
 		if err != nil {
 			return SectionWithItems{}, err
 		}
@@ -364,25 +369,30 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		return result, nil
 	}
 
-	var items []*models.MediaItem
-	var total int
-	if f.isCacheableSectionType(resolved) {
+	fetch := func(s ResolvedSection) ([]*models.MediaItem, int, error) {
+		if !f.isCacheableSectionType(s) {
+			return f.fetchSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+		}
 		// User-agnostic rows share one process-global entry per access scope.
 		// getOrRefresh returns a defensive slice copy, so reordering or
 		// truncating result.Items below (or in a caller) cannot corrupt the
 		// cached entry; the pointed-to *MediaItem must not be mutated in place
 		// (see cloneMediaItems). The per-user overlay still runs fresh in
 		// buildSectionsResponse.
-		var key string
-		key, err = f.resolvedListKey(ctx, resolved, libraryID, libraryIDs, filter)
+		key, err := f.resolvedListKey(ctx, s, libraryID, libraryIDs, filter)
 		if err != nil {
-			return SectionWithItems{}, err
+			return nil, 0, err
 		}
-		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
-			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+		return getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
+			return f.fetchSection(loadCtx, s, libraryID, libraryIDs, userID, profileID, filter)
 		})
-	} else {
-		items, total, err = f.fetchSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+	}
+	var items []*models.MediaItem
+	var total int
+	items, total, err = fetch(resolved)
+	if err == nil && HidesNotInterested(resolved.SectionType) {
+		// Marks are per profile, so they leave the row after the shared cache.
+		items, total, err = f.withoutNotInterested(ctx, resolved, userID, profileID, items, total, fetch)
 	}
 	if err != nil {
 		return SectionWithItems{}, err

@@ -106,13 +106,14 @@ func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID st
 	if err != nil {
 		return nil, fmt.Errorf("get recommendation exclusions for user %d profile %s: %w", userID, profileID, err)
 	}
-	return e.similarUsersLiked(ctx, userID, profileID, limit, excluded, filter)
+	return e.similarUsersLiked(ctx, e.rowBuilder(), userID, profileID, limit, excluded, filter)
 }
 
-// similarUsersLiked is SimilarUsersLiked with the exclusion set given. It
+// similarUsersLiked is SimilarUsersLiked with the exclusion set given, ranked
+// by builder, whose aversion it applies around the profile's taste vector. It
 // answers an empty, non-nil list when the row has nothing to show, so a
 // cached row records that it was built.
-func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
+func (e *Engine) similarUsersLiked(ctx context.Context, builder rowBuilder, userID int, profileID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	meta, err := e.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get taste profile meta for user %d profile %s: %w", userID, profileID, err)
@@ -247,8 +248,23 @@ func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID st
 	for i, item := range results {
 		resultIDs[i] = item.MediaItemID
 	}
-	embMap, _ := e.repo.GetBatchEmbeddings(ctx, resultIDs)
-	results = applyMMR(results, embMap, e.mmrLambda(), limit)
+	embMap, err := e.repo.GetBatchEmbeddings(ctx, resultIDs)
+	if err != nil {
+		if !builder.aversion.empty() {
+			// Without embeddings the row could not rank against the
+			// profile's turned-away titles.
+			return nil, fmt.Errorf("similar users embeddings: %w", err)
+		}
+		embMap = nil
+	}
+	if !builder.aversion.empty() {
+		taste, err := e.repo.GetTasteProfile(ctx, userID, profileID)
+		if err != nil {
+			return nil, fmt.Errorf("get taste profile for user %d profile %s: %w", userID, profileID, err)
+		}
+		results, _ = builder.withAversion(results, embMap, taste)
+	}
+	results = applyMMR(results, embMap, builder.lambda, limit)
 
 	// Keep any one genre from taking over the served window.
 	genres, _ := e.repo.GetItemAllGenres(ctx, resultIDs)

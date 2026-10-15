@@ -424,6 +424,25 @@ by the stored timestamp column so the existing profile/time indexes can serve th
 `added_at` fields remain UTC timestamps with millisecond precision. The frozen v1 list queries and their timestamp
 formatting are unchanged.
 
+## Not interested
+
+A profile marks a movie or series it does not want recommended with
+`PUT /api/v2/not-interested/{item_id}` and clears the mark with `DELETE` on the
+same path; both answer `204` and repeat safely. Episodes and seasons answer `422`;
+mark the series. `GET /api/v2/not-interested` pages the marks as catalog cards,
+newest first, with the same kind of cursor as the favorites list, and
+`GET /api/v2/not-interested/{item_id}` answers one mark or `404`. Every card's
+`user_state.not_interested` carries the flag. Detect support with
+`GET /api/v2/capabilities/not-interested`.
+
+A mark keeps the title out of the profile's recommendation and discovery rows
+and ranks similar titles lower there, after a rebuild that starts within
+seconds; it leaves library browsing, search, item detail, playback, favorites
+and the watchlist alone. A change publishes `user_state.changed` with
+`change: "not_interested"` and a `not_interested` boolean, so the profile's other
+clients can update. The frozen v1 surface has no mark and does not show it. See
+[recommendations.md](architecture/recommendations.md#rows).
+
 ## Watchlist titles outside the library
 
 The watchlist can also hold movies and series the library doesn't have, keyed by

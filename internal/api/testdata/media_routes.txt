@@ -463,6 +463,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/not-interested	non-media
 GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
@@ -651,6 +652,10 @@ DELETE /api/v2/markers/files/{file_id}/{segment}	non-media
 GET /api/v2/markers/items/{item_id}	non-media
 PUT /api/v2/markers/items/{item_id}	non-media
 GET /api/v2/network-access/capabilities	non-media
+GET /api/v2/not-interested	non-media
+DELETE /api/v2/not-interested/{item_id}	non-media
+GET /api/v2/not-interested/{item_id}	non-media
+PUT /api/v2/not-interested/{item_id}	non-media
 GET /api/v2/notifications	non-media
 GET /api/v2/notifications/capabilities	non-media
 DELETE /api/v2/notifications/discord-link	non-media
@@ -1737,6 +1742,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/not-interested	non-media
 GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
@@ -1925,6 +1931,10 @@ DELETE /api/v2/markers/files/{file_id}/{segment}	non-media
 GET /api/v2/markers/items/{item_id}	non-media
 PUT /api/v2/markers/items/{item_id}	non-media
 GET /api/v2/network-access/capabilities	non-media
+GET /api/v2/not-interested	non-media
+DELETE /api/v2/not-interested/{item_id}	non-media
+GET /api/v2/not-interested/{item_id}	non-media
+PUT /api/v2/not-interested/{item_id}	non-media
 GET /api/v2/notifications	non-media
 GET /api/v2/notifications/capabilities	non-media
 DELETE /api/v2/notifications/discord-link	non-media

@@ -768,6 +768,8 @@ export interface MediaItemUserState {
   played: boolean;
   is_favorite: boolean;
   in_watchlist: boolean;
+  /** The profile marked the movie or series Not interested. */
+  not_interested?: boolean;
 }
 
 export interface BrowseItemSortMetrics {

@@ -198,6 +198,28 @@ func (s *SQLiteUserStore) DeleteHomeDismissal(_ context.Context, profileID, surf
 	return DeleteHomeDismissal(s.db, profileID, surface, mediaItemID)
 }
 
+// --- Not interested ---
+
+func (s *SQLiteUserStore) MarkNotInterested(_ context.Context, profileID, mediaItemID string) (bool, error) {
+	return MarkNotInterested(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) UnmarkNotInterested(_ context.Context, profileID, mediaItemID string) (bool, error) {
+	return UnmarkNotInterested(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) GetNotInterested(_ context.Context, profileID, mediaItemID string) (*userstore.NotInterestedEntry, error) {
+	return GetNotInterested(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) ListNotInterestedPage(_ context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.NotInterestedEntry, error) {
+	return ListNotInterestedPage(s.db, profileID, after, limit)
+}
+
+func (s *SQLiteUserStore) ListNotInterestedByMediaItems(_ context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
+	return ListNotInterestedByMediaItems(s.db, profileID, mediaItemIDs)
+}
+
 // --- Favorites & Watchlist ---
 
 func (s *SQLiteUserStore) AddFavorite(_ context.Context, profileID, mediaItemID string) (bool, error) {

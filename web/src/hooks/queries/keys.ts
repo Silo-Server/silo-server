@@ -103,6 +103,11 @@ export const favoriteKeys = {
   check: (itemId: string) => ["favorites", "check", itemId] as const,
 };
 
+export const notInterestedKeys = {
+  all: ["notInterested"] as const,
+  list: () => ["notInterested", "list"] as const,
+};
+
 export const watchlistKeys = {
   all: ["watchlist"] as const,
   list: () => ["watchlist", "list"] as const,

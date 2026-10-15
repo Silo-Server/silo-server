@@ -353,6 +353,7 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		// keep shaping other accounts' Similar Users rows, and its taste
 		// would be rebuilt every night.
 		"user_ratings",
+		"user_not_interested",
 		"user_taste_profiles",
 		"user_taste_clusters",
 		"recommendation_cache",

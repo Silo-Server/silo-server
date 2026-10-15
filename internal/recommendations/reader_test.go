@@ -565,6 +565,22 @@ func TestAnchorItemIDsPassOverDislikedCompletions(t *testing.T) {
 	}
 }
 
+// A title the profile marked Not interested never anchors, however it was
+// rated.
+func TestAnchorItemIDsPassOverMarkedCompletions(t *testing.T) {
+	signals := NewSignalReader(&fakeSignalRepo{
+		fallbackRecentCompleted: []string{"marked", "liked", "next", "later"},
+		fallbackMarks:           []NotInterestedMark{{MediaItemID: "marked"}},
+	}, nil)
+	got, err := anchorItemIDs(t.Context(), signals, fakeItemRatings{"marked": 5}, 7, "p1", BecauseYouWatchedAnchors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"liked", "next", "later"}; !slices.Equal(got, want) {
+		t.Fatalf("anchors = %v, want %v", got, want)
+	}
+}
+
 // A title the profile rated one star never heads a Because You Watched row,
 // on Discover, in a home section or in Watch Tonight, even while the row
 // built for it is still cached; the next completion heads the row instead.

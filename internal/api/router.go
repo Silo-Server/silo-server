@@ -3007,6 +3007,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.Recipes = &handlers.RecipeHandler{}
 	if personalDataHandler != nil && itemsHandler != nil {
 		v2deps.PersonalLists = personalDataHandler
+		v2deps.NotInterested = personalDataHandler
 	}
 	if ratingsHandler != nil {
 		v2deps.Ratings = ratingsHandler

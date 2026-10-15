@@ -174,6 +174,7 @@ var intentTables = []struct {
 	{"user_favorites", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_watchlist", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_ratings", colMediaItemID, []string{colUserID, colProfileID}},
+	{"user_not_interested", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_personal_collection_items", colMediaItemID, []string{colUserID, "collection_id", "sub_item_id"}},
 	{"library_collection_items", colMediaItemID, []string{"collection_id"}},
 	{"user_home_item_dismissals", colMediaItemID, []string{colUserID, colProfileID, "surface"}},

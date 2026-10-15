@@ -183,7 +183,9 @@ func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, li
 	}
 	slots := allocateAnchorSlots(weights, limit)
 	lists := make([][]ScoredItem, len(anchors))
+	shares := make([]float64, len(anchors))
 	for i, a := range anchors {
+		shares[i] = 1
 		candidates, _, err := b.store.FindTasteProfileCandidates(ctx, a.embedding, excludeIDs, nil, anchorPoolFactor*slots[i], filter)
 		if err != nil {
 			return nil, nil, fmt.Errorf("main row anchor %d candidates: %w", i, err)
@@ -196,10 +198,41 @@ func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, li
 		if err != nil {
 			return nil, nil, fmt.Errorf("main row anchor %d embeddings: %w", i, err)
 		}
+		var averse aversionResult
+		candidates, averse = b.withAversion(candidates, embMap, a.embedding)
+		shares[i] = averse.interestShare(a.weight)
 		// MMR's ranking is greedy, so its first slots[i] items are the
 		// anchor's picks; the rest stand in when another anchor runs out.
 		lists[i] = applyMMR(candidates, embMap, b.lambda, len(candidates))
-		pool = mergeScoredCandidates(pool, candidates)
 	}
+	// An anchor that leaves the row leaves the pool too, so type
+	// supplements cannot bring its titles back.
+	for i, list := range lists {
+		if shares[i] >= aversionInterestFloor {
+			pool = mergeScoredCandidates(pool, list)
+		}
+	}
+	lists, slots = shrinkAvertedAnchors(lists, weights, shares, slots, limit)
 	return interleaveAnchors(lists, slots, limit), pool, nil
+}
+
+// shrinkAvertedAnchors re-splits the row's slots after the profile's
+// turned-away titles shrank some anchors' shares (see aversion.apply): each
+// anchor's weight is scaled by its share, and an anchor whose share fell
+// under aversionInterestFloor leaves the row. With every share whole it
+// returns lists and slots unchanged.
+func shrinkAvertedAnchors(lists [][]ScoredItem, weights, shares []float64, slots []int, limit int) ([][]ScoredItem, []int) {
+	if !slices.ContainsFunc(shares, func(s float64) bool { return s < 1 }) {
+		return lists, slots
+	}
+	keptLists := make([][]ScoredItem, 0, len(lists))
+	keptWeights := make([]float64, 0, len(weights))
+	for i, share := range shares {
+		if share < aversionInterestFloor {
+			continue
+		}
+		keptLists = append(keptLists, lists[i])
+		keptWeights = append(keptWeights, weights[i]*share)
+	}
+	return keptLists, allocateAnchorSlots(keptWeights, limit)
 }

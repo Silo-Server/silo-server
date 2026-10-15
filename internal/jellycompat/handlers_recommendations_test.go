@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"testing"
 
@@ -342,7 +343,7 @@ type countingRecommender struct {
 	calls int
 }
 
-func (c *countingRecommender) SimilarItems(context.Context, string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+func (c *countingRecommender) SimilarItems(context.Context, int, string, string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	c.calls++
 	return []recommendations.ScoredItem{{MediaItemID: "movie-neighbor"}}, nil
 }
@@ -401,7 +402,7 @@ type fixedRecommender struct {
 	gotLimit int
 }
 
-func (f *fixedRecommender) SimilarItems(_ context.Context, _ string, limit int, _ catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+func (f *fixedRecommender) SimilarItems(_ context.Context, _ int, _, _ string, limit int, _ catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	f.gotLimit = limit
 	return f.items, nil
 }
@@ -466,5 +467,65 @@ func TestCompatRecommendationsCapTheirLimits(t *testing.T) {
 	h.HandleRecommendations(rec, recommendationsRequest(t, "?itemLimit=1000000000&categoryLimit=1000000000"))
 	if rec.Code != http.StatusOK || reader.gotLimit != recommendations.MaxRowReadLimit {
 		t.Fatalf("status %d, read limit %d; want 200 and the most a row read returns", rec.Code, reader.gotLimit)
+	}
+}
+
+// genreFallbackContent answers a drama anchor and a page of dramas.
+type genreFallbackContent struct{ ContentService }
+
+func (genreFallbackContent) GetItemDetail(_ context.Context, _ *Session, id string, _ *int) (*upstreamItemDetail, error) {
+	return &upstreamItemDetail{ContentID: id, Type: "movie", Title: "Anchor", Genres: []string{"Drama"}}, nil
+}
+
+func (genreFallbackContent) BrowseItems(context.Context, *Session, url.Values) (*upstreamBrowseResponse, error) {
+	return &upstreamBrowseResponse{Items: []upstreamListItem{
+		{ContentID: "movie-a", Type: "movie", Title: "A"},
+		{ContentID: "movie-marked", Type: "movie", Title: "Marked"},
+		{ContentID: "movie-b", Type: "movie", Title: "B"},
+	}}, nil
+}
+
+// markingUserData reports movie-marked as marked Not interested, or fails.
+type markingUserData struct {
+	*mockUserDataService
+	err error
+}
+
+func (m markingUserData) ListNotInterestedByMediaItems(_ context.Context, _ *Session, ids []string) (map[string]bool, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return map[string]bool{"movie-marked": slices.Contains(ids, "movie-marked")}, nil
+}
+
+// The genre fallback, which serves whenever the recommender has nothing,
+// leaves out the profile's Not interested titles, and answers nothing when
+// it cannot read them rather than showing them.
+func TestCompatSimilarGenreFallbackLeavesOutMarkedTitles(t *testing.T) {
+	codec := NewResourceIDCodec()
+	similar := func(userData UserDataService) []string {
+		h := &ItemsHandler{codec: codec, mapper: newMapper(codec, nil), content: genreFallbackContent{}, userData: userData}
+		req := httptest.NewRequest(http.MethodGet, "/Items/x/Similar", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", codec.EncodeStringID(EncodedIDItem, "movie-anchor"))
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{StreamAppUserID: 7, ProfileID: "p1"})
+		rec := httptest.NewRecorder()
+		h.HandleSimilar(rec, req.WithContext(ctx))
+		var result queryResultDTO
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		names := []string{}
+		for _, item := range result.Items {
+			names = append(names, item.Name)
+		}
+		return names
+	}
+	if got := similar(markingUserData{mockUserDataService: &mockUserDataService{}}); !slices.Equal(got, []string{"A", "B"}) {
+		t.Fatalf("similar = %v, want the unmarked dramas", got)
+	}
+	if got := similar(markingUserData{mockUserDataService: &mockUserDataService{}, err: errors.New("store down")}); len(got) != 0 {
+		t.Fatalf("similar = %v with marks unreadable, want nothing", got)
 	}
 }

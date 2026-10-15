@@ -59,6 +59,7 @@ export function useToggleFavorite(itemId: string) {
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
         ...detail,
         user_state: {
+          ...detail.user_state,
           played: detail.user_state?.played ?? detail.user_data?.played ?? false,
           is_favorite: !currentlyFavorite,
           in_watchlist: detail.user_state?.in_watchlist ?? false,
@@ -71,6 +72,7 @@ export function useToggleFavorite(itemId: string) {
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
         ...detail,
         user_state: {
+          ...detail.user_state,
           played: detail.user_state?.played ?? detail.user_data?.played ?? false,
           is_favorite: currentlyFavorite,
           in_watchlist: detail.user_state?.in_watchlist ?? false,

@@ -1525,6 +1525,8 @@ func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) 
 		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
 		   OR EXISTS (SELECT 1 FROM user_watchlist s JOIN ids ON ids.id = s.media_item_id
 		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_not_interested s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
 		ON CONFLICT (user_id, profile_id) DO UPDATE SET stale_at = NOW()`,
 		itemIDs)
 	if err != nil {
@@ -2595,6 +2597,28 @@ func (r *Repo) GetFavoriteItemIDs(ctx context.Context, userID int, profileID str
 		return nil, fmt.Errorf("get favorite item IDs: %w", err)
 	}
 	return ids, nil
+}
+
+// GetNotInterestedMarks returns the profile's Not interested marks, newest
+// first.
+func (r *Repo) GetNotInterestedMarks(ctx context.Context, userID int, profileID string) ([]NotInterestedMark, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT media_item_id, added_at FROM user_not_interested
+		 WHERE user_id = $1 AND profile_id = $2
+		 ORDER BY added_at DESC, media_item_id DESC`,
+		userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get not interested marks: %w", err)
+	}
+	marks, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (NotInterestedMark, error) {
+		var m NotInterestedMark
+		err := row.Scan(&m.MediaItemID, &m.MarkedAt)
+		return m, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get not interested marks: %w", err)
+	}
+	return marks, nil
 }
 
 // GetRecentCompletedItemIDs returns the most recently completed canonical item

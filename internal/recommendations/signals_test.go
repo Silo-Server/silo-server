@@ -18,6 +18,7 @@ type fakeSignalRepo struct {
 	fallbackWatched         map[string]struct{}
 	watchedReads            int
 	fallbackFavorites       []string
+	fallbackMarks           []NotInterestedMark
 	fallbackProgress        []WatchProgressRow
 	ebookProgress           []WatchProgressRow
 	fallbackRecentCompleted []string
@@ -45,6 +46,10 @@ func (r *fakeSignalRepo) GetWatchedItemIDSet(context.Context, int, string) (map[
 
 func (r *fakeSignalRepo) GetFavoriteItemIDs(context.Context, int, string) ([]string, error) {
 	return r.fallbackFavorites, nil
+}
+
+func (r *fakeSignalRepo) GetNotInterestedMarks(context.Context, int, string) ([]NotInterestedMark, error) {
+	return r.fallbackMarks, nil
 }
 
 func (r *fakeSignalRepo) GetWatchProgressForUser(context.Context, int, string) ([]WatchProgressRow, error) {
@@ -117,6 +122,21 @@ type fakeSignalStore struct {
 	profile   *userstore.Profile
 	favorites []userstore.Favorite
 	watchlist []userstore.WatchlistEntry
+	marks     []userstore.NotInterestedEntry
+}
+
+// ListNotInterestedPage returns the profile's marks in one page, as stored.
+func (s *fakeSignalStore) ListNotInterestedPage(_ context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.NotInterestedEntry, error) {
+	if after != nil {
+		return nil, nil
+	}
+	var rows []userstore.NotInterestedEntry
+	for _, m := range s.marks {
+		if m.ProfileID == profileID && len(rows) < limit {
+			rows = append(rows, m)
+		}
+	}
+	return rows, nil
 }
 
 func (s *fakeSignalStore) ListFavorites(_ context.Context, profileID string, limit, offset int) ([]userstore.Favorite, error) {

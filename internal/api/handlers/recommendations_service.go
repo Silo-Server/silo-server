@@ -122,11 +122,12 @@ func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, p
 const liveListMaxRead = 1000
 
 // visibleListItems reads a server-wide list with read(n), n rows at a time,
-// and keeps the titles the viewer can see and the profile has not watched.
+// and keeps the titles the viewer can see and the profile has neither watched
+// nor marked Not interested.
 // The list is filtered after its LIMIT, so it reads deeper until limit
 // titles are kept, the list runs out, or liveListMaxRead rows were read.
 func (h *RecommendationsHandler) visibleListItems(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter, read func(n int) ([]recommendations.ScoredItem, error)) ([]recommendations.ScoredItem, error) {
-	watchedSet, err := h.watchedItemIDSet(ctx, userID, profileID)
+	watchedSet, err := h.skippedItemIDSet(ctx, userID, profileID)
 	if err != nil {
 		slog.WarnContext(ctx, "loading the watched set failed; recommendations are not filtered for it", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		watchedSet = nil
@@ -342,11 +343,12 @@ func (h *RecommendationsHandler) ForYouRowCards(ctx context.Context, userID int,
 	return h.renderDiscoverRows(ctx, userID, profileID, filter, discoverRowModelsFromRecommendations(rows))
 }
 
-// SimilarItems answers items similar to itemID; an unavailable engine, and
-// an anchor the viewer cannot see, answer an empty list. The engine leaves out
+// SimilarItems answers items similar to itemID for the profile, without the
+// titles it marked Not interested; an unavailable engine, and an anchor the
+// viewer cannot see, answer an empty list. The engine leaves out
 // titles the viewer cannot see before it ranks; v1 filters again with
 // keepAccessible and v2 as it renders the cards.
-func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+func (h *RecommendationsHandler) SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	if h.engineUnavailable() {
 		return []recommendations.ScoredItem{}, nil
 	}
@@ -360,7 +362,7 @@ func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string
 	if !visible {
 		return []recommendations.ScoredItem{}, nil
 	}
-	items, err := h.engine.SimilarItems(ctx, itemID, limit, filter)
+	items, err := h.engine.SimilarItems(ctx, userID, profileID, itemID, limit, filter)
 	if err != nil {
 		slog.WarnContext(ctx, "SimilarItems failed", "component", "api", "item_id", itemID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch similar items")
@@ -393,7 +395,7 @@ func (h *RecommendationsHandler) SimilarUsersLiked(ctx context.Context, userID i
 
 // SimilarCards is SimilarItems rendered as cards for the acting profile.
 func (h *RecommendationsHandler) SimilarCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.SimilarItems(ctx, itemID, limit, filter)
+	items, err := h.SimilarItems(ctx, userID, profileID, itemID, limit, filter)
 	if err != nil {
 		return nil, err
 	}

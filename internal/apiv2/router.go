@@ -389,6 +389,9 @@ type Dependencies struct {
 	// PersonalLists reads and edits a profile's favorites
 	// (*handlers.PersonalDataHandler).
 	PersonalLists PersonalListService
+	// NotInterested reads and edits a profile's Not interested marks
+	// (*handlers.PersonalDataHandler).
+	NotInterested NotInterestedService
 	// WatchlistTitles keeps a profile's watchlist entries for titles the
 	// library doesn't have (*handlers.PersonalDataHandler).
 	WatchlistTitles WatchlistTitleService

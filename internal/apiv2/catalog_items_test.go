@@ -530,7 +530,7 @@ func TestGetCatalogItem(t *testing.T) {
 	decodeJSON(t, rec.Body, &body)
 	for k, want := range map[string]string{
 		"content_id": `"movie:heat-1995"`, "tagline": `"A Los Angeles crime saga"`, "keywords": `[]`, "crew": `[]`, "subtitles": `[]`,
-		"user_state": `{"played":true,"is_favorite":true,"in_watchlist":false}`, "overlay_summary": `{"resolution":"4K"}`,
+		"user_state": `{"played":true,"is_favorite":true,"in_watchlist":false,"not_interested":false}`, "overlay_summary": `{"resolution":"4K"}`,
 		"work_formats": `[{"type":"ebook","content_id":"ebook:heat","library_id":"2"}]`,
 	} {
 		if string(body[k]) != want {

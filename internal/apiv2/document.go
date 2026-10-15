@@ -585,6 +585,7 @@ func registerAll(reg *Registry) {
 	registerPreferences(reg)
 	registerHome(reg)
 	registerFavorites(reg)
+	registerNotInterested(reg)
 	registerHistory(reg)
 	registerDeviceSettings(reg)
 	registerLibraries(reg)

@@ -1127,6 +1127,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"markNotInterested":                        "V2-only Not interested mark (v1 is frozen). Marking a marked title changes no row and sends no notice, so a replay converges on the same mark.",
+	"unmarkNotInterested":                      "V2-only clearing of a Not interested mark (v1 is frozen). Clearing an absent mark changes no row and sends no notice, so a replay converges.",
 	"translateLibraryMetadata":                 "V2-only library prewarm of AI metadata translation (v1 is frozen). It coalesces on the library's active prewarm for the language; a replay after it finished starts another prewarm that finds only what is still missing, so nothing is translated twice.",
 	"cancelLibraryMetadataTranslation":         "V2-only cancellation of a library prewarm (v1 is frozen). Canceling a terminal job is a no-op, so a replay converges on the same state.",
 	"drainAdminNode":                           "V2-only transcode node drain (v1 is frozen): it sets the node's drain request, so a replay converges on the same request and placement state.",

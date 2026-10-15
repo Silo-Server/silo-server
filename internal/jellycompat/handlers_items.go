@@ -630,7 +630,7 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 	// it as an unknown item, so the list cannot show what a hidden title
 	// resembles.
 	if h.recommender != nil && h.similarAnchorVisible(r.Context(), session, contentID) {
-		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit, h.resolveAccessFilter(r.Context(), session))
+		scored, recErr := h.recommender.SimilarItems(r.Context(), session.StreamAppUserID, session.ProfileID, contentID, limit, h.resolveAccessFilter(r.Context(), session))
 		if recErr != nil {
 			slog.WarnContext(r.Context(), "jellycompat: similar items failed; falling back to genre", "component", "jellycompat",
 				"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", recErr)
@@ -713,6 +713,12 @@ func (h *ItemsHandler) writeSimilarFromScored(w http.ResponseWriter, r *http.Req
 }
 
 // writeSimilarFromGenre finds similar items by genre when the recommender is unavailable.
+// notInterestedLister is the optional part of UserDataService that reads a
+// profile's Not interested marks. The direct service implements it.
+type notInterestedLister interface {
+	ListNotInterestedByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]bool, error)
+}
+
 func (h *ItemsHandler) writeSimilarFromGenre(w http.ResponseWriter, r *http.Request, session *Session, contentID string, limit int) {
 	empty := queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: 0}
 
@@ -748,12 +754,24 @@ func (h *ItemsHandler) writeSimilarFromGenre(w http.ResponseWriter, r *http.Requ
 	for i, li := range result.Items {
 		browseIDs[i] = li.ContentID
 	}
+	// The list suggests titles, so the profile's Not interested marks stay
+	// out, as they do from the recommender's list. A list whose marks
+	// cannot be read is answered empty rather than showing them.
+	var marked map[string]bool
+	if lister, ok := h.userData.(notInterestedLister); ok {
+		if marked, err = lister.ListNotInterestedByMediaItems(r.Context(), session, browseIDs); err != nil {
+			slog.WarnContext(r.Context(), "jellycompat: similar fallback could not read Not interested marks", "component", "jellycompat",
+				"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", err)
+			writeJSON(w, http.StatusOK, empty)
+			return
+		}
+	}
 	favorites, progress, _ := resolveUserStateForContentIDs(r.Context(), session, h.userData, browseIDs)
 
 	items := make([]baseItemDTO, 0, limit)
 	listItems := make([]upstreamListItem, 0, limit)
 	for _, li := range result.Items {
-		if li.ContentID == contentID {
+		if li.ContentID == contentID || marked[li.ContentID] {
 			continue
 		}
 		dto := h.mapper.itemFromList(li, favorites[li.ContentID], progress[li.ContentID], nil)

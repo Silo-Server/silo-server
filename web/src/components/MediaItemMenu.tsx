@@ -24,6 +24,7 @@ import {
   Plus,
   RotateCcw,
   TimerReset,
+  ThumbsDown,
   X,
 } from "lucide-react";
 import { useLocation } from "react-router";
@@ -38,6 +39,7 @@ import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queri
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { useClearResumePosition } from "@/hooks/queries/progress";
+import { canMarkNotInterested, useToggleNotInterested } from "@/hooks/queries/notInterested";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
@@ -124,6 +126,7 @@ type MediaItemMenuEntry =
         | "resetProgress"
         | "toggleFavorite"
         | "toggleWatchlist"
+        | "toggleNotInterested"
         | "dismissFromHome"
         | "viewDetails"
         | "viewPlayHistory"
@@ -237,6 +240,13 @@ export function buildMediaItemMenuModel({
         label: userState.in_watchlist ? "Remove from Watchlist" : "Add to Watchlist",
       });
     }
+    if (canMarkNotInterested(mediaType)) {
+      entries.push({
+        kind: "action",
+        key: "toggleNotInterested",
+        label: userState.not_interested ? "Show in Recommendations" : "Not Interested",
+      });
+    }
   }
 
   // Manga series get a local file inspector (folder path, per-volume files).
@@ -332,6 +342,13 @@ function MediaItemMenuActionIcon({
         <Check aria-hidden="true" className="size-4" />
       ) : (
         <Plus aria-hidden="true" className="size-4" />
+      );
+    case "toggleNotInterested":
+      return (
+        <ThumbsDown
+          aria-hidden="true"
+          className={cn("size-4", userState?.not_interested && "fill-current")}
+        />
       );
     case "dismissFromHome":
       return <X aria-hidden="true" className="size-4" />;
@@ -979,6 +996,7 @@ function MediaItemMenuEngine({
   });
   const favoriteMutation = useToggleFavorite(contentId);
   const watchlistMutation = useToggleWatchlist(contentId);
+  const notInterestedMutation = useToggleNotInterested(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
   const clearResumePositionMutation = useClearResumePosition();
@@ -988,6 +1006,7 @@ function MediaItemMenuEngine({
     watchedMutation.isPending ||
     favoriteMutation.isPending ||
     watchlistMutation.isPending ||
+    notInterestedMutation.isPending ||
     refreshMetadataMutation.isPending ||
     dismissHomeItemMutation.isPending ||
     clearResumePositionMutation.isPending;
@@ -1076,6 +1095,17 @@ function MediaItemMenuEngine({
         setCurrentUserState((prev) =>
           prev ? { ...prev, in_watchlist: !prev.in_watchlist } : prev,
         );
+        return;
+      }
+      case "toggleNotInterested": {
+        if (!currentUserState) return;
+        const marked = currentUserState.not_interested ?? false;
+        setCurrentUserState((prev) => (prev ? { ...prev, not_interested: !marked } : prev));
+        try {
+          await notInterestedMutation.mutateAsync(marked);
+        } catch {
+          setCurrentUserState((prev) => (prev ? { ...prev, not_interested: marked } : prev));
+        }
         return;
       }
       case "viewDetails": {
@@ -1231,7 +1261,8 @@ export default function MediaItemMenu({
     if (
       lastSynced?.played === userState?.played &&
       lastSynced?.is_favorite === userState?.is_favorite &&
-      lastSynced?.in_watchlist === userState?.in_watchlist
+      lastSynced?.in_watchlist === userState?.in_watchlist &&
+      lastSynced?.not_interested === userState?.not_interested
     ) {
       return;
     }
