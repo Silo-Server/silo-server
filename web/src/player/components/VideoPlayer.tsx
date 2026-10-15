@@ -4448,6 +4448,10 @@ export function VideoPlayer({
           video.paused &&
           transportStartupPendingRef.current &&
           video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        // The command sets the play state. A position this stream can't reach
+        // starts the reconnect inside applyRoomPosition, before the element
+        // pauses or plays below, and the reconnect resumes by this state.
+        playingRef.current = command.action === "play";
         const playAllowed = !awaitingMedia && applyRoomPosition(video);
 
         if (command.action === "seek") {
