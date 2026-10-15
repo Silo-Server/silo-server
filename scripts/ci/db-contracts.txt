@@ -177,6 +177,7 @@
 ./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
 ./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeletesWithCrossVisibility
+./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage

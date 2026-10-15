@@ -507,3 +507,57 @@ func TestPostgresConcurrentProfileDeletesWithCrossVisibility(t *testing.T) {
 		}
 	}
 }
+
+// Deleting a profile and deleting another profile's collection that lists it
+// can run at the same time: both lock the collection row before its
+// revision row.
+func TestPostgresConcurrentProfileAndCollectionDeletes(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	for round := range 20 {
+		var userID int
+		if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+			fmt.Sprintf("conf-mixeddelete-%d-%d", round, time.Now().UnixNano())).Scan(&userID); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID) })
+		store := newStore(pool, userID)
+		for _, id := range []string{"owner", "listed"} {
+			if err := store.CreateProfile(ctx, userstore.Profile{ID: id, Name: id}); err != nil {
+				t.Fatalf("CreateProfile %s: %v", id, err)
+			}
+		}
+		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "Owner's picks"})
+		if err != nil {
+			t.Fatalf("CreateCollection: %v", err)
+		}
+		if err := store.AddCollectionItem(ctx, c.ID, "movie:pick", 0); err != nil {
+			t.Fatalf("AddCollectionItem: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO user_personal_collection_profiles (user_id, collection_id, profile_id) VALUES ($1, $2, 'listed')`,
+			userID, c.ID); err != nil {
+			t.Fatalf("seed visibility: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		errs := make(chan error, 2)
+		wg.Go(func() { errs <- newStore(pool, userID).DeleteProfile(ctx, "listed") })
+		wg.Go(func() { errs <- newStore(pool, userID).DeleteCollection(ctx, c.ID) })
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: concurrent delete: %v", round, err)
+			}
+		}
+	}
+}

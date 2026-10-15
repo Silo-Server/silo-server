@@ -299,6 +299,9 @@ func (s *PostgresUserStore) deleteCollection(ctx context.Context, id string, exp
 		return fmt.Errorf("beginning transaction for collection delete: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.lockCollectionRow(ctx, tx, id); err != nil {
+		return err
+	}
 	if err := s.checkCollectionRevision(ctx, tx, id, expected); err != nil {
 		return err
 	}
@@ -353,6 +356,9 @@ func (s *PostgresUserStore) reorderCollectionItems(ctx context.Context, collecti
 		return fmt.Errorf("beginning collection item reorder: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.lockCollectionRow(ctx, tx, collectionID); err != nil {
+		return err
+	}
 	if err := s.checkCollectionRevision(ctx, tx, collectionID, expected); err != nil {
 		return err
 	}
