@@ -125,6 +125,17 @@ func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
 		t.Fatalf("after Reject err = %v, want ErrIncompleteIndex (an ErrNoIndex)", err)
 	}
 
+	// A Load that read the file before the Reject and stores after it
+	// doesn't undo it.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}
+	if _, err := storeFirst(key, got, nil); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("a late load's store err = %v, want the rejection kept", err)
+	}
+
 	later := stamp.Add(time.Hour)
 	if err := os.Chtimes(path, later, later); err != nil {
 		t.Fatal(err)

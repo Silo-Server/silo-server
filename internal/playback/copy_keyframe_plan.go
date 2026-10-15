@@ -206,6 +206,24 @@ func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry) {
 	}
 }
 
+// checkCopyPlanOutput runs checkCopyPlan on FFmpeg's playlist as an FFmpeg
+// process exits, having finished or been stopped. Nothing else need read the
+// session's progress (SegmentProgress) for its plan to be checked.
+func (s *TranscodeSession) checkCopyPlanOutput() {
+	if s.copyPlan == nil {
+		return
+	}
+	manifest, err := os.ReadFile(filepath.Join(s.outputDir, "stream.m3u8"))
+	if err != nil {
+		return
+	}
+	timeline, err := parseManifestTimeline(manifest)
+	if err != nil {
+		return
+	}
+	s.checkCopyPlan(timeline.entries)
+}
+
 // plannedSegmentWait is how long a request for a segment FFmpeg hasn't
 // reached yet waits. A planned stream doesn't seek-restart forward, so a far
 // seek waits for FFmpeg to copy up to it; stream copy runs many times faster

@@ -195,6 +195,29 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 	}
 }
 
+// A session checks its plan as FFmpeg exits, even if nothing read its
+// progress while it ran.
+func TestCheckCopyPlanOutputReadsFFmpegsPlaylist(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source.mkv")
+	if err := os.WriteFile(source, []byte("not matroska"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	written := "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.600000,\nseg_00000.m4s\n#EXTINF:2.200000,\nseg_00001.m4s\n"
+	if err := os.WriteFile(filepath.Join(out, "stream.m3u8"), []byte(written), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &TranscodeSession{
+		outputDir: out,
+		opts:      TranscodeOpts{InputPath: source, SessionID: "exited"},
+		copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}},
+	}
+	s.checkCopyPlanOutput()
+	if _, err := keyframes.Load(source); !errors.Is(err, keyframes.ErrIncompleteIndex) || !s.copyPlanRejected {
+		t.Fatalf("Load err = %v, session rejected = %v; want the file rejected", err, s.copyPlanRejected)
+	}
+}
+
 func TestCopySegmentPlanManifest(t *testing.T) {
 	plan := &copySegmentPlan{durations: []float64{2.6, 5.2, 0.4}}
 	got := string(plan.manifest(plannedOpts(), "segment/", "token=abc"))

@@ -62,8 +62,7 @@ func Load(path string) (Index, error) {
 		return Index{}, err
 	}
 	idx, err = settle(idx, err)
-	store(key, idx, err)
-	return idx, err
+	return storeFirst(key, idx, err)
 }
 
 // Reject records that the file at path has an index FFmpeg doesn't cut at:
@@ -107,9 +106,28 @@ func cached(key cacheKey) (Index, error, bool) {
 	return entry.index, entry.err, true
 }
 
+// storeFirst stores a read result unless the cache already has one for key,
+// and returns the result the cache holds. A Reject that landed while this
+// read ran isn't undone.
+func storeFirst(key cacheKey, idx Index, err error) (Index, error) {
+	indexCache.Lock()
+	defer indexCache.Unlock()
+	if el, ok := indexCache.entries[key]; ok {
+		indexCache.order.MoveToFront(el)
+		entry, _ := el.Value.(*cacheEntry)
+		return entry.index, entry.err
+	}
+	storeLocked(key, idx, err)
+	return idx, err
+}
+
 func store(key cacheKey, idx Index, err error) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
+	storeLocked(key, idx, err)
+}
+
+func storeLocked(key cacheKey, idx Index, err error) {
 	if el, ok := indexCache.entries[key]; ok {
 		entry, _ := el.Value.(*cacheEntry)
 		entry.index, entry.err = idx, err
