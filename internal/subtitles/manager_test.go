@@ -155,7 +155,7 @@ func (s stubProvider) Download(context.Context, string) ([]byte, SubtitleFormat,
 type failingSearchProvider struct{ stubProvider }
 
 func (failingSearchProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, error) {
-	return nil, errors.New("upstream detail api_key=synthetic-secret")
+	return nil, errors.New("rpc error: code = Unauthenticated desc = api_key=synthetic-secret upstream detail")
 }
 
 func TestManagerSearchWarningsOmitProviderErrorText(t *testing.T) {
