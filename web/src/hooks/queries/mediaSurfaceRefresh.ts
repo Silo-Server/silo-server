@@ -574,6 +574,9 @@ export function scheduleMediaSurfaceInvalidation(
       ? Boolean(existing.options.skipSimilarItems && options.skipSimilarItems)
       : options.skipSimilarItems,
     watchedKeys: [...(existing?.options.watchedKeys ?? []), ...(options.watchedKeys ?? [])],
+    // A later event without a series (one whose lookup failed, say) mustn't
+    // drop the series an earlier event for the same item named.
+    seriesId: options.seriesId ?? existing?.options.seriesId,
   };
   const now = Date.now();
   const deadline = existing?.deadline ?? now + MEDIA_SURFACE_REFRESH_MAX_WAIT_MS;

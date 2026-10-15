@@ -528,7 +528,7 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 
 	if hadSuccessfulUpdate {
 		notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
-		var published []string
+		var published, checked []string
 		for i, item := range updates {
 			if item.CheckAccess && results[i].Status != "ok" {
 				continue
@@ -537,8 +537,11 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 				continue
 			}
 			published = append(published, item.MediaItemID)
+			if item.CheckAccess {
+				checked = append(checked, item.MediaItemID)
+			}
 		}
-		seriesByEpisode := h.episodeSeries(ctx, published)
+		seriesByEpisode := h.episodeSeries(ctx, published, checked)
 		for _, id := range published {
 			publishUserStateEvent(
 				ctx,
@@ -560,11 +563,48 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 // client that hasn't cached an episode can still refresh its series and
 // seasons (#796). Without a lookup, or if it fails, events go out without a
 // series, as before.
-func (h *ProgressHandler) episodeSeries(ctx context.Context, contentIDs []string) map[string]string {
+//
+// A series is named only for an episode the viewer may see: one in checked,
+// which the sync already filtered, or one the viewer's scope allows. The v1
+// sync writes unchecked IDs as given, and naming their series would tell a
+// restricted profile which series an out-of-scope episode belongs to.
+func (h *ProgressHandler) episodeSeries(ctx context.Context, contentIDs, checked []string) map[string]string {
 	if h.EventsHub == nil || h.EpisodeLookup == nil || len(contentIDs) == 0 {
 		return nil
 	}
-	episodes, err := h.EpisodeLookup.GetByIDs(ctx, contentIDs)
+	visible := make(map[string]bool, len(contentIDs))
+	for _, id := range checked {
+		visible[id] = true
+	}
+	var unchecked []string
+	for _, id := range contentIDs {
+		if !visible[id] {
+			unchecked = append(unchecked, id)
+		}
+	}
+	if len(unchecked) > 0 && h.LibraryLookup != nil {
+		if scope, ok := access.GetScope(ctx); ok {
+			allowed, err := h.LibraryLookup.FilterAccessibleContentIDs(ctx, unchecked, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaturityLimits)
+			if err != nil {
+				slog.WarnContext(ctx, "check progress events' series access", "component", "api", "error", err)
+			}
+			for id, ok := range allowed {
+				if ok {
+					visible[id] = true
+				}
+			}
+		}
+	}
+	ids := make([]string, 0, len(visible))
+	for _, id := range contentIDs {
+		if visible[id] {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	episodes, err := h.EpisodeLookup.GetByIDs(ctx, ids)
 	if err != nil {
 		slog.WarnContext(ctx, "look up progress events' series", "component", "api", "error", err)
 		return nil

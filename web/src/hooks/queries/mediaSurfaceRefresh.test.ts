@@ -577,6 +577,19 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(otherSeriesKey)?.isInvalidated).toBe(false);
   });
 
+  it("keeps a coalesced event's series when a later one has none", async () => {
+    vi.useFakeTimers();
+    const queryClient = new QueryClient();
+    const seriesKey = catalogKeys.itemDetail("series-1");
+    queryClient.setQueryData(seriesKey, { content_id: "series-1", type: "series" });
+
+    scheduleMediaSurfaceInvalidation(queryClient, { itemId: "episode-x", seriesId: "series-1" });
+    scheduleMediaSurfaceInvalidation(queryClient, { itemId: "episode-x" });
+    await vi.advanceTimersByTimeAsync(700);
+
+    expect(queryClient.getQueryState(seriesKey)?.isInvalidated).toBe(true);
+  });
+
   it("adds the named series and its cached seasons to an item's related IDs", () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(catalogKeys.seriesSeasons("series-1"), {
