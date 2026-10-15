@@ -88,30 +88,34 @@ describe("measureBandwidthKbps deadlines", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("cuts off a read that stops returning and keeps the sample", async () => {
+  it("cuts off a read that stops returning and counts the silence", async () => {
     // 1 MB every 80 ms (100 Mbps) for 1.2 s, then the body goes silent.
-    let time = 0;
+    const t0 = Date.now();
+    const clock = () => Date.now() - t0;
     let sent = 0;
     let resolveStalled: ((r: { done: boolean }) => void) | undefined;
     const reader = {
-      read: () => {
-        if (sent < 16) {
-          sent++;
-          time += 80;
-          return Promise.resolve({ done: false, value: new Uint8Array(1_000_000) });
-        }
-        return new Promise<{ done: boolean; value?: Uint8Array }>((resolve) => {
-          resolveStalled = resolve;
-        });
-      },
+      read: () =>
+        new Promise<{ done: boolean; value?: Uint8Array }>((resolve) => {
+          if (sent < 16) {
+            sent++;
+            setTimeout(() => resolve({ done: false, value: new Uint8Array(1_000_000) }), 80);
+          } else {
+            resolveStalled = resolve;
+          }
+        }),
       cancel: vi.fn(async () => resolveStalled?.({ done: true })),
     };
     fetchWithSession.mockResolvedValue({ res: { ok: true, body: { getReader: () => reader } } });
 
-    const result = measureBandwidthKbps(new AbortController().signal, () => time);
-    await vi.advanceTimersByTimeAsync(3_000);
+    const result = measureBandwidthKbps(new AbortController().signal, clock);
+    await vi.advanceTimersByTimeAsync(4_000);
+    const kbps = await result;
 
-    expect(await result).toBe(100_000);
+    expect(reader.cancel).toHaveBeenCalled();
+    // 11 MB after ramp-up over the 2.18 s from the warm mark to the cutoff,
+    // not the 100 Mbps of the burst alone.
+    expect(kbps).toBe(40_367);
   });
 
   it("abandons a probe whose first byte never arrives", async () => {
