@@ -212,6 +212,59 @@ export function onMeteredConnection(): boolean {
   return connection?.saveData === true || connection?.type === "cellular";
 }
 
+/**
+ * Shared Web Lock a tab holds while its media plays or playback is starting,
+ * so a probe in another tab can tell the link is busy. Shared mode lets any
+ * number of tabs hold it at once.
+ */
+const MEDIA_LOCK_NAME = "silo-media-active";
+
+function lockManager(): LockManager | undefined {
+  return typeof navigator === "undefined" ? undefined : navigator.locks;
+}
+
+/** Holds the media lock until `until` settles. */
+function holdMediaLock(until: Promise<void>): void {
+  void lockManager()
+    ?.request(MEDIA_LOCK_NAME, { mode: "shared" }, () => until)
+    .catch(() => undefined);
+}
+
+let releasePlayingHold: (() => void) | undefined;
+let mediaTrackingInstalled = false;
+
+/** Holds the media lock while any media element in this tab is playing. */
+function syncPlayingHold(): void {
+  if (mediaPlaying()) {
+    if (!releasePlayingHold) {
+      holdMediaLock(
+        new Promise<void>((resolve) => {
+          releasePlayingHold = resolve;
+        }),
+      );
+    }
+    return;
+  }
+  releasePlayingHold?.();
+  releasePlayingHold = undefined;
+}
+
+function installMediaTracking(): void {
+  if (mediaTrackingInstalled || typeof document === "undefined" || !lockManager()) return;
+  mediaTrackingInstalled = true;
+  // Media events do not bubble; capturing on the document sees them all.
+  for (const type of ["playing", "pause", "ended", "emptied"]) {
+    document.addEventListener(type, syncPlayingHold, true);
+  }
+}
+
+/** Whether some tab, this one included, is playing or starting media. */
+async function mediaActiveInAnyTab(locks: LockManager): Promise<boolean> {
+  if (typeof locks.query !== "function") return false;
+  const state = await locks.query();
+  return state.held?.some((lock) => lock.name === MEDIA_LOCK_NAME) ?? false;
+}
+
 function probeAllowed(): boolean {
   // A probe beside a playing or starting stream would both slow it and
   // under-measure.
@@ -228,6 +281,7 @@ function probeAllowed(): boolean {
  */
 export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => void {
   stopBandwidthProbes();
+  installMediaTracking();
   const generation = scheduleGeneration;
   const schedule = (ms: number) => {
     if (generation !== scheduleGeneration) return;
@@ -265,7 +319,7 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
     }
     // Tabs share the cached result, so only one of them measures at a time:
     // two probes at once would split the link and both read low.
-    const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+    const locks = lockManager();
     if (!locks) {
       void probe();
       return;
@@ -281,6 +335,11 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
         }
         // The tab that held the lock may have just stored a result.
         if (awaitExpiry() || generation !== scheduleGeneration) return;
+        // Another tab may be playing; this tab's own check cannot see it.
+        if (await mediaActiveInAnyTab(locks)) {
+          schedule(PROBE_RETRY_MS);
+          return;
+        }
         await probe();
       })
       .catch(() => schedule(PROBE_RETRY_MS));
@@ -297,6 +356,9 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
 export function cancelBandwidthProbe(): void {
   cancelEpoch++;
   lastPlaybackStartAt = Date.now();
+  // Tell other tabs, until the playing hold takes over or the start settles.
+  installMediaTracking();
+  holdMediaLock(new Promise<void>((resolve) => setTimeout(resolve, PLAYBACK_START_QUIET_MS)));
   activeProbe?.abort();
 }
 

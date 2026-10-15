@@ -236,13 +236,34 @@ describe("scheduleBandwidthProbe", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not probe while another tab holds the media lock", async () => {
+    const request = vi.fn(
+      async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
+        callback({ name: "silo-bandwidth-probe" }),
+    );
+    const query = vi.fn(async () => ({
+      held: [{ name: "silo-media-active", mode: "shared" }],
+      pending: [],
+    }));
+    vi.stubGlobal("navigator", { ...navigator, locks: { request, query } });
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(query).toHaveBeenCalled();
+    expect(fetchWithSession).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("does not start a probe whose lock arrives after playback started", async () => {
     let grant: (() => Promise<void>) | undefined;
     const request = vi.fn(
-      (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
-        new Promise<void>((resolve) => {
-          grant = () => callback({ name: "silo-bandwidth-probe" }).then(resolve);
-        }),
+      (name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
+        name === "silo-bandwidth-probe"
+          ? new Promise<void>((resolve) => {
+              grant = () => callback({ name }).then(resolve);
+            })
+          : Promise.resolve(),
     );
     vi.stubGlobal("navigator", { ...navigator, locks: { request } });
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
@@ -253,6 +274,11 @@ describe("scheduleBandwidthProbe", () => {
     cancelBandwidthProbe();
     await grant!();
     expect(fetchWithSession).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith(
+      "silo-media-active",
+      { mode: "shared" },
+      expect.any(Function),
+    );
     vi.unstubAllGlobals();
   });
 
