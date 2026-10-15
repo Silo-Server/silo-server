@@ -2,6 +2,9 @@
 # The dbpins runner requires every named test and subtest to pass without
 # skipping. Run against a disposable, migrated database with make test-db-contracts.
 
+# Query attribution identity counts are emitted only by a database-backed run.
+./internal/database TestQueryAttributionIdentityCountsDB
+
 # Library visibility, rating ceilings, mixed catalogs, and section results.
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB

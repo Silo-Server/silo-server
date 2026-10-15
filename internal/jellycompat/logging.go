@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
@@ -25,6 +26,7 @@ import (
 // hijack the connection.
 type statusResponseWriter struct {
 	http.ResponseWriter
+	scope    *queryattr.RequestScope
 	status   int
 	hijacked bool
 }
@@ -55,6 +57,7 @@ func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	conn, rw, err := http.NewResponseController(w.ResponseWriter).Hijack()
 	if err == nil {
 		w.hijacked = true
+		w.scope.Hijack()
 	}
 	return conn, rw, err
 }
@@ -75,16 +78,22 @@ func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 func requestLoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ww := &statusResponseWriter{ResponseWriter: w}
+		ctx, scope := queryattr.StartRequest(r.Context())
+		if ctx != r.Context() {
+			r = r.WithContext(ctx)
+		}
+		defer scope.Seal()
+		ww := &statusResponseWriter{ResponseWriter: w, scope: scope}
 
 		next.ServeHTTP(ww, r)
+		snapshot := scope.Seal()
 
 		routePattern := ""
 		if routeCtx := chi.RouteContext(r.Context()); routeCtx != nil {
 			routePattern = routeCtx.RoutePattern()
 		}
 
-		slog.InfoContext(r.Context(), "jellycompat request", "component", "jellycompat",
+		attrs := []any{"component", "jellycompat",
 			"request_id", middleware.GetReqID(r.Context()),
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -97,7 +106,9 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			"user_agent", r.UserAgent(),
 			"content_length", r.ContentLength,
 			"auth_kind", authKind(r),
-		)
+		}
+		attrs = append(attrs, snapshot.LogAttrs()...)
+		slog.InfoContext(r.Context(), "jellycompat request", attrs...)
 	})
 }
 

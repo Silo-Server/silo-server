@@ -25,6 +25,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 var (
@@ -1607,7 +1609,7 @@ func copyInsertBatches(ctx context.Context, tx pgx.Tx, table string, columns []s
 
 	for start := 0; start < len(rows); start += copyBatchSize {
 		end := min(start+copyBatchSize, len(rows))
-		_, err := tx.CopyFrom(ctx,
+		_, err := database.CopyFrom(ctx, tx,
 			pgx.Identifier{table},
 			columns,
 			pgx.CopyFromRows(rows[start:end]),

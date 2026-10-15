@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 func importTable(ctx context.Context, source *sql.Tx, target pgx.Tx, userID int, mapping Mapping) (TableVerification, error) {
@@ -65,7 +67,7 @@ func importTable(ctx context.Context, source *sql.Tx, target pgx.Tx, userID int,
 		if len(batch) == 0 {
 			return nil
 		}
-		if _, err := target.CopyFrom(ctx, pgx.Identifier{mapping.Target}, targetColumns, pgx.CopyFromRows(batch)); err != nil {
+		if _, err := database.CopyFrom(ctx, target, pgx.Identifier{mapping.Target}, targetColumns, pgx.CopyFromRows(batch)); err != nil {
 			return importFailure(ctx, "target cannot represent source table "+mapping.Source)
 		}
 		batch = batch[:0]

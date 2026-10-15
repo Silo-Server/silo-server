@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 )
 
 // personalMembershipSourceWhere limits a query to one personal collection's
@@ -144,6 +146,7 @@ func CountPersonalCollections(ctx context.Context, pool *pgxpool.Pool, userID in
 // bad persisted definition must not suppress unrelated counts in its batch, so
 // a failed batch is retried one definition at a time.
 func countPersonalCollectionBatch(ctx context.Context, pool *pgxpool.Pool, batch []collectionCountStatement) (map[string]int, []error) {
+	ctx = queryattr.WithLabel(ctx, queryattr.LabelPersonalCollectionCounts)
 	counts := make(map[string]int, len(batch))
 	parts := make([]string, 0, len(batch))
 	var args []any

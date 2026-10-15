@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 type ScannedGroupRepository struct {
@@ -193,7 +195,7 @@ func (r *ScannedGroupRepository) UpsertMany(ctx context.Context, groups []models
 		)
 	}
 
-	results := r.pool.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, r.pool, batch)
 	defer results.Close()
 	for range groups {
 		if _, err := results.Exec(); err != nil {
@@ -261,7 +263,7 @@ func (r *ScannedGroupRepository) ReplaceForFolder(ctx context.Context, folderID 
 			group.OverrideSource,
 		)
 	}
-	results := tx.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, tx, batch)
 	for range groups {
 		if _, err := results.Exec(); err != nil {
 			_ = results.Close()
@@ -344,7 +346,7 @@ func (r *ScannedGroupRepository) ReplaceInScope(
 			group.OverrideSource,
 		)
 	}
-	results := tx.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, tx, batch)
 	for range groups {
 		if _, err := results.Exec(); err != nil {
 			_ = results.Close()

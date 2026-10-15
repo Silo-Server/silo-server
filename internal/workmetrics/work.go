@@ -9,13 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
 const (
@@ -110,6 +112,7 @@ type Run struct {
 func Start(ctx context.Context, workload string, queuedAt time.Time) (context.Context, *Run) {
 	parentCtx := ctx
 	category := Category(workload)
+	ctx = queryattr.Background(ctx, category)
 	opts := []trace.SpanStartOption{trace.WithNewRoot(), trace.WithAttributes(attribute.String(labelWorkload, category))}
 	if parent := trace.SpanContextFromContext(ctx); parent.IsValid() {
 		opts = append(opts, trace.WithLinks(trace.Link{SpanContext: parent}))

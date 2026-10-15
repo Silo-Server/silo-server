@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"go.opentelemetry.io/otel"
@@ -106,6 +107,7 @@ func RecordV1Tombstone(method string) { v1TombstoneRequests.WithLabelValues(meth
 // request moves through the router, and the observe middleware reports once
 // the response is written.
 type observation struct {
+	scope       *queryattr.RequestScope
 	operationID string
 	pathPattern string
 	errorCode   string
@@ -130,16 +132,18 @@ func observationFrom(ctx context.Context) *observation {
 func observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ctx, span := otel.Tracer("silo/apiv2").Start(telemetry.PublicContext(r.Context()), "api.v2.unmatched", trace.WithNewRoot(), trace.WithSpanKind(trace.SpanKindServer))
+		ctx, scope := queryattr.StartRequest(r.Context())
+		defer scope.Seal()
+		ctx, span := otel.Tracer("silo/apiv2").Start(telemetry.PublicContext(ctx), "api.v2.unmatched", trace.WithNewRoot(), trace.WithSpanKind(trace.SpanKindServer))
 		if span.IsRecording() {
 			span.SetAttributes(attribute.String("http.request.method", methodLabel(r.Method)))
 		}
 		defer span.End()
 		r = r.WithContext(ctx)
-		o := &observation{operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
+		o := &observation{scope: scope, operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
 		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
-		sw := &statusRecorder{ResponseWriter: w}
+		sw := &statusRecorder{ResponseWriter: w, scope: scope}
 		next.ServeHTTP(sw, r)
 		status := sw.status
 		if activitylog.RecordedStatus(r, status, status != 0) == activitylog.StatusClientClosedRequest {
@@ -173,6 +177,7 @@ func observe(next http.Handler) http.Handler {
 // http.ResponseController reach streaming capabilities on the original writer.
 type statusRecorder struct {
 	http.ResponseWriter
+	scope    *queryattr.RequestScope
 	status   int
 	hijacked bool
 	bytes    int64
@@ -233,11 +238,13 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	conn, rw, err := http.NewResponseController(s.ResponseWriter).Hijack()
 	if err == nil {
 		s.hijacked = true
+		s.scope.Hijack()
 	}
 	return conn, rw, err
 }
 
 func report(r *http.Request, o *observation, status int, hijacked bool, bodyBytes int64, elapsed time.Duration) {
+	snapshot := o.scope.Seal()
 	name, version := o.clientName, o.clientVersion
 	major := strconv.Itoa(APIMajor)
 	method := methodLabel(r.Method)
@@ -275,6 +282,7 @@ func report(r *http.Request, o *observation, status int, hijacked bool, bodyByte
 	if o.userID != nil {
 		attrs = append(attrs, "user_id", *o.userID)
 	}
+	attrs = append(attrs, snapshot.LogAttrs()...)
 	slog.InfoContext(r.Context(), "apiv2 request", attrs...)
 }
 

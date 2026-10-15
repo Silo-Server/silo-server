@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
 // jitOff is the jit setting Silo runs with, on its own connections and in the
@@ -32,9 +34,7 @@ func NewPoolForRole(ctx context.Context, cfg config.DatabaseConfig, role string)
 	if cfg.MaxConnections > 0 {
 		poolCfg.MaxConns = int32(cfg.MaxConnections)
 	}
-	poolCfg.AfterConnect = disableUnconfiguredJIT
-
-	poolCfg.ConnConfig.Tracer = postgresTracer{role: role}
+	configurePostgresTracing(poolCfg, role, queryattr.Initialize())
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating connection pool: %w", err)

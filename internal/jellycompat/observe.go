@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
@@ -97,11 +98,13 @@ var compatSpanOptions = []trace.SpanStartOption{trace.WithNewRoot(), trace.WithS
 func observeCompatRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		ctx, scope := queryattr.StartRequest(r.Context())
+		defer scope.Seal()
 		// A public listener starts a fresh trace: a caller's traceparent or
 		// baggage must not choose the trace ID or force sampling.
-		ctx, span := otel.Tracer("silo/jellycompat").Start(telemetry.PublicContext(r.Context()), "jellycompat request", compatSpanOptions...)
+		ctx, span := otel.Tracer("silo/jellycompat").Start(telemetry.PublicContext(ctx), "jellycompat request", compatSpanOptions...)
 		defer span.End()
-		sw := &statusResponseWriter{ResponseWriter: w}
+		sw := &statusResponseWriter{ResponseWriter: w, scope: scope}
 		next.ServeHTTP(sw, r.WithContext(ctx))
 		elapsed := time.Since(start)
 

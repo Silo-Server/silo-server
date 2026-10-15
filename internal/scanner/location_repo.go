@@ -11,6 +11,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 type ObservedLocationRepository struct {
@@ -92,7 +94,7 @@ func (r *ObservedLocationRepository) UpsertMany(ctx context.Context, locations [
 			location.EvidenceJSON,
 		)
 	}
-	results := r.pool.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, r.pool, batch)
 	defer results.Close()
 	for range locations {
 		if _, err := results.Exec(); err != nil {
@@ -135,7 +137,7 @@ func (r *ObservedLocationRepository) ReplaceForFolder(ctx context.Context, folde
 			location.EvidenceJSON,
 		)
 	}
-	results := tx.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, tx, batch)
 	for range locations {
 		if _, err := results.Exec(); err != nil {
 			_ = results.Close()
@@ -196,7 +198,7 @@ func (r *ObservedLocationRepository) ReplaceInScope(
 			location.EvidenceJSON,
 		)
 	}
-	results := tx.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, tx, batch)
 	for range locations {
 		if _, err := results.Exec(); err != nil {
 			_ = results.Close()
@@ -242,7 +244,7 @@ func (r *GroupLocationRepository) UpsertMany(ctx context.Context, locations []mo
 			location.IsPrimary,
 		)
 	}
-	results := r.pool.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, r.pool, batch)
 	defer results.Close()
 	for range locations {
 		if _, err := results.Exec(); err != nil {
@@ -278,7 +280,7 @@ func (r *GroupLocationRepository) ReplaceForFolder(ctx context.Context, folderID
 			location.IsPrimary,
 		)
 	}
-	results := tx.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, tx, batch)
 	for range locations {
 		if _, err := results.Exec(); err != nil {
 			_ = results.Close()
@@ -332,7 +334,7 @@ func (r *GroupLocationRepository) ReplaceInScope(
 			location.IsPrimary,
 		)
 	}
-	results := tx.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, tx, batch)
 	for range locations {
 		if _, err := results.Exec(); err != nil {
 			_ = results.Close()

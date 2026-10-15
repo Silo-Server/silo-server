@@ -28,6 +28,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/s3client"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 const StagedTargetSettingKey = config.StorageTransitionTargetKey
@@ -1672,7 +1674,7 @@ func (s *Service) saveCheckpointPage(ctx context.Context, transitionID, scope, r
 				checkpoint.Listing.Size, checkpoint.Listing.ETag, checkpoint.Listing.ModTime, runID)
 		}
 	}
-	results := s.pool.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, s.pool, batch)
 	for range checkpoints {
 		if _, err := results.Exec(); err != nil {
 			_ = results.Close()

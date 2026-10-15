@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 )
 
 const (
@@ -184,6 +186,7 @@ func LoadCleanupInterval(ctx context.Context, store SettingsStore) time.Duration
 
 // CleanupOnce runs a single operational log retention pass.
 func CleanupOnce(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, pm PartitionManager) int64 {
+	ctx = queryattr.Internal(ctx, queryattr.TelemetryPersistence)
 	policy, err := LoadRetentionPolicy(ctx, store)
 	if err != nil {
 		slog.WarnContext(ctx, "opslog cleanup policy error", "component", "opslog", "error", err)

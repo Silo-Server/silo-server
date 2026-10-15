@@ -20,6 +20,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 // SourceURL is the published list.
@@ -287,7 +289,7 @@ func (r *Refresher) replace(ctx context.Context, c claimToken, ids []listedID, e
 	for i, id := range ids {
 		rows[i] = []any{id.source, id.id}
 	}
-	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"anime_ids"}, []string{"source", "external_id"}, pgx.CopyFromRows(rows)); err != nil {
+	if _, err := database.CopyFrom(ctx, tx, pgx.Identifier{"anime_ids"}, []string{"source", "external_id"}, pgx.CopyFromRows(rows)); err != nil {
 		return fmt.Errorf("replace anime list: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `

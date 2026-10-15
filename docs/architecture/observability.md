@@ -511,6 +511,77 @@ that ended. Their difference includes queued, exporting and dropped spans, so
 it is not an instantaneous drop count. Inspect it after a drain and monitor
 collector/backend self-metrics. There is no OTel MeterProvider.
 
+## Query Attribution
+
+`internal/database/queryattr` keeps bounded accounting in memory per node,
+independent of log sampling, alongside the existing Postgres tracer.
+
+### Identity and Privacy
+
+Scheme 1 identifies work by the calling Silo function, a 64-bit FNV-1a
+fingerprint of normalized SQL, and statement form. Function names come from
+the binary, with receiver and closure suffixes, without source file paths;
+line numbers are display-only. Identities retain no statement samples or
+normalized SQL text. Normalization removes comments and whitespace, folds
+unquoted ASCII names, and replaces literals and numbered placeholders with
+value tokens. Placeholder reuse does not distinguish shapes.
+The reviewed label `catalog.personal_collection_counts` replaces the function
+for the collection-count builder and its retry.
+
+Attribution never puts SQL text, argument values, or error messages, detail
+or hints in a log line. Failures retain only canceled, deadline, a valid
+two-character SQLSTATE class, or a fixed network, client or PostgreSQL-other
+category.
+
+### Time, Ownership and Requests
+
+Request middleware starts one scope and reuses it in nested middleware.
+`workmetrics.Start` transfers ownership to a fixed background workload
+category and detaches the inherited request scope. Internal markers override
+both: `telemetry_persistence` covers log persistence, cleanup and partition
+maintenance; `connection_setup` covers pooled-connection JIT setup. Setup time
+also belongs to the creating acquire wait, but never to request query totals.
+
+The `api request`, `apiv2 request` and `jellycompat request` lines share:
+
+- `db_queries`: statements started; `db_batches`: nonempty batches started.
+- `db_query_ns`: summed query time; `db_acquire_wait_ns`: separate acquire wait.
+- `db_slowest_site`, `db_slowest_fp`, `db_slowest_ns`: the slowest completed
+  query identity and time; the site and fingerprint are `none` without one.
+- `db_repeated`: identities started more than ten times, excluding batches.
+- `db_in_flight`: unfinished statements, including queued batch children.
+- `db_incomplete`: unfinished statements/acquires or incomplete identity detail.
+- `db_scheme`: identity scheme version.
+
+Times are summed integer nanoseconds from monotonic start/end callbacks;
+parallel query durations can exceed request wall time. Batch time belongs
+to its envelope; child time is unavailable.
+Sealing freezes the request view once, before logging. Later completions
+update node totals and coverage only. Pending acquires contribute elapsed wait
+through sealing. The request table holds 64 identities; overflow keeps totals
+and marks detail incomplete. Hijacked requests skip repeat detection.
+
+Bulk callers use `database.SendBatch` and transaction-only `database.CopyFrom`
+in `internal/database/postgres_bulk.go`. They cover empty batches and copy
+setup failures. `TestBulkCallsUseQueryattrWrappers` rejects direct bulk calls
+outside the wrappers in production source under `internal/` and `cmd/`.
+
+### Controls and Bounds
+
+`SILO_QUERY_ATTRIBUTION_ENABLED` defaults to true and is read once when the
+first pool is created. Disabled attribution keeps the coarse Postgres tracer
+and omits the request's `db_*` fields.
+
+The provisional caps are 8,192 identities and 4,096 functions, without eviction.
+Past the identity cap, new identities use function-only accounting with an
+`overflow` fingerprint; past the function cap, new functions use
+`caller_unavailable`. Fallbacks keep totals and outcome classes.
+The service drains pending WARN lines once a minute and at shutdown:
+`database query identity limit reached` on a function's first identity overflow,
+and `database caller produced many query shapes` above 64 admitted shapes.
+Each condition warns once per function or reviewed label per process run;
+the lines carry `caller`, `kind`, `scheme` and component `database`.
+
 ## Client experience and plugin coordination
 
 Server response bytes and first playable segments do not establish first frame

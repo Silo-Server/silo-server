@@ -60,6 +60,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/dashmetrics"
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
@@ -454,6 +455,44 @@ func startLogDrain(run func(context.Context)) (stop func()) {
 	}
 }
 
+func ensureTelemetryPartitions(ctx context.Context, pm interface{ EnsureFuturePartitions(context.Context) error }) error {
+	return pm.EnsureFuturePartitions(queryattr.Internal(ctx, queryattr.TelemetryPersistence))
+}
+
+func runQueryAttributionWarnings(ctx context.Context, ticks <-chan time.Time, store *queryattr.Store, logger *slog.Logger) {
+	drain := func() {
+		for _, warning := range store.DrainWarnings() {
+			attrs := []slog.Attr{slog.String("component", "database"), slog.String("caller", warning.Caller), slog.String("kind", warning.Kind), slog.Int("scheme", queryattr.Scheme)}
+			if warning.Kind == "overflow" {
+				logger.LogAttrs(ctx, slog.LevelWarn, "database query identity limit reached", attrs...)
+			} else {
+				logger.LogAttrs(ctx, slog.LevelWarn, "database caller produced many query shapes", attrs...)
+			}
+		}
+	}
+	defer drain()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			drain()
+		}
+	}
+}
+
+func startQueryAttributionWarnings() func() {
+	slog.Info("database query attribution", slog.String("component", "database"), slog.Bool("enabled", queryattr.Enabled()), slog.Int("scheme", queryattr.Scheme))
+	if !queryattr.Enabled() {
+		return func() {}
+	}
+	return startLogDrain(func(ctx context.Context) {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		runQueryAttributionWarnings(ctx, ticker.C, queryattr.Default, slog.Default())
+	})
+}
+
 // configureActivityLogging queues activity log entries in memory on this node
 // and persists them in batches, so the request path never waits on Redis or
 // Postgres. stop flushes what is queued.
@@ -481,7 +520,7 @@ func configureOperationalLogging(
 		log.Fatalf("seed diagnostics defaults: %v", err)
 	}
 	opsPM := partman.NewManager(pool, "operational_logs", partman.Daily, 3)
-	if err := opsPM.EnsureFuturePartitions(ctx); err != nil {
+	if err := ensureTelemetryPartitions(ctx, opsPM); err != nil {
 		// Non-fatal: a partition hiccup must not crash-loop the server (see the
 		// operational_logs partition incident). Writes fall back to the default
 		// partition and the periodic cleanup retries EnsureFuturePartitions.
@@ -1057,6 +1096,8 @@ func main() {
 	// rows to other nodes' live tails, and the event bus closes last.
 	defer logStreamHub.Close()
 	defer stopOperationalLog()
+	stopQueryWarnings := startQueryAttributionWarnings()
+	defer stopQueryWarnings()
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
@@ -2864,7 +2905,7 @@ func main() {
 		}
 	}
 	activityPM := partman.NewManager(pool, "activity_log", partman.Weekly, 2)
-	if err := activityPM.EnsureFuturePartitions(appCtx); err != nil {
+	if err := ensureTelemetryPartitions(appCtx, activityPM); err != nil {
 		// Non-fatal: see the operational_logs partition incident. Writes fall
 		// back to the default partition and periodic cleanup retries.
 		slog.Warn("ensure activity log partitions; continuing in degraded mode", "error", err)

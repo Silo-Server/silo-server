@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 )
 
 const (
@@ -61,6 +63,7 @@ func RunCleanup(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, pm
 
 // CleanupOnce runs a single activity log retention pass.
 func CleanupOnce(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, pm PartitionManager) int64 {
+	ctx = queryattr.Internal(ctx, queryattr.TelemetryPersistence)
 	days := defaultRetention
 	if raw, err := store.Get(ctx, keyRetentionDays); err == nil && raw != "" {
 		if d := parseInt(raw); d > 0 {

@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 // Retry parameters for the bulk-reset UPDATEs below. They run concurrently
@@ -1045,7 +1047,7 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 	if pgBatch.Len() == 0 {
 		return nil
 	}
-	results := r.pool.SendBatch(ctx, &pgBatch)
+	results := database.SendBatch(ctx, r.pool, &pgBatch)
 	defer func() { _ = results.Close() }()
 	for _, remote := range remoteByQueued {
 		tag, err := results.Exec()

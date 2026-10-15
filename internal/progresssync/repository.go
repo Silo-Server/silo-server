@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 type Repository struct {
@@ -187,7 +189,7 @@ func (r *Repository) materialize(ctx context.Context, tx pgx.Tx, s *Snapshot) er
 			values = append(values, []any{s.ID, s.ItemCount, json.RawMessage(payload)})
 		}
 		if len(values) > 0 {
-			if _, err = tx.CopyFrom(ctx, pgx.Identifier{"progress_bootstrap_items"}, []string{"snapshot_id", "ordinal", "payload"}, pgx.CopyFromRows(values)); err != nil {
+			if _, err = database.CopyFrom(ctx, tx, pgx.Identifier{"progress_bootstrap_items"}, []string{"snapshot_id", "ordinal", "payload"}, pgx.CopyFromRows(values)); err != nil {
 				return err
 			}
 			// Count the normalized JSON payload actually retained, not Go struct sizes

@@ -15,12 +15,18 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, scope := queryattr.StartRequest(r.Context())
+			if ctx != r.Context() {
+				r = r.WithContext(ctx)
+			}
+			defer scope.Seal()
 			for _, prefix := range []string{"/api/v1/health", "/api/v1/ready", "/api/v1/admin/logs", APIv2Prefix} {
 				if strings.HasPrefix(r.URL.Path, prefix) {
 					next.ServeHTTP(w, r)
@@ -29,7 +35,7 @@ func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 			}
 
 			start := time.Now()
-			wrapped := &requestStatusWriter{ResponseWriter: w, status: http.StatusOK}
+			wrapped := &requestStatusWriter{ResponseWriter: w, status: http.StatusOK, scope: scope}
 			lc := activitylog.GetLogContext(r.Context())
 			if lc == nil {
 				lc = &activitylog.LogContext{}
@@ -42,6 +48,7 @@ func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 			}
 
 			next.ServeHTTP(wrapped, r)
+			snapshot := scope.Seal()
 
 			pathPattern := r.URL.Path
 			if routeCtx := chi.RouteContext(r.Context()); routeCtx != nil {
@@ -71,6 +78,7 @@ func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 			if playbackLC.PlaybackSessionID != "" {
 				attrs = append(attrs, "playback_session_id", playbackLC.PlaybackSessionID)
 			}
+			attrs = append(attrs, snapshot.LogAttrs()...)
 			slog.InfoContext(r.Context(), "api request", append([]any{"component", "api"}, attrs...)...)
 		})
 	}
@@ -80,6 +88,7 @@ type requestStatusWriter struct {
 	http.ResponseWriter
 	status      int
 	wroteHeader bool
+	scope       *queryattr.RequestScope
 }
 
 func (w *requestStatusWriter) WriteHeader(status int) {
@@ -106,7 +115,11 @@ func (w *requestStatusWriter) ReadFrom(src io.Reader) (int64, error) {
 
 func (w *requestStatusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
+		conn, rw, err := hj.Hijack()
+		if err == nil {
+			w.scope.Hijack()
+		}
+		return conn, rw, err
 	}
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
 }

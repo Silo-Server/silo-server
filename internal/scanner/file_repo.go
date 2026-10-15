@@ -11,13 +11,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/Silo-Server/silo-server/internal/scanbatch"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 // Sentinel errors for file repository operations.
@@ -874,7 +877,7 @@ func (r *FileRepository) UpsertBatchTx(ctx context.Context, tx pgx.Tx, files []m
 		}
 		batch.Queue(query, capture.args...)
 	}
-	results := tx.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, tx, batch)
 	defer results.Close()
 	for range files {
 		if _, err := results.Exec(); err != nil {

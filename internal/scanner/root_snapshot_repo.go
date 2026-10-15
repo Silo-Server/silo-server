@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 // ScannedRootRepository persists scanner root snapshots.
@@ -220,7 +222,7 @@ func (r *ScannedRootRepository) UpsertMany(ctx context.Context, roots []models.S
 		)
 	}
 
-	results := r.pool.SendBatch(ctx, batch)
+	results := database.SendBatch(ctx, r.pool, batch)
 	defer results.Close()
 	for range roots {
 		if _, err := results.Exec(); err != nil {
