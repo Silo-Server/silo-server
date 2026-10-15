@@ -3600,11 +3600,16 @@ export function VideoPlayer({
       });
       if (command.action === "play" && video.ended) {
         // play() on an ended element starts over from the beginning. A room
-        // at or past this media's end leaves it ended; one still short of the
-        // end is sought to first, however small the gap.
-        const localEndSeconds = Number.isFinite(video.duration)
-          ? toMediaTime(video.duration, timelineOffsetRef.current)
-          : Number.POSITIVE_INFINITY;
+        // at or past the movie's end leaves it ended; one still short of the
+        // end is sought to first, however small the gap. The movie's runtime
+        // comes from the server: a progressive window can end well before it.
+        const localEndSeconds =
+          mediaDurationSeconds(
+            backendDurationRef.current,
+            Number.isFinite(video.duration)
+              ? toMediaTime(video.duration, timelineOffsetRef.current)
+              : undefined,
+          ) ?? Number.POSITIVE_INFINITY;
         if (targetPositionSeconds >= localEndSeconds - roomSyncDeadbandSeconds) return false;
         decision = { kind: "seek" };
       }

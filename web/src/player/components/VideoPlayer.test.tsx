@@ -2479,6 +2479,23 @@ describe("VideoPlayer room catch-up", () => {
     expect(video.play).toHaveBeenCalledOnce();
   });
 
+  it("seeks an element whose stream window ended before the movie to the room", async () => {
+    const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(1800);
+    Object.defineProperty(video, "duration", { configurable: true, value: 1800 });
+    Object.defineProperty(video, "ended", { configurable: true, value: true });
+    rerenderPlayer({
+      duration: 7200,
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: { ...command, position_seconds: 2000 },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // The window ended, not the movie: the room is still playing it.
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(2000);
+    expect(video.play).toHaveBeenCalledOnce();
+  });
+
   it("leaves an element that ended during playback to the room", async () => {
     const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(100);
     markPlaying(video);
