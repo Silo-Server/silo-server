@@ -1209,7 +1209,16 @@ route, so a direct-play viewer would come back on a transcode. The web player
 (`web/src/player/hooks/usePlaybackSession.ts`) recovers like this instead:
 
 1. Pause, keep the position, and tell the viewer it is reconnecting. Stop
-   reporting route failures for the dead transport.
+   reporting route failures for the dead transport. An HLS stream whose
+   segments are already buffered is not dead yet: after hls.js gives up on the
+   network, the element plays on from its buffer while at least a second of
+   it lies ahead. This step starts when the element still can't play a second
+   after `waiting` (the buffer ran out, or the playhead is stuck), on a seek to
+   a position that isn't buffered, or on another fatal error. A seek outside
+   the stream's window still asks for a `seek_reanchor` first, because only
+   that moves the window, and reconnects if the server doesn't answer. The
+   cycle below therefore starts after up to a buffer's worth of playback; a
+   viewer who pauses meanwhile reconnects when they play or seek again.
 2. Retry with backoff (1 s doubling to a 15 s cap, about two minutes in total).
    Each attempt is a `track_change` that changes nothing, at the saved
    position. It keeps the current route eligible and returns a fresh plan.
@@ -1224,9 +1233,12 @@ route, so a direct-play viewer would come back on a transcode. The web player
    and sends no subtitle change until it has applied it. A refused burned-in
    subtitle is retried without subtitles, as at an initial start.
 4. The new plan plays only if the viewer was playing. That intent is taken
-   when the recovery is requested, and until the current plan's transport has
-   shown a frame it is the intent the plan was adopted with, so the pause that
-   tearing down a failed transport forces does not count.
+   when the recovery is requested, from the player's own play state rather
+   than the element, which Chromium already reports paused when its `error`
+   event arrives. A pause reported before the current plan's transport has
+   shown a frame doesn't count: it is the element between transports. A route
+   that fails before its first frame, including one a reconnect just adopted,
+   therefore keeps the viewer's intent for the plan that replaces it.
 5. Any adopted plan ends the cycle. When the budget runs out, the client says
    the connection was lost and offers to try again. Leaving the player or
    starting other playback cancels the cycle.
