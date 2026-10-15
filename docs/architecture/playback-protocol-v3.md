@@ -1214,9 +1214,11 @@ route, so a direct-play viewer would come back on a transcode. The web player
    network, the element plays on from its buffer while at least a second of
    it lies ahead. This step starts when the element still can't play a second
    after `waiting` (the buffer ran out, or the playhead is stuck), on a seek to
-   a position that isn't buffered, or on another fatal error. The cycle below
-   therefore starts after up to a buffer's worth of playback; a viewer who
-   pauses meanwhile reconnects when they play or seek again.
+   a position that isn't buffered, or on another fatal error. A seek outside
+   the stream's window still asks for a `seek_reanchor` first, because only
+   that moves the window, and reconnects if the server doesn't answer. The
+   cycle below therefore starts after up to a buffer's worth of playback; a
+   viewer who pauses meanwhile reconnects when they play or seek again.
 2. Retry with backoff (1 s doubling to a 15 s cap, about two minutes in total).
    Each attempt is a `track_change` that changes nothing, at the saved
    position. It keeps the current route eligible and returns a fresh plan.

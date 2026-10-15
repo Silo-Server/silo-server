@@ -781,22 +781,6 @@ export function VideoPlayer({
     reportConnectionLostRef.current();
   }, [stopDraining]);
 
-  /**
-   * reportConnectionLost for a fatal hls.js network error: while the element
-   * still has media ahead of its playhead, the stream drains instead.
-   */
-  const reportHlsConnectionLost = useCallback((): boolean => {
-    const video = videoRef.current;
-    if (!onConnectionLost || !video || !streamPlayedRef.current) return false;
-    if (connectionStatusRef.current === "connected" && hasMediaAhead(video)) {
-      hlsDrainingRef.current = true;
-      return true;
-    }
-    return reportConnectionLost();
-  }, [onConnectionLost, reportConnectionLost]);
-  const reportHlsConnectionLostRef = useRef(reportHlsConnectionLost);
-  reportHlsConnectionLostRef.current = reportHlsConnectionLost;
-
   // `waiting` alone doesn't mean the buffer is empty: it also fires on a seek
   // inside the buffer and on a brief decoder stall. A playhead that stays put
   // with media buffered gets one more look; a stream stuck there needs
@@ -819,6 +803,24 @@ export function VideoPlayer({
     };
     drainCheckTimerRef.current = setTimeout(check, DRAIN_CHECK_DELAY_MS);
   }, [reconnectFromDrainedStream]);
+
+  /**
+   * reportConnectionLost for a fatal hls.js network error: while the element
+   * still has media ahead of its playhead, the stream drains instead.
+   */
+  const reportHlsConnectionLost = useCallback((): boolean => {
+    const video = videoRef.current;
+    if (!onConnectionLost || !video || !streamPlayedRef.current) return false;
+    if (connectionStatusRef.current === "connected" && hasMediaAhead(video)) {
+      hlsDrainingRef.current = true;
+      // The element may already be stalled, with its `waiting` long gone.
+      if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) scheduleDrainCheck();
+      return true;
+    }
+    return reportConnectionLost();
+  }, [onConnectionLost, reportConnectionLost, scheduleDrainCheck]);
+  const reportHlsConnectionLostRef = useRef(reportHlsConnectionLost);
+  reportHlsConnectionLostRef.current = reportHlsConnectionLost;
 
   // While the session reconnects, nothing plays: the element is paused (so
   // progress reports say so), and hls.js stops hammering the server. The
@@ -1321,19 +1323,20 @@ export function VideoPlayer({
       }
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
-      // A draining stream can only seek inside its buffer. Anywhere else needs
-      // the server, so the reconnect resumes at the target.
-      if (
-        hlsDrainingRef.current &&
-        connectionStatusRef.current === "connected" &&
-        !hasMediaAhead(video, nativeSeconds)
-      ) {
+      // A draining stream can only play what it buffered. The reconnect
+      // resumes at a target that needs the server.
+      const draining = hlsDrainingRef.current && connectionStatusRef.current === "connected";
+      const reconnectAtTarget = () => {
+        if (!hlsDrainingRef.current) return;
         rememberPendingSeek(seconds);
         setCurrentTime(seconds);
         reconnectFromDrainedStream();
-        return true;
-      }
+      };
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
+        if (draining && !hasMediaAhead(video, nativeSeconds)) {
+          reconnectAtTarget();
+          return true;
+        }
         rememberPendingSeek(seconds);
         setCurrentTime(seconds);
         if (isHlsStream) video.currentTime = nativeSeconds;
@@ -1343,7 +1346,25 @@ export function VideoPlayer({
 
       // Outside the server-anchored window: this is a timeline operation, not
       // a failure, so it asks for a reanchor rather than reporting a failure.
-      return reanchorAt(seconds);
+      // Only the reanchor moves the window; the reconnect's replan may keep
+      // it. A draining stream reconnects once the reanchor can't reach the
+      // server either.
+      const accepted = reanchorAt(seconds);
+      if (!draining || accepted === true) return accepted;
+      if (accepted === false) {
+        reconnectAtTarget();
+        return true;
+      }
+      return accepted.then(
+        (ok) => {
+          if (!ok) reconnectAtTarget();
+          return true;
+        },
+        () => {
+          reconnectAtTarget();
+          return true;
+        },
+      );
     },
     [
       canSeekAnywhere,
