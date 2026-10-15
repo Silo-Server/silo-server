@@ -73,6 +73,13 @@ describe("createStallTracker", () => {
     expect(tracker.shouldDownshift(27_000)).toBe(true);
   });
 
+  it("times a start that never produces a frame from its first wait", () => {
+    const tracker = createStallTracker();
+    tracker.waiting(1_000);
+    expect(tracker.shouldDownshift(16_000)).toBe(false);
+    expect(tracker.shouldDownshift(17_000)).toBe(true);
+  });
+
   it("does not blame the network for a seek", () => {
     const tracker = createStallTracker();
     tracker.playing(0);
@@ -228,6 +235,35 @@ describe("useAutoQualityDownshift", () => {
     expect(onDownshift).not.toHaveBeenCalled();
     vi.advanceTimersByTime(2_000);
     expect(onDownshift).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries an unadopted downshift after the hook was briefly disabled", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    const { rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useAutoQualityDownshift({
+          videoRef: { current: video as unknown as HTMLVideoElement },
+          enabled,
+          sessionId: "s1",
+          planIdentity: 1,
+          deliveredKbps: 80_000,
+          onDownshift,
+        }),
+      { initialProps: { enabled: true } },
+    );
+    fire(video, "playing", 0);
+    fire(video, "waiting", 30_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
+
+    // A reconnect disables the hook before the re-arm; the same plan resumes.
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    fire(video, "playing", 40_000);
+    fire(video, "waiting", 60_000);
+    vi.advanceTimersByTime(6_000);
+    expect(onDownshift).toHaveBeenCalledTimes(2);
   });
 
   it("leaves an explicit quality alone", () => {

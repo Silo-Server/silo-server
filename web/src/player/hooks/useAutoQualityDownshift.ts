@@ -48,6 +48,9 @@ export interface StallTracker {
 
 export function createStallTracker(): StallTracker {
   let firstPlayingAt: number | undefined;
+  // When the plan first ran out of data, if that happened before its first
+  // frame. A start that never gets going is timed from here instead.
+  let firstWaitingAt: number | undefined;
   let stallStartedAt: number | undefined;
   let stalls: number[] = [];
   // A stall that reached LONG_STALL_MS before it ended still counts as long:
@@ -64,10 +67,11 @@ export function createStallTracker(): StallTracker {
       stallStartedAt = undefined;
     },
     waiting(now) {
-      if (firstPlayingAt === undefined) return;
-      // A stall that begins during startup counts only from the end of the
-      // grace period, so one that outlasts it is still seen.
-      stallStartedAt ??= Math.max(now, firstPlayingAt + STARTUP_GRACE_MS);
+      // The grace period runs from the first frame, or from the first wait
+      // when the plan has not produced one. A stall that begins during it
+      // counts only from its end, so one that outlasts it is still seen.
+      const graceFrom = firstPlayingAt ?? (firstWaitingAt ??= now);
+      stallStartedAt ??= Math.max(now, graceFrom + STARTUP_GRACE_MS);
     },
     seeking() {
       stallStartedAt = undefined;
@@ -115,9 +119,13 @@ export function useAutoQualityDownshift({
   useEffect(() => {
     onDownshiftRef.current = onDownshift;
   }, [onDownshift]);
-  // The bitrate the last downshift left. A plan that is no lower means the
-  // ladder has nothing further down, so asking again would only loop.
-  const lastDownshiftFromRef = useRef<{ sessionId: string; kbps: number } | undefined>(undefined);
+  // The plan the last downshift left and its bitrate. When a replan was
+  // adopted and is no lower, the ladder has nothing further down, so asking
+  // again would only loop. The same plan still playing means the replan was
+  // not adopted, and it stays eligible.
+  const lastDownshiftFromRef = useRef<
+    { sessionId: string; planIdentity: unknown; kbps: number } | undefined
+  >(undefined);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -125,7 +133,13 @@ export function useAutoQualityDownshift({
     const estimate = downshiftEstimateKbps(deliveredKbps);
     if (estimate === undefined) return;
     const previous = lastDownshiftFromRef.current;
-    if (previous?.sessionId === sessionId && deliveredKbps >= previous.kbps) return;
+    if (
+      previous?.sessionId === sessionId &&
+      previous.planIdentity !== planIdentity &&
+      deliveredKbps >= previous.kbps
+    ) {
+      return;
+    }
 
     // Where playback stood when the current stall began; undefined when not
     // stalled. A stall can end without a `playing` event (the player itself
@@ -144,7 +158,7 @@ export function useAutoQualityDownshift({
       if (done || video.paused || !tracker.shouldDownshift(Date.now())) return;
       done = true;
       clearLongStallTimer();
-      lastDownshiftFromRef.current = { sessionId, kbps: deliveredKbps };
+      lastDownshiftFromRef.current = { sessionId, planIdentity, kbps: deliveredKbps };
       // An adopted replan changes planIdentity and tears this effect down,
       // cancelling the re-arm. Still being here means it was not adopted.
       rearmTimer = setTimeout(() => {
