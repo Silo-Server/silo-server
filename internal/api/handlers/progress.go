@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -52,10 +53,17 @@ type ProgressLibraryLookup interface {
 	FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (map[string]bool, error)
 }
 
+// ProgressEpisodeLookup finds the episodes among content IDs, so a progress
+// event can name an episode's series.
+type ProgressEpisodeLookup interface {
+	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.Episode, error)
+}
+
 // ProgressHandler handles watch progress and sync endpoints.
 type ProgressHandler struct {
 	storeProvider           userstore.UserStoreProvider
 	LibraryLookup           ProgressLibraryLookup
+	EpisodeLookup           ProgressEpisodeLookup
 	SettingsRepo            PlaybackSettingsReader
 	EventsHub               *evt.Hub
 	profileStaler           ProfileStaler
@@ -525,6 +533,7 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 
 	if hadSuccessfulUpdate {
 		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+		var published []string
 		for i, item := range updates {
 			if item.CheckAccess && results[i].Status != "ok" {
 				continue
@@ -532,13 +541,17 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 			if item.MediaItemID == "" {
 				continue
 			}
+			published = append(published, item.MediaItemID)
+		}
+		seriesByEpisode := h.episodeSeries(ctx, published)
+		for _, id := range published {
 			publishUserStateEvent(
 				ctx,
 				h.EventsHub,
 				userID,
 				profileID,
-				item.MediaItemID,
-				"",
+				id,
+				seriesByEpisode[id],
 				"progress",
 				userStateEventState{},
 			)
@@ -546,4 +559,26 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 	}
 
 	return results, nil
+}
+
+// episodeSeries maps the episodes among contentIDs to their series, so a
+// client that hasn't cached an episode can still refresh its series and
+// seasons (#796). Without a lookup, or if it fails, events go out without a
+// series, as before.
+func (h *ProgressHandler) episodeSeries(ctx context.Context, contentIDs []string) map[string]string {
+	if h.EventsHub == nil || h.EpisodeLookup == nil || len(contentIDs) == 0 {
+		return nil
+	}
+	episodes, err := h.EpisodeLookup.GetByIDs(ctx, contentIDs)
+	if err != nil {
+		slog.WarnContext(ctx, "look up progress events' series", "component", "api", "error", err)
+		return nil
+	}
+	series := make(map[string]string, len(episodes))
+	for _, episode := range episodes {
+		if episode != nil && episode.SeriesID != "" {
+			series[episode.ContentID] = episode.SeriesID
+		}
+	}
+	return series
 }

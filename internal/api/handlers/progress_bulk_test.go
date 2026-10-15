@@ -2,9 +2,13 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -64,5 +68,62 @@ func TestSyncProgressNativeMissingScopeHasNoWrites(t *testing.T) {
 	}
 	if len(store.items) != 0 {
 		t.Fatalf("unscoped writes=%v", store.items)
+	}
+}
+
+type progressEpisodeLookupFunc func(context.Context, []string) ([]*models.Episode, error)
+
+func (f progressEpisodeLookupFunc) GetByIDs(ctx context.Context, ids []string) ([]*models.Episode, error) {
+	return f(ctx, ids)
+}
+
+// Progress events name an episode's series, so a client that hasn't cached the
+// episode can still refresh its series and seasons (#796). The series come
+// from one lookup for the batch; a failed lookup still publishes, without them.
+func TestSyncProgressEventsNameTheEpisodeSeries(t *testing.T) {
+	sync := func(t *testing.T, lookup ProgressEpisodeLookup) map[string]userStateEventPayload {
+		t.Helper()
+		hub := evt.NewHub("test", nil)
+		events, unsubscribe := hub.Subscribe()
+		defer unsubscribe()
+		h := NewProgressHandler(&bulkProgressProvider{store: &bulkProgressStore{}})
+		h.EventsHub = hub
+		h.EpisodeLookup = lookup
+		if _, err := h.SyncProgress(t.Context(), 17, "child", []ProgressSyncUpdate{{MediaItemID: "episode-1"}, {MediaItemID: "movie-1"}}); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]userStateEventPayload{}
+		for range 2 {
+			select {
+			case env := <-events:
+				var p userStateEventPayload
+				if err := json.Unmarshal(env.Data, &p); err != nil {
+					t.Fatal(err)
+				}
+				got[p.ContentID] = p
+			default:
+				t.Fatalf("published %d events, want 2", len(got))
+			}
+		}
+		return got
+	}
+
+	lookups := 0
+	got := sync(t, progressEpisodeLookupFunc(func(_ context.Context, ids []string) ([]*models.Episode, error) {
+		lookups++
+		if len(ids) != 2 {
+			t.Fatalf("looked up %v, want the batch", ids)
+		}
+		return []*models.Episode{{ContentID: "episode-1", SeriesID: "series-1"}}, nil
+	}))
+	if lookups != 1 || got["episode-1"].SeriesID != "series-1" || got["movie-1"].SeriesID != "" || got["episode-1"].Change != "progress" {
+		t.Fatalf("events=%+v lookups=%d", got, lookups)
+	}
+
+	got = sync(t, progressEpisodeLookupFunc(func(context.Context, []string) ([]*models.Episode, error) {
+		return nil, errors.New("database down")
+	}))
+	if got["episode-1"].SeriesID != "" {
+		t.Fatalf("failed lookup event=%+v", got["episode-1"])
 	}
 }

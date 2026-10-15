@@ -1175,6 +1175,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			progressHandler.LibraryLookup = catalog.NewLibraryItemRepository(deps.DB)
 		}
+		if episodeRepo != nil {
+			progressHandler.EpisodeLookup = episodeRepo
+		}
 		collectionHandler = handlers.NewCollectionHandler(deps.UserStoreProvider)
 		if deps.DB != nil {
 			collectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}

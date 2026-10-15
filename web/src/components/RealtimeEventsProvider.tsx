@@ -413,6 +413,7 @@ function handleUserStateEvent(
     payload.content_id
       ? {
           itemId: payload.content_id,
+          seriesId: payload.series_id,
           skipItemDetail: detailFullyPatched,
           skipSimilarItems: true,
         }

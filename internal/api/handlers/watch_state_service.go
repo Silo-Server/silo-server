@@ -104,7 +104,7 @@ func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog
 // episodes and an ebook's read state lives in the reader-progress store. It
 // is the command behind v1 POST/DELETE /watched/{id} and the v2 operations.
 func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played bool, filter catalog.AccessFilter) (WatchedStateView, error) {
-	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, played, filter)
+	targetType, seriesID, targets, err := h.resolveWatchedTargets(ctx, contentID, played, filter)
 	if err != nil {
 		if isNotFound(err) {
 			return WatchedStateView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
@@ -142,7 +142,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 	}
 
 	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watched", userStateEventState{
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, seriesID, "watched", userStateEventState{
 		Played: boolPtr(played),
 	})
 
