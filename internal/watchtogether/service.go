@@ -158,6 +158,10 @@ const (
 	// viewer's instead of pulling every other viewer to it. Only a jump far
 	// beyond what a correction would fix is taken as the host's choice.
 	hostAuthorityDriftSeconds = 10.0
+	// legacyHostAuthorityDriftSeconds keeps the frozen /api/v1 room socket's
+	// host band. Its clients may report a host's scrub instead of requesting
+	// it, which the wider v2 band would correct away.
+	legacyHostAuthorityDriftSeconds = 2.0
 	// roomIdleTTL is how long a room may go without any playback-anchor
 	// activity before the janitor closes it.
 	roomIdleTTL = 24 * time.Hour
@@ -178,6 +182,15 @@ func closeReplacedConnection(conn RoomConnection) {
 		return
 	}
 	_ = conn.Close()
+}
+
+// hostAuthorityDrift is the host band for member's socket. A connection on
+// the /api/v1 room socket reports itself as legacy.
+func hostAuthorityDrift(member *memberState) float64 {
+	if legacy, ok := member.connection.(interface{ LegacyRoomProtocol() bool }); ok && legacy.LegacyRoomProtocol() {
+		return legacyHostAuthorityDriftSeconds
+	}
+	return hostAuthorityDriftSeconds
 }
 
 type RoomStore interface {
@@ -803,9 +816,11 @@ func (s *Service) handleTransportRequestForConnection(
 	if request.PositionSeconds != nil {
 		position = math.Max(0, *request.PositionSeconds)
 		// A play or pause carries where the requester was when it pressed;
-		// a playing room runs on until the command executes. A seek target
-		// is absolute.
-		if request.Action != TransportActionSeek && !live.room.IsPaused {
+		// a requester that was playing runs on until the command executes. A
+		// seek target is absolute. The room's own state is not enough: an
+		// earlier play inside the lead already marked it playing while the
+		// requester is still paused where that play was sent.
+		if request.Action != TransportActionSeek && !live.room.IsPaused && !request.IsPaused {
 			position += executeAt.Sub(now).Seconds()
 		}
 	}
@@ -943,13 +958,16 @@ func (s *Service) handleStateReportForConnection(
 	// position is reporting the stream's start, not a decision. Anchoring
 	// there would rewind everyone; correct the host like a guest instead. The
 	// first report that matches the room ends the sync.
-	// A host that names the sync it was sent has run it; it may still be
-	// closing the rest by rate, but its pause or resume is a decision again.
-	// Inside the sync's settle window its play state must match the sync,
-	// since a report can trail the player by a sample.
+	// A host that names the sync it was sent and plays as the sync said,
+	// inside the host band, has run it; it may still be closing the rest by
+	// rate, and its pause or resume is a decision again. Naming the sync is
+	// not enough: a player whose play was refused (a browser blocking
+	// autoplay after a reload) or whose correction never loaded names it
+	// too, and its report would pause or rewind everyone.
+	hostBand := hostAuthorityDrift(member)
 	if isHost && member.syncingToRoom {
 		ranSync := report.CommandID != "" && report.CommandID == member.lastSentCommandID &&
-			(report.IsPaused == member.lastSentPaused || !now.Before(member.settleUntil))
+			report.IsPaused == member.lastSentPaused && drift <= hostBand
 		if ranSync || (!pauseMismatch && drift <= 1.5) {
 			member.syncingToRoom = false
 		} else {
@@ -959,7 +977,7 @@ func (s *Service) handleStateReportForConnection(
 	// A host who is buffering or catching up reports a stalled stream, and a
 	// host inside the catch-up band has only drifted. Neither is a decision
 	// the room should follow.
-	if isHost && (member.ignoreWait || member.isBuffering || (!pauseMismatch && drift <= hostAuthorityDriftSeconds)) {
+	if isHost && (member.ignoreWait || member.isBuffering || (!pauseMismatch && drift <= hostBand)) {
 		isHost = false
 	}
 	// A stalled stream cannot apply a target; recovery is acknowledged with
@@ -1036,9 +1054,11 @@ func (s *Service) handleStateReportForConnection(
 		member.driftStrikes = 0
 		member.bestDrift = 0
 		member.correctionCommand = nil
-	} else if !pauseMismatch && drift <= convergingDriftSeconds &&
+	} else if !pauseMismatch && !live.room.IsPaused && drift <= convergingDriftSeconds &&
 		(member.bestDrift == 0 || drift < member.bestDrift-convergingProgressSeconds) {
-		// Closer than before: the member is converging, so it is left to it.
+		// Closer than its best since its last command (the first report after
+		// a command sets that best): the member is converging by rate, so it is
+		// left to it. A member of a paused room cannot converge by rate.
 		member.bestDrift = drift
 		member.driftStrikes = 0
 	} else if live.room.IsPaused && !pauseMismatch && member.correctionCommand != nil &&
@@ -1368,7 +1388,9 @@ func (s *Service) handleBufferingForConnection(
 		isHost := userID == live.room.HostUserID && profileID == live.room.HostProfileID
 		resumeFromStall := alone || isHost
 		if resumeFromStall {
-			if reported := math.Max(0, report.PositionSeconds); math.Abs(reported-position) <= maxBufferingAnchorDriftSeconds {
+			// The bound is measured where the room is now; position already
+			// runs on to executeAt, which would narrow it by the lead.
+			if reported := math.Max(0, report.PositionSeconds); math.Abs(reported-expectedPosition(live.room, now)) <= maxBufferingAnchorDriftSeconds {
 				position = reported
 			}
 		}
