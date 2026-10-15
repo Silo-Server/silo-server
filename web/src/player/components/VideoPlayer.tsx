@@ -800,14 +800,16 @@ export function VideoPlayer({
   // `waiting` alone doesn't mean the buffer is empty: it also fires on a seek
   // inside the buffer and on a brief decoder stall. A playhead that stays put
   // with media buffered gets one more look; a stream stuck there needs
-  // replacing as much as an empty one. Ending the drain clears the check.
+  // replacing as much as an empty one. A viewer who paused meanwhile isn't
+  // waiting for anything: playing again fires `waiting` if the element still
+  // can't play. Ending the drain clears the check.
   const scheduleDrainCheck = useCallback(() => {
     if (!hlsDrainingRef.current || drainCheckTimerRef.current !== null) return;
     let stalledAt: number | null = null;
     const check = () => {
       drainCheckTimerRef.current = null;
       const video = videoRef.current;
-      if (!video || video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
+      if (!video || video.paused || video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
       if (hasMediaAhead(video) && video.currentTime !== stalledAt) {
         stalledAt = video.currentTime;
         drainCheckTimerRef.current = setTimeout(check, DRAIN_CHECK_DELAY_MS);

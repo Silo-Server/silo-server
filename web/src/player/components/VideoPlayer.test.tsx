@@ -4634,6 +4634,7 @@ describe("VideoPlayer lost connection", () => {
     if (!video) throw new Error("expected video element");
     await waitFor(() => expect(hlsJS.latest).not.toBeNull());
     fireFrameTimeUpdate(video);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
     fireEvent.play(video);
 
     setElementBuffer(video, {
@@ -4707,6 +4708,26 @@ describe("VideoPlayer lost connection", () => {
     });
 
     expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(40, true);
+  });
+
+  it("leaves a draining HLS stream alone while the viewer pauses", async () => {
+    const onConnectionLost = vi.fn();
+    const video = await drainingHlsStream({ onConnectionLost });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    setElementBuffer(video, {
+      currentTime: 40,
+      bufferedEnd: 70,
+      readyState: HTMLMediaElement.HAVE_METADATA,
+    });
+    fireEvent.waiting(video);
+    Object.defineProperty(video, "paused", { configurable: true, value: true });
+    fireEvent.pause(video);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
   });
 
   it.each([
