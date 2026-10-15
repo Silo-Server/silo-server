@@ -28,15 +28,22 @@ const (
 	// probes back to back.
 	bandwidthProbeWindowBytes = 400_000_000
 	bandwidthProbeWindow      = 10 * time.Minute
+	// bandwidthProbeNodeMaxInFlight bounds probes on this server across all
+	// accounts, so many viewers signing in together cannot tie up its CPU and
+	// egress with probes. A refused client tries again a few minutes later.
+	bandwidthProbeNodeMaxInFlight = 32
+	bandwidthProbeNodeRetryAfter  = 30 * time.Second
 )
 
-// bandwidthProbeLimiter bounds each account's probes on this server: how many
-// run at once and how many bytes they send per window. It is per node on
-// purpose; what it protects (sockets, goroutines, the random-byte work) is
-// per node too.
+// bandwidthProbeLimiter bounds probes on this server: how many run at once
+// overall and per account, and how many bytes each account's probes send per
+// window. It is per node on purpose; what it protects (sockets, goroutines,
+// the random-byte work) is per node too.
 type bandwidthProbeLimiter struct {
 	mu       sync.Mutex
 	accounts map[int]*bandwidthProbeAccount
+	// inFlight counts probes running on this server across all accounts.
+	inFlight int
 }
 
 type bandwidthProbeAccount struct {
@@ -69,12 +76,16 @@ func (l *bandwidthProbeLimiter) acquire(userID, size int, now time.Time) (bool, 
 	if now.Sub(account.windowStart) >= bandwidthProbeWindow {
 		account.windowStart, account.windowBytes = now, 0
 	}
+	if l.inFlight >= bandwidthProbeNodeMaxInFlight {
+		return false, time.Time{}, bandwidthProbeNodeRetryAfter
+	}
 	if account.inFlight >= bandwidthProbeMaxInFlight {
 		return false, time.Time{}, 5 * time.Second
 	}
 	if account.windowBytes+size > bandwidthProbeWindowBytes {
 		return false, time.Time{}, account.windowStart.Add(bandwidthProbeWindow).Sub(now)
 	}
+	l.inFlight++
 	account.inFlight++
 	account.windowBytes += size
 	return true, account.windowStart, 0
@@ -87,6 +98,7 @@ func (l *bandwidthProbeLimiter) acquire(userID, size int, now time.Time) (bool, 
 func (l *bandwidthProbeLimiter) release(userID, unsent int, granted, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.inFlight--
 	account := l.accounts[userID]
 	if account == nil {
 		return
@@ -128,7 +140,7 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 		"422": {Description: http.StatusText(http.StatusUnprocessableEntity), Content: map[string]*huma.MediaType{problemContentType: {Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[Problem](), true, "")}}},
 	}
 	op := humaOp(http.MethodGet, Prefix+"/playback/bandwidth-probe", opGetPlaybackBandwidthProbe, playbackTag,
-		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. An account may run two probes at once on a server and draw up to 400 MB from it per 10 minutes; beyond either it gets 429 with Retry-After.")
+		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 32 probes at once; an account may run two of them and draw up to 400 MB per 10 minutes. Beyond any limit the request gets 429 with Retry-After.")
 	op.Parameters = params
 	op.Responses = responses
 	raw := RawOperation{Operation: Operation{Operation: op, Class: ClassAuthenticated}, Protocol: "bandwidth-probe",
