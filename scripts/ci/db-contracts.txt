@@ -371,3 +371,12 @@
 # A played mark later in the same second as a history removal stays visible.
 ./internal/userstore/pgstore TestImportedWritesAfterSameSecondRemovalDB
 ./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB
+
+# A scan cut short by shutdown goes back to the queue with its owed follow-up;
+# an admin cancel still ends it cancelled, and a late requeue never takes back
+# another worker's claim.
+./internal/scanqueue TestShutdownRequeuesRunningScanWithFollowUpDB
+./internal/scanqueue TestShutdownDuringLibraryLoadRequeuesScanDB
+./internal/scanqueue TestCancelByLibraryStillCancelsRunningScanDB
+./internal/scanqueue TestRequeueLeavesACancelledRunCancelledDB
+./internal/scanqueue TestRequeueLeavesALaterClaimRunningDB
