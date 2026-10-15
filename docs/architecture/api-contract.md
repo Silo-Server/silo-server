@@ -2391,10 +2391,26 @@ forget requests, return `404`; successful commands return `204`. Both commands a
 non-retryable because a later retry can remove settings written in the meantime.
 Neither operation revokes login sessions or changes push registrations.
 
+`PATCH /api/v2/devices/{device_id}` (`updateDevice`) updates the same registry entry,
+with the same `profile_id` authorization and `404` for a missing device. Its one
+member, `custom_name`, names the device for that profile: a string sets it, `null`
+removes it, and omission leaves it unchanged. The server removes control characters
+and bidirectional overrides, collapses spaces, and rejects a name with no visible
+character (`422`). Registration never writes the custom name, so it survives the
+device being seen again, and the reported `device_name` is kept. `listDevices`
+returns `custom_name` only when one is set; clients show it in place of
+`device_name`. The operation answers `200` with the entry as `listDevices` renders it
+and is naturally idempotent. A name
+belongs to one profile's entry, so a device two profiles use is named separately for
+each. `supports_device_rename` on `getSettingsContractCapabilities` tells a client
+the operation exists. Administrator device reads and download device views still
+show the reported name.
+
 The web device-settings screen uses these operations. The Apple and Android native
 clients have no callers for this settings-device lifecycle; Apple's push registration
 belongs to the separate notification contract. Jellyfin has no corresponding
-settings-device operation.
+settings-device operation; jellycompat does not serve Jellyfin's device list or its
+custom device names.
 
 ### Administrator collections v2
 

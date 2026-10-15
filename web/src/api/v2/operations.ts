@@ -544,6 +544,7 @@ export const v2Operations = {
   "PATCH /api/v2/admin/subtitles/{id}": "updateAdminSubtitleMetadata",
   "PATCH /api/v2/collections/groups/{id}": "updateCollectionGroup",
   "PATCH /api/v2/collections/{id}": "updateCollection",
+  "PATCH /api/v2/devices/{device_id}": "updateDevice",
   "PATCH /api/v2/downloads/subscriptions/{id}": "updateDownloadSubscription",
   "PATCH /api/v2/downloads/{id}": "reportDownloadStatus",
   "PATCH /api/v2/ebooks/{content_id}/annotations/{annotation_id}": "updateEbookAnnotation",

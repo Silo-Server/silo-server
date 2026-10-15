@@ -523,7 +523,7 @@ func DeviceMetadataFromHeaders(h http.Header) DeviceMetadata {
 func NewDeviceMetadata(id, name, platform string) DeviceMetadata {
 	return DeviceMetadata{
 		DeviceID:       clampHeaderValue(id, 128),
-		DeviceName:     clampHeaderValue(name, 120),
+		DeviceName:     clampHeaderValue(name, MaxDeviceNameRunes),
 		DevicePlatform: clampHeaderValue(platform, 40),
 	}
 }

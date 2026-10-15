@@ -3337,7 +3337,10 @@ export interface AdminDeviceProfileSummary {
 /** One device the signed-in viewer watches on. */
 export interface UserDevice {
   device_id: string;
+  /** The name the device reports for itself. */
   device_name: string;
+  /** The name the profile gave the device; absent when it has none. */
+  custom_name?: string;
   device_platform: string;
   last_seen_at: string;
   profile_id: string;
