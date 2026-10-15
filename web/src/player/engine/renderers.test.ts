@@ -5,6 +5,7 @@ import {
   Canvas2DRenderer,
   canvasMapsHDR,
   DEVICE_RECOVERY_TIMEOUT_MS,
+  FRAME_CHECK_RETRY_FRAMES,
   HDRPresenter,
   MAX_DEVICE_RECOVERIES,
   probePresenter,
@@ -169,6 +170,11 @@ class FakeDevice {
     this.resolveLost({ reason: "destroyed", message: "" } as GPUDeviceLostInfo);
   }
 }
+
+/** A read-back check picture with detail in it (a gradient), as a real frame gives. */
+const detailed = () => Uint8Array.from({ length: 256 * 8 }, (_, index) => (index * 7) % 256);
+/** Lets the frame check's read-backs and comparison finish. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** How many times a frame reached `device`, imported or copied. */
 const framesSent = (device: FakeDevice) =>
@@ -424,13 +430,14 @@ describe("WebGPURenderer", () => {
 
   it("copies frames until a check shows the import matches the copy, then imports them", async () => {
     const device = new FakeDevice();
+    device.readbacks = [detailed(), detailed()];
     devices.push(device);
     const { gpu, on } = await renderer();
     gpu.draw(frame(RETAGGED), size, viewport);
     // The first frame goes both ways into the check, then by copy to the screen.
     expect(device.queue.copyExternalImageToTexture).toHaveBeenCalledTimes(2);
     expect(device.importExternalTexture).toHaveBeenCalledTimes(1);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
     gpu.draw(frame(RETAGGED), size, viewport);
     expect(device.importExternalTexture).toHaveBeenCalledTimes(2);
     expect(device.queue.copyExternalImageToTexture).toHaveBeenCalledTimes(2);
@@ -441,15 +448,38 @@ describe("WebGPURenderer", () => {
   it("keeps copying frames where the import disagrees with the copy, as in WebKit", async () => {
     const device = new FakeDevice();
     // The import of a 10-bit frame comes out far off what the copy holds.
-    device.readbacks = [new Uint8Array(256 * 8).fill(200), new Uint8Array(256 * 8).fill(60)];
+    device.readbacks = [new Uint8Array(256 * 8).fill(200), detailed()];
     devices.push(device);
     const { gpu } = await renderer();
     gpu.draw(frame(RETAGGED), size, viewport);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
     gpu.draw(frame(RETAGGED), size, viewport);
     expect(device.queue.copyExternalImageToTexture).toHaveBeenCalledTimes(3);
     expect(device.importExternalTexture).toHaveBeenCalledTimes(1);
     expect(device.copiesReleased()).toBe(false);
+  });
+
+  it("decides nothing on a black first frame, and checks a later one", async () => {
+    const device = new FakeDevice();
+    // A fade from black: both ways come out black even where the import is wrong.
+    const black = () => new Uint8Array(256 * 8);
+    device.readbacks = [black(), black(), detailed(), detailed()];
+    devices.push(device);
+    const { gpu } = await renderer();
+    gpu.draw(frame(RETAGGED), size, viewport);
+    await settle();
+    for (let index = 0; index < FRAME_CHECK_RETRY_FRAMES; index++) {
+      gpu.draw(frame(RETAGGED), size, viewport);
+    }
+    // Still copying, and the copy texture kept.
+    expect(device.importExternalTexture).toHaveBeenCalledTimes(1);
+    expect(device.copiesReleased()).toBe(false);
+    gpu.draw(frame(RETAGGED), size, viewport);
+    await settle();
+    gpu.draw(frame(RETAGGED), size, viewport);
+    // The second check saw detail and found the two agreeing.
+    expect(device.importExternalTexture).toHaveBeenCalledTimes(3);
+    expect(device.copiesReleased()).toBe(true);
   });
 
   it("imports frames where the browser cannot copy them, as in Firefox", async () => {

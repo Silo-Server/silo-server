@@ -411,6 +411,14 @@ const FRAME_CHECK_SIZE = 8;
  * a level or two of filtering. WebKit's misread 10-bit frames differ by far more.
  */
 const FRAME_CHECK_TOLERANCE = 6;
+/**
+ * Spread, in 8-bit levels, the copied check picture needs before the check
+ * counts. A dark or flat frame (a fade from black, a title card) comes out
+ * alike both ways even where the import is wrong.
+ */
+const FRAME_CHECK_MIN_SPREAD = 32;
+/** Frames drawn, by copy, before a check that saw too little is tried again. */
+export const FRAME_CHECK_RETRY_FRAMES = 30;
 
 /**
  * Draws pictures with a compiled presenter into any render target: the
@@ -427,12 +435,14 @@ class GPUPresenter {
   private planeBindGroup: GPUBindGroup | null = null;
   /**
    * How frames reach the shader. Importing costs nothing, but WebKit imports
-   * 10-bit hardware-decoded frames wrongly, so the first frame is drawn both
-   * ways and the results compared (`checkFrameImport`). Until the answer
-   * comes, and wherever the two disagree, frames are copied.
+   * 10-bit hardware-decoded frames wrongly, so a frame is drawn both ways and
+   * the results compared (`checkFrameImport`). Until there is an answer, and
+   * wherever the two disagree, frames are copied.
    */
   private frameTransfer: FrameTransfer | null = null;
-  private frameCheckStarted = false;
+  private frameChecking = false;
+  /** Frames to draw before the next check; Infinity once checking gave up. */
+  private framesUntilCheck = 0;
   private copied: { texture: GPUTexture; bindGroup: GPUBindGroup } | null = null;
   private destroyed = false;
 
@@ -476,9 +486,13 @@ class GPUPresenter {
     transfer?: FrameTransfer,
   ): void {
     // Before this draw sets its own uniforms: the check draws with its own.
-    if (picture.kind === "frame" && !transfer && !this.frameCheckStarted) {
-      this.frameCheckStarted = true;
-      void this.checkFrameImport(picture, size);
+    if (picture.kind === "frame" && !transfer && !this.frameTransfer && !this.frameChecking) {
+      if (this.framesUntilCheck > 0) {
+        this.framesUntilCheck -= 1;
+      } else {
+        this.frameChecking = true;
+        void this.checkFrameImport(picture, size);
+      }
     }
     const rect = videoContentRect(width, height, size.width, size.height, fit);
     const x0 = (rect.x / width) * 2 - 1;
@@ -636,7 +650,8 @@ class GPUPresenter {
 
   /**
    * Draws `picture` both ways into small textures and compares them: frames
-   * are imported from then on where the two agree, and copied where not.
+   * are imported from then on where the two agree, and copied where not. A
+   * picture with too little in it decides nothing; a later frame is tried.
    */
   private async checkFrameImport(picture: EnginePicture, size: PictureSize): Promise<void> {
     const side = FRAME_CHECK_SIZE;
@@ -655,18 +670,30 @@ class GPUPresenter {
       this.draw(picture, size, "cover", imported.createView(), side, side, "import");
       const [a, b] = await Promise.all([this.readBack(imported), this.readBack(copied)]);
       let difference = 0;
+      let low = 255;
+      let high = 0;
       for (let pixel = 0; pixel < side * side; pixel++) {
         const offset = Math.floor(pixel / side) * 256 + (pixel % side) * 4;
         for (let channel = 0; channel < 3; channel++) {
-          difference += Math.abs(a[offset + channel]! - b[offset + channel]!);
+          const value = b[offset + channel]!;
+          difference += Math.abs(a[offset + channel]! - value);
+          low = Math.min(low, value);
+          high = Math.max(high, value);
         }
       }
       if (this.destroyed) return;
-      if (difference / (side * side * 3) > FRAME_CHECK_TOLERANCE) this.frameTransfer = "copy";
-      else this.useImport();
+      if (high - low < FRAME_CHECK_MIN_SPREAD) {
+        this.framesUntilCheck = FRAME_CHECK_RETRY_FRAMES;
+      } else if (difference / (side * side * 3) > FRAME_CHECK_TOLERANCE) {
+        this.frameTransfer = "copy";
+      } else {
+        this.useImport();
+      }
     } catch {
       // Without an answer frames stay copied, which is right everywhere it works.
+      this.framesUntilCheck = Infinity;
     } finally {
+      this.frameChecking = false;
       imported.destroy();
       copied.destroy();
     }

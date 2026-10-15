@@ -134,12 +134,13 @@ source gamut to BT.709, sRGB encode. These match the server's tone-map recipes i
   the shader. Chromium imports these through an 8-bit surface, so this path
   quantizes before tone mapping. WebKit imports 10-bit hardware-decoded frames
   wrongly (the samples come out as if read at 8 bits), so each presenter draws
-  its first frame both ways, imported and copied with
-  `copyExternalImageToTexture` into a half-float texture, at 8x8 and compares
-  them. Where they agree it imports from then on; where they differ (WebKit's
-  10-bit frames) it copies every frame, at the cost of one GPU copy per frame.
-  It copies until the answer arrives, and imports where the browser cannot copy
-  a VideoFrame (Firefox).
+  a frame both ways, imported and copied with `copyExternalImageToTexture` into
+  a half-float texture, at 8x8 and compares them. Where they agree it imports
+  from then on; where they differ (WebKit's 10-bit frames) it copies every
+  frame, at the cost of one GPU copy per frame. A dark or flat frame looks alike
+  both ways even when the import is wrong, so such a check decides nothing and
+  a later frame is tried. It copies until there is an answer, and imports where
+  the browser cannot copy a VideoFrame (Firefox).
 - **Routing.** Each picture goes to the path its kind and tag call for
   (`routePicture` in `engine/renderers.ts`):
 
