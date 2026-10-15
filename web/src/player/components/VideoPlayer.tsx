@@ -1,4 +1,6 @@
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
+import { useAutoQualityDownshift } from "../hooks/useAutoQualityDownshift";
+import { recordObservedBandwidthLimitKbps } from "../bandwidth-probe";
 import { skipTarget } from "../utils/skipTarget";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
@@ -3757,6 +3759,26 @@ export function VideoPlayer({
   useEffect(() => {
     handleQualitySelectRef.current = handleQualitySelect;
   }, [handleQualitySelect]);
+
+  // Auto quality chose this stream from an estimate taken before playback. When
+  // the link proves slower, record what it could not sustain and replan Auto,
+  // which reads that lower estimate. Rooms have their own lower-quality offer.
+  useAutoQualityDownshift({
+    videoRef,
+    enabled: activeQualityId === "auto" && !watchTogetherRoomActive,
+    sessionId,
+    planIdentity: plan,
+    deliveredKbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps,
+    onDownshift: (estimateKbps) => {
+      recordObservedBandwidthLimitKbps(estimateKbps);
+      setNotice({
+        title: "Lowering quality",
+        message: "Playback kept buffering, so Auto is switching to a lower bitrate.",
+        tone: "info",
+      });
+      handleQualitySelectRef.current("auto");
+    },
+  });
 
   // Rebuild pacing belongs to one stream in one room.
   useEffect(() => {

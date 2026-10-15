@@ -1608,6 +1608,17 @@ field rather than send a hint it knows is clamped, such as a browser's
 `navigator.connection.downlink`, which Chromium caps at 10 Mbps. Clients that
 can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api.md#bandwidth-probe)).
 
+A transcode is a single HLS rendition, so the player cannot step down on its
+own. A client on `auto` whose playback keeps rebuffering sends a
+`quality_change` replan that keeps `quality_preference: "auto"` and lowers
+`bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
+re-runs `auto` against the lower estimate. The web player does this after two
+stalls of at least a second within two minutes, or one stall of six seconds,
+ignoring the first ten seconds of a plan and buffering caused by seeks. It
+sends 70% of the delivered bitrate, so the next stream targets about 56% of
+the one that stalled. It keeps that lower estimate for the next 30 minutes and
+stops when a replan delivers no lower bitrate.
+
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
 start must never pay for. A rung whose toolchain turns out to be missing degrades

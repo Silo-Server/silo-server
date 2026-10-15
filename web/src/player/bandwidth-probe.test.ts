@@ -9,6 +9,7 @@ import {
   BANDWIDTH_ESTIMATE_TTL_MS,
   measureBandwidthKbps,
   readMeasuredBandwidthKbps,
+  recordObservedBandwidthLimitKbps,
 } from "./bandwidth-probe";
 import { storage } from "@/utils/storage";
 
@@ -97,5 +98,24 @@ describe("measured bandwidth cache", () => {
       JSON.stringify({ kbps: "fast", measuredAt: Date.now() }),
     );
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
+  });
+
+  it("only lowers the estimate when playback could not keep up", () => {
+    const now = Date.now();
+    storage.set(
+      storage.KEYS.BANDWIDTH_ESTIMATE,
+      JSON.stringify({ kbps: 200_000, measuredAt: now }),
+    );
+
+    recordObservedBandwidthLimitKbps(56_000, now);
+    expect(readMeasuredBandwidthKbps(now)).toBe(56_000);
+
+    recordObservedBandwidthLimitKbps(90_000, now);
+    expect(readMeasuredBandwidthKbps(now)).toBe(56_000);
+  });
+
+  it("records a limit when nothing was measured", () => {
+    recordObservedBandwidthLimitKbps(14_000);
+    expect(readMeasuredBandwidthKbps()).toBe(14_000);
   });
 });

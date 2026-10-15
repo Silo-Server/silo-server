@@ -80,6 +80,19 @@ export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined 
 }
 
 /**
+ * Records that playback could not sustain `kbps`. The cache only ever moves
+ * down this way, so later starts and replans in the TTL plan for the slower
+ * link instead of the optimistic probe.
+ */
+export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now()): void {
+  const limit = clampKbps(kbps);
+  if (limit === undefined) return;
+  const current = readStored(now);
+  if (current && current.kbps <= limit) return;
+  writeStored(limit, now);
+}
+
+/**
  * Times one probe download. Returns undefined when the probe failed, was
  * aborted, or moved too little data in too short a window to mean anything.
  */
