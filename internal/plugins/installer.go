@@ -617,8 +617,11 @@ func loadManifestFromBinary(ctx context.Context, binaryData []byte) (*pluginv1.P
 			"Silo couldn't run the plugin to read its manifest. It may be built for another platform, or the file may be damaged.")
 	}
 
+	// Fields this server's SDK doesn't know yet are dropped, as when an
+	// archive's manifest.json is loaded, so a plugin built on a newer SDK
+	// still installs.
 	var manifest pluginv1.PluginManifest
-	if err := protojson.Unmarshal(manifestOut, &manifest); err != nil {
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(manifestOut, &manifest); err != nil {
 		return nil, packageError(fmt.Errorf("parse plugin manifest output: %w", err),
 			"The plugin's manifest couldn't be read.")
 	}
