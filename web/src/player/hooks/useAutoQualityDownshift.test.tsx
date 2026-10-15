@@ -65,6 +65,14 @@ describe("createStallTracker", () => {
     expect(tracker.shouldDownshift(26_000)).toBe(true);
   });
 
+  it("still counts a long stall that ended before it was checked", () => {
+    const tracker = createStallTracker();
+    tracker.playing(0);
+    tracker.waiting(20_000);
+    tracker.playing(27_000);
+    expect(tracker.shouldDownshift(27_000)).toBe(true);
+  });
+
   it("does not blame the network for a seek", () => {
     const tracker = createStallTracker();
     tracker.playing(0);
