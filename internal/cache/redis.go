@@ -37,6 +37,12 @@ const (
 
 	// ChannelEvents is the pub/sub channel for passive websocket events.
 	ChannelEvents = "silo:events"
+
+	// ChannelPlaybackControl carries playback control requests between API
+	// replicas and their replies (playback.ControlRelay). It is separate from
+	// ChannelPlayback so plugin event consumers and cache invalidators never
+	// see administrator commands.
+	ChannelPlaybackControl = "silo:playback:control"
 )
 
 // ---------------------------------------------------------------------------
@@ -61,6 +67,7 @@ const (
 	EventOperationalLogAppended      = "operational_log_appended"
 	EventAuditLogAppended            = "audit_log_appended"
 	EventEventsNotification          = "events_notification"
+	EventPlaybackControlRelay        = "playback_control_relay"
 	// EventPluginsChanged is published on ChannelAdmin by the API server after
 	// every plugin lifecycle change (install, enable, disable, config save,
 	// auto-update, uninstall) so proxy nodes running resident plugins from the

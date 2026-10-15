@@ -314,6 +314,13 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// PlaybackControlRedisClient records playback control lane ownership. Its
+	// sockets honor context deadlines (cache.NewDeadlineRedisClientForRole),
+	// so a stalled Redis cannot hold an administrator request or the
+	// ownership worker past the relay's one-second bound. Without it there is
+	// no control relay (may be nil).
+	PlaybackControlRedisClient *redis.Client
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -1545,6 +1552,28 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
+		// Administrator commands run on the replica holding the session's
+		// control lane; the relay forwards them there over Redis.
+		if relay := playback.NewControlRelay(realtimeHub, deps.PlaybackControlRedisClient); relay != nil && deps.EventBus != nil {
+			publish := func(ctx context.Context, payload string) error {
+				return deps.EventBus.Publish(ctx, cache.ChannelPlaybackControl, cache.Event{Type: cache.EventPlaybackControlRelay, Payload: payload})
+			}
+			subscribe := func(ctx context.Context, handler func(string)) error {
+				return deps.EventBus.Subscribe(ctx, cache.ChannelPlaybackControl, func(event cache.Event) {
+					if event.Type == cache.EventPlaybackControlRelay {
+						handler(event.Payload)
+					}
+				})
+			}
+			relayCtx := deps.AppContext
+			if relayCtx == nil {
+				relayCtx = context.Background()
+			}
+			adminPlaybackControlHandler.UseControlRelay(relay)
+			if err := relay.Start(relayCtx, publish, subscribe); err != nil {
+				slog.Warn("playback control relay unavailable; administrator commands reach only sessions on this replica", "component", "api", "error", err)
+			}
+		}
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
 			roomTokenService := watchtogether.NewRoomTokenService(deps.Config.Auth.JWTSecret, 24*time.Hour)

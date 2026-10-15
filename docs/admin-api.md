@@ -2082,7 +2082,11 @@ client can represent it exactly, that must rise within the session), plus option
 whole body on retry.
 
 The server keeps one ledger per playback session in the process that serves
-the session's realtime lane. The ledger is bounded per session and released
+the session's realtime lane. With several API replicas, a command that reaches
+a replica without the lane is relayed to the replica that holds it, so every
+command for a session meets the same ledger whichever replica receives it
+([playback control relay](architecture/playback-control-relay.md)). The ledger
+is bounded per session and released
 with the session: terminate and the stop fallback drop it directly, and a
 throttled sweep on the command path prunes the ledgers of sessions that ended
 by any other route. It answers deterministically:
@@ -2109,7 +2113,10 @@ by any other route. It answers deterministically:
   rather than starting a fresh session
   ([playback API](playback-api.md#progress-and-stop)).
 - An unknown session is `404`; a server without playback control answers
-  `503 dependency_unavailable`.
+  `503 dependency_unavailable`. So does a command relayed to the replica
+  holding the lane when that replica does not answer in time: it may still
+  have applied the command, so retry with the same body, and a retry that
+  reaches it replays the recorded receipt.
 
 `GET /api/v2/admin/sessions/command-capabilities` reports `available`, the
 `actions` list and `sequenced_commands: true`. All of these require an acting
@@ -2139,7 +2146,13 @@ reconstructs the session from a stream token that is still inside its TTL
 ([restart-resilient playback](architecture/restart-resilient-playback.md)). Only
 then is the dismissal dispatched on the session's realtime control lane, without
 waiting for an acknowledgement. Terminates for one session are serialized, so a
-repeat observes the first outcome instead of racing it.
+repeat observes the first outcome instead of racing it. With several API
+replicas, the terminate runs on the replica that holds the session's lane, which
+ends its live session and notifies the player. When no replica holds a lane, or
+its holder does not answer, the receiving replica revokes the session itself.
+If the holder did not answer and the session is already gone, which is what a
+holder that ran the terminate leaves behind, the answer is
+`503 dependency_unavailable` rather than `404`.
 
 The optional JSON body carries `reason`. The `200` receipt carries
 `session_id`, `authority_revoked`, `already_revoked`, `durable_state`,
