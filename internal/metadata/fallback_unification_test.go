@@ -1110,3 +1110,44 @@ func TestPersonRefreshWithProviders_RefreshesWhenAttemptWriteFails(t *testing.T)
 		t.Fatalf("bio = %q, want %q", person.Bio, "Refreshed anyway")
 	}
 }
+
+// A refresh must not carry AI text forward: the provider upsert would label
+// it provider. Blank AI fields go out empty, which keeps the stored AI text
+// and source; provider text replaces AI text in either merge mode.
+func TestBuildLocalizationRecordsDoNotCarryAITextForward(t *testing.T) {
+	for _, mode := range []MergeMode{MergeFillEmpty, MergeReplaceUnlocked} {
+		season := buildSeasonLocalizationRecord(&models.SeasonLocalization{
+			Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
+		}, "season-1", "fr", SeasonResult{}, mode)
+		if season.Overview != "" {
+			t.Errorf("mode %v: season overview = %q, want empty", mode, season.Overview)
+		}
+
+		episode := buildEpisodeLocalizationRecord(&models.EpisodeLocalization{
+			Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
+		}, "episode-1", "fr", EpisodeResult{Overview: "Apercu fournisseur"}, mode)
+		if episode.Overview != "Apercu fournisseur" {
+			t.Errorf("mode %v: episode overview = %q, want provider overview", mode, episode.Overview)
+		}
+
+		kept := buildEpisodeLocalizationRecord(&models.EpisodeLocalization{
+			Overview: "Saisi", OverviewSource: models.LocalizationSourceManual,
+		}, "episode-1", "fr", EpisodeResult{}, mode)
+		if kept.Overview != "Saisi" {
+			t.Errorf("mode %v: manual overview = %q, want it carried forward", mode, kept.Overview)
+		}
+	}
+}
+
+// A refresh in a non-canonical language hands the item builder the
+// canonical-language result, so a scheduled refresh must keep the stored AI
+// translation rather than fill it with canonical text.
+func TestBuildItemLocalizationRecordKeepsAITextOnFillEmptyRefresh(t *testing.T) {
+	item := buildItemLocalizationRecord(&models.MediaItemLocalization{
+		Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
+		Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
+	}, "series-1", "fr", "series", &MetadataResult{Overview: "English overview", Tagline: "English tagline"}, nil, MergeFillEmpty, "fr", false)
+	if item.Overview != "Apercu IA" || item.Tagline != "Phrase IA" {
+		t.Fatalf("overview/tagline = %q/%q, want the AI translation kept", item.Overview, item.Tagline)
+	}
+}

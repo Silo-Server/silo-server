@@ -16,7 +16,7 @@ export function RestartBadge({ className }: { className?: string }) {
       aria-label={RESTART_TITLE}
       className={cn(
         "inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-500/25",
-        "bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide",
+        "bg-amber-500/10 px-1.5 py-0.5 text-xs font-medium tracking-wide",
         "text-amber-600 dark:text-amber-400",
         className,
       )}

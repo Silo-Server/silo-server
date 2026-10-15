@@ -637,7 +637,10 @@ path does not inherit evidence from a different playback engine.
 `original_http` never receives normalized-remux evidence. An HDR10 claim can
 carry `hdr10_max_width`, `hdr10_max_height`, `hdr10_max_frame_rate`, and
 `hdr10_max_bitrate_kbps`; these ceilings keep a successful format probe from
-admitting an untested stream class.
+admitting an untested stream class. When the viewer turns on the web player's
+browser decode engine, `original_http` instead carries
+`client_managed_dynamic_range_v1` (with WebGPU) and the engine tone-maps the
+original itself; see [web-decode-engine.md](web-decode-engine.md).
 
 ---
 
@@ -660,6 +663,18 @@ inventory, so selecting a non-default audio track does not by itself require
 the server to remux the file. Without the claim, the historical default-track
 gate remains. A claiming client that cannot honor the identity reports a typed
 playback failure so the bounded replan ladder can choose a packaged route.
+
+A `server_remux_progressive` stream is forward-only: it has no byte ranges, and
+a request for it always starts at the plan's position. The server closes it
+after it makes no write progress for the stream stall window (see
+[streaming write deadlines](streaming-write-deadline.md)), which a paused
+client causes once its buffer is full. A client cannot resume such a stream
+where it stopped and has to open a new one at that position. The web player
+does this with a `seek_reanchor` replan (§6) when playback resumes after a
+minute idle, and falls back to its reconnect (§6.2) when the replan is refused.
+It does not do this in a watch-together room, whose transport the room
+controls; a room member who pauses past the stall window is not recovered this
+way.
 
 `client_playback_context.deliveries` is keyed by **class**, because a client's
 answer to "can you play HLS" does not differ between a remux and a transcode —
@@ -1215,6 +1230,20 @@ route, so a direct-play viewer would come back on a transcode. The web player
 5. Any adopted plan ends the cycle. When the budget runs out, the client says
    the connection was lost and offers to try again. Leaving the player or
    starting other playback cancels the cycle.
+
+Keeping the current route eligible does not mean keeping a dead node. Every
+replan except `seek_reanchor` first asks the session's transcode node and egress
+proxy whether they answer, with a two-second bound. A node that does not answer
+is left out of that replan's plan and route: its capabilities don't count, its
+running transport is not reused even by a `track_change` that changes nothing,
+and the replacement starts elsewhere. A `failure_recovery` or
+`seek_failure_recovery` from such a node doesn't exclude the failed plan's key
+either: the node failed, not the recipe, so the same recipe can run on another
+node. If the dead node was the only proxy a progressive remux could use, the
+remux has no route left and is planned as HLS on a transcode node instead. The
+pool's health flag cannot be trusted for this: it changes only at the next health
+sweep, up to 30 seconds after the node went away, and until then the node still
+looks healthy.
 
 A network failure before a transport's own first frame stays on the ordinary
 failure path, even when an earlier transport of the same viewing played: the

@@ -307,4 +307,7 @@ sys.exit(int(os.environ.get('LINT_EXIT', '0')))
 
 
 if __name__ == "__main__":
+    # The repository CI already runs this entry point for lint helper checks.
+    from test_check_go_lint import CheckGoLintTests
+
     unittest.main()

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -154,5 +155,58 @@ func TestCancelRunningJobCancelsContext(t *testing.T) {
 	case <-stopped:
 	case <-time.After(2 * time.Second):
 		t.Fatal("running job did not observe cancellation")
+	}
+}
+
+// A job canceled while it waits to get its yielded slot back must not release
+// a slot it no longer holds, which would take the queued job's slot.
+func TestYieldCanceledWhileWaitingKeepsOtherSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, stop := context.WithCancel(context.Background())
+		defer stop()
+		sem := NewSemaphore(1)
+		r := New(ctx, sem, &fakeStore{}, "test", nil)
+
+		queued := make(chan struct{})
+		yieldErr := make(chan error, 1)
+		r.Dispatch(1, func(ctx context.Context) {
+			<-queued
+			yieldErr <- Yield(ctx)
+		}, nil)
+		synctest.Wait() // the job holds the slot
+
+		admitted := make(chan struct{})
+		go func() {
+			sem <- struct{}{}
+			close(admitted)
+		}()
+		synctest.Wait() // the job holds the slot; the other job waits for it
+		close(queued)
+		synctest.Wait()
+		select {
+		case <-admitted:
+		default:
+			t.Fatal("the queued job did not get the yielded slot")
+		}
+
+		r.Cancel(1)
+		if err := <-yieldErr; err == nil {
+			t.Fatal("Yield returned nil after the job was canceled")
+		}
+		r.wg.Wait()
+		if got := len(sem); got != 1 {
+			t.Fatalf("semaphore holds %d slots, want only the queued job's", got)
+		}
+	})
+}
+
+func TestYieldOutsideJobOnlyReportsContext(t *testing.T) {
+	if err := Yield(context.Background()); err != nil {
+		t.Fatalf("Yield = %v, want nil outside a job", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Yield(ctx); err == nil {
+		t.Fatal("Yield ignored a canceled context")
 	}
 }

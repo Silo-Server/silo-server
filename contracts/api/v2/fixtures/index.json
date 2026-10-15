@@ -3241,6 +3241,25 @@
       "body_file": "admin_recommendations_embeddings.json"
     },
     {
+      "name": "admin_recommendations_embeddings_reset",
+      "operation_id": "resetAdminRecommendationEmbeddings",
+      "scenario": "A reset reports what it deleted; global rows are kept.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/recommendations/embeddings/reset",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminRecommendationEmbeddingsReset",
+      "body_file": "admin_recommendations_embeddings_reset.json"
+    },
+    {
       "name": "admin_recommendations_recommendations",
       "operation_id": "triggerAdminRecommendationRefresh",
       "scenario": "Started acknowledges process-local background execution, not a persisted job.",
@@ -3262,7 +3281,7 @@
     {
       "name": "admin_recommendations_status",
       "operation_id": "getAdminRecommendationsStatus",
-      "scenario": "Persisted counts and process-local running flags have distinct meanings.",
+      "scenario": "Persisted counts, last runs from any server and process-local running flags have distinct meanings.",
       "request": {
         "method": "GET",
         "path": "/api/v2/admin/recommendations/status",
@@ -8749,6 +8768,45 @@
       "body_file": null
     },
     {
+      "name": "ignore_unmatched_item_not_found",
+      "operation_id": "ignoreUnmatchedItem",
+      "scenario": "Ignoring an item the catalog does not hold.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/libraries/unmatched-items/movie:missing/ignore",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "ignore_unmatched_item_not_found.json"
+    },
+    {
+      "name": "ignore_unmatched_item_ok",
+      "operation_id": "ignoreUnmatchedItem",
+      "scenario": "An admin marks an item as intentionally unmatched; ignoring an ignored item again is a no-op. Success answers 204 with no body.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/libraries/unmatched-items/movie:d/ignore",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "invitation_accepted",
       "operation_id": "acceptInvitation",
       "scenario": "Invitation lifecycle with synthetic identities and credentials.",
@@ -9916,6 +9974,26 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_household_sessions_verification_required.json"
+    },
+    {
+      "name": "list_ignored_unmatched_items_ok",
+      "operation_id": "listUnmatchedItems",
+      "scenario": "The items an admin marked as intentionally unmatched, each with when it was ignored.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/unmatched-items?ignored=true",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/UnmatchedItemCollection",
+      "body_file": "list_ignored_unmatched_items_ok.json"
     },
     {
       "name": "list_libraries_ok",
@@ -14476,6 +14554,25 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "undismiss_home_item_unknown_surface.json"
+    },
+    {
+      "name": "unignore_unmatched_item_ok",
+      "operation_id": "unignoreUnmatchedItem",
+      "scenario": "Clearing the mark of an item that is not ignored leaves it as is. Success answers 204 with no body.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/libraries/unmatched-items/movie:b/ignore",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
     },
     {
       "name": "unknown_query_parameter",

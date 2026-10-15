@@ -73,7 +73,7 @@ export function installationOptionValue(entry: RequestRouterInstallation): strin
  * when one is recorded, and otherwise adopts the installation's capability.
  */
 export function serverInstallation(
-  installations: RequestRouterInstallation[],
+  installations: readonly RequestRouterInstallation[],
   installationId: number | undefined,
   capabilityId: string | undefined,
 ): RequestRouterInstallation | undefined {
@@ -83,6 +83,22 @@ export function serverInstallation(
       (entry) => entry.installationID === installationId && entry.capability.id === capabilityId,
     ) ?? installations.find((entry) => entry.installationID === installationId)
   );
+}
+
+/**
+ * Whether servers of this type need an API key: every type does unless its
+ * plugin declares it works without one. An unknown type needs one.
+ */
+export function serverNeedsAPIKey(entry: RequestRouterInstallation | undefined): boolean {
+  return !entry?.capability.request_router?.api_key_optional;
+}
+
+/**
+ * Whether servers of this type need a URL: every type does unless its plugin
+ * declares it works without one. An unknown type needs one.
+ */
+export function serverNeedsBaseURL(entry: RequestRouterInstallation | undefined): boolean {
+  return !entry?.capability.request_router?.base_url_optional;
 }
 
 export function serverConfigSchema(entry: RequestRouterInstallation | undefined): {
@@ -162,10 +178,20 @@ export function serverFitsTier(
 
 /**
  * Whether the server could take a request right now: switched on, bound to a
- * plugin, and holding an API key. Anything less reads "Needs setup".
+ * plugin, and holding an API key unless its plugin needs none. Anything less
+ * reads "Needs setup".
  */
-export function serverReady(server: RequestIntegration): boolean {
-  return Boolean(server.enabled && server.installation_id && server.has_api_key);
+export function serverReady(
+  server: RequestIntegration,
+  installations: readonly RequestRouterInstallation[],
+): boolean {
+  if (!server.enabled || !server.installation_id) return false;
+  return (
+    Boolean(server.has_api_key) ||
+    !serverNeedsAPIKey(
+      serverInstallation(installations, server.installation_id, server.capability_id),
+    )
+  );
 }
 
 export function mediaTypePlural(mediaType: RequestRouteMediaType): string {

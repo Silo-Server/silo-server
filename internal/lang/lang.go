@@ -96,6 +96,23 @@ func CompatibleTag(value string) string {
 	return CanonicalTag(value)
 }
 
+// RegisteredTag is CompatibleTag limited to tags whose primary language subtag
+// is registered, for reading a language out of free-form names. Words that are
+// merely shaped like a language code, such as "cc" or "ai" in a file name,
+// return "". The registry includes every ISO 639-3 code, so many three-letter
+// words ("sub", "dub") still pass.
+func RegisteredTag(value string) string {
+	tag := CompatibleTag(value)
+	primary, _, _ := strings.Cut(tag, "-")
+	if primary == "" {
+		return ""
+	}
+	if _, err := language.ParseBase(primary); err != nil {
+		return ""
+	}
+	return tag
+}
+
 // bibliographicCodes holds the ISO 639-2/B codes that differ from the 639-2/T
 // form. Media filenames and older tags use either spelling.
 var bibliographicCodes = map[string]string{

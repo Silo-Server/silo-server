@@ -2553,6 +2553,57 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/libraries/{library_id}/metadata-translation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Prewarm a library: persist or reuse an active job that translates the missing descriptions of every item in the library, with their seasons and episodes, into a language. Existing provider, manual and AI text is kept. Progress counts items. */
+    post: operations["translateLibraryMetadata"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/libraries/{library_id}/metadata-translation/jobs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the latest 50 prewarm jobs of a library. */
+    get: operations["listLibraryMetadataTranslationJobs"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Request cancellation only for a prewarm job of the library. */
+    post: operations["cancelLibraryMetadataTranslation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/literary-works/{work_id}/items/{content_id}": {
     parameters: {
       query?: never;
@@ -3862,6 +3913,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/recommendations/embeddings/reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete the embedding lock, every item embedding, taste clusters and per-profile cached rows, and clear taste profile vectors, in one transaction.
+     * @description Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while saved embedding settings wait for a server restart. Run the embedding job afterwards to build the new embedding space.
+     */
+    post: operations["resetAdminRecommendationEmbeddings"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/recommendations/status": {
     parameters: {
       query?: never;
@@ -3869,7 +3940,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read persisted counts and this process's running flags. */
+    /** Read persisted counts, each job's last run, the embedding lock conflict and this process's running flags. */
     get: operations["getAdminRecommendationsStatus"];
     put?: never;
     post?: never;
@@ -6599,7 +6670,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Queue a translation of the item's descriptions into the language the detail document reported missing; answers 202 with the job. */
+    /** Queue a translation of the descriptions a page shows into the language its detail document reported missing: a movie's or series' own overview and tagline, a season's overview and its episodes' overviews, or one episode. Answers 202 with the job. */
     post: operations["translateCatalogItemDescription"];
     delete?: never;
     options?: never;
@@ -7939,10 +8010,10 @@ export interface paths {
     };
     /** Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it). */
     get: operations["getFavorite"];
-    /** Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated. */
+    /** Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent. */
     put: operations["addFavorite"];
     post?: never;
-    /** Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects. */
+    /** Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent. */
     delete: operations["deleteFavorite"];
     options?: never;
     head?: never;
@@ -8609,11 +8680,29 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Page the catalog items awaiting a metadata match, in title order. */
+    /** Page the catalog items awaiting a metadata match, in title order. Items an admin marked as intentionally unmatched are left out unless ignored is set, which lists only those. */
     get: operations["listUnmatchedItems"];
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/libraries/unmatched-items/{content_id}/ignore": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Mark an unmatched, pending or ambiguous movie or series as intentionally unmatched: it leaves the unmatched list and the matcher queues and automatic matching leaves it alone, while it stays playable with its local metadata. Match Item still works and clears the mark. Books cannot be ignored. */
+    put: operations["ignoreUnmatchedItem"];
+    post?: never;
+    /** Clear an item's intentionally-unmatched mark so it returns to the unmatched list and automatic matching tries it again; an unmarked item is left as is. */
+    delete: operations["unignoreUnmatchedItem"];
     options?: never;
     head?: never;
     patch?: never;
@@ -9903,7 +9992,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Cards recommended because the acting profile watched the item, minus what it has watched or rated low. */
+    /** Cards recommended because the acting profile watched the item, minus what it has watched or rated. */
     get: operations["listBecauseWatched"];
     put?: never;
     post?: never;
@@ -11349,23 +11438,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/theme/admin-css": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read public pre-login theme overrides. */
-    get: operations["getThemeOverrides"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v2/theme/branding": {
     parameters: {
       query?: never;
@@ -11976,10 +12048,10 @@ export interface paths {
     };
     /** Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it). */
     get: operations["getWatchlistEntry"];
-    /** Add the item to the acting profile's watchlist. Automatic retries are unsafe because provider and refresh effects are not change-gated. */
+    /** Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent. */
     put: operations["addToWatchlist"];
     post?: never;
-    /** Remove the item from the acting profile's watchlist; an absent entry succeeds, but automatic retries can repeat provider and refresh effects. */
+    /** Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent. */
     delete: operations["deleteWatchlistEntry"];
     options?: never;
     head?: never;
@@ -12402,6 +12474,11 @@ export interface components {
       max_playback_quality: string;
       /**
        * Format: int64
+       * @description Household profiles each member account may have, unless the account overrides it
+       */
+      max_profiles: number;
+      /**
+       * Format: int64
        * @description Remote per-stream bitrate ceiling in kbps; 0 means unlimited
        */
       max_remote_stream_bitrate_kbps: number;
@@ -12429,6 +12506,11 @@ export interface components {
       /** Format: int64 */
       max_local_stream_bitrate_kbps?: number;
       max_playback_quality?: string;
+      /**
+       * Format: int64
+       * @description Household profiles each member account may have; 5 when a new group omits it
+       */
+      max_profiles?: number;
       /** Format: int64 */
       max_remote_stream_bitrate_kbps?: number;
       /** Format: int64 */
@@ -12463,6 +12545,11 @@ export interface components {
        */
       max_local_stream_bitrate_kbps: number;
       max_playback_quality: string;
+      /**
+       * Format: int64
+       * @description Household profiles each member account may have, unless the account overrides it
+       */
+      max_profiles: number;
       /**
        * Format: int64
        * @description Remote per-stream bitrate ceiling in kbps; 0 means unlimited
@@ -12505,6 +12592,8 @@ export interface components {
       password_reset_link: boolean;
       /** @description Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override */
       policy_defaults: boolean;
+      /** @description Whether access groups and account policy overrides take max_profiles, the household profile limit; null on an account inherits its group's limit */
+      profile_limits: boolean;
       /** @description Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout */
       profile_sections: boolean;
       /** @description Whether getAdminRequestUserUsage can report an account's request quota use */
@@ -12535,8 +12624,11 @@ export interface components {
       /** Format: int64 */
       max_local_stream_bitrate_kbps?: number | null;
       max_playback_quality?: string | null;
-      /** Format: int64 */
-      max_profiles?: number;
+      /**
+       * Format: int64
+       * @description Household profile limit override; null inherits the access group's limit
+       */
+      max_profiles?: number | null;
       /** Format: int64 */
       max_remote_stream_bitrate_kbps?: number | null;
       /** Format: int64 */
@@ -12598,8 +12690,11 @@ export interface components {
       /** Format: int64 */
       max_local_stream_bitrate_kbps?: number | null;
       max_playback_quality?: string | null;
-      /** Format: int64 */
-      max_profiles?: number;
+      /**
+       * Format: int64
+       * @description Household profile limit override; null inherits the access group's limit
+       */
+      max_profiles?: number | null;
       /** Format: int64 */
       max_remote_stream_bitrate_kbps?: number | null;
       /** Format: int64 */
@@ -13708,6 +13803,7 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       downloads_stats: boolean;
+      egress_totals: boolean;
       health: boolean;
       log_level_list: boolean;
       playback_activity: boolean;
@@ -13825,6 +13921,10 @@ export interface components {
       watch_providers: components["schemas"]["AdminDashboardWatchProviderStats"][];
     };
     AdminDashboardTimeseries: {
+      /** Format: int64 */
+      download_egress_bytes: number;
+      /** Format: int64 */
+      egress_bytes: number;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -16694,6 +16794,8 @@ export interface components {
        * @example https://silo.example.test/login
        */
       post_logout_redirect_url?: string;
+      /** @description On a request_router.v1 capability: which request server fields its plugin can do without. Omitted for other capability types */
+      request_router?: components["schemas"]["AdminPluginRequestRouter"];
       /**
        * @description How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types
        * @example oauth
@@ -16936,6 +17038,12 @@ export interface components {
       display_name?: string;
       enabled?: boolean;
       url?: string;
+    };
+    AdminPluginRequestRouter: {
+      /** @description The plugin works without an API key: a request server for it can be saved and tested without one, and gets requests without one */
+      api_key_optional: boolean;
+      /** @description The plugin works without a base URL: a request server for it can be saved and tested without one */
+      base_url_optional: boolean;
     };
     AdminPluginRuntime: {
       /** @description Why the process last stopped or failed to start */
@@ -17343,18 +17451,85 @@ export interface components {
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
     };
+    AdminRecommendationEmbeddingsReset: {
+      /**
+       * Format: int64
+       * @description Per-profile cached recommendation rows deleted. Global rows are kept.
+       */
+      cached_rows: number;
+      /**
+       * Format: int64
+       * @description Item embeddings deleted.
+       */
+      embeddings: number;
+      /**
+       * Format: int64
+       * @description Taste clusters deleted.
+       */
+      taste_clusters: number;
+      /**
+       * Format: int64
+       * @description Taste profiles whose vectors were cleared. Each is rebuilt once the embedding job stores its titles' vectors again.
+       */
+      taste_profiles: number;
+    };
+    AdminRecommendationJobRun: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      completed_at: string;
+      /** @description Why the run failed, with credentials masked. Present only when status is failed. */
+      error?: string;
+      /** @description Counts the run reported. Keys differ by job and may grow. */
+      result?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      started_at: string;
+      /**
+       * @description completed also covers runs that finished with partial failures; result counts them.
+       * @enum {string}
+       */
+      status: "completed" | "failed";
+    };
     AdminRecommendationJobStatus: {
       /** Format: int64 */
       count: number;
+      /** @description The newest finished partial run on any server: the embedding catch-up pass for embeddings, the startup global-row build for recommendations. Absent for other jobs and until one finishes. */
+      last_partial_run?: components["schemas"]["AdminRecommendationJobRun"];
+      /** @description The newest finished full run of this job on any server: scheduled or triggered. Absent until one finishes. */
+      last_run?: components["schemas"]["AdminRecommendationJobRun"];
       running: boolean;
       /** Format: int64 */
       total?: number;
     };
     AdminRecommendationsStatus: {
+      /**
+       * Format: date-time
+       * @description When the newest cached recommendation row was written, by the cache job or a profile refresh. It is not job health: profile refreshes keep it recent while the cache job fails; read recommendations.last_run for that. Absent when nothing is cached.
+       */
+      cache_refreshed_at?: string;
       cowatch: components["schemas"]["AdminRecommendationJobStatus"];
       embeddings: components["schemas"]["AdminRecommendationJobStatus"];
+      /** @description Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not. */
+      lock_conflict: string;
       recommendations: components["schemas"]["AdminRecommendationJobStatus"];
+      /** @description The stale profile sweep, which rebuilds profiles after their signals or access change. */
+      stale_sweep: components["schemas"]["AdminRecommendationStaleSweep"];
       taste_profiles: components["schemas"]["AdminRecommendationJobStatus"];
+    };
+    AdminRecommendationStaleSweep: {
+      /** @description The newest sweep on any server that rebuilt or failed at least one profile. Absent until one does. */
+      last_run?: components["schemas"]["AdminRecommendationJobRun"];
+      /**
+       * Format: int64
+       * @description Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending.
+       */
+      pending: number;
     };
     AdminRecommendationStarted: {
       /**
@@ -19011,7 +19186,15 @@ export interface components {
       sync_schedule?: string;
       title: string;
     };
+    AdminTranslateLibraryInputBody: {
+      /**
+       * @description BCP 47 tag of the language to fill in
+       * @example de
+       */
+      target_language: string;
+    };
     AdminTranslateMetadataInputBody: {
+      /** @description Also replace text an earlier AI translation wrote. Provider and manual text is never replaced. */
       force?: boolean;
       /** @description Defaults true for item targets; ignored for season and episode targets. */
       include_children?: boolean | null;
@@ -19208,10 +19391,10 @@ export interface components {
       max_playback_quality: string | null;
       /**
        * Format: int64
-       * @description Household profile limit
+       * @description Household profile limit override; null inherits the access group's limit
        * @example 5
        */
-      max_profiles: number;
+      max_profiles: number | null;
       /**
        * Format: int64
        * @description Remote per-stream bitrate override in kbps; null inherits, 0 means unlimited
@@ -20051,7 +20234,6 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
       branding_available: boolean;
-      overrides_available: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -20305,6 +20487,8 @@ export interface components {
       last_air_date?: string;
       /** @description Presigned, short-lived */
       logo_url?: string;
+      /** @description Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone. */
+      machine_translated_fields?: ("overview" | "tagline")[];
       /** Format: int64 */
       manga_chapter_count?: number;
       /** Format: int64 */
@@ -20315,6 +20499,8 @@ export interface components {
       /** @description Technical badges of the best file */
       overlay_summary?: components["schemas"]["CatalogItemOverlay"];
       overview?: string;
+      /** @description The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language. */
+      pending_translation_language?: string;
       /** @description The item to play when the card is a series or season; absent when the item plays itself */
       play_content_id?: string;
       /**
@@ -20489,6 +20675,8 @@ export interface components {
       locked_fields?: number[];
       /** @description Presigned, short-lived */
       logo_url?: string;
+      /** @description Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone. */
+      machine_translated_fields?: ("overview" | "tagline")[];
       manga?: components["schemas"]["MangaDetailExtension"];
       /** Format: int64 */
       manga_chapter_count?: number;
@@ -20501,7 +20689,7 @@ export interface components {
       /** @description Technical badges of the best file */
       overlay_summary?: components["schemas"]["CatalogItemOverlay"];
       overview?: string;
-      /** @description A translation of the overview is queued for this language */
+      /** @description The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language. */
       pending_translation_language?: string;
       /** @description The item to play when the card is a series or season; absent when the item plays itself */
       play_content_id?: string;
@@ -22849,6 +23037,12 @@ export interface components {
       max_playback_quality: string;
       /**
        * Format: int64
+       * @description Household profile limit
+       * @example 5
+       */
+      max_profiles: number;
+      /**
+       * Format: int64
        * @description Remote per-stream bitrate limit in kbps; 0 means unlimited
        * @example 0
        */
@@ -23128,8 +23322,14 @@ export interface components {
       episode_number: number;
       files?: components["schemas"]["EpisodeFile"][];
       imdb_id?: string;
+      /** @description Localized fields whose text was machine-translated by AI; absent when none were */
+      machine_translated_fields?: "overview"[];
       overlay_summary?: components["schemas"]["CatalogItemOverlay"];
       overview?: string;
+      /** @description The language this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it */
+      pending_translation_language?: string;
+      /** @description The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating. */
+      ratings?: components["schemas"]["CatalogRating"][];
       /**
        * Format: int64
        * @description Minutes
@@ -23488,6 +23688,8 @@ export interface components {
       last_air_date?: string;
       /** @description Presigned, short-lived */
       logo_url?: string;
+      /** @description Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone. */
+      machine_translated_fields?: ("overview" | "tagline")[];
       /** Format: int64 */
       manga_chapter_count?: number;
       /** Format: int64 */
@@ -23498,6 +23700,8 @@ export interface components {
       /** @description Technical badges of the best file */
       overlay_summary?: components["schemas"]["CatalogItemOverlay"];
       overview?: string;
+      /** @description The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language. */
+      pending_translation_language?: string;
       /** @description The item to play when the card is a series or season; absent when the item plays itself */
       play_content_id?: string;
       /**
@@ -23975,6 +24179,8 @@ export interface components {
       /** Format: int64 */
       embeddings_imported: number;
       /** Format: int64 */
+      embeddings_skipped: number;
+      /** Format: int64 */
       episodes_created: number;
       /** Format: int64 */
       episodes_updated: number;
@@ -24193,6 +24399,11 @@ export interface components {
     LibraryCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /**
+       * @description This build supports marking unmatched items as intentionally unmatched with ignoreUnmatchedItem, and listing them with listUnmatchedItems' ignored filter
+       * @example true
+       */
+      ignore_unmatched: boolean;
       /**
        * @description This build supports real-time library monitoring and its status read
        * @example true
@@ -25323,7 +25534,7 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       /**
-       * @description Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the server queues it on view)
+       * @description Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the client requests the translation itself when it shows an item whose pending_translation_language is set)
        * @example button
        */
       on_view: string;
@@ -25462,6 +25673,7 @@ export interface components {
       fields_done: number;
       /** Format: int64 */
       fields_total: number;
+      /** @description The job also replaces earlier AI text; provider and manual text is never replaced */
       force: boolean;
       /**
        * @description Opaque identifier
@@ -25479,7 +25691,7 @@ export interface components {
       source_language: string;
       /** @description pending, running, completed, failed, or canceled */
       status: string;
-      /** @description item, season, or episode */
+      /** @description item, season, episode, or library (a prewarm, whose fields_done and fields_total count items) */
       target_kind: string;
       target_language: string;
       /**
@@ -25794,8 +26006,10 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision, or null
        */
       read_at: string | null;
-      /** @description A JSON value whose shape is the setting's value_schema in the settings contract. */
-      reason_flags: unknown;
+      /** @description Event-specific reason data. Its keys depend on the notification type; clients ignore keys they do not recognize. */
+      reason_flags: {
+        [key: string]: unknown;
+      };
       /** Format: int64 */
       season_number?: number;
       /**
@@ -27575,6 +27789,12 @@ export interface components {
       max_playback_quality: string;
       /**
        * Format: int64
+       * @description Household profile limit
+       * @example 5
+       */
+      max_profiles: number;
+      /**
+       * Format: int64
        * @description Remote per-stream bitrate limit in kbps; 0 means unlimited
        * @example 0
        */
@@ -28979,6 +29199,8 @@ export interface components {
       /** Format: int64 */
       episode_count: number;
       is_specials?: boolean;
+      /** @description Localized fields whose text was machine-translated by AI; absent when none were */
+      machine_translated_fields?: "overview"[];
       overview?: string;
       /** @description The episode to play next */
       play_content_id?: string;
@@ -30411,10 +30633,6 @@ export interface components {
        */
       container: string;
     };
-    ThemeOverrides: {
-      raw_css: string;
-      vars: string;
-    };
     ThemePlayback: {
       /**
        * @description Media type of the audio at url
@@ -30744,7 +30962,7 @@ export interface components {
     };
     TranslateDescription: {
       /**
-       * @description BCP 47 tag of the wanted language, as the detail document's pending_translation_language reported it
+       * @description BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language.
        * @example de
        */
       target_language: string;
@@ -30754,6 +30972,11 @@ export interface components {
       content_id: string;
       /** @example movie */
       content_type: string;
+      /**
+       * Format: date-time
+       * @description When an admin marked the item as intentionally unmatched; absent unless it is ignored
+       */
+      ignored_at?: string;
       /**
        * @description "0" when the item is in no library
        * @example 1
@@ -30989,6 +31212,9 @@ export interface components {
       title: string;
     };
     WatchDetail: {
+      backdrop_thumbhash?: string;
+      /** @description The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size */
+      backdrop_url?: string;
       /** @example movie:heat-1995 */
       content_id: string;
       credits?: components["schemas"]["WatchMarker"];
@@ -31009,6 +31235,9 @@ export interface components {
       overview?: string;
       /** @description Logical watch choices, each spanning one or more ordered parts */
       playback_variants?: components["schemas"]["WatchPlaybackVariant"][];
+      poster_thumbhash?: string;
+      /** @description The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls */
+      poster_url?: string;
       preview?: components["schemas"]["WatchMarker"];
       recap?: components["schemas"]["WatchMarker"];
       /** Format: int64 */
@@ -31908,6 +32137,8 @@ export interface components {
       last_air_date?: string;
       /** @description Presigned, short-lived */
       logo_url?: string;
+      /** @description Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone. */
+      machine_translated_fields?: ("overview" | "tagline")[];
       /** Format: int64 */
       manga_chapter_count?: number;
       /** Format: int64 */
@@ -31918,6 +32149,8 @@ export interface components {
       /** @description Technical badges of the best file */
       overlay_summary?: components["schemas"]["CatalogItemOverlay"];
       overview?: string;
+      /** @description The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language. */
+      pending_translation_language?: string;
       /** @description The item to play when the card is a series or season; absent when the item plays itself */
       play_content_id?: string;
       /**
@@ -32075,6 +32308,8 @@ export interface components {
       last_air_date?: string;
       /** @description Presigned, short-lived */
       logo_url?: string;
+      /** @description Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone. */
+      machine_translated_fields?: ("overview" | "tagline")[];
       /** Format: int64 */
       manga_chapter_count?: number;
       /** Format: int64 */
@@ -32085,6 +32320,8 @@ export interface components {
       /** @description Technical badges of the best file */
       overlay_summary?: components["schemas"]["CatalogItemOverlay"];
       overview?: string;
+      /** @description The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language. */
+      pending_translation_language?: string;
       /** @description The item to play when the card is a series or season; absent when the item plays itself */
       play_content_id?: string;
       /**
@@ -54944,7 +55181,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The job was already canceled. */
+      /** @description The job is canceled: it was already canceled, or it was a queued image cache cleanup that this request canceled at once. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -55677,6 +55914,365 @@ export interface operations {
       };
       /** @description Precondition Required */
       428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  translateLibraryMetadata: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The library */
+        library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminTranslateLibraryInputBody"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MetadataTranslationJob"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listLibraryMetadataTranslationJobs: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The library */
+        library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminMetadataTranslationJobs"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  cancelLibraryMetadataTranslation: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        job_id: string;
+        /** @description The library */
+        library_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -66960,6 +67556,121 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resetAdminRecommendationEmbeddings: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminRecommendationEmbeddingsReset"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
           [name: string]: unknown;
         };
         content: {
@@ -108595,6 +109306,8 @@ export interface operations {
       query?: {
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
+        /** @description List the items an admin marked as intentionally unmatched instead of the ones awaiting a match */
+        ignored?: boolean;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
         /** @description Case-insensitive substring over title, type, status and library name */
@@ -108619,6 +109332,229 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["UnmatchedItemCollection"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  ignoreUnmatchedItem: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The catalog item */
+        content_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  unignoreUnmatchedItem: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The catalog item */
+        content_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -131635,71 +132571,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SetupStatus"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  getThemeOverrides: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeOverrides"];
         };
       };
       /** @description Bad Request */

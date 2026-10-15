@@ -97,6 +97,7 @@ type RecipeCard struct {
 	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
+	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
 	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
 	CopySeekAnchorResolved     bool                   `json:"copy_seek_anchor_resolved,omitempty"`
@@ -201,6 +202,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		VideoBitstreamFilter:       opts.VideoBitstreamFilter,
 		VideoSampleEntry:           opts.VideoSampleEntry,
 		CopyVideoMPEGTS:            opts.CopyVideoMPEGTS,
+		KeyframePlaylist:           opts.KeyframePlaylist,
 		SeekSeconds:                opts.SeekSeconds,
 		StreamOriginSeconds:        opts.StreamOriginSeconds,
 		CopySeekAnchorResolved:     opts.CopySeekAnchorResolved,
@@ -303,6 +305,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
+		KeyframePlaylist:           c.KeyframePlaylist,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -415,6 +418,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
+		KeyframePlaylist:           c.KeyframePlaylist,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -501,6 +505,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		VideoBitstreamFilter:          c.VideoBitstreamFilter,
 		VideoSampleEntry:              c.VideoSampleEntry,
 		CopyVideoMPEGTS:               c.CopyVideoMPEGTS,
+		KeyframePlaylist:              c.KeyframePlaylist,
 		SeekSeconds:                   c.SeekSeconds,
 		StreamOriginSeconds:           c.StreamOriginSeconds,
 		CopySeekAnchorResolved:        c.CopySeekAnchorResolved,

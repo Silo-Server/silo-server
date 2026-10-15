@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -387,6 +388,73 @@ func TestCountCatalogSearchVectorDocumentsModelCoverage(t *testing.T) {
 	// placeholder does not error.
 	if _, err := countCatalogSearchVectorDocuments(ctx, pool, nil, "text-embedding-3-large"); err != nil {
 		t.Fatalf("count with nil item types: %v", err)
+	}
+}
+
+// TestCatalogSearchDocumentsCarryOnlyTheActiveModelsVectors verifies that the
+// indexer sends a vector only for an item embedded by the locked model, the
+// rows the coverage gate counts, and opts the other item out explicitly.
+func TestCatalogSearchDocumentsCarryOnlyTheActiveModelsVectors(t *testing.T) {
+	ctx := context.Background()
+	pool := newSemanticCoverageTestPool(t)
+	prefix := fmt.Sprintf("idx-model-%d", time.Now().UnixNano())
+	current := prefix + "-current"
+	other := prefix + "-other"
+	cleanupSemanticCoverageItems(t, pool, prefix)
+	seedSemanticCoverageMediaItem(t, pool, current, "movie", "matched")
+	seedSemanticCoverageMediaItem(t, pool, other, "movie", "matched")
+	seedSemanticCoverageEmbedding(t, pool, current, "model-a")
+	seedSemanticCoverageEmbedding(t, pool, other, "model-b")
+	ids := []string{current, other}
+	types := []string{"movie"}
+
+	vectorsOf := func(indexer *CatalogSearchIndexer) map[string]bool {
+		t.Helper()
+		docs, err := indexer.LoadDocumentsByIDs(ctx, ids, types, DefaultMeilisearchEmbedder, true, false)
+		if err != nil {
+			t.Fatalf("LoadDocumentsByIDs(): %v", err)
+		}
+		has := map[string]bool{}
+		for _, doc := range docs {
+			vector, ok := doc.Vectors[DefaultMeilisearchEmbedder]
+			if !ok {
+				t.Fatalf("document %s has no _vectors entry for the embedder: %#v", doc.ContentID, doc.Vectors)
+			}
+			has[doc.ContentID] = len(vector) > 0
+		}
+		return has
+	}
+
+	lockedIndexer := NewCatalogSearchIndexer(pool, nil).WithSemanticModelProvider(constCoverageModels{model: "model-a"})
+	locked := vectorsOf(lockedIndexer)
+	if !locked[current] || locked[other] {
+		t.Fatalf("with model-a locked, vectors = %v; want only %s", locked, current)
+	}
+	// The indexer's vector count is the coverage numerator for the same model.
+	indexed, err := lockedIndexer.countIndexedVectors(ctx, types)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := catalogSemanticCoverageByType(ctx, pool, types, "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coverage) != 1 || coverage[0].Vectorized != indexed || indexed < 1 {
+		t.Fatalf("indexer counts %d model-a vectors, coverage %+v", indexed, coverage)
+	}
+
+	// No lock yet: every stored vector is indexed, as before.
+	unlocked := vectorsOf(NewCatalogSearchIndexer(pool, nil).WithSemanticModelProvider(constCoverageModels{}))
+	if !unlocked[current] || !unlocked[other] {
+		t.Fatalf("with no lock, vectors = %v; want both", unlocked)
+	}
+
+	failing := NewCatalogSearchIndexer(pool, nil).WithSemanticModelProvider(&fakeCoverageModels{results: []struct {
+		model string
+		err   error
+	}{{"", errors.New("lock unavailable")}}})
+	if _, err := failing.LoadDocumentsByIDs(ctx, ids, types, DefaultMeilisearchEmbedder, true, false); err == nil {
+		t.Fatal("documents were built without knowing the active model")
 	}
 }
 

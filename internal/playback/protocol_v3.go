@@ -119,6 +119,10 @@ const (
 	TransportFeaturePreparedTracksV1 = "prepared_tracks_v1"
 	// A transcode node that makes trickplay sheets (POST /trickplay/extract).
 	TransportFeatureTrickplayExtractV1 = "trickplay_extract_v1"
+	// A trickplay node that converts HDR with the tone-map source signal a
+	// request names, decodes on CUDA, and repairs missing and repeated cells.
+	// API servers that send the signal only use nodes that advertise it.
+	TransportFeatureTrickplayExtractV2 = "trickplay_extract_v2"
 )
 
 // Degradation warning codes reported by playback plans.

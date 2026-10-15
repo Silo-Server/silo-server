@@ -23,6 +23,7 @@ import {
 } from "@/hooks/queries/admin/users";
 import type { AdminDeviceSummary } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -350,41 +351,41 @@ export default function AdminDevices() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1920px] space-y-5 px-4 py-4 sm:px-6 sm:py-6 lg:px-8 xl:px-10">
-      {/* page header */}
-      <div className="page-header items-end gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Devices</h1>
-          <p className="page-subtitle max-w-2xl text-sm sm:text-base">
+    <div className="w-full space-y-5 pb-4 sm:pb-6">
+      <PageHeader
+        title="Devices"
+        subtitle={
+          <>
             Inspect, tune, and reset per-profile playback overrides across the fleet. Filter by
             user, platform, or override pattern. Press{" "}
             <kbd className="bg-surface/70 border-border/70 text-foreground/80 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10.5px]">
               {SEARCH_SHORTCUT_LABEL}
             </kbd>{" "}
             to jump to another admin page.
-          </p>
-        </div>
-
-        <div className="relative w-full sm:w-[340px]">
-          <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-          <Input
-            className="bg-background/60 h-9 pr-9 pl-9 text-[13px]"
-            placeholder="Search devices, users, IDs, profiles…"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          {search ? (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 transition-colors"
-              aria-label="Clear search"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
-        </div>
-      </div>
+          </>
+        }
+        actions={
+          <div className="relative w-full sm:w-[340px]">
+            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+            <Input
+              className="bg-background/60 h-9 pr-9 pl-9 text-[13px]"
+              placeholder="Search devices, users, IDs, profiles…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
+        }
+      />
 
       {/* fleet pulse */}
       {!isLoading && devices.length > 0 && (

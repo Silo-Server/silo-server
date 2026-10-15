@@ -1,3 +1,4 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -306,5 +307,56 @@ describe("SeasonContent", () => {
     expect(markup).toContain("Season Director");
     expect(markup).not.toContain("Creators");
     expect(markup).not.toContain("Series Creator");
+  });
+
+  it("offers the season's translation beside the episodes when there is no overview", () => {
+    const translate = vi.fn();
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: translate });
+    render(
+      <MemoryRouter>
+        <SeasonContent item={makeSeasonItem({ overview: "" })} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Translate episodes" }));
+    expect(translate).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the action to the overview when the season has one", () => {
+    const translate = vi.fn();
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: translate });
+    render(
+      <MemoryRouter>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button", { name: "Translate episodes" })).not.toBeInTheDocument();
+    expect(mocks.capturedDetailHeroProps.value).toMatchObject({ onTranslateOverview: translate });
+  });
+
+  it("moves the action to the episodes when an episode is what is missing", () => {
+    const translate = vi.fn();
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: translate });
+    const listed = mocks.useItemEpisodes();
+    mocks.useItemEpisodes.mockReturnValue({
+      ...listed,
+      data: {
+        ...listed.data,
+        episodes: listed.data.episodes.map((episode: object) => ({
+          ...episode,
+          pending_translation_language: "fr",
+        })),
+      },
+    });
+    render(
+      <MemoryRouter>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Translate episodes" }));
+    expect(translate).toHaveBeenCalledTimes(1);
+    expect(mocks.capturedDetailHeroProps.value).toMatchObject({
+      overviewTranslating: false,
+      onTranslateOverview: undefined,
+    });
   });
 });

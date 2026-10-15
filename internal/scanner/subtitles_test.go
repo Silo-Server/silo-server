@@ -87,3 +87,73 @@ func TestParseSuffixCanonicalizesCompatibleLanguageTags(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSuffixReadsLanguageAndFlagsInAnyPosition(t *testing.T) {
+	tests := []struct {
+		suffix          string
+		language        string
+		forced, hearing bool
+	}{
+		{".en", "en", false, false},
+		{".en.sdh", "en", false, true},
+		{".sdh.en", "en", false, true},
+		{".EN.SDH", "en", false, true},
+		{".en.cc", "en", false, true},
+		{".cc.en", "en", false, true},
+		{".sdh", "", false, true},
+		{".ai.hr", "hr", false, false},
+		{".hr.ai", "hr", false, false},
+		{".forced.sdh.eng", "en", true, true},
+		{".en.forced.sdh", "en", true, true},
+		{".default.en", "en", false, false},
+		{".ai", "", false, false},
+		{".jp", "", false, false},
+		// The first language word wins.
+		{".en.de", "en", false, false},
+		{".pt.br", "pt", false, false},
+		// Many short words are also ISO 639-3 codes, so a language with a
+		// two-letter code wins over one that has only a three-letter code.
+		{".sub.en", "en", false, false},
+		{".dub.en", "en", false, false},
+		{".mkv.en.sdh", "en", false, true},
+		{".und.en", "en", false, false},
+		{".yue", "yue", false, false},
+		{".fil.forced", "fil", true, false},
+		// "tl" is a two-letter code that canonicalizes to "fil".
+		{".tl.en", "fil", false, false},
+		{".tl.hi", "fil", false, true},
+		// "hi" is Hindi only when no other word names a language.
+		{".hi", "hi", false, false},
+		{".HI", "hi", false, false},
+		{".hi.forced", "hi", true, false},
+		{".hi.sdh", "hi", false, true},
+		{".en.hi", "en", false, true},
+		{".hi.en", "en", false, true},
+		{".hin.hi", "hi", false, true},
+		{".hi.hi", "hi", false, true},
+		{".hi.dub", "hi", false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.suffix, func(t *testing.T) {
+			var got ExternalSubtitleInfo
+			parseSuffix(tc.suffix, &got)
+			if got.Language != tc.language || got.Forced != tc.forced || got.HearingImpaired != tc.hearing {
+				t.Fatalf("parseSuffix(%q) = language %q, forced %v, hearing impaired %v; want %q, %v, %v",
+					tc.suffix, got.Language, got.Forced, got.HearingImpaired, tc.language, tc.forced, tc.hearing)
+			}
+		})
+	}
+}
+
+func TestExternalSubtitleModelsCarryHearingImpaired(t *testing.T) {
+	got := externalSubtitleModels([]ExternalSubtitleInfo{
+		{Path: "/m/Movie.en.sdh.srt", Language: "en", Format: "srt", Title: "Movie.en.sdh.srt", HearingImpaired: true},
+		{Path: "/m/Movie.en.srt", Language: "en", Format: "srt", Title: "Movie.en.srt"},
+	})
+	if len(got) != 2 || !got[0].HearingImpaired || got[1].HearingImpaired {
+		t.Fatalf("externalSubtitleModels = %#v, want only the SDH sidecar hearing impaired", got)
+	}
+	if empty := externalSubtitleModels(nil); empty == nil || len(empty) != 0 {
+		t.Fatalf("externalSubtitleModels(nil) = %#v, want an empty non-nil slice", empty)
+	}
+}

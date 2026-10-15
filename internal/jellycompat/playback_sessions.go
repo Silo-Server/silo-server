@@ -27,6 +27,13 @@ type PlaybackSession struct {
 	// request for the same play before it starts either response; the newer
 	// negotiation replaces an older, still-unstarted one from the same device.
 	ClientDeviceID string
+	// ClientName and ClientVersion come from the MediaBrowser header of the
+	// PlaybackInfo request. Players that open the stream URL directly (a
+	// <video> element authenticated by api_key, or a client that sends no
+	// credentials) don't send that header, so the native session falls back
+	// to these; see withNegotiatedClientInfo.
+	ClientName    string
+	ClientVersion string
 	// ClientIP is the resolved address that negotiated this play. Static
 	// streams from clients that send no credentials (Jellyfin for Android TV,
 	// Findroid) are granted only to the same address; see FindStreamGrants.
@@ -126,6 +133,10 @@ type PlaybackMediaSource struct {
 	// clients whose Dolby Vision decoder requires MPEG-TS.
 	HLSRemux       bool
 	HLSRemuxMPEGTS bool
+	// KeyframePlaylist records, for the life of the play session, that an
+	// HLS copy stream is served from a keyframe-planned playlist
+	// (playback.copy_keyframe_playlist when the session started).
+	KeyframePlaylist bool
 	// DOVIVariant marks a copy remux of Dolby Vision without a compatible base
 	// layer (HEVC profile 5, AV1 profile 10) for a client whose device profile
 	// explicitly lists DOVI. As in Jellyfin 12, the fMP4 master playlist then

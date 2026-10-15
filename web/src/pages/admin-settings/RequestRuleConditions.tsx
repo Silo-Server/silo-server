@@ -477,7 +477,7 @@ export function RuleConditionsEditor({
               {index > 0 ? (
                 <li
                   aria-hidden="true"
-                  className="text-muted-foreground px-3 text-[11px] font-semibold tracking-wide uppercase"
+                  className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase"
                 >
                   and
                 </li>

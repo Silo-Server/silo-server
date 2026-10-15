@@ -228,15 +228,34 @@ func TestExtrasDirSubtreeScanConvertsMisimportedExtras(t *testing.T) {
 func TestFullScanConvertsMisimportedExtrasUnderNestedOwners(t *testing.T) {
 	ctx := t.Context()
 	fx := seedLateExtrasFixture(ctx, t)
+	showDir := filepath.Join(filepath.Dir(fx.titleDir), "Heat Show (2020)")
+	seasonDir := filepath.Join(showDir, "Season 01")
+	fx.convertToShow(ctx, t, filepath.Join(seasonDir, "Heat Show S01E01.mkv"))
+
+	showExtra := filepath.Join(showDir, "Extras", "Making Of.mkv")
+	seasonTrailer := filepath.Join(seasonDir, "Trailers", "Preview.mkv")
+	showExtraID := fx.seedMisimportedExtra(ctx, t, showExtra)
+	seasonTrailerID := fx.seedMisimportedExtra(ctx, t, seasonTrailer)
+
+	scanner := NewScanner(NewFileRepository(fx.pool), "", nil, 1, false, 0)
+	if _, err := scanner.ScanFolder(ctx, fx.folder); err != nil {
+		t.Fatalf("ScanFolder: %v", err)
+	}
+
+	fx.assertExtraOfMovie(ctx, t, showExtra)
+	fx.assertExtraOfMovie(ctx, t, seasonTrailer)
+	fx.assertItemGone(ctx, t, showExtraID)
+	fx.assertItemGone(ctx, t, seasonTrailerID)
+}
+
+// convertToShow turns the fixture into a series library whose matched item is
+// a show with one scanned episode at episodePath.
+func (fx lateExtrasFixture) convertToShow(ctx context.Context, t *testing.T, episodePath string) {
+	t.Helper()
 	if _, err := fx.pool.Exec(ctx, `UPDATE media_folders SET type = 'series' WHERE id = $1`, fx.folder.ID); err != nil {
 		t.Fatalf("make series folder: %v", err)
 	}
 	fx.folder.Type = "series"
-
-	// Reuse the fixture's matched item as the show.
-	showDir := filepath.Join(filepath.Dir(fx.titleDir), "Heat Show (2020)")
-	seasonDir := filepath.Join(showDir, "Season 01")
-	episodePath := filepath.Join(seasonDir, "Heat Show S01E01.mkv")
 	writeTestFile(t, episodePath, "episode")
 	episodeID := fx.movieID + "-s01e01"
 	if _, err := fx.pool.Exec(ctx, `
@@ -269,21 +288,50 @@ func TestFullScanConvertsMisimportedExtrasUnderNestedOwners(t *testing.T) {
 	`, fx.movieID, episodeID, fx.folder.ID, episodePath, info.Size(), normalizeFileModifiedAt(info.ModTime())); err != nil {
 		t.Fatalf("seed episode file: %v", err)
 	}
+}
 
-	showExtra := filepath.Join(showDir, "Extras", "Making Of.mkv")
-	seasonTrailer := filepath.Join(seasonDir, "Trailers", "Preview.mkv")
-	showExtraID := fx.seedMisimportedExtra(ctx, t, showExtra)
-	seasonTrailerID := fx.seedMisimportedExtra(ctx, t, seasonTrailer)
+// An earlier scan made files in a show's extras folders into a series of
+// their own, named after the folder (issue #2427): an episode-numbered file in
+// other/, and a file one folder below Trailers/. The show's name carries no
+// year, so only its episode makes it a show. A full scan converts both files
+// into extras of the show and drops the stray series; so does a subtree scan
+// of other/ for its file. (With a second stray series elsewhere in the show,
+// that subtree scan defers until a full scan, the same as for a movie.)
+func TestScanConvertsStraySeriesFromShowExtrasFolders(t *testing.T) {
+	for _, scope := range []string{"library", "other"} {
+		t.Run(scope, func(t *testing.T) {
+			ctx := t.Context()
+			fx := seedLateExtrasFixture(ctx, t)
+			showDir := filepath.Join(filepath.Dir(fx.titleDir), "Glimmer Harbor")
+			fx.convertToShow(ctx, t, filepath.Join(showDir, "Season 01", "Glimmer Harbor - S01E01.mkv"))
 
-	scanner := NewScanner(NewFileRepository(fx.pool), "", nil, 1, false, 0)
-	if _, err := scanner.ScanFolder(ctx, fx.folder); err != nil {
-		t.Fatalf("ScanFolder: %v", err)
+			makingOf := filepath.Join(showDir, "other", "Glimmer Harbor - S00E01 - Making of.mkv")
+			trailer := filepath.Join(showDir, "Trailers", "1080p", "Glimmer Harbor S00E02.mkv")
+			makingOfID := fx.seedMisimportedExtra(ctx, t, makingOf)
+			trailerID := ""
+			if scope == "library" {
+				trailerID = fx.seedMisimportedExtra(ctx, t, trailer)
+			}
+
+			scanner := NewScanner(NewFileRepository(fx.pool), "", nil, 1, false, 0)
+			var err error
+			if scope == "library" {
+				_, err = scanner.ScanFolder(ctx, fx.folder)
+			} else {
+				_, err = scanner.ScanSubtree(ctx, fx.folder, filepath.Dir(makingOf))
+			}
+			if err != nil {
+				t.Fatalf("scan %s: %v", scope, err)
+			}
+
+			fx.assertExtraOfMovie(ctx, t, makingOf)
+			fx.assertItemGone(ctx, t, makingOfID)
+			if scope == "library" {
+				fx.assertExtraOfMovie(ctx, t, trailer)
+				fx.assertItemGone(ctx, t, trailerID)
+			}
+		})
 	}
-
-	fx.assertExtraOfMovie(ctx, t, showExtra)
-	fx.assertExtraOfMovie(ctx, t, seasonTrailer)
-	fx.assertItemGone(ctx, t, showExtraID)
-	fx.assertItemGone(ctx, t, seasonTrailerID)
 }
 
 // A sibling marked missing still counts toward a flat folder's owners: if it

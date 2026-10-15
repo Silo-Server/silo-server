@@ -1757,7 +1757,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, homeLayoutItemsFixtureCases()...)
 	cases = append(cases, catalogLettersFixtureCases()...)
 	cases = append(cases, pushRegistrationReceiptFixtureCases()...)
-	return append(cases, adminNotificationPushDeliveryFixtureCases()...)
+	cases = append(cases, adminNotificationPushDeliveryFixtureCases()...)
+	return append(cases, unmatchedItemIgnoreFixtureCases()...)
 }
 
 // homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
