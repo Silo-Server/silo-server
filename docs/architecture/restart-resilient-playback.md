@@ -767,7 +767,9 @@ served from the API origin commits, and re-recorded when a sidecar-only replan
 keeps the transport; a proxy-served transport has none, since its grant already
 covers it. A user's stop and an abort drop it on the replica that ends the
 session; a system teardown that leaves the attempt live (an FFmpeg exit, a
-copy-safety stop) keeps it, so the next request rebuilds as a token would. It is
+copy-safety stop) keeps it for a transcode the API runs itself, so the next
+request rebuilds as a token would. A remote transcode's teardown drops it,
+since the node job and node recipe go with it. It is
 only a reconstruction aid: the durable v3 attempt row decides whether it may be
 used (same plan, same account and selected profile, not expired, not stopped),
 and the rebuilt session keeps refusing unauthenticated requests. Without Redis

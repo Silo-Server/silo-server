@@ -1224,10 +1224,13 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	}
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 	h.cleanupStoppedSessionTransport(ctx, session)
-	if userInitiated {
+	if userInitiated || session.TranscodeNodeURL != "" {
 		// A system teardown (an FFmpeg exit, a copy-safety stop) leaves the
 		// attempt live for the client's next request to rebuild, as a stream
-		// token would; only a real stop retires the recovery card.
+		// token would; only a real stop retires the recovery card. A remote
+		// transport is the exception: the teardown above stopped its node job
+		// and dropped the node's recipe, so the card could only rebuild a
+		// session that relays the node's 404.
 		h.deleteSessionRecipeV3(ctx, session.ID)
 	}
 	stopResult := h.recordStoppedSession(ctx, session, userInitiated)

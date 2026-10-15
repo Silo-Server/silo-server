@@ -371,19 +371,27 @@ func (s *lockedRecipeCardStoreV3) Delete(ctx context.Context, key string) error 
 
 // An FFmpeg exit or a copy-safety stop tears the session down without ending
 // the attempt, so the client's next request rebuilds it, as a stream token
-// would. Only a user's stop retires the recovery card.
-func TestOnlyAUserStopDropsTheSessionRecipe(t *testing.T) {
+// would. A user's stop retires the recovery card, and so does any teardown of
+// a remote transcode, whose node job and node recipe go with it.
+func TestSessionRecipeRetentionOnStop(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	t.Cleanup(node.Close)
 	for _, test := range []struct {
 		name          string
 		userInitiated bool
+		nodeURL       string
 		wantDeleted   bool
 	}{
 		{name: "system teardown", userInitiated: false, wantDeleted: false},
 		{name: "user stop", userInitiated: true, wantDeleted: true},
+		// The teardown stops the node job and drops its recipe, so the card
+		// could only rebuild a session the node no longer serves.
+		{name: "system teardown of a remote transcode", userInitiated: false, nodeURL: node.URL, wantDeleted: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			manager := playback.NewSessionManager(0, 0)
-			manager.RegisterReconstructed(&playback.Session{ID: "session-recipe-stop", UserID: 1, ProfileID: "profile-1", PlayMethod: playback.PlayTranscode, RequireMediaAuthorization: true})
+			manager.RegisterReconstructed(&playback.Session{ID: "session-recipe-stop", UserID: 1, ProfileID: "profile-1", PlayMethod: playback.PlayTranscode, RequireMediaAuthorization: true,
+				TranscodeNodeURL: test.nodeURL, TranscodeTransportID: "session-recipe-stop-transport"})
 			handler := NewPlaybackHandler(manager)
 			recipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
 				"session-recipe-stop": {SessionID: "session-recipe-stop", UserID: 1, PlanID: "plan:current", RequireMediaAuthorization: true},
