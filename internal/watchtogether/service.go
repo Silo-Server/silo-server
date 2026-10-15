@@ -108,6 +108,9 @@ const (
 	// apply it in place (a transcode lands on segment boundaries), and
 	// repeating it changes nothing.
 	stuckCorrectionSeconds = 0.1
+	// stuckCorrectionRetry is how long such a member is left alone before
+	// the correction is tried again, since a failure to apply it can pass.
+	stuckCorrectionRetry = time.Minute
 	// stallSeekToleranceSeconds is how close a stalled guest must land to the
 	// waiting room's position before it counts as ready, when its ready names
 	// the seek it ran. A rebuilt stream lands on a segment boundary, often
@@ -1039,7 +1042,8 @@ func (s *Service) handleStateReportForConnection(
 		member.bestDrift = drift
 		member.driftStrikes = 0
 	} else if live.room.IsPaused && !pauseMismatch && member.correctionCommand != nil &&
-		math.Abs(report.PositionSeconds-member.correctedFrom) < stuckCorrectionSeconds {
+		math.Abs(report.PositionSeconds-member.correctedFrom) < stuckCorrectionSeconds &&
+		!correctionOlderThan(member.correctionCommand, now, stuckCorrectionRetry) {
 		// Paused where its last correction found it: it cannot apply one.
 		member.driftStrikes = 0
 	} else if member.driftStrikes++; pauseMismatch || member.driftStrikes >= guestCorrectionStrikes {
@@ -2545,7 +2549,16 @@ func (s *Service) repeatsWaitingSeekLocked(live *liveRoom, request TransportRequ
 	return request.Action == TransportActionSeek && request.PositionSeconds != nil &&
 		live.room.PlaybackState == RoomPlaybackStateWaiting && command != nil &&
 		command.Action == TransportActionSeek && command.SelectionRevision == live.room.SelectionRevision &&
+		// A host landing can move the barrier's destination; then the seek
+		// is not a repeat.
+		math.Abs(live.room.AnchorPositionSeconds-command.PositionSeconds) <= seekRepeatSeconds &&
 		math.Abs(*request.PositionSeconds-command.PositionSeconds) <= seekRepeatSeconds
+}
+
+// correctionOlderThan reports whether command was issued at least age ago.
+func correctionOlderThan(command *TransportCommand, now time.Time, age time.Duration) bool {
+	issuedAt, err := time.Parse(time.RFC3339Nano, command.IssuedAt)
+	return err != nil || now.Sub(issuedAt) >= age
 }
 
 // commandSettlingLocked reports whether a state report at now may predate the

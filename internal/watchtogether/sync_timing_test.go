@@ -595,7 +595,7 @@ func TestPausedMemberThatCannotMoveIsNotCorrectedAgain(t *testing.T) {
 	if corrections != before+1 {
 		t.Fatalf("the first correction was not sent (%d)", corrections-before)
 	}
-	for range 6 {
+	for range 4 { // about 46 s, inside stuckCorrectionRetry
 		f.now = f.now.Add(guestCorrectionRetryInterval + commandSettleWindow)
 		report(stuck)
 		report(stuck)
@@ -603,11 +603,46 @@ func TestPausedMemberThatCannotMoveIsNotCorrectedAgain(t *testing.T) {
 	if got := transportCount(f.conns["guest"]); got != corrections {
 		t.Fatalf("a paused member that cannot move got %d more corrections", got-corrections)
 	}
+	// A failure to apply a correction can pass, so it is retried after a while.
+	f.now = f.now.Add(stuckCorrectionRetry - 4*(guestCorrectionRetryInterval+commandSettleWindow))
+	report(stuck)
+	report(stuck)
+	if got := transportCount(f.conns["guest"]); got != corrections+1 {
+		t.Fatalf("a paused member stuck for %v got %d corrections, want 1 retry", stuckCorrectionRetry, got-corrections)
+	}
+	corrections++
 	// Once it moves, it is corrected again if it is still off.
 	f.now = f.now.Add(guestCorrectionRetryInterval)
-	report(stuck - 2)
-	report(stuck - 2)
+	for range guestCorrectionStrikes + 1 {
+		report(stuck - 2)
+	}
 	if got := transportCount(f.conns["guest"]); got != corrections+1 {
 		t.Fatalf("a paused member that moved further off got %d corrections, want 1", got-corrections)
+	}
+}
+
+// A host landing that moved the barrier's destination makes a seek back to the
+// original target a real seek, not a repeat.
+func TestSeekBackToTargetAfterAHostLandingIsNotARepeat(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	target := 1500.0
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionSeek, PositionSeconds: &target}); err != nil {
+		t.Fatal(err)
+	}
+	seek := lastTransport(t, f.conns["host"])
+	if _, err := f.s.HandleReadyForConnection(t.Context(), f.reg("host"), 7, "host",
+		StateReport{SessionID: "host-session", CommandID: seek.CommandID, PositionSeconds: 1494, IsPaused: true}); err != nil {
+		t.Fatal(err)
+	}
+	if f.repo.room.AnchorPositionSeconds != 1494 {
+		t.Fatalf("host landing did not move the destination: %v", f.repo.room.AnchorPositionSeconds)
+	}
+	if _, err := f.s.HandleTransportRequestForConnection(t.Context(), f.reg("host"), 7, "host",
+		TransportRequest{Action: TransportActionSeek, PositionSeconds: &target}); err != nil {
+		t.Fatal(err)
+	}
+	if again := lastTransport(t, f.conns["guest"]); again.CommandID == seek.CommandID || again.PositionSeconds != 1500 {
+		t.Fatalf("the seek back to 1500 was dropped as a repeat: %+v", again)
 	}
 }
