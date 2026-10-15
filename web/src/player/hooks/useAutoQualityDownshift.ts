@@ -29,6 +29,9 @@ const REARM_AFTER_UNADOPTED_MS = 60_000;
  */
 export const DOWNSHIFT_ESTIMATE_RATIO = 0.7;
 
+/** How often a stall in progress is re-checked once the long-stall timer fires. */
+const STALL_RECHECK_MS = 1_000;
+
 export interface StallTracker {
   /** The plan began playing. */
   playing(now: number): void;
@@ -54,8 +57,10 @@ export function createStallTracker(): StallTracker {
       stallStartedAt = undefined;
     },
     waiting(now) {
-      if (firstPlayingAt === undefined || now - firstPlayingAt < STARTUP_GRACE_MS) return;
-      stallStartedAt ??= now;
+      if (firstPlayingAt === undefined) return;
+      // A stall that begins during startup counts only from the end of the
+      // grace period, so one that outlasts it is still seen.
+      stallStartedAt ??= Math.max(now, firstPlayingAt + STARTUP_GRACE_MS);
     },
     seeking() {
       stallStartedAt = undefined;
@@ -150,12 +155,20 @@ export function useAutoQualityDownshift({
       tracker.playing(Date.now());
       check();
     };
+    // Keeps looking while the stall lasts: one that began in the startup grace
+    // period only becomes long enough some time after the first check.
+    const checkStall = () => {
+      longStallTimer = undefined;
+      check();
+      if (!done && stalledAt !== undefined)
+        longStallTimer = setTimeout(checkStall, STALL_RECHECK_MS);
+    };
     const onWaiting = () => {
       if (video.seeking || video.paused) return;
       stalledAt = video.currentTime;
       tracker.waiting(Date.now());
       clearLongStallTimer();
-      longStallTimer = setTimeout(check, LONG_STALL_MS);
+      longStallTimer = setTimeout(checkStall, LONG_STALL_MS);
     };
     const onTimeUpdate = () => {
       if (stalledAt !== undefined && video.currentTime > stalledAt) onPlaying();

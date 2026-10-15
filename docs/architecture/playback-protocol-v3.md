@@ -1613,11 +1613,13 @@ own. A client on `auto` whose playback keeps rebuffering sends a
 `quality_change` replan that keeps `quality_preference: "auto"` and lowers
 `bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
 re-runs `auto` against the lower estimate. The web player does this after two
-stalls of at least a second within two minutes, or one stall of six seconds,
-ignoring the first ten seconds of a plan and buffering caused by seeks. It
-sends 70% of the delivered bitrate, so the next stream targets about 56% of
-the one that stalled. It keeps that lower estimate for the next 30 minutes and
-stops when a replan delivers no lower bitrate.
+stalls of at least a second within two minutes, or one stall of six seconds.
+Stall time in the first ten seconds of a plan does not count, and buffering
+caused by a seek, pause or source reload is not a stall. It sends 70% of the
+delivered bitrate, so the next stream targets about 56% of the one that
+stalled. It keeps that lower estimate for the next 30 minutes, including on a
+metered link where it ignores probe results, and stops when a replan delivers
+no lower bitrate.
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving

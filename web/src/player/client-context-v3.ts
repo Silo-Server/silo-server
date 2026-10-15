@@ -27,6 +27,7 @@ import {
   networkInformation,
   onMeteredConnection,
   readMeasuredBandwidthKbps,
+  readObservedBandwidthLimitKbps,
 } from "./bandwidth-probe";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
@@ -270,7 +271,11 @@ const DOWNLINK_CEILING_MBPS = 10;
  * plan from the device and the source alone.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
-  const measured = onMeteredConnection() ? undefined : readMeasuredBandwidthKbps();
+  // On a metered link a probe result describes another link, but a limit
+  // playback observed describes this one.
+  const measured = onMeteredConnection()
+    ? readObservedBandwidthLimitKbps()
+    : readMeasuredBandwidthKbps();
   if (measured !== undefined) return measured;
   const downlinkMbps = networkInformation()?.downlink;
   if (typeof downlinkMbps !== "number" || !Number.isFinite(downlinkMbps)) return undefined;

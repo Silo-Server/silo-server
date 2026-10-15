@@ -18,6 +18,14 @@ describe("createStallTracker", () => {
     expect(tracker.shouldDownshift(9_000)).toBe(false);
   });
 
+  it("counts a startup stall from the end of the grace period", () => {
+    const tracker = createStallTracker();
+    tracker.playing(0);
+    tracker.waiting(5_000);
+    expect(tracker.shouldDownshift(15_000)).toBe(false);
+    expect(tracker.shouldDownshift(16_000)).toBe(true);
+  });
+
   it("downshifts after repeated stalls inside the window", () => {
     const tracker = createStallTracker();
     tracker.playing(0);
@@ -200,6 +208,18 @@ describe("useAutoQualityDownshift", () => {
     fire(video, "waiting", 100_000);
     vi.advanceTimersByTime(6_000);
     expect(onDownshift).toHaveBeenCalledTimes(2);
+  });
+
+  it("downshifts a stall that began in startup and never recovered", () => {
+    const video = fakeVideo();
+    const onDownshift = vi.fn();
+    renderOnAuto(video, onDownshift);
+    fire(video, "playing", 0);
+    fire(video, "waiting", 5_000);
+    vi.advanceTimersByTime(10_000);
+    expect(onDownshift).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2_000);
+    expect(onDownshift).toHaveBeenCalledTimes(1);
   });
 
   it("leaves an explicit quality alone", () => {

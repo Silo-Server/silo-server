@@ -280,6 +280,19 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     }
   });
 
+  it("uses a limit playback observed even on a metered link", () => {
+    vi.stubGlobal("navigator", { connection: { downlink: 8, saveData: true } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 4_200, measuredAt: Date.now(), observed: true }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBe(4_200);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
   it("drops missing and implausibly low readings", () => {
     withDownlink(undefined);
     expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();

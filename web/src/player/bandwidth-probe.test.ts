@@ -10,6 +10,7 @@ import {
   cancelBandwidthProbe,
   measureBandwidthKbps,
   readMeasuredBandwidthKbps,
+  readObservedBandwidthLimitKbps,
   recordObservedBandwidthLimitKbps,
   scheduleBandwidthProbe,
   stopBandwidthProbes,
@@ -164,6 +165,16 @@ describe("measured bandwidth cache", () => {
 
     recordObservedBandwidthLimitKbps(90_000, now);
     expect(readMeasuredBandwidthKbps(now)).toBe(56_000);
+  });
+
+  it("marks a lower probe result as observed without raising it", () => {
+    const now = Date.now();
+    storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, JSON.stringify({ kbps: 3_000, measuredAt: now }));
+    expect(readObservedBandwidthLimitKbps(now)).toBeUndefined();
+
+    recordObservedBandwidthLimitKbps(4_200, now);
+    expect(readMeasuredBandwidthKbps(now)).toBe(3_000);
+    expect(readObservedBandwidthLimitKbps(now)).toBe(3_000);
   });
 
   it("records a limit when nothing was measured", () => {

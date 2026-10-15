@@ -55,6 +55,12 @@ export function networkInformation(): NetworkInformationLike | undefined {
 interface StoredEstimate {
   kbps: number;
   measuredAt: number;
+  /**
+   * Set when playback itself showed the link could not sustain more. Unlike a
+   * probe result it describes whatever link the viewer is on now, so it still
+   * applies on a metered connection.
+   */
+  observed?: boolean;
 }
 
 function clampKbps(kbps: number): number | undefined {
@@ -71,14 +77,18 @@ function readStored(now: number): StoredEstimate | undefined {
     if (now - parsed.measuredAt > BANDWIDTH_ESTIMATE_TTL_MS || parsed.measuredAt > now)
       return undefined;
     const kbps = clampKbps(parsed.kbps);
-    return kbps === undefined ? undefined : { kbps, measuredAt: parsed.measuredAt };
+    if (kbps === undefined) return undefined;
+    return { kbps, measuredAt: parsed.measuredAt, observed: parsed.observed === true };
   } catch {
     return undefined;
   }
 }
 
-function writeStored(kbps: number, now: number): void {
-  storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, JSON.stringify({ kbps, measuredAt: now }));
+function writeStored(kbps: number, now: number, observed = false): void {
+  const entry: StoredEstimate = observed
+    ? { kbps, measuredAt: now, observed }
+    : { kbps, measuredAt: now };
+  storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, JSON.stringify(entry));
 }
 
 /** The cached measurement in kbps, or undefined when none is fresh. */
@@ -92,11 +102,22 @@ export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined 
  * link instead of the optimistic probe.
  */
 export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now()): void {
-  const limit = clampKbps(kbps);
-  if (limit === undefined) return;
+  const observed = clampKbps(kbps);
+  if (observed === undefined) return;
   const current = readStored(now);
-  if (current && current.kbps <= limit) return;
-  writeStored(limit, now);
+  if (current?.observed && current.kbps <= observed) return;
+  // A lower probe result still caps it, but the entry becomes observed so a
+  // metered link honors it.
+  writeStored(Math.min(observed, current?.kbps ?? observed), now, true);
+}
+
+/**
+ * The cached limit playback observed, or undefined when there is none or the
+ * cached value is only a probe result.
+ */
+export function readObservedBandwidthLimitKbps(now = Date.now()): number | undefined {
+  const stored = readStored(now);
+  return stored?.observed ? stored.kbps : undefined;
 }
 
 /**
