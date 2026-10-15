@@ -28,6 +28,7 @@ import {
   X,
 } from "lucide-react";
 import { useLocation } from "react-router";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useFinePointer } from "@/hooks/useFinePointer";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
@@ -1100,11 +1101,15 @@ function MediaItemMenuEngine({
       case "toggleNotInterested": {
         if (!currentUserState) return;
         const marked = currentUserState.not_interested ?? false;
+        const authority = captureProfileRequestContext();
         setCurrentUserState((prev) => (prev ? { ...prev, not_interested: !marked } : prev));
         try {
           await notInterestedMutation.mutateAsync(marked);
         } catch {
-          setCurrentUserState((prev) => (prev ? { ...prev, not_interested: marked } : prev));
+          // After a profile switch the card shows the new profile's state.
+          if (!authority || isCapturedProfileAuthorityActive(authority)) {
+            setCurrentUserState((prev) => (prev ? { ...prev, not_interested: marked } : prev));
+          }
         }
         return;
       }
