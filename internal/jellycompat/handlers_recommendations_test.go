@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -479,15 +480,21 @@ func (genreFallbackContent) GetItemDetail(_ context.Context, _ *Session, id stri
 	return &upstreamItemDetail{ContentID: id, Type: "movie", Title: "Anchor", Genres: []string{"Drama"}}, nil
 }
 
-// BrowseItems answers the first limit dramas, best first.
+// genreFallbackDepth is how many marked dramas genreFallbackContent puts
+// between A and B.
+var genreFallbackDepth = 2
+
+// BrowseItems answers the first limit dramas, best first: A, then
+// genreFallbackDepth marked titles, then B and C.
 func (genreFallbackContent) BrowseItems(_ context.Context, _ *Session, params url.Values) (*upstreamBrowseResponse, error) {
-	all := []upstreamListItem{
-		{ContentID: "movie-a", Type: "movie", Title: "A"},
-		{ContentID: "movie-marked", Type: "movie", Title: "Marked"},
-		{ContentID: "movie-marked-2", Type: "movie", Title: "Marked 2"},
-		{ContentID: "movie-b", Type: "movie", Title: "B"},
-		{ContentID: "movie-c", Type: "movie", Title: "C"},
+	all := []upstreamListItem{{ContentID: "movie-a", Type: "movie", Title: "A"}}
+	for i := range genreFallbackDepth {
+		all = append(all, upstreamListItem{ContentID: fmt.Sprintf("movie-marked-%d", i), Type: "movie", Title: "Marked"})
 	}
+	all = append(all,
+		upstreamListItem{ContentID: "movie-b", Type: "movie", Title: "B"},
+		upstreamListItem{ContentID: "movie-c", Type: "movie", Title: "C"},
+	)
 	limit, _ := strconv.Atoi(params.Get("limit"))
 	return &upstreamBrowseResponse{Items: all[:min(limit, len(all))]}, nil
 }
@@ -539,6 +546,14 @@ func TestCompatSimilarGenreFallbackLeavesOutMarkedTitles(t *testing.T) {
 	if got := similar(markingUserData{mockUserDataService: &mockUserDataService{}}); !slices.Equal(got, []string{"A", "B"}) {
 		t.Fatalf("similar = %v, want the unmarked dramas", got)
 	}
+	// Marks deeper than the first window: the list widens until it fills.
+	deep := genreFallbackDepth
+	genreFallbackDepth = 20
+	t.Cleanup(func() { genreFallbackDepth = deep })
+	if got := similar(markingUserData{mockUserDataService: &mockUserDataService{}}); !slices.Equal(got, []string{"A", "B"}) {
+		t.Fatalf("similar with many marks = %v, want the unmarked dramas", got)
+	}
+	genreFallbackDepth = deep
 	if got := similar(markingUserData{mockUserDataService: &mockUserDataService{}, err: errors.New("store down")}); len(got) != 0 {
 		t.Fatalf("similar = %v with marks unreadable, want nothing", got)
 	}
