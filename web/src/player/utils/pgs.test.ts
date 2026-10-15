@@ -323,10 +323,14 @@ describe("PGSStreamParser", () => {
   it("keeps at most 32 MiB of object data in one window's screens", () => {
     // Redefining one object keeps it inside the epoch budget, but each screen
     // still holds the definition it showed.
+    // Built as byte buffers: spreading 36 MB through number arrays is slow
+    // enough to time out on a busy CI runner.
     const parser = new PGSStreamParser();
     const bytes = 9_000_000;
     const redefine = (pts: number) => {
-      const out: number[] = [...pcs(pts, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] })];
+      const out: Uint8Array[] = [
+        new Uint8Array(pcs(pts, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] })),
+      ];
       for (let offset = 0; offset < bytes; offset += 65_000) {
         const first = offset === 0;
         const flags = (first ? 0x80 : 0) | (offset + 65_000 >= bytes ? 0x40 : 0);
@@ -343,26 +347,33 @@ describe("PGSStreamParser", () => {
               ...u16(2),
             ]
           : [...u16(0), 0, flags];
-        out.push(
-          ...segment(0x15, pts, [
-            ...header,
-            ...new Array<number>(Math.min(65_000, bytes - offset)).fill(0),
-          ]),
-        );
+        // The segment header carries the full body size; the zero-filled
+        // tail of the buffer is the object data.
+        const payload = Math.min(65_000, bytes - offset);
+        const head = segment(0x15, pts, header);
+        head[11] = ((header.length + payload) >> 8) & 0xff;
+        head[12] = (header.length + payload) & 0xff;
+        const fragment = new Uint8Array(head.length + payload);
+        fragment.set(head);
+        out.push(fragment);
       }
-      return [...out, ...end(pts)];
+      out.push(new Uint8Array(end(pts)));
+      return out;
     };
-    const compositions = parser.push(
-      new Uint8Array([
-        ...pcs(1, { objects: [] }),
-        ...pds(1, 0, [WHITE]),
-        ...end(1),
-        ...redefine(2),
-        ...redefine(3),
-        ...redefine(4),
-        ...redefine(5),
-      ]),
-    );
+    const chunks = [
+      new Uint8Array([...pcs(1, { objects: [] }), ...pds(1, 0, [WHITE]), ...end(1)]),
+      ...redefine(2),
+      ...redefine(3),
+      ...redefine(4),
+      ...redefine(5),
+    ];
+    const stream = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0));
+    let position = 0;
+    for (const chunk of chunks) {
+      stream.set(chunk, position);
+      position += chunk.byteLength;
+    }
+    const compositions = parser.push(stream);
     // Three 9 MB screens fit; the fourth would pass 32 MiB.
     expect(compositions.map((c) => c.start)).toEqual([1, 2, 3, 4]);
   });

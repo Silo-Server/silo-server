@@ -64,6 +64,7 @@ import {
   sectionKeys,
 } from "@/hooks/queries/keys";
 import {
+  dropInactiveWatchDetail,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
@@ -408,6 +409,13 @@ function handleUserStateEvent(
   // cannot reconstruct (position_seconds, is_in_progress, season counts), so the
   // detail query still has to be refreshed for those.
   const detailFullyPatched = payload.change === "favorite" || payload.change === "watchlist";
+  // A closed player would start from its cached watch detail's resume
+  // position, so drop it now rather than after the coalesced refresh; the
+  // refresh still reaches the series it led to.
+  const knownRelatedIds =
+    payload.content_id && (payload.change === "progress" || payload.change === "watched")
+      ? dropInactiveWatchDetail(queryClient, payload.content_id)
+      : undefined;
   scheduleMediaSurfaceInvalidation(
     queryClient,
     payload.content_id
@@ -415,6 +423,7 @@ function handleUserStateEvent(
           itemId: payload.content_id,
           skipItemDetail: detailFullyPatched,
           skipSimilarItems: true,
+          knownRelatedIds,
         }
       : { skipSimilarItems: true },
   );

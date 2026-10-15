@@ -23,6 +23,12 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
+import {
+  networkInformation,
+  onMeteredConnection,
+  readMeasuredBandwidthKbps,
+  readMeteredObservedLimitKbps,
+} from "./bandwidth-probe";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
 
@@ -164,7 +170,7 @@ function buildDeliveryCapability(
 /**
  * The browser decode engine's additions to the `original_http` class: what it
  * decodes on top of the media element, the audio track it can pick from the
- * whole file, and, when WebGPU can tone-map and the display is SDR, HDR and
+ * whole file, and, when its WebGPU presenter works and the display is SDR, HDR and
  * Dolby Vision originals (see docs/architecture/web-decode-engine.md). The
  * engine only presents SDR, so on an HDR display the claim stays off and HDR
  * sources keep the routes that preserve HDR.
@@ -236,44 +242,47 @@ export function buildDeliveriesV3(
 }
 
 /**
- * The slice of the Network Information API we use. It is not in the DOM lib
- * and is absent in Safari and Firefox, so everything here is best effort and
- * every reader tolerates `undefined`.
+ * Whether the user is on a connection they would rather not spend: Data Saver
+ * is on, or the browser reports cellular. `connection.type` is missing on
+ * desktop browsers, so its absence means "unknown, assume unmetered". The
+ * same test decides when a probe measurement is ignored, so a link without
+ * one is still flagged and the planner's metered limit can apply.
  */
-interface NetworkInformationLike {
-  saveData?: boolean;
-  downlink?: number;
-  type?: string;
-}
-
-function networkInformation(): NetworkInformationLike | undefined {
-  if (typeof navigator === "undefined") return undefined;
-  return (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
+export function detectMeteredV3(): boolean {
+  return onMeteredConnection();
 }
 
 /**
- * Whether the user is on a connection they would rather not spend. Only
- * Data Saver is a real signal in a browser — cellular detection via
- * `connection.type` is unimplemented nearly everywhere — so we report exactly
- * that and let the server treat the absence as "unknown, assume unmetered".
+ * Browsers clamp `connection.downlink` to this ceiling (Chromium caps it at
+ * 10 Mbps), so a reading at the ceiling means "at least this fast", not a
+ * measured limit.
  */
-export function detectMeteredV3(): boolean {
-  return networkInformation()?.saveData === true;
-}
+const DOWNLINK_CEILING_MBPS = 10;
 
 /**
  * Best-effort downlink estimate in kbps for the planner's ladder choice.
  *
+ * A fresh measurement from the background bandwidth probe wins, unless the
+ * link is metered (Data Saver or cellular): that measurement was taken on
+ * another link, and the planner applies its metered limit only when no
+ * estimate is sent. Otherwise
  * `connection.downlink` is a coarse, rounded, deliberately fingerprint-resistant
- * number, so it is a hint and not a measurement. Returns undefined rather than a
- * fabricated value when the API is absent or the reading falls outside the
- * contract's 100..1_000_000 kbps bounds.
+ * hint, used only below the browser's ceiling. Returns undefined rather than a
+ * fabricated value when neither source has a usable reading, which lets Auto
+ * plan from the device and the source alone.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
+  // On a metered link a probe result describes another link; only a limit
+  // playback observed on a metered link describes this one.
+  const measured = onMeteredConnection()
+    ? readMeteredObservedLimitKbps()
+    : readMeasuredBandwidthKbps();
+  if (measured !== undefined) return measured;
   const downlinkMbps = networkInformation()?.downlink;
   if (typeof downlinkMbps !== "number" || !Number.isFinite(downlinkMbps)) return undefined;
+  if (downlinkMbps >= DOWNLINK_CEILING_MBPS) return undefined;
   const kbps = Math.round(downlinkMbps * 1000);
-  if (kbps < 100 || kbps > 1_000_000) return undefined;
+  if (kbps < 100) return undefined;
   return kbps;
 }
 

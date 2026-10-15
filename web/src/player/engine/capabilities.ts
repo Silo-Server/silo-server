@@ -1,5 +1,6 @@
 /// <reference types="@webgpu/types" />
 import { ENGINE_PCM_CODECS, FFMPEG_AUDIO_CODECS } from "./codecs";
+import { isSoftwareAdapter } from "./gpuAdapter";
 
 /**
  * What the browser decode engine can play on this browser, in the server's
@@ -14,7 +15,12 @@ export interface EngineCapabilities {
   containers: string[];
   videoCodecs: string[];
   audioCodecs: string[];
-  /** WebGPU is available, so HDR sources can be tone-mapped for the display. */
+  /**
+   * HDR sources can be tone-mapped for the display: the WebGPU presenter
+   * compiled and drew through both of its paths, or, when that check was still
+   * running at playback start, a hardware adapter was found and nothing had
+   * failed yet (see `supportsHDRPresentation`).
+   */
   hdr: boolean;
 }
 
@@ -91,19 +97,79 @@ async function supportsAudio(config: AudioDecoderConfig): Promise<boolean> {
   }
 }
 
-async function supportsWebGPU(): Promise<boolean> {
-  const gpu = (navigator as Navigator & { gpu?: GPU }).gpu;
-  if (!gpu) return false;
-  try {
-    return (await gpu.requestAdapter()) !== null;
-  } catch {
-    return false;
-  }
+/**
+ * Playback start waits on the probe, so a GPU or decoder query that never
+ * answers must not hold it: past this, the page plays without the engine.
+ * The codec answers and the HDR answer are each bounded by it, so a slow GPU
+ * never costs the codec answers.
+ */
+export const PROBE_TIMEOUT_MS = 4_000;
+
+/**
+ * How long, once a hardware adapter is found, playback start waits for the
+ * rest of the HDR check before trusting the adapter alone.
+ */
+export const HDR_CHECK_GRACE_MS = 1_000;
+
+/** The full HDR check's answer, once it has a definite one; later probes use it. */
+let presenterVerdict: boolean | undefined;
+/** The HDR check found a hardware adapter, even if only after its deadline. */
+let hardwareAdapter = false;
+
+/** The HDR answer as it stands: the full check's, else whether there is a hardware adapter. */
+function hdrAnswer(): boolean {
+  return presenterVerdict ?? hardwareAdapter;
 }
 
-async function probe(): Promise<EngineCapabilities | null> {
-  if (!runtimeAvailable()) return null;
-  const [videoResults, audioResults, hdr] = await Promise.all([
+/** `work`, or `fallback()` once `ms` pass first. */
+function withDeadline<T>(work: Promise<T>, ms: number, fallback: () => T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback()), ms);
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Whether the WebGPU presenter works here: a hardware adapter, a device, the
+ * shaders compiled, and a picture drawn through each path (`probePresenter`).
+ * The presenter is loaded only once an adapter is found, so pages that never
+ * turn the engine on do not carry it.
+ *
+ * Creating the device and compiling takes milliseconds on most systems and
+ * seconds on a cold GPU process with some Linux Vulkan drivers, while every
+ * playback start, SDR included, waits for this answer. So once a hardware
+ * adapter is found, the rest of the check gets `HDR_CHECK_GRACE_MS`; past
+ * that, and as long as nothing has failed, the adapter is answer enough, as
+ * it was before the full check existed. The presenter reports any failure at
+ * runtime, and what the check learns after its deadline applies to the
+ * probes after it.
+ */
+async function supportsHDRPresentation(): Promise<boolean> {
+  const gpu = (navigator as Navigator & { gpu?: GPU }).gpu;
+  if (!gpu) return false;
+  let adapterFound!: () => void;
+  const found = new Promise<void>((resolve) => (adapterFound = resolve));
+  const check = (async (): Promise<boolean | null> => {
+    const adapter = await gpu.requestAdapter();
+    if (!adapter || isSoftwareAdapter(adapter)) return false;
+    hardwareAdapter = true;
+    adapterFound();
+    const { probePresenter } = await import("./renderers");
+    return probePresenter(adapter);
+  })()
+    // A chunk that failed to load says nothing about the presenter.
+    .catch(() => null)
+    .then((verdict) => {
+      if (verdict !== null) presenterVerdict = verdict;
+      return hdrAnswer();
+    });
+  const afterGrace = found.then(() => withDeadline(check, HDR_CHECK_GRACE_MS, hdrAnswer));
+  return withDeadline(Promise.race([check, afterGrace]), PROBE_TIMEOUT_MS, hdrAnswer);
+}
+
+async function probeCodecs(): Promise<Omit<EngineCapabilities, "hdr"> | null> {
+  const [videoResults, audioResults] = await Promise.all([
     Promise.all(
       Object.entries(VIDEO_PROBES).map(
         async ([codec, config]) => [codec, await supportsVideo(config)] as const,
@@ -114,7 +180,6 @@ async function probe(): Promise<EngineCapabilities | null> {
         async ([codec, config]) => [codec, await supportsAudio(config())] as const,
       ),
     ),
-    supportsWebGPU(),
   ]);
   const videoCodecs = videoResults.filter(([, ok]) => ok).map(([codec]) => codec);
   if (videoCodecs.length === 0) return null;
@@ -126,27 +191,37 @@ async function probe(): Promise<EngineCapabilities | null> {
       ...FFMPEG_AUDIO_CODECS,
       ...ENGINE_PCM_CODECS,
     ],
-    hdr,
   };
 }
 
-/**
- * Playback start waits on the probe, so a GPU or decoder query that never
- * answers must not hold it: past this, the page plays without the engine.
- */
-export const PROBE_TIMEOUT_MS = 4_000;
+async function probe(): Promise<EngineCapabilities | null> {
+  if (!runtimeAvailable()) return null;
+  const hdr = supportsHDRPresentation();
+  const codecs = await withDeadline(
+    probeCodecs().catch(() => null),
+    PROBE_TIMEOUT_MS,
+    () => null,
+  );
+  return codecs && { ...codecs, hdr: await hdr };
+}
 
 let probePromise: Promise<EngineCapabilities | null> | null = null;
 
-/** Probes once per page; the answers do not change while the page lives. */
+/**
+ * Probes once per page; the answers do not change while the page lives,
+ * except that an HDR check still running at playback start settles `hdr` for
+ * the calls after it (the player calls this each time it opens).
+ */
 export function probeEngineCapabilities(): Promise<EngineCapabilities | null> {
-  probePromise ??= Promise.race([
-    probe().catch(() => null),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), PROBE_TIMEOUT_MS)),
-  ]);
-  return probePromise;
+  probePromise ??= probe().catch(() => null);
+  return probePromise.then((capabilities) => {
+    const hdr = hdrAnswer();
+    return capabilities && capabilities.hdr !== hdr ? { ...capabilities, hdr } : capabilities;
+  });
 }
 
 export function resetEngineCapabilitiesForTests(): void {
   probePromise = null;
+  presenterVerdict = undefined;
+  hardwareAdapter = false;
 }

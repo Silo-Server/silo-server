@@ -18,6 +18,9 @@
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
+./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
+./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
+./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
 # Series air-date sort keys advance when a known episode airs.
@@ -34,6 +37,7 @@
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
 # Profile history and account/invitation persistence.
+./internal/api/handlers TestClearResumePositionTargetsDB
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
 ./internal/api/handlers TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres
@@ -148,6 +152,7 @@
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/requests TestEditorIntegrationsDatabase
+./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 
 # Request cleanup, prepared downloads and user-store transactions.
@@ -171,7 +176,15 @@
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
+./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
+./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
+./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves
+./internal/userstore/pgstore TestPostgresConcurrentProfileDeletesWithCrossVisibility
+./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
+./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
+./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 
@@ -190,6 +203,9 @@
 
 # A retried push attempt key migration keeps the key an earlier run built.
 ./internal/database TestPushAttemptKeyMigrationRetriesKeepTheBuiltKeyPostgres
+
+# Stored sidecar subtitles take the scanner's reading of their names.
+./internal/database TestPostgresExternalSubtitleNameBackfill
 
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
@@ -232,6 +248,90 @@
 ./internal/chapterthumbs TestMarkerThumbnailDurationEdgesDB
 ./internal/chapterthumbs TestMarkerThumbnailLifecycleEdgesDB
 
+# Recommendations: job locks, refresh marks, signal triggers, embedding lock and
+# reset, build-time access, exclusion set, profile purge, and section fill.
+./internal/api/handlers TestLibrarySectionItemsAnswersAnErrorWhenTheFetchFailsDB
+./internal/api/handlers TestV1RecentlyAddedDropsInaccessibleItemsPostgres
+./internal/api/handlers TestWatchedFilterDoesNotFallBackToPostgres
+./internal/historyimport TestImportRunReportsSignalChangesOncePostgres
+./internal/metadata TestMergeKeepsTheSourceEmbeddingPostgres
+./internal/metadata TestMergeMarksMovedProfilesStalePostgres
+./internal/recommendations TestCacheRefreshedAtPostgres
+./internal/recommendations TestCacheUserRowsDropRowsThatRebuildEmptyPostgres
+./internal/recommendations TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres
+./internal/recommendations TestClearTasteProfileKeepsTheRowAndDropsPersonalStatePostgres
+./internal/recommendations TestCowatchSkipsDeletedItemsAndPrunesStalePairsPostgres
+./internal/recommendations TestDeleteGlobalRecommendationCachePostgres
+./internal/recommendations TestDeletingAProfilePurgesItsRecommendationRowsPostgres
+./internal/recommendations TestEmbeddingLockConflictUsesTheRunningConfigPostgres
+./internal/recommendations TestEmbeddingTextSQLMatchesGoForTiedPeoplePostgres
+./internal/recommendations TestExtendGlobalRecommendationCachePostgres
+./internal/recommendations TestFailedRefreshLeavesTheProfilePendingPostgres
+./internal/recommendations TestFilterAccessibleItemIDsAppliesExcludedMediaTypesPostgres
+./internal/recommendations TestFilterItemIDsHonoursExcludedMediaTypesPostgres
+./internal/recommendations TestFindSimilarAppliesAccessLimitsInSQLPostgres
+./internal/recommendations TestForYouReadRefreshesNewProfilesWithSignalsOncePostgres
+./internal/recommendations TestGetTasteClusterMetaOmitsOnlyEmbeddingsPostgres
+./internal/recommendations TestListCacheRefreshCandidatesOldestFirstPostgres
+./internal/recommendations TestMarkAccountsStalePostgres
+./internal/recommendations TestMarkProfilesStaleForItemsPostgres
+./internal/recommendations TestProfileAccessFilterMatchesTheResolverPostgres
+./internal/recommendations TestRecentCompletedItemIDsSkipDeletedItemsPostgres
+./internal/recommendations TestRecommendationJobRunsOnOneServerPostgres
+./internal/recommendations TestJobLocksShareOneConnectionPostgres
+./internal/recommendations TestCacheJobPurgesAProfileDeletedWhileItWritesPostgres
+./internal/recommendations TestStaleSweepRecordsFailedRefreshesPostgres
+./internal/recommendations TestMarkAllProfilesStaleForPolicyMarksOncePerGenerationPostgres
+./internal/recommendations TestRefreshWaitsForThePolicyChangePostgres
+./internal/policy TestSystemAnnouncesAChangeLoadedByALaterReload
+./internal/database/pglock TestReleaseAlsoUnlocksOnlyThatKey
+./internal/database/pglock TestHeldIsFalseAfterTheSessionDies
+./internal/recommendations TestTasteProfileJobStopsWhenItsLockSessionDiesPostgres
+./internal/recommendations TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres
+./internal/recommendations TestRefreshPurgesAProfileDeletedWhileItWritesPostgres
+./internal/recommendations TestRefreshWritesNoTasteRowForADeletedProfilePostgres
+./internal/recommendations TestResetEmbeddingsPostgres
+./internal/recommendations TestResetEmbeddingsRefusesDuringACatalogImportPostgres
+./internal/recommendations TestResetEmbeddingsRollsBackPostgres
+./internal/recommendations TestStaleMarkBeforeTheFirstBuildSurvivesItPostgres
+./internal/recommendations TestTasteProfileJobSkipsAProfileRefreshingElsewherePostgres
+./internal/recommendations TestTasteProfileSubjectsReadTheSQLiteStorePostgres
+./internal/recommendations TestTasteProfileSubjectsSkipDeletedProfilesPostgres
+./internal/recommendations TestTasteSeedCandidatesHonourAccessPostgres
+./internal/recommendations TestWatchedItemIDSetAcrossPagesPostgres
+./internal/sections TestRecommendationSectionsFillFromTheWholePoolPostgres
+./internal/webhooksync TestWebhookEventsReportSignalChangesPostgres
+./migrations TestPurgeOrphanedRecommendationRowsPostgres
+
+# Recommendation ranking and rows: default rows, Popular floor, genre rows, picker
+# order, taste levels, per-interest anchors, quality prior, rubric leakage,
+# media types of personal rows.
+./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
+./internal/recommendations TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
+./internal/recommendations TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
+./internal/recommendations TestCachedRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
+./internal/recommendations TestDefaultRowsServeEachViewerLivePostgres
+./internal/recommendations TestGenreSamplerIsRatingLedPostgres
+./internal/recommendations TestGetItemQualityRatingsPostgres
+./internal/recommendations TestHighlyRatedRowBalancesMediaTypesPostgres
+./internal/recommendations TestHighlyRatedRowPostgres
+./internal/recommendations TestHighlyRatedReusesTitleCountsPostgres
+./internal/recommendations TestHighlyRatedReadsPastAStaleZeroCountPostgres
+./internal/recommendations TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres
+./internal/recommendations TestPopularNeedsACrowdOfAccountsPostgres
+./internal/recommendations TestPresentMediaTypesPostgres
+./internal/recommendations TestRecentlyAddedRowPostgres
+./internal/recommendations TestRefreshCountsPositiveTitlesForTheLevelPostgres
+./internal/recommendations TestRefreshWeighsAThreeStarCompletionBelowAnUnratedOnePostgres
+./internal/recommendations TestRelevanceRubricLeakagePostgres
+./internal/recommendations TestRelevanceRubricNewProfileGetsRowsPostgres
+./internal/recommendations TestRelevanceRubricProfilesOnOneAccountDifferPostgres
+./internal/recommendations TestTasteProfileSummaryGenresComeFromTheClustersPostgres
+./internal/recommendations TestTasteSeedPickerInterleavesGenresPostgres
+./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres
+./internal/recommendations TestTVLibrarySectionFillsFromTheMainRowTailPostgres
+./internal/sections TestRecommendationSectionsTakeTheServedRowTitlePostgres
+
 # Banner, thumb, clear art, disc art and extra backdrops: the migration's Up
 # and Down, slot write-back, backdrop row identity and GC queueing, and the
 # folder-delete reference check over the new columns, provider backfill and
@@ -255,3 +355,19 @@
 ./migrations TestDeletingLibraryPrunesAccessPolicyReferencesPostgres
 ./migrations TestLibraryDeleteRacingAccessWritePostgres
 ./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
+
+# AI metadata translations never replace provider or manual localized text.
+./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
+
+# An unmatched item an admin ignored stays off the unmatched and scan-retry
+# lists, the matcher queues and library refreshes across a rescan, the matcher
+# and item refreshes skip it, and a match clears the mark.
+./internal/api/handlers TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB
+./internal/metadata TestProcessLeavesIgnoredItemUnmatchedDB
+./internal/metadata TestMatchQueuesSkipIgnoredItemsDB
+./internal/metadata TestRefreshLeavesIgnoredItemAloneDB
+./internal/adminjob TestLibraryRefreshSkipsIgnoredItemsDB
+
+# A played mark later in the same second as a history removal stays visible.
+./internal/userstore/pgstore TestImportedWritesAfterSameSecondRemovalDB
+./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB

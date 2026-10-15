@@ -17,6 +17,7 @@ import (
 type fakeWatch struct {
 	filters   []catalogpkg.AccessFilter
 	marks     []fakeMark
+	clears    []fakeMark
 	err       error
 	trickplay *catalogpkg.TrickplayGrid
 }
@@ -80,6 +81,20 @@ func (f *fakeWatch) SetWatchedState(_ context.Context, userID int, profileID, co
 	}
 	f.marks = append(f.marks, fakeMark{userID: userID, profileID: profileID, contentID: contentID, played: played})
 	return handlers.WatchedStateView{ContentID: contentID, Type: "movie", AffectedCount: 1, Played: played}, nil
+}
+
+func (f *fakeWatch) ClearResumePosition(_ context.Context, userID int, profileID, contentID string, _ catalogpkg.AccessFilter) error {
+	if f.err != nil {
+		return f.err
+	}
+	switch contentID {
+	case "series:heat":
+		return &handlers.APIError{Status: http.StatusBadRequest, Code: "invalid_watch_target", Message: "Only a movie or an episode has a resume position"}
+	case "movie:heat-1995":
+		f.clears = append(f.clears, fakeMark{userID: userID, profileID: profileID, contentID: contentID})
+		return nil
+	}
+	return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
 }
 
 func watchDeps(watch *fakeWatch) Dependencies {
@@ -199,6 +214,73 @@ func TestMarkWatched(t *testing.T) {
 
 	off := newTestHandler(t, parityDeps(false))
 	requireProblem(t, do(t, off, http.MethodPost, "/api/v2/watched/movie:heat-1995", "", owner), TypeDependencyUnavailable)
+}
+
+func TestClearResumePosition(t *testing.T) {
+	watch := &fakeWatch{}
+	h := newTestHandler(t, watchDeps(watch))
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	path := Prefix + "/progress/movie:heat-1995/position"
+
+	rec := do(t, h, http.MethodDelete, path, "", owner)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(watch.clears) != 1 || watch.clears[0] != (fakeMark{userID: 1, profileID: "p-owner", contentID: "movie:heat-1995"}) {
+		t.Fatalf("clears = %+v", watch.clears)
+	}
+
+	// A season or series has no single resume position to clear.
+	problem := requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/progress/series:heat/position", "", owner), TypeValidationFailed)
+	if len(problem.Errors) != 1 || problem.Errors[0].Location != "path.media_item_id" {
+		t.Fatalf("errors = %+v", problem.Errors)
+	}
+	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/progress/movie:missing/position", "", owner), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodDelete, path, "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodDelete, path, "", nil), TypeAuthenticationRequired)
+	if len(watch.clears) != 1 {
+		t.Fatalf("rejected requests cleared progress: %+v", watch.clears)
+	}
+
+	watch.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to clear resume position"}
+	requireProblem(t, do(t, h, http.MethodDelete, path, "", owner), TypeInternalError)
+
+	off := newTestHandler(t, parityDeps(false))
+	requireProblem(t, do(t, off, http.MethodDelete, path, "", owner), TypeDependencyUnavailable)
+}
+
+func TestGetProgressCapabilities(t *testing.T) {
+	path := Prefix + "/progress/capabilities"
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	h := newTestHandler(t, watchDeps(&fakeWatch{}))
+	requireProblem(t, do(t, h, http.MethodGet, path, "", nil), TypeAuthenticationRequired)
+
+	rec := do(t, h, http.MethodGet, path, "", owner)
+	var out ProgressCapabilities
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || out.State != StateAvailable || out.Allowed == nil || !*out.Allowed || out.Revision == "" || !out.ClearResumePosition {
+		t.Fatalf("capabilities: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != cachePrivateNoCache {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	tag := rec.Header().Get("ETag")
+	if cached := do(t, h, http.MethodGet, path, "", with(owner, "If-None-Match", tag)); tag == "" || cached.Code != http.StatusNotModified {
+		t.Fatalf("revalidation with %q: %d", tag, cached.Code)
+	}
+
+	deps := watchDeps(&fakeWatch{})
+	deps.Watch = nil
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, path, "", owner)
+	out = ProgressCapabilities{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || out.State != StateNotConfigured || out.Allowed == nil || *out.Allowed || out.ClearResumePosition {
+		t.Fatalf("unconfigured: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestGetWatchStatePreservesDevicePreferenceContext(t *testing.T) {

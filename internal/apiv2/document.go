@@ -692,6 +692,7 @@ func registerAll(reg *Registry) {
 	registerSubtitleUploads(reg)
 	registerPlayback(reg)
 	registerPlaybackDelivery(reg)
+	registerPlaybackBandwidthProbe(reg)
 	registerProfiles(reg)
 	registerEbookAnnotations(reg)
 	registerDownloadRegistry(reg)

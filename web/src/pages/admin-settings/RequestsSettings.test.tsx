@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
+import type { PluginCapability } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
 
 import {
@@ -24,6 +25,7 @@ import {
   sonarr,
   stubBrowser,
 } from "./requestsSettings.fixtures";
+import { pluginInstallations } from "./requestsSettings.mockData";
 
 vi.mock("@/api/v2/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/request")>()),
@@ -211,6 +213,15 @@ async function openServer(name: string) {
   return screen.findByRole("dialog");
 }
 
+/** Declares, for one test, which server fields the arr plugin can do without. */
+function routerNeeds(flags: { api_key_optional: boolean; base_url_optional: boolean }) {
+  const capability: PluginCapability = pluginInstallations.data[0]!.capabilities[0]!;
+  capability.request_router = flags;
+  onTestFinished(() => {
+    delete capability.request_router;
+  });
+}
+
 describe("Requests settings: servers", () => {
   it("names each server by type and hides the switches routing owns", async () => {
     serve({
@@ -375,6 +386,87 @@ describe("Requests settings: servers", () => {
       root_folder: "/movies",
       quality_profile_id: 1,
     });
+  });
+
+  it("adds and tests a server without a URL or key when its plugin needs neither", async () => {
+    routerNeeds({ api_key_optional: true, base_url_optional: true });
+    serve({
+      servers: [radarr],
+      handlers: {
+        "POST /api/v2/admin/request-integrations/{id}/options": (options) =>
+          reply(options, {
+            options: {
+              ...serverOptions,
+              service_kind: [{ value: "sonarr", label: "Sonarr 4.0.14" }],
+            },
+          }),
+        "POST /api/v2/admin/request-integrations": (options) =>
+          reply(options, server("sonarr-9", "Local", "sonarr"), '"new"'),
+      },
+    });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Add server" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("URL (optional)")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("API key (optional)")).toBeInTheDocument();
+    expect(within(dialog).getByText("This server type works without one.")).toBeInTheDocument();
+
+    // The plugin is asked for its choices with neither, and they fill the form.
+    expect(await within(dialog).findByText("Detected Sonarr 4.0.14.")).toBeInTheDocument();
+    const [probe] = calls("POST /api/v2/admin/request-integrations/{id}/options");
+    const probeBody = probe!.body as { base_url: string; api_key_ref?: string };
+    expect(probeBody.base_url).toBe("");
+    expect(probeBody.api_key_ref).toBeUndefined();
+    expect(within(dialog).getByRole("button", { name: "Test" })).toBeEnabled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+    await waitFor(() => expect(calls("POST /api/v2/admin/request-integrations")).toHaveLength(1));
+    const body = calls("POST /api/v2/admin/request-integrations")[0]!.body as {
+      base_url: string;
+      api_key_ref?: string;
+    };
+    expect(body.base_url).toBe("");
+    expect(body.api_key_ref).toBeUndefined();
+  });
+
+  it("asks for a URL and a key before a server can be added or tested", async () => {
+    serve({
+      handlers: {
+        "POST /api/v2/admin/request-integrations/{id}/options": (options) =>
+          reply(options, { options: serverOptions }),
+      },
+    });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Add server" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Radarr 4K" } });
+    const add = within(dialog).getByRole("button", { name: "Add server" });
+    const test = within(dialog).getByRole("button", { name: "Test" });
+    expect(add).toBeDisabled();
+    expect(test).toBeDisabled();
+
+    fireEvent.change(within(dialog).getByLabelText("URL"), {
+      target: { value: "http://10.0.0.5:7878" },
+    });
+    expect(add).toBeDisabled();
+    expect(test).toBeDisabled();
+    expect(calls("POST /api/v2/admin/request-integrations/{id}/options")).toHaveLength(0);
+
+    fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "key" } });
+    expect(test).toBeEnabled();
+  });
+
+  it("shows a server without a key as needing setup only when its plugin needs one", async () => {
+    serve({ servers: [{ ...radarr, has_api_key: false }] });
+    mount();
+    const tile = await screen.findByRole("group", { name: "Radarr" });
+    expect(within(tile).getByText("Needs setup")).toBeInTheDocument();
+    cleanup();
+
+    routerNeeds({ api_key_optional: true, base_url_optional: false });
+    mount();
+    const keyOptional = await screen.findByRole("group", { name: "Radarr" });
+    expect(within(keyOptional).queryByText("Needs setup")).toBeNull();
   });
 
   it("renames a server it named when a later address answers as the other service", async () => {

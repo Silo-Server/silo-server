@@ -97,7 +97,8 @@ statistics. Rules:
   one keyframe interval earlier. Frame timestamps follow the list, not the
   input, so a frame without the tag is dropped. A keyframe that serves
   several sample times is decoded once for each; when one sample decodes a
-  second keyframe, the first is kept.
+  second keyframe, the first is kept. Sheets lists over Matroska start their
+  entries at keyframes instead (see [Keyframe entries](#keyframe-entries)).
 - Sample times are finite, non-negative, strictly increasing, and at most
   10,000 per request. `Samples` takes no audio output.
 - `Samples.ReadThrough` reads the sampled span as the one keyframes-only
@@ -308,8 +309,8 @@ metadata=mode=add:key=sample:value=-1,metadata@sheets=print
 
 `Sheets.UseInputAspect` derives the height from the input header instead,
 including a 90-degree display matrix, and returns the actual cell height in
-`Result.SheetTileHeight`. This reuses the sampling probe; a `ReadThrough`
-request also probes when this option is set. Callers publishing manifests
+`Result.SheetTileHeight`. This reuses the sampling probe, which every
+`Sheets` request runs, `ReadThrough` included. Callers publishing manifests
 must use the returned height and reject chunks whose geometry differs.
 
 - GPU surfaces (VAAPI, QSV, CUDA) are scaled on the GPU to four tiles' size,
@@ -373,38 +374,79 @@ must use the returned height and reject chunks whose geometry differs.
   half a second recovered all of them at no measurable cost. Stats keep the
   40 ms span their cached analyses were computed with. A window gives each
   sample the last frame at or before its time.
+- Sheets decode keyframes as the probed video codec needs. Interlaced MPEG-2
+  often codes a keyframe as an I field paired with a P field, which the
+  decoder reports as a P frame and `nokey` discards: a DVD-sourced episode
+  decoded 2 of 80 samples. MPEG-2 therefore decodes with
+  `-skip_frame:v noref`. The MPEG-1/2 decoder honors only `noref` and
+  `nokey` (`nointra` acts as `noref`), so this decodes every I and P
+  picture, about two and a half times the work of `nokey`. A list still
+  keeps each sample's first frame, its keyframe; a window gives each sample
+  the last I or P picture at or before its time. MPEG-1 has no field
+  pictures and keeps `nokey`.
+- MPEG-4 Part 2 (`mpeg4`, `msmpeg4*`) adds `-flags:v +low_delay`. Its
+  decoder otherwise holds each picture back for B-frames that a
+  keyframes-only read never sends, and releases it when the next keyframe
+  arrives; in AVI, whose packets carry no PTS, the frame then takes that
+  keyframe's time, and every cell showed the keyframe a GOP before its own.
+  Keyframes-only and reference-only reads decode no B-frames, so low delay
+  changes no picture. The repeat repair keeps its own `noref`.
 - A window also copies the same input's video packets to a `framecrc`
   timing file in a private temporary directory, separate from stderr and
   removed when the attempt ends. Their presentation times and durations
   bound the final keyframe's coverage without decoding extra frames or
   reading the file again. Samples beyond that observed extent remain missing, so
   premature EOF cannot turn every trailing cell into a decoded preview.
+- A packet without a PTS counts by its DTS only when the decoder runs in
+  low delay (MPEG-4 Part 2, above). A DTS never runs ahead of its PTS, so
+  the extent can only shrink, by the reorder delay. Without a PTS the decoder
+  stamps each frame with the DTS of the packet that released it, which is
+  the frame's own only when the decoder releases each keyframe as it
+  arrives. A reordering decoder does not: H.264 with B-frames in AVI
+  releases each keyframe two GOPs late in a keyframes-only read, and low
+  delay does not change that. Such windows fail with no usable packet timing
+  rather than publish every cell at an earlier keyframe.
 - A cell without a frame shows the previous cell's frame, and cells before
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,
   which sends a hardware attempt on to software.
-- A list run that fails as `empty` after the HEVC decoder logged "Duplicate
-  POC in a sequence" is read again, in the same attempt, as the
-  keyframes-only window that other containers use. One decoder serves every
-  list entry and nothing resets it between them, so an HEVC CRA keyframe
-  (open GOP) after a jump takes a picture order count derived from the
-  previous sample's. When that count matches a picture still in the
-  decoder's buffer, the decoder drops the keyframe ("Duplicate POC in a
-  sequence", then "Skipping invalid undecodable NALU: 21"), and such a file
-  can lose nearly every sample on every run. A window decodes keyframes in
-  order and keeps the counts consistent, at the cost of reading the whole
-  span. A list that is empty without that message, such as a truncated or
-  damaged file's, still fails without the extra read: damaged pictures log
-  only "Skipping invalid undecodable NALU", and a window would give their
-  samples the last good keyframe instead of failing.
+- A list run that fails as `empty` after the decoder logged a dropped
+  keyframe is read again, in the same attempt, as a window. Two messages
+  mark a dropped keyframe. One decoder serves every list entry and nothing
+  resets it between them, so an HEVC CRA keyframe (open GOP) after a jump
+  takes a picture order count derived from the previous sample's. When that
+  count matches a picture still in the decoder's buffer, the decoder drops
+  the keyframe ("Duplicate POC in a sequence", then "Skipping invalid
+  undecodable NALU: 21"). An H.264 keyframe whose reference marking names
+  pictures a keyframes-only read skipped is discarded too ("illegal short
+  term buffer state"). Either way such a file can lose nearly every sample
+  on every run. An HEVC list goes to the keyframes-only window that other
+  containers use, which decodes keyframes in order and keeps the counts
+  consistent, at the cost of reading the whole span. An H.264 list that
+  logged its message goes straight to the reference-picture window below,
+  since a keyframes-only window discards the same keyframes. A list that is
+  empty without either message, such as a truncated or damaged file's,
+  still fails without the extra read: damaged pictures log only "Skipping
+  invalid undecodable NALU", and a window would give their samples the last
+  good keyframe instead of failing.
 - Skipped pictures do not advance the decoder's count, so keyframes a whole
-  count cycle apart (256 pictures with the common 8-bit count) collide in the
-  window too. A window that logs "Duplicate POC in a sequence" after a list
-  fallback fails as `empty` rather than give later samples the last keyframe
-  it kept; such files fail as they did without the fallback. If the window
-  fails for any reason, the attempt reports the window's failure, whose
-  reason and log describe the latest read, and its error names the list
-  run's.
+  count cycle apart (256 pictures with the common 8-bit count) collide in a
+  keyframes-only window too, and H.264 windows discard keyframes as lists
+  do. A window that logged a dropped keyframe finds, for each sample that
+  holds a frame, the last keyframe packet at or before it in the timing
+  file; a sample whose own keyframe was not decoded shows an earlier one and
+  counts as filled. Such a window may fill up to 15 % of its cells instead
+  of 10 %, since the file is whole and a preview a keyframe early is still
+  usable; a list keeps 10 %, so too many drops still send it to the window.
+  A window that fills more, or that logged a drop and has a keyframe packet
+  without a time, which leaves the stale samples unknown, is read once more
+  with `-skip_frame:v noref` and `select=key` ahead of the sheets chain:
+  the decoder sees every reference picture, so its state stays whole, and
+  the chain still gets only the keyframes. That read costs several
+  keyframes-only reads and runs only for files that fail without it. If the
+  window fails for any reason, the attempt reports the window's failure,
+  whose reason and log describe the latest read, and after a list fallback
+  its error names the list run's.
 - Sheets are JPEG-encoded in-process (`image/jpeg`, `Quality`) once the run
   and its repairs are done, since a repair may replace any cell. A run holds
   its tiles until then, so a request whose sheets exceed 64 million tile
@@ -412,27 +454,98 @@ must use the returned height and reject chunks whose geometry differs.
   in order and `Result.SheetFrames` counts the decoded, filled, and
   repaired (`Refined`) cells.
 
+### Keyframe entries
+
+A sample-time entry makes the concat demuxer seek to the keyframe before the
+sample and read every packet of every stream, video and all audio tracks,
+from there up to the sample; the decoder skips them. With keyframes several
+seconds apart that is most of the file: 32 GB of a 43 GB 4K HEVC remux for
+645 cells. A Sheets list over a Matroska input therefore starts each entry
+at the sample's keyframe and reads only it and the entry's span
+(`keyframes.go`):
+
+- `Runner.Run` reads the keyframes once, before any attempt and its timeout,
+  from the file's Cues with `keyframes.ReadMatroska`: the index the
+  demuxer's seek uses, plus its spot check of a few clusters' block headers,
+  in-process and without decoding. The read runs in a goroutine, and the run
+  stops waiting after 10 seconds or when its context ends, which also stops
+  the read at its next call; a read blocked on stalled storage is left
+  behind. At most 4 reads are in flight in a process, blocked ones
+  included, which also bounds the memory parsing Cues takes (a few times
+  their size), and a run that finds none free skips the read. A file that is not
+  Matroska, has no Cues, whose Cues leave out keyframes, or whose read is
+  skipped or stopped gets sample-time entries.
+- An entry starts at the last keyframe at or before the sample's inpoint
+  (sample time plus container start, in the microseconds the list is
+  written in), rounded up to the microsecond so the seek never lands on the
+  keyframe before it. On ffmpeg-muxed files with B-frames and with container
+  starts of 3.21 and 11.4 s, this matched where ffprobe's
+  `-read_intervals` seek, which makes the same seek call, landed for every
+  sample. Samples before the first keyframe keep sample-time entries.
+- A sample whose keyframe is the previous sample's gets no entry: it would
+  only decode the frame the previous cell shows, and the HEVC decoder drops
+  a keyframe sent twice in a row as a duplicate picture order count. Once
+  the list is read, such a sample shows the previous cell's frame and its
+  source time, so the repair below finds it repeating that cell and decodes
+  its own moment. A distinct keyframe keeps its entry even when it lies
+  inside the previous entry's span.
+- Every frame of a keyframe entry lies at or after its inpoint, so its time
+  places it back in the input exactly. A sample-time entry decodes the
+  keyframe from before its inpoint, where ffmpeg rewrites the time to keep
+  the list's timestamps monotonic; with samples sharing a 40-second GOP,
+  that hid a repeat from the repair and left a cell showing the scene before.
+- An open-GOP keyframe after a jump takes a picture order count derived
+  from the last picture whose header the decoder parsed, skipped pictures
+  included. Keyframe entries leave longer gaps between parsed pictures, and
+  across a gap of more than half the count's cycle (128 frames with x265's
+  default 8-bit count) the derived counts run backwards: the decoder passes
+  on keyframes out of list order with rewritten times, or drops them as
+  duplicates. As soon as a frame comes from an earlier entry than the frame
+  before it, or the decoder logs a dropped keyframe ("Duplicate POC in a
+  sequence", or H.264's "illegal short term buffer state"), the attempt
+  stops ffmpeg and reads the samples from their own times, exactly as a
+  file without Cues. An abandoned read is never published: if the
+  attempt's time ran out meanwhile, it fails as `timeout`. A drop in the
+  abandoned read does not count toward the window fallbacks above.
+  Closed-GOP keyframes start their counts afresh and keep their keyframe
+  entries.
+- MP4 and every other container keep sample-time entries: an MP4 entry that
+  starts exactly at its keyframe's time often seeks past it (45 of 80
+  samples of one H.264 episode decoded nothing). Stats lists and repairs
+  keep sample-time entries too.
+
+Over Matroska test encodes (x264 and x265 at default settings and with
+scene cuts off at 5, 10, 20, and 40-second GOPs, open- and closed-GOP HEVC,
+samples every 5 and 10 seconds) keyframe entries never placed more wrong
+cells than sample-time entries, and fewer where samples share long GOPs.
+Open-GOP HEVC with an 8-bit count falls back once its listed keyframes lie
+more than about 5 seconds apart, which covers x265's default 10-second GOP at
+either interval; it then reads what it did before, plus the few entries read
+before the fallback.
+
 ### Repairs
 
 A list gives each sample the keyframe at or before its time, placed back in
-the input from its frame time: `pts + start - k*span + sample` for list entry
-`k`, where `start` is the list input's start time from its header, by which
-ffmpeg shifted every frame. Two kinds of cell come out worse than the input
-allows, and the attempt reads their samples again in a second list, after
-the first run and before the sheets are encoded (`sheet_repair.go`):
+the input from its frame time: `pts + start - k*span + inpoint - container
+start` for list entry `k`, where `start` is the list input's start time from
+its header, by which ffmpeg shifted every frame, and `inpoint` is where the
+entry starts in the container. Two kinds of cell come out worse than the
+input allows, and the attempt reads their samples again in a second list,
+after the first run and before the sheets are encoded (`sheet_repair.go`):
 
 - Missing cells decoded no frame. The demuxer could not seek to a keyframe
   before the sample, as in a container that flags no keyframes (VC-1 in
   Matroska, whose I-frames only the decoder recognizes, lost a third of its
   samples to half-second entries), or the HEVC decoder dropped the keyframe
   as a duplicate picture order count. The repair lists them again,
-  keyframes only, each entry lasting until the next sample (the shortest gap
+  keyframes only (with the codec's options above), each entry lasting until the next sample (the shortest gap
   between the run's samples): the decoder starts afresh and finds the
   keyframe before the sample, or failing that the first one after it.
 - Repeated cells show the same moment as the cell before: their frames lie
   within a tenth of the time between the two samples, because no keyframe
-  lies between them (a GOP longer than the interval), or because an open-GOP
-  keyframe brought a leading picture just before it that one sample kept.
+  lies between them (a GOP longer than the interval, including every sample
+  a keyframe list left out), or because an open-GOP keyframe brought a
+  leading picture just before it that one sample kept.
   The repair lists them again with `-skip_frame:v noref`, decoding every
   reference frame from the keyframe on, and keeps the last frame at or before
   each sample's time.

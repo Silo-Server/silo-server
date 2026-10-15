@@ -632,6 +632,26 @@ func NewPGEbookReaderProgressStore(pool *pgxpool.Pool) *PGEbookReaderProgressSto
 	return &PGEbookReaderProgressStore{pool: pool}
 }
 
+// PurgeProfile deletes a deleted profile's reading progress, reader settings
+// and annotations in one transaction. None of these tables has a foreign key
+// to the profile, which may live outside Postgres.
+func (s *PGEbookReaderProgressStore) PurgeProfile(ctx context.Context, userID int, profileID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin ebook reader purge: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, table := range []string{"ebook_reader_progress", "ebook_reader_config", "ebook_reader_annotations"} {
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE user_id = $1 AND profile_id = $2", userID, profileID); err != nil {
+			return fmt.Errorf("purge %s for user %d profile %s: %w", table, userID, profileID, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit ebook reader purge: %w", err)
+	}
+	return nil
+}
+
 type PGEbookReaderConfigStore struct {
 	pool *pgxpool.Pool
 }

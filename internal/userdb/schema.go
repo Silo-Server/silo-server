@@ -233,6 +233,7 @@ CREATE TABLE IF NOT EXISTS user_devices (
     device_name TEXT NOT NULL DEFAULT '',
     device_platform TEXT NOT NULL DEFAULT '',
     last_seen_at TEXT NOT NULL,
+    custom_name TEXT,
     PRIMARY KEY (profile_id, device_id)
 );
 

@@ -1616,6 +1616,14 @@ retry after an intervening unmark can create another watch; a durable client wat
 is still needed. History removal and unmark choose a fresh cutoff, so a delayed retry can
 hide an intervening watch. Sync accepts an omitted `updated_at`, so a delayed replay can
 overwrite newer progress; every item needs a stable event time before automatic retries are safe.
+Two v2-only operations extend the section without ledger rows: `clearResumePosition`
+(`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
+resume position while keeping its watched state and history, answers `204` (also when there is
+nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
+kind `markWatched` does not handle, and is
+`non_retryable` because a delayed retry would also clear a position recorded in between;
+`getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
+`clear_resume_position`. Semantics are in [the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,
@@ -2330,15 +2338,18 @@ for limits), without volatile metadata. Integration reads include persisted publ
 configuration and check status, all covered by the row revision, and a credential
 presence flag. API credentials are write-only. A blank update preserves the saved
 credential and retains the existing requirement to re-enter it when changing the
-base URL. Plugin validation happens before the storage transaction; an intervening
-edit still fails the final comparison instead of overwriting it. A failed plugin
+base URL, which applies only when a credential is saved; clearing the base URL
+counts as changing it. Plugin validation happens before the storage
+transaction; an intervening edit still fails the final comparison instead of overwriting it. A failed plugin
 validation uses structured v2 problem errors for the web's inline field messages.
 
 A v2 integration's `base_url` is normalized before option loading and before
 create or update: `http://` is assumed when no scheme is given and a trailing
 slash is dropped, so the saved address is the one the options probe used. An
 address with credentials, a query or a fragment, or another scheme, is a
-`validation_failed` problem on `body.base_url`. When `POST
+`validation_failed` problem on `body.base_url`. An options request that leaves
+`base_url` out tests the saved address; one that sends it blank tests a router
+that declares `base_url_optional` without an address. When `POST
 /admin/request-integrations/{id}/options` fails, the host answers with its own
 sentences and never echoes the plugin's upstream text. What the admin must fix
 is a `validation_failed` problem on `body.base_url` (wrong address, missing URL
@@ -2380,10 +2391,26 @@ forget requests, return `404`; successful commands return `204`. Both commands a
 non-retryable because a later retry can remove settings written in the meantime.
 Neither operation revokes login sessions or changes push registrations.
 
+`PATCH /api/v2/devices/{device_id}` (`updateDevice`) updates the same registry entry,
+with the same `profile_id` authorization and `404` for a missing device. Its one
+member, `custom_name`, names the device for that profile: a string sets it, `null`
+removes it, and omission leaves it unchanged. The server removes control characters
+and bidirectional overrides, collapses spaces, and rejects a name with no visible
+character (`422`). Registration never writes the custom name, so it survives the
+device being seen again, and the reported `device_name` is kept. `listDevices`
+returns `custom_name` only when one is set; clients show it in place of
+`device_name`. The operation answers `200` with the entry as `listDevices` renders it
+and is naturally idempotent. A name
+belongs to one profile's entry, so a device two profiles use is named separately for
+each. `supports_device_rename` on `getSettingsContractCapabilities` tells a client
+the operation exists. Administrator device reads and download device views still
+show the reported name.
+
 The web device-settings screen uses these operations. The Apple and Android native
 clients have no callers for this settings-device lifecycle; Apple's push registration
 belongs to the separate notification contract. Jellyfin has no corresponding
-settings-device operation.
+settings-device operation; jellycompat does not serve Jellyfin's device list or its
+custom device names.
 
 ### Administrator collections v2
 

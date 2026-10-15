@@ -179,6 +179,9 @@ type AdminHandler struct {
 	WatchlistTitlesSweeper interface {
 		SweepOrphanTitles(ctx context.Context) error
 	}
+	// RecWorker is told when an account update changes its profiles' access
+	// scope, so their recommendations are rebuilt. Optional.
+	RecWorker AccountsScopeNotifier
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -1093,6 +1096,9 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	}
 	if revoked && h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
+	}
+	if accountScopeChanged(updateInput) {
+		notifyAccountsScopeChanged(r.Context(), h.RecWorker, id)
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
@@ -2683,6 +2689,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		}
 		normalized[key] = value
 	}
+	checkedRedis, err := h.checkRedisSave(ctx, normalized)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
 	if err != nil {
@@ -2706,17 +2716,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				}
 			}
 
-			prospective := maps.Clone(stored)
-			for key, value := range normalized {
-				prospective[key] = value
-			}
-			rows := normalized
-			if value, ok := normalized[config.RedisDBSettingKey]; ok {
-				// The same batch can replace redis.url, so the row is decided
-				// against the URL the batch leaves in place.
-				rows = maps.Clone(normalized)
-				rows[config.RedisDBSettingKey] = redisDBRow(h.activeAdminSettings(prospective), value)
-				prospective[config.RedisDBSettingKey] = rows[config.RedisDBSettingKey]
+			prospective, rows := h.prospectiveSettings(stored, normalized)
+			if err := h.confirmRedisSave(stored, prospective, checkedRedis); err != nil {
+				preconditionErr = err
+				return nil, err
 			}
 			if modelValidation != nil {
 				if err := modelValidation.Check(stored, prospective); err != nil {
@@ -2743,7 +2746,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			validationSnapshot := adminSettingsValidationSnapshot(activeProspective, normalized)
 			if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 				validationErr = err
-				validationCode = "invalid_settings"
+				validationCode = adminInvalidSettingsCode
 				return nil, err
 			}
 			writes := make(map[string]string, len(normalized))
@@ -3073,6 +3076,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		}
 		req.Value = strconv.FormatBool(enabled)
 	}
+	change := map[string]string{key: req.Value}
+	checkedRedis, err := h.checkRedisSave(ctx, change)
+	if err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, map[string]string{key: req.Value})
 	if err != nil {
@@ -3095,12 +3103,12 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				}
 			}
 
-			prospective := maps.Clone(stored)
-			row := req.Value
-			if key == config.RedisDBSettingKey {
-				row = redisDBRow(h.activeAdminSettings(stored), req.Value)
+			prospective, rows := h.prospectiveSettings(stored, change)
+			row := rows[key]
+			if err := h.confirmRedisSave(stored, prospective, checkedRedis); err != nil {
+				preconditionErr = err
+				return nil, err
 			}
-			prospective[key] = row
 			if modelValidation != nil {
 				if err := modelValidation.Check(stored, prospective); err != nil {
 					validationErr, validationCode = err, adminInvalidSettingsCode
@@ -3118,7 +3126,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}
@@ -3133,7 +3141,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					h.RedisBootstrapAvailable,
 				); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}
@@ -3143,7 +3151,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			if key == artworkStorageBackendKey || key == s3PublicBucketKey || key == s3OperationalBucketKey {
 				if err := config.ValidateArtworkStorageSettings(h.effectiveAdminSettings(prospective)); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}

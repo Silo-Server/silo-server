@@ -107,6 +107,27 @@ type ProgressSyncBatchResult struct {
 // ProgressSyncOutput is always HTTP 200 after a per-item batch completes.
 type ProgressSyncOutput struct{ Body ProgressSyncBatchResult }
 
+// ResumePositionInput names the item whose resume position to clear.
+type ResumePositionInput struct {
+	MediaItemID ID `path:"media_item_id" doc:"A movie or episode" example:"movie-8f2c1a"`
+}
+
+// ProgressCapabilities is the getProgressCapabilities body.
+type ProgressCapabilities struct {
+	Capability
+	ClearResumePosition bool `json:"clear_resume_position" doc:"Whether clearResumePosition is served: it clears a movie or episode's resume position and keeps its watched state and watch history" example:"true"`
+}
+
+// ProgressCapabilitiesOutput is the getProgressCapabilities response.
+type ProgressCapabilitiesOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         ProgressCapabilities
+}
+
+const locationPathMediaItemID = "path.media_item_id"
+
 // opListProgress is the operation id; the cursor scope is bound to it.
 const opListProgress = "listProgress"
 
@@ -127,6 +148,41 @@ func registerProgress(reg *Registry) {
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
 	}, reg.syncProgress)
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/progress/capabilities", "getProgressCapabilities", "progress",
+		"The watch progress features this server supports, such as clearing a resume position.")), reg.getProgressCapabilities)
+	// Non-retryable as unmark is: a delayed retry would also clear a position
+	// the profile recorded after the first request.
+	clearPosition := humaOp(http.MethodDelete, Prefix+"/progress/{media_item_id}/position", "clearResumePosition", "progress",
+		"Clear the acting profile's resume position on a movie or episode, keeping its watched state and watch history. An item without a resume position is a no-op.")
+	clearPosition.DefaultStatus = http.StatusNoContent
+	Register(reg, Operation{Operation: clearPosition, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.clearResumePosition)
+}
+
+func (reg *Registry) getProgressCapabilities(_ context.Context, _ *CapabilityInput) (*ProgressCapabilitiesOutput, error) {
+	if reg.deps.Watch == nil {
+		return &ProgressCapabilitiesOutput{Body: ProgressCapabilities{Capability: Capability{State: StateNotConfigured}}}, nil
+	}
+	return &ProgressCapabilitiesOutput{Body: ProgressCapabilities{Capability: Capability{State: StateAvailable}, ClearResumePosition: true}}, nil
+}
+
+// clearResumePosition resets a movie or episode to no resume position for the
+// acting profile. A season, series or ebook fails validation of the path.
+func (reg *Registry) clearResumePosition(ctx context.Context, in *ResumePositionInput) (*struct{}, error) {
+	if reg.deps.Watch == nil {
+		return nil, unavailable("watch")
+	}
+	userID, profileID, p := viewerIdentity(ctx)
+	if p != nil {
+		return nil, p
+	}
+	filter, err := reg.deps.Watch.ContextAccessFilter(ctx, handlers.AccessFilterOptions{})
+	if err != nil {
+		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+	}
+	if err := reg.deps.Watch.ClearResumePosition(ctx, userID, profileID, string(in.MediaItemID), filter); err != nil {
+		return nil, watchTargetProblem(err, locationPathMediaItemID)
+	}
+	return nil, nil
 }
 
 // syncProgress runs the same batch write as v1 POST /sync/progress; a write

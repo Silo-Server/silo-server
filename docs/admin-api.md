@@ -2181,8 +2181,10 @@ prospective combined values. Single-key validation preserves the existing paired
 setting repair behavior. Empty values retain the established clear/default rules.
 
 Both writes are nonretryable. Enabling diagnostics can probe storage before the
-transaction, and runtime notifications after commit are not durable command
-receipts. A lost response does not establish whether the update committed. The
+transaction, a change to the Redis connection connects to Redis before it (see
+[Saving the Redis connection](admin-settings-api.md#saving-the-redis-connection)),
+and runtime notifications after commit are not durable command receipts. A
+lost response does not establish whether the update committed. The
 web captures the displayed validator, copied values and acting profile before an
 offline pause, does not refresh/replay a failed mutation, and keeps dirty edits on
 the original baseline across background reads and 412 responses. Changing acting
@@ -2770,7 +2772,9 @@ started from. Otherwise it skips the
 write without an error, leaves `last_run_at` and `last_error` as they were (so the next
 cycle polls the new upstream without waiting for the interval), records its starting
 marker as the event's `marker_after` with a note that the marker was not stored, and
-the next poll starts from the reset marker.
+the next poll starts from the reset marker. A poll that fails after such a reset
+likewise leaves `last_error` and `last_run_at` as the reset left them; its error is
+recorded only on the poll's event, with a note that it was not stored on the source.
 
 Configuration keys/values, connection and label are normalized as in the bridge.
 Webhook mode is restricted to the built-in identity, with auto/sonarr/radarr provider
@@ -3044,7 +3048,12 @@ by `id`. Both listeners share one projection: global configuration values contai
 public fields the manifest declares and list configured secret names in
 `configured_secrets`; a configuration whose schema is missing from the manifest is projected
 empty. The reserved built-in host row is excluded and a projection that contains it is an
-internal error. Timestamps are RFC 3339 UTC milliseconds.
+internal error. Timestamps are RFC 3339 UTC milliseconds. In every plugin view that lists
+capabilities (installations, catalog entries, and the install, upload and update responses), a
+`request_router.v1` capability carries `request_router`, whose `api_key_optional` and
+`base_url_optional` say which request server fields its plugin can do without; both are false
+when the plugin declares neither. For an installation they come from the capability stored at
+install or update, which is what routing reads.
 
 Both reads require an acting administrator and answer 503 when the
 plugin service or stores are not wired. The web plugins page and admin sidebar read these

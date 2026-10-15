@@ -39,8 +39,10 @@ import {
   type DecodedAudioFrame,
 } from "./ffmpegAudioDecoder";
 import { hevcLengthSize, stripDolbyVisionNalUnits } from "./hevc";
+import { IMPORT_COLOR_TAG, pictureColorOf } from "./pictureColor";
 import {
   ENGINE_READ_FAILED,
+  ENGINE_VIDEO_DECODE_FAILED,
   type EnginePlaneFrame,
   type PageToWorkerMessage,
   type WorkerToPageMessage,
@@ -69,7 +71,7 @@ const AUDIO_BUFFERED_SECONDS = 0.25;
 export const ENGINE_FAILURES = {
   open: "browser_engine_open_failed",
   videoUnsupported: "browser_engine_video_unsupported",
-  videoDecode: "browser_engine_video_decode_failed",
+  videoDecode: ENGINE_VIDEO_DECODE_FAILED,
   audioDecode: "browser_engine_audio_decode_failed",
   audioTrack: "browser_engine_audio_track_mismatch",
   read: ENGINE_READ_FAILED,
@@ -209,14 +211,16 @@ async function open(spec: EngineSourceSpec): Promise<void> {
       "The video track has no decoder configuration.",
     );
   }
+  // Read before the re-tag below replaces what the stream says.
+  const color = pictureColorOf(config);
   if (spec.video.transfer !== "sdr") {
     // Tag HDR frames as BT.709/sRGB so that a GPU-backed frame imported as an
     // external texture keeps its PQ/HLG-encoded R'G'B' values: the browser
     // then applies only the YUV matrix, and the engine's shader decodes the
-    // transfer itself. Frames copied out as planes ignore the tag.
+    // transfer and converts the gamut itself. Frames copied out as planes
+    // ignore the tag.
     config.colorSpace = {
-      primaries: "bt709",
-      transfer: "iec61966-2-1",
+      ...IMPORT_COLOR_TAG,
       // TypeScript's DOM types predate the BT.2020 matrix value.
       matrix: config.colorSpace?.matrix ?? ("bt2020-ncl" as VideoMatrixCoefficients),
       fullRange: config.colorSpace?.fullRange ?? false,
@@ -250,6 +254,7 @@ async function open(spec: EngineSourceSpec): Promise<void> {
         displayHeight: await videoTrack.getDisplayHeight(),
         rotation: await videoTrack.getRotation(),
         flip: await videoTrack.getFlip(),
+        color,
       },
       audio: audioFacts,
     },

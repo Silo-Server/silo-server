@@ -12,6 +12,8 @@ import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { preferredDateLocale } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
+import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
+import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 
 interface PlayingNextScreenProps {
   seriesId?: string;
@@ -274,6 +276,11 @@ export function PlayingNextScreen({
                     {nextEpisode.overview}
                   </p>
                 )}
+                {nextEpisode.overview &&
+                  !hideOverview &&
+                  hasMachineTranslation(nextEpisode.machineTranslatedFields) && (
+                    <MachineTranslatedLabel className="mt-1" />
+                  )}
               </div>
 
               {/* Actions */}

@@ -792,6 +792,35 @@ function PlaybackCapabilityPrewarmer() {
   return null;
 }
 
+/**
+ * Measures throughput to the server in the background so Auto quality can
+ * tell a 4K-capable link from a slow one. Signed-out screens stay quiet and a
+ * fresh cached measurement skips the probe. There is deliberately no
+ * re-measure on `connection` change events: Chromium fires them whenever its
+ * rounded estimate moves, which would spend a probe every few minutes.
+ */
+function BandwidthProbePrewarmer() {
+  const { user } = useAuth();
+  const isAuthenticated = Boolean(user);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    void import("@/player/bandwidth-probe")
+      .then(({ scheduleBandwidthProbe }) => {
+        if (!cancelled) cleanup = scheduleBandwidthProbe();
+      })
+      .catch(() => {
+        // Without a measurement Auto plans from the device and source alone.
+      });
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [isAuthenticated]);
+  return null;
+}
+
 /** Warms the hot route chunks once the first screen has settled. */
 function RouteChunkPrewarmer() {
   const { user } = useAuth();
@@ -831,6 +860,7 @@ function AppShell() {
                     <RealtimeEventsProvider>
                       <PlaybackCapabilityPrewarmer />
                       <RouteChunkPrewarmer />
+                      <BandwidthProbePrewarmer />
                       <RealtimeEventChannels />
                       <ScrollRestorationManager />
                       <NavigationDirectionManager />

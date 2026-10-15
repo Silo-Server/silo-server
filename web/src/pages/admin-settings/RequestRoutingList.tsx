@@ -422,6 +422,7 @@ export function RequestRoutingList({
     rules,
     fallback,
     servers: scope.allServers,
+    installations: scope.installations,
     serverFields: (server: RequestIntegration) => serverOverrideFields(server, scope.installations),
     language: scope.language,
     forceDual: scope.forceDual,

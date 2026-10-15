@@ -101,8 +101,7 @@ type ItemsHandler struct {
 	detailSvc                *catalog.DetailService
 	storeProvider            userstore.UserStoreProvider
 	watchState               *watchstate.Service
-	profileStaler            ProfileStaler
-	profileRefreshRequester  ProfileRefreshRequester
+	signalsNotifier          SignalsChangedNotifier
 	metadataRefreshRequester MetadataRefreshRequester
 	trailerRefreshRequester  TrailerRefreshRequester
 	trailerItemAccess        trailerItemAccess
@@ -162,14 +161,10 @@ func (h *ItemsHandler) SetCompletionObserver(obs watchstate.CompletionObserver) 
 	h.watchState.WithCompletionObserver(obs)
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *ItemsHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *ItemsHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *ItemsHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequester) {
@@ -411,6 +406,8 @@ type seasonResponse struct {
 	PosterURL       string                  `json:"poster_url,omitempty"`
 	PosterThumbhash string                  `json:"poster_thumbhash,omitempty"`
 	UserData        *catalog.SeasonUserData `json:"user_data,omitempty"`
+	// MachineTranslatedFields reaches the v2 season row only; v1 is frozen.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // seasonsResponse wraps the seasons list for JSON serialization.
@@ -464,6 +461,10 @@ type episodeResponse struct {
 	// frozen, so they stay off its wire.
 	RatingIMDB *float64 `json:"-"`
 	RatingTMDB *float64 `json:"-"`
+	// MachineTranslatedFields reaches the v2 episode row only; v1 is frozen.
+	MachineTranslatedFields []string `json:"-"`
+	// PendingTranslationLanguage reaches the v2 episode row only; v1 is frozen.
+	PendingTranslationLanguage string `json:"-"`
 }
 
 type episodeImageFallback struct {
@@ -1268,6 +1269,9 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 		RatingIMDB:          ep.RatingIMDB,
 		RatingTMDB:          ep.RatingTMDB,
 		StillThumbhash:      stillThumbhash,
+
+		MachineTranslatedFields:    ep.MachineTranslatedFields,
+		PendingTranslationLanguage: ep.PendingTranslationLanguage,
 	}
 
 	if ep.AirDate != nil {
@@ -1866,6 +1870,8 @@ func (h *ItemsHandler) localizedSeasonResponse(
 		Overview:        s.Overview,
 		EpisodeCount:    episodeCount,
 		PosterThumbhash: s.PosterThumbhash,
+
+		MachineTranslatedFields: s.MachineTranslatedFields,
 	}
 	if s.AirDate != nil {
 		resp.AirDate = s.AirDate.Format("2006-01-02")
@@ -2452,44 +2458,33 @@ type watchedLeafTarget struct {
 	DurationSeconds float64
 }
 
-// resolveWatchedTargets checks access to contentID and resolves the leaf
-// targets a watched mark writes. Unwatching a series or season returns no
-// targets: the caller expands it with watchstate.ParentUnwatchTargets, which
-// also reaches watched episodes that no longer have a file.
-func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, played bool, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
+// watchedTarget is a watched-state target that exists and that the viewer
+// may see, before a season or series is expanded into its episodes.
+type watchedTarget struct {
+	Type    string
+	Item    *models.MediaItem
+	Season  *models.Season
+	Episode *models.Episode
+}
+
+// lookupWatchedTarget finds a movie, ebook, series, season or episode and
+// checks the viewer's access without loading a season's or series' episodes.
+// Any other item type is not found.
+func (h *ItemsHandler) lookupWatchedTarget(ctx context.Context, contentID string, filter catalog.AccessFilter) (watchedTarget, error) {
 	item, err := h.itemRepo.GetByID(ctx, contentID)
 	switch {
 	case err == nil:
 		if err := h.itemRepo.EnsureAccessible(ctx, contentID, filter); err != nil {
-			return "", nil, err
+			return watchedTarget{}, err
 		}
 		switch item.Type {
-		case "movie":
-			return "movie", []watchedLeafTarget{{
-				ContentID:       item.ContentID,
-				DurationSeconds: h.contentDurationSeconds(ctx, item.ContentID, "", item.Runtime),
-			}}, nil
-		case "ebook":
-			// Ebooks have no playback duration; read state is keyed off
-			// ebook_reader_progress, so the leaf target only carries the ID.
-			return "ebook", []watchedLeafTarget{{ContentID: item.ContentID}}, nil
-		case "series":
-			if h.episodeRepo == nil {
-				return "", nil, catalog.ErrItemNotFound
-			}
-			if !played {
-				return "series", nil, nil
-			}
-			episodes, err := h.episodeRepo.ListBySeries(ctx, item.ContentID)
-			if err != nil {
-				return "", nil, err
-			}
-			return "series", h.episodeTargets(ctx, episodes), nil
+		case itemTypeMovie, itemTypeEbook, "series":
+			return watchedTarget{Type: item.Type, Item: item}, nil
 		default:
-			return "", nil, catalog.ErrItemNotFound
+			return watchedTarget{}, catalog.ErrItemNotFound
 		}
 	case !errors.Is(err, catalog.ErrItemNotFound):
-		return "", nil, err
+		return watchedTarget{}, err
 	}
 
 	if h.seasonRepo != nil {
@@ -2497,40 +2492,77 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 		switch {
 		case err == nil:
 			if err := h.itemRepo.EnsureAccessible(ctx, season.SeriesID, filter); err != nil {
-				return "", nil, err
+				return watchedTarget{}, err
 			}
-			if h.episodeRepo == nil {
-				return "", nil, catalog.ErrItemNotFound
-			}
-			if !played {
-				return "season", nil, nil
-			}
-			episodes, err := h.episodeRepo.ListBySeasonID(ctx, season.ContentID)
-			if err != nil {
-				return "", nil, err
-			}
-			return "season", h.episodeTargets(ctx, episodes), nil
+			return watchedTarget{Type: "season", Season: season}, nil
 		case !errors.Is(err, catalog.ErrSeasonNotFound):
-			return "", nil, err
+			return watchedTarget{}, err
 		}
 	}
 
 	if h.episodeRepo == nil {
-		return "", nil, catalog.ErrItemNotFound
+		return watchedTarget{}, catalog.ErrItemNotFound
 	}
 
 	episode, err := h.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
-		return "", nil, err
+		return watchedTarget{}, err
 	}
 	if err := h.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
+		return watchedTarget{}, err
+	}
+	return watchedTarget{Type: itemTypeEpisode, Episode: episode}, nil
+}
+
+// resolveWatchedTargets checks access to contentID and resolves the leaf
+// targets a watched mark writes. Unwatching a series or season returns no
+// targets: the caller expands it with watchstate.ParentUnwatchTargets, which
+// also reaches watched episodes that no longer have a file.
+func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID string, played bool, filter catalog.AccessFilter) (string, []watchedLeafTarget, error) {
+	target, err := h.lookupWatchedTarget(ctx, contentID, filter)
+	if err != nil {
 		return "", nil, err
 	}
-
-	return "episode", []watchedLeafTarget{{
-		ContentID:       episode.ContentID,
-		DurationSeconds: h.contentDurationSeconds(ctx, "", episode.ContentID, episode.Runtime),
-	}}, nil
+	switch target.Type {
+	case itemTypeMovie:
+		return itemTypeMovie, []watchedLeafTarget{{
+			ContentID:       target.Item.ContentID,
+			DurationSeconds: h.contentDurationSeconds(ctx, target.Item.ContentID, "", target.Item.Runtime),
+		}}, nil
+	case itemTypeEbook:
+		// Ebooks have no playback duration; read state is keyed off
+		// ebook_reader_progress, so the leaf target only carries the ID.
+		return itemTypeEbook, []watchedLeafTarget{{ContentID: target.Item.ContentID}}, nil
+	case "series":
+		if h.episodeRepo == nil {
+			return "", nil, catalog.ErrItemNotFound
+		}
+		if !played {
+			return "series", nil, nil
+		}
+		episodes, err := h.episodeRepo.ListBySeries(ctx, target.Item.ContentID)
+		if err != nil {
+			return "", nil, err
+		}
+		return "series", h.episodeTargets(ctx, episodes), nil
+	case "season":
+		if h.episodeRepo == nil {
+			return "", nil, catalog.ErrItemNotFound
+		}
+		if !played {
+			return "season", nil, nil
+		}
+		episodes, err := h.episodeRepo.ListBySeasonID(ctx, target.Season.ContentID)
+		if err != nil {
+			return "", nil, err
+		}
+		return "season", h.episodeTargets(ctx, episodes), nil
+	default:
+		return itemTypeEpisode, []watchedLeafTarget{{
+			ContentID:       target.Episode.ContentID,
+			DurationSeconds: h.contentDurationSeconds(ctx, "", target.Episode.ContentID, target.Episode.Runtime),
+		}}, nil
+	}
 }
 
 // episodeTargets resolves the watched leaf targets for a season or series.

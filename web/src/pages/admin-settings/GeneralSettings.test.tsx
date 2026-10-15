@@ -103,6 +103,7 @@ describe("GeneralSettings", () => {
     expect(settingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
       "server.public_url",
       "server.lan_discovery",
+      "server.local_url",
       "clientip.trusted_proxies",
       "branding.server_name",
       "branding.login_subtitle",
@@ -116,6 +117,25 @@ describe("GeneralSettings", () => {
       "Database",
       "Redis",
     ]);
+  });
+
+  // The local address applies live, like the public URL: apps read it from the
+  // connections document on their next refresh.
+  it("stages the local network address without a restart chip", async () => {
+    const form = makeForm({ "server.local_url": "http://192.168.1.20:8080" });
+    settingsFormMock.mockReturnValue(form);
+    renderPage();
+
+    const field = network().getByLabelText("Local network address");
+    expect(field).toHaveValue("http://192.168.1.20:8080");
+    expect(
+      network()
+        .queryAllByLabelText("Takes effect after a server restart")
+        .find((el) => el.parentElement?.textContent?.includes("Local network address")),
+    ).toBeUndefined();
+
+    await userEvent.clear(field);
+    expect(form.setValue).toHaveBeenLastCalledWith("server.local_url", "");
   });
 
   // Trusted proxies moved here from Security, beside the public URL, the way

@@ -8,7 +8,11 @@ import {
   PlatformIcon,
   platformKindLabel,
 } from "@/components/admin/deviceOverrides";
-import { deviceRecencyGroup, type DeviceRecencyGroup } from "@/hooks/queries/devices";
+import {
+  deviceDisplayName,
+  deviceRecencyGroup,
+  type DeviceRecencyGroup,
+} from "@/hooks/queries/devices";
 import { cn } from "@/lib/utils";
 
 const GROUP_TITLES: Record<DeviceRecencyGroup, string> = {
@@ -106,6 +110,7 @@ export function DeviceList({
       const platform = platformKindLabel(classifyPlatform(device.device_platform));
       return (
         device.device_name.toLowerCase().includes(query) ||
+        (device.custom_name ?? "").toLowerCase().includes(query) ||
         device.device_platform.toLowerCase().includes(query) ||
         platform.toLowerCase().includes(query) ||
         device.profile_name.toLowerCase().includes(query)
@@ -346,7 +351,7 @@ function DeviceRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium xl:text-[13px]">
-          {device.device_name || "Unknown device"}
+          {deviceDisplayName(device)}
         </span>
         <span className="text-muted-foreground block truncate text-[13px]">
           {device.is_current_device ? "This device" : lastSeenLabel(device.last_seen_at, now)}

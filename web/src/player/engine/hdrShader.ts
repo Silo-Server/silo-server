@@ -2,11 +2,18 @@
  * WGSL for the engine's WebGPU presenter. The color functions mirror
  * colorMath.ts, which carries the reference implementation and its tests.
  *
- * Two entry points read the picture differently and share the conversion:
+ * Three entry points read the picture differently and share the conversion.
  * `fragmentExternal` samples a GPU-backed frame whose R'G'B' the browser has
  * already derived with the YUV matrix (the decoder was told the frame is
- * sRGB-tagged so no transfer is applied), and `fragmentPlanes` reconstructs R'G'B' from uploaded 10/12-bit Y'CbCr
- * codes, keeping full precision.
+ * sRGB-tagged so no transfer is applied); `fragmentCopied` samples the same
+ * R'G'B' after the frame was copied into a half-float texture, for browsers
+ * that import some frames wrongly; and `fragmentPlanes` reconstructs R'G'B'
+ * from uploaded 10/12-bit Y'CbCr codes, keeping full precision.
+ *
+ * A picture drawn smaller than its own size would alias with one sample per
+ * pixel, so each entry averages an N x N grid of bilinear samples across the
+ * pixel's footprint, N being how many texels of that plane the pixel covers
+ * (at most 4). At or above the picture's own size N is 1.
  */
 export const PRESENTER_WGSL = /* wgsl */ `
 struct Params {
@@ -19,6 +26,17 @@ struct Params {
   tone: vec4f,
   // Luma width/height, chroma width/height of uploaded planes.
   sizes: vec4f,
+  // xy: first chroma sample's offset from the first luma sample, in luma
+  // pixels; zw: chroma subsampling along x and y (1 or 2).
+  chroma: vec4f,
+  // Y'CbCr to R'G'B': Cr into R, Cb into G, Cr into G, Cb into B.
+  yuv: vec4f,
+  // Luminance weights of the source gamut.
+  luma: vec4f,
+  // Rows of the linear source-gamut to BT.709 matrix.
+  gamut0: vec4f,
+  gamut1: vec4f,
+  gamut2: vec4f,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -54,12 +72,14 @@ fn decodedUV(upright: vec2f) -> vec2f {
   if (params.mode.w == 1u) {
     p.x = 1.0 - p.x;
   }
+  var uv = p;
   switch params.mode.z {
-    case 1u: { return vec2f(p.y, 1.0 - p.x); }
-    case 2u: { return vec2f(1.0 - p.x, 1.0 - p.y); }
-    case 3u: { return vec2f(1.0 - p.y, p.x); }
-    default: { return p; }
+    case 1u: { uv = vec2f(p.y, 1.0 - p.x); }
+    case 2u: { uv = vec2f(1.0 - p.x, 1.0 - p.y); }
+    case 3u: { uv = vec2f(1.0 - p.y, p.x); }
+    default: {}
   }
+  return uv;
 }
 
 const PQ_M1: f32 = 0.1593017578125;
@@ -70,7 +90,6 @@ const PQ_C3: f32 = 18.6875;
 const HLG_A: f32 = 0.17883277;
 const HLG_B: f32 = 0.28466892;
 const HLG_C: f32 = 0.55991073;
-const LUMA_2020 = vec3f(0.2627, 0.678, 0.0593);
 
 fn pqToNits(signal: vec3f) -> vec3f {
   let e = pow(max(signal, vec3f(0.0)), vec3f(1.0 / PQ_M2));
@@ -123,47 +142,91 @@ fn linearToSRGB(value: vec3f) -> vec3f {
 }
 
 fn toneMap(encoded: vec3f) -> vec4f {
+  let weights = params.luma.xyz;
   var linear: vec3f;
   if (params.mode.x == 2u) {
     let scene = hlgToScene(encoded);
-    let sceneLuma = dot(scene, LUMA_2020);
+    let sceneLuma = dot(scene, weights);
     linear = scene * (1000.0 * pow(max(sceneLuma, 1e-6), 0.2));
   } else {
     linear = pqToNits(encoded);
   }
   let sourcePeak = params.tone.x;
   let targetPeak = params.tone.y;
-  let luma = dot(linear, LUMA_2020);
+  let luma = dot(linear, weights);
   var scale = 0.0;
   if (luma > 0.0) {
     scale = bt2390(luma, sourcePeak, targetPeak) / luma;
   }
-  let toBT709 = mat3x3f(
-    vec3f(1.660491, -0.124551, -0.018151),
-    vec3f(-0.587641, 1.1329, -0.100579),
-    vec3f(-0.07285, -0.008349, 1.11873),
+  let bt709 = vec3f(
+    dot(params.gamut0.xyz, linear),
+    dot(params.gamut1.xyz, linear),
+    dot(params.gamut2.xyz, linear),
   );
-  let display = (toBT709 * linear) * scale / targetPeak;
-  return vec4f(linearToSRGB(display), 1.0);
+  return vec4f(linearToSRGB(bt709 * scale / targetPeak), 1.0);
+}
+
+// How many samples per axis cover a pixel spanning these texel steps. The
+// tolerance keeps whole-number scales (1:1, 2:1) from tipping into an extra
+// row of samples through rounding in the interpolated coordinates.
+fn tapCount(stepX: vec2f, stepY: vec2f) -> i32 {
+  return i32(clamp(ceil(max(length(stepX), length(stepY)) - 0.01), 1.0, 4.0));
+}
+
+// Offset of sample (i, j) of an n x n grid across the pixel, in pixels.
+fn tapOffset(i: i32, j: i32, n: i32) -> vec2f {
+  return (vec2f(f32(i), f32(j)) + 0.5) / f32(n) - 0.5;
 }
 
 @group(1) @binding(0) var externalPicture: texture_external;
 
 @fragment
 fn fragmentExternal(in: VertexOut) -> @location(0) vec4f {
-  let encoded = textureSampleBaseClampToEdge(externalPicture, pictureSampler, in.uv).rgb;
-  return toneMap(encoded);
+  // Derivatives first, while control flow is still uniform.
+  let du = dpdx(in.uv);
+  let dv = dpdy(in.uv);
+  let size = vec2f(textureDimensions(externalPicture));
+  let n = tapCount(du * size, dv * size);
+  var sum = vec3f(0.0);
+  for (var j = 0; j < n; j++) {
+    for (var i = 0; i < n; i++) {
+      let o = tapOffset(i, j, n);
+      let uv = in.uv + du * o.x + dv * o.y;
+      sum += textureSampleBaseClampToEdge(externalPicture, pictureSampler, uv).rgb;
+    }
+  }
+  return toneMap(sum / f32(n * n));
+}
+
+@group(1) @binding(0) var copiedPicture: texture_2d<f32>;
+
+@fragment
+fn fragmentCopied(in: VertexOut) -> @location(0) vec4f {
+  // Derivatives first, while control flow is still uniform.
+  let du = dpdx(in.uv);
+  let dv = dpdy(in.uv);
+  let size = vec2f(textureDimensions(copiedPicture));
+  let n = tapCount(du * size, dv * size);
+  var sum = vec3f(0.0);
+  for (var j = 0; j < n; j++) {
+    for (var i = 0; i < n; i++) {
+      let o = tapOffset(i, j, n);
+      let uv = in.uv + du * o.x + dv * o.y;
+      sum += textureSampleLevel(copiedPicture, pictureSampler, uv, 0.0).rgb;
+    }
+  }
+  return toneMap(sum / f32(n * n));
 }
 
 @group(1) @binding(0) var lumaPlane: texture_2d<u32>;
 @group(1) @binding(1) var cbPlane: texture_2d<u32>;
 @group(1) @binding(2) var crPlane: texture_2d<u32>;
 
-// Integer textures cannot be filtered by a sampler, so filter by hand.
-fn bilinear(plane: texture_2d<u32>, uv: vec2f, size: vec2f) -> f32 {
-  let position = uv * size - 0.5;
-  let base = floor(position);
-  let fraction = position - base;
+// Integer textures cannot be filtered by a sampler, so filter by hand. q is
+// in texels with texel centres at integers.
+fn bilinear(plane: texture_2d<u32>, q: vec2f, size: vec2f) -> f32 {
+  let base = floor(q);
+  let fraction = q - base;
   let maxIndex = vec2i(size) - 1;
   let p00 = clamp(vec2i(base), vec2i(0), maxIndex);
   let p11 = clamp(vec2i(base) + 1, vec2i(0), maxIndex);
@@ -174,19 +237,50 @@ fn bilinear(plane: texture_2d<u32>, uv: vec2f, size: vec2f) -> f32 {
   return mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
 }
 
+// The chroma texel under a point of the picture: chroma sample k sits at luma
+// pixel k * subsampling + origin, so this holds for any picture size.
+fn chromaTexel(uv: vec2f) -> vec2f {
+  return (uv * params.sizes.xy - 0.5 - params.chroma.xy) / params.chroma.zw;
+}
+
 @fragment
 fn fragmentPlanes(in: VertexOut) -> @location(0) vec4f {
+  // Derivatives first, while control flow is still uniform.
+  let du = dpdx(in.uv);
+  let dv = dpdy(in.uv);
+  let lumaSize = params.sizes.xy;
+  let chromaSize = params.sizes.zw;
+
+  let nl = tapCount(du * lumaSize, dv * lumaSize);
+  var y = 0.0;
+  for (var j = 0; j < nl; j++) {
+    for (var i = 0; i < nl; i++) {
+      let o = tapOffset(i, j, nl);
+      y += bilinear(lumaPlane, (in.uv + du * o.x + dv * o.y) * lumaSize - 0.5, lumaSize);
+    }
+  }
+  y /= f32(nl * nl);
+
+  let chromaScale = lumaSize / params.chroma.zw;
+  let nc = tapCount(du * chromaScale, dv * chromaScale);
+  var cbcr = vec2f(0.0);
+  for (var j = 0; j < nc; j++) {
+    for (var i = 0; i < nc; i++) {
+      let o = tapOffset(i, j, nc);
+      let q = chromaTexel(in.uv + du * o.x + dv * o.y);
+      cbcr += vec2f(bilinear(cbPlane, q, chromaSize), bilinear(crPlane, q, chromaSize));
+    }
+  }
+  cbcr /= f32(nc * nc);
+
   let scale = exp2(f32(params.mode.y) - 8.0);
-  let y = bilinear(lumaPlane, in.uv, params.sizes.xy) / scale;
-  let cb = bilinear(cbPlane, in.uv, params.sizes.zw) / scale;
-  let cr = bilinear(crPlane, in.uv, params.sizes.zw) / scale;
-  let luma = (y - 16.0) / 219.0;
-  let blue = (cb - 128.0) / 224.0;
-  let red = (cr - 128.0) / 224.0;
+  let luma = (y / scale - 16.0) / 219.0;
+  let blue = (cbcr.x / scale - 128.0) / 224.0;
+  let red = (cbcr.y / scale - 128.0) / 224.0;
   let encoded = vec3f(
-    luma + 1.4746 * red,
-    luma - 0.16455313 * blue - 0.57135313 * red,
-    luma + 1.8814 * blue,
+    luma + params.yuv.x * red,
+    luma - params.yuv.y * blue - params.yuv.z * red,
+    luma + params.yuv.w * blue,
   );
   return toneMap(encoded);
 }

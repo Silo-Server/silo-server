@@ -29,11 +29,21 @@ type ProviderIDIntegrityStats struct {
 }
 
 type ProviderIDIntegrityRepairer struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	recsStaler RecommendationStaler
 }
 
 func NewProviderIDIntegrityRepairer(pool *pgxpool.Pool) *ProviderIDIntegrityRepairer {
 	return &ProviderIDIntegrityRepairer{pool: pool}
+}
+
+// WithRecommendationStaler installs what marks recommendations stale after a
+// repair merges a duplicate item, and returns the repairer.
+func (r *ProviderIDIntegrityRepairer) WithRecommendationStaler(staler RecommendationStaler) *ProviderIDIntegrityRepairer {
+	if r != nil {
+		r.recsStaler = staler
+	}
+	return r
 }
 
 func (r *ProviderIDIntegrityRepairer) Run(ctx context.Context, batchSize int) (ProviderIDIntegrityStats, error) {
@@ -236,12 +246,12 @@ func (r *ProviderIDIntegrityRepairer) repairDriftRow(ctx context.Context, row pr
 		}
 		return "provisional_conflict", nil
 	case isConfirmedOwnershipStatus(owner.Status) && isProvisionalOwnershipStatus(row.Status):
-		if _, err := canonicalizeProviderIDDuplicateInto(ctx, r.pool, row.ContentID, owner.ContentID, false, false); err != nil {
+		if _, err := canonicalizeProviderIDDuplicateInto(ctx, r.pool, r.recsStaler, row.ContentID, owner.ContentID, false, false); err != nil {
 			return "", err
 		}
 		return "matched_canonicalization", nil
 	case isConfirmedOwnershipStatus(owner.Status) && isConfirmedOwnershipStatus(row.Status):
-		if _, err := canonicalizeProviderIDDuplicate(ctx, r.pool, row.ContentID, owner.ContentID, true, false); err != nil {
+		if _, err := canonicalizeProviderIDDuplicate(ctx, r.pool, r.recsStaler, row.ContentID, owner.ContentID, true, false); err != nil {
 			return "", err
 		}
 		return "matched_canonicalization", nil
@@ -364,7 +374,7 @@ func (s *MetadataService) canonicalizeProviderIDDuplicate(
 	if s == nil || s.dbPool == nil {
 		return "", nil
 	}
-	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, leftContentID, rightContentID, allowMatchedSource, markIdentity)
+	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, s.recsStaler, leftContentID, rightContentID, allowMatchedSource, markIdentity)
 }
 
 // clearProvisionalProviderIDsLocked removes provider ID rows for an item only
@@ -404,15 +414,17 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 }
 
 // canonicalizeProviderIDDuplicate merges two items that share a provider ID
-// onto the one chooseCanonicalProviderOwner picks. With markIdentity (an
-// Identify of leftContentID that hit the conflict with rightContentID, the
-// owner of the chosen IDs) the merge records the choice when it keeps
-// rightContentID: that item holds the chosen IDs. When it keeps
+// onto the one chooseCanonicalProviderOwner picks, then marks stale through
+// staler the recommendations of profiles whose state moved with it. With
+// markIdentity (an Identify of leftContentID that hit the conflict with
+// rightContentID, the owner of the chosen IDs) the merge records the choice
+// when it keeps rightContentID: that item holds the chosen IDs. When it keeps
 // leftContentID, which still has its old IDs, the identity write that follows
 // marks it.
 func canonicalizeProviderIDDuplicate(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	staler RecommendationStaler,
 	leftContentID string,
 	rightContentID string,
 	allowMatchedSource bool,
@@ -456,16 +468,20 @@ func canonicalizeProviderIDDuplicate(
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
 	}
+	MarkRecommendationsStale(ctx, staler, canonical.ContentID)
 	return canonical.ContentID, nil
 }
 
 // canonicalizeProviderIDDuplicateInto merges sourceID onto canonicalID, the
-// item that owns the shared provider IDs. With markIdentity (an Identify that
-// hit the conflict) the merge also records the choice on canonicalID, so the
-// mark commits with the chosen IDs even if the identity write after it fails.
+// item that owns the shared provider IDs, then marks stale through staler the
+// recommendations of profiles whose state moved with it. With markIdentity
+// (an Identify that hit the conflict) the merge also records the choice on
+// canonicalID, so the mark commits with the chosen IDs even if the identity
+// write after it fails.
 func canonicalizeProviderIDDuplicateInto(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	staler RecommendationStaler,
 	sourceID string,
 	canonicalID string,
 	allowMatchedSource bool,
@@ -544,6 +560,7 @@ func canonicalizeProviderIDDuplicateInto(
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
 	}
+	MarkRecommendationsStale(ctx, staler, canonicalID)
 	return canonicalID, nil
 }
 
@@ -832,11 +849,11 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 	{"delete source embeddings", `DELETE FROM media_item_embeddings WHERE media_item_id = $1`},
 	{"merge item localizations", `
 			INSERT INTO media_item_localizations (
-				content_id, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
-				backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
+				content_id, language, title, sort_title, overview, overview_source, tagline, tagline_source,
+				poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
 			)
-			SELECT $2, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
-			       backdrop_path, backdrop_thumbhash, logo_path, created_at, NOW()
+			SELECT $2, language, title, sort_title, overview, overview_source, tagline, tagline_source,
+			       poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path, created_at, NOW()
 			FROM media_item_localizations
 			WHERE content_id = $1
 			ON CONFLICT (content_id, language) DO NOTHING`},

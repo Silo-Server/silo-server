@@ -185,22 +185,21 @@ type copySeekAnchorResolver func(
 
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
-	sessionMgr              SessionManagerInterface
-	fileResolver            FilePathResolver            // optional; enables stream_url in responses
-	StoreProvider           userstore.UserStoreProvider // optional; enables progress/history persistence
-	DeviceSightings         *DeviceSightings            // optional; registers the device that starts playback
-	WatchScrobbler          PlaybackWatchScrobbler
-	StableIdentityResolver  *watchstate.StableIdentityResolver
-	CompletionObserver      watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
-	AdminStore              PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
-	SessionSyncer           PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
-	EventsHub               *evt.Hub
-	MissingMarker           MissingFileMarker
-	NodePlanner             nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
-	JWTSecret               string                    // needed for signing stream tokens
-	StreamTelemetry         *streamtelemetry.Registry // local observation-only telemetry
+	sessionMgr             SessionManagerInterface
+	fileResolver           FilePathResolver            // optional; enables stream_url in responses
+	StoreProvider          userstore.UserStoreProvider // optional; enables progress/history persistence
+	DeviceSightings        *DeviceSightings            // optional; registers the device that starts playback
+	WatchScrobbler         PlaybackWatchScrobbler
+	StableIdentityResolver *watchstate.StableIdentityResolver
+	CompletionObserver     watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
+	signalsNotifier        SignalsChangedNotifier
+	AdminStore             PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
+	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
+	EventsHub              *evt.Hub
+	MissingMarker          MissingFileMarker
+	NodePlanner            nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
+	JWTSecret              string                    // needed for signing stream tokens
+	StreamTelemetry        *streamtelemetry.Registry // local observation-only telemetry
 	// StreamDeny revokes a session's stream tokens before they expire (see
 	// docs/architecture/restart-resilient-playback.md). Nil-safe: without Redis
 	// a stopped session keeps serving from a valid token until the token expires.
@@ -228,7 +227,13 @@ type PlaybackHandler struct {
 	// for transcode-executed progressive remuxes, whose signed tokens otherwise
 	// outlive a node's in-memory stop fence. Without a usable store those remuxes
 	// use another legal route; tokenless HLS sessions replan instead of recovering.
-	NodeRecipeStore    recipeCardStoreV3
+	NodeRecipeStore recipeCardStoreV3
+	// SessionRecipeStore keeps the committed recipe of a header-authenticated
+	// session, keyed by playback session id, so this server (after a restart, or
+	// any replica) can rebuild a session whose URLs carry no stream token. See
+	// playback_session_recipe.go. Without Redis behind it such a session answers
+	// 404 after a restart and the client starts a new attempt, as before.
+	SessionRecipeStore sessionRecipeStoreV3
 	ItemAccess         PlaybackItemAccessChecker // optional; enables file authorization checks
 	EpisodeLookup      PlaybackEpisodeLookup     // optional; resolves episode files to their series
 	ExtraLookup        PlaybackExtraLookup       // optional; resolves extras files to their parent item
@@ -413,14 +418,10 @@ func (h *PlaybackHandler) TranscodeManager() *playback.TranscodeManager {
 	return h.tm
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *PlaybackHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *PlaybackHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *PlaybackHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 // playbackConfig returns the current playback config, falling back to the
@@ -591,6 +592,12 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 			// reconstruction; plain cards just respawn the encode. Either way the
 			// atomic playback+runtime operation is the same front door.
 			card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+			if card == nil && session.RequireMediaAuthorization {
+				var recipeErr error
+				if card, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, requestUserID); recipeErr != nil {
+					return nil, playback.SessionLoadFailed, nil, nil, recipeErr
+				}
+			}
 			if card != nil && nativeAPIEgressStatusV3(card.RoutingWorkload, card.RoutingExecution, card.RoutingEgress) != 0 {
 				// The live session may have been replanned since this token was
 				// issued. Its API assignment is authoritative; a stale proxy card
@@ -611,8 +618,15 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 		return nil, playback.SessionLoadFailed, nil, nil, nil
 	}
 	// Genuine miss (e.g. after a restart): now — and only now — pay for the token
-	// decode so the recipe is available for reconstruction.
+	// decode so the recipe is available for reconstruction. A header-authenticated
+	// session carries no token; its recipe is the server-side recovery card.
 	card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	if card == nil {
+		var recipeErr error
+		if card, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, requestUserID); recipeErr != nil {
+			return nil, playback.SessionLoadFailed, nil, nil, recipeErr
+		}
+	}
 	if card != nil {
 		if routeStatus := nativeAPIEgressStatusV3(card.RoutingWorkload, card.RoutingExecution, card.RoutingEgress); routeStatus != 0 {
 			return nil, playback.SessionUnavailable, card, claims, &nativeRouteBindingErrorV3{status: routeStatus}
@@ -780,9 +794,8 @@ func appendStreamToken(rawURL, token string) string {
 //
 // A session that requires media authorization gets the bare relative URL: it
 // authenticates every media request with the caller's own access token, so no
-// client-visible URL may carry a playback credential. Losing the token also
-// means losing transparent reconstruction after a restart, which is the
-// documented trade of that mode.
+// client-visible URL may carry a playback credential. Its reconstruction recipe
+// is kept server-side instead (see playback_session_recipe.go).
 func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 	if s == nil {
 		return ""
@@ -1003,7 +1016,7 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 		// A heartbeat that only moves the position leaves the taste profile
 		// alone; the stop (persistStopAndHistory) refreshes it for the play,
 		// and marking the item watched refreshes it here.
-		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
+		notifySignalsChanged(ctx, h.signalsNotifier, session.UserID, session.ProfileID)
 	}
 
 	if err := store.UpdateProgressHints(ctx, session.ProfileID, targetID, userstore.VersionHints{
@@ -1059,7 +1072,7 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	// A history row this stop wrote still counts when a later write failed:
 	// no later stop of a once-recorded play refreshes the profile for it.
 	if (err == nil && !result.AlreadyRecorded) || result.HistoryID != "" {
-		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
+		notifySignalsChanged(ctx, h.signalsNotifier, session.UserID, session.ProfileID)
 	}
 	return result
 }
@@ -1211,6 +1224,15 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	}
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 	h.cleanupStoppedSessionTransport(ctx, session)
+	if userInitiated || session.TranscodeNodeURL != "" {
+		// A system teardown (an FFmpeg exit, a copy-safety stop) leaves the
+		// attempt live for the client's next request to rebuild, as a stream
+		// token would; only a real stop retires the recovery card. A remote
+		// transport is the exception: the teardown above stopped its node job
+		// and dropped the node's recipe, so the card could only rebuild a
+		// session that relays the node's 404.
+		h.deleteSessionRecipeV3(ctx, session.ID)
+	}
 	stopResult := h.recordStoppedSession(ctx, session, userInitiated)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
@@ -1321,8 +1343,8 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 		}
 	}
 
-	// Abort is a connection drop / non-terminal teardown — keep the recipe card
-	// so the client can reconstruct on reconnect.
+	// Abort has no user-visible stop, but its callers end the attempt, so no
+	// recipe here is a reconstruction aid any more.
 	h.closeTranscodeForSession(session)
 	// A session that ends must stop egressing everywhere, not just here: the
 	// grant is a proxy's whole authority to serve these bytes, and unlike the
@@ -1333,6 +1355,9 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
 	// the node for a transport that no longer exists.
 	h.deleteNodeRecipeV3(ctx, session.TranscodeTransportID)
+	// Every caller ends the attempt too, which refuses the card on any replica;
+	// drop it here like the node recipe rather than leave it to lapse.
+	h.deleteSessionRecipeV3(ctx, session.ID)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1358,9 +1383,8 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 			h.closeTranscodeForSession(&sessionCopy)
 			return
 		}
-		// Expiry is a liveness reap, not a user stop — keep the recipe card so a
-		// resume reconstructs under the same id (the card's own TTL reaps it if
-		// the session is truly abandoned).
+		// Expiry is a liveness reap, not a user stop, but it ends the attempt
+		// all the same (below), so nothing can reconstruct the session afterwards.
 		h.finalizeSessionStop(ctx, &sessionCopy, false, "", false)
 		// The attempt is over: mark its row stopped under a server-minted stop
 		// id so a start replay reports session_expired on every replica, and
@@ -1772,7 +1796,7 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		// transcode to another executor if that node cannot be reached.
 		h.touchSessionActivity(sessionID)
 		var served bool
-		transcodeSession, served = h.relayOrRehomeTranscode(w, r, session, card, -1, "/master.m3u8")
+		transcodeSession, served = h.relayOrRehomeTranscode(w, r, session, clientRecipeCard(card, claims), -1, "/master.m3u8")
 		if served {
 			return
 		}
@@ -1888,7 +1912,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	if transcodeSession == nil && session.TranscodeNodeURL != "" {
 		h.touchSessionActivity(sessionID)
 		var served bool
-		transcodeSession, served = h.relayOrRehomeTranscode(w, r, session, card, requestedSegment,
+		transcodeSession, served = h.relayOrRehomeTranscode(w, r, session, clientRecipeCard(card, claims), requestedSegment,
 			"/segment/"+chi.URLParam(r, "name"))
 		if served {
 			return

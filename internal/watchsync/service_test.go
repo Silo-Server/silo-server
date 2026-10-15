@@ -66,6 +66,7 @@ type serviceFakeRepo struct {
 	confirmedScrobbles     map[string]bool
 	confirmingScrobbles    map[string]time.Time
 	markSatisfiedErr       error
+	markLocalRemovedErr    error
 	markHistoryStatusErr   error
 	syncRunMu              sync.Mutex
 	scrobbleMu             sync.Mutex
@@ -559,6 +560,9 @@ func (r *serviceFakeRepo) MarkListItemRemoteRemoved(_ context.Context, connectio
 }
 
 func (r *serviceFakeRepo) MarkListItemLocalRemoved(_ context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error {
+	if r.markLocalRemovedErr != nil {
+		return r.markLocalRemovedErr
+	}
 	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
 		s.LocalPresent = false
 		s.LastRemovedLocalAt = &removedAt
@@ -4404,6 +4408,49 @@ func (p favoriteBatchProviderStub) FetchFavoritesBatch(context.Context, ServerCo
 	return p.batch, nil
 }
 
+// A removal that changed the local list counts as a change even when the
+// shadow-state write after it fails, so recommendations still refresh.
+func TestServiceCountsAListRemovalWhoseBookkeepingFails(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	if _, err := store.AddFavoriteAt(ctx, "profile-1", testMovieMediaID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	repo := newServiceFakeRepo()
+	repo.markLocalRemovedErr = errors.New("shadow state unavailable")
+	conn := Connection{
+		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
+		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
+	}
+	repo.listItemStates = []ListItemState{{
+		ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: testMovieMediaID,
+		ProviderItemKey: testMovieProviderItemKey, RemotePresent: true, LocalPresent: true,
+	}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{
+		Rows:           []RemoteFavorite{{ProviderItemKey: testMovieProviderItemKey, Removed: true}},
+		UpdatedCursors: map[string]string{pluginFavoritesCursorKey: "cursor-2"},
+		Incremental:    true,
+	}}
+	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err == nil {
+		t.Fatal("importList succeeded with a failing shadow-state write")
+	}
+	if result.Removed != 1 || !result.changedLocalList() {
+		t.Fatalf("result = %#v, want the committed removal counted", result)
+	}
+}
+
 func TestServiceAppliesIncrementalFavoriteTombstone(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -4439,7 +4486,7 @@ func TestServiceAppliesIncrementalFavoriteTombstone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Removed != 1 {
+	if result.Removed != 1 || !result.changedLocalList() {
 		t.Fatalf("result = %#v", result)
 	}
 	favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
@@ -4452,6 +4499,41 @@ func TestServiceAppliesIncrementalFavoriteTombstone(t *testing.T) {
 	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
 	if updated.SyncCursors[pluginFavoritesCursorKey] != "cursor-2" {
 		t.Fatalf("connection cursors = %#v", updated.SyncCursors)
+	}
+}
+
+// A list import changes the profile's signals only when it adds to the local
+// list: Imported also counts rows the list already held.
+func TestImportListChangesSignalsOnlyWhenItAddsLocally(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	conn := Connection{ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1", ImportFavoritesEnabled: true}
+	service := NewService(newServiceFakeRepo(), NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{Rows: []RemoteFavorite{{ProviderItemKey: testMovieProviderItemKey}}}}
+
+	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || !result.changedLocalList() {
+		t.Fatalf("first import = %#v, want a local change", result)
+	}
+	result, err = service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || result.changedLocalList() {
+		t.Fatalf("repeat import = %#v, want no local change", result)
 	}
 }
 

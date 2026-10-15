@@ -88,6 +88,9 @@ func (s stubStore) ClearProgressBatch(context.Context, string, []string, time.Ti
 	panic("unused")
 }
 func (s stubStore) ClearProgress(context.Context, string, string) error { panic("unused") }
+func (s stubStore) ClearResumePosition(context.Context, string, string, time.Time) (bool, error) {
+	panic("unused")
+}
 func (s stubStore) GetProgress(context.Context, string, string) (*userstore.WatchProgress, error) {
 	panic("unused")
 }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EnginePlayer } from "./EnginePlayer";
-import { WebGPURenderer } from "./renderers";
+import { DECODER_RESTART_DELAY_MS, EnginePlayer, MAX_DECODER_RESTARTS } from "./EnginePlayer";
+import { DEFAULT_PICTURE_COLOR } from "./pictureColor";
+import { HDRPresenter, type PresenterEvents } from "./renderers";
 
 const audioOutput = vi.hoisted(() => ({
   resumes: true,
@@ -162,6 +163,7 @@ describe("EnginePlayer", () => {
           displayHeight: 1080,
           rotation: 0,
           flip: false,
+          color: DEFAULT_PICTURE_COLOR,
         },
         audio: withAudio ? { sampleRate: 48_000, channels: 6 } : null,
       },
@@ -695,37 +697,7 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
-  it("starts nothing new when it fails while the renderer is still being created", async () => {
-    const gpu = { draw: vi.fn(), destroy: vi.fn() };
-    let resolveRenderer!: (renderer: WebGPURenderer) => void;
-    vi.spyOn(WebGPURenderer, "create").mockReturnValue(
-      new Promise((resolve) => (resolveRenderer = resolve)),
-    );
-    const onFailure = vi.fn();
-    const player = new EnginePlayer({
-      source: { ...source, video: { ...source.video, transfer: "pq" } },
-      surface: document.createElement("div"),
-      element,
-      volume: 1,
-      muted: false,
-      onFailure,
-    });
-    player.load();
-    const worker = FakeWorker.last!;
-    await open(worker);
-    worker.emit({ type: "error", generation: null, classification: "x_failed", message: "boom" });
-    expect(onFailure).toHaveBeenCalledTimes(1);
-
-    resolveRenderer(gpu as unknown as WebGPURenderer);
-    await settle();
-    expect(gpu.destroy).toHaveBeenCalled();
-    expect(worker.posted.some((m) => m.type === "start")).toBe(false);
-    player.destroy();
-  });
-
-  it("presents hardware HDR frames that kept their PQ tag through the 2D canvas", async () => {
-    const gpu = { draw: vi.fn(), destroy: vi.fn() };
-    vi.spyOn(WebGPURenderer, "create").mockResolvedValue(gpu as unknown as WebGPURenderer);
+  function hdrPlayer(onFailure = vi.fn()) {
     const surface = document.createElement("div");
     const player = new EnginePlayer({
       source: { ...source, video: { ...source.video, transfer: "pq" } },
@@ -733,23 +705,250 @@ describe("EnginePlayer", () => {
       element,
       volume: 1,
       muted: false,
-      onFailure: vi.fn(),
+      onFailure,
     });
     player.load();
-    const worker = FakeWorker.last!;
-    await open(worker);
-    const firstCanvas = surface.querySelector("canvas");
-    const frame = Object.assign(fakeFrame(0), {
-      colorSpace: { transfer: "pq", primaries: "bt2020", matrix: "bt2020-ncl" },
+    return { player, worker: FakeWorker.last!, surface, onFailure };
+  }
+
+  function fakePresenter() {
+    let events!: PresenterEvents;
+    const presenter = { draw: vi.fn(), stop: vi.fn(), destroy: vi.fn() };
+    const create = vi.spyOn(HDRPresenter, "create").mockImplementation(async (...args) => {
+      events = args[3];
+      return presenter as unknown as HDRPresenter;
     });
-    worker.emit({ type: "frame", generation: worker.generation, frame });
+    return { presenter, create, events: () => events };
+  }
+
+  it("starts nothing new when it fails while the renderer is still being created", async () => {
+    const gpu = { draw: vi.fn(), stop: vi.fn(), destroy: vi.fn() };
+    let resolveRenderer!: (renderer: HDRPresenter) => void;
+    vi.spyOn(HDRPresenter, "create").mockReturnValue(
+      new Promise((resolve) => (resolveRenderer = resolve)),
+    );
+    const { player, worker, onFailure } = hdrPlayer();
+    await open(worker);
+    worker.emit({ type: "error", generation: null, classification: "x_failed", message: "boom" });
+    expect(onFailure).toHaveBeenCalledTimes(1);
+
+    resolveRenderer(gpu as unknown as HDRPresenter);
     await settle();
     expect(gpu.destroy).toHaveBeenCalled();
-    expect(gpu.draw).not.toHaveBeenCalled();
-    expect(surface.querySelector("canvas")).not.toBe(firstCanvas);
-    expect(surface.querySelectorAll("canvas")).toHaveLength(1);
+    expect(worker.posted.some((m) => m.type === "start")).toBe(false);
     player.destroy();
+  });
+
+  it("builds the HDR presenter with the colour description the worker read", async () => {
+    const { create } = fakePresenter();
+    const { player, worker, surface } = hdrPlayer();
+    const color = { primaries: "bt709", matrix: "bt709", chromaSiting: "left" } as const;
+    worker.emit({
+      type: "ready",
+      info: {
+        durationSeconds: 10,
+        video: {
+          codedWidth: 1920,
+          codedHeight: 1080,
+          displayWidth: 1920,
+          displayHeight: 1080,
+          rotation: 0,
+          flip: false,
+          color,
+        },
+        audio: null,
+      },
+    });
+    await settle();
+    const [layers, transfer, passed] = create.mock.calls[0]!;
+    expect(surface.contains(layers)).toBe(true);
+    expect([transfer, passed]).toEqual(["pq", color]);
+    player.destroy();
+  });
+
+  it("fails over with a presentation failure when a picture cannot be presented", async () => {
+    const { presenter } = fakePresenter();
+    presenter.draw.mockImplementation(() => {
+      throw new Error("A decoded HDR frame has a color tag the engine cannot interpret");
+    });
+    const { player, worker, onFailure } = hdrPlayer();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_presentation_failed" }),
+    );
+    expect(presenter.stop).toHaveBeenCalled();
+    player.destroy();
+    expect(presenter.destroy).toHaveBeenCalled();
+  });
+
+  it("fails over when the presenter reports a failure it found later", async () => {
+    const { presenter, events } = fakePresenter();
+    const { player, worker, onFailure } = hdrPlayer();
+    await open(worker);
+    events().onFailure("Drawing a frame failed: Invalid BindGroup");
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        classification: "browser_engine_presentation_failed",
+        message: "Drawing a frame failed: Invalid BindGroup",
+      }),
+    );
+    // A rebuild still in flight must not start anything for a failed engine.
+    expect(presenter.stop).toHaveBeenCalled();
+    player.destroy();
+  });
+
+  it("draws the picture on screen again once a lost device is replaced", async () => {
+    const { presenter, events } = fakePresenter();
+    const { player, worker } = hdrPlayer();
+    await open(worker);
+    const picture = fakeFrame(0);
+    worker.emit({ type: "frame", generation: worker.generation, frame: picture });
+    await settle();
+    const draws = presenter.draw.mock.calls.length;
+    expect(draws).toBeGreaterThan(0);
+    events().onRestored();
+    expect(presenter.draw).toHaveBeenCalledTimes(draws + 1);
+    expect(presenter.draw.mock.calls[draws]![0]).toMatchObject({ kind: "frame", frame: picture });
+    player.destroy();
+  });
+
+  it("fails over when redrawing a paused picture fails", async () => {
+    const { presenter, events } = fakePresenter();
+    const { player, worker, onFailure } = hdrPlayer();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    presenter.draw.mockImplementation(() => {
+      throw new Error("lost");
+    });
+    events().onRestored();
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_presentation_failed" }),
+    );
+    player.destroy();
+  });
+
+  it("restarts decoding after a video decoder error, as a media element would recover", async () => {
+    // A hardware decoder dies with the GPU process; a new run opens a new one.
+    const { player, worker, onFailure } = start();
+    await open(worker);
+    const decoderError = () =>
+      worker.emit({
+        type: "error",
+        generation: worker.generation,
+        classification: "browser_engine_video_decode_failed",
+        message: "Decoder failure",
+      });
+    for (let restart = 1; restart <= MAX_DECODER_RESTARTS; restart++) {
+      const before = worker.generation;
+      events.length = 0;
+      decoderError();
+      // The dead run reporting again is the same failure, not another one.
+      decoderError();
+      expect(onFailure).not.toHaveBeenCalled();
+      // The GPU process gets a moment to come back, longer each time.
+      await vi.advanceTimersByTimeAsync(DECODER_RESTART_DELAY_MS * restart - 1);
+      expect(worker.generation).toBe(before);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(worker.generation).toBe(before + 1);
+      expect(worker.posted[worker.posted.length - 1]).toMatchObject({ type: "start", position: 0 });
+      // Not a seek: hooks that act on one (progress, Watch Together, subtitles) stay out of it.
+      expect(events).not.toContain("seeking");
+    }
+    // A stream that keeps failing is broken itself: it fails over.
+    decoderError();
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_video_decode_failed" }),
+    );
+    player.destroy();
+  });
+
+  it("fails over as a decode failure when the restarted decoder shows nothing", async () => {
+    const { player, worker, onFailure } = start();
+    await open(worker);
+    worker.emit({
+      type: "error",
+      generation: worker.generation,
+      classification: "browser_engine_video_decode_failed",
+      message: "Decoder failure",
+    });
+    await vi.advanceTimersByTimeAsync(DECODER_RESTART_DELAY_MS);
+    // A read failure here would reconnect to this same route instead.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "browser_engine_video_decode_failed" }),
+    );
+    player.destroy();
+  });
+
+  it("draws in a box of its own that replaces what an earlier session left", () => {
+    const surface = document.createElement("div");
+    surface.appendChild(document.createElement("canvas"));
+    const player = new EnginePlayer({
+      source: { ...source },
+      surface,
+      element,
+      volume: 1,
+      muted: false,
+      onFailure: vi.fn(),
+    });
+    expect(surface.children).toHaveLength(1);
     expect(surface.querySelector("canvas")).toBeNull();
+    player.destroy();
+    expect(surface.children).toHaveLength(0);
+  });
+
+  it("redraws on a pixel ratio change where the browser cannot report device pixels", async () => {
+    let onResize!: ResizeObserverCallback;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          onResize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const queries: Array<{ media: string; listener?: () => void }> = [];
+    vi.stubGlobal("matchMedia", (media: string) => {
+      const query: { media: string; listener?: () => void } = { media };
+      queries.push(query);
+      return {
+        addEventListener: (_type: string, listener: () => void) => (query.listener = listener),
+        removeEventListener: vi.fn(),
+      };
+    });
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    // An entry without device pixels: the box size alone will not show a ratio change.
+    onResize([{ contentRect: {} } as ResizeObserverEntry], {} as ResizeObserver);
+    expect(queries).toHaveLength(1);
+    const drawImage = vi.mocked(HTMLCanvasElement.prototype.getContext).mock.results[0]!.value
+      .drawImage as ReturnType<typeof vi.fn>;
+    const draws = drawImage.mock.calls.length;
+    queries[0]!.listener!();
+    expect(drawImage.mock.calls.length).toBe(draws + 1);
+    // Re-armed for the next change.
+    expect(queries).toHaveLength(2);
+    player.destroy();
+  });
+
+  it("fails over at once on worker errors other than a decoder error", async () => {
+    const { player, worker, onFailure } = start();
+    await open(worker);
+    worker.emit({
+      type: "error",
+      generation: worker.generation,
+      classification: "browser_engine_audio_decode_failed",
+      message: "bad audio",
+    });
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    player.destroy();
   });
 
   it("closes queued frames and the worker on destroy", async () => {
