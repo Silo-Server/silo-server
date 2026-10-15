@@ -839,24 +839,31 @@ out of band, after which a client can retry or reload that URL with the new
 header.
 
 The signed playback token is what carries a reconstruction recipe across an
-API restart. Opting it out therefore also opts out of transparent session
-reconstruction: a missing in-memory session returns the normal expired/missing
-response and the client starts a fresh attempt. Once selected, this mode is
-sticky for the lifetime of the attempt; a client that can no longer honor it
-must stop and start a new attempt rather than downgrade a replan to a
-credential-bearing URL.
+API restart, so an attempt without one keeps its recipe server-side instead.
+When a transport served from the API origin commits, the server records its
+recipe in Redis. A media or sidecar request that finds no in-memory session is
+rebuilt from that record, but only for an authenticated caller who owns the
+attempt (account and selected profile), and only while the durable attempt
+still names the recorded plan and has neither expired nor been stopped. The
+rebuilt session keeps requiring the client's own credential on every request.
+Without Redis, or once the record has lapsed with the 24 h token lifetime, a
+missing in-memory session returns the normal expired/missing response and the
+client starts a fresh attempt. Once selected, this mode is sticky for the
+lifetime of the attempt; a client that can no longer honor it must stop and
+start a new attempt rather than downgrade a replan to a credential-bearing URL.
 
-**Replica affinity.** Because there is no reconstruction recipe, a
-header-authenticated attempt's session exists only in the memory of the API
-process that started it. A media request routed to any other replica finds no
-session and returns the expired/missing response, so a deployment serving
-tokenless attempts currently needs either a single API replica or session
-affinity on the media routes; legacy token-bearing attempts are unaffected,
-since they reconstruct anywhere. Proxy-origin URLs
-(`authorized_media_origins_v1`) are also unaffected: the proxy serves from the
-shared grant store rather than from an API process's memory. Moving session
-state into shared storage is the fix, and until it lands this constraint is
-part of the deployment contract.
+**Replica affinity.** The recorded recipe lets a restarted API process rebuild a
+header-authenticated session, and another replica can rebuild it the same way.
+A deployment with several API replicas should still keep session affinity on
+the media routes for these attempts: a replica that holds an idle copy of the
+session ends its transcode when that copy expires, and nothing in a tokenless
+request can start it again on the node. Without Redis the session exists only in
+the memory of the API process that started it, so it needs a single API replica
+or session affinity. A transcode the API executes itself (no transcode node) is
+only safe with one API replica or session affinity in any case: each replica
+that rebuilds it starts its own FFmpeg. Proxy-origin URLs
+(`authorized_media_origins_v1`) are unaffected: the proxy serves from the shared
+grant store rather than from an API process's memory.
 
 ### 4.2 Media and subtitle URL query parameters
 

@@ -1410,6 +1410,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// transcodes from after a restart. Same nil-safety: without Redis such a
 		// session replans instead of recovering, as it did before.
 		playbackHandler.NodeRecipeStore = noderecipe.NewStore(deps.RedisClient, 0)
+		// Keep the recipe of a header-authenticated session server-side, the only
+		// place it exists, so a restarted or different API process can rebuild the
+		// playback session. Same nil-safety: without Redis such a session answers
+		// 404 after a restart and the client starts a new attempt.
+		playbackHandler.SessionRecipeStore = noderecipe.NewSessionRecipeStore(deps.RedisClient, 0)
+		if streamHandler != nil {
+			streamHandler.SessionRecipeStore = playbackHandler.SessionRecipeStore
+		}
 		if deps.Config != nil {
 			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {
 				return deps.CurrentConfig().Playback

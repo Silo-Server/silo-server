@@ -655,12 +655,7 @@ func (h *PlaybackHandler) attemptSessionV2(ctx context.Context, record *playback
 		Position:             position,
 		IsPaused:             paused,
 	}
-	session.DisableProgressPersistence = record.NormalizedRequest.ProgressPersistence == playback.ProgressPersistenceClientV3
-	if !session.DisableProgressPersistence && h.fileResolver != nil {
-		if file, err := h.fileResolver.GetByID(ctx, record.EffectiveMediaFileID); err == nil && !sessionOwnsResumeTimelineV3(file) {
-			session.DisableProgressPersistence = true
-		}
-	}
+	session.DisableProgressPersistence = attemptDisablesProgressPersistenceV3(ctx, record, h.fileResolver)
 	return session
 }
 

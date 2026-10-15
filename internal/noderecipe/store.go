@@ -26,9 +26,16 @@
 // authorized_media_origins_v1 the plan hands the client a credential-free proxy
 // URL, so the proxy has no token to serve from — central writes the session's
 // recipe here at plan time and the proxy reads it after authenticating the
-// caller's own login session. NewStore and NewProxyGrantStore are the two key
-// spaces. Proxy grants deliberately do not participate in the transcode-node
-// authority generation.
+// caller's own login session. Proxy grants deliberately do not participate in
+// the transcode-node authority generation.
+//
+// A third key space keeps the API's own recovery copy: a session recipe. A
+// header-authenticated session's URLs carry no token, so the API process that
+// started it is the only holder of its recipe, and a restart (or another API
+// replica) would find nothing to rebuild the playback session from. Central
+// writes the committed card under the playback session id and reads it back on
+// a miss, for the session's authenticated owner only. NewStore,
+// NewProxyGrantStore and NewSessionRecipeStore are the three key spaces.
 package noderecipe
 
 import (
@@ -55,6 +62,13 @@ const KeyPrefix = "silo:noderecipe:"
 // from KeyPrefix: the two are written by different flows, consumed by different
 // node roles, and a lookup in one must never resolve the other's entry.
 const ProxyGrantKeyPrefix = "silo:proxygrant:"
+
+// SessionRecipeKeyPrefix namespaces the API's own recovery copy of a
+// header-authenticated session's recipe: silo:sessionrecipe:<playbackSessionID>.
+// Separate from both other key spaces: a node recipe is keyed by transport id
+// for a node to rebuild ffmpeg, a proxy grant authorizes a proxy to serve, and
+// this one only lets the API rebuild its playback session.
+const SessionRecipeKeyPrefix = "silo:sessionrecipe:"
 
 // nodeAuthorityGenerationKeyPrefix namespaces the per-node Redis timestamp
 // generation that force reload advances to revoke every outstanding node
@@ -159,8 +173,8 @@ return now_ms
 `)
 
 // Store is the Redis-backed recipe store shared by central (writer) and the
-// nodes (readers). One instance owns exactly one key prefix; see NewStore and
-// NewProxyGrantStore for the two uses.
+// nodes (readers). One instance owns exactly one key prefix; see NewStore,
+// NewProxyGrantStore and NewSessionRecipeStore for the three uses.
 type Store struct {
 	rdb    *redis.Client
 	prefix string
@@ -179,6 +193,13 @@ func NewStore(rdb *redis.Client, ttl time.Duration) *Store {
 // authenticated the caller. Same nil-safety and TTL as NewStore.
 func NewProxyGrantStore(rdb *redis.Client, ttl time.Duration) *Store {
 	return newStore(rdb, ProxyGrantKeyPrefix, ttl)
+}
+
+// NewSessionRecipeStore wraps a Redis client for the session-recipe key space:
+// the card the API rebuilds a header-authenticated playback session from after
+// a restart. Same nil-safety and TTL as NewStore.
+func NewSessionRecipeStore(rdb *redis.Client, ttl time.Duration) *Store {
+	return newStore(rdb, SessionRecipeKeyPrefix, ttl)
 }
 
 func newStore(rdb *redis.Client, prefix string, ttl time.Duration) *Store {
