@@ -19,11 +19,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
-	"github.com/google/uuid"
 )
 
 func init() {
@@ -2195,7 +2196,7 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 		if err == nil {
 			return manifest, nil
 		}
-		if err != nil && err != ErrManifestNotReady {
+		if !errors.Is(err, ErrManifestNotReady) {
 			return nil, err
 		}
 

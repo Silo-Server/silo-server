@@ -54,7 +54,7 @@ func (s *redisSuppressor) ShouldScan(ctx context.Context, key, state string, ttl
 	ttlMillis := max(ttl.Milliseconds(), 1)
 	claimed, err := claimStateScript.Run(ctx, s.client, []string{suppressRedisKey(key)}, state, ttlMillis).Int()
 	if err != nil {
-		return true, nil // fail open: a Redis hiccup should not block scanning
+		return true, nil //nolint:nilerr // fail open: a Redis hiccup should not block scanning, and claimTarget drops the scan on any error
 	}
 	return claimed == 1, nil
 }
