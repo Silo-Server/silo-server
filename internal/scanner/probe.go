@@ -140,7 +140,6 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 		"-show_chapters",
 		filePath,
 	)
-	killProcessGroupOnCancel(cmd)
 	cmd.WaitDelay = limits.waitDelay
 
 	output, err := cmd.Output()
@@ -842,7 +841,6 @@ func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, 
 	)
 	// As for the other ffprobe runs: a wrapper's child dies with it, and a
 	// child that still holds stdout cannot keep the read open past its deadline.
-	killProcessGroupOnCancel(cmd)
 	cmd.WaitDelay = defaultProbeLimits.waitDelay
 	output, err := cmd.Output()
 	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
@@ -892,7 +890,6 @@ func probeVideoPacketDuration(
 		"-of", "csv=p=0",
 		filePath,
 	)
-	killProcessGroupOnCancel(cmd)
 	cmd.WaitDelay = waitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

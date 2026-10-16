@@ -19,6 +19,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 const (
@@ -138,7 +140,7 @@ func supportsLeadingPictureDropFilter(bin string) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "-hide_banner", "-h", "bsf=noise").CombinedOutput()
+	out, err := procgroup.CommandContext(ctx, bin, "-hide_banner", "-h", "bsf=noise").CombinedOutput()
 	available := err == nil && slices.Contains(strings.Fields(string(out)), "-drop")
 	if !available {
 		slog.Warn("ffmpeg's noise bitstream filter has no drop expression; HEVC resume remuxes keep their leading pictures", "ffmpeg", bin)
