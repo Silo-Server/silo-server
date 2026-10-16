@@ -30,6 +30,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -51,6 +52,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobgc"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -60,6 +62,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/dashmetrics"
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
@@ -987,7 +990,16 @@ func main() {
 
 	mode := cfg.Server.Mode
 	maybeApplyPostgresTuning(ctx, pool, cfg.Database.MaxConnections, mode)
-	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID)
+	queryAttribution := "off"
+	if queryattr.Initialize() {
+		queryAttribution = "on"
+	}
+	queryRun := uuid.NewString()
+	if isPrimaryNode && queryattr.Enabled() {
+		queryattr.RegisterMetrics(prometheus.DefaultRegisterer)
+	}
+	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID,
+		"query_attribution", queryAttribution, "query_run", queryRun)
 
 	appCtx, appCancel := context.WithCancel(ctx)
 	defer appCancel()
@@ -1057,6 +1069,10 @@ func main() {
 	// rows to other nodes' live tails, and the event bus closes last.
 	defer logStreamHub.Close()
 	defer stopOperationalLog()
+	if queryattr.Enabled() {
+		stopQuerySummary := startLogDrain(func(ctx context.Context) { queryattr.RunSummary(ctx, queryRun, buildinfo.Current().Display) })
+		defer stopQuerySummary()
+	}
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
