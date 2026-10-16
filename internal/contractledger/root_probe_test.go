@@ -23,7 +23,7 @@ func probeRetained(t *testing.T, doc map[string]any, listener string) map[string
 // listener that serves a health or readiness probe: the row is ratified with
 // v2 unset and the retention note, without the node listener_delegation rule.
 func TestRootProbeRetainedRowIsRatifiable(t *testing.T) {
-	for _, listener := range []string{ListenerAPI, ListenerProxy, ListenerTranscodeNode} {
+	for _, listener := range []string{ListenerAPI, ListenerProxy, ListenerTranscodeNode, ListenerNodeEnrollment} {
 		t.Run(listener, func(t *testing.T) {
 			fsys := mutatedFS(t, func(doc map[string]any) { probeRetained(t, doc, listener) })
 			if err := verify(fsys); err != nil {
@@ -102,7 +102,7 @@ func TestRootProbeProposedRowKeepsPartialTarget(t *testing.T) {
 			}
 		}
 	}
-	if seen != 4 {
-		t.Fatalf("contract_root_probes rows = %d, want 4", seen)
+	if seen != 5 {
+		t.Fatalf("contract_root_probes rows = %d, want 5", seen)
 	}
 }

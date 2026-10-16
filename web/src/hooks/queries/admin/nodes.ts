@@ -17,6 +17,7 @@ import type {
   NodeCapabilities,
   NodeLastStats,
   CreateNodeRequest,
+  EnrollNodeRequest,
   UpdateNodeRequest,
   ReprobeNodeResult,
 } from "@/api/types";
@@ -115,12 +116,14 @@ export function isNodeWriteAuthorityActive(authority: ProfileRequestContextSnaps
 }
 
 type NodeWriteIntent = {
-  action: "create" | "update" | "delete";
   authority: ProfileRequestContextSnapshot | null;
-  node?: StreamNode;
-  body?: CreateNodeRequest | UpdateNodeRequest;
   onSuccess?: () => void;
-};
+} & (
+  | { action: "create"; body: CreateNodeRequest; node?: never }
+  | { action: "enroll"; body: EnrollNodeRequest; node?: never }
+  | { action: "update"; node: StreamNode; body: UpdateNodeRequest }
+  | { action: "delete"; node: StreamNode }
+);
 function useNodeWrite() {
   const client = useQueryClient();
   const mounted = useRef(false);
@@ -141,10 +144,17 @@ function useNodeWrite() {
       const onResponse = (response: Response) => {
         etag = response.headers.get("ETag");
       };
-      if (intent.action === "create") {
+      if (intent.action === "enroll") {
+        result = await v2("POST /api/v2/admin/nodes/enroll", {
+          ...common,
+          body: intent.body,
+          onResponse,
+          timeoutMs: 90_000,
+        });
+      } else if (intent.action === "create") {
         result = await v2("POST /api/v2/admin/nodes", {
           ...common,
-          body: intent.body as CreateNodeRequest,
+          body: intent.body,
           onResponse,
         });
       } else {
@@ -160,7 +170,7 @@ function useNodeWrite() {
         } else {
           result = await v2("PUT /api/v2/admin/nodes/{id}", {
             ...options,
-            body: intent.body as UpdateNodeRequest,
+            body: intent.body,
             onResponse,
           });
           if (result.id !== String(intent.node.id))
@@ -184,7 +194,9 @@ function useNodeWrite() {
     onError: (_error, intent) => {
       if (mounted.current && intent.authority && isNodeWriteAuthorityActive(intent.authority))
         toast.error(
-          "Node change could not be confirmed. Reload nodes and reopen the action before another submission; retained edits have not been rebased.",
+          intent.action === "enroll"
+            ? "Enrollment could not be confirmed. Check the token and worker connection settings, then retry to finish registration."
+            : "Node change could not be confirmed. Reload nodes and reopen the action before another submission; retained edits have not been rebased.",
         );
     },
     onSettled: (_result, _error, intent) => {
@@ -213,6 +225,20 @@ export function useCreateNode() {
     mutate: (body: CreateNodeRequest, options?: { onSuccess?: () => void }) =>
       mutation.mutate(intent(body, options)),
     mutateAsync: (body: CreateNodeRequest) => mutation.mutateAsync(intent(body)),
+  };
+}
+export function useEnrollNode() {
+  const [authority] = useState(captureNodeWriteAuthority);
+  const mutation = useNodeWrite();
+  return {
+    ...mutation,
+    mutate: (body: EnrollNodeRequest, options?: { onSuccess?: () => void }) =>
+      mutation.mutate({
+        action: "enroll",
+        authority,
+        body: structuredClone(body),
+        onSuccess: options?.onSuccess,
+      }),
   };
 }
 export function useUpdateNode() {

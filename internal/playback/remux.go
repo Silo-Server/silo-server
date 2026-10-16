@@ -3,6 +3,7 @@ package playback
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
@@ -415,7 +417,12 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := encodinglimit.Start(cmd); err != nil {
+		// Admission can fail before exec.Start closes its owned pipe ends.
+		_ = stdout.Close()
+		if pipe, ok := cmd.Stdout.(io.Closer); ok {
+			_ = pipe.Close()
+		}
 		processmetrics.Record(processmetrics.Remux, nil, err, ctx.Err())
 		cancel()
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
@@ -456,7 +463,7 @@ func (s *RemuxSession) Close() error {
 		s.cancel()
 		// The owner drains and waits exactly once, including repeated Close.
 		_, _ = io.Copy(io.Discard, s.outputPipe)
-		s.closeErr = s.cmd.Wait()
+		s.closeErr = encodinglimit.Wait(s.cmd)
 		// Cleanup cancellation must not relabel an already completed FFmpeg
 		// failure. A process killed by this Close has a signal exit instead.
 		if contextErr == nil && s.closeErr != nil && s.cmd.ProcessState != nil && !s.cmd.ProcessState.Exited() {
@@ -561,7 +568,12 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 
 	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly, opts.SourceAudioChannels, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps, opts.DropResumeLeadingPictures)
 	if err != nil {
-		http.Error(w, "failed to start remux", http.StatusInternalServerError)
+		if errors.Is(err, encodinglimit.ErrAtCapacity) {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "node is at encoding capacity", http.StatusServiceUnavailable)
+		} else {
+			http.Error(w, "failed to start remux", http.StatusInternalServerError)
+		}
 		return err
 	}
 	defer session.Close()

@@ -2,6 +2,7 @@ package transcodenode
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -100,6 +102,11 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	req.Background = true
 	result, err := runner.Run(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, encodinglimit.ErrAtCapacity) {
+			w.Header().Set("Retry-After", "1")
+			writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeBusyReason, Message: err.Error()})
+			return
+		}
 		cause := mediasample.Classify(err)
 		writeTrickplayError(w, http.StatusUnprocessableEntity, trickplay.ExtractError{Reason: string(cause), Permanent: cause.Permanent(), Message: err.Error()})
 		return
@@ -154,7 +161,7 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 			"400": {Description: "Invalid request or unapproved input path", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 			"401": {Description: http.StatusText(http.StatusUnauthorized), Content: map[string]*huma.MediaType{textMedia: text}},
 			"422": {Description: "Sampling failed; permanent names a cause in the file itself", Content: map[string]*huma.MediaType{jsonMedia: problem}},
-			"503": {Description: "Node busy with another trickplay run, re-probing, or unconfigured", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
+			"503": {Description: "Node at encoding capacity, busy with another trickplay run, re-probing, or unconfigured", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 		},
 	}
 }

@@ -159,6 +159,15 @@ services:
   #   stop_grace_period: 11m
   #   environment:
   #     MODE: transcode
+  #     # Operator-owned encoding ceiling; unset or 0 preserves unlimited.
+  #     SILO_TRANSCODE_MAX_JOBS: ${SILO_TRANSCODE_MAX_JOBS:-0}
+  #     # For automatic first-connect binding, omit the three customer variables
+  #     # below and set these instead. Mount a persistent private binding directory.
+  #     # Use a separate worker env_file without SECRET_KEY/DATABASE_URL/REDIS_URL;
+  #     # a shared core .env supplying SECRET_KEY prevents unbound startup.
+  #     # The core operator must enable SILO_NODE_ENROLLMENT_ENABLED=true on the core.
+  #     # SILO_NODE_ENROLLMENT_TOKEN: ${SILO_NODE_ENROLLMENT_TOKEN}
+  #     # SILO_NODE_BINDING_FILE: /var/lib/silo/node-binding/binding.json
   #     # Must be the SAME SECRET_KEY as the primary node (shared encrypted data).
   #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
   #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
@@ -168,6 +177,7 @@ services:
   #   ports:
   #     - "${TRANSCODE_PORT:-8082}:8080"
   #   volumes:
+  #     # - ./node-binding:/var/lib/silo/node-binding # private directory (0700)
   #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
   #     - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
   #     - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork

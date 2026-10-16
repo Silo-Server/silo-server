@@ -1,4 +1,121 @@
-# Transcode node throttle contract
+# Transcode node capacity and throttle contract
+
+## First-connect customer configuration handoff
+
+The core operator must set `SILO_NODE_ENROLLMENT_ENABLED=true` before using
+automatic handoff. It is disabled by default: acting admins receive HTTP 503
+without an outbound request when the operator has not allowed sending the core's
+bootstrap secrets to worker URLs. This switch is owned by the process environment,
+cannot be enabled through application settings, and does not affect ordinary
+registration of workers that already have customer configuration.
+
+Enrollment is opt-in for `MODE=transcode`. With `SILO_NODE_ENROLLMENT_TOKEN`
+(32–512 characters) and a persistent `SILO_NODE_BINDING_FILE`, a worker may start
+without `DATABASE_URL`, `REDIS_URL` or `SECRET_KEY`. The binding path defaults to
+`/var/lib/silo/node-binding/binding.json` when only the token is supplied.
+Legacy workers and maintenance commands still require their existing bootstrap
+credentials. Other server modes cannot enroll.
+Use a separate worker environment file without the customer variables: a shared
+core `.env` supplying `SECRET_KEY` prevents credential-free worker startup.
+
+Before the database-backed runtime starts, its separate listener exposes
+`GET /api/v1/health` with HTTP 503, `status: "unbound"` and the provider's encoding capacity,
+and `POST /api/v1/node/enroll` authenticated by the provider's one-time bearer
+token. HTTP is supported for trusted internal networks; HTTPS is optional and
+normal certificate verification applies. The core never follows enrollment
+redirects. The unbound listener is reachable for enrollment but remains unhealthy
+for node-pool placement until the configured worker runtime starts.
+
+The native acting-admin, demo-restricted `POST /api/v2/admin/nodes/enroll`
+accepts a transcode node's registration fields, `enrollment_token`, and optional
+`worker_database_url` / `worker_redis_url` overrides for endpoints reachable by
+the worker. The core supplies its bootstrap database URL, optional Redis URL and
+shared encryption key. The browser receives only the ordinary node registration
+receipt and configuration ETag. Neither the token nor customer credentials are
+stored in the node registry or returned in responses. Configuration-only
+`POST /api/v2/admin/nodes` keeps its existing behavior.
+
+The worker validates encrypted customer settings and effective Redis access,
+then saves an immutable binding containing the connection credentials and node
+identity. The directory must be private (0700), the file is 0600, and publication
+is atomic and never overwrites a prior binding. Failed validation, including
+missing Redis required by transcode mode, leaves the token usable. A
+post-publication directory-sync failure retains the winner and lets the matching
+handoff retry durability confirmation; competing bindings are refused. Saved
+restarts confirm directory durability before starting. Successful binding retires
+admission and starts the existing worker
+runtime. The provider encoding ceiling remains in operator bootstrap and cannot
+be supplied in the binding payload or changed by customer settings.
+
+The bound worker exposes authenticated `GET /api/v1/node/enrollment` with
+`binding_id` (an HMAC of a fixed protocol label under the shared encryption key)
+and `encoding_capacity`. The core signs each receipt request through
+`internal/nodeauth` using the current config watcher's `auth.jwt_secret`, including
+readiness retries after a reload. Receipt requests carry a derived-key HMAC,
+never the raw JWT signing key. The worker verifies against its current settings
+and retains legacy bearer verification for existing callers. The signature covers
+the worker path after any registered URL prefix is stripped by a reverse proxy.
+The core requires both authenticated proof and the matching binding identity
+before registering the node, and clamps initial `max_jobs` to a positive provider
+ceiling. Exact retries recover lost replies, startup delays and
+failed registry writes through the same authenticated receipt and natural URL
+registration. A 503 can follow a saved binding; retry the same enrollment request.
+A worker bound to another customer returns a conflict without another handoff.
+
+Receipt enrollment requires a worker with signed-request verification; older
+bearer-only workers refuse it. Upgrade the worker before using enrollment. The
+core has no raw-key fallback, and configuration-only registration remains
+available.
+
+Restarts load the private saved binding before opening the normal worker
+listener. Reassignment requires a provider reset while the worker is stopped,
+including clearing the binding and prior customer artifacts and issuing a new
+token. Removing a core registry row does not release or reset the worker binding.
+
+## Operator-owned encoding capacity
+
+Dedicated workers accept `SILO_TRANSCODE_MAX_JOBS` in their startup environment
+or bootstrap `.env` file. Unset or `0` means unlimited, preserving existing
+installations. A positive integer caps all concurrent FFmpeg media processes:
+playback, seek/reconstruction, prepared downloads, audio/subtitle extraction,
+thumbnails, trickplay, analysis, and hardware smoke encodes. Discovery commands
+and ffprobe are excluded. Values outside `0`–`2147483647` fail startup. This setting
+applies only to transcode mode and cannot be changed by database configuration
+reloads. The operator must retain control of the worker's environment/container.
+
+Admission is atomic before process launch. A slot remains occupied until the
+process's owner reaps it, including cancellation and teardown; failed launches
+release immediately. Completed playback encodes release capacity while the
+session and produced segments can remain available. Serving existing output
+does not consume a slot. Restart and fallback attempts must acquire anew and
+cannot exceed the ceiling. Saturated work returns HTTP 503 with a retry signal;
+capacity exhaustion does not establish unsupported hardware or codecs.
+
+Health and authenticated status add `encoding_capacity`, for example:
+
+```json
+{"max_jobs":4,"active_jobs":2,"available_jobs":2}
+```
+
+Unlimited workers report `max_jobs: 0` and `available_jobs: null`. The core keeps
+this report in the node's opaque `last_stats.encoding_capacity` sample and shows
+the operator ceiling and remaining slots read-only in Admin > Nodes. Placement
+honors both this ceiling and the customer limit, including provisional starts
+not yet represented in the latest health sample.
+
+When a healthy worker reports a positive ceiling, the core lowers its stored
+`max_jobs` if that value is higher or unlimited. Customer edits are also clamped
+to the last reported ceiling; lower limits are preserved. Reconciliation uses
+the existing configuration revision/invalidation mechanism, and subsequent
+unchanged reports do not change the revision. URL changes discard the previous
+worker's report. Unlimited workers and older workers reporting no ceiling never
+change an existing configuration. The worker's own admission remains the
+authority even if the core is older, has stale health data or is modified.
+
+These are worker and administration changes. Native Apple/Android clients need
+no new fields or UI; Jellyfin playback uses the same admitted worker processes.
+
+## Playback throttling
 
 The API server resolves `enable_transcode_throttle` and
 `transcode_throttle_seconds` before starting remote HLS playback. The

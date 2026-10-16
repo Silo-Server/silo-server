@@ -235,9 +235,12 @@ verify-route-inventory:
 		|| { echo "::error::$(ROUTE_INVENTORY) is stale or a route is unaccounted for; run make route-inventory"; exit 1; }
 
 .PHONY: verify-v1-route-freeze
+# Worker listeners own separate protocols recorded by the migration ledger and
+# x-silo-worker-protocols; their /api/v1 paths are not native business API aliases.
+# Keep every other listener in the freeze, including an unclassified listener.
 verify-v1-route-freeze:
 	@base=$$(git merge-base "$(BASE_REF)" HEAD) && \
-		python3 -c 'import json, subprocess, sys; path="contracts/api/v2/route-inventory.json"; project=lambda doc: sorted((r["method"], r["path"]) for r in doc["routes"] if r["namespace"] == "api_v1"); before=json.loads(subprocess.check_output(["git", "show", sys.argv[1]+":"+path])); after=json.load(open(path)); sys.exit("v1 routes changed; the bridge contract is frozen" if project(before) != project(after) else 0)' "$$base"
+		python3 -c 'import json, subprocess, sys; path="contracts/api/v2/route-inventory.json"; workers={"proxy", "transcode_node", "node_enrollment"}; project=lambda doc: sorted((r["listener"], r["method"], r["path"]) for r in doc["routes"] if r["namespace"] == "api_v1" and r["listener"] not in workers); before=json.loads(subprocess.check_output(["git", "show", sys.argv[1]+":"+path])); after=json.load(open(path)); sys.exit("v1 routes changed; the bridge contract is frozen" if project(before) != project(after) else 0)' "$$base"
 
 # Run only the route inventory's router-recovery rule over the whole tree.
 # Tests are excluded from this rule, so do not analyze their package variants.

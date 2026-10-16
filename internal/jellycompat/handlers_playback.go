@@ -1261,6 +1261,7 @@ func NewPlaybackHandler(
 	}); ok {
 		h.tm.Sessions = reg
 	}
+	// The exit monitor holds this session's lifecycle lock through the callback.
 	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
 		// ffmpeg crash: drop the dead transcode and stop the upstream native
 		// session. The recipe stays in the compat store so a resume reconstructs.
@@ -1279,7 +1280,7 @@ func NewPlaybackHandler(
 		// session). Only stop the upstream session when the compare-and-delete matched
 		// the dead transcode. The recipe stays in the compat store either way so a
 		// resume reconstructs.
-		if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
+		if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIfUnderLifecycle(sessionID, dead, nodeURL) {
 			if h.playbackStore != nil {
 				if playSession, ok := h.playbackStore.FindByUpstreamSessionID(sessionID); ok {
 					h.dispatchCompatScrobble(ctx, compatScrobblePause, playSession, upstreamSession, nil)

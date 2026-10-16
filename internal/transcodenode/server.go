@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -207,8 +208,9 @@ func ValidateThrottleAttestation(req TranscodeStartRequest, response TranscodeSt
 
 // HealthResponse is the JSON response for GET /api/v1/health.
 type HealthResponse struct {
-	Status     string `json:"status"`
-	ActiveJobs int32  `json:"active_jobs"`
+	EncodingCapacity encodinglimit.Capacity `json:"encoding_capacity"`
+	Status           string                 `json:"status"`
+	ActiveJobs       int32                  `json:"active_jobs"`
 	// CapabilitiesHash identifies this node's last computed hardware capability
 	// snapshot. It is read from the stored snapshot only — health must stay a
 	// cheap liveness answer, so it never triggers a probe — and is empty until
@@ -285,17 +287,18 @@ type progressiveRemuxRequest struct {
 
 // Server is the HTTP handler for transcode mode.
 type Server struct {
-	watcher           *nodeconfig.Watcher
-	streamDeny        *playback.StreamDeny
-	nodeRowID         func() (int, bool)
-	registeredNodeURL func() (string, bool)
-	tracker           sessionTracker
-	ffmpegSink        playback.FFmpegLogSink
-	prepareProgress   prepareProgressRegistry
-	inputPaths        InputPathAuthorizer
-	themeInputs       ThemeInputApprover
-	transcodeDir      string
-	artifactRoot      string
+	enrollmentIdentity string // fixed at startup; no bootstrap secrets
+	watcher            *nodeconfig.Watcher
+	streamDeny         *playback.StreamDeny
+	nodeRowID          func() (int, bool)
+	registeredNodeURL  func() (string, bool)
+	tracker            sessionTracker
+	ffmpegSink         playback.FFmpegLogSink
+	prepareProgress    prepareProgressRegistry
+	inputPaths         InputPathAuthorizer
+	themeInputs        ThemeInputApprover
+	transcodeDir       string
+	artifactRoot       string
 	// artifactProber measures artifactRoot in the background for health,
 	// status, and the artifact listing.
 	artifactProber *downloadstorage.Prober
@@ -529,7 +532,30 @@ func (s *Server) restartSegmentLocked(
 	if !ok || live != session {
 		return playback.SegmentRecoveryTarget{}, false, playback.ErrSessionSuperseded
 	}
-	return session.RestartSegment(ctx, segNum)
+	target, resolved, err := session.RestartSegment(ctx, segNum)
+	if err == nil || session.IsRunning() || session.WaitError() == nil {
+		return target, resolved, err
+	}
+	// Workers have no integrated crash monitor. A failed restoration must
+	// release this exact runtime so the next request can reconstruct from
+	// its existing authority, while retaining the known copy timeline.
+	s.mu.Lock()
+	retire := s.sessions[sessionID] == session
+	if retire {
+		delete(s.sessions, sessionID)
+		delete(s.lastAccess, sessionID)
+	}
+	s.mu.Unlock()
+	if !retire {
+		return target, resolved, err
+	}
+	if closeErr := s.retireGPUSession(session.CloseProcess); closeErr != nil {
+		slog.ErrorContext(ctx, "close failed transcode recovery", "component", "transcodenode", "error", closeErr, "session", sessionID)
+	}
+	if s.tracker != nil {
+		s.tracker.Remove(context.WithoutCancel(ctx), sessionID)
+	}
+	return target, resolved, err
 }
 
 // NewServer creates a new transcode server.
@@ -965,6 +991,7 @@ func (s *Server) router() chi.Router {
 		r.Post("/admin/reload-config", s.handleReloadConfig)
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
 		r.Get("/status", s.handleStatus)
+		r.Get("/api/v1/node/enrollment", s.handleEnrollmentReceipt)
 	})
 	return r
 }
@@ -1069,6 +1096,9 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	defer s.prepareProgress.end(req.ArtifactID, progress)
 	opts.PrepareProgressSink = progress
 	if err := playback.PrepareFile(jobCtx, opts, outputPath); err != nil {
+		if writeEncodingCapacityError(w, err) {
+			return
+		}
 		if jobCtx.Err() == nil {
 			slog.ErrorContext(jobCtx, "prepare download artifact", "component", "transcodenode", "artifact_id", req.ArtifactID, "error", err)
 		}
@@ -1178,6 +1208,9 @@ func resolveToneMapRecipe(ctx context.Context, opts *playback.TranscodeOpts) err
 }
 
 func writeToneMapRecipeError(w http.ResponseWriter, err error) {
+	if writeEncodingCapacityError(w, err) {
+		return
+	}
 	if errors.Is(err, playback.ErrToneMapExecutorUnavailable) {
 		w.Header().Set(ToneMapExecutionErrorHeader, ToneMapExecutorUnavailableCode)
 		http.Error(w, "tone-map executor unavailable", http.StatusServiceUnavailable)
@@ -1318,6 +1351,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(HealthResponse{
+		EncodingCapacity: encodinglimit.Snapshot(),
 		Status:           s.healthStatus(),
 		ActiveJobs:       s.activeJobs.Load(),
 		CapabilitiesHash: s.storedCapabilityHash(),
@@ -1458,6 +1492,9 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
 	info, err := s.buildCapabilitySnapshot(r.Context())
 	if err != nil {
+		if writeEncodingCapacityError(w, err) {
+			return
+		}
 		http.Error(w, "capability probe unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -1567,6 +1604,11 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 		AllowSoftwareToneMap: req.AllowSoftwareToneMap,
 	})
 	if err != nil {
+		if errors.Is(err, encodinglimit.ErrAtCapacity) {
+			w.Header().Set("Retry-After", "1")
+			writeChapterThumbnailError(w, http.StatusServiceUnavailable, "transcode_node_capacity_exhausted", "node is at encoding capacity")
+			return
+		}
 		writeChapterThumbnailError(w, http.StatusUnprocessableEntity, reason, err.Error())
 		return
 	}
@@ -1775,6 +1817,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		})
 	} else {
 		session, err = playback.StartTranscode(r.Context(), opts)
+	}
+	if writeEncodingCapacityError(w, err) {
+		unlock()
+		return
 	}
 	var startupErr *playback.TranscodeStartupError
 	if errors.As(err, &startupErr) {
@@ -2636,6 +2682,9 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		var reconstructErr error
 		session, reconstructErr = s.reconstructFromToken(r, sessionID, -1)
 		if session == nil {
+			if writeEncodingCapacityError(w, reconstructErr) {
+				return
+			}
 			if reconstructErr != nil && isToneMapRecipeError(reconstructErr) {
 				writeToneMapRecipeError(w, reconstructErr)
 				return
@@ -2692,6 +2741,9 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		var reconstructErr error
 		session, reconstructErr = s.reconstructFromToken(r, sessionID, requestedSegment)
 		if session == nil {
+			if writeEncodingCapacityError(w, reconstructErr) {
+				return
+			}
 			if reconstructErr != nil && isToneMapRecipeError(reconstructErr) {
 				writeToneMapRecipeError(w, reconstructErr)
 				return
@@ -2800,6 +2852,9 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
+		if writeEncodingCapacityError(w, err) {
+			return
+		}
 		if isToneMapRecipeError(err) {
 			writeToneMapRecipeError(w, err)
 			return
@@ -3080,13 +3135,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(statusResponse{
-		Status:      "ok",
-		ActiveJobs:  s.activeJobs.Load(),
-		Sessions:    sessionIDs,
-		System:      snapshot.System,
-		GPU:         snapshot.GPU,
-		Attribution: snapshot.Attribution,
-		SampledAt:   snapshot.SampledAt,
-		Artifacts:   artifacts,
+		EncodingCapacity: encodinglimit.Snapshot(),
+		Status:           "ok",
+		ActiveJobs:       s.activeJobs.Load(),
+		Sessions:         sessionIDs,
+		System:           snapshot.System,
+		GPU:              snapshot.GPU,
+		Attribution:      snapshot.Attribution,
+		SampledAt:        snapshot.SampledAt,
+		Artifacts:        artifacts,
 	})
 }

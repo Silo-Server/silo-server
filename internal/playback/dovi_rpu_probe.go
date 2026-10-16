@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 )
 
 // Some Dolby Vision sources carry an RPU that ffmpeg's dovi_rpu bitstream
@@ -226,7 +228,7 @@ func runDVRPUProbe(ctx context.Context, bin, inputPath string) dvRPUVerdict {
 	output := &cappedBuffer{limit: maxDVRPUProbeOutput}
 	cmd.Stdout = output
 	cmd.Stderr = output
-	err := cmd.Run()
+	err := encodinglimit.Run(cmd)
 
 	if dvRPUOutputFailed(output.String()) {
 		return dvRPUBroken

@@ -2844,7 +2844,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		nodeURL = transcodeNode.URL
 	}
 	adoptSuccessor := func() {
-		h.tm.CloseTranscodeSession(session.ID, "")
+		h.tm.CloseTranscodeSessionUnderLifecycle(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
 			h.deleteNodeRecipeV3(r.Context(), previousTransportID)
@@ -4176,7 +4176,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		egressNodeURL = nodePlan.ProxyNode.URL
 	}
 	adoptSuccessor := func() {
-		h.tm.CloseTranscodeSession(session.ID, "")
+		h.tm.CloseTranscodeSessionUnderLifecycle(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
 			h.deleteNodeRecipeV3(r.Context(), previousTransportID)

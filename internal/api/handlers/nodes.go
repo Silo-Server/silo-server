@@ -18,14 +18,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/go-chi/chi/v5"
-	"github.com/redis/go-redis/v9"
 )
 
 // NodeRepository defines the operations the NodeHandler needs on the node store.
@@ -56,6 +58,7 @@ type NodeCapabilityRefresher interface {
 
 // NodeHandler handles CRUD operations and health checks for stream nodes.
 type NodeHandler struct {
+	enrollment        *nodeenrollment.Client
 	configuration     AdminNodeConfigurationStore
 	configurationWake chan struct{}
 	repo              NodeRepository

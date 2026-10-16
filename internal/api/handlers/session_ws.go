@@ -209,7 +209,7 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 				}
 				session, err = h.endPlaybackSessionAuthority(ctx, session, true)
 				if err == nil {
-					h.cleanupStoppedSessionTransport(ctx, session)
+					h.cleanupStoppedSessionTransport(ctx, session, h.closeTranscodeForSessionUnderLifecycle)
 				}
 				return session, err
 			}()

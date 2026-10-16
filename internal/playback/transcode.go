@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -225,6 +226,7 @@ type TranscodeSession struct {
 	running              bool
 	restarting           *restartFlight
 	waitErr              error
+	waitCanceled         bool // the owning process context was canceled before exit
 	stderr               *boundedTailBuffer
 	mu                   sync.Mutex
 	done                 chan struct{} // closed when the monitor goroutine finishes
@@ -479,7 +481,12 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	// this ffmpeg produces is strictly newer than the stamp.
 	inheritedManifest := statManifest(opts.OutputDir)
 	startedAt := time.Now()
-	if err := cmd.Start(); err != nil {
+	if err := encodinglimit.Start(cmd); err != nil {
+		// Admission can fail before exec.Start closes its owned pipe ends.
+		_ = stdinPipe.Close()
+		if pipe, ok := cmd.Stdin.(io.Closer); ok {
+			_ = pipe.Close()
+		}
 		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
 		releaseHWDevice()
@@ -500,7 +507,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 }
 
 func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func()) {
-	waitErr := cmd.Wait()
+	waitErr := encodinglimit.Wait(cmd)
 	// The child no longer owns the device once Wait returns. Release before
 	// flushing/logging so slow diagnostics cannot make the allocator count a
 	// process that has already exited.
@@ -510,6 +517,7 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 	s.mu.Lock()
 	s.running = false
 	s.waitErr = waitErr
+	s.waitCanceled = ctx.Err() != nil
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
 	close(done)
@@ -3160,7 +3168,7 @@ func (s *TranscodeSession) cleanStaleOutputForRestart(previous, next TranscodeOp
 // recipe-changing restarts clean the manifest and the segments at or after the
 // restart point (see cleanStaleOutputForRestart).
 func (s *TranscodeSession) Restart(ctx context.Context, seekSeconds float64, startSegment int) error {
-	return s.restart(ctx, seekSeconds, startSegment, 0, false)
+	return s.restart(ctx, SegmentRecoveryTarget{SeekSeconds: seekSeconds, StartSegmentNumber: startSegment}, nil)
 }
 
 // RestartWithCopySeekAnchor restarts a copy-video stream with the keyframe
@@ -3172,7 +3180,10 @@ func (s *TranscodeSession) RestartWithCopySeekAnchor(
 	startSegment int,
 	streamOriginSeconds float64,
 ) error {
-	return s.restart(ctx, seekSeconds, startSegment, streamOriginSeconds, true)
+	return s.restart(ctx, SegmentRecoveryTarget{
+		SeekSeconds: seekSeconds, StartSegmentNumber: startSegment,
+		StreamOriginSeconds: streamOriginSeconds, CopySeekAnchorResolved: true,
+	}, nil)
 }
 
 // RestartSegment resolves and applies one missing-segment recovery as a single
@@ -3180,22 +3191,39 @@ func (s *TranscodeSession) RestartWithCopySeekAnchor(
 // the manifest used for copy-anchor mapping cannot be replaced by another
 // restart before the resolved numbering is applied.
 func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
-	target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
-	if err != nil || !ok {
-		return SegmentRecoveryTarget{}, ok, err
+	if !s.IsCopyVideo() || s.copyPlan != nil {
+		target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
+		if err != nil || !ok {
+			return SegmentRecoveryTarget{}, ok, err
+		}
+		return target, true, s.Restart(ctx, target.SeekSeconds, target.StartSegmentNumber)
 	}
 
-	if target.CopySeekAnchorResolved {
-		err = s.RestartWithCopySeekAnchor(
-			ctx,
-			target.SeekSeconds,
-			target.StartSegmentNumber,
-			target.StreamOriginSeconds,
-		)
-	} else {
-		err = s.Restart(ctx, target.SeekSeconds, target.StartSegmentNumber)
+	// Freeze the manifest mapping before entering the restart flight, which
+	// hides the old generation from segment readers and pruning. An unresolved
+	// request leaves the current encoder running so its manifest can grow.
+	baseSeconds, timeline, err := s.manifestTimelineSnapshot()
+	if errors.Is(err, ErrManifestNotReady) {
+		return SegmentRecoveryTarget{}, false, nil
 	}
-	return target, true, err
+	if err != nil {
+		return SegmentRecoveryTarget{}, false, err
+	}
+	seekSeconds, ok := segmentStartTime(baseSeconds, timeline, segNum)
+	if !ok {
+		return SegmentRecoveryTarget{}, false, nil
+	}
+	opts := s.Opts()
+	target := SegmentRecoveryTarget{SeekSeconds: seekSeconds, StartSegmentNumber: segNum}
+	err = s.restart(ctx, target, func() (SegmentRecoveryTarget, bool, error) {
+		// The restart owns cancellation and reaping before this capacity-limited
+		// probe. Its anchor is mapped against the frozen playlist, before output
+		// cleanup or replacement FFmpeg can change that playlist.
+		var resolveErr error
+		target, ok, resolveErr = resolveCopySegmentRecoveryTarget(ctx, opts, baseSeconds, timeline, seekSeconds)
+		return target, ok, resolveErr
+	})
+	return target, ok, err
 }
 
 // restartFlight carries the outcome of an in-flight restart so a concurrent
@@ -3213,10 +3241,8 @@ var restartToneMapValidationTimeout = 20 * time.Second
 
 func (s *TranscodeSession) restart(
 	ctx context.Context,
-	seekSeconds float64,
-	startSegment int,
-	streamOriginSeconds float64,
-	copySeekAnchorResolved bool,
+	target SegmentRecoveryTarget,
+	resolveTarget func() (SegmentRecoveryTarget, bool, error),
 ) error {
 	s.mu.Lock()
 	// Single-flight: a second caller arriving while a restart is in
@@ -3261,58 +3287,93 @@ func (s *TranscodeSession) restart(
 	if done != nil {
 		<-done
 	}
+	var probeErr error
+	restorePrevious := false
+	if resolveTarget != nil {
+		var ok bool
+		target, ok, probeErr = resolveTarget()
+		if probeErr != nil || !ok {
+			// The old process has already released its slot. Restore its exact
+			// recipe before reporting the probe outcome: an unmapped target is
+			// retryable only while a producer can still grow the playlist.
+			restorePrevious = true
+			target = SegmentRecoveryTarget{
+				SeekSeconds: opts.SeekSeconds, StartSegmentNumber: opts.StartSegmentNumber,
+				StreamOriginSeconds: opts.StreamOriginSeconds, CopySeekAnchorResolved: opts.CopySeekAnchorResolved,
+			}
+		}
+	}
+	startSegment := target.StartSegmentNumber
+	wrapStartError := func(err error) error {
+		if restorePrevious {
+			return errors.Join(probeErr, fmt.Errorf("restore previous transcode recipe: %w", err))
+		}
+		return err
+	}
 
 	// A planned stream's segments only match its playlist when FFmpeg cuts
 	// them from the beginning, so it always restarts there. The requested
 	// segment stays the throttler's target, so FFmpeg runs on to reach it.
 	requestedSegment := startSegment
 	if s.copyPlan != nil {
-		seekSeconds, startSegment, streamOriginSeconds, copySeekAnchorResolved = 0, 0, 0, true
+		target = SegmentRecoveryTarget{CopySeekAnchorResolved: true}
+		startSegment = 0
 	}
 
 	s.mu.Lock()
 	s.running = false
 	s.waitErr = nil
+	s.waitCanceled = false
 	if s.stderr != nil {
 		s.stderr.Reset()
 	}
 	s.restartCount++
 	s.segmentGeneration++
 	s.segmentPruneRunning = false
+	// An identical-recipe rollback keeps the retained output's download
+	// progress, including completions received while the probe ran.
+	if !restorePrevious {
+		s.lastRequestedSegment = requestedSegment
+		s.lastCompletedSegment = startSegment - 1
+		s.lastPruneHighWater = startSegment - 1
+	}
 	preStartRangePrunable := opts.SegmentRetentionSeconds > 0 && s.lastPruneFloor < startSegment
-	s.lastRequestedSegment = startSegment
-	s.lastCompletedSegment = startSegment - 1
 	if preStartRangePrunable {
 		// Every restart preserves files below startSegment. Keep an older prune
 		// cursor reachable until replacement downloads age out that range, even
 		// when the reported restart position trails the download high-water mark.
 		s.pruneBeforeStart = true
 	} else {
+		// Even an identical recipe can recreate previously pruned files from
+		// its original start, so the prune cursor must revisit that range.
 		s.lastPruneFloor = startSegment - 1
 		s.pruneBeforeStart = false
 	}
-	s.lastPruneHighWater = startSegment - 1
 	hwWorkloadDevice := s.hwWorkloadDevice
 	s.mu.Unlock()
 
 	previousOpts := opts
 
-	opts.SeekSeconds = seekSeconds
-	opts.StartSegmentNumber = startSegment
-	if strings.EqualFold(opts.TargetCodecVideo, "copy") {
-		// A seek restart describes a new emitted timeline. Never retain the
-		// previous copy seek's keyframe origin when the caller has not resolved
-		// a replacement; falling back to SeekSeconds is conservative and matches
-		// the behavior of recipes created before copy anchors were introduced.
-		opts.StreamOriginSeconds = streamOriginSeconds
-		opts.CopySeekAnchorResolved = copySeekAnchorResolved
+	if !restorePrevious {
+		opts.SeekSeconds = target.SeekSeconds
+		opts.StartSegmentNumber = startSegment
+		if strings.EqualFold(opts.TargetCodecVideo, "copy") {
+			// A seek restart describes a new emitted timeline. Never retain the
+			// previous copy seek's keyframe origin when the caller has not resolved
+			// a replacement; falling back to SeekSeconds is conservative and matches
+			// the behavior of recipes created before copy anchors were introduced.
+			opts.StreamOriginSeconds = target.StreamOriginSeconds
+			opts.CopySeekAnchorResolved = target.CopySeekAnchorResolved
+		}
+		opts.FastStart = false // seek-restarts use veryfast for better quality
 	}
-	opts.FastStart = false // seek-restarts use veryfast for better quality
 
 	// Old segments are only reusable when this generation emits the same recipe
 	// as the previous one; otherwise they, and the manifest describing them,
 	// have to go before the replacement process starts.
-	if s.cleanStaleOutputForRestart(previousOpts, opts, startSegment) {
+	// Restoring the identical recipe retains its known segment-to-source mapping
+	// and existing output, including when the replacement cannot be started.
+	if !restorePrevious && s.cleanStaleOutputForRestart(previousOpts, opts, startSegment) {
 		log.Printf("playback: cleaned stale transcode output at/after segment %d before restart (video %q -> %q)",
 			startSegment, previousOpts.TargetCodecVideo, opts.TargetCodecVideo)
 	}
@@ -3333,13 +3394,14 @@ func (s *TranscodeSession) restart(
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
+		err = wrapStartError(fmt.Errorf("create stdin pipe: %w", err))
 		s.mu.Lock()
 		flight.err = err
 		s.restarting = nil
 		s.waitErr = err
 		s.mu.Unlock()
 		close(flight.done)
-		return fmt.Errorf("create stdin pipe: %w", err)
+		return err
 	}
 	cmd.Dir = opts.OutputDir
 	cmd.Stderr = s.newStderrWriter(ctx)
@@ -3356,10 +3418,16 @@ func (s *TranscodeSession) restart(
 	// As in StartTranscode, stamp the generation before the process can write.
 	inheritedManifest := statManifest(opts.OutputDir)
 	startedAt := time.Now()
-	if err := cmd.Start(); err != nil {
+	if err := encodinglimit.Start(cmd); err != nil {
+		// Admission can fail before exec.Start closes its owned pipe ends.
+		_ = stdinPipe.Close()
+		if pipe, ok := cmd.Stdin.(io.Closer); ok {
+			_ = pipe.Close()
+		}
 		processmetrics.Record(processmetrics.Transcode, nil, err, ctx.Err())
 		cancel()
 		releaseHWDevice()
+		err = wrapStartError(fmt.Errorf("restart ffmpeg: %w", err))
 		s.mu.Lock()
 		flight.err = err
 		s.restarting = nil
@@ -3367,7 +3435,7 @@ func (s *TranscodeSession) restart(
 		s.mu.Unlock()
 		close(flight.done)
 		s.logFFmpegEvent(ctx, "ffmpeg process exit error", err.Error())
-		return fmt.Errorf("restart ffmpeg: %w", err)
+		return err
 	}
 
 	s.mu.Lock()
@@ -3378,10 +3446,13 @@ func (s *TranscodeSession) restart(
 	s.cancel = cancel
 	s.opts = opts
 	s.running = true
+	flight.err = probeErr
 	s.restarting = nil
 	s.stdinPipe = stdinPipe
-	s.lastRequestedSegment = requestedSegment
-	s.lastCompletedSegment = startSegment - 1
+	if !restorePrevious {
+		s.lastRequestedSegment = requestedSegment
+		s.lastCompletedSegment = startSegment - 1
+	}
 	s.generationStartedAt = startedAt
 	s.inheritedManifest = inheritedManifest
 	s.done = make(chan struct{})
@@ -3395,7 +3466,7 @@ func (s *TranscodeSession) restart(
 		hook(ctx)
 	}
 
-	return nil
+	return probeErr
 }
 
 // WaitForSegment polls until the named segment file exists on disk or the
@@ -3671,15 +3742,20 @@ func (s *TranscodeSession) SegmentStartTime(segNum int) (float64, bool, error) {
 		return 0, false, err
 	}
 
+	seconds, ok := segmentStartTime(baseSeekSeconds, timeline, segNum)
+	return seconds, ok, nil
+}
+
+func segmentStartTime(baseSeekSeconds float64, timeline manifestTimeline, segNum int) (float64, bool) {
 	currentTime := baseSeekSeconds
 	for _, entry := range timeline.entries {
 		if entry.number == segNum {
-			return currentTime, true, nil
+			return currentTime, true
 		}
 		currentTime += entry.duration
 	}
 
-	return 0, false, nil
+	return 0, false
 }
 
 func (s *TranscodeSession) manifestTimelineSnapshot() (float64, manifestTimeline, error) {
@@ -3735,15 +3811,20 @@ func (s *TranscodeSession) segmentNumberAtSourceTime(sourceSeconds float64) (int
 		return 0, false, err
 	}
 
+	segment, ok := segmentNumberAtSourceTime(baseSeekSeconds, timeline, sourceSeconds)
+	return segment, ok, nil
+}
+
+func segmentNumberAtSourceTime(baseSeekSeconds float64, timeline manifestTimeline, sourceSeconds float64) (int, bool) {
 	currentTime := baseSeekSeconds
 	for _, entry := range timeline.entries {
 		if math.Abs(currentTime-sourceSeconds) <= copySegmentStartMatchTolerance.Seconds() {
-			return entry.number, true, nil
+			return entry.number, true
 		}
 		currentTime += entry.duration
 	}
 
-	return 0, false, nil
+	return 0, false
 }
 
 // SegmentRecoveryTarget describes the FFmpeg seek and HLS numbering for one
@@ -3773,7 +3854,14 @@ func (s *TranscodeSession) ResolveSegmentRecoveryTarget(ctx context.Context, seg
 	if !strings.EqualFold(opts.TargetCodecVideo, "copy") {
 		return target, true, nil
 	}
+	baseSeconds, timeline, err := s.manifestTimelineSnapshot()
+	if err != nil {
+		return SegmentRecoveryTarget{}, false, err
+	}
+	return resolveCopySegmentRecoveryTarget(ctx, opts, baseSeconds, timeline, seekSeconds)
+}
 
+func resolveCopySegmentRecoveryTarget(ctx context.Context, opts TranscodeOpts, baseSeconds float64, timeline manifestTimeline, seekSeconds float64) (SegmentRecoveryTarget, bool, error) {
 	streamOriginSeconds, _, err := ResolveCopySeekAnchor(
 		ctx,
 		opts.FFmpegPath,
@@ -3784,15 +3872,15 @@ func (s *TranscodeSession) ResolveSegmentRecoveryTarget(ctx context.Context, seg
 	if err != nil {
 		return SegmentRecoveryTarget{}, false, err
 	}
-	startSegmentNumber, ok, err := s.segmentNumberAtSourceTime(streamOriginSeconds)
-	if err != nil || !ok {
-		return SegmentRecoveryTarget{}, ok, err
+	startSegmentNumber, ok := segmentNumberAtSourceTime(baseSeconds, timeline, streamOriginSeconds)
+	if !ok {
+		return SegmentRecoveryTarget{}, false, nil
 	}
 
-	target.StreamOriginSeconds = streamOriginSeconds
-	target.StartSegmentNumber = startSegmentNumber
-	target.CopySeekAnchorResolved = true
-	return target, true, nil
+	return SegmentRecoveryTarget{
+		SeekSeconds: seekSeconds, StreamOriginSeconds: streamOriginSeconds,
+		StartSegmentNumber: startSegmentNumber, CopySeekAnchorResolved: true,
+	}, true, nil
 }
 
 // RestartSeekTarget resolves the source-timeline time to restart FFmpeg for

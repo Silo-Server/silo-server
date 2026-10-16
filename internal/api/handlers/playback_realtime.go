@@ -34,11 +34,17 @@ func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, ses
 	}
 	unlock := h.tm.LockSessionLifecycle(session.ID)
 	defer unlock()
+	return h.stopPlaybackSessionWithResultUnderLifecycle(ctx, session, userInitiated)
+}
+
+// stopPlaybackSessionWithResultUnderLifecycle requires the caller to hold the
+// transcode manager's lifecycle lock for session.ID through finalization.
+func (h *PlaybackHandler) stopPlaybackSessionWithResultUnderLifecycle(ctx context.Context, session *playback.Session, userInitiated bool) (watchstate.PlaybackStopResult, error) {
 	current, err := h.endPlaybackSessionAuthority(ctx, session, userInitiated)
 	if err != nil {
 		return watchstate.PlaybackStopResult{}, err
 	}
-	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", userInitiated), nil
+	return h.finalizeSessionStopWithResultUnderLifecycle(ctx, current, true, "stop", userInitiated), nil
 }
 
 // endPlaybackSessionAuthority ends the live session and revokes its streams
@@ -90,6 +96,20 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 		return err
 	}
 	return h.stopPlaybackSession(ctx, session, userInitiated)
+}
+
+// stopPlaybackSessionByIDUnderLifecycle is the crash callback's stop path; the
+// exit monitor already holds the transcode manager's lifecycle lock.
+func (h *PlaybackHandler) stopPlaybackSessionByIDUnderLifecycle(ctx context.Context, sessionID string, userInitiated bool) error {
+	if h == nil || sessionID == "" {
+		return playback.ErrSessionNotFound
+	}
+	session, err := h.sessionMgr.GetSession(sessionID)
+	if err != nil {
+		return err
+	}
+	_, err = h.stopPlaybackSessionWithResultUnderLifecycle(ctx, session, userInitiated)
+	return err
 }
 
 // recordRealtimeStoppedSession shares native history finalization with the
