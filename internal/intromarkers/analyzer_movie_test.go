@@ -3,6 +3,7 @@ package intromarkers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -20,8 +21,10 @@ type fakeMovieSampler struct {
 	preflight error
 	errs      map[int]error
 	silences  []mediasample.Interval
-	tails     []int
-	windows   []fingerprintWindow
+	// silenceErr fails every silence read.
+	silenceErr error
+	tails      []int
+	windows    []fingerprintWindow
 	// onSample runs on every tail pass.
 	onSample func()
 	// onSilences runs on every silence read.
@@ -57,12 +60,12 @@ func (f *fakeMovieSampler) SampleMovieTail(_ context.Context, candidate Candidat
 func (f *fakeMovieSampler) SampleMovieSilences(_ context.Context, _ Candidate, window fingerprintWindow) ([]mediasample.Interval, error) {
 	f.mu.Lock()
 	f.windows = append(f.windows, window)
-	onSilences, silences := f.onSilences, f.silences
+	onSilences, silences, err := f.onSilences, f.silences, f.silenceErr
 	f.mu.Unlock()
 	if onSilences != nil {
 		onSilences()
 	}
-	return silences, nil
+	return silences, err
 }
 
 func (f *fakeMovieSampler) tailCount() int {
@@ -172,6 +175,47 @@ func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
 	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete ||
 		summary.MovieCreditsMarkersWritten != 1 || sampler.tailCount() != 3 {
 		t.Fatalf("artifact status %q, summary %+v, %d tail passes; want the third pass stored with its credits", artifact.Status, summary, sampler.tailCount())
+	}
+}
+
+// A silence pass killed at its deadline keeps the video start but leaves
+// the movie unsettled: its tail is recorded as failed with a backoff, not
+// stored complete, so the scheduled run takes it up again. A silence pass
+// that fails for another reason still settles the movie.
+func TestAnalyzeMovieSilenceTimeoutLeavesTheMovieUnsettled(t *testing.T) {
+	movie := movieCandidate(10, 7200)
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
+	timeout := &mediasample.Error{Reason: mediasample.ReasonTimeout, Attempts: []mediasample.AttemptError{{
+		Decoder: "software", Reason: mediasample.ReasonTimeout, Err: context.DeadlineExceeded,
+	}}}
+	sampler := &fakeMovieSampler{silenceErr: fmt.Errorf("ffmpeg did not finish within its 2m12s deadline: %w", timeout)}
+	analyzer := movieAnalyzer(repo, sampler)
+
+	summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
+	if err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	credits := creditsPatches(repo)
+	if summary.MovieCreditsMarkersWritten != 1 || summary.CreditsTailScanErrors != 1 || len(credits) != 1 || credits[0].Start != 6600 {
+		t.Fatalf("summary %+v, credits %+v; want the video start written", summary, credits)
+	}
+	artifact := repo.artifact(10, ArtifactKindCreditsTail)
+	if artifact.Status != mediaartifact.StatusFailed || artifact.RetryAfter == nil || artifact.Key != movieCreditsTailKey() {
+		t.Fatalf("movie tail artifact status %q, retry after %v; want failed with a backoff", artifact.Status, artifact.RetryAfter)
+	}
+
+	// Inside the backoff the movie's tail is not sampled again.
+	if _, err := analyzer.AnalyzeMovie(context.Background(), "movie"); err != nil || sampler.tailCount() != 1 {
+		t.Fatalf("AnalyzeMovie: %v, %d tail passes; want the backoff to hold", err, sampler.tailCount())
+	}
+
+	repo = &fakeIntroRepository{movieCandidates: []Candidate{movie}}
+	sampler = &fakeMovieSampler{silenceErr: errors.New("ffmpeg exit status 1")}
+	if _, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie"); err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete {
+		t.Fatalf("movie tail artifact status %q after a failed silence pass, want complete", artifact.Status)
 	}
 }
 

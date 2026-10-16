@@ -136,10 +136,7 @@ func (c *Client) Enroll(ctx context.Context, rawURL, name string, input Input) (
 	if len(input.Token) < 32 || len(input.Token) > 512 {
 		return Receipt{}, ErrRejected
 	}
-	data, err := json.Marshal(b)
-	if err != nil {
-		return Receipt{}, ErrRejected
-	}
+	data, _ := json.Marshal(b)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+EnrollmentPath, bytes.NewReader(data))
 	if err != nil {
 		return Receipt{}, ErrInvalidTarget

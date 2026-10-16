@@ -91,7 +91,7 @@ func (f *fakeCatalogActions) SearchPeopleScoped(_ context.Context, query string,
 	f.lastUser = limit
 	f.lastMediaScope = mediaScope
 	f.lastFilter = filter
-	if strings.HasPrefix("al pacino", strings.ToLower(query)) {
+	if strings.HasPrefix("al pacino", strings.ToLower(query)) { //nolint:gocritic // the fake matches a typed prefix of the name
 		return []handlers.PersonView{fakePerson(7)}, nil
 	}
 	return nil, nil

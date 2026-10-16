@@ -49,21 +49,7 @@ func TestAutomaticNodeEnrollmentProcessAndRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	b := nodeenrollment.Binding{DatabaseURL: dsn, SecretKey: master, NodeURL: "http://127.0.0.1:1", NodeName: "Sold node"}
-	if err := validateCustomerBinding(ctx, b); err != nil {
-		t.Fatal("valid DB settings and DB-derived Redis rejected", err)
-	}
-	b.SecretKey = strings.Repeat("x", 48)
-	if err := validateCustomerBinding(ctx, b); err == nil {
-		t.Fatal("wrong shared key accepted")
-	}
-	b.SecretKey = master
-	b.RedisURL = "redis://127.0.0.1:1"
-	rejectedCtx, rejectedCancel := context.WithTimeout(ctx, 2*time.Second)
-	if err := validateCustomerBinding(rejectedCtx, b); err == nil {
-		t.Fatal("unreachable Redis accepted")
-	}
-	rejectedCancel()
+	assertCustomerBindingValidation(t, ctx, dsn, master)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -74,78 +60,11 @@ func TestAutomaticNodeEnrollmentProcessAndRestart(t *testing.T) {
 	url := "http://" + addr
 	directory := t.TempDir()
 	bindingPath := filepath.Join(directory, "private", "binding.json")
-	start := func(enrollmentToken string) func() {
-		t.Helper()
-		logFile, err := os.CreateTemp(directory, "worker-*.log")
-		if err != nil {
-			t.Fatal(err)
-		}
-		cmd := exec.CommandContext(ctx, binary, "-env", filepath.Join(directory, "missing.env"))
-		cmd.Dir = directory
-		for _, entry := range os.Environ() {
-			key, _, _ := strings.Cut(entry, "=")
-			switch key {
-			case "DATABASE_URL", "SECRET_KEY", "REDIS_URL", "MODE", "PORT", "NODE_URL", "NODE_NAME", "SILO_NODE_BINDING_FILE", "SILO_NODE_ENROLLMENT_TOKEN", "SILO_TRANSCODE_MAX_JOBS":
-				continue
-			}
-			cmd.Env = append(cmd.Env, entry)
-		}
-		cmd.Env = append(cmd.Env, "MODE=transcode", "PORT="+port, "SILO_NODE_BINDING_FILE="+bindingPath, "SILO_NODE_ENROLLMENT_TOKEN="+enrollmentToken, "SILO_TRANSCODE_MAX_JOBS=3")
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		stopped := false
-		stop := func() {
-			if stopped {
-				return
-			}
-			stopped = true
-			_ = cmd.Process.Signal(os.Interrupt)
-			done := make(chan error, 1)
-			go func() { done <- cmd.Wait() }()
-			select {
-			case <-done:
-			case <-time.After(7 * time.Second):
-				_ = cmd.Process.Kill()
-				<-done
-			}
-			_ = logFile.Close()
-		}
-		t.Cleanup(stop)
-		httpClient := &http.Client{Timeout: time.Second}
-		deadline := time.Now().Add(15 * time.Second)
-		for {
-			resp, err := httpClient.Get(url + "/api/v1/health")
-			if err == nil {
-				var health struct {
-					Status string `json:"status"`
-				}
-				_ = json.NewDecoder(resp.Body).Decode(&health)
-				_ = resp.Body.Close()
-				if health.Status != "" {
-					break
-				}
-			}
-			if time.Now().After(deadline) {
-				stop()
-				logs, _ := os.ReadFile(logFile.Name())
-				t.Fatalf("worker did not listen: %s", logs)
-			}
-			select {
-			case <-ctx.Done():
-				stop()
-				t.Fatal(ctx.Err())
-			case <-time.After(50 * time.Millisecond):
-			}
-		}
-		return stop
-	}
+	worker := enrollmentTestWorker{binary: binary, directory: directory, port: port, bindingPath: bindingPath, url: url}
 	if err := settings.Set(ctx, "redis.url", ""); err != nil {
 		t.Fatal(err)
 	}
-	stop := start(token)
+	stop := worker.start(t, ctx, token)
 	store := nodepool.NewAdminConfigurationStore(pool)
 	h := &handlers.NodeHandler{}
 	h.SetConfigurationStore(store)
@@ -174,7 +93,7 @@ func TestAutomaticNodeEnrollmentProcessAndRestart(t *testing.T) {
 		t.Fatal("customer binding not persisted")
 	}
 	stop()
-	stop = start("")
+	stop = worker.start(t, ctx, "")
 	defer stop()
 	retry, err := h.EnrollAdminNode(ctx, input, nodeenrollment.Input{Token: "retired token is not needed"})
 	if err != nil || retry.ID != node.ID || *retry.MaxJobs != 3 {
@@ -197,4 +116,96 @@ func TestAutomaticNodeEnrollmentProcessAndRestart(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatal("retired enrollment endpoint still available", resp.StatusCode)
 	}
+}
+
+func assertCustomerBindingValidation(t *testing.T, ctx context.Context, dsn, master string) {
+	t.Helper()
+	b := nodeenrollment.Binding{DatabaseURL: dsn, SecretKey: master, NodeURL: "http://127.0.0.1:1", NodeName: "Sold node"}
+	if err := validateCustomerBinding(ctx, b); err != nil {
+		t.Fatal("valid DB settings and DB-derived Redis rejected", err)
+	}
+	b.SecretKey = strings.Repeat("x", 48)
+	if err := validateCustomerBinding(ctx, b); err == nil {
+		t.Fatal("wrong shared key accepted")
+	}
+	b.SecretKey = master
+	b.RedisURL = "redis://127.0.0.1:1"
+	rejectedCtx, rejectedCancel := context.WithTimeout(ctx, 2*time.Second)
+	if err := validateCustomerBinding(rejectedCtx, b); err == nil {
+		t.Fatal("unreachable Redis accepted")
+	}
+	rejectedCancel()
+}
+
+type enrollmentTestWorker struct {
+	binary, directory, port, bindingPath, url string
+}
+
+func (worker enrollmentTestWorker) start(t *testing.T, ctx context.Context, enrollmentToken string) func() {
+	t.Helper()
+	logFile, err := os.CreateTemp(worker.directory, "worker-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, worker.binary, "-env", filepath.Join(worker.directory, "missing.env"))
+	cmd.Dir = worker.directory
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "DATABASE_URL", "SECRET_KEY", "REDIS_URL", "MODE", "PORT", "NODE_URL", "NODE_NAME", "SILO_NODE_BINDING_FILE", "SILO_NODE_ENROLLMENT_TOKEN", "SILO_TRANSCODE_MAX_JOBS":
+			continue
+		}
+		cmd.Env = append(cmd.Env, entry)
+	}
+	cmd.Env = append(cmd.Env, "MODE=transcode", "PORT="+worker.port, "SILO_NODE_BINDING_FILE="+worker.bindingPath, "SILO_NODE_ENROLLMENT_TOKEN="+enrollmentToken, "SILO_TRANSCODE_MAX_JOBS=3")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		_ = cmd.Process.Signal(os.Interrupt)
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case <-done:
+		case <-time.After(7 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+		_ = logFile.Close()
+	}
+	t.Cleanup(stop)
+	httpClient := &http.Client{Timeout: time.Second}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		resp, err := httpClient.Get(worker.url + "/api/v1/health")
+		if err == nil {
+			var health struct {
+				Status string `json:"status"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&health)
+			_ = resp.Body.Close()
+			if health.Status != "" {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			stop()
+			logs, _ := os.ReadFile(logFile.Name())
+			t.Fatalf("worker did not listen: %s", logs)
+		}
+		select {
+		case <-ctx.Done():
+			stop()
+			t.Fatal(ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	return stop
 }

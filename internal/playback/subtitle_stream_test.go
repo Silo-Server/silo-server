@@ -235,7 +235,9 @@ func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	if strings.Contains(joined, "0:s:3") {
 		t.Fatalf("original container track ordinal must not leak into sup input mapping: %s", joined)
 	}
-	if !strings.Contains(joined, "-ss 1200.000") || !strings.Contains(joined, "-to 4800.000") {
+	// The seek starts early so a display set at the window start is read
+	// whole; the end is unchanged.
+	if !strings.Contains(joined, "-ss 1198.000") || !strings.Contains(joined, "-to 4800.000") {
 		t.Fatalf("cached sup extract must still window the input: %s", joined)
 	}
 	ssIdx := slices.Index(args, "-ss")
@@ -253,6 +255,33 @@ func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	}
 	if !strings.Contains(joined, "-c:s copy") || !strings.Contains(joined, "-f sup pipe:1") {
 		t.Fatalf("cached sup extract should copy into a sup stream: %s", joined)
+	}
+	// ffmpeg offsets an input seek by the input's start time, which for a
+	// cached .sup is its first cue; the seek must be absolute instead.
+	if tsIdx := slices.Index(args, "-seek_timestamp"); tsIdx < 0 || tsIdx > inIdx || args[tsIdx+1] != "1" {
+		t.Fatalf("cached sup seek must be an absolute timestamp (-seek_timestamp 1 before -i): %s", joined)
+	}
+}
+
+// An unseeked window from a cached .sup keeps its stored timestamps too:
+// without -copyts ffmpeg rebases the stream onto its first cue.
+func TestStreamExtractArgs_ExtractedSupInputFromStart(t *testing.T) {
+	args := streamExtractArgs(StreamExtractOpts{
+		InputPath:           "/transcode/subtitle-cache/abc-s3-1-2.sup",
+		SourceCodec:         "hdmv_pgs_subtitle",
+		DurationSeconds:     600,
+		AllowWindow:         true,
+		InputIsExtractedSup: true,
+	})
+	joined := strings.Join(args, " ")
+	if !slices.Contains(args, "-copyts") || slices.Contains(args, "-start_at_zero") {
+		t.Fatalf("cached sup extract must keep its stored timestamps: %s", joined)
+	}
+	if slices.Contains(args, "-ss") || slices.Contains(args, "-seek_timestamp") {
+		t.Fatalf("an extract from the start must not seek: %s", joined)
+	}
+	if !strings.Contains(joined, "-to 600.000") {
+		t.Fatalf("the window still ends at its duration: %s", joined)
 	}
 }
 
@@ -345,5 +374,45 @@ func TestStreamExtractArgs_PGSProducesSup(t *testing.T) {
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-map 0:s:1 -c:s copy -f sup pipe:1") {
 		t.Fatalf("PGS extract should copy into a sup stream: %s", joined)
+	}
+}
+
+// A window from a cached .sup that starts at or before the first cue cannot
+// be seeked (ffmpeg fails the seek and loses the first presentation
+// segment), so it reads from the start and keeps its absolute end.
+func TestWindowFromCachedSup(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		seek, duration    float64
+		wantSeek, wantDur float64
+	}{
+		{name: "before the first cue", seek: 35, duration: 60, wantSeek: 0, wantDur: 95},
+		{name: "onto the first cue", seek: 40, duration: 60, wantSeek: 0, wantDur: 100},
+		{name: "after the first cue", seek: 95, duration: 60, wantSeek: 95, wantDur: 60},
+		{name: "from the start", seek: 0, duration: 60, wantSeek: 0, wantDur: 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := windowFromCachedSup(StreamExtractOpts{SeekSeconds: tc.seek, DurationSeconds: tc.duration}, 40)
+			if got.SeekSeconds != tc.wantSeek || got.DurationSeconds != tc.wantDur {
+				t.Fatalf("got seek %v duration %v, want %v %v", got.SeekSeconds, got.DurationSeconds, tc.wantSeek, tc.wantDur)
+			}
+		})
+	}
+}
+
+func TestReadSupFirstCue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "track.sup")
+	if err := os.WriteFile(path, testSupStream([]float64{91.88, 100}, 0), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readSupFirstCue(path)
+	if err != nil || got != 91.88 {
+		t.Fatalf("readSupFirstCue = %v, %v; want 91.88", got, err)
+	}
+	if err := os.WriteFile(path, []byte("not a sup stream"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readSupFirstCue(path); err == nil {
+		t.Fatal("a file without the PG magic should be refused")
 	}
 }

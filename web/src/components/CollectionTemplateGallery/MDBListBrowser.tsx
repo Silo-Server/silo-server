@@ -153,7 +153,7 @@ export function MDBListBrowser({
                 to="/admin/settings/providers"
                 className="font-medium underline underline-offset-4"
               >
-                Settings › Subtitles &amp; Metadata
+                Settings › Providers
               </Link>
               . Popular picks and pasted links still work.
             </span>

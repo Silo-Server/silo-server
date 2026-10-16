@@ -176,8 +176,7 @@ export function HomeRowsPage({
 
   return (
     <CalmPage
-      // Settings > Home Screen sits under the Settings page's own heading.
-      heading={surface === "admin" ? "page" : "section"}
+      // Settings > Home Screen titles itself like every other settings page.
       title={title}
       subtitle={subtitle}
       actions={
@@ -274,7 +273,7 @@ export function HomeRowsPage({
                             }
                           : undefined
                       }
-                      switchDisabled={!adapter.canEdit || (row.legacyTrakt && !row.shown)}
+                      switchDisabled={!adapter.canEdit}
                       onShownChange={(shown) => void adapter.setShown(row.id, shown)}
                       onOpen={onOpenRow ? () => onOpenRow(row) : undefined}
                       menu={

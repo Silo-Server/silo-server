@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/naming"
 )
 
 // subtitleExtensions lists the recognized external subtitle file extensions.
@@ -74,10 +74,13 @@ func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubti
 // Naming conventions:
 //
 //	Movie.srt             -> no language
-//	Movie.eng.srt         -> language: "eng"
-//	Movie.en.srt          -> language: "en"
+//	Movie.eng.srt         -> language: "en"
 //	Movie.en.forced.srt   -> language: "en", forced: true
-//	Movie.forced.eng.srt  -> language: "eng", forced: true
+//	Movie.forced.eng.srt  -> language: "en", forced: true
+//	Movie.sdh.en.srt      -> language: "en", hearing impaired: true
+//	Movie.ai.hr.srt       -> language: "hr"
+//	Movie.hi.srt          -> language: "hi" (Hindi)
+//	Movie.en.hi.srt       -> language: "en", hearing impaired: true
 func DetectExternalSubtitles(mediaFilePath string) ([]ExternalSubtitleInfo, error) {
 	dir := filepath.Dir(mediaFilePath)
 
@@ -120,17 +123,8 @@ func externalSubtitlesFromCandidates(mediaFilePath string, candidates []external
 	var results []ExternalSubtitleInfo
 
 	for _, candidate := range candidates {
-		// Check that the subtitle file starts with the media basename
-		// followed by either a dot separator or nothing (exact match).
-		nameWithoutExt := candidate.base
-		if !strings.HasPrefix(nameWithoutExt, mediaBase) {
-			continue
-		}
-
-		// The suffix after the base name must be empty or start with a dot.
-		// This prevents "MovieExtra.srt" from matching "Movie.mkv".
-		suffix := nameWithoutExt[len(mediaBase):]
-		if suffix != "" && !strings.HasPrefix(suffix, ".") {
+		suffix, ok := naming.SubtitleSuffix(mediaBase, candidate.base)
+		if !ok {
 			continue
 		}
 
@@ -148,45 +142,14 @@ func externalSubtitlesFromCandidates(mediaFilePath string, candidates []external
 	return results
 }
 
-// parseSuffix extracts the language and forced flag from the suffix portion
-// of a subtitle filename. The suffix is the part between the media basename
-// and the subtitle extension, e.g. ".en.forced" or ".forced.eng" or ".eng".
+// parseSuffix reads the language and flags from the suffix portion of a
+// subtitle filename: the part between the media basename and the subtitle
+// extension, e.g. ".en.forced" or ".sdh.eng".
 func parseSuffix(suffix string, info *ExternalSubtitleInfo) {
-	if suffix == "" {
-		return
-	}
-
-	// Split on dots, filtering out empty parts.
-	parts := splitDots(suffix)
-	if len(parts) == 0 {
-		return
-	}
-
-	// Identify forced flag and language from the parts.
-	// Valid patterns:
-	//   [lang]
-	//   [lang, "forced"]
-	//   ["forced", lang]
-	for _, p := range parts {
-		lower := strings.ToLower(p)
-		if lower == "forced" {
-			info.Forced = true
-		} else if info.Language == "" {
-			info.Language = lang.CompatibleTag(p)
-		}
-	}
-}
-
-// splitDots splits a string on '.' and returns non-empty parts.
-func splitDots(s string) []string {
-	raw := strings.Split(s, ".")
-	var parts []string
-	for _, p := range raw {
-		if p != "" {
-			parts = append(parts, p)
-		}
-	}
-	return parts
+	tags := naming.ParseSubtitleSuffix(suffix)
+	info.Language = tags.Language
+	info.Forced = tags.Forced
+	info.HearingImpaired = tags.HearingImpaired
 }
 
 // stripExtension removes the file extension from a filename.

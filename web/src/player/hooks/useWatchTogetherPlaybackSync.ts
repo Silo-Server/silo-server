@@ -18,6 +18,13 @@ interface UseWatchTogetherPlaybackSyncOptions {
   appliedCommandIdRef: RefObject<string | null>;
   /** Called when a sustained stall is reported to the room. */
   onSustainedStall?: () => void;
+  /**
+   * The command a routine state report may name, or null to name none. It is
+   * the applied command once any seek it started has landed: before that the
+   * element still plays the stream the command is replacing. Defaults to the
+   * applied command.
+   */
+  reportCommandId?: () => string | null;
 }
 
 interface TransportRequestResult {
@@ -48,6 +55,12 @@ interface UseWatchTogetherPlaybackSyncResult {
   prerollMutedPreference: () => boolean | null;
   /** Records the viewer's mute choice during a pre-roll. False when none runs. */
   setPrerollMutedPreference: (muted: boolean) => boolean;
+  /**
+   * The seek of command `toCommandId` was skipped because the stream rebuild
+   * that `fromCommandId` started already heads to the same position. That
+   * rebuild then serves the new command too, including its pre-roll.
+   */
+  carryStreamRebuild: (fromCommandId: string | null, toCommandId: string) => void;
 }
 
 const stateReportIntervalMs = 1_500;
@@ -56,6 +69,11 @@ const stateReportIntervalMs = 1_500;
 const waitingReportIntervalMs = 500;
 const pendingCommandQuietPeriodMs = 250;
 const readySeekToleranceSeconds = 1;
+// A stream that lands past a seek target cannot pre-roll back to it. The
+// server holds the room's own seek to readySeekToleranceSeconds but accepts a
+// stalled viewer's own seek within this, so readiness is reported and the
+// server decides.
+const aheadReadySeekToleranceSeconds = 5;
 // The host's real position becomes the room anchor, so a rebuilt stream that
 // lands short of the target does not hold the room. Mirrors the server bound.
 const hostReadySeekToleranceSeconds = 15;
@@ -126,6 +144,7 @@ export function useWatchTogetherPlaybackSync({
   streamOriginRef,
   appliedCommandIdRef,
   onSustainedStall,
+  reportCommandId,
 }: UseWatchTogetherPlaybackSyncOptions): UseWatchTogetherPlaybackSyncResult {
   const connectionState = roomConnection.connectionState;
   const room = roomConnection.room;
@@ -216,6 +235,30 @@ export function useWatchTogetherPlaybackSync({
   // The command whose seek rebuilt the current stream. Until the rebuilt
   // stream loads, the element still holds the stream the seek replaces.
   const rebuiltForCommandRef = useRef<string | null>(null);
+  // The command applied when the element last started loading a stream, so a
+  // command that adopts an earlier command's rebuild can tell whether that
+  // rebuild has already begun loading.
+  const loadStartedForCommandRef = useRef<string | null>(null);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onLoadStart = () => {
+      loadStartedForCommandRef.current = appliedCommandIdRef.current;
+    };
+    video.addEventListener("loadstart", onLoadStart);
+    return () => video.removeEventListener("loadstart", onLoadStart);
+  }, [appliedCommandIdRef, videoRef]);
+  const carryStreamRebuild = useCallback((fromCommandId: string | null, toCommandId: string) => {
+    // A rebuild that has not started loading yet is marked for the applied
+    // command by its own loadstart.
+    if (fromCommandId === null) return;
+    if (
+      rebuiltForCommandRef.current === fromCommandId ||
+      loadStartedForCommandRef.current === fromCommandId
+    ) {
+      rebuiltForCommandRef.current = toCommandId;
+    }
+  }, []);
   const endPreroll = useCallback(
     (pause: boolean) => {
       const preroll = prerollRef.current;
@@ -410,8 +453,13 @@ export function useWatchTogetherPlaybackSync({
     const positionSeconds = Math.max(0, toMediaTime(video.currentTime, streamOriginRef.current));
     // A canplay event can still belong to the stream a room seek replaces.
     if (roomPlaybackState === "waiting" && command.action === "seek") {
-      const delta = Math.abs(positionSeconds - command.position_seconds);
-      const tolerance = isHost ? hostReadySeekToleranceSeconds : readySeekToleranceSeconds;
+      const offset = positionSeconds - command.position_seconds;
+      const delta = Math.abs(offset);
+      const tolerance = isHost
+        ? hostReadySeekToleranceSeconds
+        : offset > 0
+          ? aheadReadySeekToleranceSeconds
+          : readySeekToleranceSeconds;
       if (delta > tolerance) {
         return {
           ok: false,
@@ -503,9 +551,13 @@ export function useWatchTogetherPlaybackSync({
           return;
         }
 
+        // Naming the latest command this viewer applied lets the server take
+        // the report at once instead of waiting out that command's settle window.
+        const appliedCommandId = reportCommandId ? reportCommandId() : appliedCommandIdRef.current;
         sendRoomMessage({
           type: "state_report",
           session_id: sessionId,
+          ...(appliedCommandId ? { command_id: appliedCommandId } : {}),
           position_seconds: toMediaTime(video.currentTime, streamOriginRef.current),
           is_paused: video.paused,
         });
@@ -518,12 +570,14 @@ export function useWatchTogetherPlaybackSync({
     };
   }, [
     advanceThroughPreroll,
+    appliedCommandIdRef,
     attachedSessionId,
     catchingUp,
     checkReady,
     connectionState,
     noteReadyReject,
     readinessPending,
+    reportCommandId,
     sendRoomMessage,
     serverTimeOffsetMs,
     sessionId,
@@ -645,8 +699,10 @@ export function useWatchTogetherPlaybackSync({
       reportBuffering,
       prerollMutedPreference,
       setPrerollMutedPreference,
+      carryStreamRebuild,
     }),
     [
+      carryStreamRebuild,
       attachedSessionId,
       catchingUp,
       readinessPending,

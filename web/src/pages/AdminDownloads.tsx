@@ -1,4 +1,5 @@
 import { useSearchParams } from "react-router";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAdminDownloadPreparations } from "@/hooks/queries/admin/downloadPreparations";
 import DeviceCopiesTab from "@/pages/admin-downloads/DeviceCopiesTab";
@@ -33,15 +34,10 @@ export default function AdminDownloads() {
 
   return (
     <div className="space-y-5 lg:space-y-6">
-      <div className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3.25rem)]">Downloads</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Preparing downloads, the prepared files on the server and nodes, and the copies on
-            people's devices.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Downloads"
+        subtitle="Preparing downloads, the prepared files on the server and nodes, and the copies on people's devices."
+      />
       <Tabs
         value={tab}
         onValueChange={(value) => open(parseAdminDownloadsTab(value))}

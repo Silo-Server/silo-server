@@ -533,25 +533,27 @@ func (s *Server) restartSegmentLocked(
 		return playback.SegmentRecoveryTarget{}, false, playback.ErrSessionSuperseded
 	}
 	target, resolved, err := session.RestartSegment(ctx, segNum)
-	if err != nil && !session.IsRunning() && session.WaitError() != nil {
-		// Workers have no integrated crash monitor. A failed restoration must
-		// release this exact runtime so the next request can reconstruct from
-		// its existing authority, while retaining the known copy timeline.
-		s.mu.Lock()
-		retire := s.sessions[sessionID] == session
-		if retire {
-			delete(s.sessions, sessionID)
-			delete(s.lastAccess, sessionID)
-		}
-		s.mu.Unlock()
-		if retire {
-			if closeErr := s.retireGPUSession(session.CloseProcess); closeErr != nil {
-				slog.ErrorContext(ctx, "close failed transcode recovery", "component", "transcodenode", "error", closeErr, "session", sessionID)
-			}
-			if s.tracker != nil {
-				s.tracker.Remove(context.WithoutCancel(ctx), sessionID)
-			}
-		}
+	if err == nil || session.IsRunning() || session.WaitError() == nil {
+		return target, resolved, err
+	}
+	// Workers have no integrated crash monitor. A failed restoration must
+	// release this exact runtime so the next request can reconstruct from
+	// its existing authority, while retaining the known copy timeline.
+	s.mu.Lock()
+	retire := s.sessions[sessionID] == session
+	if retire {
+		delete(s.sessions, sessionID)
+		delete(s.lastAccess, sessionID)
+	}
+	s.mu.Unlock()
+	if !retire {
+		return target, resolved, err
+	}
+	if closeErr := s.retireGPUSession(session.CloseProcess); closeErr != nil {
+		slog.ErrorContext(ctx, "close failed transcode recovery", "component", "transcodenode", "error", closeErr, "session", sessionID)
+	}
+	if s.tracker != nil {
+		s.tracker.Remove(context.WithoutCancel(ctx), sessionID)
 	}
 	return target, resolved, err
 }

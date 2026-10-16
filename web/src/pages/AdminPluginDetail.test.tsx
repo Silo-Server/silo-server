@@ -304,6 +304,25 @@ describe("AdminPluginDetail", () => {
     expect(restartMock).toHaveBeenCalledWith(7);
   });
 
+  it("shows the start error of a non-resident plugin without offering Restart", () => {
+    installationsQuery = query([
+      makeInstallation({
+        global_config_schema: [],
+        runtime: {
+          resident: false,
+          state: "failed",
+          restart_count: 0,
+          last_error: "start plugin process: exit status 2",
+        },
+      }),
+    ]);
+    renderPage();
+
+    expect(screen.getByText("MDBList Ratings failed to start.")).toBeInTheDocument();
+    expect(screen.getByText("start plugin process: exit status 2")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restart now" })).not.toBeInTheDocument();
+  });
+
   it.each([
     { enabled: false, resident: true, state: "running", visible: false, disabled: false },
     { enabled: true, resident: false, state: "stopped", visible: false, disabled: false },

@@ -445,30 +445,18 @@ describe("Edit row", () => {
     });
   });
 
-  it("shows Continue Reading rows without a variant, and legacy Trakt rows without Change", async () => {
+  it("shows Continue Reading rows without a variant", async () => {
     rows[1] = {
       ...rows[1]!,
       title: "Keep reading",
       section_type: "continue_watching",
       config: { continue_type: "reading" },
     };
-    rows.push(
-      stored("t", {
-        position: 5,
-        title: "Trakt trending",
-        section_type: "trending_discover",
-        config: { source: "trakt", window: "week" },
-      }),
-    );
     await setup();
-    let dialog = await editRow("Keep reading");
+    const dialog = await editRow("Keep reading");
     expect(within(dialog).getByText("Continue Reading")).toBeInTheDocument();
     expect(within(dialog).queryByRole("radiogroup")).toBeNull();
     expect(within(dialog).getByRole("button", { name: /^Change/ })).toBeInTheDocument();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    dialog = await editRow("Trakt trending");
-    expect(within(dialog).queryByRole("radiogroup")).toBeNull();
-    expect(within(dialog).queryByRole("button", { name: /^Change/ })).toBeNull();
   });
 
   it("changes what a row shows through the picker and saves the new kind's settings", async () => {

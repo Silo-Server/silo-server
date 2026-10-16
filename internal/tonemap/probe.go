@@ -527,7 +527,7 @@ func hardwareFilter(backend string) string {
 // runCommand executes a probe command and retains stderr alongside stdout for
 // capability detection and bounded diagnostics.
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, name, args...))
+	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, name, args...)) //nolint:gosec // The FFmpeg binary is operator-configured; probe arguments are constructed internally without a shell.
 }
 
 // runBounded applies the per-command probe deadline within the caller's total
@@ -554,7 +554,11 @@ func hasToken(output []byte, token string) bool {
 func hardwareProbeAvailable(backend string, filters, encoders []byte) bool {
 	switch backend {
 	case BackendQSV:
-		return hasToken(filters, HardwareFilterOpenCL) && hasToken(filters, "hwmap") && hasToken(filters, "scale_vaapi") && hasToken(encoders, "h264_qsv")
+		// Bitmap subtitle burn-in on HDR sources composites and scales on
+		// OpenCL, so a build without those filters falls back to software
+		// tone mapping instead of failing at transcode start.
+		return hasToken(filters, HardwareFilterOpenCL) && hasToken(filters, "hwmap") && hasToken(filters, "scale_vaapi") &&
+			hasToken(filters, "overlay_opencl") && hasToken(filters, "scale_opencl") && hasToken(encoders, "h264_qsv")
 	case BackendVAAPI:
 		return hasToken(filters, HardwareFilterVAAPI) && hasToken(filters, "scale_vaapi") && hasToken(encoders, "h264_vaapi")
 	case BackendNVENC:
@@ -660,7 +664,7 @@ func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth in
 	}
 	filter := VAAPIFilter(kind)
 	if backend == BackendQSV {
-		filter = QSVFilter(kind) + "," + QSVInteropFilter()
+		filter = QSVFilter(kind, 0) + "," + QSVInteropFilter()
 	}
 	return filter + "," + HDRMetadataRemovalFilter()
 }

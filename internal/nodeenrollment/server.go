@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -51,10 +52,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusServiceUnavailable)
-	_ = json.NewEncoder(w).Encode(struct {
+	if err := json.NewEncoder(w).Encode(struct {
 		Status           string                 `json:"status"`
 		EncodingCapacity encodinglimit.Capacity `json:"encoding_capacity"`
-	}{"unbound", encodinglimit.Snapshot()})
+	}{"unbound", encodinglimit.Snapshot()}); err != nil {
+		slog.WarnContext(r.Context(), "write node enrollment health", "error", err)
+	}
 }
 
 // requireBearer checks the provider's one-time enrollment token, not the
@@ -119,6 +122,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	s.pending = nil
 	s.bound = true
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(Receipt{BindingID: Identity(b.SecretKey), EncodingCapacity: encodinglimit.Snapshot()})
+	if err := json.NewEncoder(w).Encode(Receipt{BindingID: Identity(b.SecretKey), EncodingCapacity: encodinglimit.Snapshot()}); err != nil {
+		slog.WarnContext(r.Context(), "write node enrollment receipt", "error", err)
+	}
 	s.done <- b
 }

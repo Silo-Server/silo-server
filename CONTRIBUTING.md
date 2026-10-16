@@ -138,6 +138,7 @@ go build ./...
 gofmt -l .                      # must print nothing
 go vet ./...
 make lint-changed                   # BASE_REF=origin/<pr-base> when not main
+make lint-router-recovery
 make test-go
 
 # Web
@@ -163,7 +164,19 @@ make verify-apiv2-fixtures
 go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
 make verify-local-paths
 make verify-case-collisions
+make verify-actionlint              # actionlint 1.7.12
+make verify-shellcheck              # ShellCheck 0.11.0
+make verify-size-ratchet
+make verify-bidi
+make verify-migrations
+make verify-v1-route-freeze
+docker pull prom/prometheus:v3.5.0   # Required first: the target uses --pull=never
+make verify-prometheus-rules
 ```
+
+The Web lint gate uses ESLint's bulk suppressions for existing findings.
+After fixing a suppressed finding, run `cd web && pnpm run lint:prune` and
+include the updated `eslint-suppressions.json` in the change.
 
 PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated
 bindings, workflow changes, unknown inputs, and unavailable diffs run both
@@ -223,6 +236,14 @@ the packages your branch touched, so it takes seconds where a cold run over
 `./...` takes minutes of every core. Do not add to the inherited findings.
 Never pass `--allow-parallel-runners`: concurrent runs queue behind one
 another on purpose.
+
+Format files as touched with gofmt/goimports. `make verify-size-ratchet` fails
+when a Go file crosses 1,000 lines, a Go test file crosses 2,000 lines, or a
+TS/TSX file crosses 800 lines compared with the base revision. Generated files
+are excluded; files already over their limit at the base do not fail this check.
+The changed-line lint gate also checks function length, cyclomatic complexity,
+and nesting with funlen, gocyclo, and nestif. Test synchronization waits on
+observable state; timing tests explain `//nolint:forbidigo // <reason>` exceptions.
 
 Summarize the relevant commands and results in the pull request. Name required
 checks that were skipped or failed, and include short output excerpts only when

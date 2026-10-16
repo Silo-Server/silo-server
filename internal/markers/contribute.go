@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,7 +39,8 @@ type ContributeOptions struct {
 	Segments []MarkerKind
 	// Auto marks a background run: a segment is only contributed when the
 	// provider has contribute_auto_local enabled and the segment is a local
-	// (scanner) intro at or above the provider's confidence threshold.
+	// (scanner) intro or credits at or above the provider's confidence
+	// threshold.
 	Auto bool
 }
 
@@ -100,6 +102,18 @@ func fileSegments(file *models.MediaFile) []segmentData {
 		{MarkerKindRecap, "recap", file.RecapStart, file.RecapEnd, file.RecapMarkersSource, file.RecapMarkersConfidence},
 		{MarkerKindPreview, "preview", file.PreviewStart, file.PreviewEnd, file.PreviewMarkersSource, file.PreviewMarkersConfidence},
 	}
+}
+
+// AutoContributedKinds lists the local segment kinds automatic contribution
+// shares, in the order a run shares them. The scanner detects intros and
+// credits; intros go first so a backlog of credits never holds back a new
+// episode's intro when a provider's daily limit ends the run.
+func AutoContributedKinds() []MarkerKind {
+	return []MarkerKind{MarkerKindIntro, MarkerKindCredits}
+}
+
+func autoContributedKind(kind MarkerKind) bool {
+	return slices.Contains(AutoContributedKinds(), kind)
 }
 
 func (s *ContributionService) submitters() []Submitter {
@@ -188,7 +202,7 @@ func (s *ContributionService) contributeSegment(
 		return ContributionOutcome{}, false
 	}
 	if auto {
-		if !cfg.ContributeAutoLocal || source != models.MarkerSourceScanner || seg.kind != MarkerKindIntro {
+		if !cfg.ContributeAutoLocal || source != models.MarkerSourceScanner || !autoContributedKind(seg.kind) {
 			return ContributionOutcome{}, false
 		}
 		confidence := 0.0

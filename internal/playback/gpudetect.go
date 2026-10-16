@@ -1568,7 +1568,7 @@ func runFFmpegProbe(ctx context.Context, timeout time.Duration, ffmpegPath strin
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, ffmpegPath, args...))
+	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, ffmpegPath, args...)) //nolint:gosec // The FFmpeg binary is operator-configured; probe arguments are constructed internally without a shell.
 }
 
 func ffmpegOutputHasToken(output []byte, token string) bool {
@@ -1683,7 +1683,7 @@ type RenderDeviceInfo struct {
 func describeRenderDevice(renderDevPath string) string {
 	name := filepath.Base(renderDevPath)
 	vendor := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "vendor"))
-	label := ""
+	var label string
 	switch vendor {
 	case "0x8086":
 		label = "Intel GPU"

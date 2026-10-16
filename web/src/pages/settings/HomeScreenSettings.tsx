@@ -1,7 +1,7 @@
 import type { ActionMenuItem } from "@/components/calm/ActionMenu";
 import type { PageMoreMenuItem } from "@/components/calm/PageMoreMenu";
 import { AddRowDialog } from "@/components/homeRows/addRow/AddRowDialog";
-import { HideWatchedCard } from "@/components/homeRows/HideWatchedCard";
+import { HomePreferencesCard } from "@/components/homeRows/HomePreferencesCard";
 import { HomeRowsPage, type SharedRowMenuItems } from "@/components/homeRows/HomeRowsPage";
 import { RemoveRowDialog } from "@/components/homeRows/RemoveRowDialog";
 import { ResetProfileDialog } from "@/components/homeRows/ResetProfileDialog";
@@ -18,11 +18,12 @@ import {
   useSetSettingValue,
   type SettingIdentity,
 } from "@/hooks/queries/settingValues";
+import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { collectionKind, profilePageName, type CollectionSummary } from "@/lib/homeRows/describe";
 import { pageLabel } from "@/lib/homeRows/pages";
 import type { HomeRow } from "@/lib/homeRows/types";
-import { SETTING_KEYS } from "@/lib/settingsContract";
+import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
 import {
   CircleMinus,
   Download,
@@ -38,7 +39,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
-const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
+const HOME_PREFERENCE_KEYS = [
+  SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+  SETTING_KEYS.UI_NEXT_UP_MODE,
+  SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+] as const;
 
 /**
  * Settings > Home Screen: this profile's rows on Home and each library page,
@@ -91,6 +96,14 @@ export default function HomeScreenSettings() {
   const saveHomePreference = useSetSettingValue();
   const hideWatchedItems =
     homePreferences.data?.[SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS]?.value === true;
+  const newReleasesFirst =
+    homePreferences.data?.[SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST]?.value === true;
+  // Next up is device-overridable, so it saves through the writer that also
+  // clears a device row shadowing the profile's choice.
+  const nextUpWriter = useProfileDefaultWriter(homePreferences.data);
+  const nextUp = homePreferences.data?.[SETTING_KEYS.UI_NEXT_UP_MODE];
+  const nextUpMode = (nextUp?.value ??
+    SETTING_DEFINITIONS[SETTING_KEYS.UI_NEXT_UP_MODE].defaultValue) as string;
 
   const profileId = useOptionalAuth()?.profile?.id;
   const collectionOptions = adapter.collections?.options;
@@ -234,6 +247,30 @@ export default function HomeScreenSettings() {
     },
   ];
 
+  function handleNextUpModeChange(mode: string) {
+    nextUpWriter
+      .save(SETTING_KEYS.UI_NEXT_UP_MODE, mode)
+      .catch(() => toast.error("Failed to save Home preference"));
+  }
+
+  function handleNextUpReset() {
+    // Deletes the profile row so the setting inherits the default again.
+    nextUpWriter
+      .reset(SETTING_KEYS.UI_NEXT_UP_MODE)
+      .catch(() => toast.error("Failed to reset the next up preference"));
+  }
+
+  function handleNewReleasesFirstChange(enabled: boolean) {
+    saveHomePreference.mutate(
+      {
+        key: SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+        value: enabled,
+        identity: PROFILE_SCOPE,
+      },
+      { onError: () => toast.error("Failed to save Home preference") },
+    );
+  }
+
   function handleHideWatchedItemsChange(enabled: boolean) {
     saveHomePreference.mutate(
       { key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS, value: enabled, identity: PROFILE_SCOPE },
@@ -262,7 +299,7 @@ export default function HomeScreenSettings() {
   return (
     <HomeRowsPage
       adapter={adapter}
-      title="Home screen"
+      title="Home Screen"
       subtitle="Choose the rows you see and their order. Only this profile changes, and it saves as you go."
       focus={focus}
       collection={(id) => collectionSummaries.get(id)}
@@ -273,10 +310,22 @@ export default function HomeScreenSettings() {
       addRow={{ onClick: () => setRowDialog({ session: null }), disabled: !adapter.canEdit }}
       notices={notice}
     >
-      <HideWatchedCard
-        checked={hideWatchedItems}
-        disabled={homePreferences.isLoading || saveHomePreference.isPending}
-        onCheckedChange={handleHideWatchedItemsChange}
+      <HomePreferencesCard
+        nextUpMode={nextUpMode}
+        nextUpChosen={nextUp?.source === "profile"}
+        onNextUpModeChange={handleNextUpModeChange}
+        onNextUpReset={handleNextUpReset}
+        newReleasesFirst={newReleasesFirst}
+        onNewReleasesFirstChange={handleNewReleasesFirstChange}
+        hideWatched={hideWatchedItems}
+        onHideWatchedChange={handleHideWatchedItemsChange}
+        disabled={
+          homePreferences.isLoading ||
+          // Without the effective values a save cannot tell which row it overrides.
+          homePreferences.isError ||
+          saveHomePreference.isPending ||
+          nextUpWriter.isSaving
+        }
       />
 
       <RemoveRowDialog

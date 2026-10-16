@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   DEVICE_ID: "silo-device-id",
   VOLUME: "player-volume",
   MUTED: "player-muted",
+  BROWSER_DECODING: "silo-player-browser-decoding",
   AUDIOBOOK_SKIP_BACK: "audiobook-skip-back",
   AUDIOBOOK_SKIP_FORWARD: "audiobook-skip-forward",
   AUDIOBOOK_SMART_REWIND: "audiobook-smart-rewind",
@@ -19,6 +20,7 @@ const STORAGE_KEYS = {
   UI_TIME_FORMAT: "silo-ui-time-format",
   UI_CACHE_OWNER: "silo-ui-cache-owner",
   CALENDAR_PRESET: "calendar:preset",
+  BANDWIDTH_ESTIMATE: "silo-bandwidth-estimate",
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];

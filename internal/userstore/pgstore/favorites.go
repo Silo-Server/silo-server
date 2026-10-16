@@ -14,9 +14,8 @@ import (
 
 // --- Favorites ---
 
-func (s *PostgresUserStore) AddFavorite(ctx context.Context, profileID, mediaItemID string) error {
-	_, err := s.AddFavoriteAt(ctx, profileID, mediaItemID, time.Now().UTC())
-	return err
+func (s *PostgresUserStore) AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	return s.AddFavoriteAt(ctx, profileID, mediaItemID, time.Now().UTC())
 }
 
 func (s *PostgresUserStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
@@ -32,12 +31,15 @@ func (s *PostgresUserStore) AddFavoriteAt(ctx context.Context, profileID, mediaI
 	return tag.RowsAffected() > 0, nil
 }
 
-func (s *PostgresUserStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error {
-	_, err := s.pool.Exec(ctx,
+func (s *PostgresUserStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
 		`DELETE FROM user_favorites WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
 		s.userID, profileID, mediaItemID,
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func (s *PostgresUserStore) ListFavorites(ctx context.Context, profileID string, limit, offset int) ([]userstore.Favorite, error) {
@@ -196,9 +198,8 @@ func (s *PostgresUserStore) ListFavoritesByMediaItems(ctx context.Context, profi
 
 // --- Watchlist ---
 
-func (s *PostgresUserStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error {
-	_, err := s.AddToWatchlistAt(ctx, profileID, mediaItemID, time.Now().UTC())
-	return err
+func (s *PostgresUserStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	return s.AddToWatchlistAt(ctx, profileID, mediaItemID, time.Now().UTC())
 }
 
 func (s *PostgresUserStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
@@ -214,12 +215,15 @@ func (s *PostgresUserStore) AddToWatchlistAt(ctx context.Context, profileID, med
 	return tag.RowsAffected() > 0, nil
 }
 
-func (s *PostgresUserStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error {
-	_, err := s.pool.Exec(ctx,
+func (s *PostgresUserStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
 		`DELETE FROM user_watchlist WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
 		s.userID, profileID, mediaItemID,
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func (s *PostgresUserStore) ListWatchlist(ctx context.Context, profileID string, limit, offset int) ([]userstore.WatchlistEntry, error) {

@@ -133,7 +133,7 @@ func warmHardwareEncoderWithRunner(ctx context.Context, timeout time.Duration, f
 }
 
 func runHardwareEncoderWarmup(ctx context.Context, ffmpegPath string, args ...string) ([]byte, error) {
-	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, ffmpegPath, args...))
+	return encodinglimit.CombinedOutput(exec.CommandContext(ctx, ffmpegPath, args...)) //nolint:gosec // The FFmpeg binary is operator-configured; arguments are constructed internally without a shell.
 }
 
 func hardwareEncoderWarmupDevices(backend, configured string) []string {

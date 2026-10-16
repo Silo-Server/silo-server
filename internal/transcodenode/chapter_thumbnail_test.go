@@ -55,23 +55,7 @@ func TestChapterThumbnailEncodingCapacity(t *testing.T) {
 			if w.Code != tc.want {
 				t.Fatalf("extraction status = %d, want %d: %s", w.Code, tc.want, w.Body.String())
 			}
-			if tc.want == http.StatusServiceUnavailable {
-				var failure chapterthumbs.RemoteExtractErrorResponse
-				if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil {
-					t.Fatal(err)
-				}
-				if failure.Reason != "transcode_node_capacity_exhausted" || failure.Error != "node is at encoding capacity" {
-					t.Fatalf("capacity failure = %#v, want transcode capacity reason and original message", failure)
-				}
-				if got := w.Header().Get("Retry-After"); got != "1" {
-					t.Fatalf("Retry-After = %q, want 1", got)
-				}
-				if _, err := os.Stat(ffmpeg + ".ran"); !os.IsNotExist(err) {
-					t.Fatalf("refused extraction invoked FFmpeg: %v", err)
-				}
-			} else if w.Body.String() != "thumbnail-frame" || w.Header().Get("Content-Type") != "image/jpeg" {
-				t.Fatalf("unlimited extraction = %s %q", w.Header().Get("Content-Type"), w.Body.String())
-			}
+			assertChapterEncodingResponse(t, w, ffmpeg, tc.want)
 			if got := encodinglimit.Snapshot(); got.MaxJobs != tc.maxJobs || got.ActiveJobs != 1 {
 				t.Fatalf("extraction changed the held reservation: %#v", got)
 			}
@@ -85,5 +69,28 @@ func TestChapterThumbnailEncodingCapacity(t *testing.T) {
 				t.Fatalf("completed extraction left %d encoding reservations", got)
 			}
 		})
+	}
+}
+
+func assertChapterEncodingResponse(t *testing.T, w *httptest.ResponseRecorder, ffmpeg string, want int) {
+	t.Helper()
+	if want != http.StatusServiceUnavailable {
+		if w.Body.String() != "thumbnail-frame" || w.Header().Get("Content-Type") != "image/jpeg" {
+			t.Fatalf("unlimited extraction = %s %q", w.Header().Get("Content-Type"), w.Body.String())
+		}
+		return
+	}
+	var failure chapterthumbs.RemoteExtractErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Reason != "transcode_node_capacity_exhausted" || failure.Error != "node is at encoding capacity" {
+		t.Fatalf("capacity failure = %#v, want transcode capacity reason and original message", failure)
+	}
+	if got := w.Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After = %q, want 1", got)
+	}
+	if _, err := os.Stat(ffmpeg + ".ran"); !os.IsNotExist(err) {
+		t.Fatalf("refused extraction invoked FFmpeg: %v", err)
 	}
 }

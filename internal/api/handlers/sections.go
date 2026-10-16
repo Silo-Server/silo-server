@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -416,6 +418,10 @@ type sectionItemResponse struct {
 	ItemSource             string                 `json:"item_source,omitempty"`
 	UserState              *itemUserStateResponse `json:"user_state,omitempty"`
 	UpcomingEvent          *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	// PendingTranslationLanguage and MachineTranslatedFields reach the v2
+	// card only; v1 is frozen.
+	PendingTranslationLanguage string   `json:"-"`
+	MachineTranslatedFields    []string `json:"-"`
 }
 
 type resolvedSectionResponse struct {
@@ -503,7 +509,9 @@ func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	section, err := h.HomeSectionItems(r.Context(), sectionID, sectionViewerFromRequest(r))
+	// The frozen v1 endpoint answers a section whose items cannot be fetched
+	// with no items; v2 answers the error.
+	section, err := h.homeSectionItems(r.Context(), sectionID, sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -549,7 +557,8 @@ func (h *SectionHandler) HandleLibrarySectionItems(w http.ResponseWriter, r *htt
 		return
 	}
 
-	section, err := h.LibrarySectionItems(r.Context(), libraryID, sectionID, sectionViewerFromRequest(r))
+	// As on Home, v1 answers a failed fetch with no items.
+	section, err := h.librarySectionItems(r.Context(), libraryID, sectionID, sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -850,16 +859,8 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		id     string
 		config json.RawMessage
 	}
-	type traktWrite struct {
-		sectionID string
-		kind      string
-		config    json.RawMessage
-		active    bool
-	}
 	refreshCandidates := make([]trendingCandidate, 0, len(writes))
-	sourceWrites := make(map[string]traktWrite)
 	seenIDs := make(map[string]struct{}, len(writes))
-	retainedSectionIDs := make(map[string]string, len(writes))
 	baseSections := make(map[string]*sections.PageSection)
 	loadBaseSection := func(sectionID string) (*sections.PageSection, bool, error) {
 		if sectionID == "" || h.sectionReader == nil {
@@ -885,7 +886,6 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 				return apiError(http.StatusBadRequest, "duplicate_override", "section override IDs must be unique")
 			}
 			seenIDs[o.ID] = struct{}{}
-			retainedSectionIDs[o.ID] = o.SectionID
 		}
 		// SectionID is the authoritative shape discriminator used by the resolver
 		// and scheduled-demand scan. Canonicalize IsUserAdded to match it so a
@@ -893,27 +893,19 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		isUserAdded := o.SectionID == ""
 		o.IsUserAdded = isUserAdded
 		if !isUserAdded {
-			cfg := o.Config
+			if o.Hidden || o.Removed {
+				continue
+			}
 			base, hasBase, err := loadBaseSection(o.SectionID)
 			if err != nil {
 				return err
 			}
-			if !hasSectionConfig(cfg) && hasBase {
-				cfg = base.Config
-			}
-			kind := traktSectionKind(cfg)
-			if kind != "" && o.ID == "" {
-				return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt-backed sections are not supported")
-			}
-			if o.ID != "" {
-				sourceWrites[o.ID] = traktWrite{sectionID: o.SectionID, kind: kind, config: append(json.RawMessage(nil), cfg...), active: !o.Hidden && !o.Removed}
-			}
-			if !o.Hidden && !o.Removed {
-				if hasBase && base.Enabled && base.SectionType == sections.SectionTrendingDiscover {
-					if !isTraktBackedSection(string(base.SectionType), cfg) {
-						refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
-					}
+			if hasBase && base.Enabled && base.SectionType == sections.SectionTrendingDiscover {
+				cfg := o.Config
+				if !hasSectionConfig(cfg) {
+					cfg = base.Config
 				}
+				refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
 			}
 			continue
 		}
@@ -942,14 +934,7 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		if err := rec.Validate(cfg); err != nil {
 			return apiError(http.StatusBadRequest, "invalid_config", err.Error())
 		}
-		kind := traktSectionKind(cfg)
-		if kind != "" && o.ID == "" {
-			return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt-backed sections are not supported")
-		}
-		if o.ID != "" {
-			sourceWrites[o.ID] = traktWrite{sectionID: o.SectionID, kind: kind, config: append(json.RawMessage(nil), cfg...), active: !o.Hidden && !o.Removed}
-		}
-		if recipeType == string(sections.SectionTrendingDiscover) && !o.Hidden && !o.Removed && !isTraktBackedSection(recipeType, cfg) {
+		if recipeType == string(sections.SectionTrendingDiscover) && !o.Hidden && !o.Removed {
 			refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
 		}
 	}
@@ -969,45 +954,12 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 	for _, override := range existing {
 		existingByID[override.ID] = override
 	}
-	if err := h.rejectLegacyTraktReactivationByRemoval(ctx, existing, retainedSectionIDs); err != nil {
-		return err
-	}
 	for id, recipeType := range keptAdminOnly {
 		old, ok := existingByID[id]
 		if !ok || old.SectionID != "" || userAddedRecipe(old) != recipeType {
 			return adminOnlyRecipeError()
 		}
 	}
-	for id, write := range sourceWrites {
-		old, ok := existingByID[id]
-		if !ok && write.kind != "" && (write.sectionID == "" || write.active) {
-			return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt-backed sections are not supported")
-		}
-		if !ok {
-			continue
-		}
-		oldConfig := json.RawMessage(old.Config)
-		if old.SectionID != "" {
-			base, found, err := loadBaseSection(old.SectionID)
-			if err != nil {
-				return err
-			}
-			if found && !hasSectionConfig(oldConfig) {
-				oldConfig = base.Config
-			}
-		} else if old.UserConfig != "" {
-			oldConfig = json.RawMessage(old.UserConfig)
-		}
-		oldKind := traktSectionKind(oldConfig)
-		if oldKind == "" && write.kind == "" {
-			continue
-		}
-		oldActive := !old.Hidden && !old.Removed
-		if oldKind == "" || oldKind != write.kind || old.SectionID != write.sectionID || !jsonConfigEqual(oldConfig, write.config) || (!oldActive && write.active) {
-			return apiError(http.StatusBadRequest, "legacy_source_immutable", "legacy Trakt section sources cannot be changed or reactivated")
-		}
-	}
-
 	refreshConfigsByKey := make(map[string]json.RawMessage, len(refreshCandidates))
 	for _, candidate := range refreshCandidates {
 		key := sections.CanonicalTrendingConfigKey(candidate.config)
@@ -1085,46 +1037,6 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 	return nil
 }
 
-// rejectLegacyTraktReactivationByRemoval checks linked overrides that a full
-// replacement (or reset) would delete. Removing an override is allowed unless
-// it would newly expose an enabled legacy Trakt base section.
-func (h *SectionHandler) rejectLegacyTraktReactivationByRemoval(ctx context.Context, existing []userstore.SectionOverride, retainedSectionIDs map[string]string) error {
-	if h.sectionReader == nil {
-		return nil
-	}
-	for _, old := range existing {
-		if retainedSectionIDs != nil {
-			if sectionID, retained := retainedSectionIDs[old.ID]; retained && sectionID == old.SectionID {
-				continue
-			}
-		}
-		if old.SectionID == "" {
-			continue
-		}
-		base, err := h.sectionReader.GetByID(ctx, old.SectionID)
-		if errors.Is(err, sections.ErrSectionNotFound) {
-			continue
-		}
-		if err != nil {
-			return apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
-		}
-		if !base.Enabled || !isTraktBackedSection(string(base.SectionType), base.Config) {
-			continue
-		}
-
-		oldConfig := json.RawMessage(old.Config)
-		if !hasSectionConfig(oldConfig) {
-			oldConfig = base.Config
-		}
-		oldActive := !old.Hidden && !old.Removed
-		if oldActive && traktSectionKind(oldConfig) != "" && jsonConfigEqual(oldConfig, base.Config) {
-			continue
-		}
-		return apiError(http.StatusBadRequest, "legacy_source_immutable", "legacy Trakt section sources cannot be changed or reactivated")
-	}
-	return nil
-}
-
 // HandleResetProfileOverrides handles DELETE /profile/sections/reset?scope=home
 func (h *SectionHandler) HandleResetProfileOverrides(w http.ResponseWriter, r *http.Request) {
 	profileID := apimw.GetProfileID(r.Context())
@@ -1162,13 +1074,6 @@ func (h *SectionHandler) resetProfileOverrides(ctx context.Context, q SectionOve
 	store, err := h.StoreProvider.ForUser(ctx, q.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-	existing, err := store.ListSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID)
-	if err != nil {
-		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load overrides")
-	}
-	if err := h.rejectLegacyTraktReactivationByRemoval(ctx, existing, nil); err != nil {
-		return err
 	}
 	if err := store.ResetSectionOverrides(ctx, q.ProfileID, q.Scope, q.LibraryID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to reset overrides")
@@ -1464,6 +1369,14 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	} else {
 		wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
 	}
+	// localizedItems lines up with allItems: a content ID can sit in several
+	// rows with different artwork, so each row keeps its own clone.
+	var localizedItems []*models.MediaItem
+	var pendingTranslations map[string]string
+	localizationAccess := sectionLocalizationAccess(viewerAccess, libraryID)
+	wg.Go(func() {
+		localizedItems, pendingTranslations = h.localizeSectionItems(ctx, allItems, localizationAccess)
+	})
 	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
 	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
@@ -1473,9 +1386,15 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	resp := homeSectionsResponse{
 		Sections: make([]resolvedSectionResponse, 0, len(withItems)),
 	}
+	position := 0
 	for _, s := range withItems {
 		items := make([]sectionItemResponse, 0, len(s.Items))
 		for _, item := range s.Items {
+			card := item
+			if position < len(localizedItems) && localizedItems[position] != nil {
+				card = localizedItems[position]
+			}
+			position++
 			var meta *sections.SectionItemMeta
 			if s.ItemMeta != nil {
 				if value, ok := s.ItemMeta[item.ContentID]; ok {
@@ -1499,7 +1418,9 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 				meta.SeriesTitle = value.SeriesTitle
 			}
 			imageKey := sectionItemImageKey{sectionID: s.ID, contentID: item.ContentID}
-			items = append(items, h.toSectionItemResponse(s.SectionType, item, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)]))
+			response := h.toSectionItemResponse(s.SectionType, card, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)])
+			response.PendingTranslationLanguage = pendingTranslations[item.ContentID]
+			items = append(items, response)
 		}
 		resp.Sections = append(resp.Sections, resolvedSectionResponse{
 			ID:          s.ID,
@@ -1740,6 +1661,8 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		BackdropIsEpisodeStill: item.BackdropIsEpisodeStill,
 		OverlaySummary:         overlaySummary,
 		UserState:              userState,
+
+		MachineTranslatedFields: item.MachineTranslatedFields,
 	}
 	if meta != nil {
 		if item.Type == "episode" && item.PosterIsEpisodeStill == nil && meta.EpisodeStillPath != nil {
@@ -1774,6 +1697,34 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 	resp.LogoURL = imageURLs.logoURL
 
 	return resp
+}
+
+// sectionLocalizationAccess scopes a library's rows to that library, so its
+// cards localize like a detail page opened there: a profile without a
+// metadata language falls back to the library's. Home rows stay unscoped.
+func sectionLocalizationAccess(viewerAccess catalog.AccessFilter, libraryID *int) catalog.AccessFilter {
+	if libraryID != nil && *libraryID > 0 {
+		id := *libraryID
+		viewerAccess.PresentationLibraryID = &id
+	}
+	return viewerAccess
+}
+
+// localizeSectionItems localizes the section cards for the viewer in one
+// batch and returns the clones in input order. Section items are shared across
+// profiles (the resolved-list cache is process-global), so localized clones
+// are kept per request and never written back. A failure keeps the base text:
+// localization must not fail Home.
+func (h *SectionHandler) localizeSectionItems(ctx context.Context, items []*models.MediaItem, viewerAccess catalog.AccessFilter) ([]*models.MediaItem, map[string]string) {
+	if h == nil || h.DetailSvc == nil || len(items) == 0 {
+		return nil, nil
+	}
+	localized, pending, err := h.DetailSvc.LocalizeSectionItems(ctx, items, withProfileMetadataLanguage(ctx, viewerAccess))
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "localizing section items", "component", "api", "error", err)
+		return nil, nil
+	}
+	return localized, pending
 }
 
 // sizedSectionBackdropPath applies the request's image size to a section
@@ -1943,4 +1894,17 @@ func (h *SectionHandler) HandleRestoreDefaults(w http.ResponseWriter, r *http.Re
 // participate in the atomic all-profile reset.
 func (h *SectionHandler) canResetAllSectionProfileOverrides() bool {
 	return h.repo.CanResetAllProfileOverrides(h.StoreProvider)
+}
+
+func jsonConfigEqual(left, right json.RawMessage) bool {
+	var leftValue, rightValue any
+	if json.Unmarshal(left, &leftValue) == nil && json.Unmarshal(right, &rightValue) == nil {
+		return reflect.DeepEqual(leftValue, rightValue)
+	}
+	return bytes.Equal(bytes.TrimSpace(left), bytes.TrimSpace(right))
+}
+
+func hasSectionConfig(config json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(config)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
 }

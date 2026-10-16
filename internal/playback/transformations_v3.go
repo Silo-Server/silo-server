@@ -105,6 +105,7 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 // failures at the registry boundary.
 func probeAudioRecipeFilterV3(ctx context.Context, ffmpegPath, channelLayout, filter string) (error, error) {
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
+	//nolint:gosec // The FFmpeg binary is operator-configured; smoke recipes are constructed internally without a shell.
 	probeErr := encodinglimit.Run(exec.CommandContext(probeCtx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-f", "lavfi", "-i", "anullsrc=r=8000:cl="+channelLayout,
@@ -126,6 +127,7 @@ func probeHEVCRecipeV3(ctx context.Context, ffmpegPath string, encoders []byte) 
 		return errHEVCEncoderUnavailableV3, nil
 	}
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
+	//nolint:gosec // The FFmpeg binary is operator-configured; smoke recipes are constructed internally without a shell.
 	probeErr := encodinglimit.Run(exec.CommandContext(probeCtx, ffmpegPath, hevcSoftwareSmokeArgsV3()...))
 	probeContextErr := probeCtx.Err()
 	cancelProbe()

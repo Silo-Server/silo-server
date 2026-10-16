@@ -58,20 +58,7 @@ func TestCopyRecoveryFFmpegProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !probe && release[0] == 'g' {
-		outputDir := filepath.Dir(args[len(args)-1])
-		if err := os.WriteFile(filepath.Join(outputDir, "seg_00012.m4s"), []byte("restored encoder segment"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		manifest := recoveryTestManifest + "#EXTINF:2.000000,\nseg_00012.m4s\n"
-		if err := os.WriteFile(args[len(args)-1], []byte(manifest), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := conn.Write([]byte{1}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := io.ReadFull(conn, release); err != nil {
-			t.Fatal(err)
-		}
+		writeCopyRecoveryNextSegment(t, conn, args, release)
 	}
 	if probe {
 		fmt.Println("#tb 0: 1/1000")
@@ -83,6 +70,24 @@ func TestCopyRecoveryFFmpegProcess(t *testing.T) {
 		default:
 			fmt.Println("0, 18000, 18000, 41, 1024, 0x12345678")
 		}
+	}
+}
+
+func writeCopyRecoveryNextSegment(t *testing.T, conn net.Conn, args []string, release []byte) {
+	t.Helper()
+	outputDir := filepath.Dir(args[len(args)-1])
+	if err := os.WriteFile(filepath.Join(outputDir, "seg_00012.m4s"), []byte("restored encoder segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := recoveryTestManifest + "#EXTINF:2.000000,\nseg_00012.m4s\n"
+	if err := os.WriteFile(args[len(args)-1], []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(conn, release); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -435,28 +440,33 @@ func TestRestartSegmentLocked_CopyRecoveryProbeFailureRestoresProgress(t *testin
 				if _, ok, err := m.RestartSegmentLocked(t.Context(), before.SessionID, session, 99); ok || err != nil || !session.IsRunning() {
 					t.Fatalf("out-of-manifest retry lost the restored producer: %t, %v", ok, err)
 				}
-				if _, err := restored.conn.Write([]byte{'g'}); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := io.ReadFull(restored.conn, make([]byte, 1)); err != nil {
-					t.Fatal(err)
-				}
-				lease, err := session.WaitForOpenSegment("seg_00012.m4s", time.Second)
-				if err != nil {
-					t.Fatalf("restored encoder did not produce the next segment: %v", err)
-				}
-				if err := lease.Close(); err != nil {
-					t.Fatal(err)
-				}
-				if seek, ok, err := session.SegmentStartTime(12); err != nil || !ok || math.Abs(seek-24.006) > 0.0001 {
-					t.Fatalf("restored encoder changed URI timing: %.6f, %t, %v", seek, ok, err)
-				}
+				assertCopyRecoveryNextSegment(t, restored, session)
 				m.CloseTranscodeSession(before.SessionID, "")
 				if encodinglimit.Snapshot().ActiveJobs != 0 {
 					t.Fatal("restored encoder cleanup leaked capacity")
 				}
 			})
 		}
+	}
+}
+
+func assertCopyRecoveryNextSegment(t *testing.T, restored copyRecoveryProcess, session *TranscodeSession) {
+	t.Helper()
+	if _, err := restored.conn.Write([]byte{'g'}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(restored.conn, make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := session.WaitForOpenSegment("seg_00012.m4s", time.Second)
+	if err != nil {
+		t.Fatalf("restored encoder did not produce the next segment: %v", err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if seek, ok, err := session.SegmentStartTime(12); err != nil || !ok || math.Abs(seek-24.006) > 0.0001 {
+		t.Fatalf("restored encoder changed URI timing: %.6f, %t, %v", seek, ok, err)
 	}
 }
 
@@ -846,11 +856,12 @@ func TestRestartSegmentLocked_CopyRecoveryRollbackKeepsReplayedSegmentsPrunable(
 			replayPath := filepath.Join(opts.OutputDir, segmentFilename(replayed, opts))
 			old := time.Now().Add(-time.Minute)
 			writePrunerTestFile(t, replayPath, []byte("replayed segment"), old)
-			manifest := recoveryTestManifest
+			var manifest strings.Builder
+			manifest.WriteString(recoveryTestManifest)
 			for segment := 12; segment <= 40; segment++ {
-				manifest += fmt.Sprintf("#EXTINF:2.000000,\nseg_%05d.m4s\n", segment)
+				fmt.Fprintf(&manifest, "#EXTINF:2.000000,\nseg_%05d.m4s\n", segment)
 			}
-			if err := os.WriteFile(filepath.Join(opts.OutputDir, "stream.m3u8"), []byte(manifest), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(opts.OutputDir, "stream.m3u8"), []byte(manifest.String()), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			session.mu.Lock()

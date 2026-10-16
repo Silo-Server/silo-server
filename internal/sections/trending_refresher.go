@@ -53,15 +53,14 @@ type trendingExternalIDResolver interface {
 	GetByExternalIDs(ctx context.Context, batch catalog.ExternalIDBatch, itemType string) (*catalog.ExternalIDLookup, error)
 }
 
-// TrendingRefresher fetches external global trending (TMDB/Trakt), resolves it
+// TrendingRefresher fetches external global trending (TMDB), resolves it
 // to library content IDs, and persists one snapshot per canonical
 // (source, window). It is driven by a TaskManager task on an interval.
 type TrendingRefresher struct {
-	Sections      trendingSectionConfigLister
-	Snapshots     trendingSnapshotStore
-	Resolver      trendingExternalIDResolver
-	TMDBTrending  catalog.TMDBCollectionFetcher
-	TraktTrending catalog.TraktCollectionFetcher
+	Sections     trendingSectionConfigLister
+	Snapshots    trendingSnapshotStore
+	Resolver     trendingExternalIDResolver
+	TMDBTrending catalog.TMDBCollectionFetcher
 
 	// Clock defaults to recipes.RealClock{}.
 	Clock  recipes.Clock
@@ -74,16 +73,14 @@ func NewTrendingRefresher(
 	snapshots trendingSnapshotStore,
 	resolver trendingExternalIDResolver,
 	tmdb catalog.TMDBCollectionFetcher,
-	trakt catalog.TraktCollectionFetcher,
 ) *TrendingRefresher {
 	return &TrendingRefresher{
-		Sections:      sectionsRepo,
-		Snapshots:     snapshots,
-		Resolver:      resolver,
-		TMDBTrending:  tmdb,
-		TraktTrending: trakt,
-		Clock:         recipes.RealClock{},
-		logger:        slog.Default(),
+		Sections:     sectionsRepo,
+		Snapshots:    snapshots,
+		Resolver:     resolver,
+		TMDBTrending: tmdb,
+		Clock:        recipes.RealClock{},
+		logger:       slog.Default(),
 	}
 }
 
@@ -209,7 +206,7 @@ func (r *TrendingRefresher) refreshCombo(ctx context.Context, source, window str
 }
 
 func (r *TrendingRefresher) refreshComboClaimed(ctx context.Context, source, window string, claimAt time.Time) string {
-	entries, err := r.fetchEntries(ctx, source, window, trendingFetchCap)
+	entries, err := r.fetchEntries(ctx, window, trendingFetchCap)
 	if err != nil {
 		r.log().ErrorContext(ctx, "trending refresh: fetch failed", "source", source, "window", window, trendingRefreshError, err)
 		return r.finishAttempt(ctx, source, window, trendingRefreshError, err.Error(), claimAt)
@@ -250,27 +247,9 @@ func (r *TrendingRefresher) finishAttempt(ctx context.Context, source, window, s
 	return status
 }
 
-// fetchEntries pulls the raw trending list from the configured provider. A
-// nil/unconfigured provider yields an empty list (no error).
-func (r *TrendingRefresher) fetchEntries(ctx context.Context, source, window string, fetchLimit int) ([]trendingDiscoverEntry, error) {
-	if source == sourceTrakt {
-		if r.TraktTrending == nil {
-			return nil, nil
-		}
-		// Trakt has no mixed endpoint; fetch movies + shows separately. Treat ANY
-		// failure as fatal so a partial result never overwrites the last-good
-		// snapshot with one media type missing.
-		movies, movieErr := r.TraktTrending.GetCollectionPreset(ctx, "trending", "movie", fetchLimit, "")
-		shows, showErr := r.TraktTrending.GetCollectionPreset(ctx, "trending", "tv", fetchLimit, "")
-		if movieErr != nil || showErr != nil {
-			return nil, fmt.Errorf("trakt trending: %w", errors.Join(movieErr, showErr))
-		}
-		// Interleave by rank so the mixed row actually shows both movies and
-		// series; plain concatenation would bury all series past the display
-		// limit whenever enough movies match the library.
-		return interleaveTraktEntries(movies, shows), nil
-	}
-
+// fetchEntries pulls the raw trending list from TMDB. An unconfigured TMDB
+// fetcher yields an empty list (no error).
+func (r *TrendingRefresher) fetchEntries(ctx context.Context, window string, fetchLimit int) ([]trendingDiscoverEntry, error) {
 	if r.TMDBTrending == nil {
 		return nil, nil
 	}
@@ -283,24 +262,6 @@ func (r *TrendingRefresher) fetchEntries(ctx context.Context, source, window str
 		out = append(out, newTrendingEntry(e.ID, e.TVDBID, e.IMDbID, e.MediaType))
 	}
 	return out, nil
-}
-
-// interleaveTraktEntries alternates rank-ordered movies and shows so the mixed
-// trending row surfaces both media types. Each input list is already in trending
-// order; alternating preserves that order within each type while mixing them.
-func interleaveTraktEntries(movies, shows []catalog.TraktCollectionEntry) []trendingDiscoverEntry {
-	out := make([]trendingDiscoverEntry, 0, len(movies)+len(shows))
-	for i := 0; i < len(movies) || i < len(shows); i++ {
-		if i < len(movies) {
-			m := movies[i]
-			out = append(out, newTrendingEntry(m.TMDBID, m.TVDBID, m.IMDbID, m.MediaType))
-		}
-		if i < len(shows) {
-			s := shows[i]
-			out = append(out, newTrendingEntry(s.TMDBID, s.TVDBID, s.IMDbID, s.MediaType))
-		}
-	}
-	return out
 }
 
 // resolveIDs matches trending entries to library content IDs via two batched

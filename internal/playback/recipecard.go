@@ -65,6 +65,21 @@ type RecipeCard struct {
 	ClientUserAgent  string `json:"client_user_agent,omitempty"`
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
 
+	// Header-authenticated recovery. A session that negotiated
+	// header_authenticated_media_v1 publishes no stream token, so the API keeps
+	// its recipe server-side instead (see noderecipe.NewSessionRecipeStore).
+	// These fields exist only on that stored copy and are never projected into
+	// stream-token claims. PlanID binds the card to the v3 plan it was committed
+	// under, so a card a later replan failed to overwrite cannot rebuild a
+	// superseded transport. RequireMediaAuthorization carries the mode onto the
+	// rebuilt session, whose UUID must stay a route identifier rather than a
+	// bearer. RequestedMediaFileID and DisableProgressPersistence are the live
+	// session's when the card is written, so the rebuilt session keeps them.
+	PlanID                     string `json:"plan_id,omitempty"`
+	RequireMediaAuthorization  bool   `json:"require_media_authorization,omitempty"`
+	RequestedMediaFileID       int    `json:"requested_media_file_id,omitempty"`
+	DisableProgressPersistence bool   `json:"disable_progress_persistence,omitempty"`
+
 	// Encode parameters — mirror of the byte-affecting TranscodeOpts fields.
 	// Direct cards leave them zero; remux cards use the audio targets when the
 	// selected stream must be converted.

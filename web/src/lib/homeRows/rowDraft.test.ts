@@ -58,7 +58,6 @@ function row(overrides: Partial<HomeRow> = {}): HomeRow {
     hero: false,
     shown: true,
     own: false,
-    legacyTrakt: false,
     ...overrides,
   };
 }
@@ -401,11 +400,8 @@ describe("rule rows", () => {
         },
       ],
       ["custom_filter", { ...rules, limit: 40, generated_source: "home" }],
-      [
-        "collection",
-        { library_collection_id: "lib-trakt", source_provider: "trakt", source_preset: "trending" },
-      ],
-      ["trending_discover", { source: "trakt", window: "week" }],
+      ["collection", { library_collection_id: "lib-1", source_provider: "mdblist" }],
+      ["trending_discover", { source: "tmdb", window: "week" }],
       ["award_winners", { award_type: "oscar" }],
       ["admin_curated_list", { item_ids: ["movie:a", "movie:b"] }],
       [

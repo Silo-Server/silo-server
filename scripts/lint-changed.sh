@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Analyze the Go packages a branch touched and report findings on changed lines.
-# Local runs include committed, staged, unstaged and untracked edits and enable
-# gocritic. CI sets LINT_CHANGED_CI=1 because it runs gocritic full-tree separately.
+# Local runs include committed, staged, unstaged and untracked edits.
+# Gocritic runs on changed lines through .golangci.yml locally and in CI.
 #
 # Usage: scripts/lint-changed.sh [golangci-lint flags...]
 # BASE_REF defaults to origin/main. LINT_CHANGED_BASE_MODE defaults to merge-base
@@ -12,7 +12,7 @@ set -euo pipefail
 base_mode=${LINT_CHANGED_BASE_MODE:-merge-base}
 ci_mode=${LINT_CHANGED_CI:-0}
 case "$base_mode" in
-	merge-base | revision) ;;
+	merge-base | revision | pr-merge) ;;
 	*) echo "lint-changed: invalid LINT_CHANGED_BASE_MODE: $base_mode" >&2; exit 2 ;;
 esac
 case "$ci_mode" in
@@ -39,7 +39,15 @@ run_lint() {
 }
 
 comparison=
-if [[ "$base_mode" == merge-base ]]; then
+if [[ "$base_mode" == pr-merge ]]; then
+	# A pull-request merge ref is the tree CI tests, with the target as parent 1.
+	if git rev-parse --verify --end-of-options 'HEAD^2^{commit}' >/dev/null 2>&1; then
+		comparison=$(git rev-parse --verify --end-of-options 'HEAD^1^{commit}')
+	else
+		echo "lint-changed: tested PR merge unavailable; checking target merge base" >&2
+		comparison=$(git merge-base "$base_ref" HEAD) || comparison=
+	fi
+elif [[ "$base_mode" == merge-base ]]; then
 	if ! comparison=$(git merge-base "$base_ref" HEAD); then
 		echo "lint-changed: cannot find merge base for $base_ref; analyzing all packages" >&2
 	fi
@@ -47,9 +55,17 @@ else
 	# A missing before object (for example after a force push), or an all-zero
 	# before SHA on a new branch, cannot provide a safe changed-line filter.
 	if ! comparison=$(git rev-parse --verify --end-of-options "${base_ref}^{commit}"); then
-		echo "lint-changed: cannot resolve previous revision $base_ref; analyzing all packages" >&2
+		echo "lint-changed: cannot resolve previous revision $base_ref; checking target merge base" >&2
+		if [[ -n "${LINT_CHANGED_TARGET_REF:-}" ]]; then
+			comparison=$(git merge-base "$LINT_CHANGED_TARGET_REF" HEAD) || comparison=
+			# HEAD as the fallback base would hide every committed finding.
+			if [[ "$comparison" == "$(git rev-parse HEAD)" ]]; then
+				comparison=
+			fi
+		fi
 	fi
 fi
+echo "lint-changed: resolved base $comparison (requested $base_ref)" >&2
 if [[ -z "$comparison" ]]; then
 	run_lint "$@" ./...
 	exit
@@ -62,25 +78,42 @@ git ls-files --others --exclude-standard -z >"$scratch/untracked"
 cat "$scratch/tracked" "$scratch/untracked" >"$scratch/changed"
 git diff --color=never --no-ext-diff --no-textconv --no-renames --diff-filter=D --name-only -z "$comparison" -- '*.go' >"$scratch/deleted-go"
 
-full_tree=0
+full_tree=${LINT_CHANGED_FULL_TREE:-0}
 unsafe_paths=0
 : >"$scratch/dirs"
 while IFS= read -r -d '' file; do
 	go_input=1
 	case "$file" in
 		go.mod | go.sum | go.work | go.work.sum | */go.mod | */go.sum | */go.work | */go.work.sum | \
-		.golangci.* | */.golangci.* | Makefile | .go-version | .github/actions/setup-go/* | .github/workflows/* | \
+		.golangci.* | */.golangci.* | .go-version | .github/actions/setup-go/* | \
+		.github/actions/ci-tools/go-checks.mk | \
 		scripts/lint-changed.sh | internal/routeinventory/lintrules/* | vendor/* | \
 		*.c | *.cc | *.cpp | *.cxx | *.h | *.hh | *.hpp | *.s | *.S | *.swig | *.swigcxx)
+			full_tree=1 ;;
+		Makefile | .github/workflows/*)
 			full_tree=1 ;;
 		*.go)
 			dir=${file%/*}
 			[[ "$dir" != "$file" ]] || dir=.
 			printf '%s\n' "$dir" >>"$scratch/dirs" ;;
-		contracts/* | migrations/* | web/dist/* | internal/* | cmd/* | pkg/*)
-			# Non-Go inputs in Go source trees can be embedded or influence cgo.
-			# Directory embeds include Markdown and other documentation too.
-			full_tree=1 ;;
+		contracts/* | migrations/* | internal/* | cmd/* | pkg/*)
+			# The nearest Go directory owns non-Go package inputs. Deletions
+			# and inputs without a Go ancestor require the whole tree.
+			dir=${file%/*}
+			if [[ ! -f "$file" ]]; then
+				full_tree=1
+			else
+				while ! compgen -G "$dir/*.go" >/dev/null; do
+					if [[ "$dir" == . ]]; then break; fi
+					if [[ "$dir" == */* ]]; then dir=${dir%/*}; else dir=.; fi
+				done
+				if compgen -G "$dir/*.go" >/dev/null; then
+					printf '%s\n' "$dir" >>"$scratch/dirs"
+				else
+					full_tree=1
+				fi
+			fi ;;
+		web/dist/*) full_tree=1 ;;
 		*) go_input=0 ;;
 	esac
 	# Only Go inputs participate in package patterns or changed-line reporting.

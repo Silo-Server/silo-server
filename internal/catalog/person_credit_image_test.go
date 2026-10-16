@@ -29,15 +29,16 @@ func personCreditPhoto(t *testing.T, size imagesize.Size) (*recordingCatalogImag
 
 // Without a requested size a headshot is presigned exactly as stored, which is
 // what this has always returned — rewriting the key here would change every
-// existing client's cast list.
+// existing client's cast list. Plugin-backed photos get the large hint so
+// providers such as TMDB serve a headshot sharp enough for a high-density card.
 func TestPersonCreditPhotoUnsetUnchanged(t *testing.T) {
 	resolver, credit := personCreditPhoto(t, imagesize.Unset)
 
 	if resolver.path != testPhotoPath {
 		t.Errorf("resolved path = %q, want the stored key %q untouched", resolver.path, testPhotoPath)
 	}
-	if resolver.variant != "featured" {
-		t.Errorf("resolver variant = %q, want featured", resolver.variant)
+	if resolver.variant != "large" {
+		t.Errorf("resolver variant = %q, want large", resolver.variant)
 	}
 	if credit.PhotoURL == "" {
 		t.Error("PhotoURL is empty")

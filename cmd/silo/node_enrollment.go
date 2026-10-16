@@ -67,7 +67,7 @@ func completeNodeBootstrap(ctx context.Context, bc *config.BootstrapConfig) erro
 	if bc.DatabaseURL != "" {
 		return nil
 	}
-	listener, err := net.Listen("tcp", bc.Listen)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", bc.Listen)
 	if err != nil {
 		return errors.New("node enrollment listener unavailable")
 	}

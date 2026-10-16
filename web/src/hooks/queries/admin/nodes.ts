@@ -116,12 +116,14 @@ export function isNodeWriteAuthorityActive(authority: ProfileRequestContextSnaps
 }
 
 type NodeWriteIntent = {
-  action: "create" | "enroll" | "update" | "delete";
   authority: ProfileRequestContextSnapshot | null;
-  node?: StreamNode;
-  body?: CreateNodeRequest | EnrollNodeRequest | UpdateNodeRequest;
   onSuccess?: () => void;
-};
+} & (
+  | { action: "create"; body: CreateNodeRequest; node?: never }
+  | { action: "enroll"; body: EnrollNodeRequest; node?: never }
+  | { action: "update"; node: StreamNode; body: UpdateNodeRequest }
+  | { action: "delete"; node: StreamNode }
+);
 function useNodeWrite() {
   const client = useQueryClient();
   const mounted = useRef(false);
@@ -145,14 +147,14 @@ function useNodeWrite() {
       if (intent.action === "enroll") {
         result = await v2("POST /api/v2/admin/nodes/enroll", {
           ...common,
-          body: intent.body as EnrollNodeRequest,
+          body: intent.body,
           onResponse,
           timeoutMs: 90_000,
         });
       } else if (intent.action === "create") {
         result = await v2("POST /api/v2/admin/nodes", {
           ...common,
-          body: intent.body as CreateNodeRequest,
+          body: intent.body,
           onResponse,
         });
       } else {
@@ -168,7 +170,7 @@ function useNodeWrite() {
         } else {
           result = await v2("PUT /api/v2/admin/nodes/{id}", {
             ...options,
-            body: intent.body as UpdateNodeRequest,
+            body: intent.body,
             onResponse,
           });
           if (result.id !== String(intent.node.id))

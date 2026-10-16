@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"time"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -99,6 +101,27 @@ func (h *NotificationsHandler) NotificationPreferences(ctx context.Context, prof
 }
 func (h *NotificationsHandler) PatchNotificationPreferences(ctx context.Context, profile string, patch notifications.PreferencePatch) (notifications.Preferences, error) {
 	return h.system.Preferences.Patch(ctx, profile, patch)
+}
+
+// ListNotifiedSeries answers every series whose new episodes the profile has
+// a reason to hear about, before catalog access filtering.
+func (h *NotificationsHandler) ListNotifiedSeries(ctx context.Context, userID int, profile string) ([]notifications.NotifiedSeries, error) {
+	return h.system.ListNotifiedSeries(ctx, userID, profile)
+}
+
+// MuteNotificationSeries mutes the series for the profile. The caller has
+// checked that the viewer may see the item; an ID that names no series is 404.
+func (h *NotificationsHandler) MuteNotificationSeries(ctx context.Context, userID int, profile, seriesID string) error {
+	err := h.system.MuteSeries(ctx, userID, profile, seriesID)
+	if errors.Is(err, notifications.ErrSeriesNotFound) {
+		return apiError(http.StatusNotFound, "not_found", "Series not found")
+	}
+	return err
+}
+
+// UnmuteNotificationSeries lifts the profile's mute of the series.
+func (h *NotificationsHandler) UnmuteNotificationSeries(ctx context.Context, userID int, profile, seriesID string) error {
+	return h.system.UnmuteSeries(ctx, userID, profile, seriesID)
 }
 
 // NotificationPushDisplay uses the same profile-scoped row and rendering as the

@@ -21,9 +21,7 @@ func TestCanonicalTrendingKey(t *testing.T) {
 		{"tmdb", "", "tmdb", "week"},
 		{"", "day", "tmdb", "day"},
 		{"", "", "tmdb", "week"},
-		{"trakt", "day", "trakt", "week"},
-		{"trakt", "week", "trakt", "week"},
-		{"trakt", "", "trakt", "week"},
+		{"trakt", "day", "tmdb", "day"},
 		{"bogus", "bogus", "tmdb", "week"},
 	}
 	for _, c := range cases {

@@ -2,6 +2,7 @@ package transcodenode
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/encodinglimit"
@@ -17,5 +18,7 @@ func (s *Server) handleEnrollmentReceipt(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(nodeenrollment.Receipt{BindingID: s.enrollmentIdentity, EncodingCapacity: encodinglimit.Snapshot()})
+	if err := json.NewEncoder(w).Encode(nodeenrollment.Receipt{BindingID: s.enrollmentIdentity, EncodingCapacity: encodinglimit.Snapshot()}); err != nil {
+		slog.WarnContext(r.Context(), "write node enrollment receipt", "error", err)
+	}
 }

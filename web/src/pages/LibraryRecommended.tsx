@@ -24,6 +24,7 @@ import { sectionKeys } from "@/hooks/queries/keys";
 import { planNextHomeSectionBatch } from "./homeSectionQueue";
 import { buildHomeSectionViewModel, type HomeSectionSlot } from "./homeSectionState";
 import { collectCachedHomeSections } from "./homeSectionCache";
+import { useDedupedSections } from "./sectionDedupe";
 import { isAudiobookLibraryType } from "./libraryPageSearchParams";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
@@ -175,9 +176,10 @@ export default function LibraryRecommended({
     });
   }, [completedIds, inFlightIds, layout, libraryId, queryClient]);
 
+  const visibleSections = useDedupedSections(layout, loadedSections);
   const viewModel = buildHomeSectionViewModel({
     layout,
-    loadedSections,
+    loadedSections: visibleSections,
     failedIds,
   });
 
@@ -203,6 +205,25 @@ export default function LibraryRecommended({
   const { data: libraryHasItems } = useLibraryHasItems(libraryId, {
     enabled: sectionsSettledEmpty,
   });
+
+  // Refetches one section in place through the regular loader, keeping its
+  // current items on screen; the Featured hero uses it while an on-view
+  // translation runs.
+  const refreshSection = (sectionId: string) => {
+    void queryClient
+      .invalidateQueries({
+        queryKey: sectionKeys.libraryItems(libraryId, sectionId),
+        refetchType: "none",
+      })
+      .then(() =>
+        setCompletedIds((prev) => {
+          if (!prev.has(sectionId)) return prev;
+          const next = new Set(prev);
+          next.delete(sectionId);
+          return next;
+        }),
+      );
+  };
 
   const retrySection = (sectionId: string) => {
     queryClient.removeQueries({ queryKey: sectionKeys.libraryItems(libraryId, sectionId) });
@@ -247,7 +268,7 @@ export default function LibraryRecommended({
 
   return (
     <div className="space-y-10 sm:space-y-12">
-      {renderHeroSlot(viewModel.hero, retrySection, libraryId, libraryType)}
+      {renderHeroSlot(viewModel.hero, retrySection, refreshSection, libraryId, libraryType)}
       {/* A layout refetch (after playback, a library change, a reconnect)
           failed: the cached layout stays, and the layout can be retried. */}
       {isError ? (
@@ -293,6 +314,7 @@ export default function LibraryRecommended({
 function renderHeroSlot(
   hero: HomeSectionSlot | null,
   retrySection: (sectionId: string) => void,
+  refreshSection: (sectionId: string) => void,
   libraryId: number,
   libraryType: string,
 ) {
@@ -313,6 +335,7 @@ function renderHeroSlot(
         bleed
         reserveHeaderSpace
         libraryId={libraryId}
+        onRefreshItems={() => refreshSection(hero.layout.id)}
       />
     );
   }

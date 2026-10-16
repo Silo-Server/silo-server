@@ -14,12 +14,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-type countingProfileStaler struct{ calls int }
+type countingSignalsNotifier struct{ calls int }
 
-func (c *countingProfileStaler) MarkProfileStale(context.Context, int, string) error {
-	c.calls++
-	return nil
-}
+func (c *countingSignalsNotifier) NotifySignalsChanged(context.Context, int, string) { c.calls++ }
 
 // playbackRefreshDriver plays one movie through a native playback surface.
 type playbackRefreshDriver struct {
@@ -101,15 +98,13 @@ func TestPlaybackProgressRefreshesTasteProfileOnlyOnCompletionAndStop(t *testing
 			h := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 			h.InstallationID = serviceInstallation
 			h.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
-			staler := &countingProfileStaler{}
-			requester := &countingProfileRefresher{}
-			h.SetProfileStaler(staler)
-			h.SetProfileRefreshRequester(requester)
+			notifier := &countingSignalsNotifier{}
+			h.SetSignalsChangedNotifier(notifier)
 			driver := newDriver(t, h, manager, file)
 			assertRefreshes := func(stage string, want int) {
 				t.Helper()
-				if staler.calls != want || requester.calls != want {
-					t.Fatalf("%s: stale marks = %d, refresh requests = %d, want %d each", stage, staler.calls, requester.calls, want)
+				if notifier.calls != want {
+					t.Fatalf("%s: signal change notifications = %d, want %d", stage, notifier.calls, want)
 				}
 			}
 

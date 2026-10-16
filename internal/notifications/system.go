@@ -448,13 +448,17 @@ func (s *System) Wait() {
 
 // PurgeProfile removes all notification state for a deleted profile.
 // Profiles may live in per-user SQLite stores, so Postgres cascades cannot
-// cover this.
-func (s *System) PurgeProfile(ctx context.Context, profileID string) error {
+// cover this. Series mutes are removed for the profile on userID's account
+// only.
+func (s *System) PurgeProfile(ctx context.Context, userID int, profileID string) error {
 	if s == nil || profileID == "" {
 		return nil
 	}
 	if err := s.Interests.DeleteAllForProfile(ctx, profileID); err != nil {
 		return fmt.Errorf("purge interest rows: %w", err)
+	}
+	if err := s.Interests.deleteMutesForProfile(ctx, userID, profileID); err != nil {
+		return fmt.Errorf("purge series mutes: %w", err)
 	}
 	if err := s.Deliveries.DeleteAllForProfile(ctx, profileID); err != nil {
 		return fmt.Errorf("purge deliveries: %w", err)

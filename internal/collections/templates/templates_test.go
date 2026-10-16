@@ -264,10 +264,10 @@ func TestRegisterBundleRejectsProfileRequiredTemplates(t *testing.T) {
 		ID:              "recommended",
 		Title:           "Recommended",
 		Category:        CategoryEditorial,
-		Source:          SourceTrakt,
+		Source:          SourceTMDB,
 		MediaKind:       MediaMovie,
 		RequiresProfile: true,
-		Trakt:           &TraktSpec{Preset: "recommended", MediaType: "movie"},
+		TMDB:            &TMDBSpec{Preset: "popular", MediaType: "movie"},
 	})
 	defer func() {
 		if recover() == nil {
@@ -313,8 +313,8 @@ func TestRegisterValidatesTemplate(t *testing.T) {
 			name: "two source specs",
 			tmpl: Template{
 				ID: "x", Title: "x", Category: CategoryTrending, Source: SourceTMDB, MediaKind: MediaMovie,
-				TMDB:  &TMDBSpec{Preset: "popular", MediaType: "movie"},
-				Trakt: &TraktSpec{Preset: "popular", MediaType: "movie"},
+				TMDB:    &TMDBSpec{Preset: "popular", MediaType: "movie"},
+				MDBList: &MDBListSpec{URL: "https://example.com/list"},
 			},
 		},
 		{
@@ -326,12 +326,8 @@ func TestRegisterValidatesTemplate(t *testing.T) {
 			tmpl: Template{ID: "x", Title: "x", Category: CategoryInTheaters, Source: SourceTMDB, MediaKind: MediaTV, TMDB: &TMDBSpec{Preset: "now_playing", MediaType: "tv"}},
 		},
 		{
-			name: "trakt recommended without requires_profile",
-			tmpl: Template{ID: "x", Title: "x", Category: CategoryEditorial, Source: SourceTrakt, MediaKind: MediaMovie, Trakt: &TraktSpec{Preset: "recommended", MediaType: "movie"}},
-		},
-		{
-			name: "trakt recommended with bad media type",
-			tmpl: Template{ID: "x", Title: "x", Category: CategoryEditorial, Source: SourceTrakt, MediaKind: MediaMovie, RequiresProfile: true, Trakt: &TraktSpec{Preset: "recommended", MediaType: "all"}},
+			name: "retired trakt source",
+			tmpl: Template{ID: "x", Title: "x", Category: CategoryEditorial, Source: "trakt", MediaKind: MediaMovie},
 		},
 		{
 			name: "mdblist non-http URL",
@@ -565,14 +561,6 @@ func TestRegisterRejectsInvalidTMDBDiscover(t *testing.T) {
 				ID: "x", Title: "x", Category: CategoryPopular, Source: SourceTMDBDiscover, MediaKind: MediaMovie,
 				TMDBDiscover: validTMDBDiscoverSpec(),
 				TMDB:         &TMDBSpec{Preset: "popular", MediaType: "movie"},
-			},
-		},
-		{
-			name: "discover with trakt spec",
-			tmpl: Template{
-				ID: "x", Title: "x", Category: CategoryPopular, Source: SourceTMDBDiscover, MediaKind: MediaMovie,
-				TMDBDiscover: validTMDBDiscoverSpec(),
-				Trakt:        &TraktSpec{Preset: "popular", MediaType: "movie"},
 			},
 		},
 		{

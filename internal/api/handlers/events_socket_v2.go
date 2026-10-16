@@ -259,9 +259,9 @@ type eventsSessionValidator interface {
 }
 
 // NewEventsSocketV2 reuses the current account, session and viewer authorities.
-func NewEventsSocketV2(events *EventsHandler, tickets *evt.SocketTicketStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker, publicURL string) *EventsSocketV2 {
+func NewEventsSocketV2(events *EventsHandler, tickets *evt.SocketTicketStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, publicURL string) *EventsSocketV2 {
 	h := &EventsSocketV2{Events: events, Tickets: tickets, PublicOrigin: publicURL}
-	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, primary)
+	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, actingAdmin)
 	return h
 }
 
@@ -283,8 +283,13 @@ func refuseRemotePlaybackSocket(validate EventsSocketValidator) EventsSocketVali
 	}
 }
 
-func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker) EventsSocketValidator {
-	if sessions == nil || users == nil || resolver == nil || primary == nil {
+// newSocketAuthorityValidator checks a socket identity against the current
+// login session, account and profile. The admin role holds only while
+// actingAdmin allows it, the decision the HTTP admin routes apply: as the
+// account's primary profile, or with no profile while the household does not
+// require one. Otherwise the identity validates with the user role.
+func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider) EventsSocketValidator {
+	if sessions == nil || users == nil || resolver == nil || actingAdmin == nil {
 		return nil
 	}
 	return func(ctx context.Context, identity evt.SocketIdentity) (context.Context, *auth.Claims, error) {
@@ -328,12 +333,16 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 			return ctx, nil, errSocketAccessChanged
 		}
 		role := authority.Role
-		if role == eventsAdminRole && identity.ProfileID != "" {
-			isPrimary, found, err := primary(checkCtx, identity.UserID, identity.ProfileID)
-			if err != nil || !found {
+		if role == eventsAdminRole {
+			acting, err := actingAdmin(checkCtx, apimw.ActingAdminRequest{
+				Claims:    &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess},
+				ProfileID: identity.ProfileID,
+				DeviceID:  identity.DeviceID,
+			})
+			if err != nil {
 				return ctx, nil, evt.ErrSocketTicket
 			}
-			if !isPrimary {
+			if !acting {
 				role = string(scopeUser)
 			}
 		}

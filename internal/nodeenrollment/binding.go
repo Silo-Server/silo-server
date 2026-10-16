@@ -121,11 +121,7 @@ func (s Store) Save(b Binding) error {
 		return errors.New("cannot persist node binding")
 	}
 	defer func() { _ = os.Remove(temp.Name()) }()
-	data, err := json.Marshal(b)
-	if err != nil {
-		_ = temp.Close()
-		return errors.New("cannot encode node binding")
-	}
+	data, _ := json.Marshal(b)
 	if _, err = temp.Write(data); err == nil {
 		err = temp.Sync()
 	}
@@ -144,7 +140,7 @@ func (s Store) Save(b Binding) error {
 	return nil
 }
 func syncBindingDirectory(parent string) error {
-	dir, err := os.Open(parent)
+	dir, err := os.Open(parent) //nolint:gosec // The operator-owned binding parent was checked as a private directory before publication.
 	if err != nil {
 		return errors.New("cannot sync binding directory")
 	}

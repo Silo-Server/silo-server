@@ -5,7 +5,6 @@
  */
 import type { SectionOverride, SettingsSectionEntry } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
-import { isTraktConfig } from "@/lib/sectionTypes";
 import { randomUUID } from "@/lib/uuid";
 import { stableJson } from "./stableJson";
 
@@ -18,10 +17,6 @@ export interface SectionOverrideIds {
   savedOverrides?: SectionOverride[];
   /** An ID for an admin section the profile has no saved override for. */
   newId?: (sectionId: string) => string;
-  /** The section the change being saved is to, if it is to one section. */
-  changedSectionId?: string;
-  /** Every section the changes being saved are to, when several are saved at once. */
-  changedSectionIds?: ReadonlySet<string>;
   /**
    * The page as it was read. With it, a save stores only what the profile
    * changed (see `buildSectionOverrides`); without it every field of every
@@ -82,13 +77,7 @@ function movedNewRow(sections: SettingsSectionEntry[], baseline: SettingsSection
 /**
  * The override set to save for one page. A change to an admin section keeps
  * the ID of the profile's saved override for that section, or gets one from
- * `newId`: the server's section source policy refuses a legacy Trakt admin
- * section's override without an ID. It also refuses a new override that
- * leaves such a section showing, so a shown one without a saved override ID is
- * left out and keeps its admin position, unless a change being saved is to
- * that section; the refusal then reaches the user instead of the change
- * silently not saving. Positions are only as close to the list order as that
- * held position allows.
+ * `newId`.
  *
  * With a `baseline`, an admin section's override stores only what the
  * profile changed: whether it is hidden, the fields it edited (or an earlier
@@ -99,13 +88,7 @@ function movedNewRow(sections: SettingsSectionEntry[], baseline: SettingsSection
 export function buildSectionOverrides(
   sections: SettingsSectionEntry[],
   removedSystemSections: RemovedSystemOverride[] = [],
-  {
-    savedOverrides = [],
-    newId = () => randomUUID(),
-    changedSectionId,
-    changedSectionIds,
-    baseline,
-  }: SectionOverrideIds = {},
+  { savedOverrides = [], newId = () => randomUUID(), baseline }: SectionOverrideIds = {},
 ): SectionOverride[] {
   // The server resolves the last saved override for a section. One saved
   // without an ID still holds the profile's changes; it gets a new ID below.
@@ -115,9 +98,6 @@ export function buildSectionOverrides(
   }
   const savedId = (sectionId: string) => saved.get(sectionId)?.id || newId(sectionId);
   const baseById = new Map(baseline?.map((s) => [s.id, s]));
-  const changed = (id: string) => id === changedSectionId || Boolean(changedSectionIds?.has(id));
-  const leftOut = (s: SettingsSectionEntry) =>
-    !s.is_custom && !s.hidden && !saved.get(s.id)?.id && !changed(s.id) && isTraktConfig(s.config);
   // Positions follow the list once the profile orders the page; until then
   // admin sections keep the admin order and only added rows store a position.
   const ordered =
@@ -125,19 +105,8 @@ export function buildSectionOverrides(
     savedOverrides.some((o) => o.section_id && o.position !== undefined) ||
     stableJson(sharedOrder(sections, baseline)) !== stableJson(sharedOrder(baseline, sections)) ||
     movedNewRow(sections, baseline);
-  // A section left out keeps its admin position, so the others are numbered
-  // in list order around it and never on it: the server orders sections with
-  // equal positions arbitrarily.
-  const heldPositions = new Set(sections.filter(leftOut).map((s) => s.position));
   const overrides: SectionOverride[] = [];
-  let position = 0;
-  for (const s of sections) {
-    if (leftOut(s)) {
-      position = Math.max(position, s.position + 1);
-      continue;
-    }
-    while (heldPositions.has(position)) position += 1;
-    const listPosition = position++;
+  for (const [listPosition, s] of sections.entries()) {
     if (s.is_custom) {
       overrides.push({
         section_id: undefined,

@@ -145,41 +145,58 @@ func TestCoverageRefreshModelErrorRetainsLastGood(t *testing.T) {
 	}
 }
 
-// TestComputeCoverageSnapshotHysteresis exercises the pure hysteresis helper
-// across the enable/disable band: 0.85 (nil prev) -> not ready, 0.92 -> ready,
-// 0.85 (prev ready) -> stays ready (latched), 0.79 -> not ready.
-func TestComputeCoverageSnapshotHysteresis(t *testing.T) {
+// TestComputeCoverageSnapshotThreshold verifies readiness is one threshold on
+// the ratio: a fresh snapshot and one computed after a ready snapshot answer
+// the same for the same counts, so nodes refreshing from one database agree.
+func TestComputeCoverageSnapshotThreshold(t *testing.T) {
 	now := time.Unix(0, 0)
-	step := func(prev *semanticCoverageSnapshot, vectorized int) *semanticCoverageSnapshot {
-		return computeCoverageSnapshot(
+	ready := func(vectorized int) bool {
+		s := computeCoverageSnapshot(
 			[]catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: vectorized}},
-			"m", prev, now,
+			"m", now,
 		)
+		return s.PerType["movie"].Ready
+	}
+	for _, tc := range []struct {
+		vectorized int
+		want       bool
+	}{
+		{84, false},
+		{85, true},
+		{92, true},
+		{100, true},
+		{0, false},
+	} {
+		if got := ready(tc.vectorized); got != tc.want {
+			t.Errorf("ratio 0.%02d ready = %v, want %v", tc.vectorized, got, tc.want)
+		}
 	}
 
-	s1 := step(nil, 85) // 0.85, band, nil prev -> not ready
-	if s1.PerType["movie"].Ready {
-		t.Fatalf("0.85 with nil prev should not be ready")
+	// A tracker that was ready before coverage dropped to 0.85 and one that
+	// just started report the same.
+	models := constCoverageModels{model: "m"}
+	var vectorized atomic.Int64
+	fetch := func(context.Context, string) ([]catalogTypeCoverage, error) {
+		return []catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: int(vectorized.Load())}}, nil
 	}
-
-	s2 := step(s1, 92) // 0.92 >= enable -> ready
-	if !s2.PerType["movie"].Ready {
-		t.Fatalf("0.92 should be ready")
+	longRunning := &semanticCoverageTracker{fetch: fetch, models: models, clock: time.Now}
+	vectorized.Store(95)
+	if err := longRunning.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
 	}
-
-	s3 := step(s2, 85) // 0.85, band, prev ready -> stays ready
-	if !s3.PerType["movie"].Ready {
-		t.Fatalf("0.85 with ready prev should latch ready")
-	}
-
-	s4 := step(s3, 79) // 0.79 < disable -> not ready
-	if s4.PerType["movie"].Ready {
-		t.Fatalf("0.79 should drop ready below disable threshold")
-	}
-
-	// Sanity check the recorded ratio on a band entry.
-	if got := s3.PerType["movie"].Ratio; got < 0.849 || got > 0.851 {
-		t.Fatalf("ratio = %v, want ~0.85", got)
+	for _, v := range []int64{85, 84} {
+		vectorized.Store(v)
+		fresh := &semanticCoverageTracker{fetch: fetch, models: models, clock: time.Now}
+		for _, tr := range []*semanticCoverageTracker{longRunning, fresh} {
+			if err := tr.Refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		a, _ := longRunning.CoverageReady(nil)
+		b, _ := fresh.CoverageReady(nil)
+		if a != b || a != (v >= 85) {
+			t.Fatalf("at %d%% the long-running tracker says %v and a fresh one %v", v, a, b)
+		}
 	}
 }
 
@@ -188,7 +205,7 @@ func TestComputeCoverageSnapshotHysteresis(t *testing.T) {
 func TestComputeCoverageSnapshotZeroEligibleNotReady(t *testing.T) {
 	s := computeCoverageSnapshot(
 		[]catalogTypeCoverage{{Type: "movie", Eligible: 0, Vectorized: 0}},
-		"m", nil, time.Unix(0, 0),
+		"m", time.Unix(0, 0),
 	)
 	c := s.PerType["movie"]
 	if c.Ready {
@@ -212,7 +229,7 @@ func TestCoverageReadyScopeAND(t *testing.T) {
 			{Type: "movie", Eligible: 100, Vectorized: 95},  // ready
 			{Type: "series", Eligible: 100, Vectorized: 50}, // not ready
 		},
-		"m", nil, now,
+		"m", now,
 	)
 	tr := &semanticCoverageTracker{fetch: fatalFetch(t), clock: time.Now}
 	tr.snap.Store(snap)
@@ -239,7 +256,7 @@ func TestCoverageReadyScopeAND(t *testing.T) {
 func TestCoverageReadyScopeUnknownTypeNotGated(t *testing.T) {
 	snap := computeCoverageSnapshot(
 		[]catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: 95}},
-		"m", nil, time.Unix(0, 0),
+		"m", time.Unix(0, 0),
 	)
 	tr := &semanticCoverageTracker{fetch: fatalFetch(t), clock: time.Now}
 	tr.snap.Store(snap)
@@ -257,22 +274,17 @@ func TestCoverageReadyScopeUnknownTypeNotGated(t *testing.T) {
 	}
 }
 
-// TestCoverageRefreshBandCollapseDropsLatch is the sharper collapse assertion:
-// it drives a band ratio (0.85) under the new model so readiness can only come
-// from a latch. Because the collapse zeroes prev, the new-model snapshot must be
-// not-ready even though the same type was ready under the old model.
-func TestCoverageRefreshBandCollapseDropsLatch(t *testing.T) {
+// TestCoverageRefreshModelCollapse verifies that when the active embedding model
+// changes the next Refresh publishes a snapshot for the new model.
+func TestCoverageRefreshModelCollapse(t *testing.T) {
 	models := &fakeCoverageModels{}
-	models.push("model-a", nil) // full coverage -> ready latch under A
-	models.push("model-b", nil) // band coverage under B
+	models.push("model-a", nil)
+	models.push("model-b", nil)
 
-	var vectorized atomic.Int64
-	vectorized.Store(100)
+	// fetch always reports full coverage; only the model identity changes.
 	tr := &semanticCoverageTracker{
 		fetch: func(_ context.Context, model string) ([]catalogTypeCoverage, error) {
-			return []catalogTypeCoverage{{
-				Type: "movie", Eligible: 100, Vectorized: int(vectorized.Load()),
-			}}, nil
+			return []catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: 100}}, nil
 		},
 		models: models,
 		clock:  time.Now,
@@ -281,20 +293,81 @@ func TestCoverageRefreshBandCollapseDropsLatch(t *testing.T) {
 	if err := tr.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh(A) error: %v", err)
 	}
-	if !tr.Snapshot().PerType["movie"].Ready {
-		t.Fatalf("movie should be ready under model-a at full coverage")
+	a := tr.Snapshot()
+	if a.Model != "model-a" || !a.PerType["movie"].Ready {
+		t.Fatalf("after Refresh(A): model=%q ready=%v, want model-a ready", a.Model, a.PerType["movie"].Ready)
 	}
 
-	vectorized.Store(85) // band [0.80,0.90) under model-b
 	if err := tr.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh(B) error: %v", err)
 	}
 	b := tr.Snapshot()
 	if b.Model != "model-b" {
+		t.Fatalf("after Refresh(B): model=%q, want model-b", b.Model)
+	}
+}
+
+// TestCoverageRefreshModelChangeWithFailedRecount verifies that a model change
+// whose recount fails leaves a not-ready snapshot for the new model, never the
+// previous model's readiness.
+func TestCoverageRefreshModelChangeWithFailedRecount(t *testing.T) {
+	models := &fakeCoverageModels{}
+	models.push("model-a", nil)
+	models.push("model-b", nil)
+
+	var fail atomic.Bool
+	tr := &semanticCoverageTracker{
+		fetch: func(_ context.Context, model string) ([]catalogTypeCoverage, error) {
+			if fail.Load() {
+				return nil, errors.New("count query failed")
+			}
+			return []catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: 100}}, nil
+		},
+		models: models,
+		clock:  time.Now,
+	}
+
+	if err := tr.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh(A) error: %v", err)
+	}
+	if ready, _ := tr.CoverageReady(nil); !ready {
+		t.Fatalf("movie should be ready under model-a at full coverage")
+	}
+
+	fail.Store(true)
+	if err := tr.Refresh(context.Background()); err == nil {
+		t.Fatal("Refresh(B) should surface the count failure")
+	}
+	b := tr.Snapshot()
+	if b.Model != "model-b" {
 		t.Fatalf("snapshot model = %q, want model-b", b.Model)
 	}
-	if b.PerType["movie"].Ready {
-		t.Fatalf("band coverage under a new model must not inherit the old-model latch")
+	if ready, _ := tr.CoverageReady(nil); ready {
+		t.Fatalf("a failed recount under a new model must not keep the old model's readiness")
+	}
+}
+
+// TestCoverageReadyEmptyScopeGatesTypesWithItems verifies that an empty scope
+// is gated by every type that has eligible items, and only by those.
+func TestCoverageReadyEmptyScopeGatesTypesWithItems(t *testing.T) {
+	tr := &semanticCoverageTracker{fetch: fatalFetch(t), clock: time.Now}
+
+	// A type listed with no eligible items does not gate.
+	tr.snap.Store(computeCoverageSnapshot([]catalogTypeCoverage{
+		{Type: "movie", Eligible: 100, Vectorized: 95},
+		{Type: "ebook", Eligible: 0, Vectorized: 0},
+	}, "m", time.Unix(0, 0)))
+	if ready, reason := tr.CoverageReady(nil); !ready {
+		t.Fatalf("a type with no items blocked the empty scope: %q", reason)
+	}
+
+	// A small type that has items and too few vectors still gates.
+	tr.snap.Store(computeCoverageSnapshot([]catalogTypeCoverage{
+		{Type: "movie", Eligible: 100, Vectorized: 95},
+		{Type: "ebook", Eligible: 3, Vectorized: 0},
+	}, "m", time.Unix(0, 0)))
+	if ready, reason := tr.CoverageReady(nil); ready || !strings.Contains(reason, `"ebook"`) {
+		t.Fatalf("empty scope with an unready type = %v, %q", ready, reason)
 	}
 }
 

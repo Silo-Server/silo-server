@@ -15,6 +15,7 @@ vi.mock("@/hooks/queries/admin/nodes", () => ({
   useToggleNode: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 vi.mock("@/hooks/queries/admin/settings", () => ({ useAdminServerSettings: () => ({ data: {} }) }));
+vi.mock("@/pages/admin-settings/NodeRoutingSettings", () => ({ NodeRoutingSettings: () => null }));
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 function openForm(type: "Transcode" | "Proxy") {

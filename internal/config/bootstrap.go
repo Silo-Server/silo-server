@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -46,7 +47,7 @@ func LoadDatabaseURL(envFile string) (string, error) {
 	}
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		return "", fmt.Errorf("DATABASE_URL is required (set in .env or environment)")
+		return "", errors.New("DATABASE_URL is required (set in .env or environment)")
 	}
 	return dbURL, nil
 }
@@ -72,11 +73,11 @@ func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfi
 	token, bindingFile := os.Getenv("SILO_NODE_ENROLLMENT_TOKEN"), os.Getenv("SILO_NODE_BINDING_FILE")
 	canEnroll := allowEnrollment && mode == bootstrapModeTranscode && (token != "" || bindingFile != "")
 	if token != "" && (len(token) < 32 || len(token) > 512) {
-		return nil, fmt.Errorf("SILO_NODE_ENROLLMENT_TOKEN must contain 32 to 512 characters")
+		return nil, errors.New("SILO_NODE_ENROLLMENT_TOKEN must contain 32 to 512 characters")
 	}
 	if !canEnroll || dbURL != "" || secretKey != "" {
 		if dbURL == "" {
-			return nil, fmt.Errorf("DATABASE_URL is required (set in .env or environment)")
+			return nil, errors.New("DATABASE_URL is required (set in .env or environment)")
 		}
 		if len(secretKey) < minSecretKeyLen {
 			return nil, fmt.Errorf("SECRET_KEY is required (>=%d chars); generate one with: openssl rand -base64 48", minSecretKeyLen)
@@ -98,7 +99,7 @@ func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfi
 	if value := os.Getenv("SILO_NODE_ENROLLMENT_ENABLED"); value != "" {
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
-			return nil, fmt.Errorf("SILO_NODE_ENROLLMENT_ENABLED must be a boolean")
+			return nil, errors.New("SILO_NODE_ENROLLMENT_ENABLED must be a boolean")
 		}
 		enrollmentEnabled = parsed
 	}
@@ -106,7 +107,7 @@ func LoadStartupBootstrap(envFile string, allowEnrollment bool) (*BootstrapConfi
 	if value := os.Getenv("SILO_TRANSCODE_MAX_JOBS"); value != "" {
 		parsed, err := strconv.ParseInt(value, 10, 32)
 		if err != nil || parsed < 0 {
-			return nil, fmt.Errorf("SILO_TRANSCODE_MAX_JOBS must be an integer between 0 and 2147483647")
+			return nil, errors.New("SILO_TRANSCODE_MAX_JOBS must be an integer between 0 and 2147483647")
 		}
 		maxJobs = int(parsed)
 	}

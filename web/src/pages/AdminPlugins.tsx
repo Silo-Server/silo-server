@@ -15,6 +15,7 @@ import {
   InstalledPluginTile,
   PluginTileGrid,
 } from "@/components/admin/plugins/PluginTile";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -137,27 +138,25 @@ function PluginsBoard() {
   }, [pluginUpdateTask?.state, queryClient]);
 
   const header = (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div className="space-y-3">
-        <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Plugins</h1>
-        <p className="page-subtitle text-sm sm:text-base">
-          Add metadata sources, playback markers, request routing, and watch sync to Silo.
-        </p>
-      </div>
-      <Button
-        variant="outline"
-        onClick={() => checkPluginUpdates.mutate()}
-        disabled={checkPluginUpdates.isPending || isCheckingUpdates}
-      >
-        <Download className="mr-1.5 h-3.5 w-3.5" />
-        {isCheckingUpdates ? "Checking updates..." : "Check for updates"}
-      </Button>
-    </div>
+    <PageHeader
+      title="Plugins"
+      subtitle="Add metadata sources, playback markers, request routing, and watch sync to Silo."
+      actions={
+        <Button
+          variant="outline"
+          onClick={() => checkPluginUpdates.mutate()}
+          disabled={checkPluginUpdates.isPending || isCheckingUpdates}
+        >
+          <Download className="mr-1.5 h-3.5 w-3.5" />
+          {isCheckingUpdates ? "Checking updates..." : "Check for updates"}
+        </Button>
+      }
+    />
   );
 
   if (isLoading) {
     return (
-      <div className="page-shell space-y-6 py-4 sm:py-6">
+      <div className="space-y-6 pb-4 sm:pb-6">
         {header}
         <div className="text-muted-foreground py-12 text-center text-sm">Loading plugins...</div>
       </div>
@@ -165,7 +164,7 @@ function PluginsBoard() {
   }
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
+    <div className="space-y-6 pb-4 sm:pb-6">
       {header}
 
       <Tabs
