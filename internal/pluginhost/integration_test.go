@@ -1,5 +1,3 @@
-//go:build integration
-
 package pluginhost_test
 
 import (
@@ -19,8 +17,9 @@ import (
 )
 
 const (
-	examplePluginDir  = "/opt/worktrees/silo-plugin-sdk-rh/examples/hello-runtime-host"
-	expectedEventName = "plugin.example.hello-runtime-host.ping"
+	// examplePluginPackage is built from the SDK version this module requires.
+	examplePluginPackage = "github.com/Silo-Server/silo-plugin-sdk/examples/hello-runtime-host"
+	expectedEventName    = "plugin.example.hello-runtime-host.ping"
 )
 
 // capturingPublisher implements pluginhost.EventPublisher and buffers envelopes
@@ -103,8 +102,7 @@ func TestPluginPublishEvent_FlowsToHub(t *testing.T) {
 func buildExamplePlugin(t *testing.T) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "hello-runtime-host")
-	cmd := exec.Command("go", "build", "-o", out, ".")
-	cmd.Dir = examplePluginDir
+	cmd := exec.Command("go", "build", "-o", out, examplePluginPackage)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build example plugin: %v\n%s", err, b)
 	}

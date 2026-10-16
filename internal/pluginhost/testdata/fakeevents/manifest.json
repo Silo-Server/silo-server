@@ -1,0 +1,21 @@
+{
+  "plugin_id": "silo.test.events",
+  "version": "0.1.0",
+  "checksum": "__CHECKSUM__",
+  "silo_api_version": "v1",
+  "supported_platforms": [
+    {"os": "linux", "arch": "amd64"},
+    {"os": "linux", "arch": "arm64"},
+    {"os": "darwin", "arch": "amd64"},
+    {"os": "darwin", "arch": "arm64"}
+  ],
+  "capabilities": [
+    {
+      "type": "event_consumer.v1",
+      "id": "watcher",
+      "display_name": "Event Fixture",
+      "description": "Test fixture that accepts every event it subscribes to.",
+      "subscriptions": ["plugin.silo.test.source.ping"]
+    }
+  ]
+}
