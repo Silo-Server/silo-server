@@ -413,8 +413,9 @@ Caching and refresh:
   and episode images): the scanner reached that file through the same link.
   That folder is opened as an `os.Root`, that file must be the same file
   reached through it, and the image is read through it. Anything else
-  stays the outside-roots failure, except that an I/O error while checking is
-  a read failure retried as usual. The admin image picker reads sidecars the
+  stays the outside-roots failure, except that an I/O error while checking,
+  or a check that tried as many cataloged files as it lists (32) without a
+  match, is a read failure retried as usual. The admin image picker reads sidecars the
   same way. When
   the re-check or the read fails, the processor probes, through
   `internal/rootcheck`, the nearest folder that exists at or above the file's
