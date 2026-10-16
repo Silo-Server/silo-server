@@ -318,7 +318,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		return nil, 0, err
 	}
 
-	pending := make(map[string]pendingDelivery, len(candidates))
+	pending := make(map[profileKey]pendingDelivery, len(candidates))
 	toInsert := make([]Delivery, 0, len(candidates))
 	for _, candidate := range candidates {
 		flags, eligible := EvaluateRecipient(candidate, prefs[candidate.ProfileID], event.EpisodeKey)
@@ -344,7 +344,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 			Type:           DeliveryTypeEpisodeAvailable,
 			ReasonFlags:    flagsJSON,
 		}
-		pending[candidate.ProfileID] = pendingDelivery{delivery: delivery, flags: flags}
+		pending[profileKey{candidate.UserID, candidate.ProfileID}] = pendingDelivery{delivery: delivery, flags: flags}
 		toInsert = append(toInsert, delivery)
 	}
 	if len(toInsert) == 0 {
@@ -382,7 +382,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	}
 	dispatchRows := make([]DeliveryRow, 0, len(inserted))
 	for _, row := range inserted {
-		entry, ok := pending[row.ProfileID]
+		entry, ok := pending[profileKey{row.UserID, row.ProfileID}]
 		if !ok {
 			continue
 		}
@@ -480,7 +480,7 @@ func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inse
 // inserted delivery, inside the fanout transaction. Two filters apply:
 // per-webhook reason flags, and the per-profile delivery rate limit
 // (over-limit notifications stay in the inbox; webhooks just don't fire).
-func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[string]pendingDelivery) error {
+func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
 	if w.webhooks == nil || len(inserted) == 0 || !w.settings.WebhooksEnabled(ctx) {
 		return nil
 	}
@@ -493,11 +493,11 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 	attempts := make([]DeliveryAttempt, 0, len(inserted))
 	rateLimited := 0
 	for _, row := range inserted {
-		entry, ok := pending[row.ProfileID]
+		key := profileKey{row.UserID, row.ProfileID}
+		entry, ok := pending[key]
 		if !ok {
 			continue
 		}
-		key := profileKey{row.UserID, row.ProfileID}
 		for _, hook := range hooksByProfile[key] {
 			if !hook.MatchesReasons(entry.flags) {
 				continue
