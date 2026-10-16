@@ -427,9 +427,13 @@ func deleteTree(ctx context.Context, dir *os.Root, name string, n *int) error {
 	return nil
 }
 
+// deleteBatch is how many directory entries deleteChildren reads at a time.
+var deleteBatch = 256
+
 // deleteChildren empties the directory name, which Lstat reported as want.
 // OpenRoot follows a symlink, so the opened directory must be the same file
-// Lstat saw; otherwise name was replaced after Lstat and is left alone.
+// Lstat saw, and name must still be that directory rather than a symlink to
+// it; otherwise name was replaced after Lstat and is left alone.
 func deleteChildren(ctx context.Context, parent *os.Root, name string, want fs.FileInfo, n *int) error {
 	sub, err := parent.OpenRoot(name)
 	if os.IsNotExist(err) {
@@ -446,24 +450,58 @@ func deleteChildren(ctx context.Context, parent *os.Root, name string, want fs.F
 	if !os.SameFile(want, got) {
 		return fmt.Errorf("blobstore: %s changed during delete", name)
 	}
-	entries, err := fs.ReadDir(sub.FS(), ".")
-	if err != nil {
-		return err
+	// A directory renamed elsewhere and replaced by a symlink to it passes
+	// the check above, so look at name itself again now that it is open.
+	now, err := parent.Lstat(name)
+	if err != nil || now.Mode()&fs.ModeSymlink != 0 || !os.SameFile(want, now) {
+		return fmt.Errorf("blobstore: %s changed during delete", name)
 	}
+	// Read the entries in batches, so a huge directory is not listed in full
+	// before ctx is checked again. As os.RemoveAll does, reopen the directory
+	// after each batch, because removing entries can make a continued read
+	// skip some, and read on past a batch in which nothing could be removed.
+	//
 	// Like RemoveAll, keep going past an entry that cannot be removed so it
 	// does not strand its siblings, and report the first error at the end.
 	// Cancellation still stops the walk at once.
 	var first error
-	for _, e := range entries {
-		err = deleteTree(ctx, sub, e.Name(), n)
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	for {
+		d, err := sub.Open(".")
+		if err != nil {
 			return err
 		}
-		if first == nil {
-			first = err
+		var read int
+		for {
+			entries, err := d.ReadDir(deleteBatch)
+			if err != nil && !errors.Is(err, io.EOF) {
+				_ = d.Close()
+				return err
+			}
+			read = len(entries)
+			sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+			failed := 0
+			for _, e := range entries {
+				err = deleteTree(ctx, sub, e.Name(), n)
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					_ = d.Close()
+					return err
+				}
+				if err != nil {
+					failed++
+					if first == nil {
+						first = err
+					}
+				}
+			}
+			if read < deleteBatch || failed < read {
+				break
+			}
+		}
+		_ = d.Close()
+		if read < deleteBatch {
+			return first
 		}
 	}
-	return first
 }
 func (f *Filesystem) List(ctx context.Context, prefix, cursor string, limit int) ([]ObjectInfo, string, error) {
 	if prefix != "" {
