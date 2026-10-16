@@ -437,3 +437,7 @@
 # Server collections show a restricted viewer only the members it can open, and
 # leave out a collection whose members it can open none of (#2828).
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
+
+# Local artwork in a title folder linked out of the library is vouched for by
+# present catalogued files of the same title under that folder.
+./internal/catalog TestCataloguedFilesUnderListsPresentFilesOfTheTitleDB
