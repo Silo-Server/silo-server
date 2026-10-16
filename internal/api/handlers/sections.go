@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -1029,7 +1030,7 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		for _, config := range refreshConfigsByKey {
 			config := config
 			go func() {
-				refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+				refreshCtx, cancel := context.WithTimeout(queryattr.Detach(context.WithoutCancel(ctx)), 2*time.Minute)
 				defer cancel()
 				h.TrendingRefresher.RefreshConfig(refreshCtx, config)
 			}()

@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -791,7 +792,7 @@ func (s *MetadataService) maybeAutoTranslate(ctx context.Context, folderID int, 
 	if strings.EqualFold(strings.TrimSpace(item.DefaultMetadataLanguage), library) {
 		return
 	}
-	go s.autoTranslator.AutoEnqueue(context.WithoutCancel(ctx), contentID, library)
+	go s.autoTranslator.AutoEnqueue(queryattr.Detach(context.WithoutCancel(ctx)), contentID, library)
 }
 
 // adoptableFolderLanguage reports whether a folder-scoped refresh should
