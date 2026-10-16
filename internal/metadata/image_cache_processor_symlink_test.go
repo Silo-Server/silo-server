@@ -280,3 +280,59 @@ func TestLocalFileIOErrorSeparatesStorageFailuresFromPathAnswers(t *testing.T) {
 		t.Fatalf("escape refusal %v must not count as a storage failure", err)
 	}
 }
+
+// A cataloged video that is itself a link to another file inside the title
+// folder, absolute or relative, still vouches for the folder; the link is
+// read, not followed, so a target outside it is never touched.
+func TestProcessLocalImageAcceptsCatalogedVideoLinkedInsideTheFolder(t *testing.T) {
+	for _, absolute := range []bool{true, false} {
+		t.Run(fmt.Sprintf("absolute=%v", absolute), func(t *testing.T) {
+			library, title := symlinkedTitle(t, map[string]string{
+				"payload/Example (2020).mkv": "video",
+				"poster.jpg":                 "poster-bytes",
+			})
+			store, err := filepath.EvalSymlinks(title)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join("payload", "Example (2020).mkv")
+			if absolute {
+				target = filepath.Join(store, target)
+			}
+			if err := os.Symlink(target, filepath.Join(store, "Example (2020).mkv")); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			job := localArtworkJob("file://" + filepath.Join(title, "poster.jpg"))
+			resolver := &catalogedRootResolver{roots: []string{library}, files: []string{filepath.Join(title, "Example (2020).mkv")}}
+			jobs, cacher := runLocalJob(t, job, resolver)
+			if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "poster-bytes" {
+				t.Fatalf("cached %d images (failed text %q), want the poster", len(cacher.byteReqs), jobs.failedText)
+			}
+		})
+	}
+}
+
+// Links that loop inside the folder end the check instead of spinning.
+func TestPathInsideFolderStopsOnALinkLoop(t *testing.T) {
+	dir := t.TempDir()
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("b", filepath.Join(resolvedDir, "a")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink("a", filepath.Join(resolvedDir, "b")); err != nil {
+		t.Fatal(err)
+	}
+	if _, inFolder, err := pathInsideFolder(resolvedDir, "a"); inFolder || err != nil {
+		t.Fatalf("loop resolved inFolder=%v err=%v, want neither", inFolder, err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(resolvedDir, "out")); err != nil {
+		t.Fatal(err)
+	}
+	if _, inFolder, err := pathInsideFolder(resolvedDir, filepath.Join("out", "video.mkv")); inFolder || err != nil {
+		t.Fatalf("link out resolved inFolder=%v err=%v, want neither", inFolder, err)
+	}
+}

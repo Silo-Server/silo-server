@@ -1318,9 +1318,13 @@ func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImag
 		if err != nil || !filepath.IsLocal(rel) {
 			continue
 		}
-		// Look through the opened folder first. os.Root won't follow a link
-		// out of it, so a cataloged file behind one is no proof, and the
-		// link's target, which may be a stalled mount, is never touched.
+		// A cataloged file behind a link out of the folder is no proof, and
+		// the link's target, which may be a stalled mount, is never touched.
+		rel, inFolder, err := pathInsideFolder(resolvedDir, rel)
+		if !inFolder {
+			noteIOErr(err)
+			continue
+		}
 		inside, err := root.Stat(rel)
 		if err != nil {
 			noteIOErr(err)
@@ -1338,6 +1342,60 @@ func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImag
 		return data, true, err
 	}
 	return nil, false, ioErr
+}
+
+// maxFolderLinks bounds how many symlinks pathInsideFolder follows, so a
+// loop ends.
+const maxFolderLinks = 40
+
+// pathInsideFolder resolves rel, a path under the folder at resolvedDir (a
+// path with no symlinks), one component at a time without leaving the folder.
+// A symlink is read, not followed: its target, absolute or relative, must lie
+// inside the folder, and resolution carries on from there. It returns the
+// link-free path relative to resolvedDir, or inFolder false when a link leads
+// out of the folder, a component is missing, or links loop; err is a failure
+// met on the way. Only paths inside the folder are ever looked at.
+func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, err error) {
+	sep := string(filepath.Separator)
+	pending := strings.Split(filepath.Clean(rel), sep)
+	links := 0
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		if part == "" || part == "." {
+			continue
+		}
+		next := filepath.Join(resolved, part)
+		if !filepath.IsLocal(next) {
+			return "", false, nil
+		}
+		full := filepath.Join(resolvedDir, next)
+		info, err := os.Lstat(full)
+		if err != nil {
+			return "", false, err
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			resolved = next
+			continue
+		}
+		if links++; links > maxFolderLinks {
+			return "", false, nil
+		}
+		target, err := os.Readlink(full)
+		if err != nil {
+			return "", false, err
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(resolvedDir, resolved, target)
+		}
+		targetRel, err := filepath.Rel(resolvedDir, filepath.Clean(target))
+		if err != nil || (targetRel != "." && !filepath.IsLocal(targetRel)) {
+			return "", false, nil
+		}
+		resolved = ""
+		pending = append(strings.Split(targetRel, sep), pending...)
+	}
+	return resolved, resolved != "", nil
 }
 
 // openedLibraryRoot is a library root opened before the image path is
