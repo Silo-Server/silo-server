@@ -7,11 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/notifications"
-	"github.com/go-chi/chi/v5"
 )
 
 const (
@@ -65,8 +66,6 @@ type notificationSyncResponse struct {
 	NextCursor    string                             `json:"next_cursor,omitempty"`
 	UnreadCount   int                                `json:"unread_count"`
 }
-
-type notificationApplePushDisplayResponse = notifications.NotificationDisplay
 
 type unreadCountResponse struct {
 	Count int `json:"count"`
@@ -195,7 +194,7 @@ func (h *NotificationsHandler) HandleApplePushDisplay(w http.ResponseWriter, r *
 		writeError(w, http.StatusNotFound, "not_found", "Notification not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, notificationApplePushDisplayResponse(notifications.BuildNotificationDisplay(*row)))
+	writeJSON(w, http.StatusOK, notifications.BuildNotificationDisplay(*row))
 }
 
 // HandleUnreadCount handles GET /notifications/unread-count.

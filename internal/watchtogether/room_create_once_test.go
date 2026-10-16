@@ -56,7 +56,7 @@ func TestRoomCreationKeepsMembersAndCurrentReceipt(t *testing.T) {
 		t.Fatal("replay replaced members/readiness or dispatched")
 	}
 	for _, candidate := range repo.inputs {
-		if candidate.ID != base.ID || candidate.HostUserID != base.HostUserID || candidate.HostProfileID != base.HostProfileID || candidate.SelectionMode != input.SelectionMode || candidate.Code == "" || candidate.JoinToken == "" || candidate.Code == "retained" || candidate.Generation != 1 || candidate.CreatedAt != now {
+		if candidate.ID != base.ID || candidate.HostUserID != base.HostUserID || candidate.HostProfileID != base.HostProfileID || candidate.SelectionMode != input.SelectionMode || candidate.Code == "" || candidate.JoinToken == "" || candidate.Code == "retained" || candidate.Generation != 1 || !candidate.CreatedAt.Equal(now) {
 			t.Fatalf("candidate %+v", candidate)
 		}
 	}

@@ -7,15 +7,17 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 	"unicode"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 const ebookCoverTestThumbhash = "thumb"
@@ -2023,10 +2025,9 @@ func buildTestMOBI(t *testing.T) string {
 	recs = append(recs, exthRec(100, "A H Lee")...)          // author
 	recs = append(recs, exthRec(503, "The Sea: A Novel")...) // updated title
 	recs = append(recs, exthRec(104, "9780306406157")...)    // ISBN
-	exth := make([]byte, 12)
-	copy(exth[0:4], "EXTH")
-	binary.BigEndian.PutUint32(exth[4:8], uint32(12+len(recs)))
-	binary.BigEndian.PutUint32(exth[8:12], 3)
+	exth := []byte("EXTH")
+	exth = binary.BigEndian.AppendUint32(exth, uint32(12+len(recs))) // block length
+	exth = binary.BigEndian.AppendUint32(exth, 3)                    // record count
 	exth = append(exth, recs...)
 
 	const mobiHeaderLen = 232
@@ -2055,7 +2056,7 @@ func buildTestMOBI(t *testing.T) string {
 	binary.BigEndian.PutUint32(pdb[78:82], rec0Off) // record 0 offset
 
 	path := filepath.Join(t.TempDir(), "book.mobi")
-	if err := os.WriteFile(path, append(pdb, rec0...), 0o644); err != nil {
+	if err := os.WriteFile(path, slices.Concat(pdb, rec0), 0o644); err != nil {
 		t.Fatalf("write test mobi: %v", err)
 	}
 	return path

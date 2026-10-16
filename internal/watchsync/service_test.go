@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -843,7 +844,7 @@ func (r *serviceFakeRepo) CompleteConfirmedScrobbleStop(_ context.Context, playb
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
 	key := playbackSessionID + "|" + connectionID
-	if r.confirmingScrobbles[key] != claimVersion {
+	if !r.confirmingScrobbles[key].Equal(claimVersion) {
 		return errConfirmedStopClaimLost
 	}
 	delete(r.confirmingScrobbles, key)
@@ -868,7 +869,7 @@ func (r *serviceFakeRepo) FailConfirmedScrobbleStop(_ context.Context, playbackS
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
 	key := playbackSessionID + "|" + connectionID
-	if r.confirmingScrobbles[key] != claimVersion {
+	if !r.confirmingScrobbles[key].Equal(claimVersion) {
 		return errConfirmedStopClaimLost
 	}
 	delete(r.confirmingScrobbles, key)

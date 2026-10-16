@@ -377,12 +377,10 @@ func (r *LibraryCollectionRepository) ListAll(ctx context.Context, libraryID *in
 		args       []any
 		scopeJoin  string
 	)
-	argIdx := 1
 	if libraryID != nil {
-		scopeJoin = fmt.Sprintf(`JOIN library_collection_libraries scope_lcl
-			ON scope_lcl.collection_id = lc.id AND scope_lcl.library_id = $%d`, argIdx)
+		scopeJoin = `JOIN library_collection_libraries scope_lcl
+			ON scope_lcl.collection_id = lc.id AND scope_lcl.library_id = $1`
 		args = append(args, *libraryID)
-		argIdx++
 	} else {
 		scopeJoin = libraryCollectionScopeFallbackJoin
 	}

@@ -41,7 +41,7 @@ func TestSuggestionCreationBroadcastOnlyOnInsertion(t *testing.T) {
 				t.Fatalf("first: %v", err)
 			}
 			id, err := s.CreateSuggestionWithIdentity(t.Context(), "room-1", "request", 7, "host", input)
-			if err != nil || id != "request" || store.calls != 2 || store.lists != 1 || store.input.CreatedAt != now || store.input.SuggesterUserID != 7 || store.input.SuggesterProfileID != "host" {
+			if err != nil || id != "request" || store.calls != 2 || store.lists != 1 || !store.input.CreatedAt.Equal(now) || store.input.SuggesterUserID != 7 || store.input.SuggesterProfileID != "host" {
 				t.Fatalf("retry %s %v %+v", id, err, store)
 			}
 			want := 1
