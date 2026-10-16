@@ -21,15 +21,19 @@ func TestArtworkReadinessSurvivesRequestCancellation(t *testing.T) {
 	h := NewReadyHandler(nil, nil, artworkProbeFunc(func(ctx context.Context) error {
 		calls++
 		if ctx.Err() != nil {
-			t.Fatalf("probe inherited canceled request: %v", ctx.Err())
+			t.Errorf("probe inherited canceled request: %v", ctx.Err())
+			return ctx.Err()
 		}
 		deadline, ok := ctx.Deadline()
 		if !ok || time.Until(deadline) > 5*time.Second {
-			t.Fatal("shared probe must have a bounded lifetime")
+			t.Error("shared probe must have a bounded lifetime")
 		}
 		return nil
 	}))
-	if !h.checkArtwork(ctx) || !h.checkArtwork(t.Context()) || calls != 1 {
+	// A canceled caller may stop waiting, but must not cancel or poison the
+	// shared probe that the next caller uses.
+	h.checkArtwork(ctx)
+	if !h.checkArtwork(t.Context()) || calls != 1 {
 		t.Fatalf("healthy probe was not cached: calls=%d healthy=%v", calls, h.artworkOK)
 	}
 }
