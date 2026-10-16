@@ -111,6 +111,25 @@ func TestEmbyProviderParseWebhookMultipart(t *testing.T) {
 	}
 }
 
+// NextPart reports a body that stops before its closing boundary with a
+// wrapped io.EOF, so a truncated delivery must not decode the part it read
+// as if the body were complete.
+func TestDecodeEmbyMultipartRejectsMissingClosingBoundary(t *testing.T) {
+	t.Parallel()
+
+	const part = "--B\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\n{\"Event\":\"playback.stop\"}\r\n"
+	var payload embyWebhookPayload
+	if err := decodeEmbyMultipart([]byte(part+"--B--\r\n"), "B", &payload); err != nil {
+		t.Fatalf("complete body: %v", err)
+	}
+	if payload.Event != "playback.stop" {
+		t.Fatalf("complete body Event = %q, want playback.stop", payload.Event)
+	}
+	if err := decodeEmbyMultipart([]byte(part+"--B"), "B", &embyWebhookPayload{}); err == nil {
+		t.Fatal("truncated body decoded; want an error")
+	}
+}
+
 func TestEmbyProviderParseWebhookMarkUnplayed(t *testing.T) {
 	t.Parallel()
 

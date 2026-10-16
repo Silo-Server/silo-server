@@ -43,7 +43,7 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 		if err == nil {
 			return r.enrichExisting(ctx, existingID, p)
 		}
-		if err != pgx.ErrNoRows {
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return 0, fmt.Errorf("lookup by tmdb_id: %w", err)
 		}
 	}
@@ -53,7 +53,7 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 		if err == nil {
 			return r.enrichExisting(ctx, existingID, p)
 		}
-		if err != pgx.ErrNoRows {
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return 0, fmt.Errorf("lookup by imdb_id: %w", err)
 		}
 	}
