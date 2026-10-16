@@ -55,16 +55,6 @@
       "count": 1
     }
   },
-  "src/components/onboarding/OnboardingGate.tsx": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
-  "src/components/onboarding/TourHost.tsx": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
   "src/components/subtitles/SubtitleUploadForm.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 2
@@ -90,11 +80,6 @@
       "count": 2
     }
   },
-  "src/hooks/queries/admin/settings.ts": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
   "src/hooks/queries/catalog.ts": {
     "react-hooks/exhaustive-deps": {
       "count": 1
@@ -105,11 +90,6 @@
   },
   "src/hooks/queries/notInterested.test.tsx": {
     "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/hooks/queries/onboarding.ts": {
-    "eslint-comments/require-description": {
       "count": 1
     }
   },
@@ -133,11 +113,6 @@
       "count": 1
     }
   },
-  "src/lib/homeRows/rowLinks.ts": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
   "src/pages/AdminCollections.tsx": {
     "no-restricted-syntax": {
       "count": 1
@@ -145,11 +120,6 @@
   },
   "src/pages/AdminLibraries.tsx": {
     "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
-  "src/pages/AdminRecommendations.tsx": {
-    "eslint-comments/require-description": {
       "count": 1
     }
   },
@@ -163,34 +133,9 @@
       "count": 1
     }
   },
-  "src/pages/Home.tsx": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
-  "src/pages/LibraryPage.tsx": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
   "src/pages/LibraryRecommended.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 2
-    }
-  },
-  "src/pages/admin-settings/RequestServers.tsx": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
-  "src/pages/admin-settings/useStagedDraft.ts": {
-    "eslint-comments/require-description": {
-      "count": 2
-    }
-  },
-  "src/pages/admin-users/detail/preferences/ProfileHomeSections.tsx": {
-    "eslint-comments/require-description": {
-      "count": 1
     }
   },
   "src/pages/audiobooks/player/AudiobookPlayer.tsx": {
@@ -218,11 +163,6 @@
       "count": 1
     }
   },
-  "src/pages/settings/LibrarySettings.tsx": {
-    "eslint-comments/require-description": {
-      "count": 2
-    }
-  },
   "src/pages/setup-wizard/steps/SubtitlesStep.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -233,11 +173,6 @@
       "count": 1
     },
     "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/pages/watchtogether/hooks/useActivityFeed.ts": {
-    "eslint-comments/require-description": {
       "count": 1
     }
   },
@@ -253,11 +188,6 @@
   },
   "src/pages/watchtogether/room/picker/SeriesDrilldown.tsx": {
     "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/pages/watchtogether/room/picker/usePickerData.ts": {
-    "eslint-comments/require-description": {
       "count": 1
     }
   },
@@ -302,25 +232,7 @@
       "count": 3
     }
   },
-  "src/player/hooks/useASSSubtitles.ts": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
-  "src/player/hooks/useBrowserEngine.ts": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
-  "src/player/hooks/useIntroSkipPrompt.ts": {
-    "eslint-comments/require-description": {
-      "count": 1
-    }
-  },
   "src/player/hooks/useNextEpisode.ts": {
-    "eslint-comments/require-description": {
-      "count": 1
-    },
     "react-hooks/set-state-in-effect": {
       "count": 1
     }
@@ -328,11 +240,6 @@
   "src/player/hooks/usePGSSubtitles.ts": {
     "react-hooks/refs": {
       "count": 4
-    }
-  },
-  "src/player/hooks/useSubtitleTracks.ts": {
-    "eslint-comments/require-description": {
-      "count": 1
     }
   },
   "src/player/hooks/useWatchProgress.ts": {

@@ -476,7 +476,7 @@ export default function AdminRecommendations() {
       }
       return merged;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds only keys missing from localValues; depending on it would rerun on every edit
   }, [settings, sensitiveData]);
 
   function handleLocalChange(key: string, value: string) {

@@ -398,7 +398,7 @@ export function useASSSubtitles(
     };
     // videoRef is a stable ref object. streamOriginSeconds is read from
     // streamOriginRef inside the async function to always get the latest value.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- videoRef and streamOriginRef are refs
   }, [activeUrl, activeLanguage, activeFontBundleUrl, isDetached, rebuild, transportRevision]);
 
   // A retime of the track on screen (subtitle sync, a timing reset) loads the
