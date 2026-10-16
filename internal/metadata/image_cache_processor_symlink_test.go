@@ -3,9 +3,12 @@ package metadata
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -211,5 +214,69 @@ func TestProcessLocalImageRefusesCatalogedFileLinkedOutOfTheFolder(t *testing.T)
 	jobs, cacher := runLocalJob(t, job, resolver)
 	if len(cacher.byteReqs) != 0 || !strings.Contains(jobs.failedText, "local image path outside library roots") {
 		t.Fatalf("cached %d images, failed text %q; want the outside-roots refusal", len(cacher.byteReqs), jobs.failedText)
+	}
+}
+
+// An absolute link inside the title folder that stays in it doesn't stop the
+// read: the path through the opened folder comes from resolved paths, as
+// os.Root won't follow an absolute link.
+func TestProcessLocalImageFollowsAbsoluteLinkInsideTheTitleFolder(t *testing.T) {
+	library, title := symlinkedTitle(t, map[string]string{
+		"Example (2020).mkv": "video",
+		"art/fanart1.jpg":    "fanart-bytes",
+	})
+	store, err := filepath.EvalSymlinks(title)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(store, "art"), filepath.Join(store, "extrafanart")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	job := localArtworkJob("file://" + filepath.Join(title, "extrafanart", "fanart1.jpg"))
+	resolver := &catalogedRootResolver{roots: []string{library}, files: []string{filepath.Join(title, "Example (2020).mkv")}}
+	jobs, cacher := runLocalJob(t, job, resolver)
+	if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "fanart-bytes" {
+		t.Fatalf("cached %d images (failed text %q), want the fanart", len(cacher.byteReqs), jobs.failedText)
+	}
+}
+
+// When every cataloged file tried fails the check and more were listed than
+// were tried, the job is retried as usual rather than parked as refused.
+func TestProcessLocalImageRetriesWhenTheCatalogedCheckIsIncomplete(t *testing.T) {
+	library, title := symlinkedTitle(t, map[string]string{"poster.jpg": "poster-bytes"})
+	files := make([]string, catalogedFileCheckLimit)
+	for i := range files {
+		files[i] = filepath.Join(title, fmt.Sprintf("gone-%02d.mkv", i))
+	}
+	job := localArtworkJob("file://" + filepath.Join(title, "poster.jpg"))
+	jobs, cacher := runLocalJob(t, job, &catalogedRootResolver{roots: []string{library}, files: files})
+	if len(cacher.byteReqs) != 0 || !strings.Contains(jobs.failedText, "local image read failed") {
+		t.Fatalf("cached %d images, failed text %q; want a read failure", len(cacher.byteReqs), jobs.failedText)
+	}
+	if isStableProviderImageFailure(jobs.failedText) {
+		t.Fatalf("an incomplete check %q must retry as usual, not park", jobs.failedText)
+	}
+}
+
+// Storage failures keep a job retrying; a missing or forbidden path, or one an
+// opened folder refuses to follow out of it, is an answer about the path.
+func TestLocalFileIOErrorSeparatesStorageFailuresFromPathAnswers(t *testing.T) {
+	if !localFileIOError(&fs.PathError{Op: "stat", Path: "x", Err: syscall.EIO}) {
+		t.Fatal("EIO is a storage failure")
+	}
+	if localFileIOError(&fs.PathError{Op: "stat", Path: "x", Err: syscall.ENOENT}) || localFileIOError(&fs.PathError{Op: "stat", Path: "x", Err: syscall.EACCES}) {
+		t.Fatal("a missing or forbidden path is not a storage failure")
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "out")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	if _, err := root.Stat("out"); err == nil || localFileIOError(err) {
+		t.Fatalf("escape refusal %v must not count as a storage failure", err)
 	}
 }

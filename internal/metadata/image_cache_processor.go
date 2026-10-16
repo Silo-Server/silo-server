@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -1184,8 +1185,8 @@ type catalogedFileLister interface {
 }
 
 // catalogedFileCheckLimit bounds how many cataloged files are tried as
-// proof for one folder.
-const catalogedFileCheckLimit = 8
+// proof for one folder. Usually the first one is enough.
+const catalogedFileCheckLimit = 32
 
 // readLocalImageOfTitle reads a local image of contentID under roots with
 // readConfinedLocalImage. When the image's folder leads out of the roots
@@ -1262,53 +1263,84 @@ func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, co
 		if len(files) == 0 {
 			continue
 		}
-		data, trusted, err := readLocalImageBesideCatalogedFile(localPath, dir, files)
+		data, trusted, err := readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir, files)
 		if trusted {
 			return data, err
 		}
 		noteIOErr(err)
+		if len(files) == catalogedFileCheckLimit {
+			// More files may be listed than were tried; one of them could
+			// still vouch for the folder, so this is no proof it can't.
+			noteIOErr(errCatalogedCheckIncomplete)
+		}
 	}
 	return nil, untrusted()
 }
 
-// readLocalImageBesideCatalogedFile opens dir as a root and reads localPath
-// through it when one of files, cataloged paths under dir, is the same file
-// inside that root as at its cataloged path. trusted reports whether one was;
-// when none was, err is a failure to open dir or to stat a cataloged path.
-func readLocalImageBesideCatalogedFile(localPath, dir string, files []string) (data []byte, trusted bool, err error) {
+// errCatalogedCheckIncomplete reports that every cataloged file tried for a
+// folder failed the check while more were listed than were tried.
+var errCatalogedCheckIncomplete = fmt.Errorf("checked the first %d cataloged files without a match", catalogedFileCheckLimit)
+
+// localFileIOError reports whether err is the operating system failing a
+// call on storage, such as a share that stopped answering, rather than a path
+// that is missing, forbidden, or refused for leaving an opened folder.
+func localFileIOError(err error) bool {
+	var errno syscall.Errno
+	return errors.As(err, &errno) && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrPermission)
+}
+
+// readLocalImageBesideCatalogedFile opens dir, which resolves to
+// resolvedDir, as a root and reads localPath through it when one of files,
+// cataloged paths under dir, physically sits in that folder and is the same
+// file inside the root as at its cataloged path. Paths inside the root are
+// taken from resolved paths, as readConfinedLocalImage does, so a link inside
+// the folder that stays in it, absolute or not, doesn't stop the read. trusted
+// reports whether a file vouched for the folder; when none did, err is a
+// storage failure met while checking.
+func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir string, files []string) (data []byte, trusted bool, err error) {
+	imageRel, err := filepath.Rel(resolvedDir, filepath.Join(resolvedImageDir, filepath.Base(localPath)))
+	if err != nil || !filepath.IsLocal(imageRel) {
+		return nil, false, nil
+	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, false, err
 	}
 	defer func() { _ = root.Close() }()
-	var statErr error
+	var ioErr error
+	noteIOErr := func(err error) {
+		if localFileIOError(err) {
+			ioErr = cmp.Or(ioErr, err)
+		}
+	}
 	for _, file := range files {
-		rel, err := filepath.Rel(dir, file)
+		resolvedFile, err := filepath.EvalSymlinks(file)
+		if err != nil {
+			noteIOErr(err)
+			continue
+		}
+		// A cataloged file behind another link out of the folder is no proof.
+		rel, err := filepath.Rel(resolvedDir, resolvedFile)
 		if err != nil || !filepath.IsLocal(rel) {
 			continue
 		}
-		// os.Root refuses a path that leaves the opened folder, so a
-		// cataloged file behind another link out of it is no proof.
 		inside, err := root.Stat(rel)
 		if err != nil {
+			noteIOErr(err)
 			continue
 		}
 		cataloged, err := os.Stat(file)
 		if err != nil {
-			statErr = cmp.Or(statErr, err)
+			noteIOErr(err)
 			continue
 		}
 		if !os.SameFile(inside, cataloged) {
 			continue
 		}
-		imageRel, err := filepath.Rel(dir, localPath)
-		if err != nil || !filepath.IsLocal(imageRel) {
-			return nil, false, nil
-		}
 		data, err := readLocalImageFile(localPath, root, imageRel)
 		return data, true, err
 	}
-	return nil, false, statErr
+	return nil, false, ioErr
 }
 
 // openedLibraryRoot is a library root opened before the image path is
