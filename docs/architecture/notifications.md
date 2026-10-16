@@ -110,9 +110,14 @@ release event's episode key:
   table keyed by account, profile, and series, because interest rows are
   recomputed per library and pruned once their reasons go, and a mute lasts
   until the profile unmutes. The account is part of the key because profile
-  IDs, such as the legacy `default`, repeat across accounts. A muted profile's notification cursor does not move, and
-  unmuting does not announce the episodes that arrived meanwhile, since their
-  release events are already processed. A mute follows its series through a
+  IDs, such as the legacy `default`, repeat across accounts. A muted
+  profile's notification cursor does not move. The mute is read when fanout
+  evaluates a release, not when the episode arrives: unmuting does not
+  announce episodes fanout already evaluated during the mute, since their
+  release events are processed, but an event still inside the settle delay at
+  unmute is fanned out to the profile. No suppression state is kept per
+  release; the window is the settle delay plus one claim pass, and it applies
+  symmetrically to a mute made just after a release. A mute follows its series through a
   catalog merge or split like other per-profile series state, and profile
   deletion removes it.
 - Profile-level notification preferences are a hard gate: a reason disabled

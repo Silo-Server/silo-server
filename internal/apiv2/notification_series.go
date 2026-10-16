@@ -179,7 +179,7 @@ func registerNotificationSeries(reg *Registry) {
 	unmute := notificationOperation(http.MethodDelete, "/series/{series_id}/mute", opUnmuteNotificationSeries)
 	unmute.DefaultStatus = http.StatusNoContent
 	unmute.Summary = "Unmute new-episode notifications for one series."
-	unmute.Description = "The series notifies the acting profile again for its active reasons, from the next new episode on; episodes that arrived while it was muted are not announced. Unmuting a series that is not muted succeeds and changes nothing. No access check runs, so a profile can lift a mute on a series it can no longer see."
+	unmute.Description = "The series notifies the acting profile again for its active reasons. The mute applies when notification delivery evaluates a new episode, normally within a minute of it arriving: an episode evaluated while the series was muted is not announced later, and one still waiting to be evaluated when the profile unmutes is announced. Unmuting a series that is not muted succeeds and changes nothing. No access check runs, so a profile can lift a mute on a series it can no longer see."
 	Register(reg, unmute, reg.unmuteNotificationSeries)
 }
 

@@ -24,8 +24,9 @@ func (s *System) MuteSeries(ctx context.Context, userID int, profileID, seriesID
 }
 
 // UnmuteSeries lifts the profile's mute of the series. Unmuting a series that
-// is not muted changes nothing. Episodes that arrived while it was muted stay
-// unannounced.
+// is not muted changes nothing. Fanout reads the mute when it evaluates a
+// release, so an episode it evaluated while the series was muted stays
+// unannounced, and one still waiting for fanout at unmute is announced.
 func (s *System) UnmuteSeries(ctx context.Context, userID int, profileID, seriesID string) error {
 	return s.Interests.unmuteSeries(ctx, userID, profileID, seriesID)
 }

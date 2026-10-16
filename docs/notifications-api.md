@@ -101,9 +101,12 @@ Muting a series already muted succeeds and changes nothing. An ID that names no
 series, or a series the viewer may not see, is 404.
 
 `DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
-The series notifies again for its active reasons from the next new episode;
-episodes that arrived while it was muted are not announced afterwards.
-Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
+The series notifies again for its active reasons. Fanout reads the mute when it
+evaluates a new episode, after the release settle delay (30 seconds by
+default): an episode it evaluated while the series was muted is not announced
+later, and one still waiting for fanout when the profile unmutes is announced.
+The same holds the other way: a mute made just after an episode arrives can
+still stop its notification. Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
 profile can lift a mute on a series it can no longer open.
 
 Notifications already delivered stay in the inbox, and a delivery fanout
