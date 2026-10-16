@@ -132,16 +132,19 @@ func (r *WebPushRepository) ListByProfile(ctx context.Context, profileID string)
 	return scanWebPushSubscriptions(rows)
 }
 
-// ListEnabledByProfiles loads enabled subscriptions keyed by profile, inside
-// the fanout transaction (outbox enqueue).
-func (r *WebPushRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) (map[string][]WebPushSubscription, error) {
-	out := make(map[string][]WebPushSubscription, len(profileIDs))
-	if len(profileIDs) == 0 {
+// ListEnabledByProfiles loads enabled subscriptions keyed by account and
+// profile (profile IDs repeat across accounts), inside the delivery's
+// transaction (outbox enqueue).
+func (r *WebPushRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx, profiles []profileKey) (map[profileKey][]WebPushSubscription, error) {
+	out := make(map[profileKey][]WebPushSubscription, len(profiles))
+	if len(profiles) == 0 {
 		return out, nil
 	}
+	userIDs, profileIDs := profileKeyArrays(profiles)
 	rows, err := tx.Query(ctx,
-		`SELECT `+webPushColumns+` FROM web_push_subscriptions WHERE profile_id = ANY($1) AND enabled`,
-		profileIDs)
+		`SELECT `+webPushColumns+` FROM web_push_subscriptions
+		WHERE (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])) AND enabled`,
+		userIDs, profileIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled web push subscriptions: %w", err)
 	}
@@ -150,7 +153,8 @@ func (r *WebPushRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx
 		return nil, err
 	}
 	for _, sub := range subs {
-		out[sub.ProfileID] = append(out[sub.ProfileID], sub)
+		key := profileKey{sub.UserID, sub.ProfileID}
+		out[key] = append(out[key], sub)
 	}
 	return out, nil
 }

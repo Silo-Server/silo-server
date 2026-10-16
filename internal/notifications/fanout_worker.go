@@ -412,6 +412,23 @@ type pendingDelivery struct {
 	flags    ReasonFlags
 }
 
+// insertedProfileKeys lists the distinct account/profile pairs of the
+// inserted deliveries. Channel targets are looked up by both: profile IDs
+// repeat across accounts, and one account's delivery must not reach another
+// account's devices or webhooks.
+func insertedProfileKeys(inserted []InsertedDelivery) []profileKey {
+	seen := make(map[profileKey]struct{}, len(inserted))
+	keys := make([]profileKey, 0, len(inserted))
+	for _, row := range inserted {
+		key := profileKey{row.UserID, row.ProfileID}
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
 // enqueuePushOutbox inserts pending push attempt rows for each newly inserted
 // delivery and enabled private-push device on every admin-enabled platform
 // (Apple and Android).
@@ -423,21 +440,13 @@ func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserte
 	if len(platforms) == 0 {
 		return nil
 	}
-	profileSet := make(map[string]struct{}, len(inserted))
-	profileIDs := make([]string, 0, len(inserted))
-	for _, row := range inserted {
-		if _, ok := profileSet[row.ProfileID]; !ok {
-			profileSet[row.ProfileID] = struct{}{}
-			profileIDs = append(profileIDs, row.ProfileID)
-		}
-	}
-	devicesByProfile, err := w.pushDevices.ListEnabledPushByProfiles(ctx, tx, profileIDs, platforms)
+	devicesByProfile, err := w.pushDevices.ListEnabledPushByProfiles(ctx, tx, insertedProfileKeys(inserted), platforms)
 	if err != nil {
 		return err
 	}
 	attempts := make([]PushDeliveryAttempt, 0, len(inserted))
 	for _, row := range inserted {
-		attempts = append(attempts, newPushDeliveryAttempts(row.ID, devicesByProfile[row.ProfileID])...)
+		attempts = append(attempts, newPushDeliveryAttempts(row.ID, devicesByProfile[profileKey{row.UserID, row.ProfileID}])...)
 	}
 	return w.pushDevices.EnqueuePushAttempts(ctx, tx, attempts)
 }
@@ -450,21 +459,13 @@ func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inse
 	if w.webPush == nil || len(inserted) == 0 || !w.settings.WebPushEnabled(ctx) {
 		return nil
 	}
-	profileSet := make(map[string]struct{}, len(inserted))
-	profileIDs := make([]string, 0, len(inserted))
-	for _, row := range inserted {
-		if _, ok := profileSet[row.ProfileID]; !ok {
-			profileSet[row.ProfileID] = struct{}{}
-			profileIDs = append(profileIDs, row.ProfileID)
-		}
-	}
-	subsByProfile, err := w.webPush.ListEnabledByProfiles(ctx, tx, profileIDs)
+	subsByProfile, err := w.webPush.ListEnabledByProfiles(ctx, tx, insertedProfileKeys(inserted))
 	if err != nil {
 		return err
 	}
 	attempts := make([]DeliveryAttempt, 0, len(inserted))
 	for _, row := range inserted {
-		for _, sub := range subsByProfile[row.ProfileID] {
+		for _, sub := range subsByProfile[profileKey{row.UserID, row.ProfileID}] {
 			attempts = append(attempts, DeliveryAttempt{
 				ID:                     ulid.Make().String(),
 				NotificationDeliveryID: row.ID,
@@ -483,15 +484,7 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 	if w.webhooks == nil || len(inserted) == 0 || !w.settings.WebhooksEnabled(ctx) {
 		return nil
 	}
-	profileSet := make(map[string]struct{}, len(inserted))
-	profileIDs := make([]string, 0, len(inserted))
-	for _, row := range inserted {
-		if _, ok := profileSet[row.ProfileID]; !ok {
-			profileSet[row.ProfileID] = struct{}{}
-			profileIDs = append(profileIDs, row.ProfileID)
-		}
-	}
-	hooksByProfile, err := w.webhooks.ListEnabledByProfiles(ctx, tx, profileIDs)
+	hooksByProfile, err := w.webhooks.ListEnabledByProfiles(ctx, tx, insertedProfileKeys(inserted))
 	if err != nil {
 		return err
 	}
@@ -504,11 +497,12 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 		if !ok {
 			continue
 		}
-		for _, hook := range hooksByProfile[row.ProfileID] {
+		key := profileKey{row.UserID, row.ProfileID}
+		for _, hook := range hooksByProfile[key] {
 			if !hook.MatchesReasons(entry.flags) {
 				continue
 			}
-			if w.rateLimiter != nil && !w.rateLimiter.Allow(row.ProfileID, rateLimit) {
+			if w.rateLimiter != nil && !w.rateLimiter.Allow(key, rateLimit) {
 				rateLimited++
 				continue
 			}
