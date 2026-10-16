@@ -24,5 +24,10 @@
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_history_hidden_items_profile;
 
 -- +goose Down
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_history_hidden_items_profile
+-- The rollback only runs after the index was dropped, so an index found here
+-- is the invalid leftover of an interrupted rebuild. Drop it so the rebuild
+-- runs again instead of keeping it.
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_history_hidden_items_profile;
+
+CREATE INDEX CONCURRENTLY idx_user_history_hidden_items_profile
     ON public.user_history_hidden_items (user_id, profile_id, hidden_before DESC);
