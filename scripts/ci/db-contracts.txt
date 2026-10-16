@@ -373,5 +373,5 @@
 ./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB
 
 # Local artwork in a title folder linked out of the library is vouched for by
-# present catalogued files of the same title under that folder.
-./internal/catalog TestCataloguedFilesUnderListsPresentFilesOfTheTitleDB
+# present cataloged files of the same title under that folder.
+./internal/catalog TestCatalogedFilesUnderListsPresentFilesOfTheTitleDB

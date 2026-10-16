@@ -411,8 +411,8 @@ Caching and refresh:
   read only when a folder it physically sits in, below the library root, also
   holds a present `media_files` row of the same title (the series, for season
   and episode images): the scanner reached that file through the same link.
-  That folder is opened as an `os.Root`, the catalogued file must be the same
-  file reached through it, and the image is read through it. Anything else
+  That folder is opened as an `os.Root`, that file must be the same file
+  reached through it, and the image is read through it. Anything else
   stays the outside-roots failure, except that an I/O error while checking is
   a read failure retried as usual. The admin image picker reads sidecars the
   same way. When
