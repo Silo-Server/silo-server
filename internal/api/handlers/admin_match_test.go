@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -419,4 +420,36 @@ func (c *capturingMetadataService) SearchAndNormalize(ctx context.Context, query
 
 func (c *capturingMetadataService) Process(ctx context.Context, req metadata.ProcessRequest) (*metadata.ProcessResult, error) {
 	return c.inner.Process(ctx, req)
+}
+
+// A match can move the item to a new content ID. Cached home rails still list
+// the old ID, so both IDs must reach the other API nodes.
+func TestAdminMatchApply_PublishesOldAndNewContentIDs(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"movie-tmdb-124905": {ContentID: "movie-tmdb-124905", Title: "Godzilla", Year: 2014, Type: "movie"},
+		},
+	}
+	metaSvc := &fakeMatchMetadataService{
+		processResult: &metadata.ProcessResult{ContentID: "movie-tmdb-929", Updated: true},
+	}
+	bus := &recordingEventBus{}
+	h := NewAdminMatchHandler(items, nil, metaSvc)
+	h.EventBus = bus
+
+	if _, err := h.ApplyAdminItemMatch(context.Background(), "movie-tmdb-124905", AdminMatchApplyRequest{
+		ProviderIDs: map[string]string{"tmdb": "929"},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	var got []string
+	for _, event := range bus.events {
+		if event.Type == cache.EventCatalogItemChanged {
+			got = append(got, event.Payload)
+		}
+	}
+	if len(got) != 2 || got[0] != "movie-tmdb-124905" || got[1] != "movie-tmdb-929" {
+		t.Fatalf("catalog item changes = %v, want old then new content ID", got)
+	}
 }

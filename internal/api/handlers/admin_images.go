@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -61,6 +62,7 @@ type AdminImageHandler struct {
 	imageResolver ImageURLResolver
 	detailSvc     *catalog.DetailService
 	EventsHub     *evt.Hub
+	EventBus      cache.EventBus
 }
 
 // NewAdminImageHandler creates a handler for admin image selection endpoints.
@@ -444,6 +446,7 @@ func (h *AdminImageHandler) applyItemImage(ctx context.Context, contentID string
 	if resolved.parentItem.ContentID != contentID {
 		publishEventMetadataUpdate(ctx, h.EventsHub, 0, resolved.parentItem.ContentID)
 	}
+	publishCatalogItemChanged(ctx, h.EventBus, contentID, resolved.parentItem.ContentID)
 
 	imageURL := ""
 	if h.imageResolver != nil {

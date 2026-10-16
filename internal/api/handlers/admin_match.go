@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -39,6 +40,7 @@ type AdminMatchHandler struct {
 	items    MatchItemLookup
 	folders  MatchFolderLookup
 	metadata MatchMetadataService
+	EventBus cache.EventBus
 }
 
 // NewAdminMatchHandler creates a handler for admin match search/apply endpoints.
@@ -220,6 +222,7 @@ func (h *AdminMatchHandler) ApplyAdminItemMatch(ctx context.Context, contentID s
 		slog.ErrorContext(ctx, "admin match: apply failed", "component", "api", "content_id", contentID, "error", err)
 		return AdminMatchApplyResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply match")
 	}
+	publishCatalogItemChanged(ctx, h.EventBus, contentID, result.ContentID)
 
 	return AdminMatchApplyResult{
 		ContentID: result.ContentID,

@@ -1030,8 +1030,11 @@ func main() {
 	// each event reaches plugins once however many nodes receive it.
 	eventBus := cache.NewObservedEventBus(cache.NewEventBus(cfg.Redis))
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
-		if event.Type == cache.EventScanComplete {
+		switch event.Type {
+		case cache.EventScanComplete:
 			sections.InvalidateResolvedListCache()
+		case cache.EventCatalogItemChanged:
+			sections.EvictResolvedListItems(event.Payload)
 		}
 	}); err != nil {
 		slog.Warn("subscribe section cache invalidation failed", "error", err)

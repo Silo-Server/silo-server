@@ -328,3 +328,63 @@ func TestEnqueueLocalizedArtworkRequeuesOnlyWithoutACachedCopy(t *testing.T) {
 		}
 	})
 }
+
+// After an identify the item can be a different title, so its cached artwork
+// of another source must not keep standing in for the new title's artwork.
+// Ordinary refreshes, re-applying the same match and locked artwork keep the
+// cached copy.
+func TestPrepareItemImagesForQueueDropsPreviousTitleArtworkOnIdentify(t *testing.T) {
+	const (
+		oldCached = "tmdb/movies/438631/poster/original.old.webp"
+		oldSource = "tmdb://poster/old.jpg"
+		newSource = "tmdb://poster/new.jpg"
+	)
+	existing := func() *models.MediaItem {
+		return &models.MediaItem{PosterPath: oldCached, PosterSourcePath: oldSource, PosterThumbhash: "old-thumb"}
+	}
+	cases := []struct {
+		name       string
+		chosenPath string
+		identify   bool
+		wantPath   string
+		wantSource string
+	}{
+		{"identify to another title", newSource, true, newSource, newSource},
+		{"refresh with a new provider choice", newSource, false, oldCached, newSource},
+		{"identify to the same title", oldSource, true, oldCached, oldSource},
+		{"identify with locked artwork", oldCached, true, oldCached, oldSource},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := &models.MediaItem{PosterPath: tc.chosenPath}
+			prepareItemImagesForQueue(item, existing(), tc.identify)
+			if item.PosterPath != tc.wantPath || item.PosterSourcePath != tc.wantSource {
+				t.Fatalf("poster path, source = %q, %q; want %q, %q", item.PosterPath, item.PosterSourcePath, tc.wantPath, tc.wantSource)
+			}
+		})
+	}
+}
+
+// An identify in a library whose language is not the item's canonical one
+// writes only the localization row, so that row must not keep serving the
+// previous title's cached artwork either.
+func TestBuildItemLocalizationRecordDropsPreviousTitleArtworkOnIdentify(t *testing.T) {
+	existing := func() *models.MediaItemLocalization {
+		return &models.MediaItemLocalization{
+			ContentID:        "movie-1",
+			Language:         "de",
+			PosterPath:       "tmdb/movies/438631/poster/original.old.webp",
+			PosterSourcePath: "tmdb://poster/old.jpg",
+		}
+	}
+	images := []RemoteImage{{ProviderID: "tmdb", URL: "tmdb://poster/new.jpg", Type: ImagePoster, Language: "de", Rating: 9}}
+
+	loc := buildItemLocalizationRecord(existing(), "movie-1", "de", "movie", &MetadataResult{}, images, MergeReplaceUnlocked, "de", false, true)
+	if loc.PosterPath != "tmdb://poster/new.jpg" || loc.PosterSourcePath != "tmdb://poster/new.jpg" {
+		t.Fatalf("identify localization poster = %q (source %q), want the new provider image", loc.PosterPath, loc.PosterSourcePath)
+	}
+	loc = buildItemLocalizationRecord(existing(), "movie-1", "de", "movie", &MetadataResult{}, images, MergeReplaceUnlocked, "de", false, false)
+	if loc.PosterPath != "tmdb/movies/438631/poster/original.old.webp" {
+		t.Fatalf("refresh localization poster = %q, want the cached copy kept until the new one lands", loc.PosterPath)
+	}
+}
