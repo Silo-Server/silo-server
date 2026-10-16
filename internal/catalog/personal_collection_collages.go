@@ -73,6 +73,11 @@ type PersonalCollectionCollages struct {
 
 	refreshMu sync.Mutex
 	refreshes map[string]personalCollageRefresh
+
+	// noSources remembers the hand-picked and imported collections in which
+	// a viewer can see no title with a poster, so reads don't scan all their
+	// members again (personalCollectionReadMemo).
+	noSources personalCollectionReadMemo[struct{}]
 }
 
 // personalCollageRefresh is a pending Refresh of one collection: the latest
@@ -155,17 +160,59 @@ func (p *PersonalCollectionCollages) Posters(ctx context.Context, userID int, co
 	if len(members) == 0 {
 		return posters
 	}
+	members, remember := p.withoutRememberedNoSources(ctx, userID, members, access)
+	if len(members) == 0 {
+		return posters
+	}
 	sources, err := p.ListSources(ctx, userID, members, access)
 	if err != nil {
 		slog.WarnContext(ctx, "collage: failed to select personal collection collages", "component", "catalog", "error", err)
 		return posters
 	}
+	remember(sources)
 	ids := make([]string, 0, len(members))
 	for _, c := range members {
 		ids = append(ids, c.ID)
 	}
 	maps.Copy(posters, p.collageSet(userID).serve(ctx, ids, sources))
 	return posters
+}
+
+// withoutRememberedNoSources drops the hand-picked and imported collections
+// remembered to show the viewer described by access no title with a poster.
+// Pass the sources then listed for the rest to remember, so later reads skip
+// those that have none too. When their revisions can't be read, every
+// collection is kept and nothing is remembered.
+func (p *PersonalCollectionCollages) withoutRememberedNoSources(ctx context.Context, userID int, members []PersonalCollectionDefinition, access AccessFilter) ([]PersonalCollectionDefinition, func(map[string][]string)) {
+	ids := make([]string, 0, len(members))
+	for _, c := range members {
+		ids = append(ids, c.ID)
+	}
+	revisions, err := personalCollectionRevisions(ctx, p.pool, userID, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "collage: failed to load personal collection revisions", "component", "catalog", "error", err)
+		return members, func(map[string][]string) {}
+	}
+	accessKey := collageAccessKey(access)
+	now := time.Now()
+	kept := make([]PersonalCollectionDefinition, 0, len(members))
+	for _, c := range members {
+		revision, ok := revisions[c.ID]
+		if ok {
+			if _, none := p.noSources.get(personalCollectionReadKey{userID, c.ID, accessKey}, revision, now); none {
+				continue
+			}
+		}
+		kept = append(kept, c)
+	}
+	return kept, func(sources map[string][]string) {
+		for _, c := range kept {
+			revision, ok := revisions[c.ID]
+			if ok && len(sources[c.ID]) == 0 {
+				p.noSources.put(personalCollectionReadKey{userID, c.ID, accessKey}, revision, struct{}{}, now)
+			}
+		}
+	}
 }
 
 // serveSmart returns the recorded collage each smart collection shows the
@@ -348,6 +395,10 @@ func (p *PersonalCollectionCollages) listMemberSources(ctx context.Context, user
 	return nil
 }
 
+// buildPersonalCollectionCollageSourcesSQL orders members as
+// user_collection_items_continuation_idx does (position is NOT NULL, so the
+// COALESCE changes no order), letting each collection's scan stop at its first
+// titles with a poster instead of sorting all its members.
 func buildPersonalCollectionCollageSourcesSQL(userID int, collectionIDs []string, access AccessFilter) (string, []any) {
 	args := []any{userID, collectionIDs, CollectionCollageSourceLimit}
 	argIdx := 4
@@ -367,7 +418,7 @@ func buildPersonalCollectionCollageSourcesSQL(userID int, collectionIDs []string
 			  AND upci.sub_item_id = ''
 			  AND mi.poster_path <> ''
 			  AND ` + MangaChapterExclusionWhere("mi") + memberWhere.String() + `
-			ORDER BY upci.position, upci.media_item_id
+			ORDER BY COALESCE(upci.position, 0), upci.media_item_id
 			LIMIT $3
 		) src
 		ORDER BY c.ord, src.position, src.media_item_id`, args
