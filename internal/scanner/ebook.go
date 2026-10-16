@@ -456,7 +456,7 @@ func validISBN10(candidate string) bool {
 	}
 	sum := 0
 	for i, r := range candidate {
-		value := 0
+		var value int
 		switch {
 		case r >= '0' && r <= '9':
 			value = int(r - '0')
@@ -555,7 +555,7 @@ func parseEbookFBZ(path string) (parsedEbook, error) {
 		if err != nil {
 			return book, err
 		}
-		defer entry.Close()
+		defer func() { _ = entry.Close() }() //nolint:gocritic,revive // the loop returns after this entry
 		return parseEbookFB2Reader(io.LimitReader(entry, maxEPUBMetadataEntrySize+1), "fbz")
 	}
 	return book, fmt.Errorf("fbz archive has no fb2 entry")
@@ -1198,7 +1198,7 @@ func readEPUBZipEntry(reader *zip.Reader, name string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer entry.Close()
+		defer func() { _ = entry.Close() }() //nolint:gocritic,revive // the loop returns after this entry
 		limited := io.LimitReader(entry, maxEPUBMetadataEntrySize+1)
 		data, err := io.ReadAll(limited)
 		if err != nil {

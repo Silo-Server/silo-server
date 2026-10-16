@@ -1,6 +1,6 @@
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature, SubtitleMode } from "../types";
 import { canonicalLanguageTag, normalizeLanguageCode } from "@/lib/languageTags";
-import { isBitmapCodec } from "./subtitleCodecs";
+import { isBitmapCodec, subtitleNeedsBurnIn } from "./subtitleCodecs";
 
 const ORIGINAL_LANGUAGE_SENTINEL = "original";
 // playback.audio_language stores the original-language choice as this
@@ -22,31 +22,24 @@ function sourcePriority(track: PlayerSubtitleInfo): number {
 }
 
 /**
- * Whether showing the track forces a burn-in transcode. The web player renders
- * no bitmap subtitles (`client-context-v3.ts` declares no bitmap support), so
- * every PGS/DVD/DVB track is burned in, even one the server could deliver as a
- * sidecar. The server's `burn_in_only` flag covers the rest.
- */
-function needsBurnIn(track: PlayerSubtitleInfo): boolean {
-  return isBitmapCodec(track.codec) || track.burn_in_only === true;
-}
-
-/**
  * Auto-select priority within the same language rank: lower is better. Each
  * tier only breaks ties in the one before it:
  * 1. a track the player renders itself beats one that forces a burn-in;
  * 2. full dialogue beats forced, and plain beats SDH, so a file's own forced
  *    or SDH track never displaces the full track the viewer asked for;
- * 3. embedded beats external beats downloaded.
+ * 3. text beats an image track the player draws (PGS), which ignores the
+ *    subtitle appearance settings;
+ * 4. embedded beats external beats downloaded.
  * A burn-in track still wins when it's the only match for the language.
  */
 function trackPriority(track: PlayerSubtitleInfo): number {
   // Source (0-2) stays below 4, so each flag weight outranks every lower
   // tier combined.
   return (
-    (needsBurnIn(track) ? 16 : 0) +
-    (track.forced ? 8 : 0) +
-    (track.hearing_impaired ? 4 : 0) +
+    (subtitleNeedsBurnIn(track) ? 32 : 0) +
+    (track.forced ? 16 : 0) +
+    (track.hearing_impaired ? 8 : 0) +
+    (isBitmapCodec(track.codec) ? 4 : 0) +
     sourcePriority(track)
   );
 }

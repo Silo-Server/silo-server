@@ -179,6 +179,25 @@ describe("EpisodeCarousel", () => {
                 duration_seconds: 1800,
               },
             },
+            {
+              content_id: "ep-3",
+              season_number: 1,
+              episode_number: 3,
+              title: "Rewatch",
+              overview: "",
+              air_date: null,
+              runtime: 44,
+              still_url: "",
+              still_thumbhash: "",
+              files: [],
+              // Watched before and partly rewatched: no progress bar, but a
+              // resume position Reset Progress can clear.
+              user_data: {
+                played: true,
+                position_seconds: 300,
+                duration_seconds: 1800,
+              },
+            },
           ]}
         />
       </MemoryRouter>,
@@ -195,6 +214,7 @@ describe("EpisodeCarousel", () => {
       showCollectionActions: false,
       showWatchedShortcut: true,
       hasPartialProgress: false,
+      hasResumePosition: false,
       quickActionMode: "watched",
     });
     expect(capturedMenuProps[1]).toMatchObject({
@@ -207,7 +227,13 @@ describe("EpisodeCarousel", () => {
       },
       showWatchedShortcut: true,
       hasPartialProgress: true,
+      hasResumePosition: true,
       quickActionMode: "watched",
+    });
+    expect(capturedMenuProps[2]).toMatchObject({
+      contentId: "ep-3",
+      hasPartialProgress: false,
+      hasResumePosition: true,
     });
   });
 });

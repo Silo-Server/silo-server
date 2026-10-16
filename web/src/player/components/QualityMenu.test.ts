@@ -245,3 +245,67 @@ describe("available playback choices", () => {
     expect(props.onSelect).not.toHaveBeenCalled();
   });
 });
+
+describe("playback speed", () => {
+  it("keeps the menu for speed alone and picks a speed without closing it", () => {
+    const onPlaybackSpeedChange = vi.fn();
+    render(
+      createElement(
+        QualityMenu,
+        menuProps({ options: [original], versions: undefined, onPlaybackSpeedChange }),
+      ),
+    );
+    const trigger = screen.getByRole("button", { name: "Playback settings" });
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole("group", { name: "Speed" })).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(9);
+    expect(screen.getByRole("menuitemradio", { name: "1×" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "1.5×" }));
+    expect(onPlaybackSpeedChange).toHaveBeenCalledExactlyOnceWith(1.5);
+    // The menu stays open so the viewer sees the speed take effect.
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("moves between speeds with the left and right arrow keys", () => {
+    render(createElement(QualityMenu, menuProps({ onPlaybackSpeedChange: vi.fn() })));
+    fireEvent.click(screen.getByRole("button", { name: "Playback settings" }));
+    const half = screen.getByRole("menuitemradio", { name: "0.5×" });
+    half.focus();
+    fireEvent.keyDown(half, { key: "ArrowRight" });
+    expect(screen.getByRole("menuitemradio", { name: "0.75×" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft" });
+    expect(half).toHaveFocus();
+  });
+
+  it("keeps focus in the menu when the track is pressed between stops", () => {
+    render(createElement(QualityMenu, menuProps({ onPlaybackSpeedChange: vi.fn() })));
+    fireEvent.click(screen.getByRole("button", { name: "Playback settings" }));
+    const track = screen.getByRole("menuitemradio", { name: "1×" }).parentElement!;
+    expect(fireEvent.pointerDown(track, { button: 0 })).toBe(false);
+    expect(
+      fireEvent.pointerDown(screen.getByRole("menuitemradio", { name: "2×" }), { button: 0 }),
+    ).toBe(true);
+  });
+
+  it("badges the gear with a speed other than 1x", () => {
+    const props = menuProps({
+      options: [auto, original],
+      activeId: "original",
+      playbackSpeed: 1,
+      onPlaybackSpeedChange: vi.fn(),
+    });
+    const { rerender } = render(createElement(QualityMenu, props));
+    expect(screen.getByRole("button", { name: "Playback settings" })).toHaveTextContent(
+      /^Original$/,
+    );
+
+    rerender(createElement(QualityMenu, { ...props, playbackSpeed: 1.5 }));
+    const trigger = screen.getByRole("button", { name: "Playback settings, 1.5×" });
+    expect(trigger.querySelector(".player-quality-label")).toHaveTextContent(/^Original$/);
+    expect(trigger.querySelector(".player-speed-badge")).toHaveTextContent(/^1\.5×$/);
+  });
+});

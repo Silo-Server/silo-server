@@ -1,8 +1,11 @@
 package subtitles
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -147,6 +150,32 @@ func (s stubProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, 
 
 func (s stubProvider) Download(context.Context, string) ([]byte, SubtitleFormat, error) {
 	return s.data, FormatSRT, nil
+}
+
+type failingSearchProvider struct{ stubProvider }
+
+func (failingSearchProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, error) {
+	return nil, errors.New("rpc error: code = Unauthenticated desc = api_key=synthetic-secret upstream detail")
+}
+
+func TestManagerSearchWarningsOmitProviderErrorText(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
+	manager.RegisterProvider(failingSearchProvider{stubProvider{name: "example"}})
+	resp, err := manager.SearchBridge(t.Context(), SearchRequest{Title: "Example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Warnings) != 1 || resp.Warnings[0] != "example: search failed" {
+		t.Fatalf("warnings = %q", resp.Warnings)
+	}
+	if !strings.Contains(logs.String(), "upstream detail") || strings.Contains(logs.String(), "synthetic-secret") {
+		t.Fatalf("provider failure log = %q", logs.String())
+	}
 }
 
 func TestManagerDownloadRejectsOversizedProviderResult(t *testing.T) {

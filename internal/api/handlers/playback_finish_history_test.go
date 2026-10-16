@@ -248,9 +248,9 @@ func TestRecordedJellyfinPlayRefreshesProfileDespiteFailedHints(t *testing.T) {
 	admin := &recordingPlaybackAdminStore{}
 	stopped := newFinishHistoryReplica(store, admin, finishHistoryFile())
 	stale := newFinishHistoryReplica(store, admin, finishHistoryFile())
-	staler := &countingProfileStaler{}
-	stopped.handler.SetProfileStaler(staler)
-	stale.handler.SetProfileStaler(staler)
+	notifier := &countingSignalsNotifier{}
+	stopped.handler.SetSignalsChangedNotifier(notifier)
+	stale.handler.SetSignalsChangedNotifier(notifier)
 	session := compatFinishSession()
 	stopped.holdCopy(t, session, 3500)
 	staleCopy := stale.holdCopy(t, session, 1800)
@@ -261,8 +261,8 @@ func TestRecordedJellyfinPlayRefreshesProfileDespiteFailedHints(t *testing.T) {
 	stale.expire(staleCopy)
 
 	assertOneCompletedPlay(t, sqlite)
-	if staler.calls != 1 {
-		t.Fatalf("profile refreshes = %d, want 1", staler.calls)
+	if notifier.calls != 1 {
+		t.Fatalf("profile refreshes = %d, want 1", notifier.calls)
 	}
 }
 

@@ -2,11 +2,12 @@ package catalog
 
 import "strings"
 
+const collectionTypeSmart = "smart"
+
+// The collection types a sync fills from an external list.
 const (
-	collectionTypeSmart   = "smart"
 	collectionTypeMDBList = "mdblist"
 	collectionTypeTMDB    = "tmdb"
-	collectionTypeTrakt   = "trakt"
 )
 
 // IsKnownType reports whether collectionType is a value the
@@ -14,7 +15,7 @@ const (
 // stored lowercase, so the comparison is exact.
 func IsKnownType(collectionType string) bool {
 	switch collectionType {
-	case libraryCollectionTypeManual, collectionTypeSmart, collectionTypeMDBList, collectionTypeTMDB, collectionTypeTrakt:
+	case libraryCollectionTypeManual, collectionTypeSmart, collectionTypeMDBList, collectionTypeTMDB:
 		return true
 	default:
 		return false
@@ -31,7 +32,7 @@ func IsLiveQueryType(collectionType string) bool {
 // Mirrored by isListBackedCollectionType in web/src/lib/collections/types.ts.
 func IsSyncableType(collectionType string) bool {
 	switch strings.TrimSpace(strings.ToLower(collectionType)) {
-	case collectionTypeMDBList, collectionTypeTMDB, collectionTypeTrakt:
+	case collectionTypeMDBList, collectionTypeTMDB:
 		return true
 	default:
 		return false

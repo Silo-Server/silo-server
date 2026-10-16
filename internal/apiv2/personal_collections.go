@@ -28,7 +28,7 @@ type PersonalCollection struct {
 	CreatorProfileID           ID              `json:"creator_profile_id" example:"p-owner"`
 	Name                       string          `json:"name" example:"Rainy days"`
 	Description                string          `json:"description" example:""`
-	CollectionType             string          `json:"collection_type" doc:"manual, smart, or an import source (mdblist, tmdb, trakt)" example:"manual"`
+	CollectionType             string          `json:"collection_type" doc:"manual, smart, or an import source (mdblist, tmdb)" example:"manual"`
 	IsShared                   bool            `json:"is_shared" doc:"Every profile on the login sees the collection read-only, including profiles added later; otherwise only its creator does" example:"false"`
 	QueryDefinition            json.RawMessage `json:"query_definition" doc:"Smart-collection query document; {} for a manual collection"`
 	SortConfig                 json.RawMessage `json:"sort_config" doc:"Default sort document; {} when unset"`
@@ -150,8 +150,7 @@ type CollectionCapabilities struct {
 }
 
 // importableCollectionSources are the import sources a new collection can be
-// created from. Trakt is absent: existing Trakt collections still sync, but
-// new ones are refused.
+// created from.
 var importableCollectionSources = [...]string{importSourceMDBList, importSourceTMDB, importSourceTMDBList}
 
 // Import source names reported in import_sources.
@@ -296,18 +295,6 @@ type TMDBListCollectionImportInput struct {
 	Body TMDBListCollectionImport
 }
 
-// TraktCollectionImport is the importTraktCollection body.
-type TraktCollectionImport struct {
-	CollectionImportBase
-	Preset    string  `json:"preset" minLength:"1" doc:"A Trakt preset name" example:"trending"`
-	MediaType *string `json:"media_type,omitempty" nullable:"false" doc:"movie or show; the preset's default when omitted" example:"movie"`
-}
-
-// TraktCollectionImportInput is the importTraktCollection request.
-type TraktCollectionImportInput struct {
-	Body TraktCollectionImport
-}
-
 // CollectionSyncResult is one sync run's outcome.
 type CollectionSyncResult struct {
 	Status         string  `json:"status" doc:"success, partial or failed" example:"success"`
@@ -384,7 +371,6 @@ type CollectionImportService interface {
 	ImportMDBList(ctx context.Context, userID int, profileID string, req handlers.UserImportMDBListRequest) (handlers.UserImportView, error)
 	ImportTMDB(ctx context.Context, userID int, profileID string, req handlers.UserImportTMDBRequest) (handlers.UserImportView, error)
 	ImportTMDBList(ctx context.Context, userID int, profileID string, req handlers.UserImportTMDBListRequest) (handlers.UserImportView, error)
-	ImportTrakt(ctx context.Context, userID int, profileID string, req handlers.UserImportTraktRequest) (handlers.UserImportView, error)
 	SearchMDBList(ctx context.Context, query string) (handlers.MDBListDiscoveryView, error)
 	TopMDBList(ctx context.Context) (handlers.MDBListDiscoveryView, error)
 	MDBListConfigured() bool
@@ -469,8 +455,6 @@ func registerPersonalCollections(reg *Registry) {
 		"Import a TMDB preset as a synced collection.")), reg.importTMDBCollection)
 	Register(reg, write(importOp("/collections/import/tmdb-list", "importTMDBListCollection",
 		"Import a public TMDB list as a synced collection.")), reg.importTMDBListCollection)
-	Register(reg, write(importOp("/collections/import/trakt", "importTraktCollection",
-		"Import a Trakt preset as a synced collection.")), reg.importTraktCollection)
 
 	Register(reg, read(humaOp(http.MethodGet, Prefix+"/collections/import/mdblist/search", "searchMDBListLists", "collections",
 		"Search MDBList for lists to import.")), reg.searchMDBListLists)
@@ -892,30 +876,6 @@ func (reg *Registry) importTMDBListCollection(ctx context.Context, in *TMDBListC
 		return nil, p
 	}
 	view, err := svc.ImportTMDBList(ctx, userID, profileFrom(ctx), handlers.UserImportTMDBListRequest{UserImportSharedFields: shared, URL: in.Body.URL})
-	if err != nil {
-		return nil, collectionProblem(err)
-	}
-	return importOutput(view), nil
-}
-
-func (reg *Registry) importTraktCollection(ctx context.Context, in *TraktCollectionImportInput) (*CollectionImportOutput, error) {
-	svc, p := reg.collectionImports()
-	if p != nil {
-		return nil, p
-	}
-	userID, p := actingUserID(ctx)
-	if p != nil {
-		return nil, p
-	}
-	shared, p := importSharedFields(in.Body.CollectionImportBase)
-	if p != nil {
-		return nil, p
-	}
-	req := handlers.UserImportTraktRequest{UserImportSharedFields: shared, Preset: in.Body.Preset}
-	if in.Body.MediaType != nil {
-		req.MediaType = *in.Body.MediaType
-	}
-	view, err := svc.ImportTrakt(ctx, userID, profileFrom(ctx), req)
 	if err != nil {
 		return nil, collectionProblem(err)
 	}

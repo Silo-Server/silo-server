@@ -18,7 +18,8 @@ import (
 )
 
 // Local sidecar artwork is copied into the artwork store by the process that
-// discovered it. Only api and integrated processes run metadata refreshes and
+// discovered it, while metadata.cache_images is on; with it off no local art is
+// selected or copied. Only api and integrated processes run metadata refreshes and
 // the image cache, and a refresh can only discover a sidecar it can read, so
 // the discovering process is one that sees the library mount. The queue keeps
 // each job for retries, which any server may claim.
@@ -67,6 +68,11 @@ type localArtworkCopies struct {
 func (p *ImageCacheProcessor) CopyLocalArtwork(ctx context.Context, inputs []EnqueueImageCacheJobInput) error {
 	if p == nil || p.cacher == nil {
 		return errNoLocalArtworkQueue
+	}
+	if !p.enabled.Load() {
+		// The caller queues the artwork instead; a drain copies it once
+		// caching is on.
+		return errLocalArtworkCachingOff
 	}
 	store, ok := p.jobs.(localArtworkJobStore)
 	if !ok {
@@ -131,6 +137,10 @@ func (p *ImageCacheProcessor) copyDiscoveredLocalArtwork(store localArtworkJobSt
 		return
 	}
 	defer release()
+	if !p.enabled.Load() {
+		// Caching went off while the slot waited; the job stays queued.
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), ImageCacheJobTimeout)
 	defer cancel()
 	// A token per claim: when a refresh replaces the slot's source while an

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import { PageHeader } from "@/components/page/PageHeader";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useAuth } from "@/hooks/useAuth";
@@ -356,12 +357,10 @@ export default function HistoryImportSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">History import</h2>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Import watch history from an external media server into a Silo profile.
-        </p>
-      </div>
+      <PageHeader
+        title="History Import"
+        subtitle="Import watch history from an external media server into a Silo profile."
+      />
 
       {/* ── New import ──────────────────────────────────── */}
       <SettingsGroup
@@ -451,7 +450,7 @@ export default function HistoryImportSettings() {
                 {sourcesLoading ? (
                   <div className="text-muted-foreground text-sm">Loading saved servers\u2026</div>
                 ) : embySources.length === 0 ? (
-                  <EmptyNotice>No admin-defined Emby servers are available yet.</EmptyNotice>
+                  <EmptyNotice>No server-defined Emby servers are available yet.</EmptyNotice>
                 ) : (
                   <>
                     <div className="space-y-2">
@@ -569,7 +568,7 @@ export default function HistoryImportSettings() {
                 {sourcesLoading ? (
                   <div className="text-muted-foreground text-sm">Loading saved servers\u2026</div>
                 ) : plexSources.length === 0 ? (
-                  <EmptyNotice>No admin-defined Plex servers are available yet.</EmptyNotice>
+                  <EmptyNotice>No server-defined Plex servers are available yet.</EmptyNotice>
                 ) : (
                   <>
                     <div className="space-y-2">
@@ -1003,7 +1002,7 @@ function MetricCard({
       >
         {value}
       </div>
-      <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+      <div className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
         {label}
       </div>
     </div>

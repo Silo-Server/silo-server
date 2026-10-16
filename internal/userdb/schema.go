@@ -107,6 +107,13 @@ CREATE TABLE IF NOT EXISTS watchlist (
     PRIMARY KEY (profile_id, media_item_id)
 );
 
+CREATE TABLE IF NOT EXISTS not_interested (
+    profile_id TEXT NOT NULL,
+    media_item_id TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, media_item_id)
+);
+
 CREATE TABLE IF NOT EXISTS home_item_dismissals (
     profile_id TEXT NOT NULL,
     surface TEXT NOT NULL,
@@ -233,6 +240,7 @@ CREATE TABLE IF NOT EXISTS user_devices (
     device_name TEXT NOT NULL DEFAULT '',
     device_platform TEXT NOT NULL DEFAULT '',
     last_seen_at TEXT NOT NULL,
+    custom_name TEXT,
     PRIMARY KEY (profile_id, device_id)
 );
 
@@ -284,6 +292,9 @@ CREATE INDEX IF NOT EXISTS idx_personal_collection_profiles_lookup
 
 CREATE INDEX IF NOT EXISTS idx_home_item_dismissals_lookup
     ON home_item_dismissals(profile_id, surface);
+
+CREATE INDEX IF NOT EXISTS idx_not_interested_profile_added
+    ON not_interested(profile_id, added_at DESC, media_item_id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_hidden_history_items_lookup
     ON hidden_history_items(profile_id, hidden_before);

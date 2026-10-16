@@ -23,7 +23,7 @@ import { FieldGroup } from "./FieldGroup";
 import { RequestRoutingGroup } from "./RequestRouting";
 import { RequestServersGroup } from "./RequestServers";
 import { requestRouterInstallations } from "./requestServerModel";
-import { SETTINGS_BUTTON, SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
+import { SettingField, SettingFieldStatus } from "./SettingField";
 import { useStagedDraft } from "./useStagedDraft";
 
 interface GeneralDraft {
@@ -278,14 +278,6 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
                     ) : undefined
                   }
                 />
-                <SettingField
-                  label="Also request a 4K version of every title"
-                  type="toggle"
-                  description="Normally a 4K version is requested only for people whose playback limit allows 4K, and only when a server takes 4K. With this on, every request also asks for 4K."
-                  value={String(draft.force_dual_quality)}
-                  onChange={(value) => editGeneral({ force_dual_quality: value === "true" })}
-                  dirty={draft.force_dual_quality !== baseGeneral.force_dual_quality}
-                />
                 {draft.watchlist_requests !== undefined ? (
                   <SettingField
                     label="Request titles added to a watchlist"
@@ -296,6 +288,14 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
                     dirty={draft.watchlist_requests !== baseGeneral.watchlist_requests}
                   />
                 ) : null}
+                <SettingField
+                  label="Also request a 4K version of every title"
+                  type="toggle"
+                  description="Normally a 4K version is requested only for people whose playback limit allows 4K, and only when a server takes 4K. With this on, every request also asks for 4K."
+                  value={String(draft.force_dual_quality)}
+                  onChange={(value) => editGeneral({ force_dual_quality: value === "true" })}
+                  dirty={draft.force_dual_quality !== baseGeneral.force_dual_quality}
+                />
                 {generalConflict ? (
                   <div className="py-3.5">
                     <EditorConflict onReload={reloadGeneral} />
@@ -329,36 +329,6 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
             forceDual={general.base?.force_dual_quality ?? false}
           />
         ) : null}
-
-        <FieldGroup label="Related">
-          <SettingFieldRow
-            label="Group and account limits"
-            description="Give an access group or one account its own approval and limit. An account's own setting wins, then its group's, then the defaults above."
-          >
-            <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-              <Link to="/admin/access-groups">Access groups</Link>
-            </Button>
-            <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-              <Link to="/admin/users">Users</Link>
-            </Button>
-          </SettingFieldRow>
-          <SettingFieldRow
-            label="Request notifications"
-            description="Announce submitted, approved, declined, and fulfilled requests on Discord or a webhook."
-          >
-            <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-              <Link to="/admin/settings/notifications">Notifications</Link>
-            </Button>
-          </SettingFieldRow>
-          <SettingFieldRow
-            label="Autoscan"
-            description="Autoscan can reuse these servers to import downloads as soon as they finish."
-          >
-            <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-              <Link to="/admin/libraries?tab=autoscan">Autoscan</Link>
-            </Button>
-          </SettingFieldRow>
-        </FieldGroup>
       </div>
 
       <SaveBar

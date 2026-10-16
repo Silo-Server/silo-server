@@ -108,9 +108,7 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	persisted, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), p.ID)
-	if errors.Is(err, ErrNotFound) {
-		persisted = p
-	} else if err != nil {
+	if err != nil {
 		persisted = p
 	}
 

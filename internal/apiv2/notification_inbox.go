@@ -26,6 +26,9 @@ type NotificationInboxService interface {
 	MarkNotificationInboxThrough(context.Context, int, string, notifications.Cursor) error
 	NotificationPreferences(context.Context, string) (notifications.Preferences, error)
 	PatchNotificationPreferences(context.Context, string, notifications.PreferencePatch) (notifications.Preferences, error)
+	ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error)
+	MuteNotificationSeries(context.Context, int, string, string) error
+	UnmuteNotificationSeries(context.Context, int, string, string) error
 }
 
 // NotificationItem preserves event-specific reason data while normalizing IDs
@@ -221,7 +224,10 @@ func registerNotificationInbox(reg *Registry) {
 			body.State = StateNotConfigured
 			return &NotificationCapabilitiesOutput{Body: body}, nil
 		}
-		return &NotificationCapabilitiesOutput{Body: notificationCapabilitiesOf(svc.NotificationCapabilities(ctx))}, nil
+		body := notificationCapabilitiesOf(svc.NotificationCapabilities(ctx))
+		body.Series.Available = reg.deps.PersonalLists != nil
+		body.Series.Mute = body.Series.Available
+		return &NotificationCapabilitiesOutput{Body: body}, nil
 	})
 	Register(reg, notificationOperation(http.MethodGet, "", "listNotifications"), func(ctx context.Context, in *NotificationListInput) (*NotificationListOutput, error) {
 		svc, p := reg.notificationInbox()
@@ -427,6 +433,14 @@ type NotificationCapabilities struct {
 	Webhooks    NotificationWebhookCapability        `json:"webhooks"`
 	Email       NotificationAccountChannelCapability `json:"email"`
 	Discord     NotificationAccountChannelCapability `json:"discord"`
+	Series      NotificationSeriesCapability         `json:"series"`
+}
+
+// NotificationSeriesCapability reports listNotificationSeries and the series
+// mute.
+type NotificationSeriesCapability struct {
+	Available bool `json:"available" doc:"GET /notifications/series lists the series whose new episodes can notify the profile"`
+	Mute      bool `json:"mute" doc:"PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted"`
 }
 type NotificationInAppCapability struct {
 	Enabled bool `json:"enabled"`

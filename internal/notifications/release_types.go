@@ -98,6 +98,29 @@ type ReasonFlags struct {
 	NextUp           bool `json:"next_up"`
 }
 
+// The reason names, as ReasonFlags' JSON keys spell them.
+const (
+	ReasonFavorite         = "favorite"
+	ReasonWatchlist        = "watchlist"
+	ReasonContinueWatching = "continue_watching"
+	ReasonNextUp           = "next_up"
+)
+
+// Has reports whether the named reason is set; an unknown name never is.
+func (f ReasonFlags) Has(reason string) bool {
+	switch reason {
+	case ReasonFavorite:
+		return f.Favorite
+	case ReasonWatchlist:
+		return f.Watchlist
+	case ReasonContinueWatching:
+		return f.ContinueWatching
+	case ReasonNextUp:
+		return f.NextUp
+	}
+	return false
+}
+
 // Any reports whether at least one reason matched.
 func (f ReasonFlags) Any() bool {
 	return f.Favorite || f.Watchlist || f.ContinueWatching || f.NextUp

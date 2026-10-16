@@ -21,7 +21,6 @@ function row(sectionType: string, config: Record<string, unknown> = {}): HomeRow
     hero: false,
     shown: true,
     own: false,
-    legacyTrakt: false,
   };
 }
 
@@ -242,7 +241,7 @@ describe("collection kinds", () => {
   it("names each stored collection type the way the picker filters them", () => {
     expect(collectionKind("manual")).toBe("Manual");
     expect(collectionKind("smart")).toBe("Smart");
-    for (const type of ["mdblist", "tmdb", "trakt"] as const)
+    for (const type of ["mdblist", "tmdb"] as const)
       expect(collectionKind(type)).toBe("Synced list");
     expect(collectionKind(undefined)).toBeUndefined();
   });

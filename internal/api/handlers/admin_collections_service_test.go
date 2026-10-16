@@ -31,17 +31,21 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 
 func TestAdminCollectionServiceRejectsUnknownCollectionType(t *testing.T) {
 	h := &LibraryCollectionHandler{}
-	_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", CollectionType: "bogus"})
-	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
-		t.Fatalf("create: expected collection_type field error, got %v", err)
+	// Trakt collections were retired, so trakt is an unknown type too.
+	for _, v := range []string{"bogus", "trakt"} {
+		_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", CollectionType: v})
+		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
+			t.Fatalf("create %q: expected collection_type field error, got %v", v, err)
+		}
 	}
-	for _, v := range []string{"bogus", ""} {
+	var err error
+	for _, v := range []string{"bogus", "trakt", ""} {
 		_, err = h.UpdateAdminCollection(t.Context(), "collection", AdminCollectionUpdate{CollectionType: new(v)})
 		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
 			t.Fatalf("update %q: expected collection_type field error, got %v", v, err)
 		}
 	}
-	for _, v := range []string{"manual", "smart", "mdblist", "tmdb", "trakt"} {
+	for _, v := range []string{"manual", "smart", "mdblist", "tmdb"} {
 		if err := validateCollectionType(v); err != nil {
 			t.Fatalf("%q rejected: %v", v, err)
 		}
@@ -114,52 +118,6 @@ func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 			apiErr, ok := errors.AsType[*APIError](adminCollectionLookupAPIError(tc.err))
 			if !ok || apiErr.Status != tc.wantStatus || apiErr.Code != tc.wantCode {
 				t.Fatalf("error = %#v, want status=%d code=%s", apiErr, tc.wantStatus, tc.wantCode)
-			}
-		})
-	}
-}
-
-func TestLegacyTraktAdminCollectionLibraryScopeIsImmutable(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		existing   *models.LibraryCollection
-		libraryIDs []int
-		wantError  bool
-	}{
-		{
-			name: "collection type changed scope",
-			existing: &models.LibraryCollection{
-				CollectionType: "trakt", LibraryIDs: []int{1, 2},
-			},
-			libraryIDs: []int{2, 3}, wantError: true,
-		},
-		{
-			name: "source config changed scope",
-			existing: &models.LibraryCollection{
-				CollectionType: "manual", LibraryIDs: []int{1, 2},
-				SourceConfig: json.RawMessage(`{"provider":"trakt","mode":"trakt_list"}`),
-			},
-			libraryIDs: []int{2, 3}, wantError: true,
-		},
-		{
-			name: "reordered duplicate scope is unchanged",
-			existing: &models.LibraryCollection{
-				CollectionType: "trakt", LibraryIDs: []int{1, 2},
-			},
-			libraryIDs: []int{2, 1, 2},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateAdminCollectionSourceUpdate(tc.existing, AdminCollectionUpdate{LibraryIDs: &tc.libraryIDs})
-			if tc.wantError {
-				apiErr, ok := errors.AsType[*APIError](err)
-				if !ok || apiErr.Code != "legacy_source_immutable" {
-					t.Fatalf("error = %#v, want legacy_source_immutable", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
 			}
 		})
 	}

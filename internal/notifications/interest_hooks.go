@@ -347,14 +347,14 @@ func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string,
 	}
 }
 
-// --- Favorites & watchlist: every mutation queues (user-action frequency).
+// --- Favorites & watchlist: a mutation that changed a row queues.
 
-func (s *interestTrackingStore) AddFavorite(ctx context.Context, profileID, mediaItemID string) error {
-	err := s.UserStore.AddFavorite(ctx, profileID, mediaItemID)
-	if err == nil {
+func (s *interestTrackingStore) AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	changed, err := s.UserStore.AddFavorite(ctx, profileID, mediaItemID)
+	if err == nil && changed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
-	return err
+	return changed, err
 }
 
 func (s *interestTrackingStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
@@ -365,20 +365,20 @@ func (s *interestTrackingStore) AddFavoriteAt(ctx context.Context, profileID, me
 	return inserted, err
 }
 
-func (s *interestTrackingStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error {
-	err := s.UserStore.RemoveFavorite(ctx, profileID, mediaItemID)
-	if err == nil {
+func (s *interestTrackingStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	changed, err := s.UserStore.RemoveFavorite(ctx, profileID, mediaItemID)
+	if err == nil && changed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
-	return err
+	return changed, err
 }
 
-func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error {
-	err := s.UserStore.AddToWatchlist(ctx, profileID, mediaItemID)
-	if err == nil {
+func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	changed, err := s.UserStore.AddToWatchlist(ctx, profileID, mediaItemID)
+	if err == nil && changed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
-	return err
+	return changed, err
 }
 
 // AddToWatchlistAt is the add that keeps an earlier added_at: watch-provider
@@ -392,12 +392,12 @@ func (s *interestTrackingStore) AddToWatchlistAt(ctx context.Context, profileID,
 	return inserted, err
 }
 
-func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error {
-	err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
-	if err == nil {
+func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	changed, err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
+	if err == nil && changed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
-	return err
+	return changed, err
 }
 
 // --- Home dismissals: a card removed from Continue Watching or Next Up stops
@@ -504,6 +504,14 @@ func (s *interestTrackingStore) ClearProgress(ctx context.Context, profileID, me
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
 	return err
+}
+
+func (s *interestTrackingStore) ClearResumePosition(ctx context.Context, profileID, mediaItemID string, at time.Time) (bool, error) {
+	cleared, err := s.UserStore.ClearResumePosition(ctx, profileID, mediaItemID, at)
+	if err == nil && cleared {
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+	}
+	return cleared, err
 }
 
 func (s *interestTrackingStore) ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
@@ -637,7 +645,7 @@ func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) er
 	if err == nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if purgeErr := s.system.PurgeProfile(purgeCtx, id); purgeErr != nil {
+		if purgeErr := s.system.PurgeProfile(purgeCtx, s.userID, id); purgeErr != nil {
 			slog.WarnContext(ctx, "notifications: profile purge failed", "component", "notifications", "profile_id", id, "error", purgeErr)
 		}
 	}

@@ -172,12 +172,13 @@ func (a attemptRun) repair(req Request, run *sheetAssembler, cells []int, inputS
 	}
 	repairReq := req
 	repairReq.Samples = &Samples{Seconds: times}
-	args, stdinBytes, err := buildSheetsArgs(repairReq, a.attempt, a.hw, inputStart, a.sheetsGraph, "", list)
+	plan := samplePlan(times, inputStart)
+	args, stdinBytes, err := buildSheetsArgs(repairReq, a.attempt, a.hw, plan.entries, a.sheetsGraph, "", list)
 	if err != nil {
 		return
 	}
 	collector := newSheetAssembler(*req.Sheets, times, true, 0, list.span)
-	collector.inputStart = inputStart
+	collector.plan = plan
 	collector.candidates = make([]sheetCandidate, len(times))
 	finished := a.exec(req, args, stdinBytes, collector, collector.line) == nil
 	if (finished && collector.close() != nil) || (!finished && collector.broken()) {

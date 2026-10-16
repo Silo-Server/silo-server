@@ -65,10 +65,10 @@ func main() {
 	out := flag.String("out", "", "directory to write fixtures into (required)")
 	flag.Parse()
 	if *out == "" {
-		fail("usage: playbackfixtures -out <dir>")
+		failf("usage: playbackfixtures -out <dir>")
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
-		fail("create %s: %v", *out, err)
+		failf("create %s: %v", *out, err)
 	}
 
 	write(*out, "start_request.json", goldenStartRequest())
@@ -90,16 +90,16 @@ func goldenErrorResponse() playback.ErrorResponseV3 {
 func write(dir, name string, value any) {
 	body, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		fail("marshal %s: %v", name, err)
+		failf("marshal %s: %v", name, err)
 	}
 	body = append(body, '\n')
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, body, 0o644); err != nil { //nolint:gosec // generated fixture
-		fail("write %s: %v", path, err)
+		failf("write %s: %v", path, err)
 	}
 }
 
-func fail(format string, args ...any) {
+func failf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
 }
@@ -193,7 +193,7 @@ func goldenReplanRequest() playback.ReplanRequestV3 {
 	audioIndex := 0
 	decision := goldenDecisionResponse()
 	if decision.PlaybackPlan == nil {
-		fail("golden decision has no plan")
+		failf("golden decision has no plan")
 	}
 	plan := decision.PlaybackPlan
 	return playback.ReplanRequestV3{
@@ -311,7 +311,7 @@ func goldenNativeDecisionResponse() playback.DecisionResponseV3 {
 func goldenDecisionForSource(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3) playback.DecisionResponseV3 {
 	now, err := time.Parse(time.RFC3339, "2029-12-31T23:55:00Z")
 	if err != nil {
-		fail("parse golden planner time: %v", err)
+		failf("parse golden planner time: %v", err)
 	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
 		Request:             request,
@@ -324,7 +324,7 @@ func goldenDecisionForSource(file *models.MediaFile, request playback.StartReque
 		AdditionalSubtitles: additional,
 	})
 	if result.Plan == nil {
-		fail("golden planner returned terminal: %#v", result.Terminal)
+		failf("golden planner returned terminal: %#v", result.Terminal)
 	}
 	plan := *result.Plan
 	// These values belong to session/transport setup, which runs after the
@@ -370,7 +370,7 @@ func goldenCapabilityResponse() playback.CapabilityResponseV3 {
 func goldenRouteEvent() playback.RouteEventV3 {
 	decision := goldenDecisionResponse()
 	if decision.PlaybackPlan == nil {
-		fail("golden decision has no plan")
+		failf("golden decision has no plan")
 	}
 	plan := decision.PlaybackPlan
 	return playback.RouteEventV3{
@@ -744,7 +744,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	decision := goldenDecisionResponse()
 	plan := decision.PlaybackPlan
 	if plan == nil {
-		fail("golden decision has no plan")
+		failf("golden decision has no plan")
 	}
 	trackIndex := 1
 	trackChange := goldenReplanRequest()
@@ -797,7 +797,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	outputA := playback.PlanAttemptKeyV3(*plan, "output-a", nil)
 	outputB := playback.PlanAttemptKeyV3(*plan, "output-b", nil)
 	if outputA == outputB {
-		fail("output context must change the opaque plan attempt key")
+		failf("output context must change the opaque plan attempt key")
 	}
 	recovery := goldenReplanRequest()
 	recovery.ReplanRequestID = "replan-failure-matrix-0001"

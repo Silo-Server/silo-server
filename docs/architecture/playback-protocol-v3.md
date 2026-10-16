@@ -637,7 +637,10 @@ path does not inherit evidence from a different playback engine.
 `original_http` never receives normalized-remux evidence. An HDR10 claim can
 carry `hdr10_max_width`, `hdr10_max_height`, `hdr10_max_frame_rate`, and
 `hdr10_max_bitrate_kbps`; these ceilings keep a successful format probe from
-admitting an untested stream class.
+admitting an untested stream class. When the viewer turns on the web player's
+browser decode engine, `original_http` instead carries
+`client_managed_dynamic_range_v1` (when its WebGPU presenter works) and the engine tone-maps the
+original itself; see [web-decode-engine.md](web-decode-engine.md).
 
 ---
 
@@ -660,6 +663,18 @@ inventory, so selecting a non-default audio track does not by itself require
 the server to remux the file. Without the claim, the historical default-track
 gate remains. A claiming client that cannot honor the identity reports a typed
 playback failure so the bounded replan ladder can choose a packaged route.
+
+A `server_remux_progressive` stream is forward-only: it has no byte ranges, and
+a request for it always starts at the plan's position. The server closes it
+after it makes no write progress for the stream stall window (see
+[streaming write deadlines](streaming-write-deadline.md)), which a paused
+client causes once its buffer is full. A client cannot resume such a stream
+where it stopped and has to open a new one at that position. The web player
+does this with a `seek_reanchor` replan (§6) when playback resumes after a
+minute idle, and falls back to its reconnect (§6.2) when the replan is refused.
+It does not do this in a watch-together room, whose transport the room
+controls; a room member who pauses past the stall window is not recovered this
+way.
 
 `client_playback_context.deliveries` is keyed by **class**, because a client's
 answer to "can you play HLS" does not differ between a remux and a transcode —
@@ -824,24 +839,31 @@ out of band, after which a client can retry or reload that URL with the new
 header.
 
 The signed playback token is what carries a reconstruction recipe across an
-API restart. Opting it out therefore also opts out of transparent session
-reconstruction: a missing in-memory session returns the normal expired/missing
-response and the client starts a fresh attempt. Once selected, this mode is
-sticky for the lifetime of the attempt; a client that can no longer honor it
-must stop and start a new attempt rather than downgrade a replan to a
-credential-bearing URL.
+API restart, so an attempt without one keeps its recipe server-side instead.
+When a transport served from the API origin commits, the server records its
+recipe in Redis. A media or sidecar request that finds no in-memory session is
+rebuilt from that record, but only for an authenticated caller who owns the
+attempt (account and selected profile), and only while the durable attempt
+still names the recorded plan and has neither expired nor been stopped. The
+rebuilt session keeps requiring the client's own credential on every request.
+Without Redis, or once the record has lapsed with the 24 h token lifetime, a
+missing in-memory session returns the normal expired/missing response and the
+client starts a fresh attempt. Once selected, this mode is sticky for the
+lifetime of the attempt; a client that can no longer honor it must stop and
+start a new attempt rather than downgrade a replan to a credential-bearing URL.
 
-**Replica affinity.** Because there is no reconstruction recipe, a
-header-authenticated attempt's session exists only in the memory of the API
-process that started it. A media request routed to any other replica finds no
-session and returns the expired/missing response, so a deployment serving
-tokenless attempts currently needs either a single API replica or session
-affinity on the media routes; legacy token-bearing attempts are unaffected,
-since they reconstruct anywhere. Proxy-origin URLs
-(`authorized_media_origins_v1`) are also unaffected: the proxy serves from the
-shared grant store rather than from an API process's memory. Moving session
-state into shared storage is the fix, and until it lands this constraint is
-part of the deployment contract.
+**Replica affinity.** The recorded recipe lets a restarted API process rebuild a
+header-authenticated session, and another replica can rebuild it the same way.
+A deployment with several API replicas should still keep session affinity on
+the media routes for these attempts: a replica that holds an idle copy of the
+session ends its transcode when that copy expires, and nothing in a tokenless
+request can start it again on the node. Without Redis the session exists only in
+the memory of the API process that started it, so it needs a single API replica
+or session affinity. A transcode the API executes itself (no transcode node) is
+only safe with one API replica or session affinity in any case: each replica
+that rebuilds it starts its own FFmpeg. Proxy-origin URLs
+(`authorized_media_origins_v1`) are unaffected: the proxy serves from the shared
+grant store rather than from an API process's memory.
 
 ### 4.2 Media and subtitle URL query parameters
 
@@ -1586,6 +1608,32 @@ also never targets more than the source's own bitrate, counted in the output
 codec (H.264 for a scaled encode, or HEVC for any encode when the planner
 chooses HEVC).
 
+`bandwidth_estimate_kbps` is optional and is the client's belief about its
+link, not a promise. An absent estimate removes the bandwidth term entirely, so
+`auto` plans from the device and the source alone; a client should omit the
+field rather than send a hint it knows is clamped, such as a browser's
+`navigator.connection.downlink`, which Chromium caps at 10 Mbps. Clients that
+can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api.md#bandwidth-probe)).
+
+A transcode is a single HLS rendition, so the player cannot step down on its
+own. A client on `auto` whose playback keeps rebuffering sends a
+`quality_change` replan that keeps `quality_preference: "auto"` and lowers
+`bandwidth_estimate_kbps` below the bitrate that stalled; the planner then
+re-runs `auto` against the lower estimate. The web player does this after two
+stalls of at least a second within two minutes, or one stall of six seconds.
+Stall time in the first ten seconds of a plan does not count, and buffering
+caused by a seek, pause or source reload is not a stall. It sends 70% of the
+delivered bitrate, so the next stream targets about 56% of the one that
+stalled. It keeps that lower estimate for the next 30 minutes. When the plan
+that follows is no lower, it leaves that plan alone for five minutes rather than
+replan in a loop. On a metered link it uses the estimate only if
+the stall was observed on the same kind of metered link, by the browser's
+connection type and Data Saver setting, since probe results and observations
+from other links do not describe it; back on an unmetered link it ignores a
+limit recorded on a metered one. Buffering while media requests fail (load
+errors, not timeouts) or while the browser is offline is an outage for the
+reconnect path and never counts toward a downshift.
+
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
 start must never pay for. A rung whose toolchain turns out to be missing degrades
@@ -1693,6 +1741,8 @@ or older node advertisement is rejected instead of silently changing modes.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
+A plain HLG source resolves to BT.2100 HLG, or to the BT.709-gamut HLG kind
+when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
 resolve to the `dolby_vision` source kind. Only executors that apply the RPU
 advertise it: software `tonemapx`, QSV `tonemap_opencl`, and NVENC

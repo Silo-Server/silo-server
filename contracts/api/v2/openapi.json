@@ -12194,6 +12194,10 @@
             ],
             "type": "string"
           },
+          "request_router": {
+            "$ref": "#/components/schemas/AdminPluginRequestRouter",
+            "description": "On a request_router.v1 capability: which request server fields its plugin can do without. Omitted for other capability types"
+          },
           "sign_in_mode": {
             "description": "How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types",
             "enum": [
@@ -13013,6 +13017,24 @@
         },
         "type": "object"
       },
+      "AdminPluginRequestRouter": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_optional": {
+            "description": "The plugin works without an API key: a request server for it can be saved and tested without one, and gets requests without one",
+            "type": "boolean"
+          },
+          "base_url_optional": {
+            "description": "The plugin works without a base URL: a request server for it can be saved and tested without one",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "api_key_optional",
+          "base_url_optional"
+        ],
+        "type": "object"
+      },
       "AdminPluginRuntime": {
         "additionalProperties": false,
         "properties": {
@@ -13044,7 +13066,7 @@
             "type": "integer"
           },
           "state": {
-            "description": "Process state; backoff and failed occur only for resident plugins",
+            "description": "Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed",
             "enum": [
               "stopped",
               "starting",
@@ -14072,12 +14094,94 @@
         ],
         "type": "object"
       },
+      "AdminRecommendationEmbeddingsReset": {
+        "additionalProperties": false,
+        "properties": {
+          "cached_rows": {
+            "description": "Per-profile cached recommendation rows deleted. Global rows are kept.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "embeddings": {
+            "description": "Item embeddings deleted.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "taste_clusters": {
+            "description": "Taste clusters deleted.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "taste_profiles": {
+            "description": "Taste profiles whose vectors were cleared. Each is rebuilt once the embedding job stores its titles' vectors again.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "embeddings",
+          "taste_profiles",
+          "taste_clusters",
+          "cached_rows"
+        ],
+        "type": "object"
+      },
+      "AdminRecommendationJobRun": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "error": {
+            "description": "Why the run failed, with credentials masked. Present only when status is failed.",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": {},
+            "description": "Counts the run reported. Keys differ by job and may grow.",
+            "type": "object"
+          },
+          "started_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "status": {
+            "description": "completed also covers runs that finished with partial failures; result counts them.",
+            "enum": [
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "started_at",
+          "completed_at"
+        ],
+        "type": "object"
+      },
       "AdminRecommendationJobStatus": {
         "additionalProperties": false,
         "properties": {
           "count": {
             "format": "int64",
             "type": "integer"
+          },
+          "last_partial_run": {
+            "$ref": "#/components/schemas/AdminRecommendationJobRun",
+            "description": "The newest finished partial run on any server: the embedding catch-up pass for embeddings, the startup global-row build for recommendations. Absent for other jobs and until one finishes."
+          },
+          "last_run": {
+            "$ref": "#/components/schemas/AdminRecommendationJobRun",
+            "description": "The newest finished full run of this job on any server: scheduled or triggered. Absent until one finishes."
           },
           "running": {
             "type": "boolean"
@@ -14090,6 +14194,24 @@
         "required": [
           "running",
           "count"
+        ],
+        "type": "object"
+      },
+      "AdminRecommendationStaleSweep": {
+        "additionalProperties": false,
+        "properties": {
+          "last_run": {
+            "$ref": "#/components/schemas/AdminRecommendationJobRun",
+            "description": "The newest sweep on any server that rebuilt or failed at least one profile. Absent until one does."
+          },
+          "pending": {
+            "description": "Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending"
         ],
         "type": "object"
       },
@@ -14112,14 +14234,29 @@
       "AdminRecommendationsStatus": {
         "additionalProperties": false,
         "properties": {
+          "cache_refreshed_at": {
+            "description": "When the newest cached recommendation row was written, by the cache job or a profile refresh. It is not job health: profile refreshes keep it recent while the cache job fails; read recommendations.last_run for that. Absent when nothing is cached.",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
           "cowatch": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
           },
           "embeddings": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
           },
+          "lock_conflict": {
+            "description": "Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not.",
+            "type": "string"
+          },
           "recommendations": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
+          },
+          "stale_sweep": {
+            "$ref": "#/components/schemas/AdminRecommendationStaleSweep",
+            "description": "The stale profile sweep, which rebuilds profiles after their signals or access change."
           },
           "taste_profiles": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
@@ -14129,7 +14266,9 @@
           "embeddings",
           "taste_profiles",
           "cowatch",
-          "recommendations"
+          "recommendations",
+          "lock_conflict",
+          "stale_sweep"
         ],
         "type": "object"
       },
@@ -18859,79 +18998,21 @@
         ],
         "type": "object"
       },
-      "AdminTraktImport": {
+      "AdminTranslateLibraryInputBody": {
         "additionalProperties": false,
         "properties": {
-          "description": {
-            "type": "string"
-          },
-          "featured": {
-            "type": "boolean"
-          },
-          "library_id": {
-            "description": "Opaque identifier",
+          "target_language": {
+            "description": "BCP 47 tag of the language to fill in",
             "examples": [
-              "1"
+              "de"
             ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "library_ids": {
-            "items": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 1000,
-            "type": "array"
-          },
-          "limit": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "list_url": {
-            "type": "string"
-          },
-          "management_key": {
-            "type": "string"
-          },
-          "management_mode": {
-            "type": "string"
-          },
-          "management_source": {
-            "type": "string"
-          },
-          "media_type": {
-            "type": "string"
-          },
-          "poster_url": {
-            "type": "string"
-          },
-          "preset": {
-            "type": "string"
-          },
-          "profile_id": {
-            "description": "Opaque identifier",
-            "examples": [
-              "1"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "sort_config": {},
-          "sync_schedule": {
-            "type": "string"
-          },
-          "title": {
+            "maxLength": 16,
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "title"
+          "target_language"
         ],
         "type": "object"
       },
@@ -18939,6 +19020,7 @@
         "additionalProperties": false,
         "properties": {
           "force": {
+            "description": "Also replace text an earlier AI translation wrote. Provider and manual text is never replaced.",
             "type": "boolean"
           },
           "include_children": {
@@ -22016,6 +22098,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone.",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga_chapter_count": {
             "format": "int64",
             "type": "integer"
@@ -22041,6 +22134,10 @@
             "description": "Technical badges of the best file"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -22427,6 +22524,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone.",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga": {
             "$ref": "#/components/schemas/MangaDetailExtension"
           },
@@ -22461,7 +22569,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "A translation of the overview is queued for this language",
+            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -22867,6 +22975,13 @@
             ],
             "type": "boolean"
           },
+          "not_interested": {
+            "description": "The profile marked the movie or series Not interested: recommendations leave it out and rank similar titles lower",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "played": {
             "examples": [
               false
@@ -22877,7 +22992,8 @@
         "required": [
           "played",
           "is_favorite",
-          "in_watchlist"
+          "in_watchlist",
+          "not_interested"
         ],
         "type": "object"
       },
@@ -25573,9 +25689,6 @@
           },
           "tmdb_list": {
             "$ref": "#/components/schemas/TMDBListSpec"
-          },
-          "trakt": {
-            "$ref": "#/components/schemas/TraktSpec"
           }
         },
         "required": [
@@ -26831,10 +26944,18 @@
             "minimum": 0,
             "type": "integer"
           },
+          "custom_name": {
+            "description": "Name the profile gave the device; show it in place of device_name. Absent when none was given",
+            "examples": [
+              "Living Room"
+            ],
+            "type": "string"
+          },
           "device_id": {
             "type": "string"
           },
           "device_name": {
+            "description": "Name the device reports for itself",
             "type": "string"
           },
           "device_platform": {
@@ -26892,6 +27013,24 @@
         "required": [
           "items"
         ],
+        "type": "object"
+      },
+      "DeviceUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "custom_name": {
+            "description": "Name to show for the device in place of the name it reports. Control characters and bidirectional overrides are removed and runs of spaces collapse; a name with no visible character is rejected. null removes it. The reported device_name is kept",
+            "examples": [
+              "Living Room"
+            ],
+            "maxLength": 120,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "DiagnosticsCapabilities": {
@@ -29386,11 +29525,32 @@
           "imdb_id": {
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI; absent when none were",
+            "items": {
+              "enum": [
+                "overview"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "overlay_summary": {
             "$ref": "#/components/schemas/CatalogItemOverlay"
           },
           "overview": {
             "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "The language this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it",
+            "type": "string"
+          },
+          "ratings": {
+            "description": "The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating.",
+            "items": {
+              "$ref": "#/components/schemas/CatalogRating"
+            },
+            "type": "array"
           },
           "runtime": {
             "description": "Minutes",
@@ -30289,6 +30449,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone.",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga_chapter_count": {
             "format": "int64",
             "type": "integer"
@@ -30314,6 +30485,10 @@
             "description": "Technical badges of the best file"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -31314,6 +31489,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "embeddings_skipped": {
+            "format": "int64",
+            "type": "integer"
+          },
           "episodes_created": {
             "format": "int64",
             "type": "integer"
@@ -31383,6 +31562,7 @@
           "links_created",
           "credits_replaced",
           "embeddings_imported",
+          "embeddings_skipped",
           "skipped"
         ],
         "type": "object"
@@ -31886,6 +32066,13 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "ignore_unmatched": {
+            "description": "This build supports marking unmatched items as intentionally unmatched with ignoreUnmatchedItem, and listing them with listUnmatchedItems' ignored filter",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "realtime_monitoring": {
             "description": "This build supports real-time library monitoring and its status read",
             "examples": [
@@ -31926,6 +32113,7 @@
           "realtime_monitoring",
           "trickplay",
           "trickplay_supported",
+          "ignore_unmatched",
           "revision",
           "state",
           "allowed"
@@ -34422,7 +34610,7 @@
             "type": "boolean"
           },
           "on_view": {
-            "description": "Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the server queues it on view)",
+            "description": "Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the client requests the translation itself when it shows an item whose pending_translation_language is set)",
             "examples": [
               "button"
             ],
@@ -34710,6 +34898,7 @@
             "type": "integer"
           },
           "force": {
+            "description": "The job also replaces earlier AI text; provider and manual text is never replaced",
             "type": "boolean"
           },
           "id": {
@@ -34742,7 +34931,7 @@
             "type": "string"
           },
           "target_kind": {
-            "description": "item, season, or episode",
+            "description": "item, season, episode, or library (a prewarm, whose fields_done and fields_total count items)",
             "type": "string"
           },
           "target_language": {
@@ -35171,6 +35360,83 @@
         ],
         "type": "object"
       },
+      "NotInterestedCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "NotInterestedCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CatalogItem"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "NotInterestedEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "description": "The movie or series",
+            "examples": [
+              "movie:heat-1995"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "marked_at": {
+            "description": "When the profile marked it",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "marked_at"
+        ],
+        "type": "object"
+      },
       "NotificationAccountChannelCapability": {
         "additionalProperties": false,
         "properties": {
@@ -35221,6 +35487,9 @@
             "description": "Opaque revision of this document",
             "type": "string"
           },
+          "series": {
+            "$ref": "#/components/schemas/NotificationSeriesCapability"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -35246,6 +35515,7 @@
           "webhooks",
           "email",
           "discord",
+          "series",
           "revision",
           "state",
           "allowed"
@@ -35498,6 +35768,30 @@
           "verification_id",
           "expires_at",
           "current"
+        ],
+        "type": "object"
+      },
+      "NotificationEpisodeRef": {
+        "additionalProperties": false,
+        "properties": {
+          "episode_number": {
+            "examples": [
+              9
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "season_number": {
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "season_number",
+          "episode_number"
         ],
         "type": "object"
       },
@@ -35824,6 +36118,109 @@
           "key_prefix",
           "api_key_configured",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "NotificationSeries": {
+        "additionalProperties": false,
+        "properties": {
+          "active_reasons": {
+            "$ref": "#/components/schemas/NotificationSeriesReasons",
+            "description": "The reasons the profile's notification preferences let notify; all false when they silence the series"
+          },
+          "item": {
+            "$ref": "#/components/schemas/CatalogItem",
+            "description": "The series as a catalog card"
+          },
+          "muted": {
+            "description": "The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted.",
+            "type": "boolean"
+          },
+          "next_up_after": {
+            "$ref": "#/components/schemas/NotificationEpisodeRef",
+            "description": "With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"
+          },
+          "notifies": {
+            "description": "True when at least one reason is active and the profile has not muted the series",
+            "type": "boolean"
+          },
+          "reasons": {
+            "$ref": "#/components/schemas/NotificationSeriesReasons",
+            "description": "The profile's relationships to the series"
+          }
+        },
+        "required": [
+          "item",
+          "reasons",
+          "active_reasons",
+          "notifies",
+          "muted"
+        ],
+        "type": "object"
+      },
+      "NotificationSeriesCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "GET /notifications/series lists the series whose new episodes can notify the profile",
+            "type": "boolean"
+          },
+          "mute": {
+            "description": "PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available",
+          "mute"
+        ],
+        "type": "object"
+      },
+      "NotificationSeriesCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/NotificationSeries"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "NotificationSeriesReasons": {
+        "additionalProperties": false,
+        "properties": {
+          "continue_watching": {
+            "description": "The profile is partway through the series",
+            "type": "boolean"
+          },
+          "favorite": {
+            "description": "The series is one of the profile's favorites",
+            "type": "boolean"
+          },
+          "next_up": {
+            "description": "The profile finished an episode and waits for the next",
+            "type": "boolean"
+          },
+          "watchlist": {
+            "description": "The series is on the profile's watchlist",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "favorite",
+          "watchlist",
+          "continue_watching",
+          "next_up"
         ],
         "type": "object"
       },
@@ -37361,7 +37758,7 @@
         "additionalProperties": false,
         "properties": {
           "collection_type": {
-            "description": "manual, smart, or an import source (mdblist, tmdb, trakt)",
+            "description": "manual, smart, or an import source (mdblist, tmdb)",
             "examples": [
               "manual"
             ],
@@ -41108,6 +41505,43 @@
         ],
         "type": "object"
       },
+      "ProgressCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "clear_resume_position": {
+            "description": "Whether clearResumePosition is served: it clears a movie or episode's resume position and keeps its watched state and watch history",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "clear_resume_position",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
       "ProgressCollection": {
         "additionalProperties": false,
         "properties": {
@@ -43201,6 +43635,16 @@
           "is_specials": {
             "type": "boolean"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI; absent when none were",
+            "items": {
+              "enum": [
+                "overview"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "overview": {
             "type": "string"
           },
@@ -43973,6 +44417,10 @@
             },
             "type": "array"
           },
+          "local_route": {
+            "$ref": "#/components/schemas/ServerLocalRoute",
+            "description": "How to reach the API server directly on the local network; absent on a server whose API port does not answer TLS."
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -44079,6 +44527,29 @@
         },
         "required": [
           "server_id"
+        ],
+        "type": "object"
+      },
+      "ServerLocalRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "spki_sha256": {
+            "description": "Base64 SHA-256 of the SubjectPublicKeyInfo of the certificate the API listener presents over TLS on its own port. A client accepts a local-network address only when TLS there presents this key, and learns it only over an address it already trusts. Derived from SECRET_KEY, so it changes when that key is rotated.",
+            "examples": [
+              "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg="
+            ],
+            "type": "string"
+          },
+          "url": {
+            "description": "server.local_url: scheme://host[:port] of the API server on the local network, when an admin set one. Clients connect with https on the same host and port, whatever the scheme says, and require the pinned key. Absent when unset; clients may still find local addresses through LAN discovery.",
+            "examples": [
+              "http://192.168.1.20:8080"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "spki_sha256"
         ],
         "type": "object"
       },
@@ -44448,6 +44919,13 @@
             ],
             "type": "boolean"
           },
+          "supports_device_rename": {
+            "description": "Whether updateDevice can give a device a custom name, which listDevices returns as custom_name",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "supports_idempotent_writes": {
             "description": "Whether repeating a value write converges on the same state",
             "examples": [
@@ -44466,6 +44944,7 @@
           "supports_batched_effective",
           "supports_idempotent_writes",
           "supports_atomic_shortcuts",
+          "supports_device_rename",
           "revision",
           "state",
           "allowed"
@@ -47321,114 +47800,6 @@
         ],
         "type": "object"
       },
-      "TraktCollectionImport": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "examples": [
-              ""
-            ],
-            "type": "string"
-          },
-          "display_query_definition": {
-            "description": "Display filter fragment"
-          },
-          "is_shared": {
-            "description": "Show the collection to every profile on the login; defaults to false",
-            "examples": [
-              false
-            ],
-            "type": "boolean"
-          },
-          "library_ids": {
-            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
-            "examples": [
-              [
-                "1"
-              ]
-            ],
-            "items": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "limit": {
-            "description": "Cap on synced items; the server's own maximum applies when omitted",
-            "examples": [
-              50
-            ],
-            "format": "int64",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "media_type": {
-            "description": "movie or show; the preset's default when omitted",
-            "examples": [
-              "movie"
-            ],
-            "type": "string"
-          },
-          "poster_url": {
-            "description": "A bundled template poster path or an image URL",
-            "examples": [
-              ""
-            ],
-            "type": "string"
-          },
-          "preset": {
-            "description": "A Trakt preset name",
-            "examples": [
-              "trending"
-            ],
-            "minLength": 1,
-            "type": "string"
-          },
-          "sort_config": {
-            "description": "Default sort document"
-          },
-          "sync_schedule": {
-            "description": "Sync cadence name; the server default when omitted",
-            "examples": [
-              "daily"
-            ],
-            "type": "string"
-          },
-          "title": {
-            "description": "The new collection's name; trimmed",
-            "examples": [
-              "Trending movies"
-            ],
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "preset",
-          "title"
-        ],
-        "type": "object"
-      },
-      "TraktSpec": {
-        "additionalProperties": false,
-        "properties": {
-          "media_type": {
-            "type": "string"
-          },
-          "preset": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "preset",
-          "media_type"
-        ],
-        "type": "object"
-      },
       "TransformationV3": {
         "additionalProperties": false,
         "properties": {
@@ -47460,7 +47831,7 @@
         "additionalProperties": false,
         "properties": {
           "target_language": {
-            "description": "BCP 47 tag of the wanted language, as the detail document's pending_translation_language reported it",
+            "description": "BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language.",
             "examples": [
               "de"
             ],
@@ -47487,6 +47858,13 @@
             "examples": [
               "movie"
             ],
+            "type": "string"
+          },
+          "ignored_at": {
+            "description": "When an admin marked the item as intentionally unmatched; absent unless it is ignored",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "library_id": {
@@ -50332,6 +50710,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone.",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga_chapter_count": {
             "format": "int64",
             "type": "integer"
@@ -50357,6 +50746,10 @@
             "description": "Technical badges of the best file"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -50676,6 +51069,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone.",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga_chapter_count": {
             "format": "int64",
             "type": "integer"
@@ -50701,6 +51105,10 @@
             "description": "Technical badges of the best file"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -64461,197 +64869,6 @@
           }
         ],
         "summary": "Import a public TMDB list as a collection.",
-        "tags": [
-          "admin-collections"
-        ],
-        "x-silo-class": "acting_admin",
-        "x-silo-demo-restricted": true,
-        "x-silo-retry-safety": "non_retryable",
-        "x-silo-service-backed": true
-      }
-    },
-    "/api/v2/admin/collections/import/trakt": {
-      "post": {
-        "operationId": "importAdminTrakt",
-        "parameters": [
-          {
-            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "schema": {
-              "examples": [
-                "1"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
-            "in": "header",
-            "name": "X-Profile-Token",
-            "schema": {
-              "examples": [
-                "pvt_5f3a9c1e7b2d4e8fa0c6"
-              ],
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdminTraktImport"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminCollectionImportResult"
-                }
-              }
-            },
-            "description": "Created",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "406": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Acceptable"
-          },
-          "408": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Request Timeout"
-          },
-          "413": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "429": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Import a Trakt collection.",
         "tags": [
           "admin-collections"
         ],
@@ -84829,7 +85046,7 @@
                 }
               }
             },
-            "description": "The job was already canceled."
+            "description": "The job is canceled: it was already canceled, or it was a queued image cache cleanup that this request canceled at once."
           },
           "202": {
             "content": {
@@ -85732,6 +85949,532 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/libraries/{library_id}/metadata-translation": {
+      "post": {
+        "operationId": "translateLibraryMetadata",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library",
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "description": "The library",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTranslateLibraryInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataTranslationJob"
+                }
+              }
+            },
+            "description": "Accepted",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Prewarm a library: persist or reuse an active job that translates the missing descriptions of every item in the library, with their seasons and episodes, into a language. Existing provider, manual and AI text is kept. Progress counts items.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/libraries/{library_id}/metadata-translation/jobs": {
+      "get": {
+        "operationId": "listLibraryMetadataTranslationJobs",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library",
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "description": "The library",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMetadataTranslationJobs"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the latest 50 prewarm jobs of a library.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancelLibraryMetadataTranslation",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library",
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "description": "The library",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Request cancellation only for a prewarm job of the library.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -102282,6 +103025,161 @@
         "x-silo-conditional": true
       }
     },
+    "/api/v2/admin/recommendations/embeddings/reset": {
+      "post": {
+        "description": "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while saved embedding settings wait for a server restart. Run the embedding job afterwards to build the new embedding space.",
+        "operationId": "resetAdminRecommendationEmbeddings",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRecommendationEmbeddingsReset"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete the embedding lock, every item embedding, taste clusters and per-profile cached rows, and clear taste profile vectors, in one transaction.",
+        "tags": [
+          "admin-recommendations"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/recommendations/status": {
       "get": {
         "operationId": "getAdminRecommendationsStatus",
@@ -102416,7 +103314,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read persisted counts and this process's running flags.",
+        "summary": "Read persisted counts, each job's last run, the embedding lock conflict and this process's running flags.",
         "tags": [
           "admin-recommendations"
         ],
@@ -132885,6 +133783,207 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/capabilities/not-interested": {
+      "get": {
+        "operationId": "getNotInterestedCapability",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotInterestedCapability"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Whether the acting profile can mark movies and series Not interested.",
+        "tags": [
+          "not-interested"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/capabilities/password-reset": {
       "get": {
         "operationId": "getPasswordResetCapability",
@@ -136480,7 +137579,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Queue a translation of the item's descriptions into the language the detail document reported missing; answers 202 with the job.",
+        "summary": "Queue a translation of the descriptions a page shows into the language its detail document reported missing: a movie's or series' own overview and tagline, a season's overview and its episodes' overviews, or one episode. Answers 202 with the job.",
         "tags": [
           "catalog"
         ],
@@ -141449,199 +142548,6 @@
         "x-silo-service-backed": true
       }
     },
-    "/api/v2/collections/import/trakt": {
-      "post": {
-        "operationId": "importTraktCollection",
-        "parameters": [
-          {
-            "description": "The household profile acting for this request; it must belong to the authenticated account.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "required": true,
-            "schema": {
-              "examples": [
-                "1"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
-            "in": "header",
-            "name": "X-Profile-Token",
-            "schema": {
-              "examples": [
-                "pvt_5f3a9c1e7b2d4e8fa0c6"
-              ],
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TraktCollectionImport"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CollectionImportResult"
-                }
-              }
-            },
-            "description": "Created",
-            "headers": {
-              "Location": {
-                "schema": {
-                  "description": "The created collection's resource path",
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "406": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Acceptable"
-          },
-          "408": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Request Timeout"
-          },
-          "413": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "429": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Import a Trakt preset as a synced collection. Creates the collection and runs its first sync. Not idempotent: a retry after a lost response creates a second collection.",
-        "tags": [
-          "collections"
-        ],
-        "x-silo-class": "profile_scoped",
-        "x-silo-demo-restricted": true,
-        "x-silo-retry-safety": "non_retryable",
-        "x-silo-service-backed": true
-      }
-    },
     "/api/v2/collections/order": {
       "get": {
         "operationId": "getCollectionOrder",
@@ -145891,6 +146797,220 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      },
+      "patch": {
+        "operationId": "updateDevice",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Another profile on the account; requires household management authority",
+            "explode": false,
+            "in": "query",
+            "name": "profile_id",
+            "schema": {
+              "description": "Another profile on the account; requires household management authority",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceSettings"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a device's entry for the acting profile, or another household profile, and return it; omitted members are unchanged. Settings and login sessions are untouched.",
+        "tags": [
+          "devices"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -157687,12 +158807,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.",
+        "summary": "Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
       "get": {
@@ -157991,12 +159111,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated.",
+        "summary": "Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "favorites"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -163822,6 +164942,17 @@
             }
           },
           {
+            "description": "List the items an admin marked as intentionally unmatched instead of the ones awaiting a match",
+            "explode": false,
+            "in": "query",
+            "name": "ignored",
+            "schema": {
+              "default": false,
+              "description": "List the items an admin marked as intentionally unmatched instead of the ones awaiting a match",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "Opaque cursor from page.next_cursor",
             "explode": false,
             "in": "query",
@@ -163942,11 +165073,321 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Page the catalog items awaiting a metadata match, in title order.",
+        "summary": "Page the catalog items awaiting a metadata match, in title order. Items an admin marked as intentionally unmatched are left out unless ignored is set, which lists only those.",
         "tags": [
           "libraries"
         ],
         "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/libraries/unmatched-items/{content_id}/ignore": {
+      "delete": {
+        "operationId": "unignoreUnmatchedItem",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The catalog item",
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "description": "The catalog item",
+              "examples": [
+                "local-ad5847acdd9590cc9d353da12446"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clear an item's intentionally-unmatched mark so it returns to the unmatched list and automatic matching tries it again; an unmarked item is left as is.",
+        "tags": [
+          "libraries"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "ignoreUnmatchedItem",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The catalog item",
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "description": "The catalog item",
+              "examples": [
+                "local-ad5847acdd9590cc9d353da12446"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mark an unmatched, pending or ambiguous movie or series as intentionally unmatched: it leaves the unmatched list and the matcher queues and automatic matching leaves it alone, while it stays playable with its local metadata. Match Item still works and clears the mark. Books cannot be ignored.",
+        "tags": [
+          "libraries"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -169060,6 +170501,653 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/not-interested": {
+      "get": {
+        "operationId": "listNotInterested",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Artwork variant to presign; absent picks each surface's default",
+            "explode": false,
+            "in": "query",
+            "name": "image_size",
+            "schema": {
+              "description": "Artwork variant to presign; absent picks each surface's default",
+              "enum": [
+                "small",
+                "medium",
+                "large",
+                "original"
+              ],
+              "examples": [
+                "medium"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJvIjo1MH0"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotInterestedCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the movies and series the acting profile marked Not interested as catalog cards, newest mark first; items the viewer may not see are omitted.",
+        "tags": [
+          "not-interested"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/not-interested/{item_id}": {
+      "delete": {
+        "operationId": "unmarkNotInterested",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier of a movie or series",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier of a movie or series",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clear the acting profile's Not interested mark on the item. An absent mark succeeds and changes nothing.",
+        "tags": [
+          "not-interested"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      },
+      "get": {
+        "operationId": "getNotInterested",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier of a movie or series",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier of a movie or series",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotInterestedEntry"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Answer whether the acting profile marked the item Not interested: the mark, or 404 when it did not (or the viewer may not see the item).",
+        "tags": [
+          "not-interested"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "markNotInterested",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier of a movie or series",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier of a movie or series",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mark a movie or series Not interested for the acting profile: its recommendation and discovery rows leave it out and rank similar titles lower, after a rebuild that starts within seconds. Library browsing, search, item detail, playback, favorites and the watchlist are unchanged. Episodes and seasons are refused with 422; mark the series. Marking a marked title succeeds and changes nothing.",
+        "tags": [
+          "not-interested"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/notifications": {
       "get": {
         "operationId": "listNotifications",
@@ -172610,6 +174698,570 @@
           }
         ],
         "summary": "Manage the acting profile's notification inbox.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/series": {
+      "get": {
+        "description": "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted.",
+        "operationId": "listNotificationSeries",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Artwork variant to presign; absent picks each surface's default",
+            "explode": false,
+            "in": "query",
+            "name": "image_size",
+            "schema": {
+              "description": "Artwork variant to presign; absent picks each surface's default",
+              "enum": [
+                "small",
+                "medium",
+                "large",
+                "original"
+              ],
+              "examples": [
+                "medium"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJ0IjoiYmVhciJ9"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "default": "all",
+              "description": "active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series",
+              "enum": [
+                "all",
+                "active",
+                "inactive"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason",
+            "explode": false,
+            "in": "query",
+            "name": "reason",
+            "schema": {
+              "description": "Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason",
+              "enum": [
+                "favorite",
+                "watchlist",
+                "continue_watching",
+                "next_up"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keeps the series whose title or sort title contains this text, case-insensitively",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Keeps the series whose title or sort title contains this text, case-insensitively",
+              "examples": [
+                "bear"
+              ],
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "One field, descending with a leading '-'. added_at is when the series joined the catalog; latest_episode_added when it last gained an episode. A series without a year or an episode sorts last either way; ties order by title.",
+            "explode": false,
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "default": "title",
+              "description": "One field, descending with a leading '-'. added_at is when the series joined the catalog; latest_episode_added when it last gained an episode. A series without a year or an episode sorts last either way; ties order by title.",
+              "enum": [
+                "title",
+                "-title",
+                "year",
+                "-year",
+                "added_at",
+                "-added_at",
+                "latest_episode_added",
+                "-latest_episode_added"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSeriesCollection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the series whose new episodes can notify the acting profile.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/series/{series_id}/mute": {
+      "delete": {
+        "description": "The series notifies the acting profile again for its active reasons. The mute applies when notification delivery evaluates a new episode, normally within a minute of it arriving: an episode evaluated while the series was muted is not announced later, and one still waiting to be evaluated when the profile unmutes is announced. Unmuting a series that is not muted succeeds and changes nothing. No access check runs, so a profile can lift a mute on a series it can no longer see.",
+        "operationId": "unmuteNotificationSeries",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier of the series",
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier of the series",
+              "examples": [
+                "series-tvdb-81189"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unmute new-episode notifications for one series.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "description": "The acting profile gets no new-episode notification for the series on any channel, whatever its reasons, until it unmutes. Favorites, the watchlist, Home, and watch history are unchanged, and other profiles are unaffected. Muting a series already muted succeeds and changes nothing. A series the viewer may not see, or an item that is not a series, is 404.",
+        "operationId": "muteNotificationSeries",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier of the series",
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier of the series",
+              "examples": [
+                "series-tvdb-81189"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mute new-episode notifications for one series.",
         "tags": [
           "notifications"
         ],
@@ -176289,6 +178941,124 @@
         "x-silo-class": "public",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/playback/bandwidth-probe": {
+      "get": {
+        "operationId": "getPlaybackBandwidthProbe",
+        "parameters": [
+          {
+            "description": "Number of bytes to send. A client may close the connection early once it has timed enough of the transfer.",
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "default": 1000000,
+              "format": "int64",
+              "maximum": 100000000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Random bytes",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "format": "int64",
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 32 probes at once; an account may run two of them and draw up to 400 MB per 10 minutes. Beyond any limit the request gets 429 with Retry-After.",
+        "tags": [
+          "playback"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-raw-protocol": "bandwidth-probe",
+        "x-silo-raw-reason": "A throughput measurement needs an unbuffered, uncompressible byte stream the client can time and abandon mid-transfer."
       }
     },
     "/api/v2/playback/capabilities": {
@@ -181988,6 +184758,358 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/progress/capabilities": {
+      "get": {
+        "operationId": "getProgressCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The watch progress features this server supports, such as clearing a resume position.",
+        "tags": [
+          "progress"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/progress/{media_item_id}/position": {
+      "delete": {
+        "operationId": "clearResumePosition",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "A movie or episode",
+            "in": "path",
+            "name": "media_item_id",
+            "required": true,
+            "schema": {
+              "description": "A movie or episode",
+              "examples": [
+                "movie-8f2c1a"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clear the acting profile's resume position on a movie or episode, keeping its watched state and watch history. An item without a resume position is a no-op.",
+        "tags": [
+          "progress"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/ratings": {
       "get": {
         "operationId": "listRatings",
@@ -182822,7 +185944,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Cards recommended because the acting profile watched the item, minus what it has watched or rated low.",
+        "summary": "Cards recommended because the acting profile watched the item, minus what it has watched or rated.",
         "tags": [
           "recommendations"
         ],
@@ -183461,7 +186583,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The server's most played items over the window, minus what the acting profile has watched.",
+        "summary": "The server's most played items over the window, minus what the acting profile has watched or marked Not interested.",
         "tags": [
           "recommendations"
         ],
@@ -183637,7 +186759,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Items added over the window, minus what the acting profile has watched.",
+        "summary": "Items added over the window, minus what the acting profile has watched or marked Not interested.",
         "tags": [
           "recommendations"
         ],
@@ -184166,7 +187288,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Cards similar to the item by content; not personalised beyond the acting profile's access.",
+        "summary": "Cards similar to the item by content; personalised only by the acting profile's access and by leaving out the titles it marked Not interested.",
         "tags": [
           "recommendations"
         ],
@@ -209116,12 +212238,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove the item from the acting profile's watchlist; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.",
+        "summary": "Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       },
       "get": {
@@ -209420,12 +212542,12 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add the item to the acting profile's watchlist. Automatic retries are unsafe because provider and refresh effects are not change-gated.",
+        "summary": "Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.",
         "tags": [
           "watchlist"
         ],
         "x-silo-class": "profile_scoped",
-        "x-silo-retry-safety": "non_retryable",
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },

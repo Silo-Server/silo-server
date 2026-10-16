@@ -475,13 +475,17 @@ func (s *Service) newFulfillContext(ctx context.Context) (*fulfillContext, error
 // installation routing isn't supported yet: it picks the first eligible
 // connection's installation and includes ONLY connections belonging to it, so a
 // second installation's resolved plaintext credentials are never handed to the
-// first plugin. A connection whose api key cannot be resolved (or resolves empty)
-// is skipped rather than aborting the whole request — a sibling healthy
-// connection can still fulfill it, and an unauthenticated request is never sent.
+// first plugin. A connection without the api key its plugin needs (see
+// missingAPIKey) is skipped rather than aborting the whole request — a sibling
+// healthy connection can still fulfill it, and an unauthenticated request is
+// never sent to a plugin that needs a key. So is one whose plugin's
+// declaration cannot be read; that error is returned only when no connection
+// is left.
 func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillContext, mediaType MediaType) ([]ResolvedRouterConnection, int, string, error) {
 	var conns []ResolvedRouterConnection
 	installationID, capabilityID := 0, ""
 	chosen := false
+	var readErr error
 	for _, in := range fc.integrations {
 		if !eligibleRouterConnection(in, mediaType) {
 			continue
@@ -492,9 +496,13 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 		if chosen && (*in.InstallationID != installationID || in.CapabilityID != capabilityID) {
 			continue
 		}
-		// in.APIKeyRef was decrypted by the repo on read; empty means unconfigured.
-		apiKey := strings.TrimSpace(in.APIKeyRef)
-		if apiKey == "" {
+		missing, err := s.missingAPIKey(ctx, fc, in)
+		if err != nil {
+			slog.WarnContext(ctx, "requests: skipping router connection whose plugin's api key declaration cannot be read", "component", "requests", "connection_id", in.ID, "err", err)
+			readErr = err
+			continue
+		}
+		if missing {
 			slog.WarnContext(ctx, "requests: skipping router connection with no api key", "component", "requests", "connection_id", in.ID)
 			continue
 		}
@@ -503,9 +511,33 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 		if !chosen {
 			installationID, capabilityID, chosen = *in.InstallationID, in.CapabilityID, true
 		}
-		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig})
+		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: strings.TrimSpace(in.APIKeyRef), Config: in.PluginConfig})
+	}
+	if len(conns) == 0 && readErr != nil {
+		return nil, 0, "", readErr
 	}
 	return conns, installationID, capabilityID, nil
+}
+
+// missingAPIKey reports whether a connection has no API key although its
+// router capability needs one. in.APIKeyRef was decrypted by the repo on
+// read, and empty means none was saved. A capability that declares
+// api_key_optional takes connections without a key; its declaration is read
+// only for a connection without one, so a connection with a key never
+// depends on it. When the declaration cannot be read, the key counts as
+// missing and the error is returned.
+func (s *Service) missingAPIKey(ctx context.Context, fc *fulfillContext, in Integration) (bool, error) {
+	if strings.TrimSpace(in.APIKeyRef) != "" {
+		return false, nil
+	}
+	if in.InstallationID == nil || in.CapabilityID == "" {
+		return true, nil
+	}
+	features, err := s.routerFeatures(ctx, fc, *in.InstallationID, in.CapabilityID)
+	if err != nil {
+		return true, err
+	}
+	return !features.APIKeyOptional, nil
 }
 
 // Reasons a configured router connection cannot take a submission, recorded in
@@ -517,7 +549,7 @@ const (
 
 // unusableRouterMessage explains why no configured connection could take a
 // submission, for the request's last_error.
-func unusableRouterMessage(fc *fulfillContext, mediaType MediaType) string {
+func (s *Service) unusableRouterMessage(ctx context.Context, fc *fulfillContext, mediaType MediaType) string {
 	for _, in := range fc.integrations {
 		if !in.Enabled || in.CapabilityID == "" || !integrationSupportsMediaType(in, mediaType) {
 			continue
@@ -527,7 +559,7 @@ func unusableRouterMessage(fc *fulfillContext, mediaType MediaType) string {
 			// plugin install and were never re-bound.
 			return msgRouterUnbound
 		}
-		if strings.TrimSpace(in.APIKeyRef) == "" {
+		if missing, _ := s.missingAPIKey(ctx, fc, in); missing {
 			return msgRouterNoKey
 		}
 	}
@@ -568,11 +600,14 @@ func routerConfiguredFor(fc *fulfillContext, mediaType MediaType) bool {
 }
 
 // skippedRouterConnection reports whether resolveRouterConnections leaves out
-// a connection that would otherwise serve the media type, because its API key
-// is missing.
-func skippedRouterConnection(fc *fulfillContext, mediaType MediaType) bool {
+// a connection that would otherwise serve the media type, because it has no
+// API key and its plugin needs one.
+func (s *Service) skippedRouterConnection(ctx context.Context, fc *fulfillContext, mediaType MediaType) bool {
 	for _, in := range fc.integrations {
-		if eligibleRouterConnection(in, mediaType) && strings.TrimSpace(in.APIKeyRef) == "" {
+		if !eligibleRouterConnection(in, mediaType) {
+			continue
+		}
+		if missing, _ := s.missingAPIKey(ctx, fc, in); missing {
 			return true
 		}
 	}
@@ -1527,7 +1562,8 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 	// On UPDATE the client omits api_key_ref ("leave blank to keep saved key"),
 	// so we would otherwise validate against an empty credential. Mirror
 	// LoadIntegrationOptions's backfill: load the stored row by id and reuse the
-	// saved (already-decrypted) api key (and BaseURL/PluginConfig if also blank).
+	// saved (already-decrypted) api key (and PluginConfig if also blank). The
+	// base URL is validated as sent, since that is what the save stores.
 	// Nil-safe — a brand-new id has no stored row, so just proceed with what the
 	// body carries.
 	if strings.TrimSpace(in.APIKeyRef) == "" && strings.TrimSpace(in.ID) != "" {
@@ -1539,13 +1575,12 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 			// Don't pair a stored API key with a caller-changed base URL: require the
 			// key to be re-entered when the server URL changes (defense against
 			// exfiltrating a stored, API-unreadable key to an attacker-supplied URL).
-			if strings.TrimSpace(in.BaseURL) != "" && !sameIntegrationBaseURL(in.BaseURL, stored.BaseURL) {
-				return &ValidationError{FieldErrors: map[string]string{"api_key_ref": "re-enter the API key when changing the base URL"}}
+			// A cleared URL is a change too, since the save stores it blank. A
+			// server saved without a key has none to protect.
+			if strings.TrimSpace(stored.APIKeyRef) != "" && !sameIntegrationBaseURL(in.BaseURL, stored.BaseURL) {
+				return &ValidationError{FieldErrors: map[string]string{fieldAPIKey: integrationKeyReentry}}
 			}
 			in.APIKeyRef = stored.APIKeyRef
-			if strings.TrimSpace(in.BaseURL) == "" {
-				in.BaseURL = stored.BaseURL
-			}
 			if in.PluginConfig == nil {
 				in.PluginConfig = stored.PluginConfig
 			}
@@ -1636,17 +1671,19 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		}
 		if stored != nil {
 			submittedBaseURL := strings.TrimSpace(integration.BaseURL)
-			if submittedBaseURL == "" {
-				integration.BaseURL = stored.BaseURL
-			}
-			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || sameIntegrationBaseURL(submittedBaseURL, stored.BaseURL)) {
-				integration.APIKeyRef = stored.APIKeyRef
-			}
 			if strings.TrimSpace(integration.CapabilityID) == "" {
 				integration.CapabilityID = stored.CapabilityID
 			}
 			if integration.InstallationID == nil {
 				integration.InstallationID = stored.InstallationID
+			}
+			if submittedBaseURL == "" && (!integration.BaseURLCleared || s.blankURLMeansSaved(ctx, integration)) {
+				integration.BaseURL = stored.BaseURL
+			}
+			// The saved key goes only to the address it was saved for, so a
+			// changed or cleared address is probed without it.
+			if strings.TrimSpace(integration.APIKeyRef) == "" && sameIntegrationBaseURL(integration.BaseURL, stored.BaseURL) {
+				integration.APIKeyRef = stored.APIKeyRef
 			}
 			if integration.PluginConfig == nil {
 				integration.PluginConfig = stored.PluginConfig
@@ -1654,17 +1691,20 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		}
 	}
 
-	// Without a key the plugin could only fail; say so on the key field. The
-	// address is passed as given: the v2 adapter normalizes it first, and the
-	// frozen v1 route keeps sending what the client submitted.
-	apiKey := strings.TrimSpace(integration.APIKeyRef)
-	if apiKey == "" {
+	// Without a key a plugin that needs one could only fail; say so on the key
+	// field. The address is passed as given: the v2 adapter normalizes it
+	// first, and the frozen v1 route keeps sending what the client submitted.
+	missing, err := s.missingAPIKey(ctx, &fulfillContext{}, integration)
+	if err != nil {
+		return nil, err
+	}
+	if missing {
 		return nil, probeValidation(&ValidationError{FieldErrors: map[string]string{fieldAPIKey: integrationKeyMissing}})
 	}
 	if s.router == nil || integration.InstallationID == nil {
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
-	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: apiKey, Config: integration.PluginConfig}
+	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: strings.TrimSpace(integration.APIKeyRef), Config: integration.PluginConfig}
 	options, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
 	if err != nil {
 		return nil, classifyIntegrationError(err, integration.CapabilityID)
@@ -2265,7 +2305,7 @@ func (s *Service) submitClaimed(ctx context.Context, req Request, actor Viewer, 
 		// but none is usable. That is an admin-fixable setup problem, so it is
 		// returned as a submission error: the request keeps its approval and
 		// retries with backoff, and goes through once the connection is fixed.
-		return nil, errors.New(unusableRouterMessage(fc, req.MediaType))
+		return nil, errors.New(s.unusableRouterMessage(ctx, fc, req.MediaType))
 	}
 	if missingSeasons {
 		// missingSeasonsDeliverable checked every series connection; this
@@ -2282,7 +2322,7 @@ func (s *Service) submitClaimed(ctx context.Context, req Request, actor Viewer, 
 	if !fc.settings.ForceDualQuality {
 		allowed = filterUnconfiguredOptionalQualities(allowed, conns)
 	}
-	plan, done, err := s.planSubmission(ctx, req, actor, allowed, resolved && !skippedRouterConnection(fc, req.MediaType))
+	plan, done, err := s.planSubmission(ctx, req, actor, allowed, resolved && !s.skippedRouterConnection(ctx, fc, req.MediaType))
 	if done != nil || err != nil {
 		return done, err
 	}
@@ -2336,7 +2376,7 @@ func (s *Service) submitRouted(ctx context.Context, req Request, actor Viewer, f
 			failures[q] = unroutedMessage(routes, req.MediaType, q)
 			continue
 		}
-		conn, installationID, capabilityID, err := routedConnection(fc, decision, req.MediaType, q)
+		conn, installationID, capabilityID, err := s.routedConnection(ctx, fc, decision, req.MediaType, q)
 		if err != nil {
 			if len(targets) == 0 {
 				// The chosen server is gone, disabled or not set up: an
@@ -2980,6 +3020,7 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 	}
 	groups := map[owner]*group{}
 	var order []owner
+	var errs []error
 	groupFor := func(key owner) *group {
 		g := groups[key]
 		if g == nil {
@@ -3013,7 +3054,11 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 			continue
 		}
 		in := integrationByID(fc, t.IntegrationID)
-		if !statusCheckable(in) {
+		checkable, err := s.statusCheckable(ctx, fc, in)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if !checkable {
 			continue
 		}
 		g := groupFor(owner{*in.InstallationID, in.CapabilityID})
@@ -3023,7 +3068,6 @@ func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets 
 	// One plugin being down must not hide the statuses another reported, so
 	// every group is asked and the errors are returned alongside them.
 	var out []RouterTargetStatus
-	var errs []error
 	for _, key := range order {
 		g := groups[key]
 		statuses, err := s.router.CheckStatus(ctx, key.installationID, key.capabilityID, req, g.refs, g.conns)
@@ -3068,9 +3112,14 @@ func soleRefConnection(refs []RouterTargetRef) string {
 
 // statusCheckable reports whether a target's server can be asked for the
 // target's status: it still exists, is enabled, is bound to a router
-// capability, and has an API key.
-func statusCheckable(in *Integration) bool {
-	return in != nil && in.Enabled && in.InstallationID != nil && in.CapabilityID != "" && strings.TrimSpace(in.APIKeyRef) != ""
+// capability, and has an API key unless its plugin needs none. The error is
+// from reading that declaration; the server is not asked then.
+func (s *Service) statusCheckable(ctx context.Context, fc *fulfillContext, in *Integration) (bool, error) {
+	if in == nil || !in.Enabled || in.InstallationID == nil || in.CapabilityID == "" {
+		return false, nil
+	}
+	missing, err := s.missingAPIKey(ctx, fc, *in)
+	return !missing && err == nil, err
 }
 
 func integrationByID(fc *fulfillContext, id string) *Integration {

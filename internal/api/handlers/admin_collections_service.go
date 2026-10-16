@@ -16,7 +16,6 @@ import (
 
 const (
 	adminCollectionBackdrop = "backdrop"
-	adminCollectionTrakt    = "trakt"
 	adminCollectionVisible  = "visible"
 	adminCollectionHidden   = "hidden"
 )
@@ -30,7 +29,6 @@ type AdminCollectionPreviewRequest = previewCollectionRequest
 type AdminCollectionImportMDBList = importMDBListRequest
 type AdminCollectionImportTMDB = importTMDBRequest
 type AdminCollectionImportTMDBList = importTMDBListRequest
-type AdminCollectionImportTrakt = importTraktRequest
 type AdminCollectionImportResult = importCollectionResponse
 type AdminCollectionTemplateApply = applyTemplateBundleRequest
 type AdminCollectionTemplateResult = applyTemplateBundleResponse
@@ -110,9 +108,6 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 
 func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, req AdminCollectionCreate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
-	if req.CollectionType == adminCollectionTrakt || isTraktCollectionSourceConfig(req.SourceConfig) {
-		return none, apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
-	}
 	if req.CollectionType != "" {
 		if err := validateCollectionType(req.CollectionType); err != nil {
 			return none, err
@@ -330,9 +325,7 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 // validateCollectionType rejects values the library_collections
 // collection_type CHECK constraint would refuse. Create skips it for an empty
 // value, which later defaults to manual; an update has no default to fall back
-// to, so an explicit empty value is an error. Trakt passes so that a legacy
-// Trakt collection can be saved unchanged; validateAdminCollectionSourceUpdate
-// and createAdminCollection refuse new ones.
+// to, so an explicit empty value is an error.
 func validateCollectionType(collectionType string) error {
 	if catalog.IsKnownType(collectionType) {
 		return nil
@@ -375,10 +368,6 @@ func adminCollectionLookupAPIError(err error) error {
 }
 
 func validateAdminCollectionSourceUpdate(existing *models.LibraryCollection, req AdminCollectionUpdate) error {
-	proposedType := existing.CollectionType
-	if req.CollectionType != nil {
-		proposedType = *req.CollectionType
-	}
 	proposedConfig := existing.SourceConfig
 	if len(req.SourceConfig) > 0 {
 		proposedConfig = req.SourceConfig
@@ -387,41 +376,12 @@ func validateAdminCollectionSourceUpdate(existing *models.LibraryCollection, req
 	if req.SourceURL != nil {
 		proposedURL = *req.SourceURL
 	}
-	wasTrakt := existing.CollectionType == adminCollectionTrakt || isTraktCollectionSourceConfig(existing.SourceConfig)
-	willBeTrakt := proposedType == adminCollectionTrakt || isTraktCollectionSourceConfig(proposedConfig)
-	if !wasTrakt && willBeTrakt {
-		return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
-	}
 	if err := validateTMDBListSourceConfig(proposedConfig, proposedURL); err != nil {
 		return apiError(http.StatusBadRequest, "bad_request", err.Error())
-	}
-	if wasTrakt {
-		activatesSchedule := req.SyncSchedule != nil && strings.TrimSpace(*req.SyncSchedule) != "" && (existing.SyncSchedule == nil || strings.TrimSpace(*existing.SyncSchedule) == "")
-		changesLibraries := req.LibraryIDs != nil && !samePositiveIntSet(existing.LibraryIDs, *req.LibraryIDs)
-		if proposedType != existing.CollectionType || !jsonConfigEqual(existing.SourceConfig, proposedConfig) || proposedURL != existing.SourceURL || activatesSchedule || changesLibraries {
-			return apiError(http.StatusBadRequest, "legacy_source_immutable", "legacy Trakt collection sources cannot be changed or reactivated")
-		}
 	}
 	return nil
 }
 
-func samePositiveIntSet(left, right []int) bool {
-	left = uniquePositiveInts(left)
-	right = uniquePositiveInts(right)
-	if len(left) != len(right) {
-		return false
-	}
-	rightSet := make(map[int]struct{}, len(right))
-	for _, id := range right {
-		rightSet[id] = struct{}{}
-	}
-	for _, id := range left {
-		if _, ok := rightSet[id]; !ok {
-			return false
-		}
-	}
-	return true
-}
 func (h *LibraryCollectionHandler) UpdateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate) (AdminCollection, error) {
 	if req.PosterSourceURL != nil || req.BackdropSourceURL != nil {
 		return AdminCollection{}, apiError(400, "bad_request", "Use the artwork endpoint for artwork sources")
@@ -584,14 +544,6 @@ func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req 
 }
 func (h *LibraryCollectionHandler) ImportAdminTMDBList(ctx context.Context, req AdminCollectionImportTMDBList) (AdminCollectionImportResult, error) {
 	return h.importAdminTMDBList(ctx, req, h.adminArtworkSources(ctx))
-}
-
-func (h *LibraryCollectionHandler) importAdminTrakt(ctx context.Context, req AdminCollectionImportTrakt, artwork adminCollectionArtwork) (AdminCollectionImportResult, error) {
-	var none AdminCollectionImportResult
-	return none, apiError(http.StatusGone, "unsupported_source", "new Trakt collections are not supported")
-}
-func (h *LibraryCollectionHandler) ImportAdminTrakt(ctx context.Context, req AdminCollectionImportTrakt) (AdminCollectionImportResult, error) {
-	return h.importAdminTrakt(ctx, req, h.adminArtworkSources(ctx))
 }
 
 func (h *LibraryCollectionHandler) GetAdminCollection(ctx context.Context, id string) (AdminCollection, int64, error) {

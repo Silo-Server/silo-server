@@ -53,9 +53,15 @@ func TestGetSettingsContractCapabilities(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"api_version":1,"manifest_revision":12,"contract_etag":"\"etag-12\"","definition_count":40,"scopes":["account","profile"],"client_families":["tv","web"],"supports_batched_effective":true,"supports_idempotent_writes":true,"supports_atomic_shortcuts":true}` + "\n"
+	want := `{"api_version":1,"manifest_revision":12,"contract_etag":"\"etag-12\"","definition_count":40,"scopes":["account","profile"],"client_families":["tv","web"],"supports_batched_effective":true,"supports_idempotent_writes":true,"supports_atomic_shortcuts":true,"supports_device_rename":false}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	withDevices := pilotDeps(nil, nil)
+	withDevices.DeviceSettings = &fakeDeviceSettings{}
+	renamable := do(t, newTestHandler(t, withDevices), http.MethodGet, "/api/v2/settings/contract/capabilities", "", bearer(memberToken))
+	if !strings.Contains(renamable.Body.String(), `"supports_device_rename":true`) {
+		t.Fatalf("device settings wired, body = %s", renamable.Body.String())
 	}
 	deps := pilotDeps(nil, nil)
 	deps.SettingsContract = nil

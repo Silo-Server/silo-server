@@ -22,11 +22,12 @@ func (f fakeServerIdentity) ServerID(context.Context) (string, error) { return f
 const fixtureServerID = "3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"
 
 type connectionsDoc struct {
-	State     string `json:"state"`
-	Allowed   bool   `json:"allowed"`
-	ServerID  string `json:"server_id"`
-	Current   ServerAccessPath
-	Endpoints []ServerEndpoint `json:"endpoints"`
+	State      string `json:"state"`
+	Allowed    bool   `json:"allowed"`
+	ServerID   string `json:"server_id"`
+	Current    ServerAccessPath
+	Endpoints  []ServerEndpoint  `json:"endpoints"`
+	LocalRoute *ServerLocalRoute `json:"local_route"`
 }
 
 func decodeConnections(t *testing.T, rec *httptest.ResponseRecorder) connectionsDoc {
@@ -90,7 +91,14 @@ func TestGetServerConnections(t *testing.T) {
 	cache := netaccess.NewStatusCache()
 	cache.Report(netaccess.Status{InstallationID: 7, Provider: "stub", State: netaccess.StateConnected, Origin: "HTTPS://Silo.Overlay.Example.Test/"})
 	publicURL := "https://silo.example.test/"
-	deps.ServerConnections = ServerConnections{PublicURL: func() string { return publicURL }, Providers: cache}
+	localURL := "HTTP://192.168.1.20:8080/"
+	const pin = "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg="
+	deps.ServerConnections = ServerConnections{
+		PublicURL:   func() string { return publicURL },
+		LocalURL:    func() string { return localURL },
+		Providers:   cache,
+		LocalTLSPin: pin,
+	}
 	h := newTestHandler(t, deps)
 	path := Prefix + "/system/connections"
 
@@ -103,6 +111,9 @@ func TestGetServerConnections(t *testing.T) {
 	}
 	if doc.Current.Kind != AccessPathDefault || doc.Current.Provider != "" {
 		t.Fatalf("current = %+v", doc.Current)
+	}
+	if doc.LocalRoute == nil || *doc.LocalRoute != (ServerLocalRoute{SPKISHA256: pin, URL: "http://192.168.1.20:8080"}) {
+		t.Fatalf("local_route = %+v", doc.LocalRoute)
 	}
 	want := []ServerEndpoint{
 		{Kind: EndpointKindPublic, URL: "https://silo.example.test"},
@@ -139,13 +150,17 @@ func TestGetServerConnections(t *testing.T) {
 		t.Fatalf("coerced state = %+v", doc.Endpoints[2])
 	}
 
-	// No public URL: the endpoint is absent, never manufactured. An
-	// unparsable one is treated the same.
+	// No public or local URL: the endpoint and the local url are absent,
+	// never manufactured. An unparsable one is treated the same. The pin
+	// stays: LAN discovery still supplies local addresses.
 	for _, raw := range []string{"", "not a url", "ftp://silo.example.test"} {
-		publicURL = raw
+		publicURL, localURL = raw, raw
 		doc = decodeConnections(t, do(t, h, http.MethodGet, path, "", bearer(memberToken)))
 		if len(doc.Endpoints) != 2 || doc.Endpoints[0].Kind != EndpointKindProvider {
-			t.Fatalf("public_url=%q endpoints = %+v", raw, doc.Endpoints)
+			t.Fatalf("url=%q endpoints = %+v", raw, doc.Endpoints)
+		}
+		if doc.LocalRoute == nil || doc.LocalRoute.URL != "" || doc.LocalRoute.SPKISHA256 != pin {
+			t.Fatalf("url=%q local_route = %+v", raw, doc.LocalRoute)
 		}
 	}
 }
@@ -163,8 +178,9 @@ func TestGetServerConnectionsCurrentPath(t *testing.T) {
 	if doc.Current.Kind != EndpointKindProvider || doc.Current.Provider != "tailscale" {
 		t.Fatalf("current = %+v", doc.Current)
 	}
-	// Nothing wired beyond identity: an empty, still-available document.
-	if doc.State != StateAvailable || len(doc.Endpoints) != 0 {
+	// Nothing wired beyond identity: an empty, still-available document
+	// with no local route.
+	if doc.State != StateAvailable || len(doc.Endpoints) != 0 || doc.LocalRoute != nil {
 		t.Fatalf("doc = %+v", doc)
 	}
 }

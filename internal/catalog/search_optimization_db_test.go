@@ -270,7 +270,11 @@ func TestSearchOptimizedAccuracyPostgres(t *testing.T) {
 				if err := pool.QueryRow(ctx, countSQL, options.countArgs...).Scan(&total); err != nil {
 					t.Fatal(err)
 				}
-				scoredCount := baselineSQL[:strings.Index(baselineSQL, ", page AS (")] + " SELECT COUNT(*) FROM scored WHERE $1::text IS NOT NULL"
+				baselineScored, _, ok := strings.Cut(baselineSQL, ", page AS (")
+				if !ok {
+					t.Fatalf("baseline search SQL has no page CTE:\n%s", baselineSQL)
+				}
+				scoredCount := baselineScored + " SELECT COUNT(*) FROM scored WHERE $1::text IS NOT NULL"
 				if err := pool.QueryRow(ctx, scoredCount, options.countArgs...).Scan(&scoredTotal); err != nil {
 					t.Fatal(err)
 				}

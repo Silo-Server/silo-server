@@ -10,6 +10,7 @@ import {
   resolveProviderTileState,
   type ProviderTestState,
 } from "@/components/settings/ProviderTile";
+import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -314,21 +315,6 @@ function MarkerProviderTile({
         value={fetchEnabled ? "true" : "false"}
         onChange={(value) => setFetchEnabled(value === "true")}
       />
-      <SettingFieldRow
-        label="Provider priority"
-        htmlFor={priorityID}
-        description="If providers return markers for the same section, prefer the provider with the lower number."
-      >
-        <Input
-          id={priorityID}
-          type="number"
-          value={fetchPriority}
-          step={1}
-          onChange={(event) => setFetchPriority(event.target.value)}
-          className={SETTINGS_NUMBER_WIDTH}
-          aria-invalid={!priorityValid}
-        />
-      </SettingFieldRow>
       <SettingField
         label="Allow sharing with this provider"
         type="toggle"
@@ -345,35 +331,62 @@ function MarkerProviderTile({
       />
       <div className="border-border ml-3 border-l pl-4">
         <SettingField
-          label="Automatically share detected intros"
+          label="Automatically share detected intros and credits"
           type="toggle"
           value={autoLocal ? "true" : "false"}
           onChange={(value) => setAutoLocal(value === "true")}
           disabled={!provider.is_submitter || !contributeEnabled}
-          description="Share intros detected on this server that meet the minimum confidence below."
+          description="Share intros and credits detected on this server that meet the minimum confidence under Advanced."
         />
-        <div className="border-border ml-3 border-l pl-4">
-          <SettingFieldRow
-            label="Minimum confidence for automatic sharing"
-            htmlFor={minConfidenceID}
-            description="Choose a value from 0% to 100%. Recommended: 95%."
-            unit="%"
-          >
-            <Input
-              id={minConfidenceID}
-              type="number"
-              value={minConfidence}
-              min={0}
-              max={100}
-              step="any"
-              onChange={(event) => setMinConfidence(event.target.value)}
-              className={SETTINGS_NUMBER_WIDTH}
-              aria-invalid={!confidenceValid}
-              disabled={!provider.is_submitter}
-            />
-          </SettingFieldRow>
-        </div>
       </div>
+      {/* Lookup order and the sharing threshold have working defaults; an
+          edited or invalid value holds the section open so Save never stalls
+          on a field the admin cannot see. */}
+      <AdvancedSection
+        id={`providers.marker.${slug}`}
+        count={2}
+        forceOpen={
+          !priorityValid ||
+          !confidenceValid ||
+          provider.fetch_priority !== parsedFetchPriority ||
+          savedMinConfidence !== parsedMinConfidence
+        }
+      >
+        <SettingFieldRow
+          label="Provider priority"
+          htmlFor={priorityID}
+          description="If providers return markers for the same section, prefer the provider with the lower number."
+        >
+          <Input
+            id={priorityID}
+            type="number"
+            value={fetchPriority}
+            step={1}
+            onChange={(event) => setFetchPriority(event.target.value)}
+            className={SETTINGS_NUMBER_WIDTH}
+            aria-invalid={!priorityValid}
+          />
+        </SettingFieldRow>
+        <SettingFieldRow
+          label="Minimum confidence for automatic sharing"
+          htmlFor={minConfidenceID}
+          description="Choose a value from 0% to 100%. Recommended: 95%."
+          unit="%"
+        >
+          <Input
+            id={minConfidenceID}
+            type="number"
+            value={minConfidence}
+            min={0}
+            max={100}
+            step="any"
+            onChange={(event) => setMinConfidence(event.target.value)}
+            className={SETTINGS_NUMBER_WIDTH}
+            aria-invalid={!confidenceValid}
+            disabled={!provider.is_submitter}
+          />
+        </SettingFieldRow>
+      </AdvancedSection>
 
       {stats && (
         <div className="border-border bg-muted/20 mt-3.5 rounded-md border px-3 py-3">

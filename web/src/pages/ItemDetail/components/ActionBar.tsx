@@ -31,10 +31,13 @@ import {
   RotateCcw,
   Shuffle,
   Tags,
+  TimerReset,
+  ThumbsDown,
   UsersRound,
   Hand,
   Zap,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -184,6 +187,8 @@ export interface ActionBarProps {
   playLabel?: string;
   playProgress?: number;
   restartHref?: string;
+  /** Clears the resume position without marking the item watched. */
+  onResetProgress?: () => void;
   resumePositionSeconds?: number;
   resumeDurationSeconds?: number;
   resumeResolution?: string;
@@ -198,6 +203,9 @@ export interface ActionBarProps {
   isFavorite?: boolean;
   onToggleWatchlist?: () => void;
   inWatchlist?: boolean;
+  /** Marks or clears Not interested; movies and series only. */
+  onToggleNotInterested?: () => void;
+  notInterested?: boolean;
   onRefresh?: (mode: RefreshItemMetadataMode) => void;
   isRefreshing?: boolean;
   /** Re-detects local markers; without redetectKind the admin picks intro, credits, or both. */
@@ -260,6 +268,7 @@ export default function ActionBar({
   playLabel = "Play",
   playProgress,
   restartHref,
+  onResetProgress,
   resumePositionSeconds,
   resumeDurationSeconds,
   watchedLabel,
@@ -270,6 +279,8 @@ export default function ActionBar({
   isFavorite = false,
   onToggleWatchlist,
   inWatchlist = false,
+  onToggleNotInterested,
+  notInterested = false,
   onRefresh,
   isRefreshing = false,
   onRedetectMarkers,
@@ -570,8 +581,10 @@ export default function ActionBar({
   };
   const hasOverflowActions = Boolean(
     restartHref ||
+    onResetProgress ||
     onShuffle ||
     onToggleWatchlist ||
+    onToggleNotInterested ||
     onDownload ||
     onSearchSubtitles ||
     onRequestSeasons,
@@ -806,10 +819,25 @@ export default function ActionBar({
                   Play from Beginning
                 </DetailOverflowMenuItem>
               )}
+              {onResetProgress && (
+                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onResetProgress}>
+                  <TimerReset className="size-4" />
+                  Reset Progress
+                </DetailOverflowMenuItem>
+              )}
               {onToggleWatchlist && (
                 <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onToggleWatchlist}>
                   {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
                   {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
+                </DetailOverflowMenuItem>
+              )}
+              {onToggleNotInterested && (
+                <DetailOverflowMenuItem
+                  closeMenu={closeOverflowMenu}
+                  onAction={onToggleNotInterested}
+                >
+                  <ThumbsDown className={cn("size-4", notInterested && "fill-current")} />
+                  {notInterested ? "Show in Recommendations" : "Not Interested"}
                 </DetailOverflowMenuItem>
               )}
               {contentId && canAddToCollection && (

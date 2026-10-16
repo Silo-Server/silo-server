@@ -398,9 +398,23 @@ func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 	if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", report); err != nil {
 		t.Fatal(err)
 	}
-	first := lastTransport(t, conn)
+	if got := transportCount(conn); got != 0 {
+		t.Fatalf("a single drifted report dispatched %d corrections, want 0", got)
+	}
 	if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", report); err != nil {
 		t.Fatal(err)
+	}
+	first := lastTransport(t, conn)
+	if first.PositionSeconds != expectedAtExecution(t, repo.room, first) {
+		t.Fatalf("correction = %+v, want the room's position at its execution", first)
+	}
+	// Past the correction's settle window, sustained drift is not corrected
+	// again until the retry interval has passed.
+	current = current.Add(commandSettleWindow + time.Second)
+	for range guestCorrectionStrikes {
+		if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", report); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if got := transportCount(conn); got != 1 {
 		t.Fatalf("repeated drift report dispatched %d corrections, want 1", got)
@@ -418,6 +432,7 @@ func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 		t.Fatalf("retry reused command ID %q", second.CommandID)
 	}
 
+	current = current.Add(commandSettleWindow + time.Second)
 	expected := expectedPosition(repo.room, current)
 	if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", StateReport{
 		SessionID:       "session-1",
@@ -425,8 +440,10 @@ func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", report); err != nil {
-		t.Fatal(err)
+	for range guestCorrectionStrikes {
+		if _, err := service.HandleStateReportForConnection(t.Context(), reg, 8, "guest", report); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if got := transportCount(conn); got != 3 {
 		t.Fatalf("in-sync report did not re-arm correction, got %d corrections, want 3", got)
@@ -436,8 +453,12 @@ func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 // transportCount counts the transport commands a connection received,
 // ignoring snapshots.
 func transportCount(conn *recordingConn) int {
+	return transportCountIn(conn.payloads)
+}
+
+func transportCountIn(payloads []map[string]any) int {
 	count := 0
-	for _, payload := range conn.payloads {
+	for _, payload := range payloads {
 		if _, ok := payload["command"].(TransportCommand); ok {
 			count++
 		}
@@ -1005,8 +1026,10 @@ func TestBufferingReportCannotTeleportRoomAnchor(t *testing.T) {
 	if snapshot.PlaybackState != RoomPlaybackStateWaiting {
 		t.Fatalf("playback state = %q, want %q", snapshot.PlaybackState, RoomPlaybackStateWaiting)
 	}
-	if snapshot.AnchorPositionSeconds > 20.001 || snapshot.AnchorPositionSeconds < 19.999 {
-		t.Fatalf("anchor = %v, want ~20 (clamped)", snapshot.AnchorPositionSeconds)
+	// Clamped to the room's position when the pause executes, one lead on.
+	want := 20 + defaultTransportLead.Seconds()
+	if snapshot.AnchorPositionSeconds > want+0.001 || snapshot.AnchorPositionSeconds < want-0.001 {
+		t.Fatalf("anchor = %v, want ~%v (clamped)", snapshot.AnchorPositionSeconds, want)
 	}
 }
 
@@ -1137,7 +1160,7 @@ func TestStateReportConflictClearsStaleCorrectionCommands(t *testing.T) {
 		registrationFor(repo.room.ID, 7, "host", hostConn),
 		7,
 		"host",
-		StateReport{SessionID: "host-session", PositionSeconds: 30},
+		StateReport{SessionID: "host-session", PositionSeconds: 20 + hostAuthorityDriftSeconds + 5},
 	)
 	if err != nil {
 		t.Fatalf("HandleStateReportForConnection() error = %v", err)
@@ -1202,6 +1225,12 @@ func TestHostPauseReportPausesTheRoom(t *testing.T) {
 	if f.s.rooms[f.repo.room.ID].command == nil {
 		t.Fatal("explicit pause left no room command")
 	}
+	// A report racing the pause command describes the state before it.
+	hostReport(false)
+	if f.repo.room.PlaybackState != RoomPlaybackStatePaused {
+		t.Fatalf("a host report inside the pause's settle window moved the room to %s", f.repo.room.PlaybackState)
+	}
+	f.now = f.now.Add(commandSettleWindow + time.Second)
 	hostReport(false)
 	if f.repo.room.PlaybackState != RoomPlaybackStatePlaying || !f.repo.room.ResumeOnReady {
 		t.Fatalf("room = %s, resume on ready %v; want playing with resume", f.repo.room.PlaybackState, f.repo.room.ResumeOnReady)
@@ -1211,6 +1240,7 @@ func TestHostPauseReportPausesTheRoom(t *testing.T) {
 	}
 
 	// After another pause, a guest stall does not arm a barrier that resumes the room.
+	f.now = f.now.Add(commandSettleWindow + time.Second)
 	hostReport(true)
 	f.buffer("guest")
 	if f.repo.room.PlaybackState != RoomPlaybackStatePaused || f.repo.room.ResumeOnReady {
@@ -1248,18 +1278,20 @@ func TestReadyAcknowledgesCurrentSeek(t *testing.T) {
 			member := &memberState{userID: 7, profileID: "host", sessionID: "session", connection: conn}
 			live.members[buildMemberKey(7, "host")] = member
 			reg := registrationFor(repo.room.ID, 7, "host", conn)
-			seek := func() TransportCommand {
+			seek := func(target float64) TransportCommand {
 				t.Helper()
 				_, err := service.HandleTransportRequestForConnection(t.Context(), reg, 7, "host", TransportRequest{
-					Action: TransportActionSeek, PositionSeconds: new(1500.0),
+					Action: TransportActionSeek, PositionSeconds: &target,
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
 				return conn.payloads[len(conn.payloads)-1]["command"].(TransportCommand)
 			}
-			previous := seek()
-			current := seek()
+			// A repeat of the pending target is the same seek, so the earlier
+			// seek goes elsewhere.
+			previous := seek(1400)
+			current := seek(1500)
 			commandID := current.CommandID
 			if test.staleCommand {
 				commandID = previous.CommandID
@@ -1312,6 +1344,8 @@ func TestHostRejoinReportsDoNotRewindTheRoomUntilSynced(t *testing.T) {
 		&stubFiles{file: &models.MediaFile{ID: 42, ContentID: "movie-1"}},
 		nil,
 	)
+	current := now
+	service.now = func() time.Time { return current }
 	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", connection: conn}
 	reg := registrationFor(repo.room.ID, 7, "host", conn)
 	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "session-1"); err != nil {
@@ -1322,9 +1356,19 @@ func TestHostRejoinReportsDoNotRewindTheRoomUntilSynced(t *testing.T) {
 	}
 	before := len(conn.payloads)
 
-	// Stream just started: position 0 while the room is at ~600.
+	// Stream just started: position 0 while the room is at ~600. Inside the
+	// sync's settle window that is the stream before the sync, not drift.
 	if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: 0, IsPaused: false}); err != nil {
 		t.Fatalf("report: %v", err)
+	}
+	if repo.room.AnchorPositionSeconds != 600 || len(conn.payloads) != before {
+		t.Fatalf("host's pre-seek report moved the room to %v or was corrected", repo.room.AnchorPositionSeconds)
+	}
+	current = current.Add(commandSettleWindow + time.Second)
+	for range guestCorrectionStrikes {
+		if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: 0, IsPaused: false}); err != nil {
+			t.Fatalf("report: %v", err)
+		}
 	}
 	if repo.room.AnchorPositionSeconds != 600 {
 		t.Fatalf("host's pre-seek report rewound the room to %v", repo.room.AnchorPositionSeconds)
@@ -1341,14 +1385,16 @@ func TestHostRejoinReportsDoNotRewindTheRoomUntilSynced(t *testing.T) {
 	}
 
 	// The seek landed: the host now reports the room's position and becomes authoritative again.
-	if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: 600.4, IsPaused: false}); err != nil {
+	current = current.Add(commandSettleWindow + time.Second)
+	if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: expectedPosition(repo.room, current) + 0.4, IsPaused: false}); err != nil {
 		t.Fatalf("synced report: %v", err)
 	}
 	if _, err := service.HandleStateReportForConnection(context.Background(), reg, 7, "host", StateReport{SessionID: "session-1", PositionSeconds: 650, IsPaused: false}); err != nil {
 		t.Fatalf("authoritative report: %v", err)
 	}
-	if repo.room.AnchorPositionSeconds != 650 {
-		t.Fatalf("host authority not restored after sync: anchor=%v", repo.room.AnchorPositionSeconds)
+	// The host keeps playing until its command runs, one lead later.
+	if want := 650 + defaultTransportLead.Seconds(); repo.room.AnchorPositionSeconds != want {
+		t.Fatalf("host authority not restored after sync: anchor=%v, want %v", repo.room.AnchorPositionSeconds, want)
 	}
 }
 

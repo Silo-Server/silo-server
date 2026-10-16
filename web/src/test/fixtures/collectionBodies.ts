@@ -746,25 +746,6 @@ export const goldens = {
       },
     },
   ] satisfies Writes,
-  /** Admin Synced list editor, legacy Trakt: the source can't change, so neither `source_url` nor `source_config` is sent. */
-  adminEditTrakt: [
-    {
-      operation: "PATCH /api/v2/admin/collections/{id}",
-      path: "/api/v2/admin/collections/c1",
-      headers: {
-        "If-Match": '"/api/v2/admin/collections/c1#1"',
-      },
-      body: {
-        title: "For you",
-        description: "",
-        visibility: "visible",
-        collection_type: "trakt",
-        sync_schedule: "",
-        sort_config: {},
-        library_ids: ["1"],
-      },
-    },
-  ] satisfies Writes,
   /** Personal Synced list editor: optional fields go only when changed; name, sharing, libraries and the tab switch always go. */
   personalSyncedRename: [
     {

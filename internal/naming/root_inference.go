@@ -283,8 +283,8 @@ func extractPathEvidence(filePath string, libraryType string, libraryRoots ...st
 
 	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
 	allowNumericSeason := seriesLibrary && (libraryRoot == "" || len(dirParts) > 1)
-	_, hasEpisodePattern := parseEpisodeToken(nameNoExt, dirParts, libraryRoot != "", allowNumericSeason, seriesLibrary)
-	hasSeasonStructure, _ := detectSeasonStructure(dirParts, nameNoExt, hasEpisodePattern || seriesLibrary, libraryRoot != "")
+	episode, hasEpisodePattern := parseEpisodeToken(nameNoExt, dirParts, libraryRoot != "", allowNumericSeason, seriesLibrary)
+	hasSeasonStructure, _ := detectSeasonStructure(dirParts, nameNoExt, episode.seriesTitle, hasEpisodePattern || seriesLibrary, libraryRoot != "")
 	parentTitle, parentYear, parentTrusted := parseInferFolderTitleYear(parentBase)
 	if parentDir == libraryRoot {
 		parentTitle, parentYear, parentTrusted = "", 0, false
@@ -320,7 +320,7 @@ func extractPathEvidence(filePath string, libraryType string, libraryRoots ...st
 		}
 	}
 
-	rootPath := parentDir
+	var rootPath string
 	var seriesContext *PathContext
 	if inferredType == "series" {
 		seriesContext = ResolvePathContext(cleanFilePath, libraryType, libraryRoot)
@@ -386,7 +386,7 @@ func normalizeInferLibraryType(value string) string {
 }
 
 func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
-	found, _ := detectSeasonStructure(parts, "", allowNumeric, false)
+	found, _ := detectSeasonStructure(parts, "", "", allowNumeric, false)
 	return found
 }
 

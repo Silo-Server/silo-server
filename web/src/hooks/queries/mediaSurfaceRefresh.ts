@@ -7,7 +7,10 @@ import type {
 } from "@/api/types";
 import {
   adminKeys,
+  calendarKeys,
   catalogKeys,
+  collectionKeys,
+  episodeKeys,
   favoriteKeys,
   historyKeys,
   itemKeys,
@@ -16,6 +19,7 @@ import {
   progressKeys,
   recKeys,
   sectionKeys,
+  shuffleKeys,
   watchlistKeys,
 } from "./keys";
 import {
@@ -35,6 +39,10 @@ interface InvalidateMediaSurfaceOptions {
    */
   skipItemQueries?: boolean;
   skipSimilarItems?: boolean;
+  // Items already found related to itemId, such as through a watch detail
+  // dropped since (dropInactiveWatchDetail), which was the only link from an
+  // episode to its series.
+  knownRelatedIds?: ReadonlySet<string>;
   // The item may be one this client has never seen, such as an episode a
   // scan just added. Only catalog events can say so; progress, favorite and
   // watchlist events are about items that already exist.
@@ -95,10 +103,27 @@ export function cancelItemDetailQueries(queryClient: QueryClient, itemId: string
   });
 }
 
+// dropInactiveWatchDetail drops a closed player's cached watch detail for an
+// item whose resume position changed, at once: the player starts from that
+// detail's position while it refetches. The detail may be the only link from
+// an episode to its series, so the items it led to are returned for the
+// media surface refresh (knownRelatedIds). An open player's query is active
+// and keeps its data. Undefined when there was nothing to drop.
+export function dropInactiveWatchDetail(
+  queryClient: QueryClient,
+  itemId: string,
+): ReadonlySet<string> | undefined {
+  const filters = { queryKey: [...itemKeys.all, "watchDetail", itemId], type: "inactive" } as const;
+  if (queryClient.getQueryCache().findAll(filters).length === 0) return undefined;
+  const related = relatedItemIds(queryClient, itemId);
+  queryClient.removeQueries(filters);
+  return related;
+}
+
 export function removeItemFromHomeSectionCaches(
   queryClient: QueryClient,
   itemId: string,
-  sectionType?: string,
+  sectionType?: string | ReadonlySet<string>,
 ) {
   queryClient.setQueriesData<HomeSectionItemsResponse>(
     {
@@ -112,7 +137,11 @@ export function removeItemFromHomeSectionCaches(
       if (!current?.section) {
         return current;
       }
-      if (sectionType && current.section.section_type !== sectionType) {
+      if (
+        typeof sectionType === "string"
+          ? current.section.section_type !== sectionType
+          : sectionType && !sectionType.has(current.section.section_type)
+      ) {
         return current;
       }
       const nextItems = current.section.items.filter((item) => item.content_id !== itemId);
@@ -412,6 +441,7 @@ export async function invalidateMediaSurfaceQueries(
   // that predates the mutation satisfy the invalidation and land in the cache
   // as fresh.
   const relatedIds = options.itemId ? relatedItemIds(queryClient, options.itemId) : undefined;
+  options.knownRelatedIds?.forEach((id) => relatedIds?.add(id));
   // A new item nothing in the cache knows about, such as an episode a scan
   // just added, can't be traced to the season or series lists that should now
   // show it, so its event refreshes every such list. Other items' detail
@@ -454,6 +484,47 @@ function cacheHasItemDetail(queryClient: QueryClient, itemId: string): boolean {
         (isItemDetailQueryKey(query.queryKey, itemId) || isWatchDetailQueryKey(query.queryKey)) &&
         query.state.data != null,
     );
+}
+
+// Reads that carry localized titles and descriptions beyond the media surfaces:
+// the families a viewer access change refetches, shuffle cards, collection
+// peeks, the Home-row editor's peeks, previews and curated-title search, and
+// the Watch Together picker's rows and catalog searches (pickerKeys in the
+// picker's usePickerData; its room presence and member state are not localized).
+const LOCALIZED_READ_PREFIXES = [
+  collectionKeys.all,
+  episodeKeys.all,
+  calendarKeys.all,
+  shuffleKeys.all,
+  ["collection-peek"],
+  ["home-row-peek"],
+  ["home-row-preview"],
+  ["curatedListPicker"],
+  ["watch-party", "picker"],
+  ["watch-party", "search"],
+  ["watch-party", "recently-added"],
+];
+
+function isLocalizedMediaQuery(query: Query) {
+  return (
+    shouldInvalidateMediaSurfaceQuery(query.queryKey, {}) ||
+    LOCALIZED_READ_PREFIXES.some((prefix) => queryKeyStartsWith(query.queryKey, prefix))
+  );
+}
+
+/**
+ * Refreshes the localized media reads after the viewer's metadata language
+ * changes. A request still in flight would answer in the old language and land
+ * as fresh: TanStack reuses a running request that has no data yet instead of
+ * restarting it, and an observer-less one (Home rows, prefetches) is never
+ * refetched. So those requests are cancelled before the reads are invalidated.
+ * Resolves once the reads are marked stale; mounted screens refetch on their
+ * own, and Home's load queue restarts right away.
+ */
+export async function refreshLocalizedMediaQueries(queryClient: QueryClient) {
+  await queryClient.cancelQueries({ predicate: isLocalizedMediaQuery });
+  void queryClient.invalidateQueries({ predicate: isLocalizedMediaQuery });
+  bumpHomeRefreshSignal(queryClient);
 }
 
 // A letter index sorts the whole result, which on a large library can outlast
@@ -509,6 +580,13 @@ export function scheduleMediaSurfaceInvalidation(
     skipSimilarItems: existing
       ? Boolean(existing.options.skipSimilarItems && options.skipSimilarItems)
       : options.skipSimilarItems,
+    knownRelatedIds:
+      existing?.options.knownRelatedIds || options.knownRelatedIds
+        ? new Set([
+            ...(existing?.options.knownRelatedIds ?? []),
+            ...(options.knownRelatedIds ?? []),
+          ])
+        : undefined,
     watchedKeys: [...(existing?.options.watchedKeys ?? []), ...(options.watchedKeys ?? [])],
   };
   const now = Date.now();

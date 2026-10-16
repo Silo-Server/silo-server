@@ -395,7 +395,8 @@ type CatalogSearchSemanticStatus struct {
 
 // CatalogSearchTypeCoverage is the per-media-type slice of the semantic coverage
 // snapshot surfaced to admins: how many embed-eligible items exist, how many are
-// vectorized, the resulting ratio, and the hysteresis-latched readiness.
+// vectorized, the resulting ratio, and whether the ratio reaches the readiness
+// threshold.
 type CatalogSearchTypeCoverage struct {
 	Type          string  `json:"type"`
 	Eligible      int     `json:"eligible"`

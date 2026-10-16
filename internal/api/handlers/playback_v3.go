@@ -128,6 +128,10 @@ type preparedTransportV3 struct {
 	rollbackRequired   func() error
 	applySession       func() (func() error, error)
 	afterDurableCommit func()
+	// sessionRecipe is the recovery card of a header-authenticated transport,
+	// recorded once the transport commits (recordSessionRecipeV3). Nil for a
+	// token-bearing attempt, whose URLs carry the recipe themselves.
+	sessionRecipe *playback.RecipeCard
 }
 
 type preparedTimelineV3 struct {
@@ -214,11 +218,12 @@ func headerAuthenticatedMediaV3(clientFeatures []string) mediaAuthModeV3 {
 	}
 }
 
-// recipeCardStoreV3 is the shared control-plane store central hands a recipe
-// card to another Silo process through (*noderecipe.Store). One instance owns
-// one key space; the handler holds two of them, and what a stored card
-// authorizes or rebuilds is the field's business, not the interface's — see
-// PlaybackHandler.ProxyGrantStore and PlaybackHandler.NodeRecipeStore.
+// recipeCardStoreV3 is the shared control-plane store central keeps a recipe
+// card in for another Silo process, or for itself after a restart
+// (*noderecipe.Store). One instance owns one key space; the handler holds three
+// of them, and what a stored card authorizes or rebuilds is the field's
+// business, not the interface's — see PlaybackHandler.ProxyGrantStore,
+// NodeRecipeStore and SessionRecipeStore.
 type recipeCardStoreV3 interface {
 	// Enabled reports whether the store can actually carry a card. A disabled
 	// store accepts Put silently, so a URL that only a stored card can serve
@@ -2126,6 +2131,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, commitErr
 	}
+	h.recordSessionRecipeV3(r.Context(), result.Plan.PlanID, &transport)
 	// Start-side effects belong after both the attempt and transport commits:
 	// retries that lose the idempotency race must not emit duplicate provider
 	// scrobbles or analysis work for the short-lived session they roll back.
@@ -2877,7 +2883,12 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		releaseLifecycle()
 		return nil
 	}
+	var sessionRecipe *playback.RecipeCard
+	if mode.headerAuth {
+		sessionRecipe = sessionRecipeCardV3(identityRecipeCard(&routeSession), session)
+	}
 	return preparedTransportV3{
+		sessionRecipe:      sessionRecipe,
 		url:                streamURL,
 		nodeURL:            nodeURL,
 		transportID:        transportID,
@@ -3904,20 +3915,23 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 		}
 	}
 	url := fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID)
-	if !mode.headerAuth {
-		card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
-		card.OriginalStartedAt = session.StartedAt
-		card.StreamLocation = session.StreamLocation
-		card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
-		card.RoutingWorkload = string(routingWorkloadV3(result))
-		card.RoutingExecution = string(noderouting.ExecutionAPI)
-		card.RoutingEgress = string(noderouting.EgressAPI)
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
+	card.OriginalStartedAt = session.StartedAt
+	card.StreamLocation = session.StreamLocation
+	card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
+	card.RoutingWorkload = string(routingWorkloadV3(result))
+	card.RoutingExecution = string(noderouting.ExecutionAPI)
+	card.RoutingEgress = string(noderouting.EgressAPI)
+	var sessionRecipe *playback.RecipeCard
+	if mode.headerAuth {
+		sessionRecipe = sessionRecipeCardV3(card, session)
+	} else {
 		url = appendStreamToken(url, h.signSessionToken(card, mode.headerAuth))
 	}
 	committed := false
-	previousNodeURL := session.TranscodeNodeURL
-	previousTransportID := remoteTransportID(session)
+	previousNodeURL, previousTransportID := h.liveTranscodeRouteV3(session)
 	return preparedTransportV3{
+		sessionRecipe:    sessionRecipe,
 		url:              url,
 		hwAccel:          ts.Opts().EffectiveEncoderHWAccel(),
 		toneMapMode:      ts.Opts().ToneMapMode,
@@ -4151,9 +4165,8 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		}
 	}
 	committed := false
-	previousNodeURL := session.TranscodeNodeURL
-	previousTransportID := remoteTransportID(session)
 	unlock := h.tm.LockSessionLifecycle(session.ID)
+	previousNodeURL, previousTransportID := h.liveTranscodeRouteV3(session)
 	routingEgress := noderouting.EgressAPI
 	egressNodeID := 0
 	egressNodeURL := ""
@@ -4208,7 +4221,11 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if routingWorkloadV3(result) == noderouting.WorkloadRemux {
 		rollbackRequired = func() error { return rollbackTransport(true) }
 	}
-	return preparedTransportV3{url: url, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
+	var sessionRecipe *playback.RecipeCard
+	if mode.headerAuth {
+		sessionRecipe = sessionRecipeCardV3(card, session)
+	}
+	return preparedTransportV3{sessionRecipe: sessionRecipe, url: url, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
 		routingEgress: routingEgress, routingEgressID: egressNodeID, routingEgressURL: egressNodeURL, commit: func() *transportErrorV3 {
 			if committed {
@@ -4221,6 +4238,18 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		}, rollback: func() {
 			_ = rollbackTransport(false)
 		}, rollbackRequired: rollbackRequired}, nil
+}
+
+// liveTranscodeRouteV3 is the transcode route the session runs now, which a
+// replacement stops once it commits. Callers read it under the session
+// lifecycle lock, not from the snapshot they planned with: a move off a dead
+// node commits under that lock, so a route read here is the one the commit
+// replaces. A session the manager no longer has falls back to the snapshot.
+func (h *PlaybackHandler) liveTranscodeRouteV3(session *playback.Session) (nodeURL, transportID string) {
+	if current, err := h.sessionMgr.GetSession(session.ID); err == nil && current != nil {
+		return current.TranscodeNodeURL, remoteTransportID(current)
+	}
+	return session.TranscodeNodeURL, remoteTransportID(session)
 }
 
 // remoteTranscodeRecipeCardV3 captures the byte-affecting recipe of a started
@@ -4784,7 +4813,9 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 		var err error
 		rollbackSession, err = transport.applySession()
 		if err != nil {
-			if rollbackErr, _ := rollbackFailedReplanV3(transport, nil); rollbackErr != nil {
+			// With no session to restore, only the transport can fail.
+			rollbackErr, _ := rollbackFailedReplanV3(transport, nil)
+			if rollbackErr != nil {
 				slog.ErrorContext(r.Context(), "protocol v3 unapplied replacement transport cancellation failed", "session", sessionID, "error", rollbackErr)
 				return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to cancel the unapplied replacement transport")
 			}
@@ -4795,8 +4826,10 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 		if errors.Is(err, playback.ErrAttemptStoppedV3) {
 			// A stop landed on another replica while this replan ran: tear the
 			// replacement transport and the local session down and report the
-			// session gone; the deny marker refuses the plan anyway.
-			if transportRollbackErr, _ := rollbackFailedReplanV3(transport, rollbackSession); transportRollbackErr != nil {
+			// session gone; the deny marker refuses the plan anyway. The abort
+			// below makes a failed session restore moot.
+			transportRollbackErr, _ := rollbackFailedReplanV3(transport, rollbackSession)
+			if transportRollbackErr != nil {
 				slog.ErrorContext(r.Context(), "protocol v3 replacement transport cancellation failed", "session", sessionID, "error", transportRollbackErr)
 			}
 			_ = h.abortPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID)
@@ -4822,6 +4855,7 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 			_ = h.abortPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID)
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusServiceUnavailable, commitErr.reason, commitErr.message)
 		}
+		h.recordSessionRecipeV3(r.Context(), updated.CurrentPlanID, transport)
 		if transport.afterDurableCommit != nil {
 			transport.afterDurableCommit()
 		}
@@ -5415,6 +5449,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		result.Plan.Timeline = reusedTimeline
 		result.Plan.ExpiresAt = record.CurrentPlan.ExpiresAt
 		transport = reusedHLSTransportV3(session, record.CurrentPlan.Stream.URL)
+		if mode.headerAuth {
+			transport.sessionRecipe = h.reusedSessionRecipeV3(r.Context(), session.ID, record.CurrentPlanID)
+		}
 		slog.InfoContext(r.Context(), "protocol v3 replan reused active HLS A/V transport",
 			logComponentKey, playbackLogValueV3,
 			"playback_session_id", session.ID,

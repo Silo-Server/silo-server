@@ -5,7 +5,7 @@ import {
   captureNotificationAuthority,
 } from "@/api/v2/notifications";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   Webhook as WebhookIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/page/PageHeader";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import type {
   NotificationChannelMode,
@@ -106,6 +107,7 @@ type WebhookNotifyKey = (typeof WEBHOOK_NOTIFY_FIELDS)[number]["key"];
 function PreferencesSection() {
   const { data: prefs, isLoading } = useNotificationPreferences();
   const updatePrefs = useUpdateNotificationPreferences();
+  const { data: capability } = useNotificationCapability();
 
   if (isLoading || !prefs) {
     return (
@@ -118,7 +120,22 @@ function PreferencesSection() {
   return (
     <SettingsGroup
       title="New Episode Notifications"
-      description="Choose which series relationships notify this profile when a new episode arrives."
+      description={
+        <>
+          Choose which series relationships notify this profile when a new episode arrives.
+          {capability?.series?.available && (
+            <>
+              {" "}
+              <Link
+                to="/notifications?view=series"
+                className="text-foreground underline underline-offset-4"
+              >
+                See which series notify you
+              </Link>
+            </>
+          )}
+        </>
+      }
     >
       <div className="flex items-center justify-between gap-3">
         <div>
@@ -1104,7 +1121,10 @@ export default function NotificationsSettings() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Notifications</h2>
+      <PageHeader
+        title="Notifications"
+        subtitle="New-episode alerts by email, Discord, push, or webhook."
+      />
 
       <PreferencesSection />
 

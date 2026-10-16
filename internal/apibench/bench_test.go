@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -45,7 +44,7 @@ func TestRunnerAgainstStub(t *testing.T) {
 	// shipped example plan expects.
 	plan := Plan{
 		NativeBaseURL: srv.URL,
-		BaseDir:       filepath.Join("testdata"),
+		BaseDir:       "testdata",
 		Bearer:        "${APIBENCH_TEST_BEARER}",
 		ProfileID:     "fixture-profile",
 		Concurrency:   4,

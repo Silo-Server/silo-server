@@ -2,6 +2,7 @@ package requests
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -353,7 +354,7 @@ func traceRoutes(routes []Route, req Request, qualities []Quality) (map[Quality]
 // Radarr plugin's own terms: it is the tier's default, and the plugin's anime
 // overlay is off because the route's overrides replace it. A plugin without
 // those keys ignores them.
-func routedConnection(fc *fulfillContext, d RouteDecision, mediaType MediaType, q Quality) (ResolvedRouterConnection, int, string, error) {
+func (s *Service) routedConnection(ctx context.Context, fc *fulfillContext, d RouteDecision, mediaType MediaType, q Quality) (ResolvedRouterConnection, int, string, error) {
 	var in *Integration
 	for i := range fc.integrations {
 		if fc.integrations[i].ID == d.IntegrationID {
@@ -368,7 +369,12 @@ func routedConnection(fc *fulfillContext, d RouteDecision, mediaType MediaType, 
 		return ResolvedRouterConnection{}, 0, "", fmt.Errorf("route %q sends to %q, which is disabled", d.RouteName, in.Name)
 	case in.InstallationID == nil || in.CapabilityID == "":
 		return ResolvedRouterConnection{}, 0, "", fmt.Errorf("%s (route %q)", msgRouterUnbound, d.RouteName)
-	case strings.TrimSpace(in.APIKeyRef) == "":
+	}
+	missing, err := s.missingAPIKey(ctx, fc, *in)
+	switch {
+	case err != nil:
+		return ResolvedRouterConnection{}, 0, "", err
+	case missing:
 		return ResolvedRouterConnection{}, 0, "", fmt.Errorf("%s (route %q)", msgRouterNoKey, d.RouteName)
 	case !integrationSupportsMediaType(*in, mediaType):
 		// The server's media types can change after a route points at it.
