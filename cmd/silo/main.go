@@ -3211,7 +3211,7 @@ func main() {
 			if releaser := metadata.NewStoredArtworkReleaser(deps.DB); releaser != nil {
 				taskMgr.Register(tasks.NewReleaseStoredArtworkTask(releaser))
 				// Turning caching off releases stored artwork now, not at the
-				// next hourly pass.
+				// next daily pass.
 				configWatcher.OnChange(func(previous, updated *config.Config) {
 					if previous == nil || !previous.Metadata.CacheImages || updated.Metadata.CacheImages {
 						return
