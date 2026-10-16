@@ -46,7 +46,7 @@ require (
 	go.n16f.net/thumbhash v1.1.0
 	go.opentelemetry.io/otel/trace v1.45.0
 	golang.org/x/image v0.46.0
-	golang.org/x/net v0.58.0
+	golang.org/x/net v0.60.0
 	golang.org/x/tools v0.49.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
