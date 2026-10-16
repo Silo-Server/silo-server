@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -63,10 +64,19 @@ type InterestUpdater struct {
 	homeChanged map[profileKey]time.Time
 }
 
+// profileKey names one profile on one account. A profile id alone is not
+// unique: every account from before profiles has a profile named "default".
 type profileKey struct {
 	userID    int
 	profileID string
 }
+
+// String renders the key as account/profile for logs and errors.
+func (k profileKey) String() string { return strconv.Itoa(k.userID) + "/" + k.profileID }
+
+// LogValue logs the key as account/profile in every slog handler; the JSON
+// handler would otherwise encode the unexported fields as {}.
+func (k profileKey) LogValue() slog.Value { return slog.StringValue(k.String()) }
 
 // NewInterestUpdater creates an InterestUpdater.
 func NewInterestUpdater(
@@ -494,7 +504,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 
 	if !flags.HasAnyInterest() && lastCompleted == nil {
 		// Nothing can ever notify: drop all rows for the pair.
-		return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, []int{})
+		return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, []int{})
 	}
 
 	libraryIDs, err := u.visibleSeriesLibraries(ctx, userID, profileID, seriesID)
@@ -502,7 +512,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		return err
 	}
 	if len(libraryIDs) == 0 {
-		return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, []int{})
+		return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, []int{})
 	}
 
 	rows := make([]SeriesInterest, 0, len(libraryIDs))
@@ -514,7 +524,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	if err := u.interests.UpsertRows(ctx, rows); err != nil {
 		return err
 	}
-	return u.interests.DeleteStaleForProfileSeries(ctx, profileID, seriesID, libraryIDs)
+	return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, libraryIDs)
 }
 
 // loadSeriesStructure returns the series' episode keys (content_id ->

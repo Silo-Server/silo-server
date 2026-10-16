@@ -773,7 +773,7 @@ func (h *EventsHandler) snapshotForChannel(
 		if h == nil || h.notifications == nil || boundProfileID == "" {
 			return json.RawMessage("[]"), nil
 		}
-		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), boundProfileID, 25)
+		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), claims.UserID, boundProfileID, 25)
 		if err != nil {
 			return nil, err
 		}

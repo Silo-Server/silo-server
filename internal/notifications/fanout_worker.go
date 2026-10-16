@@ -223,20 +223,20 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// under the locks would not close the gap before commit. A delivery
 	// created in that gap is like one created just before the change.
 	recipients := newRecipientAccess(w.scopes)
-	candidatesByEvent := make(map[string]map[string]struct{}, len(fanout))
+	candidatesByEvent := make(map[string]map[profileKey]struct{}, len(fanout))
 	profiles := make(map[string]struct{})
 	for _, event := range fanout {
 		candidates, err := w.interests.ListActiveBySeries(ctx, tx, event.LibraryID, event.SeriesID)
 		if err != nil {
 			return 0, err
 		}
-		prefs, err := w.preferences.GetMany(ctx, tx, candidateProfileIDs(candidates))
+		prefs, err := w.preferences.GetMany(ctx, tx, candidateProfiles(candidates))
 		if err != nil {
 			return 0, err
 		}
-		captured := make(map[string]struct{}, len(candidates))
+		captured := make(map[profileKey]struct{}, len(candidates))
 		for _, candidate := range candidates {
-			if _, eligible := EvaluateRecipient(candidate, prefs[candidate.ProfileID], event.EpisodeKey); !eligible {
+			if _, eligible := EvaluateRecipient(candidate, prefs[candidate.key()], event.EpisodeKey); !eligible {
 				continue
 			}
 			allowed, err := recipients.canOpen(ctx, tx, candidate.UserID, candidate.ProfileID, event.EpisodeID, event.LibraryID)
@@ -246,7 +246,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 			if !allowed {
 				continue
 			}
-			captured[candidate.ProfileID] = struct{}{}
+			captured[candidate.key()] = struct{}{}
 			profiles[candidate.ProfileID] = struct{}{}
 		}
 		candidatesByEvent[event.ID] = captured
@@ -300,7 +300,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 // fanOutEvent resolves recipients for one release event and inserts
 // deliveries. Returns dispatch payloads for the rows actually inserted and
 // the candidate recipient count.
-func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event ReleaseEvent, capturedProfiles map[string]struct{}) ([]DeliveryRow, int, error) {
+func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event ReleaseEvent, capturedProfiles map[profileKey]struct{}) ([]DeliveryRow, int, error) {
 	candidates, err := w.interests.ListActiveBySeries(ctx, tx, event.LibraryID, event.SeriesID)
 	if err != nil {
 		return nil, 0, err
@@ -313,15 +313,15 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		return nil, 0, nil
 	}
 
-	prefs, err := w.preferences.GetMany(ctx, tx, candidateProfileIDs(candidates))
+	prefs, err := w.preferences.GetMany(ctx, tx, candidateProfiles(candidates))
 	if err != nil {
 		return nil, 0, err
 	}
 
-	pending := make(map[string]pendingDelivery, len(candidates))
+	pending := make(map[profileKey]pendingDelivery, len(candidates))
 	toInsert := make([]Delivery, 0, len(candidates))
 	for _, candidate := range candidates {
-		flags, eligible := EvaluateRecipient(candidate, prefs[candidate.ProfileID], event.EpisodeKey)
+		flags, eligible := EvaluateRecipient(candidate, prefs[candidate.key()], event.EpisodeKey)
 		if !eligible {
 			continue
 		}
@@ -344,7 +344,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 			Type:           DeliveryTypeEpisodeAvailable,
 			ReasonFlags:    flagsJSON,
 		}
-		pending[candidate.ProfileID] = pendingDelivery{delivery: delivery, flags: flags}
+		pending[candidate.key()] = pendingDelivery{delivery: delivery, flags: flags}
 		toInsert = append(toInsert, delivery)
 	}
 	if len(toInsert) == 0 {
@@ -368,9 +368,9 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		return nil, 0, err
 	}
 
-	notifiedProfiles := make([]string, 0, len(inserted))
+	notifiedProfiles := make([]profileKey, 0, len(inserted))
 	for _, row := range inserted {
-		notifiedProfiles = append(notifiedProfiles, row.ProfileID)
+		notifiedProfiles = append(notifiedProfiles, row.key())
 	}
 	if err := w.interests.GuardedSetLastNotified(ctx, tx, event.LibraryID, event.SeriesID, event.EpisodeKey, notifiedProfiles); err != nil {
 		return nil, 0, err
@@ -382,7 +382,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	}
 	dispatchRows := make([]DeliveryRow, 0, len(inserted))
 	for _, row := range inserted {
-		entry, ok := pending[row.ProfileID]
+		entry, ok := pending[row.key()]
 		if !ok {
 			continue
 		}
@@ -479,7 +479,7 @@ func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inse
 // inserted delivery, inside the fanout transaction. Two filters apply:
 // per-webhook reason flags, and the per-profile delivery rate limit
 // (over-limit notifications stay in the inbox; webhooks just don't fire).
-func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[string]pendingDelivery) error {
+func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
 	if w.webhooks == nil || len(inserted) == 0 || !w.settings.WebhooksEnabled(ctx) {
 		return nil
 	}
@@ -500,7 +500,7 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 	attempts := make([]DeliveryAttempt, 0, len(inserted))
 	rateLimited := 0
 	for _, row := range inserted {
-		entry, ok := pending[row.ProfileID]
+		entry, ok := pending[row.key()]
 		if !ok {
 			continue
 		}
@@ -564,21 +564,21 @@ func eventIDs(events []ReleaseEvent) []string {
 	return ids
 }
 
-func candidateProfileIDs(candidates []SeriesInterest) []string {
-	ids := make([]string, 0, len(candidates))
+func candidateProfiles(candidates []SeriesInterest) []profileKey {
+	keys := make([]profileKey, 0, len(candidates))
 	for _, candidate := range candidates {
-		ids = append(ids, candidate.ProfileID)
+		keys = append(keys, candidate.key())
 	}
-	return ids
+	return keys
 }
 
 // capturedFanoutCandidates retains refreshed state without admitting profiles
 // whose inbox locks were not included in the transaction-wide acquisition,
 // which also leaves out every candidate that was ineligible or failed the
 // access check when the batch was captured.
-func capturedFanoutCandidates(candidates []SeriesInterest, captured map[string]struct{}) []SeriesInterest {
+func capturedFanoutCandidates(candidates []SeriesInterest, captured map[profileKey]struct{}) []SeriesInterest {
 	return slices.DeleteFunc(candidates, func(candidate SeriesInterest) bool {
-		_, ok := captured[candidate.ProfileID]
+		_, ok := captured[candidate.key()]
 		return !ok
 	})
 }
