@@ -76,12 +76,13 @@ func TestHandleGenresListsAllWithoutLimit(t *testing.T) {
 		query     string
 		wantItems int
 		wantTotal int
+		wantFirst string
 	}{
-		{"", 30, 30},
-		{"?StartIndex=2", 28, 30},
-		{"?StartIndex=2&Limit=5", 5, 30},
-		{"?Limit=5", 5, 30},
-		{"?Limit=0", 0, 30},
+		{"", 30, 30, "Genre 00"},
+		{"?StartIndex=2", 28, 30, "Genre 02"},
+		{"?StartIndex=2&Limit=5", 5, 30, "Genre 02"},
+		{"?Limit=5", 5, 30, "Genre 00"},
+		{"?Limit=0", 0, 30, ""},
 	} {
 		req := httptest.NewRequest("GET", "/Genres"+tc.query, nil)
 		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: "p1"}))
@@ -91,8 +92,12 @@ func TestHandleGenresListsAllWithoutLimit(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 			t.Fatalf("%q: %v: %s", tc.query, err, rec.Body.String())
 		}
-		if len(result.Items) != tc.wantItems || result.TotalRecordCount != tc.wantTotal {
-			t.Errorf("%q: items=%d total=%d, want %d and %d", tc.query, len(result.Items), result.TotalRecordCount, tc.wantItems, tc.wantTotal)
+		first := ""
+		if len(result.Items) > 0 {
+			first = result.Items[0].Name
+		}
+		if len(result.Items) != tc.wantItems || result.TotalRecordCount != tc.wantTotal || first != tc.wantFirst {
+			t.Errorf("%q: items=%d total=%d first=%q, want %d, %d and %q", tc.query, len(result.Items), result.TotalRecordCount, first, tc.wantItems, tc.wantTotal, tc.wantFirst)
 		}
 	}
 }
