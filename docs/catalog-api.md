@@ -406,6 +406,14 @@ cannot extend that deadline. Cold or expired membership requires a fresh build;
 an older in-flight build cannot replace the current generation. Badge summaries
 and per-profile playability are recomputed during this grace period.
 
+## Continue Watching row
+
+When the profile's `ui.next_up_mode` is `combined` (the default), Continue
+Watching merges in-progress cards with next-up episodes, keeps one card per
+series, orders the cards by most recent activity, and returns at most the row's
+`item_limit` cards. With `separate`, the row holds only in-progress cards and
+Next Up is its own row.
+
 ## Bridge note
 
 The alpha `/api/v1` surface exposes the same saved-sort and capability features at
