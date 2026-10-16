@@ -1,5 +1,5 @@
 {
-  "revision": "b1406770e1cc06c7d72140247c907cd0796f12062ab858eda4d37a02de47c1a1",
+  "revision": "f6332dfe95838bfdc89bce31d95b0af3b1bd32944aed4a44ef05dbdf893f5d40",
   "state": "available",
   "allowed": true,
   "in_app": {
@@ -36,5 +36,8 @@
     "available": false,
     "modes": [],
     "digest_hour": 0
+  },
+  "series": {
+    "available": true
   }
 }

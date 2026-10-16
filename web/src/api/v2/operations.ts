@@ -413,6 +413,7 @@ export const v2Operations = {
   "GET /api/v2/notifications/preferences": "getNotificationPreferences",
   "GET /api/v2/notifications/push/apple/display/{delivery_id}": "getNotificationApplePushDisplay",
   "GET /api/v2/notifications/push/devices/capabilities": "getPushRegistrationCapabilities",
+  "GET /api/v2/notifications/series": "listNotificationSeries",
   "GET /api/v2/notifications/sync": "syncNotifications",
   "GET /api/v2/notifications/unread-count": "getNotificationUnreadCount",
   "GET /api/v2/notifications/web-push/subscriptions": "listNotificationWebPushSubscriptions",

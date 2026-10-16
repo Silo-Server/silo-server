@@ -12088,6 +12088,27 @@
       "body_file": "notification_get_notification_unread_count.json"
     },
     {
+      "name": "notification_list_notification_series",
+      "operation_id": "listNotificationSeries",
+      "scenario": "Series that can notify the acting profile, with one the viewer may not see omitted.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/notifications/series",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotificationSeriesCollection",
+      "body_file": "notification_list_notification_series.json"
+    },
+    {
       "name": "notification_list_notifications",
       "operation_id": "listNotifications",
       "scenario": "Profile notification inbox with synthetic records.",

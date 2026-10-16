@@ -108,6 +108,45 @@ func TestEvaluateRecipientReasons(t *testing.T) {
 	})
 }
 
+func TestSplitEpisodeKeyInvertsEpisodeKey(t *testing.T) {
+	for _, c := range [][2]int{{0, 0}, {1, 2}, {2, 999999}, {12, 10500}} {
+		if season, episode := SplitEpisodeKey(EpisodeKey(c[0], c[1])); season != c[0] || episode != c[1] {
+			t.Errorf("SplitEpisodeKey(EpisodeKey(%d, %d)) = %d, %d", c[0], c[1], season, episode)
+		}
+	}
+}
+
+func TestReasonFlagsHas(t *testing.T) {
+	f := ReasonFlags{Watchlist: true, NextUp: true}
+	for reason, want := range map[string]bool{ReasonFavorite: false, ReasonWatchlist: true, ReasonContinueWatching: false, ReasonNextUp: true, "other": false} {
+		if got := f.Has(reason); got != want {
+			t.Errorf("Has(%q) = %v, want %v", reason, got, want)
+		}
+	}
+}
+
+// ActiveReasons is the event-independent half of EvaluateRecipient: the
+// reasons preferences let notify, with Next Up needing a known episode.
+func TestActiveReasons(t *testing.T) {
+	key := EpisodeKey(1, 4)
+	all := SeriesInterest{Favorite: true, Watchlist: true, ContinueWatching: true, NextUpCandidate: true, NextExpectedEpisodeKey: &key}
+	prefs := DefaultPreferences("p")
+	if got := ActiveReasons(all, prefs); got != (ReasonFlags{Favorite: true, Watchlist: true, ContinueWatching: true, NextUp: true}) {
+		t.Errorf("all enabled = %+v", got)
+	}
+	prefs.NotifyWatchlist = false
+	if got := ActiveReasons(all, prefs); got.Watchlist || !got.Favorite {
+		t.Errorf("watchlist off = %+v", got)
+	}
+	if got := ActiveReasons(SeriesInterest{NextUpCandidate: true}, prefs); got.Any() {
+		t.Errorf("next up without an expected episode = %+v", got)
+	}
+	prefs.Enabled = false
+	if got := ActiveReasons(all, prefs); got.Any() {
+		t.Errorf("disabled = %+v", got)
+	}
+}
+
 func TestApplyBurstCap(t *testing.T) {
 	event := func(library int, series string, key int) ReleaseEvent {
 		return ReleaseEvent{

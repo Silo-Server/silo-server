@@ -3,6 +3,7 @@ import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "
 import {
   captureNotificationAuthority,
   listNotifications,
+  listNotificationSeries,
   markAllNotificationsRead,
   markNotificationRead,
   updateNotificationPreferences,
@@ -130,4 +131,43 @@ it("preserves explicit false preferences and omits response-only profile identit
     enabled: false,
     notify_favorites: false,
   });
+});
+it("pages notified series by status and rejects a page that repeats its cursor", async () => {
+  const series = {
+    item: {
+      content_id: "series:bear",
+      title: "The Bear",
+      type: "series",
+      status: "matched",
+      genres: [],
+      keywords: [],
+    },
+    reasons: { favorite: true, watchlist: false, continue_watching: false, next_up: false },
+    active_reasons: { favorite: true, watchlist: false, continue_watching: false, next_up: false },
+    notifies: true,
+  };
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(
+      response({ items: [series], page: { has_more: true, next_cursor: "next" } }),
+    )
+    .mockResolvedValueOnce(response({ items: [], page: { has_more: true, next_cursor: "next" } }));
+  vi.stubGlobal("fetch", fetch);
+  const page = await listNotificationSeries("inactive", {
+    q: "bear",
+    reason: "favorite",
+    sort: "-latest_episode_added",
+  });
+  expect(page).toEqual({ series: [series], next_cursor: "next" });
+  const url = new URL(String(fetch.mock.calls[0]![0]), "http://silo.test");
+  expect(url.pathname).toBe("/api/v2/notifications/series");
+  expect(Object.fromEntries(url.searchParams)).toMatchObject({
+    status: "inactive",
+    q: "bear",
+    reason: "favorite",
+    sort: "-latest_episode_added",
+  });
+  await expect(listNotificationSeries("inactive", {}, "next")).rejects.toThrow(
+    "Invalid series page",
+  );
 });

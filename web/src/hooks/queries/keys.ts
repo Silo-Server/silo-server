@@ -250,6 +250,7 @@ export const settingsKeys = {
 export const notificationKeys = {
   all: ["notifications"] as const,
   list: (status: "all" | "unread" = "all") => ["notifications", "list", status] as const,
+  series: (status: "active" | "inactive") => ["notifications", "series", status] as const,
   unreadCount: () => ["notifications", "unread-count"] as const,
   preferences: () => ["notifications", "preferences"] as const,
   emailPreferences: () => ["notifications", "email-preferences"] as const,

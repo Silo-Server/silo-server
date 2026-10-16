@@ -9331,6 +9331,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/notifications/series": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the series whose new episodes can notify the acting profile.
+     * @description Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, filtered and sorted as asked (by title by default). Each carries its reasons and which of them the profile's notification preferences let notify. Series the viewer may not see are omitted.
+     */
+    get: operations["listNotificationSeries"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/notifications/sync": {
     parameters: {
       query?: never;
@@ -26001,6 +26021,7 @@ export interface components {
       in_app: components["schemas"]["NotificationInAppCapability"];
       /** @description Opaque revision of this document */
       revision: string;
+      series: components["schemas"]["NotificationSeriesCapability"];
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -26088,6 +26109,18 @@ export interface components {
        * @example 1
        */
       verification_id: string;
+    };
+    NotificationEpisodeRef: {
+      /**
+       * Format: int64
+       * @example 9
+       */
+      episode_number: number;
+      /**
+       * Format: int64
+       * @example 2
+       */
+      season_number: number;
     };
     NotificationInAppCapability: {
       enabled: boolean;
@@ -26209,6 +26242,38 @@ export interface components {
       key_prefix: string;
       relay_request_id?: string;
       relay_url: string;
+    };
+    NotificationSeries: {
+      /** @description The reasons the profile's notification preferences let notify; all false when they silence the series */
+      active_reasons: components["schemas"]["NotificationSeriesReasons"];
+      /** @description The series as a catalog card */
+      item: components["schemas"]["CatalogItem"];
+      /** @description With an active Next Up reason, the episode it waits for: on that reason alone, an earlier new episode does not notify */
+      next_up_episode?: components["schemas"]["NotificationEpisodeRef"];
+      /** @description True when at least one reason is active */
+      notifies: boolean;
+      /** @description The profile's relationships to the series */
+      reasons: components["schemas"]["NotificationSeriesReasons"];
+    };
+    NotificationSeriesCapability: {
+      /** @description GET /notifications/series lists the series whose new episodes can notify the profile */
+      available: boolean;
+    };
+    NotificationSeriesCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["NotificationSeries"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    NotificationSeriesReasons: {
+      /** @description The profile is partway through the series */
+      continue_watching: boolean;
+      /** @description The series is one of the profile's favorites */
+      favorite: boolean;
+      /** @description The profile finished an episode and waits for the next */
+      next_up: boolean;
+      /** @description The series is on the profile's watchlist */
+      watchlist: boolean;
     };
     NotificationServerChannel: {
       /** Format: int64 */
@@ -115139,6 +115204,135 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listNotificationSeries: {
+    parameters: {
+      query?: {
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Artwork variant to presign; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Keeps the series whose title or sort title contains this text, case-insensitively */
+        q?: string;
+        /** @description Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason */
+        reason?: "favorite" | "watchlist" | "continue_watching" | "next_up";
+        /** @description One field, descending with a leading '-'. added_at is when the series joined the catalog; latest_episode_added when it last gained an episode. A series without a year or an episode sorts last either way; ties order by title. */
+        sort?:
+          | "title"
+          | "-title"
+          | "year"
+          | "-year"
+          | "added_at"
+          | "-added_at"
+          | "latest_episode_added"
+          | "-latest_episode_added";
+        /** @description active keeps the series the profile's preferences let notify; inactive keeps the ones they silence */
+        status?: "all" | "active" | "inactive";
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NotificationSeriesCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };

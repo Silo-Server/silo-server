@@ -447,6 +447,17 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 	return entries, items, nil
 }
 
+// ResolveCards answers the cards of the given catalog items the viewer may
+// see, in the order given. Items the catalog no longer has or the viewer may
+// not see have no card.
+func (h *PersonalDataHandler) ResolveCards(ctx context.Context, viewer PersonalListViewer, ids []string) ([]CollectionItemView, error) {
+	items, err := resolveItemsByIDs(h, ctx, viewer, ids)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve items")
+	}
+	return items, nil
+}
+
 // filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
 // The entries stay in the store (and on synced providers) so a newly added
 // episode makes the series reappear; only the display surface hides them.

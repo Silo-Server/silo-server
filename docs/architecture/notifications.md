@@ -125,6 +125,14 @@ Deliveries are deduplicated per `(profile, release event)` and, for
 dual-quality library setups notify at most once. Reprocessing an event is
 idempotent.
 
+The notified-series list (`GET /api/v2/notifications/series`) shows a profile
+the same index fanout evaluates. `ActiveReasons` is the event-independent half
+of these rules, shared by fanout and the list, so the two cannot disagree about
+which reasons a preference silences. The list filters series through the
+catalog's card access check rather than fanout's per-library one, and it leaves
+out the per-episode checks (Next Up's expected episode and the
+already-notified cursor), which depend on the episode that arrives.
+
 ## Release-event retention
 
 Release events and inbox deliveries have independent lifetimes. Pruning an old

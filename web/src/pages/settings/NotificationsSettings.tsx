@@ -5,7 +5,7 @@ import {
   captureNotificationAuthority,
 } from "@/api/v2/notifications";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -107,6 +107,7 @@ type WebhookNotifyKey = (typeof WEBHOOK_NOTIFY_FIELDS)[number]["key"];
 function PreferencesSection() {
   const { data: prefs, isLoading } = useNotificationPreferences();
   const updatePrefs = useUpdateNotificationPreferences();
+  const { data: capability } = useNotificationCapability();
 
   if (isLoading || !prefs) {
     return (
@@ -119,7 +120,22 @@ function PreferencesSection() {
   return (
     <SettingsGroup
       title="New Episode Notifications"
-      description="Choose which series relationships notify this profile when a new episode arrives."
+      description={
+        <>
+          Choose which series relationships notify this profile when a new episode arrives.
+          {capability?.series?.available && (
+            <>
+              {" "}
+              <Link
+                to="/notifications?view=series"
+                className="text-foreground underline underline-offset-4"
+              >
+                See which series notify you
+              </Link>
+            </>
+          )}
+        </>
+      }
     >
       <div className="flex items-center justify-between gap-3">
         <div>

@@ -151,6 +151,7 @@
 ./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
+./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase

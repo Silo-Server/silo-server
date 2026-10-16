@@ -101,6 +101,12 @@ func (h *NotificationsHandler) PatchNotificationPreferences(ctx context.Context,
 	return h.system.Preferences.Patch(ctx, profile, patch)
 }
 
+// ListNotifiedSeries answers every series whose new episodes the profile has
+// a reason to hear about, before catalog access filtering.
+func (h *NotificationsHandler) ListNotifiedSeries(ctx context.Context, profile string) ([]notifications.NotifiedSeries, error) {
+	return h.system.ListNotifiedSeries(ctx, profile)
+}
+
 // NotificationPushDisplay uses the same profile-scoped row and rendering as the
 // bridge notification extension endpoint without hydrating unrelated inbox data.
 func (h *NotificationsHandler) NotificationPushDisplay(ctx context.Context, profile, id string) (notifications.NotificationDisplay, error) {
