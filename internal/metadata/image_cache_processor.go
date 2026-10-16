@@ -1172,48 +1172,48 @@ func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
 // symlink, such as a per-title folder linked into another tree.
 var errLocalImageEscapedRoots = errors.New("a symlink leads out of the library roots")
 
-// cataloguedFileLister lists the files the scanner catalogued for a title.
+// catalogedFileLister lists the files the scanner cataloged for a title.
 // The image cache processor's LibraryRootResolver may implement it to let
 // local artwork through a title folder that is a symlink out of the library;
 // *catalog.FolderRepository does.
-type cataloguedFileLister interface {
-	// CataloguedFilesUnder returns up to limit present media file paths of
+type catalogedFileLister interface {
+	// CatalogedFilesUnder returns up to limit present media file paths of
 	// contentID (a title, or a series for its episodes' files) under dir, as
 	// the scanner recorded them.
-	CataloguedFilesUnder(ctx context.Context, contentID, dir string, limit int) ([]string, error)
+	CatalogedFilesUnder(ctx context.Context, contentID, dir string, limit int) ([]string, error)
 }
 
-// cataloguedFileCheckLimit bounds how many catalogued files are tried as
+// catalogedFileCheckLimit bounds how many cataloged files are tried as
 // proof for one folder.
-const cataloguedFileCheckLimit = 8
+const catalogedFileCheckLimit = 8
 
 // readLocalImageOfTitle reads a local image of contentID under roots with
 // readConfinedLocalImage. When the image's folder leads out of the roots
-// through a symlink and resolver can list catalogued files, it gets one more
-// chance through readCataloguedLocalImage.
+// through a symlink and resolver can list cataloged files, it gets one more
+// chance through readCatalogedLocalImage.
 func readLocalImageOfTitle(ctx context.Context, resolver LibraryRootResolver, contentID, localPath string, roots []string) ([]byte, error) {
 	data, err := readConfinedLocalImage(localPath, roots)
 	if !errors.Is(err, errLocalImageEscapedRoots) {
 		return data, err
 	}
-	lister, ok := resolver.(cataloguedFileLister)
+	lister, ok := resolver.(catalogedFileLister)
 	if !ok || contentID == "" {
 		return nil, err
 	}
-	return readCataloguedLocalImage(ctx, lister, contentID, localPath, roots, err)
+	return readCatalogedLocalImage(ctx, lister, contentID, localPath, roots, err)
 }
 
-// readCataloguedLocalImage reads a local image whose folder leads out of the
+// readCatalogedLocalImage reads a local image whose folder leads out of the
 // library roots through a symlink, as a per-title folder linked into another
-// tree does. The scanner follows those links and catalogues the videos behind
+// tree does. The scanner follows those links and catalogs the videos behind
 // them, so the image is trusted when a folder it sits in, below the library
-// root, also holds a file the scanner catalogued for the same title. That
-// folder is opened as a root, the catalogued file must be the same file
+// root, also holds a file the scanner cataloged for the same title. That
+// folder is opened as a root, the cataloged file must be the same file
 // reached through it, and the image is read through it with the usual leaf
 // checks. Anything else keeps the outside-roots failure, escaped, unless
 // checking ran into an I/O error, which is reported as a read failure so the
 // job is retried as usual rather than parked.
-func readCataloguedLocalImage(ctx context.Context, lister cataloguedFileLister, contentID, localPath string, roots []string, escaped error) ([]byte, error) {
+func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, contentID, localPath string, roots []string, escaped error) ([]byte, error) {
 	libraryRoot := ""
 	for _, root := range roots {
 		root = filepath.Clean(strings.TrimSpace(root))
@@ -1234,7 +1234,7 @@ func readCataloguedLocalImage(ctx context.Context, lister cataloguedFileLister, 
 	}
 	untrusted := func() error {
 		if ioErr != nil {
-			return fmt.Errorf("local image read failed: checking catalogued files: %w", ioErr)
+			return fmt.Errorf("local image read failed: checking cataloged files: %w", ioErr)
 		}
 		return escaped
 	}
@@ -1255,14 +1255,14 @@ func readCataloguedLocalImage(ctx context.Context, lister cataloguedFileLister, 
 		if !localImagePathWithinRoots(resolvedImageDir, []string{resolvedDir}) {
 			continue
 		}
-		files, err := lister.CataloguedFilesUnder(ctx, contentID, dir, cataloguedFileCheckLimit)
+		files, err := lister.CatalogedFilesUnder(ctx, contentID, dir, catalogedFileCheckLimit)
 		if err != nil {
-			return nil, fmt.Errorf("local image read failed: listing catalogued files: %w", err)
+			return nil, fmt.Errorf("local image read failed: listing cataloged files: %w", err)
 		}
 		if len(files) == 0 {
 			continue
 		}
-		data, trusted, err := readLocalImageBesideCataloguedFile(localPath, dir, files)
+		data, trusted, err := readLocalImageBesideCatalogedFile(localPath, dir, files)
 		if trusted {
 			return data, err
 		}
@@ -1271,11 +1271,11 @@ func readCataloguedLocalImage(ctx context.Context, lister cataloguedFileLister, 
 	return nil, untrusted()
 }
 
-// readLocalImageBesideCataloguedFile opens dir as a root and reads localPath
-// through it when one of files, catalogued paths under dir, is the same file
-// inside that root as at its catalogued path. trusted reports whether one was;
-// when none was, err is a failure to open dir or to stat a catalogued path.
-func readLocalImageBesideCataloguedFile(localPath, dir string, files []string) (data []byte, trusted bool, err error) {
+// readLocalImageBesideCatalogedFile opens dir as a root and reads localPath
+// through it when one of files, cataloged paths under dir, is the same file
+// inside that root as at its cataloged path. trusted reports whether one was;
+// when none was, err is a failure to open dir or to stat a cataloged path.
+func readLocalImageBesideCatalogedFile(localPath, dir string, files []string) (data []byte, trusted bool, err error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, false, err
@@ -1288,17 +1288,17 @@ func readLocalImageBesideCataloguedFile(localPath, dir string, files []string) (
 			continue
 		}
 		// os.Root refuses a path that leaves the opened folder, so a
-		// catalogued file behind another link out of it is no proof.
+		// cataloged file behind another link out of it is no proof.
 		inside, err := root.Stat(rel)
 		if err != nil {
 			continue
 		}
-		catalogued, err := os.Stat(file)
+		cataloged, err := os.Stat(file)
 		if err != nil {
 			statErr = cmp.Or(statErr, err)
 			continue
 		}
-		if !os.SameFile(inside, catalogued) {
+		if !os.SameFile(inside, cataloged) {
 			continue
 		}
 		imageRel, err := filepath.Rel(dir, localPath)

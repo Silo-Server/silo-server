@@ -12,24 +12,24 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// The server's root resolver must list catalogued files, or symlinked title
+// The server's root resolver must list cataloged files, or symlinked title
 // folders quietly lose their artwork again.
-var _ cataloguedFileLister = (*catalog.FolderRepository)(nil)
+var _ catalogedFileLister = (*catalog.FolderRepository)(nil)
 
-// cataloguedRootResolver is a library root resolver that also lists
-// catalogued files, as *catalog.FolderRepository does.
-type cataloguedRootResolver struct {
+// catalogedRootResolver is a library root resolver that also lists
+// cataloged files, as *catalog.FolderRepository does.
+type catalogedRootResolver struct {
 	roots []string
 	files []string
 	err   error
 	asked []string
 }
 
-func (r *cataloguedRootResolver) LibraryRootsForContent(context.Context, string) ([]string, error) {
+func (r *catalogedRootResolver) LibraryRootsForContent(context.Context, string) ([]string, error) {
 	return r.roots, nil
 }
 
-func (r *cataloguedRootResolver) CataloguedFilesUnder(_ context.Context, contentID, dir string, limit int) ([]string, error) {
+func (r *catalogedRootResolver) CatalogedFilesUnder(_ context.Context, contentID, dir string, limit int) ([]string, error) {
 	r.asked = append(r.asked, contentID)
 	if r.err != nil {
 		return nil, r.err
@@ -79,9 +79,9 @@ func runLocalJob(t *testing.T, job *models.MetadataImageCacheJob, resolver Libra
 }
 
 // A title folder that is a symlink out of the library, with a video the
-// scanner catalogued through it, has its artwork cached, including artwork in
-// a subfolder. Without the catalogued file the same layout is refused.
-func TestProcessLocalImageAcceptsSymlinkedTitleFolderWithCataloguedVideo(t *testing.T) {
+// scanner cataloged through it, has its artwork cached, including artwork in
+// a subfolder. Without the cataloged file the same layout is refused.
+func TestProcessLocalImageAcceptsSymlinkedTitleFolderWithCatalogedVideo(t *testing.T) {
 	library, title := symlinkedTitle(t, map[string]string{
 		"Example (2020).mkv":      "video",
 		"poster.jpg":              "poster-bytes",
@@ -95,20 +95,20 @@ func TestProcessLocalImageAcceptsSymlinkedTitleFolderWithCataloguedVideo(t *test
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			job := localArtworkJob("file://" + filepath.Join(title, tc.image))
-			resolver := &cataloguedRootResolver{roots: []string{library}, files: []string{video}}
+			resolver := &catalogedRootResolver{roots: []string{library}, files: []string{video}}
 			jobs, cacher := runLocalJob(t, job, resolver)
 			if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != tc.want {
 				t.Fatalf("cached %d images (failed text %q), want %q", len(cacher.byteReqs), jobs.failedText, tc.want)
 			}
 			if len(resolver.asked) == 0 || resolver.asked[0] != "movie-1" {
-				t.Fatalf("catalogued files asked for %v, want the job's title", resolver.asked)
+				t.Fatalf("cataloged files asked for %v, want the job's title", resolver.asked)
 			}
 		})
 	}
 
-	t.Run("no catalogued file", func(t *testing.T) {
+	t.Run("no cataloged file", func(t *testing.T) {
 		job := localArtworkJob("file://" + filepath.Join(title, "poster.jpg"))
-		jobs, cacher := runLocalJob(t, job, &cataloguedRootResolver{roots: []string{library}})
+		jobs, cacher := runLocalJob(t, job, &catalogedRootResolver{roots: []string{library}})
 		if len(cacher.byteReqs) != 0 || !strings.Contains(jobs.failedText, "local image path outside library roots") {
 			t.Fatalf("cached %d images, failed text %q; want the outside-roots refusal", len(cacher.byteReqs), jobs.failedText)
 		}
@@ -119,7 +119,7 @@ func TestProcessLocalImageAcceptsSymlinkedTitleFolderWithCataloguedVideo(t *test
 
 	t.Run("listing fails", func(t *testing.T) {
 		job := localArtworkJob("file://" + filepath.Join(title, "poster.jpg"))
-		resolver := &cataloguedRootResolver{roots: []string{library}, err: errors.New("database unavailable")}
+		resolver := &catalogedRootResolver{roots: []string{library}, err: errors.New("database unavailable")}
 		jobs, cacher := runLocalJob(t, job, resolver)
 		if len(cacher.byteReqs) != 0 || !strings.Contains(jobs.failedText, "local image read failed") {
 			t.Fatalf("cached %d images, failed text %q; want a read failure", len(cacher.byteReqs), jobs.failedText)
@@ -140,7 +140,7 @@ func TestProcessLocalImageAcceptsSymlinkedTitleFolderWithCataloguedVideo(t *test
 
 // A series folder linked out of the library proves itself with an episode in
 // a season folder below it, so the series poster beside the seasons is read.
-func TestProcessLocalImageAcceptsSymlinkedSeriesFolderWithCataloguedEpisode(t *testing.T) {
+func TestProcessLocalImageAcceptsSymlinkedSeriesFolderWithCatalogedEpisode(t *testing.T) {
 	library, title := symlinkedTitle(t, map[string]string{
 		"Season 01/Example S01E01.mkv": "video",
 		"poster.jpg":                   "series-poster",
@@ -149,17 +149,17 @@ func TestProcessLocalImageAcceptsSymlinkedSeriesFolderWithCataloguedEpisode(t *t
 	job.TargetType = ImageCacheTargetItem
 	job.TargetContentID = "series-1"
 	job.SeriesID = "series-1"
-	resolver := &cataloguedRootResolver{roots: []string{library}, files: []string{filepath.Join(title, "Season 01", "Example S01E01.mkv")}}
+	resolver := &catalogedRootResolver{roots: []string{library}, files: []string{filepath.Join(title, "Season 01", "Example S01E01.mkv")}}
 	jobs, cacher := runLocalJob(t, job, resolver)
 	if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "series-poster" {
 		t.Fatalf("cached %d images (failed text %q), want the series poster", len(cacher.byteReqs), jobs.failedText)
 	}
 }
 
-// A symlink planted in the library that points somewhere without a catalogued
-// file of the title stays refused, even when the title has catalogued files
+// A symlink planted in the library that points somewhere without a cataloged
+// file of the title stays refused, even when the title has cataloged files
 // elsewhere in the library.
-func TestProcessLocalImageRefusesPlantedSymlinkWithoutCataloguedFile(t *testing.T) {
+func TestProcessLocalImageRefusesPlantedSymlinkWithoutCatalogedFile(t *testing.T) {
 	library := t.TempDir()
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "poster.jpg"), []byte("outside-bytes"), 0o644); err != nil {
@@ -179,16 +179,16 @@ func TestProcessLocalImageRefusesPlantedSymlinkWithoutCataloguedFile(t *testing.
 	}
 
 	job := localArtworkJob("file://" + filepath.Join(planted, "poster.jpg"))
-	jobs, cacher := runLocalJob(t, job, &cataloguedRootResolver{roots: []string{library}, files: []string{video}})
+	jobs, cacher := runLocalJob(t, job, &catalogedRootResolver{roots: []string{library}, files: []string{video}})
 	if len(cacher.byteReqs) != 0 || !strings.Contains(jobs.failedText, "local image path outside library roots") {
 		t.Fatalf("cached %d images, failed text %q; want the outside-roots refusal", len(cacher.byteReqs), jobs.failedText)
 	}
 }
 
-// A catalogued path that is itself a symlink out of the title folder proves
+// A cataloged path that is itself a symlink out of the title folder proves
 // nothing about the folder: the check goes through the opened folder, which
 // will not follow it out.
-func TestProcessLocalImageRefusesCataloguedFileLinkedOutOfTheFolder(t *testing.T) {
+func TestProcessLocalImageRefusesCatalogedFileLinkedOutOfTheFolder(t *testing.T) {
 	library := t.TempDir()
 	outside := t.TempDir()
 	elsewhere := filepath.Join(t.TempDir(), "real.mkv")
@@ -207,7 +207,7 @@ func TestProcessLocalImageRefusesCataloguedFileLinkedOutOfTheFolder(t *testing.T
 	}
 
 	job := localArtworkJob("file://" + filepath.Join(title, "poster.jpg"))
-	resolver := &cataloguedRootResolver{roots: []string{library}, files: []string{filepath.Join(title, "Example (2020).mkv")}}
+	resolver := &catalogedRootResolver{roots: []string{library}, files: []string{filepath.Join(title, "Example (2020).mkv")}}
 	jobs, cacher := runLocalJob(t, job, resolver)
 	if len(cacher.byteReqs) != 0 || !strings.Contains(jobs.failedText, "local image path outside library roots") {
 		t.Fatalf("cached %d images, failed text %q; want the outside-roots refusal", len(cacher.byteReqs), jobs.failedText)
