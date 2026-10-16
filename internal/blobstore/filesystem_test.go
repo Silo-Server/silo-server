@@ -370,7 +370,7 @@ func TestFilesystemIdentityIsAbsoluteRoot(t *testing.T) {
 }
 
 // cancelAfter reports cancellation once Err has been called more than n times.
-type cancelAfter struct {
+type cancelAfter struct { //nolint:containedctx // wraps the context to count Err calls
 	context.Context
 	n int
 }
