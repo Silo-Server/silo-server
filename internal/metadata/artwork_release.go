@@ -100,6 +100,12 @@ func releasableSQL(pathCol, sourceCol string) string {
 	return "(" + storedCopySQL(pathCol) + " AND " + providerSourceSQL(sourceCol) + ")"
 }
 
+// sourcelessCopySQL holds when a slot serves a stored copy saved without its
+// source, as copies made before source columns existed were.
+func sourcelessCopySQL(pathCol, sourceCol string) string {
+	return "(" + storedCopySQL(pathCol) + " AND coalesce(" + sourceCol + ", '') = '')"
+}
+
 // needsProviderArtworkSQL holds when only a refresh can give a slot provider
 // artwork: it serves a copy with no provider source, or it is empty and waits
 // on a local copy.
@@ -113,20 +119,32 @@ func needsProviderArtworkSQL(pathCol, sourceCol string) string {
 // as a placeholder, and the provider image it now serves is the one the copy
 // was made from, or, when a refresh moved the source on, a newer pick that
 // replaces the placeholder as soon as it loads.
-func releaseSet(alias string, slots []artworkReleaseSlot) string {
+//
+// With clearSourceless, a stored copy with no source at all is cleared: a
+// localization row's empty slot falls back to the item's or season's own
+// artwork, which this pass and refreshes already move to the providers.
+func releaseSet(alias string, slots []artworkReleaseSlot, clearSourceless bool) string {
 	parts := make([]string, 0, len(slots)+1)
 	for _, slot := range slots {
 		path, source := alias+"."+slot.path, alias+"."+slot.source
-		parts = append(parts, fmt.Sprintf("%s = CASE WHEN %s THEN %s ELSE %s END", slot.path, releasableSQL(path, source), source, path))
+		clear := ""
+		if clearSourceless {
+			clear = fmt.Sprintf(" WHEN %s THEN ''", sourcelessCopySQL(path, source))
+		}
+		parts = append(parts, fmt.Sprintf("%s = CASE WHEN %s THEN %s%s ELSE %s END", slot.path, releasableSQL(path, source), source, clear, path))
 	}
 	parts = append(parts, "updated_at = NOW()")
 	return strings.Join(parts, ", ")
 }
 
-func anyReleasable(alias string, slots []artworkReleaseSlot) string {
-	conds := make([]string, len(slots))
-	for i, slot := range slots {
-		conds[i] = releasableSQL(alias+"."+slot.path, alias+"."+slot.source)
+func anyReleasable(alias string, slots []artworkReleaseSlot, clearSourceless bool) string {
+	conds := make([]string, 0, 2*len(slots))
+	for _, slot := range slots {
+		path, source := alias+"."+slot.path, alias+"."+slot.source
+		conds = append(conds, releasableSQL(path, source))
+		if clearSourceless {
+			conds = append(conds, sourcelessCopySQL(path, source))
+		}
 	}
 	return "(" + strings.Join(conds, " OR ") + ")"
 }
@@ -173,10 +191,10 @@ type artworkReleaseTable struct {
 // refresh can fix. Paging only through such rows keeps a pass with nothing to
 // do to one ordered read of each table.
 func (t artworkReleaseTable) candidateSQL() string {
-	cond := anyReleasable("t", t.slots)
+	cond := anyReleasable("t", t.slots, false)
 	if t.localized != "" {
 		cond = fmt.Sprintf("EXISTS (SELECT 1 FROM %s l WHERE l.%s = t.content_id AND %s)",
-			t.localized, t.localizedKey, anyReleasable("l", t.slots))
+			t.localized, t.localizedKey, anyReleasable("l", t.slots, true))
 	}
 	if t.needsRefresh != "" {
 		cond = "(" + cond + " OR " + t.needsRefresh + ")"
@@ -204,7 +222,10 @@ func storedArtworkReleaseTables() []artworkReleaseTable {
 		{
 			table: items, owner: releaseItemOwnerSQL, slots: itemReleaseSlots,
 			needsRefresh: "(" + needs(itemLocalizationReleaseSlots...) +
-				" OR EXISTS (SELECT 1 FROM media_item_backdrops b WHERE b.content_id = t.content_id))",
+				" OR EXISTS (SELECT 1 FROM media_item_backdrops b WHERE b.content_id = t.content_id)" +
+				// Storage recovery clears a missing copy it cannot re-download
+				// to empty slot and source and nulls last_refreshed.
+				" OR (t.last_refreshed IS NULL AND (" + emptySlotSQL("t", itemLocalizationReleaseSlots) + ")))",
 		},
 		{
 			table: items, owner: releaseItemOwnerSQL, slots: itemLocalizationReleaseSlots,
@@ -217,6 +238,16 @@ func storedArtworkReleaseTables() []artworkReleaseTable {
 		},
 		{table: releaseEpisodesTable, owner: releaseSeriesOwnerSQL, slots: episodeReleaseSlots, needsRefresh: needs(episodeReleaseSlots...)},
 	}
+}
+
+// emptySlotSQL holds when any slot of the row aliased alias has neither a path
+// nor a source.
+func emptySlotSQL(alias string, slots []artworkReleaseSlot) string {
+	conds := make([]string, len(slots))
+	for i, slot := range slots {
+		conds[i] = fmt.Sprintf("(coalesce(%[1]s.%[2]s, '') = '' AND coalesce(%[1]s.%[3]s, '') = '')", alias, slot.path, slot.source)
+	}
+	return strings.Join(conds, " OR ")
 }
 
 // NewStoredArtworkReleaser returns nil without a database.
@@ -322,7 +353,14 @@ func ownerScopeSQL(table artworkReleaseTable) string {
 		table.owner, imagesLockedSQL("mi"), cachingOffSQL)
 }
 
-func (r *StoredArtworkReleaser) releasePage(ctx context.Context, table artworkReleaseTable, keys []string) (int, error) {
+// releasePage releases a page's slots. An Edit Metadata selection writes the
+// artwork and locks it in one transaction, and an UPDATE that waited on that
+// row would judge the lock from the snapshot it started with and release the
+// selection. So the page's rows are locked first, in the order a selection
+// takes them (the target row, then the item it locks), each in a statement of
+// its own, and the UPDATE then reads the committed lock. A deadlock with
+// another writer retries the page.
+func (r *StoredArtworkReleaser) releasePage(ctx context.Context, table artworkReleaseTable, keys []string) (released int, err error) {
 	var query string
 	if table.localized != "" {
 		query = fmt.Sprintf(`
@@ -330,19 +368,37 @@ func (r *StoredArtworkReleaser) releasePage(ctx context.Context, table artworkRe
 			FROM %[3]s t
 			WHERE t.content_id = ANY($1) AND l.%[4]s = t.content_id
 			  AND %[5]s AND %[6]s`,
-			table.localized, releaseSet("l", table.slots), table.table, table.localizedKey,
-			anyReleasable("l", table.slots), ownerScopeSQL(table))
+			table.localized, releaseSet("l", table.slots, true), table.table, table.localizedKey,
+			anyReleasable("l", table.slots, true), ownerScopeSQL(table))
 	} else {
 		query = fmt.Sprintf(`
 			UPDATE %[1]s t SET %[2]s
 			WHERE t.content_id = ANY($1) AND %[3]s AND %[4]s`,
-			table.table, releaseSet("t", table.slots), anyReleasable("t", table.slots), ownerScopeSQL(table))
+			table.table, releaseSet("t", table.slots, false), anyReleasable("t", table.slots, false), ownerScopeSQL(table))
 	}
-	tag, err := r.pool.Exec(ctx, query, keys)
+	err = retryOnDeadlock(ctx, func() error {
+		return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+			for _, lock := range []string{
+				fmt.Sprintf(`SELECT 1 FROM %s t WHERE t.content_id = ANY($1) ORDER BY t.content_id FOR UPDATE`, table.table),
+				fmt.Sprintf(`
+					SELECT 1 FROM media_items mi
+					WHERE EXISTS (SELECT 1 FROM %s t WHERE t.content_id = ANY($1) AND %s)
+					ORDER BY mi.content_id
+					FOR SHARE`, table.table, table.owner),
+			} {
+				if _, err := tx.Exec(ctx, lock, keys); err != nil {
+					return err
+				}
+			}
+			tag, err := tx.Exec(ctx, query, keys)
+			released = int(tag.RowsAffected())
+			return err
+		})
+	})
 	if err != nil {
 		return 0, fmt.Errorf("stored artwork release: releasing %s: %w", table.name(), err)
 	}
-	return int(tag.RowsAffected()), nil
+	return released, nil
 }
 
 func (r *StoredArtworkReleaser) queryStrings(ctx context.Context, sql string, args ...any) ([]string, error) {

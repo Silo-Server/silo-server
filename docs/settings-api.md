@@ -1048,8 +1048,10 @@ Artwork stored earlier goes back to its providers through a hidden task that
 runs at startup, daily, and when the setting is turned off: a stored copy of
 provider artwork serves its provider source again, and a matched movie or
 series whose poster, backdrop, or logo has no provider source, or that keeps
-extra backdrops, is queued for a metadata refresh at most once a week. The
-item keeps that art until a refresh finds a provider image. Items with locked
+extra backdrops, or that a storage recovery left without artwork, is queued
+for a metadata refresh at most once a week. The item keeps that art until a
+refresh finds a provider image. A localized copy saved without any source is
+cleared, so the item's or season's own artwork shows. Items with locked
 artwork keep what they have; choosing artwork in Edit Metadata locks it, for a
 season or episode on the whole series. Banner, landscape thumb, clear art, and
 disc art come only from local files, so copies already stored stay. Nothing is
