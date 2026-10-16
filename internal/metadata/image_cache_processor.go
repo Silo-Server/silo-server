@@ -1398,12 +1398,12 @@ func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, 
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(resolvedDir, resolved, target)
 		}
-		targetRel, err := filepath.Rel(resolvedDir, filepath.Clean(target))
-		if err != nil || (targetRel != "." && !filepath.IsLocal(targetRel)) {
+		target = filepath.Clean(target)
+		if !localImagePathWithinRoots(target, []string{resolvedDir}) {
 			return "", false, nil
 		}
 		resolved = ""
-		pending = append(strings.Split(targetRel, sep), pending...)
+		pending = append(strings.Split(strings.TrimPrefix(target, resolvedDir), sep), pending...)
 	}
 	return resolved, resolved != "", nil
 }
