@@ -423,12 +423,9 @@ func (r *StoredArtworkReleaser) queueRefreshes(ctx context.Context, table artwor
 	if err != nil {
 		return 0, fmt.Errorf("stored artwork release: finding %s to refresh: %w", table.name(), err)
 	}
-	now := time.Now().UTC()
-	for _, id := range ids {
-		if err := r.debts.RequestDue(ctx, RefreshTargetItem, id, storedArtworkReleaseDebtPriority,
-			RefreshDebtReasonProviderArtwork, now, storedArtworkReleaseRefreshAge); err != nil {
-			return 0, err
-		}
+	if err := r.debts.RequestDueMany(ctx, RefreshTargetItem, ids, storedArtworkReleaseDebtPriority,
+		RefreshDebtReasonProviderArtwork, time.Now().UTC(), storedArtworkReleaseRefreshAge); err != nil {
+		return 0, err
 	}
 	return len(ids), nil
 }
