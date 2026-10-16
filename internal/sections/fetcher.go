@@ -547,10 +547,11 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	}
 
 	// Combined mode merges next-up cards into the row and keeps the newest
-	// limit cards of the two.
+	// limit cards of the two. The next-up lookup is not bounded by the
+	// in-progress cards' times: a series finished before all of them still
+	// makes the row when its next episode was just released.
 	if combined {
-		since := continueNextUpCutoff(orderedItems, itemMeta, limit)
-		nextUpItems, nextUpMeta, nextUpErr := f.fetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit, since)
+		nextUpItems, nextUpMeta, nextUpErr := f.FetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit)
 		if nextUpErr != nil {
 			slog.ErrorContext(ctx, "fetching next-up items", "component", "sections", "error", nextUpErr)
 		} else {
@@ -671,28 +672,6 @@ func appendContinuePage(orderedItems, pageItems []*models.MediaItem, meta map[st
 		orderedItems = orderedItems[:limit]
 	}
 	return orderedItems
-}
-
-// continueNextUpCutoff bounds the next-up lookup of a combined row. When the
-// in-progress cards fill the row on their own, a next-up card older than all
-// of them sorts below limit cards and cannot make the row, so the lookup only
-// needs series completed at or after the oldest in-progress card. Nil when
-// the row is not full or a card has no timestamp to sort by.
-func continueNextUpCutoff(items []*models.MediaItem, meta map[string]SectionItemMeta, limit int) *time.Time {
-	if len(items) < limit {
-		return nil
-	}
-	var oldest time.Time
-	for i, item := range items {
-		ts := meta[item.ContentID].SortTimestamp
-		if ts.IsZero() {
-			return nil
-		}
-		if i == 0 || ts.Before(oldest) {
-			oldest = ts
-		}
-	}
-	return &oldest
 }
 
 // ebookContinueWatchingProgressQuery lists in-progress ebook resume points for
@@ -878,12 +857,6 @@ func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSecti
 // It delegates to NextUpRepository for the optimized LATERAL JOIN query, then resolves
 // the full MediaItem objects via fetchEpisodeTargetsByContentIDs.
 func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, limit int) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
-	return f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil)
-}
-
-// fetchNextUpItems is FetchNextUpItems limited, when since is set, to series
-// whose newest completed episode is at or after since.
-func (f *Fetcher) fetchNextUpItems(ctx context.Context, userID int, profileID string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, limit int, since *time.Time) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if f.NextUpRepo == nil {
 		return nil, nil, nil
 	}
@@ -895,7 +868,6 @@ func (f *Fetcher) fetchNextUpItems(ctx context.Context, userID int, profileID st
 		LibraryIDs:   libraryIDs,
 		AccessFilter: filter,
 		Limit:        limit,
-		DateCutoff:   since,
 	})
 	if err != nil {
 		return nil, nil, err

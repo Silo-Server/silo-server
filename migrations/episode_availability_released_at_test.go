@@ -29,7 +29,7 @@ INSERT INTO episode_libraries VALUES
 	('restored', 1, NOW() - INTERVAL '1 day'),
 	('unseeded', 2, NOW() - INTERVAL '5 days');`)
 
-	migrationExec(t, tx, adminMigrationSQL(t, "20261016003126_add_episode_availability_released_at", schema, false))
+	migrationExec(t, tx, adminMigrationSQL(t, "20261016012917_add_episode_availability_released_at", schema, false))
 
 	want := map[string]bool{"back-catalog": false, "new": true, "late-match": false, "no-membership": false, "restored": false, "unseeded": false}
 	for id, released := range want {
@@ -44,5 +44,5 @@ INSERT INTO episode_libraries VALUES
 		}
 	}
 
-	migrationExec(t, tx, adminMigrationSQL(t, "20261016003126_add_episode_availability_released_at", schema, true))
+	migrationExec(t, tx, adminMigrationSQL(t, "20261016012917_add_episode_availability_released_at", schema, true))
 }

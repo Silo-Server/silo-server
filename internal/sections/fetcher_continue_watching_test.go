@@ -246,33 +246,6 @@ func TestAppendContinuePageCollapsesBeforeTrimming(t *testing.T) {
 	}
 }
 
-func TestContinueNextUpCutoff(t *testing.T) {
-	t.Parallel()
-
-	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	items := []*models.MediaItem{{ContentID: "a"}, {ContentID: "b"}, {ContentID: "c"}}
-	meta := map[string]SectionItemMeta{
-		"a": {SortTimestamp: base},
-		"b": {SortTimestamp: base.Add(-2 * time.Hour)},
-		"c": {SortTimestamp: base.Add(-time.Hour)},
-	}
-
-	if got := continueNextUpCutoff(items, meta, 4); got != nil {
-		t.Fatalf("cutoff for a row short of its limit = %v, want nil", got)
-	}
-	got := continueNextUpCutoff(items, meta, 3)
-	if got == nil || !got.Equal(base.Add(-2*time.Hour)) {
-		t.Fatalf("cutoff for a full row = %v, want the oldest card %v", got, base.Add(-2*time.Hour))
-	}
-
-	// A card without a timestamp sorts last, so a next-up card older than
-	// every other card could still outrank it.
-	meta["c"] = SectionItemMeta{}
-	if got := continueNextUpCutoff(items, meta, 3); got != nil {
-		t.Fatalf("cutoff with an untimed card = %v, want nil", got)
-	}
-}
-
 func contentIDs(items []*models.MediaItem) []string {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
