@@ -90,7 +90,7 @@ func TestNotificationDestinationTestSends(t *testing.T) {
 	settings := NewSettings(mapSettingReader{SettingWebhooksEnabled: "true"})
 	hooks := NewWebhookRepository(pool)
 	channels := NewServerChannelRepository(pool)
-	hookBefore, err := hooks.GetByID(ctx, "owner", "hook")
+	hookBefore, err := hooks.GetByID(ctx, 1, "owner", "hook")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestNotificationDestinationTestSends(t *testing.T) {
 	webhookSvc := newWebhookService(hooks, cipher, settings, &webhookSender{cipher: cipher, client: client})
 	channelSvc := newServerChannelService(channels, cipher, settings, &serverChannelSender{cipher: cipher, client: client})
 	for _, send := range []func() (*WebhookTestResult, error){
-		func() (*WebhookTestResult, error) { return webhookSvc.Test(ctx, "owner", "hook") },
+		func() (*WebhookTestResult, error) { return webhookSvc.Test(ctx, 1, "owner", "hook") },
 		func() (*WebhookTestResult, error) { return channelSvc.Test(ctx, "channel") },
 	} {
 		before := calls
@@ -110,10 +110,14 @@ func TestNotificationDestinationTestSends(t *testing.T) {
 			t.Fatalf("send: %+v %v calls=%d", result, err, calls)
 		}
 	}
-	if _, err = webhookSvc.Test(ctx, "other", "hook"); !errors.Is(err, ErrWebhookNotFound) || calls != 2 {
+	if _, err = webhookSvc.Test(ctx, 1, "other", "hook"); !errors.Is(err, ErrWebhookNotFound) || calls != 2 {
 		t.Fatalf("cross-profile send: %v calls=%d", err, calls)
 	}
-	hookAfter, err := hooks.GetByID(ctx, "owner", "hook")
+	// A profile with the same ID on another account is another owner.
+	if _, err = webhookSvc.Test(ctx, 2, "owner", "hook"); !errors.Is(err, ErrWebhookNotFound) || calls != 2 {
+		t.Fatalf("cross-account send: %v calls=%d", err, calls)
+	}
+	hookAfter, err := hooks.GetByID(ctx, 1, "owner", "hook")
 	if err != nil {
 		t.Fatal(err)
 	}

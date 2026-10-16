@@ -448,8 +448,9 @@ func (s *System) Wait() {
 
 // PurgeProfile removes all notification state for a deleted profile.
 // Profiles may live in per-user SQLite stores, so Postgres cascades cannot
-// cover this. Interest rows, series mutes, deliveries, and preferences are
-// removed for the profile on userID's account only.
+// cover this. Interest rows, series mutes, deliveries, preferences,
+// destinations, and email prefs are removed for the profile on userID's
+// account only.
 func (s *System) PurgeProfile(ctx context.Context, userID int, profileID string) error {
 	if s == nil || profileID == "" {
 		return nil
@@ -467,22 +468,22 @@ func (s *System) PurgeProfile(ctx context.Context, userID int, profileID string)
 		return fmt.Errorf("purge preferences: %w", err)
 	}
 	if s.webhookRepo != nil {
-		if err := s.webhookRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+		if err := s.webhookRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge webhooks: %w", err)
 		}
 	}
 	if s.webPushRepo != nil {
-		if err := s.webPushRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+		if err := s.webPushRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge web push subscriptions: %w", err)
 		}
 	}
 	if s.pushDeviceRepo != nil {
-		if err := s.pushDeviceRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+		if err := s.pushDeviceRepo.DeleteAllForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge push devices: %w", err)
 		}
 	}
 	if s.EmailPrefs != nil {
-		if err := s.EmailPrefs.DeleteForProfile(ctx, profileID); err != nil {
+		if err := s.EmailPrefs.DeleteForProfile(ctx, userID, profileID); err != nil {
 			return fmt.Errorf("purge email prefs: %w", err)
 		}
 	}

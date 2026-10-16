@@ -116,7 +116,7 @@ func TestOrderedAndroidPushFencesBridgeAndBootstrap(t *testing.T) {
 	if _, err := repo.UpsertFCM(ctx, legacy, cipher); !errors.Is(err, ErrPushLegacyWriter) {
 		t.Fatalf("legacy register=%v", err)
 	}
-	if err := repo.DeleteByProfileDevice(ctx, cmd.ProfileID, cmd.DeviceID); !errors.Is(err, ErrPushLegacyWriter) {
+	if err := repo.DeleteByProfileDevice(ctx, cmd.UserID, cmd.ProfileID, cmd.DeviceID); !errors.Is(err, ErrPushLegacyWriter) {
 		t.Fatalf("legacy remove=%v", err)
 	}
 	cmd.Generation = 2

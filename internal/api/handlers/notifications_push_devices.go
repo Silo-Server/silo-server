@@ -161,7 +161,7 @@ func (h *NotificationsHandler) HandleUnregisterPushDevice(w http.ResponseWriter,
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Push registration is not available")
 		return
 	}
-	err := service.Unregister(r.Context(), apimw.GetProfileID(r.Context()), chi.URLParam(r, "device_id"))
+	err := service.Unregister(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "device_id"))
 	if err != nil {
 		switch {
 		case errors.Is(err, notifications.ErrPushLegacyWriter):

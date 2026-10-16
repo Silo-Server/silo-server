@@ -39,7 +39,7 @@ func TestWebhookCreateAndTestBlockedWhenDisabled(t *testing.T) {
 	if _, _, err := service.Create(ctx, 1, "profile", WebhookInput{Name: &name, URL: &url}); !errors.Is(err, ErrWebhooksDisabled) {
 		t.Fatalf("Create error = %v, want ErrWebhooksDisabled", err)
 	}
-	if _, err := service.Test(ctx, "profile", "hook-id"); !errors.Is(err, ErrWebhooksDisabled) {
+	if _, err := service.Test(ctx, 1, "profile", "hook-id"); !errors.Is(err, ErrWebhooksDisabled) {
 		t.Fatalf("Test error = %v, want ErrWebhooksDisabled", err)
 	}
 }

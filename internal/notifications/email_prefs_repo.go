@@ -387,10 +387,11 @@ func (r *EmailPrefsRepository) UnsubscribeByToken(ctx context.Context, token str
 	return tag.RowsAffected() > 0, nil
 }
 
-// DeleteForProfile purges the profile's email prefs (profile deletion).
-func (r *EmailPrefsRepository) DeleteForProfile(ctx context.Context, profileID string) error {
+// DeleteForProfile purges the account profile's email prefs (profile
+// deletion).
+func (r *EmailPrefsRepository) DeleteForProfile(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_email_prefs WHERE profile_id = $1`, profileID)
+		`DELETE FROM notification_email_prefs WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	if err != nil {
 		return fmt.Errorf("delete email prefs: %w", err)
 	}
