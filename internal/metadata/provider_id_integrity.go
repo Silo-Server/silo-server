@@ -977,7 +977,7 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			SELECT user_id, profile_id, $2, muted_at
 			FROM profile_series_notification_mutes
 			WHERE series_id = $1
-			ON CONFLICT (profile_id, series_id) DO UPDATE
+			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
 			SET muted_at = LEAST(profile_series_notification_mutes.muted_at, EXCLUDED.muted_at)`},
 	{"delete source notification mutes", `DELETE FROM profile_series_notification_mutes WHERE series_id = $1`},
 	{"merge watch provider dropped items", `

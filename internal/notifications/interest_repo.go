@@ -34,7 +34,7 @@ func (r *InterestRepository) ListActiveBySeries(ctx context.Context, tx pgx.Tx, 
 		  AND (psi.favorite OR psi.watchlist OR psi.continue_watching OR psi.next_up_candidate)
 		  AND NOT EXISTS (
 			SELECT 1 FROM profile_series_notification_mutes m
-			WHERE m.series_id = psi.series_id AND m.profile_id = psi.profile_id)`,
+			WHERE m.series_id = psi.series_id AND m.user_id = psi.user_id AND m.profile_id = psi.profile_id)`,
 		libraryID, seriesID)
 	if err != nil {
 		return nil, fmt.Errorf("list series interest: %w", err)

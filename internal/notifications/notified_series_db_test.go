@@ -46,7 +46,7 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	}
 	s := &System{Interests: NewInterestRepository(pool), Preferences: NewPreferencesRepository(pool)}
 
-	got, err := s.ListNotifiedSeries(ctx, "p1")
+	got, err := s.ListNotifiedSeries(ctx, 1, "p1")
 	if err != nil {
 		t.Fatalf("ListNotifiedSeries: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE notification_preferences SET enabled = false WHERE profile_id = 'p1'`); err != nil {
 		t.Fatal(err)
 	}
-	got, err = s.ListNotifiedSeries(ctx, "p1")
+	got, err = s.ListNotifiedSeries(ctx, 1, "p1")
 	if err != nil {
 		t.Fatalf("ListNotifiedSeries: %v", err)
 	}

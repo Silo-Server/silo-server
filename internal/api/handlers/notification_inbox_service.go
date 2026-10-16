@@ -105,8 +105,8 @@ func (h *NotificationsHandler) PatchNotificationPreferences(ctx context.Context,
 
 // ListNotifiedSeries answers every series whose new episodes the profile has
 // a reason to hear about, before catalog access filtering.
-func (h *NotificationsHandler) ListNotifiedSeries(ctx context.Context, profile string) ([]notifications.NotifiedSeries, error) {
-	return h.system.ListNotifiedSeries(ctx, profile)
+func (h *NotificationsHandler) ListNotifiedSeries(ctx context.Context, userID int, profile string) ([]notifications.NotifiedSeries, error) {
+	return h.system.ListNotifiedSeries(ctx, userID, profile)
 }
 
 // MuteNotificationSeries mutes the series for the profile. The caller has
@@ -120,8 +120,8 @@ func (h *NotificationsHandler) MuteNotificationSeries(ctx context.Context, userI
 }
 
 // UnmuteNotificationSeries lifts the profile's mute of the series.
-func (h *NotificationsHandler) UnmuteNotificationSeries(ctx context.Context, profile, seriesID string) error {
-	return h.system.UnmuteSeries(ctx, profile, seriesID)
+func (h *NotificationsHandler) UnmuteNotificationSeries(ctx context.Context, userID int, profile, seriesID string) error {
+	return h.system.UnmuteSeries(ctx, userID, profile, seriesID)
 }
 
 // NotificationPushDisplay uses the same profile-scoped row and rendering as the

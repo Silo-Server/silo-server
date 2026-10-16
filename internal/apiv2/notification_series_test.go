@@ -191,7 +191,8 @@ func notificationSeriesMuteHandler(t *testing.T) (http.Handler, *fakeNotificatio
 	return NewHandler(deps), inbox
 }
 
-// Mute and unmute act as the acting profile and are idempotent writes.
+// Mute and unmute act as the acting profile on its account and are idempotent
+// writes.
 func TestNotificationSeriesMuteAndUnmute(t *testing.T) {
 	h, inbox := notificationSeriesMuteHandler(t)
 	for range 2 {
@@ -202,7 +203,7 @@ func TestNotificationSeriesMuteAndUnmute(t *testing.T) {
 			t.Fatal(rec.Code, rec.Body.String())
 		}
 	}
-	if !slices.Equal(inbox.mutes, []string{"p-owner/series:bear", "p-owner/series:bear"}) || !slices.Equal(inbox.unmutes, []string{"p-owner/series:wire", "p-owner/series:wire"}) {
+	if !slices.Equal(inbox.mutes, []string{"1/p-owner/series:bear", "1/p-owner/series:bear"}) || !slices.Equal(inbox.unmutes, []string{"1/p-owner/series:wire", "1/p-owner/series:wire"}) {
 		t.Fatalf("mutes = %v, unmutes = %v", inbox.mutes, inbox.unmutes)
 	}
 }
@@ -220,7 +221,7 @@ func TestNotificationSeriesMuteRefusals(t *testing.T) {
 	if rec := do(t, h, http.MethodDelete, Prefix+"/notifications/series/series:hidden/mute", "", profileOwner()); rec.Code != http.StatusNoContent {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if !slices.Equal(inbox.unmutes, []string{"p-owner/series:hidden"}) {
+	if !slices.Equal(inbox.unmutes, []string{"1/p-owner/series:hidden"}) {
 		t.Fatalf("unmutes = %v", inbox.unmutes)
 	}
 }

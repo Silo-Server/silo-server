@@ -107,9 +107,10 @@ release event's episode key:
   again when fanout re-reads the candidates under the inbox locks. A mute
   committed after that second read is like a preference change made just
   after the delivery. Muting writes no interest row: the mute lives in its own
-  table keyed by profile and series, because interest rows are recomputed per
-  library and pruned once their reasons go, and a mute lasts until the
-  profile unmutes. A muted profile's notification cursor does not move, and
+  table keyed by account, profile, and series, because interest rows are
+  recomputed per library and pruned once their reasons go, and a mute lasts
+  until the profile unmutes. The account is part of the key because profile
+  IDs, such as the legacy `default`, repeat across accounts. A muted profile's notification cursor does not move, and
   unmuting does not announce the episodes that arrived meanwhile, since their
   release events are already processed. A mute follows its series through a
   catalog merge or split like other per-profile series state, and profile

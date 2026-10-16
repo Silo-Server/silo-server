@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,7 +30,8 @@ type fakeNotificationInbox struct {
 	empty  bool
 	// series is the notified-series list; nil answers fixtureNotifiedSeries.
 	series []notifications.NotifiedSeries
-	// mutes and unmutes record the series each call named, as profile/series.
+	// mutes and unmutes record the series each call named, as
+	// account/profile/series.
 	mutes, unmutes []string
 }
 
@@ -52,20 +54,20 @@ func fixtureNotifiedSeries() []notifications.NotifiedSeries {
 // notificationNotASeriesID is an item the viewer may see that is no series.
 const notificationNotASeriesID = "movie:heat-1995"
 
-func (f *fakeNotificationInbox) MuteNotificationSeries(_ context.Context, _ int, profile, seriesID string) error {
+func (f *fakeNotificationInbox) MuteNotificationSeries(_ context.Context, userID int, profile, seriesID string) error {
 	if seriesID == notificationNotASeriesID {
 		return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Series not found"}
 	}
-	f.mutes = append(f.mutes, profile+"/"+seriesID)
+	f.mutes = append(f.mutes, fmt.Sprintf("%d/%s/%s", userID, profile, seriesID))
 	return nil
 }
 
-func (f *fakeNotificationInbox) UnmuteNotificationSeries(_ context.Context, profile, seriesID string) error {
-	f.unmutes = append(f.unmutes, profile+"/"+seriesID)
+func (f *fakeNotificationInbox) UnmuteNotificationSeries(_ context.Context, userID int, profile, seriesID string) error {
+	f.unmutes = append(f.unmutes, fmt.Sprintf("%d/%s/%s", userID, profile, seriesID))
 	return nil
 }
 
-func (f *fakeNotificationInbox) ListNotifiedSeries(context.Context, string) ([]notifications.NotifiedSeries, error) {
+func (f *fakeNotificationInbox) ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error) {
 	if f.series == nil {
 		return fixtureNotifiedSeries(), nil
 	}

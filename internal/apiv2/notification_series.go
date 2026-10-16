@@ -219,11 +219,11 @@ func (reg *Registry) unmuteNotificationSeries(ctx context.Context, in *Notificat
 	if p != nil {
 		return nil, p
 	}
-	_, profileID, p := viewerIdentity(ctx)
+	userID, profileID, p := viewerIdentity(ctx)
 	if p != nil {
 		return nil, p
 	}
-	if err := svc.UnmuteNotificationSeries(ctx, profileID, string(in.SeriesID)); err != nil {
+	if err := svc.UnmuteNotificationSeries(ctx, userID, profileID, string(in.SeriesID)); err != nil {
 		return nil, serviceProblem(err)
 	}
 	return nil, nil
@@ -256,7 +256,7 @@ func (reg *Registry) listNotificationSeries(ctx context.Context, cursors *Cursor
 			return nil, p
 		}
 	}
-	all, err := svc.ListNotifiedSeries(ctx, viewer.ProfileID)
+	all, err := svc.ListNotifiedSeries(ctx, viewer.UserID, viewer.ProfileID)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

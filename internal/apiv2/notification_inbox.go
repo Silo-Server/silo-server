@@ -26,9 +26,9 @@ type NotificationInboxService interface {
 	MarkNotificationInboxThrough(context.Context, int, string, notifications.Cursor) error
 	NotificationPreferences(context.Context, string) (notifications.Preferences, error)
 	PatchNotificationPreferences(context.Context, string, notifications.PreferencePatch) (notifications.Preferences, error)
-	ListNotifiedSeries(context.Context, string) ([]notifications.NotifiedSeries, error)
+	ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error)
 	MuteNotificationSeries(context.Context, int, string, string) error
-	UnmuteNotificationSeries(context.Context, string, string) error
+	UnmuteNotificationSeries(context.Context, int, string, string) error
 }
 
 // NotificationItem preserves event-specific reason data while normalizing IDs

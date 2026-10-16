@@ -26,8 +26,8 @@ func (s *System) MuteSeries(ctx context.Context, userID int, profileID, seriesID
 // UnmuteSeries lifts the profile's mute of the series. Unmuting a series that
 // is not muted changes nothing. Episodes that arrived while it was muted stay
 // unannounced.
-func (s *System) UnmuteSeries(ctx context.Context, profileID, seriesID string) error {
-	return s.Interests.unmuteSeries(ctx, profileID, seriesID)
+func (s *System) UnmuteSeries(ctx context.Context, userID int, profileID, seriesID string) error {
+	return s.Interests.unmuteSeries(ctx, userID, profileID, seriesID)
 }
 
 func (r *InterestRepository) muteSeries(ctx context.Context, userID int, profileID, seriesID string) error {
@@ -38,7 +38,7 @@ func (r *InterestRepository) muteSeries(ctx context.Context, userID int, profile
 		), muted AS (
 			INSERT INTO profile_series_notification_mutes (user_id, profile_id, series_id)
 			SELECT $1, $2, content_id FROM series
-			ON CONFLICT (profile_id, series_id) DO NOTHING
+			ON CONFLICT (user_id, profile_id, series_id) DO NOTHING
 		)
 		SELECT EXISTS (SELECT 1 FROM series)`,
 		userID, profileID, seriesID).Scan(&found)
@@ -51,19 +51,20 @@ func (r *InterestRepository) muteSeries(ctx context.Context, userID int, profile
 	return nil
 }
 
-func (r *InterestRepository) unmuteSeries(ctx context.Context, profileID, seriesID string) error {
+func (r *InterestRepository) unmuteSeries(ctx context.Context, userID int, profileID, seriesID string) error {
 	if _, err := r.pool.Exec(ctx,
-		`DELETE FROM profile_series_notification_mutes WHERE profile_id = $1 AND series_id = $2`,
-		profileID, seriesID); err != nil {
+		`DELETE FROM profile_series_notification_mutes WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`,
+		userID, profileID, seriesID); err != nil {
 		return fmt.Errorf("unmute series: %w", err)
 	}
 	return nil
 }
 
 // deleteMutesForProfile removes a deleted profile's mutes.
-func (r *InterestRepository) deleteMutesForProfile(ctx context.Context, profileID string) error {
+func (r *InterestRepository) deleteMutesForProfile(ctx context.Context, userID int, profileID string) error {
 	if _, err := r.pool.Exec(ctx,
-		`DELETE FROM profile_series_notification_mutes WHERE profile_id = $1`, profileID); err != nil {
+		`DELETE FROM profile_series_notification_mutes WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID); err != nil {
 		return fmt.Errorf("delete series mutes: %w", err)
 	}
 	return nil
