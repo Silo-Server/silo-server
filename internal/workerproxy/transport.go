@@ -181,19 +181,10 @@ func (h *hop) RoundTrip(request *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 		response, err := base.RoundTrip(out)
-		if err == nil && response.StatusCode >= 200 && response.StatusCode < 300 {
-			var authority workeridentity.OutputAuthority
-			if e := json.Unmarshal(grant.scope.Body, &authority); e != nil {
+		if err == nil {
+			if err := verifyOutputReceipt(response, grant); err != nil {
 				_ = response.Body.Close()
-				return nil, errors.New("invalid output authority")
-			}
-			if authority.ArtifactFingerprint != "" {
-				const fingerprintHeader = "X-Silo-Download-Execution-Fingerprint"
-				if response.Header.Get(fingerprintHeader) != authority.ArtifactFingerprint || authority.ClientFingerprint == "" {
-					_ = response.Body.Close()
-					return nil, errors.New("artifact receipt mismatch")
-				}
-				response.Header.Set(fingerprintHeader, authority.ClientFingerprint)
+				return nil, err
 			}
 		}
 		if err != nil || attempt == 1 || response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusConflict {
@@ -217,34 +208,9 @@ func (t *Transport) grant(ctx context.Context, key grantKey, token, secret strin
 	result := t.flights.DoChan(key.node+":"+key.epoch+":"+string(key.token[:]), func() (any, error) {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
-		var reply workercontrolcore.GrantReply
-		if t.Grant != nil {
-			var err error
-			reply, err = t.Grant(ctx, token, key.node)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			body, _ := json.Marshal(map[string]string{"token": token, "node_url": key.node})
-			request, err := http.NewRequestWithContext(ctx, http.MethodPost, t.Origin+"/api/internal/workers/output-grant", bytes.NewReader(body))
-			if err != nil {
-				return nil, err
-			}
-			request.Header.Set("Content-Type", "application/json")
-			if err = nodeauth.Sign(request, t.Origin, secret); err != nil {
-				return nil, err
-			}
-			response, err := t.client.Do(request)
-			if err != nil {
-				return nil, errors.New("core output authority unavailable")
-			}
-			defer func() { _ = response.Body.Close() }()
-			if response.StatusCode != http.StatusOK {
-				return nil, errors.New("core output authority denied")
-			}
-			if err = json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&reply); err != nil {
-				return nil, err
-			}
+		reply, err := t.requestGrant(ctx, token, key.node, secret)
+		if err != nil {
+			return nil, err
 		}
 		scope, err := workeridentity.ReadOutputScope(reply.Grant)
 		if err != nil || scope.Audience != key.node || !time.Now().Before(time.Unix(scope.ExpiresAt, 0)) {
@@ -272,4 +238,51 @@ func (t *Transport) grant(ctx context.Context, key grantKey, token, secret strin
 		}
 		return grant, nil
 	}
+}
+
+func verifyOutputReceipt(response *http.Response, grant entry) error {
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil
+	}
+	var authority workeridentity.OutputAuthority
+	if err := json.Unmarshal(grant.scope.Body, &authority); err != nil {
+		return errors.New("invalid output authority")
+	}
+	if authority.ArtifactFingerprint == "" {
+		return nil
+	}
+	const fingerprintHeader = "X-Silo-Download-Execution-Fingerprint"
+	if response.Header.Get(fingerprintHeader) != authority.ArtifactFingerprint || authority.ClientFingerprint == "" {
+		return errors.New("artifact receipt mismatch")
+	}
+	response.Header.Set(fingerprintHeader, authority.ClientFingerprint)
+	return nil
+}
+
+func (t *Transport) requestGrant(ctx context.Context, token, node, secret string) (workercontrolcore.GrantReply, error) {
+	if t.Grant != nil {
+		return t.Grant(ctx, token, node)
+	}
+	var reply workercontrolcore.GrantReply
+	body, _ := json.Marshal(map[string]string{"token": token, "node_url": node})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, t.Origin+"/api/internal/workers/output-grant", bytes.NewReader(body))
+	if err != nil {
+		return workercontrolcore.GrantReply{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if err = nodeauth.Sign(request, t.Origin, secret); err != nil {
+		return workercontrolcore.GrantReply{}, err
+	}
+	response, err := t.client.Do(request)
+	if err != nil {
+		return workercontrolcore.GrantReply{}, errors.New("core output authority unavailable")
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return workercontrolcore.GrantReply{}, errors.New("core output authority denied")
+	}
+	if err = json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&reply); err != nil {
+		return workercontrolcore.GrantReply{}, err
+	}
+	return reply, nil
 }

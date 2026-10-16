@@ -6,11 +6,11 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -82,7 +82,7 @@ func TestTransientRenewalMustNotFenceUnexpiredGeneration(t *testing.T) {
 
 func TestStageSourcesReplacesClosedHandleMaps(t *testing.T) {
 	for _, published := range []bool{false, true} {
-		t.Run(fmt.Sprint(published), func(t *testing.T) {
+		t.Run(strconv.FormatBool(published), func(t *testing.T) {
 			r := raceRuntime(t)
 			if err := r.authority.SetNonce("test-nonce"); err != nil {
 				t.Fatal(err)
@@ -134,6 +134,7 @@ func (b *observedRenewalBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
+//nolint:funlen,gocyclo,nestif // One source lease spans the interrupted response, retry, and definitive malformed-response controls.
 func TestSourceRenewalBodyFailureRecovery(t *testing.T) {
 	for _, failure := range []string{"timeout", "reset", "framing-short-body", "caller-cancellation", "complete-malformed", "complete-truncated-json", "complete-wrong-type", "invalid-envelope"} {
 		t.Run(failure, func(t *testing.T) {

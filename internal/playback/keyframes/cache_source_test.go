@@ -66,6 +66,7 @@ func TestSourceReadFailuresDoNotPoisonIndexCache(t *testing.T) {
 }
 
 type canceledIndexReader struct {
+	//nolint:containedctx // This admitted-reader fixture retains the owning context so reads observe cancellation.
 	ctx     context.Context
 	started chan struct{}
 	once    sync.Once

@@ -285,8 +285,8 @@ func testOutputSnapshotRechecksEachViewer(t *testing.T, prepared bool) {
 		if denied && token == "private-viewer-a" {
 			return nil, ErrDenied
 		}
-		copy := claims
-		return &copy, nil
+		snapshot := claims
+		return &snapshot, nil
 	}})
 	if err != nil {
 		t.Fatal(err)

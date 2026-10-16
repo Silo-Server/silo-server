@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -335,6 +337,67 @@ func TestHandleItemImageProxyRouteIDUsesCanonicalItemAndProxy(t *testing.T) {
 	}
 	if !upstreamCalled {
 		t.Fatal("proxy route did not fetch the upstream image")
+	}
+}
+
+// A proxied poster may reach the server's local network only when it is a
+// direct URL to the artwork store. A metadata provider's URL, kept as the
+// poster when caching it failed, reaches public addresses only.
+func TestHandleItemImageProxyKeepsProviderURLsOffTheLocalNetwork(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "image/webp")
+		_, _ = w.Write([]byte("local-image"))
+	}))
+	defer upstream.Close()
+
+	for _, tc := range []struct {
+		name      string
+		storeBase string
+		wantCode  int
+		wantHits  int32
+	}{
+		{name: "provider URL", storeBase: "http://storage.invalid", wantCode: http.StatusBadGateway, wantHits: 0},
+		{name: "artwork store URL", storeBase: upstream.URL, wantCode: http.StatusOK, wantHits: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hits.Store(0)
+			codec := NewResourceIDCodec()
+			contentID := "movie-1"
+			routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+			updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+			item := &models.MediaItem{ContentID: contentID, PosterPath: upstream.URL + "/poster.webp", UpdatedAt: updatedAt}
+			cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+			tag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+				ContentID:  contentID,
+				Type:       "movie",
+				Title:      "Movie",
+				PosterURL:  item.PosterPath,
+				PosterPath: item.PosterPath,
+				UpdatedAt:  item.UpdatedAt,
+			}, false, nil, nil).ImageTags["Primary"]
+			h := &ImagesHandler{
+				codec:        codec,
+				images:       NewImageCache(time.Hour, func() time.Time { return updatedAt }),
+				itemRepo:     fakeImageItemRepo{item: item},
+				imageTags:    newImageTagSigner(cfg.Auth.JWTSecret),
+				httpClient:   newCompatImageClient(),
+				artworkStore: blobstoretest.NewDirect(tc.storeBase),
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?tag="+compatImageProxyTag(tag), nil)
+			req = withImageRouteParams(req, routeID, "Primary")
+			rec := httptest.NewRecorder()
+			h.HandleItemImage(rec, req)
+
+			if rec.Code != tc.wantCode || hits.Load() != tc.wantHits {
+				t.Fatalf("status = %d, upstream hits = %d, body = %q; want %d and %d hits", rec.Code, hits.Load(), rec.Body.String(), tc.wantCode, tc.wantHits)
+			}
+			if tc.wantCode != http.StatusOK && strings.Contains(rec.Body.String(), "local-image") {
+				t.Fatalf("body leaked the local response: %q", rec.Body.String())
+			}
+		})
 	}
 }
 

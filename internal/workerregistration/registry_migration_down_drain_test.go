@@ -54,6 +54,7 @@ func TestRegistryMigrationDownAllowsAuthenticationDuringDrain(t *testing.T) {
 	waitRegistryRollbackDrain(t, r, application)
 }
 
+//nolint:nestif // Cancellation after promotion and the drain retry share one held snapshot fence and transaction timeline.
 func TestRegistryMigrationDownRetriesPromotionAfterReleasingSnapshotFence(t *testing.T) {
 	for _, name := range []string{"complete", "cancel"} {
 		t.Run(name, func(t *testing.T) {

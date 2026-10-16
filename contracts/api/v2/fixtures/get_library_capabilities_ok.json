@@ -1,8 +1,9 @@
 {
-  "revision": "acb6061b6ed685ee85933c4187157c9cf4380cd0e099b671dcee7690ef3e7e74",
+  "revision": "6fcbb994aa4a8925a3276d419d1a8d73147ac1dee0abfad0fb8c18a1f42accba",
   "state": "available",
   "allowed": true,
   "realtime_monitoring": true,
   "trickplay": true,
-  "trickplay_supported": false
+  "trickplay_supported": false,
+  "ignore_unmatched": true
 }

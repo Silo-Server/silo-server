@@ -532,8 +532,7 @@ function storedWithLimit(list: ListDraft): Partial<StoredSource> {
 /**
  * What a saved list's PATCH sends for its source. MDBList, chart, TMDB list
  * and franchise sources are rebuilt whole; a Discover list, and a franchise
- * list with no ID yet, send their stored config only when Max titles changed;
- * a Trakt list never sends its source, which the server keeps as it is.
+ * list with no ID yet, send their stored config only when Max titles changed.
  */
 function editedSource(list: ListDraft, linkChanged: boolean): Partial<StoredSource> {
   switch (list.source) {
@@ -555,18 +554,15 @@ function editedSource(list: ListDraft, linkChanged: boolean): Partial<StoredSour
     }
     case "tmdb_discover":
       return storedWithLimit(list);
-    case "trakt":
-      return {};
   }
 }
 
-const COLLECTION_TYPE_OF: Readonly<Record<SyncedSource, "mdblist" | "tmdb" | "trakt">> = {
+const COLLECTION_TYPE_OF: Readonly<Record<SyncedSource, "mdblist" | "tmdb">> = {
   mdblist: "mdblist",
   tmdb_chart: "tmdb",
   tmdb_list: "tmdb",
   tmdb_franchise: "tmdb",
   tmdb_discover: "tmdb",
-  trakt: "trakt",
 };
 
 /** A saved server list's PATCH: every field, its source rebuilt, never `featured`. */
@@ -591,8 +587,7 @@ function serverListRequest(
 /**
  * A saved personal list's PATCH. Name, sharing, libraries, the Collections
  * tab switch and Show only always go; everything else only when it changed
- * from `base`. A legacy Trakt list never sends libraries: the server refuses
- * any it's sent. A "custom" schedule is never sent: it stays until another is picked.
+ * from `base`. A "custom" schedule is never sent: it stays until another is picked.
  */
 function personalListRequest(draft: ListEditDraft, base: CollectionDraft): UpdateCollectionRequest {
   const changed = new Set(changedFields(base, draft));
@@ -602,8 +597,8 @@ function personalListRequest(draft: ListEditDraft, base: CollectionDraft): Updat
     is_shared: draft.personal?.shared ?? false,
     include_in_server_collections: draft.personal?.inLibraryTabs ?? false,
     display_query_definition: draft.showOnly,
+    library_ids: draft.libraryIds,
   };
-  if (list.source !== "trakt") body.library_ids = draft.libraryIds;
   if (changed.has("description")) body.description = draft.description;
   if (changed.has("rawSortConfig")) body.sort_config = draft.rawSortConfig ?? {};
   if (changed.has("list") && list.source === "mdblist") {

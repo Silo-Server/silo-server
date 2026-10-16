@@ -431,6 +431,7 @@ func (s *failedRehomeReadSession) GetAttempt(ctx context.Context) (*playback.Att
 	return s.RouteSessionV3.GetAttempt(ctx)
 }
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestFailedRehomeStartPreservesFreshAuthority(t *testing.T) {
 	for _, mode := range []string{"restored", "stop-failure", "stopped", "expired", "different-work", "same-work-candidate", "same-work-old-node", "same-plan-third-node", "same-work-new-owner", "read-unknown", "token-card"} {
 		t.Run(mode, func(t *testing.T) {
@@ -516,6 +517,7 @@ func TestFailedRehomeStartPreservesFreshAuthority(t *testing.T) {
 			if mode == "token-card" {
 				deadline := time.Now().Add(time.Second)
 				for deletes.Load() == 0 && time.Now().Before(deadline) {
+					//nolint:forbidigo // The test polls an externally owned lease or publication state; the delay yields between bounded observations.
 					time.Sleep(time.Millisecond)
 				}
 			}

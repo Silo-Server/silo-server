@@ -217,6 +217,9 @@ func TestEnrichmentQueueReconcileMissingIsBoundedAndLaneSafe(t *testing.T) {
 		}
 	}
 	windowAt := strings.Index(query, "membership_candidates AS MATERIALIZED")
+	if windowAt < 0 {
+		t.Fatalf("reconcile query has no membership_candidates CTE:\n%s", query)
+	}
 	boundedQuery := query[windowAt:]
 	limitAt := strings.Index(boundedQuery, "LIMIT $3")
 	itemJoinAt := strings.Index(boundedQuery, "JOIN media_items mi")

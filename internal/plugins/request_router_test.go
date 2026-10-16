@@ -9,14 +9,16 @@ import (
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 )
 
-// The host reads supports_seasons and reports_download_progress from the
-// capability metadata stored from the manifest, the way install records it.
+// The host reads supports_seasons, reports_download_progress and
+// api_key_optional from the capability metadata stored from the manifest, the
+// way install records it.
 func TestRequestRouterDescriptorReadsStoredManifestFlag(t *testing.T) {
 	records, err := CapabilityRecordsFromManifest(&pluginv1.PluginManifest{
 		Capabilities: []*pluginv1.CapabilityDescriptor{
 			{Type: capability.RequestRouter, Id: "arr", RequestRouter: &pluginv1.RequestRouterDescriptor{SupportsSeasons: true}},
 			{Type: capability.RequestRouter, Id: "legacy"},
 			{Type: capability.RequestRouter, Id: "progress", RequestRouter: &pluginv1.RequestRouterDescriptor{SupportsSeasons: true, ReportsDownloadProgress: true}},
+			{Type: capability.RequestRouter, Id: "keyless", RequestRouter: &pluginv1.RequestRouterDescriptor{ApiKeyOptional: true}},
 		},
 	})
 	if err != nil {
@@ -29,14 +31,16 @@ func TestRequestRouterDescriptorReadsStoredManifestFlag(t *testing.T) {
 	service := &Service{installations: store}
 
 	for _, tc := range []struct {
-		capabilityID string
-		want         bool
-		wantProgress bool
+		capabilityID    string
+		want            bool
+		wantProgress    bool
+		wantKeyOptional bool
 	}{
-		{"arr", true, false},      // built before reports_download_progress existed
-		{"legacy", false, false},  // built before the descriptor existed
-		{"missing", false, false}, // not declared at all
-		{"progress", true, true},
+		{"arr", true, false, false},      // built before reports_download_progress existed
+		{"legacy", false, false, false},  // built before the descriptor existed
+		{"missing", false, false, false}, // not declared at all
+		{"progress", true, true, false},
+		{"keyless", false, false, true},
 	} {
 		got, err := service.RequestRouterDescriptor(context.Background(), 5, tc.capabilityID)
 		if err != nil {
@@ -47,6 +51,9 @@ func TestRequestRouterDescriptorReadsStoredManifestFlag(t *testing.T) {
 		}
 		if got.GetReportsDownloadProgress() != tc.wantProgress {
 			t.Errorf("%s: reports_download_progress = %v, want %v", tc.capabilityID, got.GetReportsDownloadProgress(), tc.wantProgress)
+		}
+		if got.GetApiKeyOptional() != tc.wantKeyOptional {
+			t.Errorf("%s: api_key_optional = %v, want %v", tc.capabilityID, got.GetApiKeyOptional(), tc.wantKeyOptional)
 		}
 	}
 }

@@ -245,11 +245,11 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 
 		// A manual refresh of the target does not make it due for other
 		// drains, but claims it itself.
-		if err := repo.retryTargetNow(ctx, seriesID, false); err != nil {
+		if err := repo.retryTargetNow(ctx, seriesID); err != nil {
 			t.Fatalf("retryTargetNow: %v", err)
 		}
 		assertHeld(t, "after a manual refresh's retry")
-		jobs, err := repo.claimDueForTarget(ctx, "refreshing-server", seriesID, false, 10)
+		jobs, err := repo.claimDueForTarget(ctx, "refreshing-server", seriesID, 10)
 		if err != nil || len(jobs) != 1 {
 			t.Fatalf("refresh claim = %d jobs, %v; want the held job", len(jobs), err)
 		}
@@ -353,8 +353,6 @@ func TestLocalArtworkCopiedOnDiscoveryDB(t *testing.T) {
 
 	t.Run("copied by the discovering process", func(t *testing.T) {
 		p, targets, cacher := newLocalArtworkDBProcessor(pool, []string{root})
-		// Remote caching off changes nothing for local art.
-		p.SetEnabled(false)
 		if err := p.CopyLocalArtwork(ctx, inputs); err != nil {
 			t.Fatalf("CopyLocalArtwork: %v", err)
 		}
@@ -418,7 +416,7 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		`, contentID); err != nil {
 			t.Fatalf("make job due: %v", err)
 		}
-		jobs, err := repo.claimDueForTarget(ctx, "mountless-server", contentID, false, 1)
+		jobs, err := repo.claimDueForTarget(ctx, "mountless-server", contentID, 1)
 		if err != nil || len(jobs) != 1 {
 			t.Fatalf("claim = %d jobs, %v; want 1", len(jobs), err)
 		}
@@ -499,7 +497,7 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		// A manual refresh starts the deferral over, so refreshing on this
 		// server does not push the job to the long delay; also when the
 		// deferral had already run out.
-		if err := repo.retryTargetNow(ctx, contentID, false); err != nil {
+		if err := repo.retryTargetNow(ctx, contentID); err != nil {
 			t.Fatalf("retryTargetNow: %v", err)
 		}
 		assertDeferred(t, claimAndProcess(t, contentID, []string{root}))
@@ -508,7 +506,7 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		`, contentID); err != nil {
 			t.Fatalf("let the deferral run out: %v", err)
 		}
-		if err := repo.retryTargetNow(ctx, contentID, false); err != nil {
+		if err := repo.retryTargetNow(ctx, contentID); err != nil {
 			t.Fatalf("retryTargetNow: %v", err)
 		}
 		assertDeferred(t, claimAndProcess(t, contentID, []string{root}))
@@ -556,43 +554,4 @@ func TestLocalArtworkRetriesWithoutLibraryRootDB(t *testing.T) {
 		}
 		assertStableFailure(t, run(t, []string{root}, "file://"+filepath.Join(root, "Art", "poster.jpg")+"?v=12-1700000000"), "local image missing")
 	})
-}
-
-// TestLocalImageCacheClaimUsesLocalDueIndexDB pins the plan of the drain's
-// local-only claim, which runs while metadata.cache_images is off. Remote jobs
-// queued before caching was turned off stay due and unclaimed; the partial
-// index keeps the claim from reading them on every drain.
-func TestLocalImageCacheClaimUsesLocalDueIndexDB(t *testing.T) {
-	pool := imageCacheQueueTestPool(t)
-	ctx := t.Context()
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	prefix := fmt.Sprintf("local-due-plan-%d", time.Now().UnixNano())
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO metadata_image_cache_jobs (
-			target_type, target_content_id, target_language, series_id, source_path,
-			provider_id, provider_content_id, content_type, image_type, status,
-			attempt_count, next_attempt_at, locked_by, last_error, created_at, updated_at
-		)
-		SELECT 'item', $1 || '-' || g, '', $1 || '-' || g,
-			CASE WHEN g % 1000 = 0 THEN 'file:///media/' || g || '/poster.jpg' ELSE 'https://img.example/' || g || '.jpg' END,
-			'tmdb', g::text, 'movie', 'poster', 'queued', 0, NOW() - interval '1 minute', '', '', NOW(), NOW()
-		FROM generate_series(1, 20000) g
-	`, prefix); err != nil {
-		t.Fatalf("seed queue: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `ANALYZE metadata_image_cache_jobs`); err != nil {
-		t.Fatalf("analyze: %v", err)
-	}
-	results, err := tx.Conn().PgConn().Exec(ctx, `EXPLAIN (GENERIC_PLAN, FORMAT JSON) `+claimDueQuery(false, true)).ReadAll()
-	if err != nil || len(results) != 1 || len(results[0].Rows) != 1 {
-		t.Fatalf("explain local claim: %v", err)
-	}
-	raw := string(results[0].Rows[0][0])
-	if !strings.Contains(raw, `"Index Name": "metadata_image_cache_jobs_local_due_idx"`) {
-		t.Fatalf("local claim does not use metadata_image_cache_jobs_local_due_idx: %s", raw)
-	}
 }

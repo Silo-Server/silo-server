@@ -107,7 +107,7 @@ func TestSecondCoreAcceptsOnlyShortOwnedPendingLease(t *testing.T) {
 	}
 	// The second core's cache is bounded; after its250ms horizon the durable
 	// candidate record/lease must not authorize anything.
-	time.Sleep(260 * time.Millisecond)
+	time.Sleep(260 * time.Millisecond) //nolint:forbidigo // This assertion measures expiry of the real 250ms cross-core authority cache, not worker readiness.
 	if two.WorkActive(t.Context(), 7, "work", candidate.Generation) {
 		t.Fatal("abandoned candidate remained authorized")
 	}

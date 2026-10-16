@@ -625,18 +625,40 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Tier 1: embedding-based recommendations.
-	if h.recommender != nil {
-		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit)
-		if recErr == nil && len(scored) > 0 {
-			if h.writeSimilarFromScored(w, r, session, scored, limit) {
-				return
-			}
+	// Tier 1: embedding-based recommendations, anchored only on an item the
+	// viewer can see. A hidden anchor goes to the genre path, which answers
+	// it as an unknown item, so the list cannot show what a hidden title
+	// resembles.
+	if h.recommender != nil && h.similarAnchorVisible(r.Context(), session, contentID) {
+		scored, recErr := h.recommender.SimilarItems(r.Context(), session.StreamAppUserID, session.ProfileID, contentID, limit, h.resolveAccessFilter(r.Context(), session))
+		if recErr != nil {
+			slog.WarnContext(r.Context(), "jellycompat: similar items failed; falling back to genre", "component", "jellycompat",
+				"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", recErr)
+		} else if len(scored) > 0 && h.writeSimilarFromScored(w, r, session, scored, limit) {
+			return
 		}
 	}
 
 	// Tier 2: genre-based fallback.
 	h.writeSimilarFromGenre(w, r, session, contentID, limit)
+}
+
+// similarAnchorVisible reports whether the session's viewer can see the
+// catalog item a Similar list is anchored on. A failed check counts as not
+// visible.
+func (h *ItemsHandler) similarAnchorVisible(ctx context.Context, session *Session, contentID string) bool {
+	items, err := h.loadCompatItemsByContentIDs(ctx, session, []string{contentID}, nil)
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat: similar anchor access check failed", "component", "jellycompat",
+			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", err)
+		return false
+	}
+	for _, item := range items {
+		if item.ContentID == contentID {
+			return true
+		}
+	}
+	return false
 }
 
 // writeSimilarFromScored converts recommender ScoredItem results into a Jellyfin query result.
@@ -650,6 +672,8 @@ func (h *ItemsHandler) writeSimilarFromScored(w http.ResponseWriter, r *http.Req
 
 	itemsByID, err := h.fetchCompatItemsByContentIDs(r.Context(), session, contentIDs, nil)
 	if err != nil {
+		slog.WarnContext(r.Context(), "jellycompat: similar items lookup failed", "component", "jellycompat",
+			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "error", err)
 		writeJSON(w, http.StatusOK, queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: 0})
 		return true
 	}
@@ -689,6 +713,22 @@ func (h *ItemsHandler) writeSimilarFromScored(w http.ResponseWriter, r *http.Req
 }
 
 // writeSimilarFromGenre finds similar items by genre when the recommender is unavailable.
+// similarGenreFallbackWindow is how many genre titles the Similar fallback
+// first reads for a list of limit: three times the list and the anchor.
+func similarGenreFallbackWindow(limit int) int {
+	return 3*limit + 1
+}
+
+// similarGenreFallbackMaxRead bounds how deep the Similar fallback reads to
+// fill its list past the profile's Not interested titles.
+const similarGenreFallbackMaxRead = 400
+
+// notInterestedLister is the optional part of UserDataService that reads a
+// profile's Not interested marks. The direct service implements it.
+type notInterestedLister interface {
+	ListNotInterestedByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]bool, error)
+}
+
 func (h *ItemsHandler) writeSimilarFromGenre(w http.ResponseWriter, r *http.Request, session *Session, contentID string, limit int) {
 	empty := queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: 0}
 
@@ -712,33 +752,55 @@ func (h *ItemsHandler) writeSimilarFromGenre(w http.ResponseWriter, r *http.Requ
 	params.Set("genre", genre)
 	params.Set("sort", "rating_tmdb")
 	params.Set("order", "desc")
-	params.Set("limit", strconv.Itoa(limit+1))
 
-	result, err := h.content.BrowseItems(r.Context(), session, params)
-	if err != nil {
-		writeJSON(w, http.StatusOK, empty)
-		return
-	}
-
-	browseIDs := make([]string, len(result.Items))
-	for i, li := range result.Items {
-		browseIDs[i] = li.ContentID
-	}
-	favorites, progress, _ := resolveUserStateForContentIDs(r.Context(), session, h.userData, browseIDs)
-
-	items := make([]baseItemDTO, 0, limit)
-	listItems := make([]upstreamListItem, 0, limit)
-	for _, li := range result.Items {
-		if li.ContentID == contentID {
-			continue
+	// The anchor and the profile's Not interested titles are dropped, so the
+	// window starts deeper than the list and widens until the list fills,
+	// the genre runs out, or similarGenreFallbackMaxRead titles were read.
+	var items []baseItemDTO
+	var listItems []upstreamListItem
+	for window := similarGenreFallbackWindow(limit); ; window = min(window*4, similarGenreFallbackMaxRead) {
+		params.Set("limit", strconv.Itoa(window))
+		result, err := h.content.BrowseItems(r.Context(), session, params)
+		if err != nil {
+			writeJSON(w, http.StatusOK, empty)
+			return
 		}
-		dto := h.mapper.itemFromList(li, favorites[li.ContentID], progress[li.ContentID], nil)
-		dto.MediaType = ""
-		dto.LocationType = ""
-		dto.VideoType = ""
-		items = append(items, dto)
-		listItems = append(listItems, li)
-		if len(items) >= limit {
+
+		browseIDs := make([]string, len(result.Items))
+		for i, li := range result.Items {
+			browseIDs[i] = li.ContentID
+		}
+		// The list suggests titles, so the profile's Not interested marks
+		// stay out, as they do from the recommender's list. A list whose
+		// marks cannot be read is answered empty rather than showing them.
+		var marked map[string]bool
+		if lister, ok := h.userData.(notInterestedLister); ok {
+			if marked, err = lister.ListNotInterestedByMediaItems(r.Context(), session, browseIDs); err != nil {
+				slog.WarnContext(r.Context(), "jellycompat: similar fallback could not read Not interested marks", "component", "jellycompat",
+					"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", err)
+				writeJSON(w, http.StatusOK, empty)
+				return
+			}
+		}
+		favorites, progress, _ := resolveUserStateForContentIDs(r.Context(), session, h.userData, browseIDs)
+
+		items = make([]baseItemDTO, 0, limit)
+		listItems = make([]upstreamListItem, 0, limit)
+		for _, li := range result.Items {
+			if li.ContentID == contentID || marked[li.ContentID] {
+				continue
+			}
+			dto := h.mapper.itemFromList(li, favorites[li.ContentID], progress[li.ContentID], nil)
+			dto.MediaType = ""
+			dto.LocationType = ""
+			dto.VideoType = ""
+			items = append(items, dto)
+			listItems = append(listItems, li)
+			if len(items) >= limit {
+				break
+			}
+		}
+		if len(items) >= limit || len(result.Items) < window || window >= similarGenreFallbackMaxRead {
 			break
 		}
 	}
@@ -2238,6 +2300,7 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 	q := catalog.NextUpQuery{
 		UserID:          session.StreamAppUserID,
 		ProfileID:       session.ProfileID,
+		AccessFilter:    h.resolveAccessFilter(r.Context(), session),
 		Limit:           query.limit + query.startIndex, // fetch enough to paginate
 		EnableResumable: parseBool(qp.Get("enableResumable"), false),
 	}
@@ -2259,6 +2322,8 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	q.RankByRelease = h.nextUpNewReleasesFirst(r.Context(), session)
+
 	results, err := h.nextUpRepo.ListNextUp(r.Context(), q)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -2266,6 +2331,20 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeNextUpResponse(w, r, session, results, query)
+}
+
+// nextUpNewReleasesFirst reads the profile's ui.next_up_new_releases_first,
+// so Jellyfin clients see Next Up in the order Silo's Home uses. Without a
+// store, or when the read fails, it is the default, off.
+func (h *ItemsHandler) nextUpNewReleasesFirst(ctx context.Context, session *Session) bool {
+	if h.storeProvider == nil || session.ProfileID == "" {
+		return false
+	}
+	store, err := h.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return false
+	}
+	return access.ResolveViewerPreferences(ctx, store, session.ProfileID).NextUpNewReleasesFirst
 }
 
 // writeNextUpResponse renders a slice of catalog.NextUpResult into the

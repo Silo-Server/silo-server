@@ -21,7 +21,15 @@ const IDENTITY_KEYS = ["branding.server_name", "branding.login_subtitle"];
 // Trusted proxies sit beside the public URL, the way the setup wizard asks for
 // them: both are what an install behind a reverse proxy needs to get right.
 const TRUSTED_PROXIES_KEY = "clientip.trusted_proxies";
-const NETWORK_KEYS = ["server.public_url", "server.lan_discovery", TRUSTED_PROXIES_KEY];
+// The local address covers what LAN discovery cannot reach: a Docker bridge
+// network, where the advert never leaves the container and names the wrong port.
+const LOCAL_URL_KEY = "server.local_url";
+const NETWORK_KEYS = [
+  "server.public_url",
+  "server.lan_discovery",
+  LOCAL_URL_KEY,
+  TRUSTED_PROXIES_KEY,
+];
 
 // Redis and the Postgres pool are server-wide plumbing, not storage, so they
 // moved here from the Storage page. userdb.backend, userdb.pool_max_open and
@@ -148,6 +156,15 @@ export default function GeneralSettings() {
             value={form.getValue("server.lan_discovery")}
             onChange={(v) => form.setValue("server.lan_discovery", v)}
             restartRequired={restartKeys.has("server.lan_discovery")}
+          />
+          <SettingField
+            label="Local network address"
+            dirty={form.isDirty(LOCAL_URL_KEY)}
+            description="Where devices on your home network reach Silo directly: the host's IP and the port Silo listens on, or the published port under Docker. Signed-in apps switch to it on their own while they can reach it, over an encrypted connection. Leave empty when apps already find the server on the local network."
+            hint="http://192.168.1.20:8080"
+            value={form.getValue(LOCAL_URL_KEY)}
+            onChange={(v) => form.setValue(LOCAL_URL_KEY, v)}
+            restartRequired={restartKeys.has(LOCAL_URL_KEY)}
           />
           <SettingField
             label="Trusted proxies"

@@ -5,7 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -62,7 +62,7 @@ func TestStoppedAssignmentCannotReconstructFromSurvivingRecipe(t *testing.T) {
 
 func TestRecipeJobIdentityKeepsParentAndLegacyIdentityAcrossRecovery(t *testing.T) {
 	for _, legacy := range []bool{false, true} {
-		t.Run(fmt.Sprint(legacy), func(t *testing.T) {
+		t.Run(strconv.FormatBool(legacy), func(t *testing.T) {
 			public, key, _ := ed25519.GenerateKey(rand.Reader)
 			store := NewMemoryStore()
 			node := Node{ID: 7, URL: "https://worker.example", PublicKey: public, Enabled: true}
@@ -147,7 +147,7 @@ func (s *expiringSources) Acquire(ctx context.Context, node int, work string, ge
 }
 func TestExpiredSourceRecoveryRequiresOriginalRevision(t *testing.T) {
 	for _, changed := range []bool{false, true} {
-		t.Run(fmt.Sprint(changed), func(t *testing.T) {
+		t.Run(strconv.FormatBool(changed), func(t *testing.T) {
 			pub, key, _ := ed25519.GenerateKey(rand.Reader)
 			store := NewMemoryStore()
 			node := Node{ID: 7, URL: "https://worker.example", PublicKey: pub, Enabled: true}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -168,7 +169,7 @@ func TestOutputAuthorityCapacityRetrySweepsRetiredRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range 40 {
-		_, err := registry.Register(t.Context(), OutputAuthorityRecord{Token: strings.Repeat("t", 60<<10) + fmt.Sprint(i), NodeID: node.ID, WorkID: fmt.Sprintf("retired-%d", i), Generation: 1, Epoch: "epoch", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+		_, err := registry.Register(t.Context(), OutputAuthorityRecord{Token: strings.Repeat("t", 60<<10) + strconv.Itoa(i), NodeID: node.ID, WorkID: fmt.Sprintf("retired-%d", i), Generation: 1, Epoch: "epoch", ExpiresAt: time.Now().Add(time.Hour).Unix()})
 		if errors.Is(err, ErrUnavailable) {
 			break
 		}

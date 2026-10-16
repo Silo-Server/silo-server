@@ -157,7 +157,7 @@ catalog merges them. For each title with exactly one visible copy:
    run `Effects.WatchlistPromoted`, implemented by
    `handlers.PersonalDataHandler`: the provider export event
    (`dispatchLocalListEvent`), the recommendations refresh
-   (`triggerProfileRefresh`) and a realtime `user_state.changed` event with
+   (`notifySignalsChanged`) and a realtime `user_state.changed` event with
    `change: "watchlist"`. These are the effects of a manual add.
 
 The library add in step 3 uses a second pool connection while the promotion's
@@ -341,7 +341,7 @@ least 15.
 
 ## Not built
 
-Watch-provider (Trakt, Simkl, MDBList) and Plex imports still drop rows the
+Watch-provider (Simkl, MDBList) and Plex imports still drop rows the
 library doesn't have, and export only library items. Carrying unowned titles
 through them needs its own design; imports would never auto-request. A profile
 that cannot request, or has opted out, gets no arrival notification: only the

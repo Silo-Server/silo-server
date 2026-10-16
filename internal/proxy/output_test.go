@@ -73,10 +73,7 @@ func TestStandaloneArtifactRelayPreservesTokenAndVerifiesReceipt(t *testing.T) {
 	})
 	worker.Start()
 	defer worker.Close()
-	token, err := streamtoken.Sign(streamtoken.Claims{SessionID: "download", PlayMethod: streamtoken.PlayMethodToneMapDownload, TranscodeNode: node.URL, RoutingExecutionNodeID: 7, DownloadArtifactID: work, DownloadArtifactSize: 10, DownloadExecutionFingerprint: clientFingerprint}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := artifactRelayToken(t, streamtoken.Claims{SessionID: "download", PlayMethod: streamtoken.PlayMethodToneMapDownload, TranscodeNode: node.URL, RoutingExecutionNodeID: 7, DownloadArtifactID: work, DownloadArtifactSize: 10, DownloadExecutionFingerprint: clientFingerprint}, secret)
 	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.URL.Path != "/api/internal/workers/output-grant" || nodeauth.Verify(r, secret) != nil {
 			w.WriteHeader(401)
@@ -121,22 +118,7 @@ func TestStandaloneArtifactRelayPreservesTokenAndVerifiesReceipt(t *testing.T) {
 	nodehttp.Configure(transport.Wrap)
 	defer nodehttp.Configure(nil)
 	server := newDownloadProxyServer(t, secret)
-	serve := func(method string, want int) {
-		t.Helper()
-		request := httptest.NewRequest(method, "/downloads/file/"+token, nil)
-		request.Header.Set("Range", "bytes=2-5")
-		rec := httptest.NewRecorder()
-		server.Handler().ServeHTTP(rec, request)
-		if rec.Code != want {
-			t.Fatalf("%s relay: status=%d body=%q want=%d", method, rec.Code, rec.Body.String(), want)
-		}
-		if want == 206 && method != "HEAD" && rec.Body.String() != "2345" {
-			t.Fatalf("relay bytes=%q", rec.Body.String())
-		}
-		if want == 502 && rec.Body.String() == "2345" {
-			t.Fatal("refused receipt released media")
-		}
-	}
+	serve := artifactRelayRequester(t, server.Handler(), token)
 	serve("GET", 206)
 	serve("HEAD", 206)
 	wrongFingerprint.Store(true)
@@ -149,4 +131,33 @@ func TestStandaloneArtifactRelayPreservesTokenAndVerifiesReceipt(t *testing.T) {
 	if grantCalls.Load() != 1 || workerCalls.Load() != 5 {
 		t.Fatalf("cached grant/worker requests=%d/%d", grantCalls.Load(), workerCalls.Load())
 	}
+}
+
+func artifactRelayRequester(t *testing.T, handler http.Handler, token string) func(string, int) {
+	t.Helper()
+	return func(method string, want int) {
+		t.Helper()
+		request := httptest.NewRequest(method, "/downloads/file/"+token, nil)
+		request.Header.Set("Range", "bytes=2-5")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, request)
+		if rec.Code != want {
+			t.Fatalf("%s relay: status=%d body=%q want=%d", method, rec.Code, rec.Body.String(), want)
+		}
+		if want == 206 && method != "HEAD" && rec.Body.String() != "2345" {
+			t.Fatalf("relay bytes=%q", rec.Body.String())
+		}
+		if want == 502 && rec.Body.String() == "2345" {
+			t.Fatal("refused receipt released media")
+		}
+	}
+}
+
+func artifactRelayToken(t *testing.T, claims streamtoken.Claims, secret string) string {
+	t.Helper()
+	token, err := streamtoken.Sign(claims, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }

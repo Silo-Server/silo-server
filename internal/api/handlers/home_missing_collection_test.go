@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"sync"
 	"testing"
@@ -187,7 +188,15 @@ func TestSectionRowOfDeletedCollectionLogsAtDebugDB(t *testing.T) {
 			} else {
 				row, err = h.HomeSectionItems(viewerContext(tc.profile), tc.id, viewer)
 			}
-			assertEmpty(t, row, err, tc.id)
+			if tc.wantError {
+				// The single-section service, which v2 calls, answers a
+				// real failure with an error; v1 keeps an empty row.
+				if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusInternalServerError {
+					t.Fatalf("%s: err = %v, want a 500", tc.id, err)
+				}
+			} else {
+				assertEmpty(t, row, err, tc.id)
+			}
 			errs := logs.take(slog.LevelError)
 			if tc.wantError && (len(errs) != 1 || errs[0] != "fetching section items") {
 				t.Fatalf("ERROR records = %q, want one fetching section items record", errs)

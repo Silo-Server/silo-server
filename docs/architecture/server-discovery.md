@@ -79,7 +79,10 @@ and a listener on one address serves only one link. A listener on
 unavailable, port 5353 taken) is logged once without affecting the server and
 retried every check interval. The advertisement reaches only the networks the
 process itself is attached to, and it carries the port the process listens
-on, not a port a container runtime publishes it under.
+on, not a port a container runtime publishes it under. `server.local_url`
+covers those deployments (a Docker bridge network, typically): signed-in
+clients read it from `GET /api/v2/system/connections` as a local route
+candidate.
 
 ## Overlay network: the provider's short name
 
@@ -132,4 +135,9 @@ is a convenience, not part of connection setup.
 - Listing servers a user can reach over the internet. A client learns the
   public and provider addresses of a known server from
   `GET /api/v2/system/connections` after sign-in.
-- Automatic switching between a server's addresses mid-session.
+- Switching a signed-in client to an address on trust in its advert alone. A
+  signed-in client may move its requests to the server's local address (the
+  local route) only over TLS that presents the key pinned from the
+  connections document; the advert and `server.local_url` only supply the
+  candidates. See
+  [server-identity.md](server-identity.md#local-network-tls).

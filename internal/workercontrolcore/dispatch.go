@@ -93,6 +93,8 @@ func inputKind(key, path string) string {
 	}
 	return ""
 }
+
+//nolint:nestif // Recursive recipe traversal validates every source before emitting opaque aliases, including nested object arrays.
 func rewriteInputs(raw json.RawMessage, path string, inputs *[]input) (json.RawMessage, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
@@ -128,7 +130,11 @@ func rewriteInputs(raw json.RawMessage, path string, inputs *[]input) (json.RawM
 					list[i] = next
 				}
 			}
-			obj[k], _ = json.Marshal(list)
+			encoded, err := json.Marshal(list)
+			if err != nil {
+				return nil, err
+			}
+			obj[k] = encoded
 		}
 	}
 	if len(*inputs) > 32 {
@@ -136,6 +142,8 @@ func rewriteInputs(raw json.RawMessage, path string, inputs *[]input) (json.RawM
 	}
 	return json.Marshal(obj)
 }
+
+//nolint:nestif // Recursive replacement strips core execution settings at every nested recipe level while preserving alias scope.
 func replaceAliases(raw json.RawMessage, aliases map[string]string) (json.RawMessage, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
@@ -159,7 +167,9 @@ func replaceAliases(raw json.RawMessage, aliases map[string]string) (json.RawMes
 			obj[k] = next
 		} else if len(v) > 0 && v[0] == '[' {
 			var list []json.RawMessage
-			_ = json.Unmarshal(v, &list)
+			if err := json.Unmarshal(v, &list); err != nil {
+				return nil, err
+			}
 			for i, value := range list {
 				if len(value) > 0 && value[0] == '{' {
 					next, err := replaceAliases(value, aliases)
@@ -169,7 +179,11 @@ func replaceAliases(raw json.RawMessage, aliases map[string]string) (json.RawMes
 					list[i] = next
 				}
 			}
-			obj[k], _ = json.Marshal(list)
+			encoded, err := json.Marshal(list)
+			if err != nil {
+				return nil, err
+			}
+			obj[k] = encoded
 		}
 	}
 	return json.Marshal(obj)
@@ -198,6 +212,7 @@ type InputBinder interface {
 	InputBindings(context.Context, int, string, uint64) (map[string]string, error)
 }
 
+//nolint:funlen,gocyclo,nestif // Source admission and every compensation path share the same named candidate and deferred cancellation scope.
 func (s *Service) admit(ctx context.Context, node Node, work, path string, body json.RawMessage) (a workerwire.Assignment, err error) {
 	var inputs []input
 	rewritten, err := rewriteInputs(body, path, &inputs)
@@ -322,6 +337,8 @@ func (s *Service) cancelAdmission(ctx context.Context, a workerwire.Assignment) 
 	s.clearAdmission(a)
 	s.invalidateCached(a.NodeID, a.WorkID)
 }
+
+//nolint:funlen,gocyclo,nestif // Request rewriting, candidate ownership, and proof signing share one rollback boundary.
 func (s *Service) PrepareRequest(r *http.Request) (*http.Request, error) {
 	if state, ok := r.Context().Value(dispatchKey{}).(*dispatchState); ok {
 		node, found, err := s.nodeForRequest(r)

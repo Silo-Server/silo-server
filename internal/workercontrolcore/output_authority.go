@@ -55,7 +55,10 @@ func OutputAuthorityLookupKey(claims streamtoken.Claims, node int, work string, 
 	if canonical, err := workeridentity.ValidateOrigin(claims.TranscodeNode, true); err == nil {
 		claims.TranscodeNode = canonical
 	}
-	encoded, _ := json.Marshal([]any{"silo/worker-output-lookup/v1", claims, node, work, generation, epoch})
+	encoded, err := json.Marshal([]any{"silo/worker-output-lookup/v1", claims, node, work, generation, epoch})
+	if err != nil {
+		return ""
+	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
 }
@@ -66,7 +69,10 @@ func validOutputLookupKey(key string) bool {
 }
 
 func outputAuthorityID(r OutputAuthorityRecord) string {
-	value, _ := json.Marshal([]any{"silo/worker-output-authority/v1", r.Token, r.NodeID, r.WorkID, r.Generation, r.Epoch})
+	value, err := json.Marshal([]any{"silo/worker-output-authority/v1", r.Token, r.NodeID, r.WorkID, r.Generation, r.Epoch})
+	if err != nil {
+		return ""
+	}
 	digest := sha256.Sum256(value)
 	return hex.EncodeToString(digest[:])
 }

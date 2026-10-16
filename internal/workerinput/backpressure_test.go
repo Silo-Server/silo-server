@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func TestClosedHandleReleasesBackpressuredRead(t *testing.T) {
 	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer close(coreFinished)
 		w.Header().Set("ETag", `"revision"`)
-		w.Header().Set("Content-Length", fmt.Sprint(size))
+		w.Header().Set("Content-Length", strconv.Itoa(size))
 		block := []byte(strings.Repeat("a", 64<<10))
 		for sent := 0; sent < size; sent += len(block) {
 			if _, err := w.Write(block); err != nil {

@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -290,9 +291,9 @@ func (c *recipeFaultConn) Write(p []byte) (int, error) {
 			query = string(packet[5 : len(packet)-1])
 		case 'P':
 			rest := packet[5:]
-			if i := strings.IndexByte(string(rest), 0); i >= 0 {
+			if i := bytes.IndexByte(rest, 0); i >= 0 {
 				rest = rest[i+1:]
-				if j := strings.IndexByte(string(rest), 0); j >= 0 {
+				if j := bytes.IndexByte(rest, 0); j >= 0 {
 					query = string(rest[:j])
 				}
 			}
@@ -305,6 +306,8 @@ func (c *recipeFaultConn) Write(p []byte) (int, error) {
 	}
 	return c.Conn.Write(p)
 }
+
+//nolint:nestif // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func (c *recipeFaultConn) Read(p []byte) (int, error) {
 	if len(c.pending) == 0 {
 		header := make([]byte, 5)
@@ -324,7 +327,9 @@ func (c *recipeFaultConn) Read(p []byte) (int, error) {
 			_ = c.Close()
 			return 0, io.ErrUnexpectedEOF
 		}
-		c.pending = append(header, body...)
+		c.pending = make([]byte, len(header)+len(body))
+		copy(c.pending, header)
+		copy(c.pending[len(header):], body)
 	}
 	n := copy(p, c.pending)
 	c.pending = c.pending[n:]
@@ -1025,6 +1030,8 @@ func TestRejectedRemoteStartDoesNotStopAnotherReplicaSuccessor(t *testing.T) {
 		}
 	}
 }
+
+//nolint:funlen // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func testRejectedRemoteStartSuccessor(t *testing.T, alias, identical bool) {
 	pool, _, recipes, state := recipeDurableFixture(t)
 	work := uuid.NewString()

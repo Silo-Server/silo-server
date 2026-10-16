@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -45,7 +46,7 @@ func readAdmissionCapabilities(t *testing.T, server *Server) (playback.HWAccelIn
 
 func TestCapabilityAdmissionServesVerifiedReportAtFiniteCeiling(t *testing.T) {
 	for _, limit := range []int{1, 2} {
-		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+		t.Run(strconv.Itoa(limit), func(t *testing.T) {
 			server, log := capabilityAdmissionServer(t, limit)
 			verified, warm := readAdmissionCapabilities(t, server)
 			if warm.Code != http.StatusOK || verified.CapabilityHash == "" {
@@ -173,6 +174,8 @@ func TestCapabilityAdmissionCanceledWaiterReservesNoJob(t *testing.T) {
 func awaitCapabilityReceipt(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
 	for {
 		if _, err := os.Stat(path); err == nil {
 			return
@@ -180,7 +183,7 @@ func awaitCapabilityReceipt(t *testing.T, path string) {
 		if time.Now().After(deadline) {
 			t.Fatal("fake capability probe did not report its start")
 		}
-		time.Sleep(time.Millisecond)
+		<-ticker.C
 	}
 }
 
@@ -380,27 +383,26 @@ func TestCapabilityAdmissionChangedConfigurationDuringBuildDoesNotPublish(t *tes
 
 func TestCapabilityAdmissionRejectedReprobeKeepsFallback(t *testing.T) {
 	for _, full := range []bool{false, true} {
-		t.Run(fmt.Sprint(full), func(t *testing.T) {
+		t.Run(strconv.FormatBool(full), func(t *testing.T) {
 			server, _ := capabilityAdmissionServer(t, 1)
 			if _, warm := readAdmissionCapabilities(t, server); warm.Code != http.StatusOK {
 				t.Fatal(warm.Body)
 			}
+			want := http.StatusConflict
 			if full {
 				_, release, admitted := server.acquireJobContext(t.Context(), "retained-compute")
 				if !admitted {
 					t.Fatal("could not retain compute identity")
 				}
 				defer release()
-				if response := postReprobe(t, server); response.Code != http.StatusServiceUnavailable {
-					t.Fatalf("over-limit re-probe=%d", response.Code)
-				}
+				want = http.StatusServiceUnavailable
 			} else {
 				if response := postStart(t, server, "retained"); response.Code != http.StatusAccepted {
 					t.Fatal(response.Body)
 				}
-				if response := postReprobe(t, server); response.Code != http.StatusConflict {
-					t.Fatalf("busy re-probe=%d", response.Code)
-				}
+			}
+			if response := postReprobe(t, server); response.Code != want {
+				t.Fatalf("rejected re-probe=%d want=%d", response.Code, want)
 			}
 			if _, response := readAdmissionCapabilities(t, server); response.Code != http.StatusOK {
 				t.Fatalf("rejected re-probe discarded valid fallback: %d %s", response.Code, response.Body)
@@ -411,7 +413,7 @@ func TestCapabilityAdmissionRejectedReprobeKeepsFallback(t *testing.T) {
 
 func TestCapabilityAdmissionAcceptedReprobeReplacesOrInvalidatesFallback(t *testing.T) {
 	for _, fail := range []bool{false, true} {
-		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+		t.Run(strconv.FormatBool(fail), func(t *testing.T) {
 			server, log := capabilityAdmissionServer(t, 1)
 			verified, warm := readAdmissionCapabilities(t, server)
 			if warm.Code != http.StatusOK {
@@ -487,7 +489,7 @@ func TestCapabilityAdmissionPublicationRechecksAfterRuntimeMetadata(t *testing.T
 
 func TestCapabilityAdmissionFailedOrCanceledBuildKeepsPriorFallback(t *testing.T) {
 	for _, canceled := range []bool{false, true} {
-		t.Run(fmt.Sprint(canceled), func(t *testing.T) {
+		t.Run(strconv.FormatBool(canceled), func(t *testing.T) {
 			server, log := capabilityAdmissionServer(t, 1)
 			verified, warm := readAdmissionCapabilities(t, server)
 			if warm.Code != http.StatusOK {
@@ -525,6 +527,8 @@ func TestCapabilityAdmissionFailedOrCanceledBuildKeepsPriorFallback(t *testing.T
 				t.Fatal(err)
 			}
 			deadline := time.Now().Add(5 * time.Second)
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
 			for {
 				server.jobs.mu.Lock()
 				identities := len(server.jobs.refs)
@@ -538,7 +542,7 @@ func TestCapabilityAdmissionFailedOrCanceledBuildKeepsPriorFallback(t *testing.T
 				if time.Now().After(deadline) {
 					t.Fatalf("finished builder retained identities=%d gpu_workers=%d", identities, workers)
 				}
-				time.Sleep(time.Millisecond)
+				<-ticker.C
 			}
 			if server.storedCapabilityHash() != verified.CapabilityHash {
 				t.Fatal("incomplete builder replaced published hash")

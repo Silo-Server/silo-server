@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+//nolint:gocyclo // Each proof assertion is bound to the same prepared receipt, node, and live generation.
 func TestProxyOutputGrantBindsPreparedReceiptNodeAndLiveGeneration(t *testing.T) {
 	nodePub, _, _ := ed25519.GenerateKey(rand.Reader)
 	corePub, coreKey, _ := ed25519.GenerateKey(rand.Reader)

@@ -93,6 +93,7 @@ func overlapPlanStores(t *testing.T) (*pgxpool.Pool, [3]*planstore.Postgres, *re
 	return writer, stores, counter
 }
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestWorkerReportOverlappingTransportsUseCommittedRoute(t *testing.T) {
 	writer, plans, counter := overlapPlanStores(t)
 	f := newReportFixture(t)

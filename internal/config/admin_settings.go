@@ -185,6 +185,14 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // takes effect on restart.
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
 
+// ServerLocalURLSettingKey is the API server's address on the local network,
+// for a deployment whose LAN advertisement cannot reach the network or names
+// the wrong port (Docker bridge networking). Signed-in clients read it from the
+// connections document and use it, over TLS pinned to the deployment key, while
+// they can reach it (docs/architecture/server-identity.md, "Local network TLS").
+// Read per request, so a change applies without restart.
+const ServerLocalURLSettingKey = "server.local_url"
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
@@ -281,6 +289,7 @@ var adminSettingDefaults = map[string]string{
 	"theme.catalog_url":         DefaultThemeCatalogURL,
 
 	ServerLANDiscoverySettingKey:              "true",
+	ServerLocalURLSettingKey:                  "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
@@ -365,7 +374,6 @@ var adminSettingDefaults = map[string]string{
 	"jellyfin_compat.playback_session_ttl":    "6h",
 
 	"recommendations.enabled":                    "false",
-	"recommendations.embedding_provider":         "ollama",
 	"recommendations.embeddings_job_timeout":     "24h",
 	"recommendations.embedding_base_url":         "http://ollama:11434",
 	"recommendations.embedding_model":            "all-minilm",
@@ -829,6 +837,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"s3.public_endpoint", "s3.public_read_endpoint", "s3.private_endpoint",
 		"s3.user_db_endpoint", "catalog.search.meilisearch.url":
 		return normalizeAdminURL(key, value)
+	case ServerLocalURLSettingKey:
+		return normalizeLocalURL(value)
 	case "redis.url":
 		return NormalizeRedisURL(value)
 	case RedisDBSettingKey:
@@ -940,12 +950,8 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 			return fmt.Errorf("email.from_address is required when email is enabled")
 		}
 	}
-	for _, provider := range []string{"trakt", "simkl"} {
-		clientID := strings.TrimSpace(effective["watchsync."+provider+".client_id"])
-		clientSecret := strings.TrimSpace(effective["watchsync."+provider+".client_secret"])
-		if (clientID == "") != (clientSecret == "") {
-			return fmt.Errorf("watchsync.%s client ID and client secret must be configured together", provider)
-		}
+	if (strings.TrimSpace(effective["watchsync.simkl.client_id"]) == "") != (strings.TrimSpace(effective["watchsync.simkl.client_secret"]) == "") {
+		return errors.New("watchsync.simkl client ID and client secret must be configured together")
 	}
 	if err := ValidateRedisRateLimitTransport(effective, capabilities.RedisBootstrapAvailable); err != nil {
 		return err
@@ -1256,6 +1262,23 @@ func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s must be one of: %s", key, strings.Join(allowed, ", "))
+}
+
+// normalizeLocalURL accepts an http(s) origin: clients reach the API at its
+// root, and the connections document publishes origins only.
+func normalizeLocalURL(value string) (string, error) {
+	normalized, err := normalizeAdminURL(ServerLocalURLSettingKey, value)
+	if err != nil || normalized == "" {
+		return normalized, err
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", fmt.Errorf("%s must include a URL scheme and host", ServerLocalURLSettingKey)
+	}
+	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return "", fmt.Errorf("%s must be a scheme, host and optional port, such as http://192.168.1.20:8080", ServerLocalURLSettingKey)
+	}
+	return normalized, nil
 }
 
 func normalizeAdminURL(key, value string) (string, error) {

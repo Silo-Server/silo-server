@@ -54,7 +54,7 @@ type Handle struct {
 	adapter *Adapter
 	source  Source
 	token   string
-	ctx     context.Context
+	ctx     context.Context //nolint:containedctx // Handle owns cancellation of every read until Close releases its input.
 	cancel  context.CancelFunc
 	once    sync.Once
 }
@@ -89,7 +89,7 @@ func New(options Options) (*Adapter, error) {
 		t.ResponseHeaderTimeout = 10 * time.Second
 		transport = t
 	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp4", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}

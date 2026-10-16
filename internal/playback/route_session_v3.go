@@ -98,8 +98,8 @@ func (s *memoryRouteSessionV3) GetAttempt(ctx context.Context) (*AttemptRecordV3
 	defer s.store.mu.Unlock()
 	for _, record := range s.store.attempts {
 		if record.SessionID == s.sessionID {
-			copy := record
-			return &copy, nil
+			cloned := record
+			return &cloned, nil
 		}
 	}
 	return nil, ErrSessionNotFound

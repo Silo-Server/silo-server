@@ -127,9 +127,9 @@ func TestWorkerPreparedRelayLookupRejectsUntrustedIndexRecords(t *testing.T) {
 		"fingerprint": func(c *streamtoken.Claims) { c.DownloadExecutionFingerprint += "other" },
 	} {
 		t.Run(name, func(t *testing.T) {
-			copy := *claims
-			mutate(&copy)
-			badToken, err := streamtoken.SignAt(copy, f.secret, f.now, playback.MaxTokenTTL)
+			cloned := *claims
+			mutate(&cloned)
+			badToken, err := streamtoken.SignAt(cloned, f.secret, f.now, playback.MaxTokenTTL)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -179,6 +179,7 @@ func TestWorkerPreparedRelayLookupRejectsUntrustedIndexRecords(t *testing.T) {
 	}
 }
 
+//nolint:gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestWorkerPreparedRelayLookupRetainsFullDayAndFencesNewScopes(t *testing.T) {
 	f := newRelayLookupFixture(t)
 	first, err := f.relay.token(f.request, f.node)

@@ -324,8 +324,8 @@ func TestWorkerContentAuthorityRevokesDirectAndInheritedEncodePermissions(t *tes
 	audio.PlayMethod = playback.PlayRemux
 	audio.TranscodeAudio = true
 	audio.TargetCodecAudio = "aac"
-	copy := *f.card
-	copy.PlayMethod = playback.PlayRemux
+	cloned := *f.card
+	cloned.PlayMethod = playback.PlayRemux
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, err := f.pool.Exec(ctx, query, args...); err != nil {
@@ -342,7 +342,7 @@ func TestWorkerContentAuthorityRevokesDirectAndInheritedEncodePermissions(t *tes
 	check(&audio, true, "initial audio")
 	exec("UPDATE users SET transcode_allowed=FALSE WHERE id=$1", f.user)
 	check(&video, false, "direct video revoke")
-	check(&copy, true, "copy remux preserves video permission independence")
+	check(&cloned, true, "copy remux preserves video permission independence")
 	exec("UPDATE users SET transcode_allowed=TRUE,audio_transcode_allowed=FALSE WHERE id=$1", f.user)
 	check(&audio, false, "direct audio revoke")
 	check(&video, true, "video restored")
@@ -359,7 +359,7 @@ func TestWorkerContentAuthorityRevokesDirectAndInheritedEncodePermissions(t *tes
 	check(&audio, true, "inherited audio")
 	exec("UPDATE access_groups SET transcode_allowed=FALSE WHERE id=$1", group)
 	check(&video, false, "group video revoke")
-	check(&copy, true, "group video copy")
+	check(&cloned, true, "group video copy")
 	exec("UPDATE access_groups SET transcode_allowed=TRUE,audio_transcode_allowed=FALSE WHERE id=$1", group)
 	check(&audio, false, "group audio revoke")
 	check(&video, true, "group video restored")

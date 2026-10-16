@@ -4,18 +4,19 @@ import { EngineAudioOutput } from "./audioOutput";
 import { EngineClock } from "./clock";
 import {
   ENGINE_READ_FAILED,
+  ENGINE_VIDEO_DECODE_FAILED,
   type EngineMediaInfo,
   type PageToWorkerMessage,
   type WorkerToPageMessage,
   type WorkletToPageMessage,
 } from "./protocol";
 import {
-  browserMapsToSDR,
   Canvas2DRenderer,
-  WebGPURenderer,
+  HDRPresenter,
   type EnginePicture,
   type FrameRenderer,
   type PictureSize,
+  type Viewport,
 } from "./renderers";
 import type { EngineSourceSpec } from "./source";
 import { EngineTextTrack } from "./textTracks";
@@ -42,6 +43,13 @@ const IDLE_TICK_MS = 250;
 const RESYNC_LAG_SECONDS = 2;
 /** Without audio, a frame this overdue means the decoder is starved. */
 const VIDEO_STALL_SECONDS = 0.25;
+/** Video decoder errors one session restarts decoding after before failing over. */
+export const MAX_DECODER_RESTARTS = 2;
+/**
+ * Wait before a decoder restart, times the restarts made so far: a hardware
+ * decoder dies with the GPU process, which takes a moment to come back.
+ */
+export const DECODER_RESTART_DELAY_MS = 750;
 
 /** Typed failures the server records against the plan (see routing.ts). */
 export const ENGINE_PAGE_FAILURES = {
@@ -86,7 +94,7 @@ class EngineTimeRanges implements TimeRanges {
 
 export interface EnginePlayerOptions {
   source: EngineSourceSpec;
-  /** Box the engine draws into; it owns the canvas inside. */
+  /** Box the engine draws into; each session owns everything inside it. */
   surface: HTMLElement;
   /** Receives media events and supplies the fit mode, like the element it stands in for. */
   element: HTMLVideoElement;
@@ -106,8 +114,8 @@ export interface EnginePlayerOptions {
  */
 export class EnginePlayer {
   private readonly source: EngineSourceSpec;
-  private readonly surface: HTMLElement;
-  private canvas: HTMLCanvasElement;
+  /** This session's box inside the surface, holding its canvases. */
+  private readonly layers: HTMLElement;
   private readonly element: HTMLVideoElement;
   private readonly onFailure: (failure: FailureV3) => void;
   private worker: Worker | null = null;
@@ -120,6 +128,8 @@ export class EnginePlayer {
   private queue: QueuedPicture[] = [];
   private shown: QueuedPicture | null = null;
   private presentedFrames = 0;
+  private decoderRestarts = 0;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
   /** Decoded frames skipped because a later one was already due. */
   private droppedFrames = 0;
   private seekTarget: number;
@@ -157,20 +167,35 @@ export class EnginePlayer {
   private nextCallbackId = 1;
   private readonly tracks: EngineTextTrack[] = [];
   private fit: VideoFitMode = "contain";
+  /** The surface's size in device pixels, where the browser reports it exactly. */
+  private devicePixels: { width: number; height: number } | null = null;
+  /** Fallback trigger for a device pixel ratio change, re-armed after each one. */
+  private resolutionQuery: MediaQueryList | null = null;
   private readonly resizeObserver: ResizeObserver;
   private readonly classObserver: MutationObserver;
   private wakeLock: WakeLockSentinel | "pending" | null = null;
 
   constructor(options: EnginePlayerOptions) {
     this.source = options.source;
-    this.surface = options.surface;
+    // A fresh box replaces whatever an earlier session left in the surface,
+    // including canvases of a presenter that is still being created.
+    this.layers = document.createElement("div");
+    this.layers.style.width = "100%";
+    this.layers.style.height = "100%";
+    options.surface.replaceChildren(this.layers);
     this.element = options.element;
     this.onFailure = options.onFailure;
     this.volumeValue = options.volume;
     this.mutedValue = options.muted;
     this.seekTarget = options.source.startSeconds;
-    this.resizeObserver = new ResizeObserver(() => this.relayout());
-    this.canvas = this.replaceCanvas();
+    this.resizeObserver = new ResizeObserver((entries) => {
+      const box = entries[entries.length - 1]?.devicePixelContentBoxSize?.[0];
+      this.devicePixels = box ? { width: box.inlineSize, height: box.blockSize } : null;
+      // Without the exact size, a ratio change alone would not reach us.
+      if (!box && !this.resolutionQuery) this.watchResolution();
+      this.relayout();
+    });
+    this.observeSurface();
     this.classObserver = new MutationObserver(() => this.relayout());
     this.classObserver.observe(this.element, {
       attributes: true,
@@ -327,6 +352,7 @@ export class EnginePlayer {
       return;
     }
     this.seekingValue = true;
+    this.clearDecoderRestart();
     this.wake();
     this.endedValue = false;
     this.ready = Math.min(this.ready, 1);
@@ -388,8 +414,11 @@ export class EnginePlayer {
     this.disposed = true;
     this.stopPresentationTimers();
     this.clearReadinessDeadline();
+    this.clearDecoderRestart();
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.resizeObserver.disconnect();
+    this.resolutionQuery?.removeEventListener("change", this.onResolutionChange);
+    this.resolutionQuery = null;
     this.classObserver.disconnect();
     for (const picture of this.queue) this.release(picture);
     this.queue = [];
@@ -400,7 +429,7 @@ export class EnginePlayer {
     this.audio = null;
     this.renderer?.destroy();
     this.renderer = null;
-    this.canvas.remove();
+    this.layers.remove();
     this.callbacks.clear();
     this.updatePresence();
     if ("mediaSession" in navigator) {
@@ -448,6 +477,8 @@ export class EnginePlayer {
     // last picture stays up until the player replaces or destroys the engine.
     this.stopPresentationTimers();
     this.clearReadinessDeadline();
+    this.clearDecoderRestart();
+    this.renderer?.stop();
     for (const picture of this.queue) this.release(picture);
     this.queue = [];
     this.stopWorker();
@@ -509,6 +540,9 @@ export class EnginePlayer {
         return;
       case "error":
         if (message.generation === null || message.generation === this.generation) {
+          if (message.classification === ENGINE_VIDEO_DECODE_FAILED && this.restartDecoding()) {
+            return;
+          }
           this.fail(message.classification, message.message);
         }
         return;
@@ -526,10 +560,11 @@ export class EnginePlayer {
     try {
       const renderer =
         transfer === "sdr"
-          ? new Canvas2DRenderer(this.canvas)
-          : await WebGPURenderer.create(this.canvas, transfer, (reason) =>
-              this.fail(ENGINE_PAGE_FAILURES.presentation, reason),
-            );
+          ? Canvas2DRenderer.in(this.layers)
+          : await HDRPresenter.create(this.layers, transfer, info.video.color, {
+              onFailure: (reason) => this.fail(ENGINE_PAGE_FAILURES.presentation, reason),
+              onRestored: () => this.relayout(),
+            });
       if (this.stopped) {
         renderer.destroy();
         return;
@@ -624,6 +659,42 @@ export class EnginePlayer {
     this.readinessTimer = null;
   }
 
+  /**
+   * Starts a new decode run at the current position after a video decoder
+   * error, after a short wait. A hardware decoder dies when the GPU process
+   * restarts, and a new run opens a new one; a stream that is itself broken
+   * fails again and fails over when the restarts run out. Unlike a seek, the
+   * page sees only waiting and playing, as when a media element's decoder
+   * recovers.
+   */
+  private restartDecoding(): boolean {
+    // The dead run may report again before the restart; that is the same error.
+    if (this.restartTimer !== null) return true;
+    if (!this.info || this.decoderRestarts >= MAX_DECODER_RESTARTS) return false;
+    this.decoderRestarts += 1;
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (this.stopped) return;
+      const position = this.currentTime;
+      this.ready = Math.min(this.ready, 2);
+      // A run that never shows a picture failed to decode: that fails over,
+      // where a read failure would reconnect to this same route.
+      this.armReadinessDeadline(() =>
+        this.fail(ENGINE_VIDEO_DECODE_FAILED, "The video decoder did not recover in time."),
+      );
+      if (!this.pausedValue && !this.seekingValue) this.setWaiting(true);
+      this.beginGeneration(position);
+      this.wake();
+    }, DECODER_RESTART_DELAY_MS * this.decoderRestarts);
+    return true;
+  }
+
+  private clearDecoderRestart(): void {
+    if (this.restartTimer === null) return;
+    clearTimeout(this.restartTimer);
+    this.restartTimer = null;
+  }
+
   private beginGeneration(position: number): void {
     this.generation += 1;
     this.seekTarget = position;
@@ -652,12 +723,9 @@ export class EnginePlayer {
   }
 
   private present(picture: QueuedPicture): void {
-    if (browserMapsToSDR(picture) && !(this.renderer instanceof Canvas2DRenderer)) {
-      this.useCanvas2D();
-    }
     const size = this.pictureSize(picture);
     try {
-      this.renderer?.draw(picture, size, this.fit);
+      this.renderer?.draw(picture, size, this.viewport());
     } catch (error) {
       this.fail(ENGINE_PAGE_FAILURES.presentation, `Drawing a frame failed: ${String(error)}`);
     }
@@ -686,31 +754,38 @@ export class EnginePlayer {
     }
   }
 
-  /**
-   * A fresh canvas in the surface: a canvas keeps the first context type it
-   * hands out, so changing renderer means changing canvas.
-   */
-  private replaceCanvas(): HTMLCanvasElement {
-    const canvas = document.createElement("canvas");
-    canvas.style.display = "block";
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
-    this.surface.replaceChildren(canvas);
-    this.resizeObserver.disconnect();
-    this.resizeObserver.observe(canvas);
-    return canvas;
+  private viewport(): Viewport {
+    return { fit: this.fit, devicePixels: this.devicePixels };
   }
 
   /**
-   * Hardware-decoded HDR frames keep their PQ/HLG tag, and Chromium's WebGPU
-   * import of those desaturates them, while its 2D canvas applies the same tone
-   * mapping a <video> element does. Such sessions present through the 2D canvas.
+   * Follows the surface's size in device pixels, so the canvases match the
+   * screen pixel for pixel. Where the browser cannot report that size (Safari),
+   * a change of device pixel ratio alone (a window moved to another screen,
+   * a zoom) would not resize the box, so a resolution query stands in for it.
    */
-  private useCanvas2D(): void {
-    this.renderer?.destroy();
-    this.canvas = this.replaceCanvas();
-    this.renderer = new Canvas2DRenderer(this.canvas);
+  private observeSurface(): void {
+    try {
+      this.resizeObserver.observe(this.layers, { box: "device-pixel-content-box" });
+    } catch {
+      this.resizeObserver.observe(this.layers);
+      this.watchResolution();
+    }
   }
+
+  private watchResolution(): void {
+    if (typeof window.matchMedia !== "function") return;
+    this.resolutionQuery?.removeEventListener("change", this.onResolutionChange);
+    // The query matches the current ratio only, so it fires once per change.
+    this.resolutionQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    this.resolutionQuery.addEventListener("change", this.onResolutionChange);
+  }
+
+  private readonly onResolutionChange = (): void => {
+    if (this.disposed) return;
+    this.watchResolution();
+    this.relayout();
+  };
 
   private pictureSize(picture: QueuedPicture): PictureSize {
     const video = this.info?.video;
@@ -999,11 +1074,12 @@ export class EnginePlayer {
 
   private relayout(): void {
     this.readFit();
-    if (this.shown && this.renderer && !this.failed) {
+    if (this.shown && this.renderer && !this.stopped) {
+      // While paused no later frame would repaint, so a failure here counts.
       try {
-        this.renderer.draw(this.shown, this.pictureSize(this.shown), this.fit);
-      } catch {
-        // The next frame repaints anyway.
+        this.renderer.draw(this.shown, this.pictureSize(this.shown), this.viewport());
+      } catch (error) {
+        this.fail(ENGINE_PAGE_FAILURES.presentation, `Drawing a frame failed: ${String(error)}`);
       }
     }
   }

@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+//nolint:funlen,gocyclo // One Redis timeline correlates concurrent admission, generation fences, revocation, and replay assertions.
 func TestRedisDurableConcurrentAdmissionRevocationAndReplay(t *testing.T) {
 	address := os.Getenv("SILO_WORKER_TEST_REDIS")
 	if address == "" {

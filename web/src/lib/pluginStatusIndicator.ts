@@ -2,7 +2,8 @@ import type { PluginInstallation } from "@/api/types";
 
 /**
  * Status dot for an installation. A resident plugin (one the server keeps
- * running) reports its supervisor state; everything else reads enabled.
+ * running) reports its supervisor state. A plugin started on first use reads
+ * Active unless its last launch failed.
  */
 export function pluginStatusIndicator(installation: PluginInstallation): {
   dotClass: string;
@@ -14,6 +15,9 @@ export function pluginStatusIndicator(installation: PluginInstallation): {
   }
   const runtime = installation.runtime;
   if (!runtime.resident) {
+    if (runtime.state === "failed") {
+      return { dotClass: "bg-destructive", label: "Failed", title: runtime.last_error };
+    }
     return { dotClass: "bg-success", label: "Active" };
   }
   switch (runtime.state) {

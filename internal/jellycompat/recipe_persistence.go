@@ -30,6 +30,7 @@ const (
 
 func recipeWorkLockKey(work string) int64 {
 	digest := sha256.Sum256([]byte("silo:compat-recipe-mutation:v1\x00" + work))
+	//nolint:gosec // SQL advisory locks intentionally use all 64 hash bits, including the signed high bit. G115
 	return int64(binary.BigEndian.Uint64(digest[:8]))
 }
 func acceptedRecipe(session *PlaybackSession) *noderecipe.AcceptedPublication {

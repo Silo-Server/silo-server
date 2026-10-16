@@ -327,7 +327,7 @@ func TestExpiryAndReleaseAreNotRenewalAuthority(t *testing.T) {
 func TestNewRejectsMissingAuthority(t *testing.T) {
 	for _, options := range []Options{{}, {Store: NewMemoryStore(), Origin: "http://core.example"}} {
 		if _, err := New(options); err == nil {
-			t.Fatalf("missing authority admitted: %s", fmt.Sprint(options.Origin))
+			t.Fatalf("missing authority admitted: %s", options.Origin)
 		}
 	}
 }

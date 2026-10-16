@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,17 +40,9 @@ func TestFFmpegSourceTransferFaultParity(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	frames := func(out []byte) int {
-		n := 0
-		for _, line := range strings.Split(string(out), "\n") {
-			if line != "" && !strings.HasPrefix(line, "#") {
-				n++
-			}
-		}
-		return n
-	}
-	if frames(baseline) != 120 {
-		t.Fatalf("local frame count%d", frames(baseline))
+
+	if sourceTransferFrameCount(baseline) != 120 {
+		t.Fatalf("local frame count%d", sourceTransferFrameCount(baseline))
 	}
 	for _, fault := range []string{"none", "503", "short-body"} {
 		t.Run(fault, func(t *testing.T) {
@@ -83,7 +76,7 @@ func TestFFmpegSourceTransferFaultParity(t *testing.T) {
 					w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(data)))
 				}
 				w.Header().Set("ETag", `"r"`)
-				w.Header().Set("Content-Length", fmt.Sprint(end-start+1))
+				w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
 				w.WriteHeader(status)
 				if first && fault == "short-body" {
 					_, _ = w.Write(data[start : start+min(int64(16384), (end-start+1)/2)])
@@ -116,9 +109,9 @@ func TestFFmpegSourceTransferFaultParity(t *testing.T) {
 			var stderr bytes.Buffer
 			command.Stderr = &stderr
 			actual, e := command.Output()
-			t.Logf("actual FFmpeg fault=%s frames=%d requests=%d bytes=%d/%d", fault, frames(actual), calls.Load(), len(actual), len(baseline))
+			t.Logf("actual FFmpeg fault=%s frames=%d requests=%d bytes=%d/%d", fault, sourceTransferFrameCount(actual), calls.Load(), len(actual), len(baseline))
 			if e != nil || !bytes.Equal(baseline, actual) {
-				t.Fatalf("fault=%s output mismatch: %v stderr=%s frames=%d/%d", fault, e, stderr.String(), frames(actual), frames(baseline))
+				t.Fatalf("fault=%s output mismatch: %v stderr=%s frames=%d/%d", fault, e, stderr.String(), sourceTransferFrameCount(actual), sourceTransferFrameCount(baseline))
 			}
 			if !authority.Allowed("work", 1) {
 				t.Fatal("fault parity exceeded original2second work authority")
@@ -128,4 +121,14 @@ func TestFFmpegSourceTransferFaultParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func sourceTransferFrameCount(out []byte) int {
+	n := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			n++
+		}
+	}
+	return n
 }

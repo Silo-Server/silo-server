@@ -56,10 +56,7 @@ func (s *RedisStore) BindInputs(ctx context.Context, node int, work string, gene
 	if s.client == nil {
 		return ErrUnavailable
 	}
-	encoded, err := json.Marshal(bindings)
-	if err != nil {
-		return err
-	}
+	encoded, _ := json.Marshal(bindings)
 	keys := s.keys(node)
 	n, err := bindingsScript.Run(ctx, s.client, []string{keys[1], keys[4]}, work, strconv.FormatUint(generation, 10), string(encoded)).Int()
 	if err != nil {

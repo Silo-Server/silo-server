@@ -62,6 +62,7 @@ func TestRelayFailoverKeepsDurableReportTransport(t *testing.T) {
 	}
 }
 
+//nolint:gocyclo,nestif // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestRelayFailoverLocalCandidateRequiresSettledAuthority(t *testing.T) {
 	for _, outcome := range []string{"committed", "old", "replanned", "replanned-same-work", "new-local-work", "stopped"} {
 		t.Run(outcome, func(t *testing.T) {
@@ -252,6 +253,7 @@ func TestRelayFailoverSerializesHandlersSharingMemoryStore(t *testing.T) {
 			releaseStart()
 			t.Fatal("first POST never entered")
 		}
+		//nolint:forbidigo // The test polls an externally owned lease or publication state; the delay yields between bounded observations.
 		time.Sleep(time.Millisecond)
 	}
 	go func() { results <- f2.segment("seg_00004.ts") }()

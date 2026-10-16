@@ -107,10 +107,7 @@ func (s *Server) publishCapabilitySnapshotLocked(ctx context.Context, inputs cap
 	if err := s.checkCapabilityInputs(ctx, inputs); err != nil {
 		return playback.HWAccelInfo{}, err
 	}
-	encoded, err := json.Marshal(info)
-	if err != nil {
-		return playback.HWAccelInfo{}, err
-	}
+	encoded, _ := json.Marshal(info)
 	info = s.projectCapabilityTransport(info)
 	if err := s.checkCapabilityInputs(ctx, inputs); err != nil {
 		return playback.HWAccelInfo{}, err

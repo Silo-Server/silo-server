@@ -73,10 +73,7 @@ func (tr *Tracker) ReplaceSnapshot(ctx context.Context, publisher string, fence 
 			return errors.New("duplicate session snapshot member")
 		}
 		present[info.SessionID] = struct{}{}
-		data, err := json.Marshal(info)
-		if err != nil {
-			return err
-		}
+		data, _ := json.Marshal(info)
 		args = append(args, tr.nodeHash+":"+info.SessionID, data)
 	}
 	accepted, err := replaceSnapshot.Run(ctx, tr.rdb, []string{fence.Key, snapshotKeyPrefix + publisher}, args...).Int()

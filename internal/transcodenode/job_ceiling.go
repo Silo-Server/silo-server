@@ -26,7 +26,7 @@ type jobCeiling struct {
 
 type sessionJobLease struct {
 	tracking SessionTracking
-	context  context.Context
+	context  context.Context //nolint:containedctx // Session lease retains execution ownership until releaseSessionJob removes it.
 	release  func()
 }
 

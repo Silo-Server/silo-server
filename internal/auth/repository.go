@@ -209,9 +209,9 @@ func createUser(ctx context.Context, db interface {
 	}
 
 	// Build placeholders: $1, $2, ..., $N
-	placeholders := make([]string, len(args))
+	placeholders := make([]string, 0, len(args)+1)
 	for i := range args {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
 	}
 	// Admins stay ungrouped: scope/action decisions are role-blind, so the
 	// default group's ceilings would cap the server owner (mirrors the

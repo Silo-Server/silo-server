@@ -28,12 +28,12 @@ type viewerContentDecision struct {
 
 // The cache belongs to one verification call. Retain every content-sensitive
 // claim field, including prepared/theme identity, policy and source path inputs.
-func viewerContentKey(claims streamtoken.Claims) string {
+func viewerContentKey(claims streamtoken.Claims) (string, error) {
 	claims.OriginCredential = streamtoken.OriginCredential{}
 	claims.IssuedAt, claims.ExpiresAt = nil, nil
 	claims.SessionID, claims.TranscodeTransportID = "", ""
-	encoded, _ := json.Marshal(claims)
-	return string(encoded)
+	encoded, err := json.Marshal(claims)
+	return string(encoded), err
 }
 
 func verifyWorkerOutputTokens(ctx context.Context, pool *pgxpool.Pool, content *workerContentAuthority, tokens []string, secret string) ([]workercontrolcore.TokenVerification, error) {
@@ -95,7 +95,10 @@ func verifyWorkerOutputTokens(ctx context.Context, pool *pgxpool.Pool, content *
 			results[i].Err = workercontrolcore.ErrOutputRevoked
 			continue
 		}
-		key := viewerContentKey(*results[i].Claims)
+		key, err := viewerContentKey(*results[i].Claims)
+		if err != nil {
+			return nil, err
+		}
 		decision, found := decisions[key]
 		if !found {
 			decision.allowed, decision.err = content.checkClaims(ctx, results[i].Claims)
@@ -121,6 +124,9 @@ func verifyViewerLoginProbes(ctx context.Context, pool *pgxpool.Pool, probes map
 	users := make([]int32, 0, len(probes))
 	remote := make([]bool, 0, len(probes))
 	for probe := range probes {
+		if probe.user <= 0 || probe.user > math.MaxInt32 {
+			return workercontrolcore.ErrOutputRevoked
+		}
 		ordered = append(ordered, probe)
 		ids = append(ids, probe.login)
 		profiles = append(profiles, probe.profile)
@@ -147,6 +153,9 @@ func verifyViewerKeyProbes(ctx context.Context, pool *pgxpool.Pool, probes map[v
 	ids := make([]int64, 0, len(probes))
 	users := make([]int32, 0, len(probes))
 	for probe := range probes {
+		if probe.user <= 0 || probe.user > math.MaxInt32 {
+			return workercontrolcore.ErrOutputRevoked
+		}
 		ordered = append(ordered, probe)
 		ids = append(ids, probe.key)
 		users = append(users, int32(probe.user))

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"sync"
@@ -117,18 +118,16 @@ func (h *enrollmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	public := PublicBinding{Version: 1, NodeID: e.NodeID, CoreURL: e.CoreURL, CorePublicKey: e.CorePublicKey, NodeURL: e.NodeURL, NodePublicKey: request.NodePublicKey, AllowHTTP: e.AllowHTTP}
-	body, err := json.Marshal(public)
-	if err != nil {
-		http.Error(w, "binding unavailable", http.StatusInternalServerError)
-		return
-	}
+	body, _ := json.Marshal(public)
 	grant, err := workeridentity.EncodeGrant(workeridentity.Grant{Version: 1, Domain: domainBindingGrant, Audience: e.NodeURL, NodeID: e.NodeID, ExpiresAt: time.Now().Add(30 * time.Second).Unix(), Body: body}, h.options.PrivateKey)
 	if err != nil {
 		http.Error(w, "binding unavailable", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"grant": grant})
+	if err := json.NewEncoder(w).Encode(map[string]string{"grant": grant}); err != nil {
+		slog.WarnContext(r.Context(), "write worker enrollment grant", "error", err)
+	}
 }
 
 // Enroll keeps the node private key local. A consumed ticket is never retried
@@ -145,10 +144,7 @@ func Enroll(ctx context.Context, e Enrollment, key ed25519.PrivateKey, client *h
 	if err := binding.Validate(); err != nil {
 		return workeridentity.Binding{}, err
 	}
-	data, err := json.Marshal(enrollmentRequest{Enrollment: e, NodePublicKey: ed25519.PublicKey(key[ed25519.SeedSize:])})
-	if err != nil {
-		return workeridentity.Binding{}, err
-	}
+	data, _ := json.Marshal(enrollmentRequest{Enrollment: e, NodePublicKey: ed25519.PublicKey(key[ed25519.SeedSize:])})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.CoreURL+enrollmentPath, bytes.NewReader(data))
 	if err != nil {
 		return workeridentity.Binding{}, err
@@ -193,11 +189,8 @@ func SaveEnrollment(path string, e Enrollment) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(e, "", "  ")
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	data, _ := json.MarshalIndent(e, "", "  ")
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) //nolint:gosec // The operator chooses the ticket path; exclusive creation and private permissions prevent replacement.
 	if err != nil {
 		return err
 	}
@@ -229,7 +222,7 @@ func LoadEnrollment(path string) (Enrollment, error) {
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		return e, errors.New("enrollment ticket requires a private regular file")
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // The operator chooses the ticket path; Lstat and SameFile fence the private regular file opened below.
 	if err != nil {
 		return e, err
 	}

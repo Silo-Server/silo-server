@@ -23,6 +23,8 @@ func ExtractOutputWork(claims *streamtoken.Claims) string {
 
 // IssueOutputGrant verifies the existing customer token on the core, then
 // delegates output request proofs to one worker/work/generation public key.
+//
+//nolint:gocyclo,nestif // Artifact receipts and playback recipes require distinct identity checks before signing the same generation-bound grant.
 func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySecret string) (GrantReply, error) {
 	if s.options.VerifyToken == nil || proxySecret == "" {
 		return GrantReply{}, ErrDenied
@@ -106,6 +108,9 @@ func (s *Service) IssueOutputGrant(ctx context.Context, token, nodeURL, proxySec
 	}
 	epoch := workeridentity.OutputEpoch(proxySecret)
 	lookupKey := OutputAuthorityLookupKey(*claims, node.ID, work, generation, epoch)
+	if lookupKey == "" {
+		return GrantReply{}, ErrDenied
+	}
 	authorityID, err := s.registerOutputAuthority(ctx, node, OutputAuthorityRecord{Token: token, LookupKey: lookupKey, NodeID: node.ID, WorkID: work, Generation: generation, Epoch: epoch, ExpiresAt: claims.ExpiresAt.Unix()})
 	if err != nil {
 		return GrantReply{}, err

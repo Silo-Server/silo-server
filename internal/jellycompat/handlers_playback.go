@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	crand "crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -10,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -25,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodehttp"
@@ -333,8 +332,7 @@ type PlaybackHandler struct {
 	ScopeResolver           ScopeResolver
 	NodePlanner             nodepool.SessionPlanner
 	JWTSecret               string
-	profileStaler           profileStaler
-	profileRefreshRequester profileRefreshRequester
+	signalsNotifier         signalsChangedNotifier
 	FFmpegPath              string
 	HWAccel                 string
 	TranscodeDir            string
@@ -1580,6 +1578,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	return h.startOwnedRemoteTranscodeWithToneMapMode(ctx, playSessionID, upstreamSessionID, source, file, initialSeekSeconds, transcodeNodeURL, requiredToneMapMode)
 }
 
+//nolint:funlen,gocyclo // The remote-start state machine keeps publication, acceptance and compensating cleanup in their reviewed order.
 func (h *PlaybackHandler) startOwnedRemoteTranscodeWithToneMapMode(ctx context.Context, playSessionID, upstreamSessionID string, source PlaybackMediaSource, file *models.MediaFile, initialSeekSeconds float64, transcodeNodeURL string, requiredToneMapMode tonemap.Mode) error {
 	// Remote contenders for one upstream session single-flight across route
 	// binding, node start, and durable publication. This uses a dedicated key,
@@ -2072,6 +2071,8 @@ func (h *PlaybackHandler) startOwnedRemoteTranscodeWithToneMapMode(ctx context.C
 // A missing upstream
 // session (a start/build race, or no session manager in tests) is logged and the
 // live transcode is left serving — only restart resilience is forfeited.
+//
+//nolint:nestif // The remote-start state machine keeps publication, acceptance and compensating cleanup in their reviewed order.
 func (h *PlaybackHandler) persistTranscodeRecipe(
 	ctx context.Context,
 	playSessionID, upstreamSessionID string,
@@ -2223,7 +2224,7 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 	size := 102400
 	if raw := firstQueryValue(r.URL.Query(), "Size"); raw != "" {
 		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 || value > 100000000 {
+		if err != nil || value < 1 || value > bandwidthprobe.MaxSize {
 			writeError(w, http.StatusBadRequest, "BadRequest", "Size must be between 1 and 100000000")
 			return
 		}
@@ -2231,21 +2232,7 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Content-Length", strconv.Itoa(size))
 	w.WriteHeader(http.StatusOK)
-	// Random bytes, as Jellyfin sends: a compressing proxy would shrink a
-	// constant payload and inflate the measured bandwidth.
-	var seed [32]byte
-	_, _ = crand.Read(seed[:])
-	source := rand.NewChaCha8(seed)
-	block := make([]byte, min(size, 32768))
-	for size > 0 {
-		chunk := block[:min(size, len(block))]
-		_, _ = source.Read(chunk)
-		n, err := w.Write(chunk)
-		if err != nil || n == 0 {
-			return
-		}
-		size -= n
-	}
+	_ = bandwidthprobe.Write(w, size)
 }
 
 // HandlePlaybackInfo negotiates media sources for a Jellyfin item.
@@ -3078,7 +3065,7 @@ var compatFallbackCodecRank = map[string]int{
 func preferredAudioStreamIndex(version catalog.FileVersion, profile DeviceProfile) *int {
 	defaultIdx := defaultAudioStreamIndex(version)
 	if defaultIdx == nil {
-		return defaultIdx
+		return nil
 	}
 
 	defaultTrackIdx := *defaultIdx - len(version.VideoTracks)

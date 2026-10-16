@@ -27,6 +27,7 @@ type personalDataItemRepository interface {
 	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.MediaItem, error)
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]bool, error)
 }
 
 type LocalListEventDispatcher interface {
@@ -35,17 +36,16 @@ type LocalListEventDispatcher interface {
 
 // PersonalDataHandler handles favorites, watchlist, and history endpoints.
 type PersonalDataHandler struct {
-	storeProvider           userstore.UserStoreProvider
-	itemRepo                personalDataItemRepository
-	episodeRepo             *catalog.EpisodeRepository
-	seasonRepo              *catalog.SeasonRepository
-	detailSvc               *catalog.DetailService
-	EventsHub               *evt.Hub
-	localListDispatcher     LocalListEventDispatcher
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
-	ebookProgressStore      EbookReaderProgressLister
-	watchlistTitles         *watchlist.Titles
+	storeProvider       userstore.UserStoreProvider
+	itemRepo            personalDataItemRepository
+	episodeRepo         *catalog.EpisodeRepository
+	seasonRepo          *catalog.SeasonRepository
+	detailSvc           *catalog.DetailService
+	EventsHub           *evt.Hub
+	localListDispatcher LocalListEventDispatcher
+	signalsNotifier     SignalsChangedNotifier
+	ebookProgressStore  EbookReaderProgressLister
+	watchlistTitles     *watchlist.Titles
 }
 
 // NewPersonalDataHandler creates a new PersonalDataHandler.
@@ -65,14 +65,10 @@ func (h *PersonalDataHandler) SetEbookReaderProgressStore(store EbookReaderProgr
 	h.ebookProgressStore = store
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *PersonalDataHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *PersonalDataHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *PersonalDataHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 func (h *PersonalDataHandler) SetEpisodeRepo(repo *catalog.EpisodeRepository) {
@@ -340,7 +336,7 @@ func (h *PersonalDataHandler) notifyListChange(ctx context.Context, list watchsy
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), listChangeNoticeTimeout)
 	defer cancel()
 	h.dispatchLocalListEvent(ctx, list, change, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, viewer.UserID, viewer.ProfileID)
 	member := change == watchsync.ListChangeAdded
 	state, stateChange := userStateEventState{IsFavorite: &member}, "favorite"
 	if list == watchsync.ListKindWatchlist {
@@ -450,6 +446,26 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
 	}
 	return entries, items, nil
+}
+
+// VisibleItemIDs reports which of the given catalog items the viewer may see.
+func (h *PersonalDataHandler) VisibleItemIDs(ctx context.Context, viewer PersonalListViewer, ids []string) (map[string]bool, error) {
+	visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, viewer.Access)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+	}
+	return visible, nil
+}
+
+// ResolveCards answers the cards of the given catalog items the viewer may
+// see, in the order given. Items the catalog no longer has or the viewer may
+// not see have no card.
+func (h *PersonalDataHandler) ResolveCards(ctx context.Context, viewer PersonalListViewer, ids []string) ([]CollectionItemView, error) {
+	items, err := resolveItemsByIDs(h, ctx, viewer, ids)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve items")
+	}
+	return items, nil
 }
 
 // filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
@@ -781,7 +797,7 @@ func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, pro
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove history")
 	}
 
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	for _, mediaItemID := range mediaItemIDs {
 		publishUserStateEvent(
 			ctx,
@@ -863,15 +879,19 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 	size := viewer.ImageSize
 	posterHint := requestVariantHint("featured", size)
 	cardHint := requestVariantHint("card", size)
+	itemIDs := make([]string, len(mediaItems))
+	for i, mi := range mediaItems {
+		itemIDs[i] = mi.ContentID
+	}
+	accessible, err := h.itemRepo.EnsureAccessibleIDs(ctx, itemIDs, filter)
+	if err != nil {
+		return nil, err
+	}
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
-		if err := h.itemRepo.EnsureAccessible(ctx, mi.ContentID, filter); err != nil {
-			if errors.Is(err, catalog.ErrItemNotFound) {
-				continue
-			}
-			return nil, err
+		if accessible[mi.ContentID] {
+			accessibleItems = append(accessibleItems, mi)
 		}
-		accessibleItems = append(accessibleItems, mi)
 	}
 
 	userStates := map[string]*itemUserStateResponse{}

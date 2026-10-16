@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+//nolint:funlen // The open viewer stream and shared artifact must be checked across the same authority revocation.
 func TestRevokedViewerStopsOpenOutputWithoutStoppingSharedArtifact(t *testing.T) {
 	public, core, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

@@ -799,3 +799,437 @@ func TestNextUpRepository_DroppedSeriesHiddenUntilWatchedAgain(t *testing.T) {
 	}
 	assertNextUpContentIDs(t, results, episodes[2], episodes[4])
 }
+
+func TestNextUpRepository_ReleasedEpisodeMovesCaughtUpSeriesForward(t *testing.T) {
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-released-%d", time.Now().UnixNano())
+	weekly, binge, rerun := prefix+"-weekly", prefix+"-binge", prefix+"-rerun"
+
+	userID, profileID, folderID := seedNextUpTestOwner(t, ctx, pool, prefix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM episode_availability WHERE library_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{weekly, binge, rerun})
+	})
+	for _, id := range []string{weekly, binge, rerun} {
+		seedNextUpSeries(t, ctx, pool, id, id)
+	}
+	episodes := []string{weekly + "-1", weekly + "-2", binge + "-1", binge + "-2", rerun + "-1", rerun + "-2"}
+	seedNextUpEpisodes(t, ctx, pool, episodes, []string{weekly, weekly, binge, binge, rerun, rerun}, []int{1, 2, 1, 2, 1, 2})
+	seedNextUpFiles(t, ctx, pool, folderID, episodes)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	// The weekly show's next episode was released two hours ago, a week after
+	// the profile caught up. The binge's next episode was released before the
+	// profile finished the previous one. The rerun's was recorded silently.
+	seedNextUpAvailability(t, ctx, pool, folderID, episodes[1], weekly, 2, now.Add(-2*time.Hour), true)
+	seedNextUpAvailability(t, ctx, pool, folderID, episodes[3], binge, 2, now.Add(-5*24*time.Hour), true)
+	seedNextUpAvailability(t, ctx, pool, folderID, episodes[5], rerun, 2, now.Add(-time.Hour), false)
+	weeklyDone := now.Add(-8 * 24 * time.Hour)
+	bingeDone := now.Add(-time.Hour)
+	rerunDone := now.Add(-24 * time.Hour)
+	seedNextUpCompleted(t, ctx, pool, userID, profileID, map[string]time.Time{
+		episodes[0]: weeklyDone, episodes[2]: bingeDone, episodes[4]: rerunDone,
+	})
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	results, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListNextUp: %v", err)
+	}
+	assertNextUpOrder(t, results, episodes[3], episodes[1], episodes[5])
+	if got := results[1]; !got.ActivityAt.Equal(now.Add(-2*time.Hour)) || !got.CompletedAt.Equal(weeklyDone) {
+		t.Errorf("weekly ActivityAt=%v CompletedAt=%v, want release %v and completion %v", got.ActivityAt, got.CompletedAt, now.Add(-2*time.Hour), weeklyDone)
+	}
+	if got := results[0]; !got.ActivityAt.Equal(bingeDone) {
+		t.Errorf("binge ActivityAt=%v, want its completion %v", got.ActivityAt, bingeDone)
+	}
+
+	// Without the profile's opt-in, the order stays by completion time.
+	results, err = repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListNextUp by completion: %v", err)
+	}
+	assertNextUpOrder(t, results, episodes[3], episodes[5], episodes[1])
+	for _, res := range results {
+		if !res.ActivityAt.Equal(res.CompletedAt) {
+			t.Errorf("%s ActivityAt=%v without RankByRelease, want its completion %v", res.ContentID, res.ActivityAt, res.CompletedAt)
+		}
+	}
+
+	// A limit below the candidate count keeps the released episode: the walk
+	// visits the rerun before the weekly show, but the order is by activity.
+	results, err = repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListNextUp limit 2: %v", err)
+	}
+	assertNextUpOrder(t, results, episodes[3], episodes[1])
+
+	// The series' own lookup reports the same activity time.
+	results, err = repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, SeriesID: weekly, Limit: 1})
+	if err != nil {
+		t.Fatalf("ListNextUp scoped: %v", err)
+	}
+	assertNextUpOrder(t, results, episodes[1])
+	if !results[0].ActivityAt.Equal(now.Add(-2 * time.Hour)) {
+		t.Errorf("scoped ActivityAt=%v, want %v", results[0].ActivityAt, now.Add(-2*time.Hour))
+	}
+}
+
+func TestNextUpRepository_EarliestAvailabilityDecidesRelease(t *testing.T) {
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-earliest-%d", time.Now().UnixNano())
+	older, newer := prefix+"-older", prefix+"-newer"
+
+	userID, profileID, folderID := seedNextUpTestOwner(t, ctx, pool, prefix)
+	otherFolder := seedNextUpFolder(t, ctx, pool, prefix+" Other")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM episode_availability WHERE library_id = ANY($1)`, []int{folderID, otherFolder})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{older, newer})
+	})
+	seedNextUpSeries(t, ctx, pool, older, older)
+	seedNextUpSeries(t, ctx, pool, newer, newer)
+	episodes := []string{older + "-1", older + "-2", newer + "-1", newer + "-2"}
+	seedNextUpEpisodes(t, ctx, pool, episodes, []string{older, older, newer, newer}, []int{1, 2, 1, 2})
+	seedNextUpFiles(t, ctx, pool, folderID, episodes)
+
+	// The older series' next episode was already on the server, recorded
+	// silently, before a second library received it as a release: it is not
+	// news to a viewer who can reach both libraries.
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	seedNextUpAvailability(t, ctx, pool, folderID, episodes[1], older, 2, now.Add(-90*24*time.Hour), false)
+	seedNextUpAvailability(t, ctx, pool, otherFolder, episodes[1], older, 2, now.Add(-time.Hour), true)
+	// The newer series' row absorbed an earlier row in a content-ID merge: its
+	// available_at is no longer the release time it carries.
+	seedNextUpAvailability(t, ctx, pool, folderID, episodes[3], newer, 2, now.Add(-90*24*time.Hour), false)
+	if _, err := pool.Exec(ctx, `UPDATE episode_availability SET released_at = $3 WHERE library_id = $1 AND episode_id = $2`,
+		folderID, episodes[3], now.Add(-time.Hour)); err != nil {
+		t.Fatalf("seed merged availability: %v", err)
+	}
+	seedNextUpCompleted(t, ctx, pool, userID, profileID, map[string]time.Time{
+		episodes[0]: now.Add(-300 * 24 * time.Hour),
+		episodes[2]: now.Add(-200 * 24 * time.Hour),
+	})
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	results, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListNextUp: %v", err)
+	}
+	assertNextUpOrder(t, results, episodes[3], episodes[1])
+	for _, res := range results {
+		if !res.ActivityAt.Equal(res.CompletedAt) {
+			t.Errorf("%s ActivityAt=%v, want its completion %v", res.ContentID, res.ActivityAt, res.CompletedAt)
+		}
+	}
+
+	// A viewer who can reach only the second library sees the release.
+	results, err = repo.ListNextUp(ctx, NextUpQuery{
+		UserID: userID, ProfileID: profileID, Limit: 20, RankByRelease: true,
+		AccessFilter: AccessFilter{AllowedLibraryIDs: []int{otherFolder}},
+	})
+	if err != nil {
+		t.Fatalf("ListNextUp other library: %v", err)
+	}
+	assertNextUpOrder(t, results, episodes[1], episodes[3])
+}
+
+func TestNextUpRepository_ReleaseOutsideScopeKeepsCompletionOrder(t *testing.T) {
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-release-scope-%d", time.Now().UnixNano())
+	visible, elsewhere := prefix+"-visible", prefix+"-elsewhere"
+
+	userID, profileID, folderID := seedNextUpTestOwner(t, ctx, pool, prefix)
+	otherFolder := seedNextUpFolder(t, ctx, pool, prefix+" Other")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM episode_availability WHERE library_id = ANY($1)`, []int{folderID, otherFolder})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{visible, elsewhere})
+	})
+	seedNextUpSeries(t, ctx, pool, visible, visible)
+	seedNextUpSeries(t, ctx, pool, elsewhere, elsewhere)
+	episodes := []string{visible + "-1", visible + "-2", elsewhere + "-1", elsewhere + "-2"}
+	seedNextUpEpisodes(t, ctx, pool, episodes, []string{visible, visible, elsewhere, elsewhere}, []int{1, 2, 1, 2})
+	seedNextUpFiles(t, ctx, pool, folderID, episodes[:3])
+	seedNextUpFiles(t, ctx, pool, otherFolder, episodes[3:])
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	seedNextUpAvailability(t, ctx, pool, folderID, episodes[1], visible, 2, now.Add(-30*24*time.Hour), false)
+	// The other series' next episode was released an hour ago, in a library
+	// the request may not reach.
+	seedNextUpAvailability(t, ctx, pool, otherFolder, episodes[3], elsewhere, 2, now.Add(-time.Hour), true)
+	seedNextUpCompleted(t, ctx, pool, userID, profileID, map[string]time.Time{
+		episodes[0]: now.Add(-24 * time.Hour),
+		episodes[2]: now.Add(-10 * 24 * time.Hour),
+	})
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	base := NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 20}
+	results, err := repo.ListNextUp(ctx, base)
+	if err != nil {
+		t.Fatalf("ListNextUp: %v", err)
+	}
+	assertNextUpOrder(t, results, episodes[3], episodes[1])
+
+	scoped := map[string]NextUpQuery{}
+	q := base
+	q.AccessFilter = AccessFilter{AllowedLibraryIDs: []int{folderID}}
+	scoped["access group"] = q
+	q = base
+	q.LibraryID = &folderID
+	scoped["section library"] = q
+	q = base
+	q.AccessFilter = AccessFilter{DisabledLibraryIDs: []int{otherFolder}}
+	scoped["disabled library"] = q
+	for name, q := range scoped {
+		results, err := repo.ListNextUp(ctx, q)
+		if err != nil {
+			t.Fatalf("%s: ListNextUp: %v", name, err)
+		}
+		assertNextUpOrder(t, results, episodes[1], episodes[3])
+	}
+}
+
+func TestNextUpRepository_SmallerLimitReadsPrefixOfLargerLimit(t *testing.T) {
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-prefix-%d", time.Now().UnixNano())
+	userID, profileID, folderID := seedNextUpTestOwner(t, ctx, pool, prefix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM episode_availability WHERE library_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"-%")
+	})
+
+	// A full first walk batch: two series with a next episode, then finished
+	// series with none. The returning series was finished before all of them,
+	// so the walk reaches it only in a later batch; its next episode was just
+	// released.
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, status, genres)
+		SELECT $1 || '-finished-' || n, 'series', 'Finished ' || n, 'matched', '{}'::text[]
+		FROM generate_series(1, $2) n;
+		`, prefix, nextUpAnchorMaxSeries); err != nil {
+		t.Fatalf("seed finished series: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
+		SELECT $1 || '-finished-' || n || '-1', $1 || '-finished-' || n, 1, 1, 'Only'
+		FROM generate_series(1, $2) n`, prefix, nextUpAnchorMaxSeries); err != nil {
+		t.Fatalf("seed finished episodes: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+		SELECT $1, $2, $3 || '-finished-' || n || '-1', 0, 1800, TRUE, $4::timestamptz - n * interval '1 minute'
+		FROM generate_series(1, $5) n`, userID, profileID, prefix, now.Add(-24*time.Hour), nextUpAnchorMaxSeries); err != nil {
+		t.Fatalf("seed finished progress: %v", err)
+	}
+
+	recentA, recentB, returning := prefix+"-recent-a", prefix+"-recent-b", prefix+"-returning"
+	for _, id := range []string{recentA, recentB, returning} {
+		seedNextUpSeries(t, ctx, pool, id, id)
+	}
+	episodes := []string{recentA + "-1", recentA + "-2", recentB + "-1", recentB + "-2", returning + "-1", returning + "-2"}
+	seedNextUpEpisodes(t, ctx, pool, episodes, []string{recentA, recentA, recentB, recentB, returning, returning}, []int{1, 2, 1, 2, 1, 2})
+	seedNextUpFiles(t, ctx, pool, folderID, episodes)
+	seedNextUpAvailability(t, ctx, pool, folderID, episodes[5], returning, 2, now.Add(-time.Hour), true)
+	seedNextUpCompleted(t, ctx, pool, userID, profileID, map[string]time.Time{
+		episodes[0]: now.Add(-2 * time.Hour),
+		episodes[2]: now.Add(-3 * time.Hour),
+		episodes[4]: now.Add(-400 * 24 * time.Hour),
+	})
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	all, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 3})
+	if err != nil {
+		t.Fatalf("ListNextUp limit 3: %v", err)
+	}
+	assertNextUpOrder(t, all, episodes[5], episodes[1], episodes[3])
+	first, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 1})
+	if err != nil {
+		t.Fatalf("ListNextUp limit 1: %v", err)
+	}
+	assertNextUpOrder(t, first, episodes[5])
+}
+
+func TestNextUpRepository_PagesPastRankedCandidatesKeepOneOrder(t *testing.T) {
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-pages-%d", time.Now().UnixNano())
+	userID, profileID, folderID := seedNextUpTestOwner(t, ctx, pool, prefix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM episode_availability WHERE library_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"-%")
+	})
+
+	// Two full walk batches of series with a next episode, plus one series
+	// finished before all of them whose next episode was just released. It
+	// sits outside the ranked candidates, so every page keeps it last.
+	total := 2*nextUpAnchorMaxSeries + 1
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, stmt := range []string{
+		`INSERT INTO media_items (content_id, type, title, status, genres)
+		 SELECT $1 || '-s' || n, 'series', 'Series ' || n, 'matched', '{}'::text[] FROM generate_series(1, $2) n`,
+		`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
+		 SELECT $1 || '-s' || n || '-e' || e, $1 || '-s' || n, 1, e, 'E' || e FROM generate_series(1, $2) n, generate_series(1, 2) e`,
+	} {
+		if _, err := pool.Exec(ctx, stmt, prefix, total); err != nil {
+			t.Fatalf("seed series: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_files (episode_id, media_folder_id, file_path, duration)
+		SELECT $1 || '-s' || n || '-e2', $3, '/nextup-pages/' || $1 || '/' || n || '.mkv', 1800
+		FROM generate_series(1, $2) n`, prefix, total, folderID); err != nil {
+		t.Fatalf("seed files: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+		SELECT $1, $2, $3 || '-s' || n || '-e1', 0, 1800, TRUE, $4::timestamptz - n * interval '1 minute'
+		FROM generate_series(1, $5) n`, userID, profileID, prefix, now.Add(-time.Hour), total); err != nil {
+		t.Fatalf("seed progress: %v", err)
+	}
+	oldest := fmt.Sprintf("%s-s%d", prefix, total)
+	seedNextUpAvailability(t, ctx, pool, folderID, oldest+"-e2", oldest, 2, now.Add(-time.Minute), true)
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	all, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: total + 23})
+	if err != nil {
+		t.Fatalf("ListNextUp all: %v", err)
+	}
+	if len(all) != total || all[total-1].SeriesID != oldest {
+		t.Fatalf("ListNextUp returned %d rows ending with %s, want %d ending with %s", len(all), all[len(all)-1].SeriesID, total, oldest)
+	}
+	for limit := 24; limit < total; limit += 24 {
+		page, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: limit})
+		if err != nil {
+			t.Fatalf("ListNextUp limit %d: %v", limit, err)
+		}
+		for i := range page {
+			if page[i].ContentID != all[i].ContentID {
+				t.Fatalf("limit %d row %d = %s, want %s", limit, i, page[i].ContentID, all[i].ContentID)
+			}
+		}
+	}
+}
+
+func TestSortNextUpByActivity_BreaksTiesByCompletionThenSeries(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	results := []NextUpResult{
+		{SeriesID: "c", ActivityAt: at, CompletedAt: at.Add(-2 * time.Hour)},
+		{SeriesID: "b", ActivityAt: at, CompletedAt: at.Add(-time.Hour)},
+		{SeriesID: "z", ActivityAt: at.Add(-time.Minute), CompletedAt: at.Add(-time.Minute)},
+		{SeriesID: "a", ActivityAt: at, CompletedAt: at.Add(-2 * time.Hour)},
+		{SeriesID: "y", ActivityAt: at.Add(time.Minute), CompletedAt: at.Add(-48 * time.Hour)},
+	}
+	sortNextUpByActivity(results)
+	got := make([]string, len(results))
+	for i, res := range results {
+		got[i] = res.SeriesID
+	}
+	if want := "y b a c z"; strings.Join(got, " ") != want {
+		t.Fatalf("order = %q, want %q", strings.Join(got, " "), want)
+	}
+}
+
+func TestNextUpReleaseScope(t *testing.T) {
+	t.Parallel()
+
+	five := 5
+	cases := []struct {
+		name     string
+		q        NextUpQuery
+		wantCond string
+		wantArgs []interface{}
+	}{
+		{"unrestricted", NextUpQuery{}, "", nil},
+		{"disabled", NextUpQuery{AccessFilter: AccessFilter{DisabledLibraryIDs: []int{3}}},
+			" AND NOT (ea.library_id = ANY($9::int[]))", []interface{}{[]int{3}}},
+		{"allowed", NextUpQuery{AccessFilter: AccessFilter{AllowedLibraryIDs: []int{1, 2}, DisabledLibraryIDs: []int{2}}},
+			" AND ea.library_id = ANY($9::int[])", []interface{}{[]int{1}}},
+		{"section library", NextUpQuery{LibraryID: &five}, " AND ea.library_id = ANY($9::int[])", []interface{}{[]int{5}}},
+		{"no reachable library", NextUpQuery{LibraryIDs: []int{4}, AccessFilter: AccessFilter{AllowedLibraryIDs: []int{1}}},
+			" AND ea.library_id = ANY($9::int[])", []interface{}{[]int{}}},
+	}
+	for _, tc := range cases {
+		cond, args := nextUpReleaseScope(tc.q, 9)
+		if cond != tc.wantCond || fmt.Sprint(args) != fmt.Sprint(tc.wantArgs) {
+			t.Errorf("%s: got %q %v, want %q %v", tc.name, cond, args, tc.wantCond, tc.wantArgs)
+		}
+	}
+}
+
+func seedNextUpFolder(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string) int {
+	t.Helper()
+
+	var folderID int
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO media_folders (type, name, enabled)
+		VALUES ('series', $1, TRUE)
+		RETURNING id
+	`, name).Scan(&folderID); err != nil {
+		t.Fatalf("seed media folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+	return folderID
+}
+
+// seedNextUpAvailability records when a season-1 episode became available in
+// the library and, when released, that the availability detector counted it
+// as a release.
+func seedNextUpAvailability(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	folderID int,
+	episodeID, seriesID string,
+	episodeNumber int,
+	availableAt time.Time,
+	released bool,
+) {
+	t.Helper()
+
+	var releasedAt *time.Time
+	if released {
+		releasedAt = &availableAt
+	}
+	// episode_key folds season and episode as notifications.EpisodeKey does.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO episode_availability
+			(library_id, episode_id, series_id, season_number, episode_number, episode_key, available_at, released_at)
+		VALUES ($1, $2, $3, 1, $4, 1000000 + $4, $5, $6)
+	`, folderID, episodeID, seriesID, episodeNumber, availableAt, releasedAt); err != nil {
+		t.Fatalf("seed episode availability: %v", err)
+	}
+}
+
+func seedNextUpCompleted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID int, profileID string, completedAt map[string]time.Time) {
+	t.Helper()
+
+	for episodeID, at := range completedAt {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+			VALUES ($1, $2, $3, 0, 1800, TRUE, $4)
+		`, userID, profileID, episodeID, at); err != nil {
+			t.Fatalf("seed completed progress: %v", err)
+		}
+	}
+}
+
+func assertNextUpOrder(t *testing.T, results []NextUpResult, want ...string) {
+	t.Helper()
+
+	got := make([]string, len(results))
+	for i, res := range results {
+		got[i] = res.ContentID
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("ListNextUp order = %v, want %v", got, want)
+	}
+}

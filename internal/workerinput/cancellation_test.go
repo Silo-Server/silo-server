@@ -17,7 +17,7 @@ type cancellationTransport func(*http.Request) (*http.Response, error)
 func (f cancellationTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type blockedSourceBody struct {
-	ctx     context.Context
+	ctx     context.Context //nolint:containedctx // Test body models the HTTP request lifetime so cancellation wakes a blocked Read.
 	started chan struct{}
 	closed  chan struct{}
 	once    sync.Once

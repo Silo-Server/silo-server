@@ -612,7 +612,7 @@ func TestResolverRoutesLocalMetadataSidecarsToTheirDirectory(t *testing.T) {
 	root := t.TempDir()
 	movie := filepath.Join(root, "Film (2020)")
 	repo := &fakeFolderRepo{folders: []*models.MediaFolder{
-		{ID: 3, Type: "movies", Enabled: true, Paths: []string{filepath.Join(root)}},
+		{ID: 3, Type: "movies", Enabled: true, Paths: []string{root}},
 	}}
 	resolver := NewResolver(repo)
 	for _, name := range []string{"movie.nfo", "poster.jpg", "Film (2020)-fanart.PNG", "clearlogo.webp"} {

@@ -92,6 +92,13 @@ type Report struct {
 	AmbiguousHistory []AmbiguousHistoryRow `json:"ambiguous_history,omitempty"`
 }
 
+// MovedUserState reports whether the run moved any watch progress, history
+// or item-level intent (favorites, watchlist, ratings, ...), the state a
+// profile's recommendations are built from. A nil report moved nothing.
+func (r *Report) MovedUserState() bool {
+	return r != nil && r.ProgressMoved+r.ProgressConflicts+r.HistoryMoved+r.IntentMoved > 0
+}
+
 // AmbiguousHistoryRow identifies one history row left behind for lack of
 // decisive evidence.
 type AmbiguousHistoryRow struct {
@@ -167,6 +174,7 @@ var intentTables = []struct {
 	{"user_favorites", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_watchlist", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_ratings", colMediaItemID, []string{colUserID, colProfileID}},
+	{"user_not_interested", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_personal_collection_items", colMediaItemID, []string{colUserID, "collection_id", "sub_item_id"}},
 	{"library_collection_items", colMediaItemID, []string{"collection_id"}},
 	{"user_home_item_dismissals", colMediaItemID, []string{colUserID, colProfileID, "surface"}},
@@ -174,6 +182,7 @@ var intentTables = []struct {
 	{"user_audio_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_subtitle_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_series_playback_preferences", colSeriesID, []string{colUserID, colProfileID}},
+	{"profile_series_notification_mutes", colSeriesID, []string{colUserID, colProfileID}},
 }
 
 // movePairs moves ALL state rows for each (from,to) pair: the whole-item path

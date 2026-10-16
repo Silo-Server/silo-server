@@ -25,7 +25,7 @@ export function pluginStatus(installation: PluginInstallation): PluginStatus {
   if (!installation.enabled) {
     return { ...indicator, textClass: "text-muted-foreground", attention: false, rank: 4 };
   }
-  if (installation.runtime.resident && installation.runtime.state === "failed") {
+  if (installation.runtime.state === "failed") {
     return { ...indicator, textClass: "text-destructive", attention: true, rank: 0 };
   }
   if (installation.runtime.resident && installation.runtime.state === "backoff") {

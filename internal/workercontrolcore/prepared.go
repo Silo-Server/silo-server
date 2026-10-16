@@ -64,10 +64,7 @@ func (s *Service) verifyPreparedResponse(ctx context.Context, a workerwire.Assig
 	// Only a receipt matching the opaque source/complete byte recipe may be
 	// translated back to the original core-only request's legacy fingerprint.
 	result.ExecutionFingerprint = original
-	encoded, err := json.Marshal(result)
-	if err != nil {
-		return err
-	}
+	encoded, _ := json.Marshal(result)
 	response.Body = io.NopCloser(bytes.NewReader(encoded))
 	response.ContentLength = int64(len(encoded))
 	response.TransferEncoding = nil

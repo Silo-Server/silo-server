@@ -133,7 +133,7 @@ func TestRenewUnavailableOpenDoesNotExtendOrDeleteGrant(t *testing.T) {
 		t.Fatalf("unavailable open: %v", err)
 	}
 	after, err := a.options.Store.Get(t.Context(), source.Grant)
-	if err != nil || after.ExpiresAt != before.ExpiresAt {
+	if err != nil || !after.ExpiresAt.Equal(before.ExpiresAt) {
 		t.Fatalf("unknown changed grant: %v", err)
 	}
 	if err = os.Rename(filepath.Dir(path)+".offline", filepath.Dir(path)); err != nil {

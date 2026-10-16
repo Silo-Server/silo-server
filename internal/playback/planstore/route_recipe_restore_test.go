@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
+//nolint:funlen // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestPostgresLiveRouteRestorationSerializesStop(t *testing.T) {
 	f := newPlanstoreFixture(t)
 	store := NewPostgres(f.pool)

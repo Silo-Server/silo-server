@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -67,7 +68,7 @@ func (f *stopFixture) prepareArtifact(ctx context.Context, label string, bitrate
 		return 0, err
 	}
 	if !ok {
-		return 0, fmt.Errorf("prepared admission missing")
+		return 0, errors.New("prepared admission missing")
 	}
 	return a.Generation, nil
 }

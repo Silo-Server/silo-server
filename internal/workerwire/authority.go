@@ -37,6 +37,7 @@ func NewLocalAuthority(nodeID int, bootID, nonce string, onRevoked func(string, 
 	return &LocalAuthority{nodeID: nodeID, bootID: bootID, nonce: nonce, active: map[string]uint64{}, onRevoked: onRevoked}, nil
 }
 
+//nolint:gocyclo // Validate the complete snapshot before atomically replacing authority; partial or mixed-epoch installation is forbidden.
 func (a *LocalAuthority) Apply(snapshot Snapshot, requestSent time.Time) error {
 	now := time.Now()
 	if requestSent.IsZero() || requestSent.After(now) || snapshot.ValidForMillis <= 0 {

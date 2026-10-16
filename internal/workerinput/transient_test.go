@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,7 +32,7 @@ func TestTransientIndexMustNotCloseSharedHandle(t *testing.T) {
 					start, end, _ = requestedRange(r.Header.Get("Range"), 10)
 					w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/10", start, end))
 				}
-				w.Header().Set("Content-Length", fmt.Sprint(end-start+1))
+				w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
 				if r.Header.Get("Range") != "" {
 					w.WriteHeader(206)
 				}
@@ -89,7 +90,7 @@ func TestTruncatedFFmpegBodyMustNotRetireHandle(t *testing.T) {
 			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/10", start, end))
 		}
 		w.Header().Set("ETag", `"r"`)
-		w.Header().Set("Content-Length", fmt.Sprint(end-start+1))
+		w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
 		w.WriteHeader(status)
 		if count.Add(1) == 1 {
 			_, _ = io.WriteString(w, "abc")

@@ -139,6 +139,7 @@ func (d *DurableCompatPlaybackStore) WithRemoteStart(ctx context.Context, work s
 	return run(context.WithValue(ctx, recipeOwnerKey{}, owner))
 }
 
+//nolint:nestif // The ownership branches distinguish a fresh lease, a reentrant owner and an expired owner without renewing authority.
 func checkRecipeWorkOwner(ctx context.Context, work string) error {
 	owner, _ := ctx.Value(recipeOwnerKey{}).(*recipeWorkOwner)
 	if owner != nil {

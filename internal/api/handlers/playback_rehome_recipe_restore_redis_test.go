@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -54,7 +53,7 @@ func recipeRestoreReadRedisCommand(r *bufio.Reader) ([]byte, []string, error) {
 		return nil, nil, err
 	}
 	if len(line) == 0 || line[0] != '*' {
-		return nil, nil, fmt.Errorf("expected RESP array")
+		return nil, nil, errors.New("expected RESP array")
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(line[1:]))
 	if err != nil {
@@ -68,7 +67,7 @@ func recipeRestoreReadRedisCommand(r *bufio.Reader) ([]byte, []string, error) {
 			return nil, nil, e
 		}
 		if len(head) == 0 || head[0] != '$' {
-			return nil, nil, fmt.Errorf("expected RESP bulk")
+			return nil, nil, errors.New("expected RESP bulk")
 		}
 		size, e := strconv.Atoi(strings.TrimSpace(head[1:]))
 		if e != nil {

@@ -2361,7 +2361,6 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		}
 	}
 	audioTrackIndex := 0
-	audioRestarted := false
 	// Jellyfin web/mobile clients send AudioStreamIndex on every progress
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
@@ -2384,13 +2383,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
 				audioTrackIndex = resolvedAudioTrackIndex
 			}
-			audioRestarted = restarted
 			slog.InfoContext(r.Context(), "jellycompat audio selection updated", "component", "jellycompat",
 				"play_session_id", playSession.ID,
 				"media_source_id", updatedSource.ID,
 				"audio_stream_index", selectedAudioStreamIndex,
 				"audio_track_index", audioTrackIndex,
-				"transcode_restarted", audioRestarted,
+				"transcode_restarted", restarted,
 			)
 		}
 	}
@@ -2455,7 +2453,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if refreshTasteProfile && playSession.ItemID != "" {
-		triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+		notifySignalsChanged(r.Context(), h.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	}
 	// ID-less players still supply a final resume sample on Stopped. Persist
 	// it above, but do not use an item/source match to tear down a play: a

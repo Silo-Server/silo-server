@@ -68,6 +68,45 @@ describe("probeWebCapabilities", () => {
     );
   });
 
+  // iOS Safari reports every HEVC configuration as not smooth, even a small
+  // SDR stream, while its hardware decoder (power efficient) plays them in real time.
+  it("accepts a hardware decoder where the browser reports no HEVC stream as smooth", async () => {
+    const decodingInfo = vi
+      .fn()
+      .mockResolvedValue({ supported: true, smooth: false, powerEfficient: true });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(true);
+    expect(decodingInfo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ video: expect.objectContaining({ width: 640, height: 360 }) }),
+    );
+  });
+
+  // Chromium derives smooth from frames dropped in earlier playback, so a
+  // hardware decoder that struggled at 4K is reported as not smooth there.
+  it("keeps a not-smooth answer from a browser that plays the small stream smoothly", async () => {
+    const decodingInfo = vi.fn().mockImplementation((configuration: MediaDecodingConfiguration) =>
+      Promise.resolve({
+        supported: true,
+        smooth: configuration.video?.width === 640,
+        powerEfficient: true,
+      }),
+    );
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
+  });
+
+  it("does not claim HDR10 for a decoder that is neither smooth nor power efficient", async () => {
+    const decodingInfo = vi
+      .fn()
+      .mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
+    expect(decodingInfo).toHaveBeenCalledTimes(1);
+  });
+
   // The strip remux delivers an hvc1-labeled file; support reported only for
   // hev1 is evidence for bytes Silo never sends and must not earn the claim.
   it("does not promote an hev1-only answer to an HDR10 claim", async () => {

@@ -102,10 +102,7 @@ func acceptedPublicationEvidence(work string, accepted *AcceptedPublication) ([]
 	if accepted.Started {
 		started = "1"
 	}
-	encoded, err := json.Marshal([]string{"silo:accepted-node-recipe:v1", accepted.Scope, work, accepted.ID, string(data), started})
-	if err != nil {
-		return nil, err
-	}
+	encoded, _ := json.Marshal([]string{"silo:accepted-node-recipe:v1", accepted.Scope, work, accepted.ID, string(data), started})
 	digest := sha256.Sum256(encoded)
 	return []any{"1", accepted.ID, accepted.Scope, string(data), started, hex.EncodeToString(digest[:])}, nil
 }
@@ -324,6 +321,7 @@ func (s *Store) publish(ctx context.Context, work string, card playback.RecipeCa
 	return s.publishWithAdmission(ctx, work, card, data, ttl, undo, publicationPrepareTTL, time.Time{}, "", accepted...)
 }
 
+//nolint:nestif // Reconciliation must keep candidate identity, undo ownership and acknowledgement outcomes in one ordered decision.
 func (s *Store) publishWithAdmission(ctx context.Context, work string, card playback.RecipeCard, data []byte, ttl time.Duration, undo bool, admission time.Duration, notAfter time.Time, generation string, accepted ...*AcceptedPublication) (*publication, error) {
 	version, err := publicationVersion()
 	if err != nil {

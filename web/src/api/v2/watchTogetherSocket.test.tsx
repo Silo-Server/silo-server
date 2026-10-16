@@ -184,6 +184,131 @@ it("gets a fresh ticket after socket close and preserves ping/message callbacks"
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(RoomSocket.all[1]!.protocols[1]).toBe(`silo.ticket.${"b".repeat(43)}`);
 });
+it("estimates the clock from the fastest pong, keeps it across a reconnect, and forgets it on leave", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket()),
+  );
+  const view = renderHook(
+    ({ roomId }) =>
+      useWatchTogetherRoomConnection({ roomId, roomToken: roomId ? "room-proof" : null }),
+    { initialProps: { roomId: "room" as string | null } },
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  const pings = (socket: RoomSocket) =>
+    socket.send.mock.calls
+      .map(([data]) => JSON.parse(data as string) as Record<string, string>)
+      .filter((message) => message.type === "ping");
+  // Answers the latest ping after `rttMs`, from a server clock `offsetMs` ahead.
+  const pong = async (socket: RoomSocket, rttMs: number, offsetMs: number) => {
+    const ping = pings(socket).at(-1)!;
+    await act(() => vi.advanceTimersByTimeAsync(rttMs));
+    const serverAt = new Date(Date.parse(ping.client_sent_at!) + rttMs / 2 + offsetMs);
+    act(() =>
+      socket.message({
+        type: "pong",
+        client_sent_at: ping.client_sent_at,
+        server_received_at: serverAt.toISOString(),
+        server_sent_at: serverAt.toISOString(),
+      }),
+    );
+  };
+
+  const first = RoomSocket.all[0]!;
+  act(() => first.open());
+  expect(pings(first)).toHaveLength(1);
+  await pong(first, 100, 500);
+  expect(view.result.current.serverTimeOffsetMs).toBe(500);
+  // Pings come every 2 s until this connection has four samples.
+  const fastSamples = [
+    [40, 520],
+    [300, 560],
+    [200, 470],
+  ] as const;
+  let previousRtt = 100;
+  for (const [index, [rtt, offset]] of fastSamples.entries()) {
+    await act(() => vi.advanceTimersByTimeAsync(2_000 - previousRtt));
+    expect(pings(first)).toHaveLength(index + 2);
+    await pong(first, rtt, offset);
+    previousRtt = rtt;
+  }
+  // The fastest round trip wins, not the latest.
+  expect(view.result.current.serverTimeOffsetMs).toBe(520);
+  await act(() => vi.advanceTimersByTimeAsync(14_000));
+  expect(pings(first)).toHaveLength(4);
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(pings(first)).toHaveLength(5);
+
+  // A reconnect to the same room keeps the samples it has.
+  act(() => first.close());
+  await act(() => vi.advanceTimersByTimeAsync(500));
+  const second = RoomSocket.all[1]!;
+  act(() => second.open());
+  expect(pings(second)).toHaveLength(1);
+  await pong(second, 1_000, 400);
+  expect(view.result.current.serverTimeOffsetMs).toBe(520);
+  // The new connection takes its own fast samples.
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(pings(second)).toHaveLength(2);
+
+  // Leaving forgets them: a slow sample in the next visit stands alone.
+  view.rerender({ roomId: null });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(view.result.current.serverTimeOffsetMs).toBe(0);
+  view.rerender({ roomId: "room" });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  const third = RoomSocket.all.at(-1)!;
+  act(() => third.open());
+  await pong(third, 1_000, 300);
+  expect(view.result.current.serverTimeOffsetMs).toBe(300);
+});
+it("returns to fast pings after a clock step", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket()),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  const socket = RoomSocket.all[0]!;
+  const pings = () =>
+    socket.send.mock.calls
+      .map(([data]) => JSON.parse(data as string) as Record<string, string>)
+      .filter((message) => message.type === "ping");
+  const pong = (offsetMs: number) => {
+    const ping = pings().at(-1)!;
+    const serverAt = new Date(Date.parse(ping.client_sent_at!) + offsetMs).toISOString();
+    act(() =>
+      socket.message({
+        type: "pong",
+        client_sent_at: ping.client_sent_at,
+        server_received_at: serverAt,
+        server_sent_at: serverAt,
+      }),
+    );
+  };
+  act(() => socket.open());
+  pong(500);
+  for (let i = 0; i < 3; i++) {
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    pong(500);
+  }
+  // Settled: the next ping is 15 s out.
+  await act(() => vi.advanceTimersByTimeAsync(14_999));
+  expect(pings()).toHaveLength(4);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(pings()).toHaveLength(5);
+  // The clock steps by two seconds; the estimate starts over at 2 s pings.
+  pong(2_500);
+  expect(view.result.current.serverTimeOffsetMs).toBe(2_500);
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  expect(pings()).toHaveLength(6);
+});
 it("drops a transport command with the socket that delivered it", async () => {
   vi.stubGlobal(
     "fetch",

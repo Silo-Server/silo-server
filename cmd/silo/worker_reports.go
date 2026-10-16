@@ -36,6 +36,7 @@ type workerReportSink struct {
 	publishers  map[int]*streamtelemetry.RedisStore
 }
 
+//nolint:funlen,gocyclo,nestif // Validate the report against its committed native or compatibility authority before publishing any state.
 func (s *workerReportSink) accept(ctx context.Context, nodeID int, raw json.RawMessage) error {
 	var batch workerwire.Report
 	if err := json.Unmarshal(raw, &batch); err != nil {

@@ -15,6 +15,8 @@ import (
 // The HTTP handler keeper independently exercises failover through this exact
 // store seam. This control composes its committed tuple with real PG replica
 // readers and real Redis report publication; it does not start an HTTP worker.
+//
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestWorkerReportAfterCommittedExecutorMove(t *testing.T) {
 	_, plans, _ := overlapPlanStores(t)
 	f := newReportFixture(t)

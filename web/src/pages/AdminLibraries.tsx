@@ -33,6 +33,7 @@ import {
   useCancelAdminJob,
   useConfirmEmptyRootCleanup,
   useUnmatchedLibraryItems,
+  useSetUnmatchedItemIgnored,
   UNMATCHED_PAGE_SIZE,
 } from "@/hooks/queries/admin/libraries";
 import { useAdminTrickplayLibraries } from "@/hooks/queries/admin/trickplay";
@@ -96,6 +97,8 @@ import {
   Unlink,
   Search,
   FolderOpen,
+  EyeOff,
+  Undo2,
 } from "lucide-react";
 import { legacyLibrariesAutoscanTarget } from "@/pages/autoscanSearchParams";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -2022,6 +2025,10 @@ function SkippedRootsSection() {
 
 /* ─── Unmatched Items ──────────────────────────────────────────── */
 
+// IGNORABLE_UNMATCHED_TYPES are the content types an admin can mark as
+// intentionally unmatched.
+const IGNORABLE_UNMATCHED_TYPES = new Set(["movie", "series"]);
+
 function UnmatchedItemsSection() {
   const [open, setOpen] = useState(false);
   const navigationVersion = useRef(0);
@@ -2034,12 +2041,23 @@ function UnmatchedItemsSection() {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
+  // "ignored" lists the items an admin marked as intentionally unmatched.
+  const [view, setView] = useState<"unmatched" | "ignored">("unmatched");
+  const ignoredView = view === "ignored";
   const [matchItem, setMatchItem] = useState<UnmatchedLibraryItem | null>(null);
+  const setIgnored = useSetUnmatchedItemIgnored();
   // The listing is an infinite query that retains each loaded page's cursor:
   // `page` indexes the loaded pages, Next fetches only when the next page is
   // not loaded yet, and a refetch refreshes the loaded pages in place.
-  const { data, hasNextPage, fetchNextPage, isFetching } =
-    useUnmatchedLibraryItems(debouncedSearch);
+  const { data, hasNextPage, fetchNextPage, isFetching } = useUnmatchedLibraryItems(
+    debouncedSearch,
+    ignoredView,
+  );
+  // Unfiltered totals of both views, for the header count and for hiding the
+  // section; each shares its cache entry with the listing while no search
+  // is active.
+  const awaitingTotal = useUnmatchedLibraryItems("", false).data?.pages[0]?.total;
+  const ignoredTotal = useUnmatchedLibraryItems("", true).data?.pages[0]?.total;
   const loadedPages = data?.pages ?? [];
   const total = loadedPages[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / UNMATCHED_PAGE_SIZE));
@@ -2071,34 +2089,67 @@ function UnmatchedItemsSection() {
     })();
   };
 
-  // Hide the section only when there are genuinely no unmatched items and no
-  // active search — keep it mounted while searching so the box and the
-  // "no matches" state stay visible even when a query returns nothing.
-  if (total === 0 && page === 0 && search.trim() === "") return null;
+  // Hide the section only while it is closed and nothing is unmatched or
+  // ignored. Once open it stays mounted, so the search box and the empty
+  // states stay put while a search or an Ignore refetches the listings.
+  if (!open && !awaitingTotal && !ignoredTotal && search.trim() === "") return null;
+
+  const emptyMessage = ignoredView
+    ? search.trim()
+      ? "No ignored items match your search."
+      : "No items are ignored."
+    : search.trim()
+      ? "No unmatched items match your search."
+      : "No items are awaiting a match.";
 
   return (
     <CollapsibleDiagnosticsSection
       title="Unmatched Items"
       description="Items that could not be matched to any metadata provider."
-      count={total}
+      count={awaitingTotal}
       icon={<Search className="h-4 w-4 text-amber-500" />}
       open={open}
       onOpenChange={setOpen}
     >
-      <div className="relative mb-2">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
-        <Input
-          placeholder="Search all unmatched items by title, library, or type..."
-          value={search}
-          onChange={(e) => {
-            // Search is server-side and spans the whole table; jump back to
-            // the first page so results start at the top as the query changes.
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row">
+        <Select
+          value={view}
+          onValueChange={(value) => {
             navigationVersion.current++;
-            setSearch(e.target.value);
+            setView(value === "ignored" ? "ignored" : "unmatched");
             setPage(0);
           }}
-          className="h-8 pl-8 text-xs"
-        />
+        >
+          <SelectTrigger
+            aria-label="Unmatched item view"
+            className="h-8 w-full text-xs sm:w-[180px]"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="unmatched">Awaiting a match</SelectItem>
+            <SelectItem value="ignored">Ignored</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="relative flex-1">
+          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+          <Input
+            placeholder={
+              ignoredView
+                ? "Search ignored items by title, library, or type..."
+                : "Search all unmatched items by title, library, or type..."
+            }
+            value={search}
+            onChange={(e) => {
+              // Search is server-side and spans the whole table; jump back to
+              // the first page so results start at the top as the query changes.
+              navigationVersion.current++;
+              setSearch(e.target.value);
+              setPage(0);
+            }}
+            className="h-8 pl-8 text-xs"
+          />
+        </div>
       </div>
       <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
         <Table>
@@ -2108,14 +2159,14 @@ function UnmatchedItemsSection() {
               <TableHead>Library</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="w-[100px]">Actions</TableHead>
+              <TableHead className="w-[190px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
-                  No unmatched items match your search.
+                  {emptyMessage}
                 </TableCell>
               </TableRow>
             ) : (
@@ -2140,15 +2191,48 @@ function UnmatchedItemsSection() {
                     <Badge variant="secondary">{u.status}</Badge>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 gap-1 text-xs"
-                      onClick={() => setMatchItem(u)}
-                    >
-                      <Search className="h-3 w-3" />
-                      Match
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 text-xs"
+                        onClick={() => setMatchItem(u)}
+                      >
+                        <Search className="h-3 w-3" />
+                        Match
+                      </Button>
+                      {/* Books keep their own enrichment, so only a movie or series can be ignored. */}
+                      {ignoredView || IGNORABLE_UNMATCHED_TYPES.has(u.content_type) ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          disabled={
+                            setIgnored.isPending && setIgnored.variables?.contentId === u.content_id
+                          }
+                          aria-label={`${ignoredView ? "Restore" : "Ignore"} ${u.title}`}
+                          title={
+                            ignoredView
+                              ? "Put this item back on the unmatched list so Silo tries to match it again"
+                              : "Mark this item as intentionally unmatched: Silo stops trying to match it and moves it to the Ignored view"
+                          }
+                          onClick={() =>
+                            setIgnored.mutate({
+                              contentId: u.content_id,
+                              title: u.title,
+                              ignored: !ignoredView,
+                            })
+                          }
+                        >
+                          {ignoredView ? (
+                            <Undo2 className="h-3 w-3" />
+                          ) : (
+                            <EyeOff className="h-3 w-3" />
+                          )}
+                          {ignoredView ? "Restore" : "Ignore"}
+                        </Button>
+                      ) : null}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

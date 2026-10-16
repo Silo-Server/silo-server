@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
 )
 
+//nolint:containedctx // Retains one cancellable admission lease across asynchronous start and compensation boundaries.
 type admission struct {
 	ctx        context.Context
 	until      time.Time

@@ -118,9 +118,9 @@ func TestProofExpiryReplayCapacityAndConcurrentReplay(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			copy := r.Clone(r.Context())
-			copy.Body = io.NopCloser(bytes.NewReader(payload))
-			if v.Verify(copy, 17) == nil {
+			request := r.Clone(r.Context())
+			request.Body = io.NopCloser(bytes.NewReader(payload))
+			if v.Verify(request, 17) == nil {
 				accepted.Add(1)
 			}
 		}()

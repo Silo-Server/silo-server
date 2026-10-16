@@ -175,6 +175,7 @@ func (s *sourceRenewals) loop() {
 	}
 }
 
+//nolint:nestif // Transient renewal retries preserve the exact source lease; definitive failures revoke it without replacing another entry.
 func (s *sourceRenewals) renewDue(ctx context.Context, now time.Time) {
 	s.mu.Lock()
 	entries := make([]*sourceRenewal, 0, len(s.entries))

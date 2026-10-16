@@ -26,6 +26,7 @@ func waitRecipeCondition(t *testing.T, why string, ready func() bool) {
 		if time.Now().After(deadline) {
 			t.Fatal(why)
 		}
+		//nolint:forbidigo // The test polls an externally owned lease or publication state; the delay yields between bounded observations.
 		time.Sleep(time.Millisecond)
 	}
 }
@@ -290,6 +291,7 @@ func TestRecipeRemoteOwnershipContextCannotRenewExpiredOrDifferentWork(t *testin
 	state := NewPlaybackSessionStore(time.Hour, nil)
 	var owned context.Context
 	if err := state.WithRemoteStart(t.Context(), "scope-A", func(ctx context.Context) error {
+		//nolint:fatcontext // Retain ownership to verify that it cannot renew an expired or different-work lease.
 		owned = ctx
 		if err := state.WithRemoteStart(ctx, "scope-B", func(context.Context) error { t.Error("different work inherited ownership"); return nil }); !recipePublicationUncertain(err) {
 			t.Fatal("different-work context renewed ownership", err)

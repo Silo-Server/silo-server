@@ -21,15 +21,20 @@ func NewInterestRepository(pool *pgxpool.Pool) *InterestRepository {
 
 // ListActiveBySeries loads candidate recipients for one (library, series).
 // This is the hot fanout query; it uses the partial active-interest index.
+// Profiles that muted the series are left out in the same query, so a mute
+// costs fanout no per-recipient read.
 func (r *InterestRepository) ListActiveBySeries(ctx context.Context, tx pgx.Tx, libraryID int, seriesID string) ([]SeriesInterest, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT user_id, profile_id, library_id, series_id,
-		       favorite, watchlist, continue_watching, next_up_candidate,
-		       last_completed_episode_key, next_expected_episode_key, last_notified_episode_key,
-		       updated_at
-		FROM profile_series_interest
-		WHERE library_id = $1 AND series_id = $2
-		  AND (favorite OR watchlist OR continue_watching OR next_up_candidate)`,
+		SELECT psi.user_id, psi.profile_id, psi.library_id, psi.series_id,
+		       psi.favorite, psi.watchlist, psi.continue_watching, psi.next_up_candidate,
+		       psi.last_completed_episode_key, psi.next_expected_episode_key, psi.last_notified_episode_key,
+		       psi.updated_at
+		FROM profile_series_interest psi
+		WHERE psi.library_id = $1 AND psi.series_id = $2
+		  AND (psi.favorite OR psi.watchlist OR psi.continue_watching OR psi.next_up_candidate)
+		  AND NOT EXISTS (
+			SELECT 1 FROM profile_series_notification_mutes m
+			WHERE m.series_id = psi.series_id AND m.user_id = psi.user_id AND m.profile_id = psi.profile_id)`,
 		libraryID, seriesID)
 	if err != nil {
 		return nil, fmt.Errorf("list series interest: %w", err)

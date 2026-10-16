@@ -170,6 +170,7 @@ function SeasonEpisodeCard({
           showCollectionActions={false}
           showWatchedShortcut
           hasPartialProgress={hasPartialProgress}
+          hasResumePosition={(episode.user_data?.position_seconds ?? 0) > 0}
           quickActionMode={quickActionMode}
           longPressRef={cardRef}
           itemTitle={episodeTitle}

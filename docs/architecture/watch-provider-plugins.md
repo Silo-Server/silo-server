@@ -1,11 +1,12 @@
 # Watch provider plugins
 
-Every watch provider is a `watch_sync_provider.v1` plugin. Trakt, Simkl, and
-MDBList used to be compiled into the server. They now ship as first-party
-plugins (`silo.watchprovider.trakt`, `silo.watchprovider.simkl`,
-`silo.watchprovider.mdblist`) from the Silo plugin repository. The host side of
-the contract lives in `internal/watchsync/plugin_provider*.go`, and the
-first-party rules described here live in `internal/watchsync/first_party.go`.
+Every watch provider is a `watch_sync_provider.v1` plugin. Simkl and MDBList
+used to be compiled into the server. They now ship as first-party plugins
+(`silo.watchprovider.simkl`, `silo.watchprovider.mdblist`) from the Silo plugin
+repository. Trakt took the same path and was later retired (see
+[Retired providers](#retired-providers)). The host side of the contract lives in
+`internal/watchsync/plugin_provider*.go`, and the first-party rules described
+here live in `internal/watchsync/first_party.go`.
 
 ## Provider keys
 
@@ -19,8 +20,8 @@ The registry key names a provider everywhere it is stored:
 A plugin capability is normally keyed `plugin:<installation id>:<capability id>`.
 That key is unique and cannot be claimed by a plugin.
 
-The three first-party plugins keep the keys of the built-ins they replaced:
-`trakt`, `simkl`, and `mdblist`. As a result, every connection, stored token,
+The first-party plugins keep the keys of the built-ins they replaced: `simkl`
+and `mdblist`. As a result, every connection, stored token,
 export record, rating and dropped-show agreement, and history source those
 built-ins wrote stays valid, and nothing is re-encrypted or renamed. Three rules
 protect this:
@@ -28,8 +29,8 @@ protect this:
 - **Only a Silo-managed repository can claim a legacy key.** A plugin gets one
   only when its installation came from a repository whose `source_kind` is
   `silo`. Plugin IDs are not reserved, so a third-party plugin that reuses
-  `silo.watchprovider.trakt` gets a per-installation key. It never receives
-  the tokens of existing Trakt connections. Replacing an installation records
+  `silo.watchprovider.simkl` gets a per-installation key. It never receives
+  the tokens of existing Simkl connections. Replacing an installation records
   the new package's repository, and none for an upload, so a package from
   elsewhere installed over a Silo one loses the key too.
 - **One installation holds a legacy key.** If two Silo-managed installations of
@@ -50,7 +51,7 @@ next to the dedicated token columns. A row a built-in wrote has only the
 columns. Reading it falls back to them, and the next token write adds the
 bundle.
 
-Provider app credentials, such as the Trakt and Simkl client ID and secret,
+Provider app credentials, such as the Simkl client ID and secret,
 live in the plugin's global config entry `app`. On reload, the host copies the
 legacy `watchsync.<key>.client_id` and `client_secret` server settings into that
 entry when the plugin has none saved. Existing tokens were issued to that app,
@@ -63,9 +64,20 @@ A plugin connection reports `credentials_configured` as false until every
 global config entry its manifest marks required has a saved value, as the
 built-ins did for their app credentials.
 
-Trakt collections and trending send profile tokens issued to the Trakt app, so
-they read the client ID from the Trakt plugin. They fall back to the legacy
-setting only when no Trakt plugin is configured.
+## Retired providers
+
+Silo no longer supports Trakt. `RetiredPlugin` lists `silo.watchprovider.trakt`,
+and the host never registers an installation of it, from any repository, so a
+copy left installed cannot sync, scrobble, or claim a key. The `trakt` key is no
+longer a first-party key: no plugin can claim it, and no auto-install follows
+from old connections. Migration `20261016134645_retire_trakt_watch_sync` deleted the
+`trakt` connections with their per-connection rows, the legacy
+`watchsync.trakt.*` settings and migration markers, and disabled any installed
+copy. Watch history imported under the `trakt` source stays.
+
+Only that plugin ID is retired. A community Trakt plugin with its own plugin ID
+registers like any other third-party plugin, under a per-installation key; it
+starts with no connections, since the old ones were deleted.
 
 ## Connection settings
 
@@ -105,7 +117,7 @@ Several items with one key follow these rules:
   listing after the removal. An undated listing never counts as newer.
 - A full import counts every IMDb, TMDB, and TVDB id on a provider row as
   present for that row's kind, since a plugin's key can use a different id than
-  the one stored at export (Trakt keys shows by TVDB id first). A row or stored
+  the one stored at export (a provider may key shows by TVDB id first). A row or stored
   item without a kind matches any kind.
 - A remote tombstone removes every row with its key, and with its kind when it
   names one. Plugin tombstones carry only the key, so one whose rows name more

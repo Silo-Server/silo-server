@@ -50,6 +50,7 @@ func workerCoreOrigin(publicURL string) (string, bool, error) {
 	return origin, allowHTTP, err
 }
 
+//nolint:funlen,gocyclo // The composition root wires one shared worker-authority lifecycle and its teardown in order.
 func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, rdb *redis.Client, cfg *config.Config, contentAuthority *workerContentAuthority, live ...func() *config.Config) (http.Handler, error) {
 	liveConfig := func() *config.Config { return cfg }
 	if len(live) > 0 && live[0] != nil {

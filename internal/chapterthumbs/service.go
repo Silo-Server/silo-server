@@ -993,7 +993,7 @@ func (s *Service) enqueue(req ChapterThumbnailRequest, priority bool) bool {
 
 	s.mu.Lock()
 	enqueued := false
-	action := ""
+	var action string
 
 	if priority {
 		if existing, ok := s.queuedPriority[req.FileID]; ok {

@@ -276,6 +276,7 @@ type TranscodeSession struct {
 	// workerExecutionContext retains local probe configuration and admission
 	// for bounded probes of generated fragments. It follows the producer's
 	// lifetime and is replaced together with each successful restart.
+	//nolint:containedctx // The admitted execution lifetime spans FFmpeg generations; its cancellation and source authority must survive a request.
 	workerExecutionContext context.Context
 }
 
@@ -468,6 +469,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		copyPlan:             copyPlan,
 	}
 	if workerinput.IsStandalone(ctx) {
+		//nolint:fatcontext // The admitted execution lifetime spans FFmpeg generations; its cancellation and source authority must survive a request.
 		s.workerExecutionContext = ctx
 	}
 
@@ -2203,7 +2205,7 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 		if err == nil {
 			return manifest, nil
 		}
-		if err != nil && err != ErrManifestNotReady {
+		if !errors.Is(err, ErrManifestNotReady) {
 			return nil, err
 		}
 
@@ -3396,6 +3398,7 @@ func (s *TranscodeSession) restart(
 	s.cancel = cancel
 	s.opts = opts
 	if workerinput.IsStandalone(ctx) {
+		//nolint:fatcontext // The admitted execution lifetime spans FFmpeg generations; its cancellation and source authority must survive a request.
 		s.workerExecutionContext = ctx
 	}
 	s.running = true

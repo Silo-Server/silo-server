@@ -71,6 +71,8 @@ func (s *coldJobRecipes) RevokeNode(_ context.Context, _ string) error { return 
 // reconstruction path while a different transport of that playback holds the
 // operator's only slot. The executable only implements stdin lifetime; it does
 // not encode media or use a GPU.
+//
+//nolint:funlen,gocyclo // One process-lifetime scenario correlates cold reconstruction, signed playback identity, replacement, and exact producer cleanup.
 func TestColdOutputReconstructionRetainsSignedPlaybackJob(t *testing.T) {
 	corePublic, corePrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -191,6 +193,8 @@ func TestColdOutputReconstructionRetainsSignedPlaybackJob(t *testing.T) {
 	producer := func(work string) int {
 		t.Helper()
 		deadline := time.Now().Add(time.Second)
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
 		for time.Now().Before(deadline) {
 			paths, err := filepath.Glob(filepath.Join(runtime.options.Scratch, work+"*", "producer.pid"))
 			if err != nil {
@@ -206,7 +210,7 @@ func TestColdOutputReconstructionRetainsSignedPlaybackJob(t *testing.T) {
 					return pid
 				}
 			}
-			time.Sleep(time.Millisecond)
+			<-ticker.C
 		}
 		t.Fatal("producer did not become live")
 		return 0

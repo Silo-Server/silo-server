@@ -431,7 +431,8 @@ func TestPrepareTransportV3RemoteCommitDropsThePreviousTransportRecipe(t *testin
 	}
 }
 
-// A stopped session's node job is gone, so its stored recipe must be too.
+// A stopped session's node job is gone, so its stored recipe must be too, and a
+// stopped session is over, so its API recovery card goes with it.
 func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	const transportID = "session-node-stop-plan0001-aaaabbbb"
@@ -445,6 +446,10 @@ func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 		transportID: {SessionID: "session-node-stop", TranscodeTransportID: transportID},
 	}}
 	handler.NodeRecipeStore = recipes
+	sessionRecipes := &recordingRecipeCardStoreV3{cards: map[string]playback.RecipeCard{
+		"session-node-stop": {SessionID: "session-node-stop", TranscodeTransportID: transportID, RequireMediaAuthorization: true},
+	}}
+	handler.SessionRecipeStore = sessionRecipes
 	session := &playback.Session{
 		ID: "session-node-stop", UserID: 7, ProfileID: "profile-1",
 		TranscodeNodeURL: node.URL, TranscodeTransportID: transportID,
@@ -463,6 +468,9 @@ func TestFinalizeSessionStopDropsTheNodeRecipe(t *testing.T) {
 
 	if len(recipes.deleted) != 1 || recipes.deleted[0] != transportID {
 		t.Fatalf("recipes deleted on stop = %v, want the session's transport recipe dropped", recipes.deleted)
+	}
+	if len(sessionRecipes.deleted) != 1 || sessionRecipes.deleted[0] != "session-node-stop" {
+		t.Fatalf("session recipes deleted on stop = %v, want the session's recovery card dropped", sessionRecipes.deleted)
 	}
 }
 

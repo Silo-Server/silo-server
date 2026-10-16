@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"reflect"
 	"strings"
@@ -23,8 +24,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
-type authorityFinder interface {
-	Find(context.Context, int, string) (OutputAuthorityRecord, bool, error)
+func TestOutputAuthorityLookupKeyRejectsUnencodableClaims(t *testing.T) {
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		claims := streamtoken.Claims{SeekSeconds: value}
+		if key := OutputAuthorityLookupKey(claims, 9, "artifact", 1, "epoch"); key != "" {
+			t.Fatalf("unencodable claims produced a reusable lookup key: %q", key)
+		}
+	}
 }
 
 func TestOutputAuthorityLookupKeyBindsFullClaimsAndAssignment(t *testing.T) {
@@ -266,7 +272,7 @@ func TestIssueOutputGrantPublishesVerifiedLookupIdentity(t *testing.T) {
 	}
 	registry := NewMemoryOutputAuthorities()
 	claims := streamtoken.Claims{OriginCredential: streamtoken.OriginCredential{OriginLoginSessionID: "login"}, DownloadArtifactID: a.WorkID, DownloadArtifactRowID: "row", DownloadExecutionFingerprint: "original", TranscodeNode: node.URL, RoutingExecutionNodeID: 7, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}
-	service, err := New(Options{Origin: "https://core.example.test", PrivateKey: private, Nodes: testNodes{[]Node{node}}, Store: store, OutputAuthorities: registry, VerifyToken: func(context.Context, string) (*streamtoken.Claims, error) { copy := claims; return &copy, nil }})
+	service, err := New(Options{Origin: "https://core.example.test", PrivateKey: private, Nodes: testNodes{[]Node{node}}, Store: store, OutputAuthorities: registry, VerifyToken: func(context.Context, string) (*streamtoken.Claims, error) { snapshot := claims; return &snapshot, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,19 +314,19 @@ func TestRedisOutputAuthorityLookupMissesAndCorruptionFailClosed(t *testing.T) {
 			case "missing-expiry":
 				err = client.Del(t.Context(), keys[1]).Err()
 			default:
-				copy := r
+				snapshot := r
 				switch name {
 				case "legacy-record":
-					copy.LookupKey = ""
+					snapshot.LookupKey = ""
 					wantMiss = true
 				case "wrong-record-id":
-					copy.ID = strings.Repeat("0", 64)
+					snapshot.ID = strings.Repeat("0", 64)
 				case "wrong-lookup-key":
-					copy.LookupKey = strings.Repeat("b", 64)
+					snapshot.LookupKey = strings.Repeat("b", 64)
 				case "wrong-node":
-					copy.NodeID++
+					snapshot.NodeID++
 				}
-				encoded, _ := json.Marshal(copy)
+				encoded, _ := json.Marshal(snapshot)
 				if name == "malformed-json" {
 					encoded = []byte("!")
 				}
@@ -425,7 +431,7 @@ func TestOutputAuthorityLookupQuotaAndPrunePreserveSuccessor(t *testing.T) {
 
 func TestOutputAuthorityLookupUsesExactPrivateRecord(t *testing.T) {
 	registry := NewMemoryOutputAuthorities()
-	finder, ok := any(registry).(authorityFinder)
+	finder, ok := any(registry).(OutputAuthorityFinder)
 	if !ok {
 		t.Fatal("bounded output authorities cannot perform a targeted lookup")
 	}

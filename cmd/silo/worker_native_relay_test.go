@@ -38,6 +38,7 @@ func (n outputRelayNodes) ByURL(_ context.Context, origin string) (workercontrol
 	return n.node, origin == n.node.URL, nil
 }
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestWorkerNativeRelayCannotBorrowCoreAuthorityAfterOriginLogout(t *testing.T) {
 	for _, headerAuth := range []bool{false, true} {
 		t.Run(fmt.Sprintf("header_auth_%v", headerAuth), func(t *testing.T) {
@@ -164,6 +165,7 @@ func TestWorkerNativeRelayCannotBorrowCoreAuthorityAfterOriginLogout(t *testing.
 					t.Fatalf("positive %s: %d %s", id, rr.Code, rr.Body.String())
 				}
 			}
+			//nolint:forbidigo // Cross the cached authorization lifetime before checking that the revoked login is denied.
 			time.Sleep(1100 * time.Millisecond)
 			if rr := read("play-A"); rr.Code != 200 {
 				t.Fatalf("warm read failed: %d", rr.Code)

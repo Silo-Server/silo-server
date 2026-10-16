@@ -31,7 +31,7 @@ func TestManagementPagingDB(t *testing.T) {
 		if err := pool.QueryRow(ctx, "INSERT INTO users(username,role) VALUES($1,'user') RETURNING id", "webhook-page-"+uuid.NewString()).Scan(target); err != nil {
 			t.Fatal(err)
 		}
-		defer func(id int) { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id=$1", id) }(*target)
+		defer func(id int) { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id=$1", id) }(*target) //nolint:gocritic,revive // each fixture user is removed when the test returns
 	}
 	cipher, err := secret.New([]byte("test-management-key-with-enough-entropy-for-cipher"))
 	if err != nil {

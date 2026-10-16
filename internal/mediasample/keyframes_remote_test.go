@@ -25,6 +25,7 @@ import (
 )
 
 type signedKeyframeInput struct {
+	//nolint:containedctx // This admitted-reader fixture retains the owning context so reads observe cancellation.
 	ctx       context.Context
 	handle    *workerinput.Handle
 	adapter   *workerinput.Adapter
@@ -99,6 +100,7 @@ func newSignedKeyframeInput(t *testing.T, path string) *signedKeyframeInput {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = f.adapter.Close() })
+	//nolint:fatcontext // This admitted-reader fixture retains the owning context so reads observe cancellation.
 	f.ctx = workerinput.WithContext(t.Context(), f.adapter)
 	f.handle = f.open(t)
 	return f

@@ -42,7 +42,7 @@ type readerPage struct {
 // the adapter's existing reader admission with FFmpeg.
 type RangeReader struct {
 	handle              *Handle
-	ctx                 context.Context
+	ctx                 context.Context //nolint:containedctx // Reader owns its bounded indexing lifetime and cancels it on Close.
 	cancel              context.CancelFunc
 	stop                func() bool
 	limits              ReaderLimits

@@ -72,7 +72,10 @@ func openPin(path string) (*os.File, FileIdentity, error) {
 }
 
 func validatePin(f *os.File, path string, pin FileIdentity) error {
-	for _, get := range []func() (os.FileInfo, error){f.Stat, func() (os.FileInfo, error) { return os.Stat(path) }} {
+	for _, get := range []func() (os.FileInfo, error){
+		f.Stat,
+		func() (os.FileInfo, error) { return os.Stat(path) }, //nolint:gosec // Re-stat the approved catalog path to fence replacement of its pinned regular-file identity.
+	} {
 		info, err := get()
 		if err != nil {
 			return ErrUnavailable

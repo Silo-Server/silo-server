@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -141,7 +140,7 @@ func (f *stopFixture) startBeforeReport(t *testing.T, previousPID int) (uint64, 
 }
 func TestDelayedTrackerCannotResurrectStoppedOrOverwriteNewGeneration(t *testing.T) {
 	for _, successor := range []bool{false, true} {
-		t.Run(fmt.Sprint(successor), func(t *testing.T) {
+		t.Run(strconv.FormatBool(successor), func(t *testing.T) {
 			f := newStopFixture(t)
 			tracker := installDelayedTracker(t, f)
 			release := sync.OnceFunc(func() { close(tracker.release) })
@@ -197,9 +196,10 @@ func TestDelayedTrackerCannotResurrectStoppedOrOverwriteNewGeneration(t *testing
 	}
 }
 
+//nolint:nestif // The delayed retirement must cross reconstruction on the same generation without erasing its successor tracker.
 func TestDelayedTrackerRetirementPreservesSameGenerationReconstruction(t *testing.T) {
 	for _, reconstruct := range []bool{false, true} {
-		t.Run(fmt.Sprint(reconstruct), func(t *testing.T) {
+		t.Run(strconv.FormatBool(reconstruct), func(t *testing.T) {
 			f := newStopFixture(t)
 			tracker := installDelayedTracker(t, f)
 			release := sync.OnceFunc(func() { close(tracker.release) })

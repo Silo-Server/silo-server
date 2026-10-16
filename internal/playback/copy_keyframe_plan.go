@@ -144,6 +144,7 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 	return plan
 }
 
+//nolint:nestif // Standalone source denial must never fall through to the local-path compatibility branch.
 func resolveCopyPlanResult(ctx context.Context, opts TranscodeOpts, load copyKeyframeIndexLoader) (*copySegmentPlan, error) {
 	var sourceIdentity string
 	var handle *workerinput.Handle

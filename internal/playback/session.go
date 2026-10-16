@@ -53,9 +53,9 @@ type Session struct {
 	IsJellyfinCompat              bool   // immutable origin identity for Jellyfin compatibility sessions
 	// RequireMediaAuthorization distinguishes v3 transports whose session ID is
 	// only a route identifier from legacy HLS transports where that UUID also
-	// acts as the bearer capability. It is live-session state by design: secure
-	// transports carry no reconstruction token and start a fresh attempt after
-	// an API restart.
+	// acts as the bearer capability. Secure transports carry no reconstruction
+	// token; a session rebuilt from the API's server-side recovery card gets the
+	// flag back from that card (RecipeCard.RequireMediaAuthorization).
 	RequireMediaAuthorization bool
 
 	TranscodeNodeURL     string // URL of assigned transcode node (empty = local/integrated)

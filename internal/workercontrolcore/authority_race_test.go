@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -177,7 +178,7 @@ func TestAuthorityRevalidationFencesChangesAfterStoreLookup(t *testing.T) {
 
 func TestAuthorityRepeatedInvalidationIsBoundedAndCancelable(t *testing.T) {
 	for _, cancelDuringRetry := range []bool{false, true} {
-		t.Run(fmt.Sprint(cancelDuringRetry), func(t *testing.T) {
+		t.Run(strconv.FormatBool(cancelDuringRetry), func(t *testing.T) {
 			service, store, node := authorityTestService(t)
 			a := activateAuthorityWork(t, store, "changing")
 			ctx, cancel := context.WithCancel(t.Context())

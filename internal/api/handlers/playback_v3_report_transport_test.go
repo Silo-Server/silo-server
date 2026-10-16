@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
+//nolint:funlen // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestPlaybackV3PersistsCurrentReportTransport(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	file.Container = "mkv"

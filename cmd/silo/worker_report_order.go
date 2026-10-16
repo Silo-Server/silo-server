@@ -85,13 +85,10 @@ func lockWorkerReport(ctx context.Context, rdb *redis.Client, node int, batch wo
 		cursor.Retired[cursor.BootID] = now + 120
 	}
 	cursor.BootID, cursor.Sequence = batch.BootID, batch.Sequence
-	encoded, err := json.Marshal(cursor)
-	if err == nil {
-		var accepted int
-		accepted, err = setWorkerReportCursor.Run(ctx, rdb, []string{lock, key}, owner, encoded).Int()
-		if err == nil && accepted != 1 {
-			err = errors.New("worker report lease replaced")
-		}
+	encoded, _ := json.Marshal(cursor)
+	accepted, err := setWorkerReportCursor.Run(ctx, rdb, []string{lock, key}, owner, encoded).Int()
+	if err == nil && accepted != 1 {
+		err = errors.New("worker report lease replaced")
 	}
 	if err != nil {
 		release()

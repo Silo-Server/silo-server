@@ -216,6 +216,7 @@ func TestRedisLateStopKeepsSuccessorAdmissionRenewing(t *testing.T) {
 	}
 }
 
+//nolint:funlen // The delayed stop and successor publication must race on the same Redis recipe and ownership fence.
 func TestRedisLateCoreStopPreservesSuccessorRecipePublication(t *testing.T) {
 	endpoint := os.Getenv("SILO_TEST_REDIS_URL")
 	if endpoint == "" {

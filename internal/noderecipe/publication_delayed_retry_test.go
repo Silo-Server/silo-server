@@ -55,6 +55,7 @@ func publicationReadCommand(r *bufio.Reader) ([]byte, []string, error) {
 	return raw, args, nil
 }
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestRedisPublicationDelayedRetriesCannotRepublishRejectedCandidate(t *testing.T) {
 	_, direct, work := publicationTestStore(t)
 	for _, script := range []*redis.Script{prepareRecipePublicationScript, publishRecipeScript, retireRecipePublicationScript} {

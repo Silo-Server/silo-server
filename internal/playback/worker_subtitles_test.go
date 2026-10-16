@@ -67,6 +67,7 @@ func registeredSubtitleSource(t *testing.T, path, scratch string) (context.Conte
 	return ctx, handle.URL(), &reads
 }
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestWorkerASSBurnInStylesFontsAndSeekMatchLocal(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,65 +29,9 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		sourceError(w, r, 405)
 		return
 	}
-	if !strings.HasPrefix(r.URL.Path, a.routePrefix) || r.URL.RawQuery != "" || r.ContentLength > 0 || len(r.TransferEncoding) > 0 {
-		sourceError(w, r, 404)
-		return
-	}
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, a.routePrefix), "/")
-	if len(parts) != 3 || parts[1] != "sources" {
-		sourceError(w, r, 404)
-		return
-	}
-	node, err := strconv.Atoi(parts[0])
-	if err != nil || node < 1 || strconv.Itoa(node) != parts[0] {
-		sourceError(w, r, 404)
-		return
-	}
-	parsed, err := uuid.Parse(parts[2])
-	if err != nil || parsed.String() != parts[2] {
-		sourceError(w, r, 404)
-		return
-	}
-	if err := a.options.VerifyRequest(r, node); err != nil {
-		status := http.StatusUnauthorized
-		if errors.Is(err, ErrUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			status = http.StatusServiceUnavailable
-		}
+	record, node, status := a.authorizeSourceRequest(r)
+	if status != 0 {
 		sourceError(w, r, status)
-		return
-	}
-	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Silo-Source-Grant")), []byte(parts[2])) != 1 {
-		sourceError(w, r, 403)
-		return
-	}
-	if err := r.Context().Err(); err != nil {
-		sourceError(w, r, 408)
-		return
-	}
-	record, err := a.options.Store.Get(r.Context(), parts[2])
-	if err != nil {
-		sourceError(w, r, sourceStatus(err))
-		return
-	}
-	if record.Source.NodeID != node || record.Source.Origin != a.options.Origin {
-		sourceError(w, r, 403)
-		return
-	}
-	if !a.options.Now().Before(record.ExpiresAt) {
-		sourceError(w, r, 410)
-		return
-	}
-	if err := a.checkActive(r.Context(), node, record.Source.WorkID, record.Source.Generation); err != nil {
-		sourceError(w, r, HTTPStatus(err))
-		return
-	}
-	if err := a.options.PathApprover(r.Context(), record.Path, record.Source.Ref.Kind); err != nil {
-		sourceError(w, r, HTTPStatus(err))
-		return
-	}
-	match := r.Header.Get("If-Match")
-	if (r.Method == http.MethodGet || match != "") && match != record.Source.ETag {
-		sourceError(w, r, 412)
 		return
 	}
 	select {
@@ -110,7 +55,7 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	start, length, status := int64(0), record.Source.Size, 200
+	start, length, status := int64(0), record.Source.Size, http.StatusOK
 	if r.Method == http.MethodGet && r.Header.Get("Range") != "" {
 		start, length, status = singleRange(r.Header.Get("Range"), record.Source.Size)
 		if status >= 400 {
@@ -133,90 +78,68 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		return
 	}
+	a.streamSource(w, r, node, record, f, start, length, status)
+}
+
+func (a *Authority) authorizeSourceRequest(r *http.Request) (Record, int, int) {
+	if !strings.HasPrefix(r.URL.Path, a.routePrefix) || r.URL.RawQuery != "" || r.ContentLength > 0 || len(r.TransferEncoding) > 0 {
+		return Record{}, 0, http.StatusNotFound
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, a.routePrefix), "/")
+	if len(parts) != 3 || parts[1] != "sources" {
+		return Record{}, 0, http.StatusNotFound
+	}
+	node, err := strconv.Atoi(parts[0])
+	if err != nil || node < 1 || strconv.Itoa(node) != parts[0] {
+		return Record{}, 0, http.StatusNotFound
+	}
+	parsed, err := uuid.Parse(parts[2])
+	if err != nil || parsed.String() != parts[2] {
+		return Record{}, 0, http.StatusNotFound
+	}
+	if err := a.options.VerifyRequest(r, node); err != nil {
+		status := http.StatusUnauthorized
+		if errors.Is(err, ErrUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusServiceUnavailable
+		}
+		return Record{}, 0, status
+	}
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Silo-Source-Grant")), []byte(parts[2])) != 1 {
+		return Record{}, 0, 403
+	}
+	if err := r.Context().Err(); err != nil {
+		return Record{}, 0, 408
+	}
+	record, err := a.options.Store.Get(r.Context(), parts[2])
+	if err != nil {
+		return Record{}, 0, sourceStatus(err)
+	}
+	if record.Source.NodeID != node || record.Source.Origin != a.options.Origin {
+		return Record{}, 0, 403
+	}
+	if !a.options.Now().Before(record.ExpiresAt) {
+		return Record{}, 0, 410
+	}
+	if err := a.checkActive(r.Context(), node, record.Source.WorkID, record.Source.Generation); err != nil {
+		return Record{}, 0, HTTPStatus(err)
+	}
+	if err := a.options.PathApprover(r.Context(), record.Path, record.Source.Ref.Kind); err != nil {
+		return Record{}, 0, HTTPStatus(err)
+	}
+	match := r.Header.Get("If-Match")
+	if (r.Method == http.MethodGet || match != "") && match != record.Source.ETag {
+		return Record{}, 0, 412
+	}
+	return record, node, 0
+}
+
+func (a *Authority) streamSource(w http.ResponseWriter, r *http.Request, node int, record Record, f *os.File, start, length int64, status int) {
 	buffer := make([]byte, a.options.Limits.ChunkBytes)
 	streamCtx, cancelStream := context.WithCancel(r.Context())
 	defer cancelStream()
-	var authorityMu sync.Mutex
-	lastSharedCheck := a.options.Now()
-	authorized := func() bool {
-		checkCtx, cancel := context.WithTimeout(streamCtx, sourceCheckTimeout)
-		defer cancel()
-		if checkCtx.Err() != nil {
-			return false
-		}
-		authorityMu.Lock()
-		now := a.options.Now()
-		// A long GET can outlive its initial lease when the control plane renews
-		// it. Refresh before rejecting that snapshot, without a store operation
-		// for every chunk. Deletion on another core is observed within a second.
-		if now.Sub(lastSharedCheck) >= time.Second || !now.Before(record.ExpiresAt) {
-			current, e := a.options.Store.Get(checkCtx, record.Source.Grant)
-			if e != nil || current.Source != record.Source {
-				authorityMu.Unlock()
-				return false
-			}
-			record.ExpiresAt = current.ExpiresAt
-			lastSharedCheck = a.options.Now()
-		}
-		unexpired := a.options.Now().Before(record.ExpiresAt)
-		authorityMu.Unlock()
-		return unexpired && a.checkActive(checkCtx, node, record.Source.WorkID, record.Source.Generation) == nil && checkCtx.Err() == nil
-	}
-	invalidate := func(err error) {
-		if streamCtx.Err() == nil {
-			ctx, cancel := context.WithTimeout(streamCtx, sourceCheckTimeout)
-			defer cancel()
-			_ = a.invalidateChanged(ctx, record.Source.Grant, err)
-		}
-	}
-	controller := http.NewResponseController(w)
-	_ = controller.SetWriteDeadline(time.Now().Add(sourceWriteHorizon))
-	stopWatch, watchDone := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(watchDone)
-		ticker := time.NewTicker(sourceWatchInterval)
-		defer ticker.Stop()
-		interrupt := func() {
-			cancelStream()
-			_ = controller.SetWriteDeadline(time.Now())
-			_ = f.Close()
-		}
-		for {
-			select {
-			case <-stopWatch:
-				return
-			case <-streamCtx.Done():
-				interrupt()
-				return
-			case <-ticker.C:
-				if !authorized() {
-					interrupt()
-					return
-				}
-				if err := validatePin(f, record.Path, record.Identity); err != nil {
-					invalidate(err)
-					interrupt()
-					return
-				}
-				if streamCtx.Err() != nil {
-					interrupt()
-					return
-				}
-				// Healthy backpressure has no fixed transfer timeout. Only this
-				// watcher renews the safety horizon or expires it on authority loss.
-				_ = controller.SetWriteDeadline(time.Now().Add(sourceWriteHorizon))
-			}
-		}
-	}()
-	defer func() {
-		normal := streamCtx.Err() == nil
-		close(stopWatch)
-		cancelStream()
-		<-watchDone
-		if normal {
-			_ = controller.SetWriteDeadline(time.Time{})
-		}
-	}()
+	authorized, invalidate := a.sourceStreamChecks(streamCtx, node, record)
+	stopWatch := a.watchSource(streamCtx, cancelStream, w, record, f, authorized, invalidate)
+	defer stopWatch()
 	w.WriteHeader(status)
 	for offset, remaining := start, length; remaining > 0; {
 		if !authorized() {
@@ -256,6 +179,94 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validatePin(f, record.Path, record.Identity); err != nil {
 		invalidate(err)
+	}
+}
+
+func (a *Authority) sourceStreamChecks(streamCtx context.Context, node int, record Record) (func() bool, func(error)) {
+	var authorityMu sync.Mutex
+	lastSharedCheck := a.options.Now()
+	authorized := func() bool {
+		checkCtx, cancel := context.WithTimeout(streamCtx, sourceCheckTimeout)
+		defer cancel()
+		if checkCtx.Err() != nil {
+			return false
+		}
+		authorityMu.Lock()
+		now := a.options.Now()
+		// A long GET can outlive its initial lease when the control plane renews
+		// it. Refresh before rejecting that snapshot, without a store operation
+		// for every chunk. Deletion on another core is observed within a second.
+		if now.Sub(lastSharedCheck) >= time.Second || !now.Before(record.ExpiresAt) {
+			current, e := a.options.Store.Get(checkCtx, record.Source.Grant)
+			if e != nil || current.Source != record.Source {
+				authorityMu.Unlock()
+				return false
+			}
+			record.ExpiresAt = current.ExpiresAt
+			lastSharedCheck = a.options.Now()
+		}
+		unexpired := a.options.Now().Before(record.ExpiresAt)
+		authorityMu.Unlock()
+		return unexpired && a.checkActive(checkCtx, node, record.Source.WorkID, record.Source.Generation) == nil && checkCtx.Err() == nil
+	}
+	invalidate := func(err error) {
+		if streamCtx.Err() == nil {
+			ctx, cancel := context.WithTimeout(streamCtx, sourceCheckTimeout)
+			defer cancel()
+			_ = a.invalidateChanged(ctx, record.Source.Grant, err)
+		}
+	}
+	return authorized, invalidate
+}
+
+func (a *Authority) watchSource(streamCtx context.Context, cancelStream context.CancelFunc, w http.ResponseWriter, record Record, f *os.File, authorized func() bool, invalidate func(error)) func() {
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(time.Now().Add(sourceWriteHorizon))
+	stopWatch, watchDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		ticker := time.NewTicker(sourceWatchInterval)
+		defer ticker.Stop()
+		interrupt := func() {
+			cancelStream()
+			_ = controller.SetWriteDeadline(time.Now())
+			_ = f.Close()
+		}
+		for {
+			select {
+			case <-stopWatch:
+				return
+			case <-streamCtx.Done():
+				interrupt()
+				return
+			case <-ticker.C:
+				if !authorized() {
+					interrupt()
+					return
+				}
+				if err := validatePin(f, record.Path, record.Identity); err != nil {
+					invalidate(err)
+					interrupt()
+					return
+				}
+				if streamCtx.Err() != nil {
+					interrupt()
+					return
+				}
+				// Healthy backpressure has no fixed transfer timeout. Only this
+				// watcher renews the safety horizon or expires it on authority loss.
+				_ = controller.SetWriteDeadline(time.Now().Add(sourceWriteHorizon))
+			}
+		}
+	}()
+	return func() {
+		normal := streamCtx.Err() == nil
+		close(stopWatch)
+		cancelStream()
+		<-watchDone
+		if normal {
+			_ = controller.SetWriteDeadline(time.Time{})
+		}
 	}
 }
 

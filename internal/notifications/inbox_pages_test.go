@@ -16,35 +16,8 @@ import (
 
 func inboxPageDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	admin, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema := "notification_inbox_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	quoted := pgx.Identifier{schema}.Sanitize()
-	if _, err = admin.Exec(t.Context(), "CREATE SCHEMA "+quoted); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(context.WithoutCancel(t.Context()), "DROP SCHEMA "+quoted+" CASCADE")
-		admin.Close()
-	})
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
-	cfg.MaxConns = 4
-	p, err := pgxpool.NewWithConfig(t.Context(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(p.Close)
-	if _, err = p.Exec(t.Context(), `CREATE TABLE notification_deliveries (LIKE public.notification_deliveries INCLUDING ALL); CREATE TABLE notification_preferences (LIKE public.notification_preferences INCLUDING ALL)`); err != nil {
+	p := schemaDB(t, "notification_inbox_")
+	if _, err := p.Exec(t.Context(), `CREATE TABLE notification_deliveries (LIKE public.notification_deliveries INCLUDING ALL); CREATE TABLE notification_preferences (LIKE public.notification_preferences INCLUDING ALL)`); err != nil {
 		t.Fatal(err)
 	}
 	// LIKE does not copy triggers. Apply the actual migration in this schema so
@@ -65,6 +38,42 @@ func inboxPageDB(t *testing.T) *pgxpool.Pool {
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	return p
+}
+
+// schemaDB connects to the test database with a fresh schema, dropped after
+// the test, first on the search path: tables a test creates there shadow
+// public's, and the rest of the schema stays visible.
+func schemaDB(t *testing.T, prefix string) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	admin, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := prefix + strings.ReplaceAll(uuid.NewString(), "-", "")
+	quoted := pgx.Identifier{schema}.Sanitize()
+	if _, err = admin.Exec(t.Context(), "CREATE SCHEMA "+quoted); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.WithoutCancel(t.Context()), "DROP SCHEMA "+quoted+" CASCADE")
+		admin.Close()
+	})
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
+	cfg.MaxConns = 4
+	p, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(p.Close)
 	return p
 }
 func TestNotificationInboxCutoffReplayAndTies(t *testing.T) {

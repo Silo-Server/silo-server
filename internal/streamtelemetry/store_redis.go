@@ -122,6 +122,7 @@ func (s *RedisStore) PublishWithLease(ctx context.Context, snapshot Snapshot, le
 	return s.publish(ctx, snapshot, leaseKey, leaseOwner)
 }
 
+//nolint:nestif // Keep the fenced and legacy Redis ownership paths adjacent to their lease checks.
 func (s *RedisStore) publish(ctx context.Context, snapshot Snapshot, leaseKey, leaseOwner string) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("stream telemetry redis client is nil")

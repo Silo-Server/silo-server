@@ -20,7 +20,7 @@ The engine adds to the existing `declared`-tier capability block
   (WebCodecs AAC, Opus, MP3, FLAC; the bundled FFmpeg decoders for `ac3`,
   `eac3`, `dts`, `truehd`, `mlp`; uncompressed PCM).
 - `original_http` gains the validated claims `client_selected_audio_track_v1`
-  and, when WebGPU is available and the display is SDR,
+  and, when the WebGPU presenter passes the probe and the display is SDR,
   `client_managed_dynamic_range_v1`
   (see [playback-protocol-v3.md](playback-protocol-v3.md) §3 and §4). The
   engine presents only SDR, so on an HDR display (`dynamic-range: high`) the
@@ -31,11 +31,22 @@ The engine adds to the existing `declared`-tier capability block
   and transcode routes are unchanged.
 
 The probe (`web/src/player/engine/capabilities.ts`) asks WebCodecs
-`isConfigSupported` and requests a WebGPU adapter. Like the rest of the web
-block it is a declaration, not a decode of real media. A source that passes
-the probe and still cannot be decoded fails with a typed classification, and
-the normal `failure_recovery` replan excludes the plan's attempt key, so the
-server falls through to a packaged route.
+`isConfigSupported` and checks the HDR presenter: a hardware (non-fallback)
+WebGPU adapter, a device, both presenter pipelines compiled, and one picture
+drawn through each path without a validation error (`probePresenter` in
+`renderers.ts`). The codec answers and the HDR answer are each bounded by
+`PROBE_TIMEOUT_MS`, and once a hardware adapter is found the rest of the HDR
+check gets `HDR_CHECK_GRACE_MS`, because every playback start waits for the
+probe and the check can take seconds on some Linux Vulkan drivers. A check
+still running then counts as passed when nothing has failed, because the
+presenter reports failures at runtime. What the check learns after its
+deadline (its own answer, or a hardware adapter that answered late) applies
+the next time the player opens. A device lost during the check, or a presenter chunk that
+fails to load, leaves the answer open. Like the rest of the web block it is a declaration,
+not a decode of real media. A source that passes the probe and still cannot be
+decoded or presented fails with a typed classification, and the normal
+`failure_recovery` replan excludes the plan's attempt key, so the server falls
+through to a packaged route.
 
 The server needs no change: the planner already honours both claims on
 `original_http`.
@@ -65,7 +76,8 @@ VideoPlayer (page)
     ├─ engine.worker.ts — Mediabunny demux over HTTP ranges, WebCodecs video,
     │                     WebCodecs / FFmpeg WASM / PCM audio, downmix
     ├─ audio.worklet.ts — PCM ring and master clock, fed by the worker directly
-    └─ renderers.ts     — 2D canvas (SDR, or HDR the browser tone-maps) or WebGPU tone mapping (HDR)
+    └─ renderers.ts     — 2D canvas (SDR), or for HDR a WebGPU tone map plus a 2D canvas layer
+                          for frames only the browser can map
 ```
 
 - **Facade.** `engine/facade.ts` installs instance-level overrides on the
@@ -91,8 +103,13 @@ VideoPlayer (page)
   worker downmixes with ATSC A/52 Lo/Ro coefficients and the worklet soft-limits
   overs. A playback rate other than 1 (Watch Together catch-up) resamples, so
   pitch shifts.
-- **Picture.** Each session draws on a fresh canvas inside a box under the
-  `<video>`, because a canvas keeps the first context type it hands out.
+- **Picture.** Each session draws on canvases it creates inside a box under the
+  `<video>`: one for SDR, and for HDR a WebGPU canvas plus a 2D canvas added
+  when needed, because a canvas keeps the first context type it hands out. The
+  box is observed in device pixels (`device-pixel-content-box`) so canvases
+  match the screen exactly; where the browser cannot report that (Safari), the
+  box's CSS pixels times the device pixel ratio stand in, and a resolution
+  media query redraws on a ratio change.
 - **Readiness and autoplay.** The worker signals once enough audio has been sent
   to the worklet, because the worklet does not run while the AudioContext is
   suspended. `play()` refuses without events on a page that never had a user
@@ -104,25 +121,79 @@ VideoPlayer (page)
 ## HDR presentation
 
 `engine/hdrShader.ts` mirrors the reference in `engine/colorMath.ts`: PQ or HLG
-decode, BT.2390 EETF from a 1000-nit source peak to SDR white at 100 nits,
-BT.2020 to BT.709, sRGB encode. These match the server's tone-map recipes in
+decode, BT.2390 EETF from a 1000-nit source peak to SDR white at 100 nits, the
+source gamut to BT.709, sRGB encode. These match the server's tone-map recipes in
 `internal/tonemap`, so a picture looks the same whichever side tone-maps it.
 
 - **Planes.** Software-decoded 10/12-bit frames (`I420P10`, `I420P12` and their
   4:2:2/4:4:4 forms) are copied out with `VideoFrame.copyTo`, uploaded as
   `r16uint` textures and converted in the shader at full precision.
-- **External textures.** GPU-backed frames are imported with
-  `importExternalTexture`. The decoder is configured with an sRGB/BT.709 color
-  space tag so the browser applies only the YUV matrix and leaves the PQ/HLG
-  encoding for the shader. Chromium imports these through an 8-bit surface, so
-  this path quantizes before tone mapping.
-- **Browser tone mapping.** Hardware decoders (VideoToolbox on macOS, and
-  likely D3D11 and VA-API) ignore that tag: their frames still report a PQ or
-  HLG `colorSpace.transfer`, and Chromium's external-texture import of them
-  is desaturated. On the first such frame the engine replaces the WebGPU canvas
-  with a 2D canvas and draws frames with `drawImage`, which tone-maps the way
-  the browser's own `<video>` does (`browserMapsToSDR` in
-  `engine/renderers.ts`).
+- **External textures.** The worker re-tags HDR decoder configurations as
+  BT.709/sRGB so the browser applies only the Y'CbCr matrix when a GPU-backed
+  frame is imported with `importExternalTexture`, leaving the PQ/HLG codes for
+  the shader. Chromium imports these through an 8-bit surface, so this path
+  quantizes before tone mapping. WebKit imports 10-bit hardware-decoded frames
+  wrongly (the samples come out as if read at 8 bits), so each presenter draws
+  a frame both ways, imported and copied with `copyExternalImageToTexture` into
+  a half-float texture, at 8x8 and compares them. Where they agree it imports
+  from then on; where they differ (WebKit's 10-bit frames) it copies every
+  frame, at the cost of one GPU copy per frame. A dark or flat frame looks alike
+  both ways even when the import is wrong, so such a check decides nothing and
+  a later frame is tried. It copies until there is an answer, and imports where
+  the browser cannot copy a VideoFrame (Firefox).
+- **Routing.** Each picture goes to the path its kind and tag call for
+  (`routePicture` in `engine/renderers.ts`):
+
+  | Picture | Path |
+  | --- | --- |
+  | Uploaded planes | WebGPU, planes pipeline |
+  | Frame tagged BT.709 primaries and sRGB transfer (the re-tag held) | WebGPU, external texture or a copy (see above) |
+  | Frame tagged PQ or HLG (a hardware decoder ignored the re-tag: VideoToolbox, D3D11, VA-API) | 2D canvas, which tone-maps the way the browser's `<video>` does, when `canvasMapsHDR` |
+  | Anything else | `browser_engine_presentation_failed` |
+
+  Chromium's WebGPU import of a PQ/HLG-tagged frame is desaturated, so those
+  frames go to the 2D canvas. `canvasMapsHDR` checks, once per page and
+  transfer and only when a session first needs it, that a canvas set up like
+  the presenter's maps a dark code, reference white and a highlight
+  differently from sRGB and below clipping: Chromium and Safari do, Firefox
+  draws the raw codes, so there such a frame fails over instead. The canvas's mapping is the browser's, not the
+  server recipe's, so a session that switches paths changes brightness.
+- **Source colour.** The worker reads the stream's primaries, matrix and chroma
+  siting before the re-tag (`engine/pictureColor.ts`) and sends them with
+  `ready`. Primaries other than BT.709 and P3 (D65), and matrices other than
+  BT.709, are read as BT.2020, whether stated or unknown. Chroma siting comes from
+  AV1's signalled `chroma_sample_position`; H.264 and HEVC use type 0, the
+  position of an unsignalled stream (an explicit VUI value is not read); VP9,
+  which signals none, and unsignalled AV1 keep the centred position. 4:2:2 is
+  always co-sited horizontally.
+- **Scaling down.** Each fragment averages an N x N grid of bilinear samples
+  across its footprint, N being the texels of that plane the pixel covers (at
+  most 4), so a picture drawn smaller than its size does not alias.
+- **Errors.** Pipelines are built with `createRenderPipelineAsync` inside an
+  error scope, and each draw runs inside a validation scope; the first error,
+  or an `uncapturederror` event (allocation failures included), fails the engine with
+  `browser_engine_presentation_failed` so the replan runs. WebGPU never throws
+  for these, so without the scopes a broken presenter shows a black picture
+  while audio plays.
+- **Device.** The presenter uses the default adapter, the one the browser
+  composites with, and treats a software adapter as none. The page keeps one
+  presenter device: the probe offers its device as soon as the presenter
+  compiles (its test draw can take seconds to report on some Linux drivers),
+  and each playback hands it on when it ends unless it was lost or reported an
+  error. The device subscribes to its loss and uncaptured errors once and
+  forwards them to whichever renderer holds it; a renderer that takes a
+  device handles what it reported before then, such as a loss during
+  compilation, the same way. A lost device is replaced in
+  place with a fresh one within `DEVICE_RECOVERY_TIMEOUT_MS`, at most
+  `MAX_DEVICE_RECOVERIES` times per session. A hardware decoder dies with the
+  GPU process too, so after a video decoder error `EnginePlayer` starts a new
+  decode run at the current position, after `DECODER_RESTART_DELAY_MS` times
+  the restarts so far and at most `MAX_DECODER_RESTARTS` times per session,
+  showing only waiting and playing as a media element would; a run that then
+  shows no picture, or a stream that keeps failing, fails over as a decode
+  failure.
+- **Layers.** Each session draws in its own box, which replaces whatever an
+  earlier session left in the surface.
 - **Dolby Vision.** RPU (NAL 62) and enhancement-layer (NAL 63 or
   `nuh_layer_id > 0`) units are removed before decode (`engine/hevc.ts`).
 

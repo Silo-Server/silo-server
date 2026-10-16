@@ -138,6 +138,7 @@ func TestRedisPublicationUndoRemovesNewOrExpiredPrior(t *testing.T) {
 			if expired {
 				// Wait for the captured absolute prior expiry, while the candidate stays live.
 				for time.Now().Before(priorExpiry) {
+					//nolint:forbidigo // The test polls an externally owned lease or publication state; the delay yields between bounded observations.
 					time.Sleep(time.Millisecond)
 				}
 			}
@@ -305,6 +306,7 @@ func TestRedisPublicationRequiresAnUnexpiredPreparation(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("preparation did not expire")
 		}
+		//nolint:forbidigo // The test polls an externally owned lease or publication state; the delay yields between bounded observations.
 		time.Sleep(time.Millisecond)
 	}
 	card := playback.RecipeCard{SessionID: work, InputPath: "/approved/expired-candidate"}
@@ -415,6 +417,7 @@ func TestRedisPublicationExpiredOwnerFailuresDoNotResurrectCandidate(t *testing.
 					if time.Now().After(deadline) {
 						t.Fatal("owner did not expire")
 					}
+					//nolint:forbidigo // The test polls an externally owned lease or publication state; the delay yields between bounded observations.
 					time.Sleep(time.Millisecond)
 				}
 				card.InputPath = "/approved/failed-second"
@@ -602,6 +605,7 @@ func TestRecipeVersionDoesNotAdoptPendingPublicationWithMissingVersion(t *testin
 	}
 }
 
+//nolint:nestif // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestRedisPublicationRetireOnlyRemovesExactRejectedCandidate(t *testing.T) {
 	for _, successor := range []string{"none", "different", "identical", "legacy-same-version"} {
 		t.Run(successor, func(t *testing.T) {
@@ -795,6 +799,7 @@ func TestRedisPublicationTerminalPreparationCannotBeReusedAfterDeadline(t *testi
 				if time.Now().After(bound) {
 					t.Fatal("terminal marker did not expire")
 				}
+				//nolint:forbidigo // The test polls an externally owned lease or publication state; the delay yields between bounded observations.
 				time.Sleep(time.Millisecond)
 			}
 			if n, e := prepareRecipePublicationScript.Run(t.Context(), client, receipt.keys(), args...).Int(); e != nil || n != 0 {

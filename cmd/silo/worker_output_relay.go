@@ -33,6 +33,7 @@ type workerOutputRelay struct {
 	now         func() time.Time
 }
 
+//nolint:nestif // Retained grants must pass the complete credential, artifact, generation and epoch checks before reuse.
 func (r workerOutputRelay) token(request *http.Request, node workercontrolcore.Node) (string, error) {
 	parts := strings.Split(strings.TrimPrefix(request.URL.Path, "/"), "/")
 	now := time.Now()
@@ -64,7 +65,7 @@ func (r workerOutputRelay) token(request *http.Request, node workercontrolcore.N
 		// JWT NumericDate uses whole seconds; rotate on that same boundary.
 		issued := time.Unix(card.OriginalStartedAt.Unix(), 0)
 		if elapsed := now.Sub(issued); elapsed >= playback.MaxTokenTTL {
-			issued = issued.Add(elapsed / playback.MaxTokenTTL * playback.MaxTokenTTL)
+			issued = issued.Add(elapsed.Truncate(playback.MaxTokenTTL))
 		}
 		return streamtoken.SignAt(claims, secret, issued, playback.MaxTokenTTL)
 	}
@@ -74,6 +75,7 @@ func (r workerOutputRelay) token(request *http.Request, node workercontrolcore.N
 	return "", workercontrolcore.ErrDenied
 }
 
+//nolint:gocyclo,nestif // Retained grants must pass the complete credential, artifact, generation and epoch checks before reuse.
 func (r workerOutputRelay) downloadToken(request *http.Request, node workercontrolcore.Node, work, secret string, now time.Time) (string, error) {
 	caller := apimw.GetClaims(request.Context())
 	profile := apimw.GetProfileID(request.Context())
@@ -122,7 +124,10 @@ func (r workerOutputRelay) downloadToken(request *http.Request, node workercontr
 	if !workeridentity.SameOrigin(artifact.OriginNodeURL, node.URL, node.AllowHTTP) {
 		return "", workercontrolcore.ErrDenied
 	}
-	identity, _ := json.Marshal([]any{origin, caller.UserID, profile, rowID})
+	identity, err := json.Marshal([]any{origin, caller.UserID, profile, rowID})
+	if err != nil {
+		return "", err
+	}
 	digest := sha256.Sum256(identity)
 	claims := streamtoken.Claims{OriginCredential: origin, SessionID: "download-" + hex.EncodeToString(digest[:16]), UserID: caller.UserID, ProfileID: profile, MediaFileID: artifact.MediaFileID, PlayMethod: streamtoken.PlayMethodDownload, TranscodeNode: node.URL, RoutingExecutionNodeID: node.ID, DownloadArtifactID: work, DownloadArtifactRowID: rowID, DownloadArtifactSize: artifact.FileSize}
 	if artifact.ToneMapMode != "" || artifact.AudioRecipeVersion != "" || artifact.TrackRecipeVersion != "" {
@@ -144,6 +149,9 @@ func (r workerOutputRelay) downloadToken(request *http.Request, node workercontr
 	}
 	epoch := workeridentity.OutputEpoch(secret)
 	lookupKey := workercontrolcore.OutputAuthorityLookupKey(claims, node.ID, work, assignment.Generation, epoch)
+	if lookupKey == "" {
+		return "", workercontrolcore.ErrDenied
+	}
 	if finder, ok := r.authorities.(workercontrolcore.OutputAuthorityFinder); ok {
 		record, found, err := finder.Find(request.Context(), node.ID, lookupKey)
 		if err != nil {

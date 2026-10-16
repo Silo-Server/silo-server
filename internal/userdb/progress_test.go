@@ -116,6 +116,51 @@ func TestAddHistoryIfMissingKeepsExistingSemantics(t *testing.T) {
 	}
 }
 
+// Imported history arrives with sub-second times. The SQLite store compares
+// its timestamps as text, so it keeps them in whole seconds: one stored that
+// way before still dedupes the replay, and a removal still hides it.
+func TestAddHistoryIfMissingStoresWholeSeconds(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	entry := userstore.WatchHistoryEntry{ProfileID: "profile-1", MediaItemID: "movie-1", WatchedAt: "2026-04-25T12:00:00Z", Completed: true, Source: userstore.WatchHistorySourceImport}
+	if created, err := AddHistoryIfMissing(db, entry); err != nil || !created {
+		t.Fatalf("whole-second import: created %v, err %v", created, err)
+	}
+	entry.WatchedAt = "2026-04-25T12:00:00.25Z"
+	if created, err := AddHistoryIfMissing(db, entry); err != nil || created {
+		t.Fatalf("sub-second replay: created %v, err %v; want a duplicate", created, err)
+	}
+	entry.MediaItemID = "movie-2"
+	entry.WatchedAt = "2026-04-25T12:00:01.75+00:00"
+	if created, err := AddHistoryIfMissing(db, entry); err != nil || !created {
+		t.Fatalf("sub-second import: created %v, err %v", created, err)
+	}
+	history, err := ListHistory(db, "profile-1", 10, 0)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("ListHistory: %+v, err %v; want two rows", history, err)
+	}
+	if history[0].WatchedAt != "2026-04-25T12:00:01Z" {
+		t.Fatalf("stored watched_at = %q, want 2026-04-25T12:00:01Z", history[0].WatchedAt)
+	}
+	if err := RemoveHistoryItems(db, "profile-1", []string{"movie-2"}, time.Date(2026, 4, 25, 12, 0, 1, 900_000_000, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if created, err := AddHistoryIfMissing(db, entry); err != nil || created {
+		t.Fatalf("import before the removal: created %v, err %v; want hidden", created, err)
+	}
+}
+
 func TestListCompletedHistoryAppliesScopedFilters(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -469,5 +514,60 @@ func TestUpdateProgressBackwardSeekPersists(t *testing.T) {
 	}
 	if wp.PositionSeconds != 600 {
 		t.Errorf("PositionSeconds = %v, want 600 (last write wins)", wp.PositionSeconds)
+	}
+}
+
+// ClearResumePosition must only move a row's timestamps forward. The Jellyfin
+// path stores fractional seconds, which a whole-second clear in the same second
+// sorts after as text although it is earlier (issue #2134 review).
+func TestClearResumePositionNeverMovesTimestampsBack(t *testing.T) {
+	const updatedAt, eventAt = "2026-10-14T23:48:50.220Z", "2026-10-14T23:48:50.220123456Z"
+	for _, tc := range []struct {
+		name                       string
+		at                         time.Time
+		wantUpdatedAt, wantEventAt string
+	}{
+		{"same second as a fractional write", time.Date(2026, 10, 14, 23, 48, 50, 900_000_000, time.UTC), updatedAt, eventAt},
+		{"a later second", time.Date(2026, 10, 14, 23, 48, 51, 0, time.UTC), "2026-10-14T23:48:51Z", "2026-10-14T23:48:51Z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("open sqlite: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			if err := InitSchema(db); err != nil {
+				t.Fatalf("InitSchema: %v", err)
+			}
+			if _, err := db.Exec(`
+				INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at, event_at)
+				VALUES ('p1', 'm1', 600, 5400, 0, ?, ?)`, updatedAt, eventAt); err != nil {
+				t.Fatalf("seed progress: %v", err)
+			}
+			var seqBefore int64
+			if err := db.QueryRow(`SELECT synced_seq FROM watch_progress WHERE profile_id = 'p1' AND media_item_id = 'm1'`).Scan(&seqBefore); err != nil {
+				t.Fatalf("read seq: %v", err)
+			}
+
+			cleared, err := ClearResumePosition(db, "p1", "m1", tc.at)
+			if err != nil || !cleared {
+				t.Fatalf("ClearResumePosition = %v, %v; want cleared", cleared, err)
+			}
+
+			var position float64
+			var gotUpdatedAt, gotEventAt string
+			var seqAfter int64
+			if err := db.QueryRow(`
+				SELECT position_seconds, updated_at, event_at, synced_seq
+				FROM watch_progress WHERE profile_id = 'p1' AND media_item_id = 'm1'`).Scan(&position, &gotUpdatedAt, &gotEventAt, &seqAfter); err != nil {
+				t.Fatalf("read progress: %v", err)
+			}
+			if position != 0 || gotUpdatedAt != tc.wantUpdatedAt || gotEventAt != tc.wantEventAt {
+				t.Fatalf("after clear: position %v, updated_at %q, event_at %q; want 0, %q, %q", position, gotUpdatedAt, gotEventAt, tc.wantUpdatedAt, tc.wantEventAt)
+			}
+			if seqAfter <= seqBefore {
+				t.Fatalf("synced_seq = %d, want past %d so delta sync carries the clear", seqAfter, seqBefore)
+			}
+		})
 	}
 }

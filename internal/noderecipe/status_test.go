@@ -13,6 +13,14 @@ import (
 )
 
 func TestRecipeStatusDistinguishesMissingRevokedAndUnavailable(t *testing.T) {
+	for _, disabled := range []*Store{nil, NewStore(nil, time.Minute)} {
+		if card, found, err := disabled.Lookup(t.Context(), "disabled"); err != nil || found || card != nil {
+			t.Fatalf("disabled recovery lookup = (%v, %v, %v), want absence", card, found, err)
+		}
+		if _, _, err := disabled.GetStatus(t.Context(), "disabled"); err == nil {
+			t.Fatal("disabled storage became confirmed absence for publication recovery")
+		}
+	}
 	endpoint := os.Getenv("SILO_TEST_REDIS_URL")
 	if endpoint == "" {
 		t.Skip("requires task Redis SILO_TEST_REDIS_URL")
@@ -47,6 +55,9 @@ func TestRecipeStatusDistinguishesMissingRevokedAndUnavailable(t *testing.T) {
 	if _, _, err = store.GetStatus(t.Context(), work); err == nil {
 		t.Fatal("malformed recipe became a confirmed missing recipe")
 	}
+	if card, found, err := store.Lookup(t.Context(), work); err != nil || found || card != nil {
+		t.Fatalf("malformed recovery card = (%v, %v, %v), want absence", card, found, err)
+	}
 	if err = store.Put(t.Context(), work, card); err != nil {
 		t.Fatal(err)
 	}
@@ -61,5 +72,8 @@ func TestRecipeStatusDistinguishesMissingRevokedAndUnavailable(t *testing.T) {
 	}
 	if _, _, err = store.GetStatus(t.Context(), work); err == nil {
 		t.Fatal("unavailable Redis became a confirmed missing recipe")
+	}
+	if _, _, err = store.Lookup(t.Context(), work); err == nil {
+		t.Fatal("unavailable Redis became a confirmed missing session")
 	}
 }

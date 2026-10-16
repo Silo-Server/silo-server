@@ -23,6 +23,7 @@ type originRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f originRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+//nolint:funlen,gocyclo // One enrolled node must preserve its canonical origins across refresh, command dispatch, and output authorization.
 func TestEnrolledCanonicalOriginsRefreshAndRouteCommandsAndOutput(t *testing.T) {
 	for _, tc := range []struct {
 		name, stored, canonical, explicit string

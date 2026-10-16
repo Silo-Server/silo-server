@@ -115,6 +115,7 @@ func (standaloneRecipeSources) Acquire(_ context.Context, node int, work string,
 
 func (standaloneRecipeSources) Release(context.Context, int, string, uint64) error { return nil }
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestRedisStandaloneNativeLegacyClientKeepsDurableRecipe(t *testing.T) {
 	endpoint := os.Getenv("SILO_TEST_REDIS_URL")
 	if endpoint == "" {

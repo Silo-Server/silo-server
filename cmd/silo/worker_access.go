@@ -22,9 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
 )
 
-type workerScopeResolver interface {
-	Resolve(context.Context, access.ResolveInput) (access.Scope, error)
-}
+type workerScopeResolver = scopeResolver
 type workerAccessState struct {
 	pool      *pgxpool.Pool
 	resolver  workerScopeResolver
@@ -78,6 +76,7 @@ func (a *workerContentAuthority) checkClaims(ctx context.Context, claims *stream
 	return a.checkRecipe(ctx, &card, nil)
 }
 
+//nolint:funlen,gocyclo // Keep the ordered account, scope, catalog and media checks together so every definitive denial remains visible.
 func (a *workerContentAuthority) checkRecipe(ctx context.Context, card *playback.RecipeCard, preparedClaims *streamtoken.Claims) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err

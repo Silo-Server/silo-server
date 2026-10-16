@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+//nolint:funlen // The proof-scope matrix shares one delegated grant and verifies replay rejection before and after its stop.
 func TestDelegatedOutputHTTPRejectsProofScopeReplayAndStop(t *testing.T) {
 	corePub, coreKey, _ := ed25519.GenerateKey(rand.Reader)
 	_, nodeKey, _ := ed25519.GenerateKey(rand.Reader)

@@ -36,6 +36,7 @@ func (*registryRefreshTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.Trace
 // Done is observed after refresh joins the shared flight, so cancellation can
 // be scheduled after both callers are waiting without relying on a delay.
 type registryRefreshWaiterContext struct {
+	//nolint:containedctx // This admitted-reader fixture retains the owning context so reads observe cancellation.
 	context.Context
 	selected chan struct{}
 	once     sync.Once

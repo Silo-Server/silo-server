@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
@@ -20,13 +19,7 @@ type RuntimeConfig interface {
 	ForceReload(context.Context) error
 }
 
-type SessionTracker interface {
-	Track(context.Context, nodesessions.SessionInfo)
-	Remove(context.Context, string)
-	Cleanup(context.Context)
-	NodeURL() string
-	NodeName() string
-}
+type SessionTracker = sessionTracker
 
 type RuntimeOptions struct {
 	Config         RuntimeConfig

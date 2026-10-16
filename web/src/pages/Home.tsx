@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable react-hooks/set-state-in-effect -- section state resets when the layout or cache changes, and the reveal gates follow sidebar transitions */
 import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
@@ -20,6 +20,7 @@ import {
 import { planNextHomeSectionBatch } from "./homeSectionQueue";
 import { buildHomeSectionViewModel, type HomeSectionSlot } from "./homeSectionState";
 import { collectCachedHomeSections } from "./homeSectionCache";
+import { useDedupedSections } from "./sectionDedupe";
 import { useSectionRefreshSignal } from "./homeSurfaceRefresh";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselIntrinsicHeight } from "@/lib/uiCustomization";
@@ -216,9 +217,11 @@ export default function Home() {
     if (hasFirstContent) markCriticalContentLoaded();
   }, [hasFirstContent]);
 
+  const visibleSections = useDedupedSections(layout, loadedSections);
+
   const viewModel = buildHomeSectionViewModel({
     layout,
-    loadedSections,
+    loadedSections: visibleSections,
     failedIds,
   });
 

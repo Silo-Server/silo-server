@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+//nolint:funlen // Cached and fresh requests must share the same viewer revocation and replacement boundary.
 func TestOrdinaryPlaybackRequiresCurrentViewerOnCachedAndFreshRequests(t *testing.T) {
 	public, coreKey, _ := ed25519.GenerateKey(rand.Reader)
 	_, nodeKey, _ := ed25519.GenerateKey(rand.Reader)

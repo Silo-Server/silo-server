@@ -134,6 +134,7 @@ func TestMemoryLiveRouteRestorationRequiresExactPredecessor(t *testing.T) {
 	}
 }
 
+//nolint:nestif // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestMemoryLiveRouteRestorationSerializesAttemptAliases(t *testing.T) {
 	for _, order := range []string{"replace-first", "save-first"} {
 		t.Run(order, func(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -34,9 +35,9 @@ func (s *Service) router() chi.Router {
 	mux := chi.NewRouter()
 	mux.With(workerPathValues).Post("/api/internal/workers/{node}/snapshot", s.snapshot)
 	mux.With(workerPathValues).Post("/api/internal/workers/{node}/report", s.report)
-	mux.With(workerPathValues).Get("/api/internal/workers/{node}/recipes/{work}", s.recipe)       //nolint:goconst // Route inventory requires literal registrations.
-	mux.With(workerPathValues).Head("/api/internal/workers/{node}/recipes/{work}", s.recipe)      //nolint:goconst // Route inventory requires literal registrations.
-	mux.With(workerPathValues).Delete("/api/internal/workers/{node}/recipes/{work}", s.closeWork) //nolint:goconst // Route inventory requires literal registrations.
+	mux.With(workerPathValues).Get("/api/internal/workers/{node}/recipes/{work}", s.recipe)
+	mux.With(workerPathValues).Head("/api/internal/workers/{node}/recipes/{work}", s.recipe)
+	mux.With(workerPathValues).Delete("/api/internal/workers/{node}/recipes/{work}", s.closeWork)
 	mux.With(workerPathValues).Post("/api/internal/workers/{node}/revoke", s.closeNode)
 	mux.With(workerPathValues).Post("/api/internal/workers/{node}/sources/{grant}/renew", s.renew)
 	if s.options.SourceHandler != nil {
@@ -108,7 +109,9 @@ func (s *Service) reply(w http.ResponseWriter, node Node, domain, work string, g
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(GrantReply{Grant: grant})
+	if err := json.NewEncoder(w).Encode(GrantReply{Grant: grant}); err != nil {
+		slog.Warn("write worker control grant", "error", err)
+	}
 }
 func (s *Service) snapshot(w http.ResponseWriter, r *http.Request) {
 	node, ok := s.authenticate(w, r)
@@ -184,6 +187,8 @@ func primarySource(a workerwire.Assignment) (string, bool) {
 	}
 	return "", false
 }
+
+//nolint:nestif // Only an in-flight admission may supply a fallback recipe when shared storage has no current recipe.
 func (s *Service) currentRecipe(r *http.Request, node Node, work string) (RecipeReply, error) {
 	if !validWork(work) {
 		return RecipeReply{}, ErrDenied

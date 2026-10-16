@@ -37,6 +37,7 @@ type recipeRestoreRestoreWire struct {
 	retireUnavailable        bool
 }
 
+//nolint:funlen,gocyclo,nestif // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func recipeRestoreRestoreClient(t *testing.T, direct *redis.Client, work string, wire *recipeRestoreRestoreWire, retries int, readTimeout time.Duration) *redis.Client {
 	t.Helper()
 	for _, script := range []*redis.Script{prepareRecipePublicationScript, publishRecipeScript, retireRecipePublicationScript, commitRecipePublicationScript} {

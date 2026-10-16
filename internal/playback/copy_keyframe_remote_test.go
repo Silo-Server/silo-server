@@ -24,6 +24,7 @@ import (
 )
 
 type keyframeRemoteFixture struct {
+	//nolint:containedctx // This admitted-reader fixture retains the owning context so reads observe cancellation.
 	ctx         context.Context
 	adapter     *workerinput.Adapter
 	authority   *workersource.Authority
@@ -74,6 +75,7 @@ func newKeyframeRemoteFixture(t *testing.T, path, scratch string) *keyframeRemot
 	}
 	f.adapter = adapter
 	t.Cleanup(func() { _ = adapter.Close() })
+	//nolint:fatcontext // This admitted-reader fixture retains the owning context so reads observe cancellation.
 	f.ctx = workerinput.WithContext(t.Context(), adapter)
 	return f
 }

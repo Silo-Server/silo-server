@@ -94,18 +94,7 @@ func TestOutputHTTPGrantCacheSignsEverySegmentAndStopsWithoutReplay(t *testing.T
 		}
 		return r
 	}
-	read := func(i int) error {
-		res, err := transport.RoundTrip(request(i))
-		if err != nil {
-			return err
-		}
-		defer func() { _ = res.Body.Close() }()
-		body, err := io.ReadAll(res.Body)
-		if err == nil && (res.StatusCode != 200 || string(body) != "segment") {
-			return io.ErrUnexpectedEOF
-		}
-		return err
-	}
+	read := func(i int) error { return readOutputSegment(transport, request(i)) }
 	if err := read(0); err != nil {
 		t.Fatal(err)
 	}
@@ -160,4 +149,17 @@ func TestUnapprovedHTTPOutputIsRejectedBeforeGrantAndNetwork(t *testing.T) {
 	if coreCalls.Load() != 0 || workerCalls.Load() != 0 {
 		t.Fatal("unapproved HTTP target reached grant or worker network")
 	}
+}
+
+func readOutputSegment(transport http.RoundTripper, request *http.Request) error {
+	res, err := transport.RoundTrip(request)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	if err == nil && (res.StatusCode != 200 || string(body) != "segment") {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestReadyWorkerOutputRevokesCachedViewerPermissionWithoutStoppingArtifact(t *testing.T) {
 	f := newContentFixture(t)
 	corePublic, coreKey, _ := ed25519.GenerateKey(rand.Reader)
@@ -185,6 +186,7 @@ func TestReadyWorkerOutputRevokesCachedViewerPermissionWithoutStoppingArtifact(t
 		if time.Now().After(deadline) {
 			t.Fatal("valid ready output never became available")
 		}
+		//nolint:forbidigo // The test polls an externally owned lease or publication state; the delay yields between bounded observations.
 		time.Sleep(20 * time.Millisecond)
 	}
 	// Exercise the core's tokenless HTTPPreparer relay against an already-warm

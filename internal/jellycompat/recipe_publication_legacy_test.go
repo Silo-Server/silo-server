@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
 )
 
+//nolint:nestif // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestRecipePublicationCanReplacePreReceiptVersion(t *testing.T) {
 	for _, rejected := range []bool{false, true} {
 		t.Run(map[bool]string{false: "accepted", true: "sql-rejected"}[rejected], func(t *testing.T) {

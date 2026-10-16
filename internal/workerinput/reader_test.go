@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,7 +32,7 @@ func rangeReaderFixture(t *testing.T, data string) (*Handle, *atomic.Bool, *atom
 		}
 		w.Header().Set("ETag", `"revision"`)
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(data)))
-		w.Header().Set("Content-Length", fmt.Sprint(end-start+1))
+		w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
 		w.WriteHeader(http.StatusPartialContent)
 		_, _ = io.WriteString(w, data[start:end+1])
 	}))
@@ -158,7 +159,7 @@ func TestReaderAtRejectsWrongRangesAndRetainsShortBodyAuthority(t *testing.T) {
 					body = strings.Repeat("x", int(min(3, length-1)))
 				}
 				w.Header().Set("Content-Range", contentRange)
-				w.Header().Set("Content-Length", fmt.Sprint(length))
+				w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 				w.WriteHeader(206)
 				_, _ = io.WriteString(w, body)
 			}))

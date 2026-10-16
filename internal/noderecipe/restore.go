@@ -57,6 +57,8 @@ return {raw,tostring(now_ms+lifetime),generation,redis.call('GET',KEYS[2]) or ''
 
 // CaptureRestore binds the exact predecessor, its existing authority epoch,
 // and its shortest absolute expiry before a candidate stop removes the record.
+//
+//nolint:nestif // Restoration validates the complete captured Redis tuple before constructing an immutable ticket.
 func (s *Store) CaptureRestore(ctx context.Context, work string, expected playback.RecipeCard) (Restoration, error) {
 	if !s.Enabled() || s.prefix != KeyPrefix || work == "" {
 		return nil, ErrPublicationUncertain

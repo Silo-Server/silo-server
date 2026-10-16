@@ -36,6 +36,7 @@ type Options struct {
 	Transport                                   http.RoundTripper
 }
 
+//nolint:containedctx // Owns the worker process lifetime and cancels all background control loops during Close.
 type Runtime struct {
 	options       Options
 	observations  *observations
@@ -264,6 +265,7 @@ func (r *Runtime) refresh(ctx context.Context) error {
 	return nil
 }
 
+//nolint:gosec // Requests use the validated enrollment core origin and signed worker-control paths; redirects are disabled.
 func (r *Runtime) callGrant(ctx context.Context, method, path string, body any, domain string, target any, scope ...*workeridentity.Grant) error {
 	var raw []byte
 	var err error
@@ -324,6 +326,7 @@ func (r *Runtime) callGrant(ctx context.Context, method, path string, body any, 
 	return json.Unmarshal(grant.Body, target)
 }
 
+//nolint:nestif // Proxy output proofs and core commands retain separate refresh, viewer, and generation fences before attaching request authority.
 func (r *Runtime) verifyCommand(request *http.Request) error {
 	if request.Context().Value(commandContextKey{}) == r {
 		return nil

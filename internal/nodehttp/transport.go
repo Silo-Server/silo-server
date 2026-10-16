@@ -89,8 +89,8 @@ func Client(client *http.Client) *http.Client {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	copy := *client
-	copy.Transport = Wrap(copy.Transport)
-	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &copy
+	cloned := *client
+	cloned.Transport = Wrap(cloned.Transport)
+	cloned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &cloned
 }

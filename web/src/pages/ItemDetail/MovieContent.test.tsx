@@ -72,12 +72,26 @@ vi.mock("@/hooks/queries/watchlist", () => ({
   useToggleWatchlist: mocks.useToggleWatchlist,
 }));
 
+vi.mock("@/hooks/queries/notInterested", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/notInterested")>()),
+  useToggleNotInterested: () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
+}));
+
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
 }));
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryCapabilities: mocks.useLibraryCapabilities,
+}));
+
+const resetProgressMocks = vi.hoisted(() => ({
+  useResetProgressAction: vi.fn((): (() => void) | undefined => undefined),
+}));
+
+vi.mock("@/hooks/queries/progress", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/progress")>()),
+  useResetProgressAction: resetProgressMocks.useResetProgressAction,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -326,6 +340,34 @@ describe("MovieContent", () => {
         audioLabel: "DTS",
       },
     });
+  });
+
+  it("passes the reset progress action for the movie's resume position", () => {
+    const resetProgress = vi.fn();
+    resetProgressMocks.useResetProgressAction.mockImplementation(() => resetProgress);
+    try {
+      renderToStaticMarkup(
+        <MemoryRouter initialEntries={["/item/movie-1"]}>
+          <MovieContent
+            item={makeMovieItem({
+              user_data: {
+                played: false,
+                is_in_progress: true,
+                position_seconds: 600,
+                duration_seconds: 3600,
+              },
+            })}
+          />
+        </MemoryRouter>,
+      );
+    } finally {
+      resetProgressMocks.useResetProgressAction.mockImplementation(() => undefined);
+    }
+
+    expect(resetProgressMocks.useResetProgressAction).toHaveBeenCalledWith(
+      expect.objectContaining({ content_id: "movie-1" }),
+    );
+    expect(mocks.capturedActionBarProps.value?.onResetProgress).toBe(resetProgress);
   });
 
   it("passes restartHref when the movie is partially watched", () => {

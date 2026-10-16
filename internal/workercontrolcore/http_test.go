@@ -165,8 +165,8 @@ func (s *testRecipes) Get(context.Context, string) (*playback.RecipeCard, bool) 
 	if s.card == nil {
 		return nil, false
 	}
-	copy := *s.card
-	return &copy, true
+	snapshot := *s.card
+	return &snapshot, true
 }
 func (s *testRecipes) Delete(context.Context, string) error     { s.card = nil; return nil }
 func (s *testRecipes) RevokeNode(context.Context, string) error { s.card = nil; return nil }
@@ -266,6 +266,7 @@ func TestStandaloneControlHasNoCustomerTokenResolutionRoute(t *testing.T) {
 	}
 }
 
+//nolint:nestif // Both preexisting and newly admitted recipes must preserve the same opaque-source and binding assertions.
 func TestLazySignedRecipeOmitsCorePathsFromAssignmentAndRecipe(t *testing.T) {
 	for _, preexisting := range []bool{false, true} {
 		name := "lazy"

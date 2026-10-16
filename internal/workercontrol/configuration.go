@@ -79,16 +79,16 @@ func (c *localConfig) install(next workerwire.ExecutionConfig) (func(), error) {
 		c.mu.Unlock()
 		return nil, nil
 	}
-	copy := *c.cfg
-	copy.Playback.SegmentRetentionSeconds = next.SegmentRetentionSeconds
+	snapshot := *c.cfg
+	snapshot.Playback.SegmentRetentionSeconds = next.SegmentRetentionSeconds
 	capacity := next.SubtitleSyncCapacity
 	if c.maxJobs > 0 && capacity > c.maxJobs {
 		capacity = c.maxJobs
 	}
-	copy.Playback.SubtitleSyncNodeCapacity = capacity
+	snapshot.Playback.SubtitleSyncNodeCapacity = capacity
 	changed := c.execution.Drain != next.Drain
 	callback := c.drainCallback
-	c.cfg, c.execution = &copy, next
+	c.cfg, c.execution = &snapshot, next
 	c.mu.Unlock()
 	if changed && callback != nil {
 		return func() { callback(next.Drain) }, nil

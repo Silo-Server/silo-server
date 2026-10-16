@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestWorkerOutputAuthorityRevokesExactOriginatingCredential(t *testing.T) {
 	f := newContentFixture(t)
 	ctx := t.Context()

@@ -202,6 +202,7 @@ func TestFailedRehomeStartUndispatchedCandidateUsesHealthyNode(t *testing.T) {
 	waitForStoredRecipeNode(t, recipes, healthy.server.URL, 3)
 }
 
+//nolint:nestif // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestFailedRehomeStartUndispatchedLegacyRouteMustRemainCurrent(t *testing.T) {
 	for _, mode := range []string{"stopped", "changed", "busy"} {
 		t.Run(mode, func(t *testing.T) {

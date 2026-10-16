@@ -197,6 +197,13 @@ func (v *Verifier) verify(req *http.Request, nodeID int, delegated ed25519.Publi
 	if !now.Before(sent.Add(window)) || sent.After(now.Add(window)) {
 		return errors.New("request proof expired")
 	}
+	if err := v.verifySignature(req, nodeID, delegated); err != nil {
+		return err
+	}
+	return v.consumeNonce(nodeID, nonce, now, sent.Add(window), capacity)
+}
+
+func (v *Verifier) verifySignature(req *http.Request, nodeID int, delegated ed25519.PublicKey) error {
 	encoded, err := oneHeader(req.Header, HeaderSignature, true)
 	if err != nil {
 		return err
@@ -222,6 +229,10 @@ func (v *Verifier) verify(req *http.Request, nodeID int, delegated ed25519.Publi
 	if !ed25519.Verify(key, message, sig) {
 		return errors.New("invalid request proof")
 	}
+	return nil
+}
+
+func (v *Verifier) consumeNonce(nodeID int, nonce string, now, expires time.Time, capacity int) error {
 	cacheKey := strconv.Itoa(nodeID) + ":" + nonce
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -241,8 +252,8 @@ func (v *Verifier) verify(req *http.Request, nodeID int, delegated ed25519.Publi
 	if len(v.nonces) >= capacity {
 		return errors.New("request replay cache full")
 	}
-	v.nonces[cacheKey] = sent.Add(window)
-	heap.Push(&v.expiries, nonceEntry{cacheKey, sent.Add(window)})
+	v.nonces[cacheKey] = expires
+	heap.Push(&v.expiries, nonceEntry{cacheKey, expires})
 	return nil
 }
 
@@ -252,9 +263,9 @@ type nonceEntry struct {
 }
 type nonceHeap []nonceEntry
 
-func (h nonceHeap) Len() int           { return len(h) }
-func (h nonceHeap) Less(i, j int) bool { return h[i].deadline.Before(h[j].deadline) }
-func (h nonceHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *nonceHeap) Len() int           { return len(*h) }
+func (h *nonceHeap) Less(i, j int) bool { return (*h)[i].deadline.Before((*h)[j].deadline) }
+func (h *nonceHeap) Swap(i, j int)      { (*h)[i], (*h)[j] = (*h)[j], (*h)[i] }
 func (h *nonceHeap) Push(value any) {
 	entry, ok := value.(nonceEntry)
 	if !ok {
@@ -299,10 +310,7 @@ func requestMessage(req *http.Request) ([]byte, error) {
 		}
 		fields = append(fields, value)
 	}
-	encoded, err := json.Marshal(fields)
-	if err != nil {
-		return nil, err
-	}
+	encoded, _ := json.Marshal(fields)
 	return append([]byte(requestPrefix), encoded...), nil
 }
 
@@ -486,11 +494,8 @@ func SaveBinding(path string, b Binding) error {
 	if err := b.Validate(); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(b, "", "  ")
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	data, _ := json.MarshalIndent(b, "", "  ")
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) //nolint:gosec // Operator-selected binding path is created exclusively with private permissions.
 	if err != nil {
 		return err
 	}
@@ -522,7 +527,7 @@ func LoadBinding(path string) (Binding, error) {
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		return b, errors.New("worker binding requires a private regular file")
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // Operator-selected binding must match the private regular file checked before and after open.
 	if err != nil {
 		return b, err
 	}

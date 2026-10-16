@@ -29,6 +29,7 @@ func TestWorkerOutputRelayMissingSecretFailsClosed(t *testing.T) {
 	}
 }
 
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestWorkerPreparedRelayReusesExactCredentialArtifactAndGeneration(t *testing.T) {
 	f := newContentFixture(t)
 	prepared := f.preparedClaims(t, "720p")

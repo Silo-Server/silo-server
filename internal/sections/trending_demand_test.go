@@ -128,7 +128,7 @@ func TestTrendingDemandIncludesLinkedProfileConfig(t *testing.T) {
 func TestTrendingDemandEmptySectionIDPrefersExplicitUserConfig(t *testing.T) {
 	provider := demandProvider{stores: map[int]userstore.UserStore{
 		11: demandStore{overrides: []userstore.SectionOverride{{
-			ID: "conflicting", SectionType: "trending_discover", Config: `{"source":"trakt","window":"week"}`,
+			ID: "conflicting", SectionType: "trending_discover", Config: `{"source":"tmdb","window":"week"}`,
 			UserSectionType: "trending_discover", UserConfig: `{"source":"tmdb","window":"day"}`,
 		}}},
 	}}

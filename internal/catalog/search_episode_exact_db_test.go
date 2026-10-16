@@ -220,7 +220,11 @@ func TestEpisodeExactTierCursorAndPlanPostgres(t *testing.T) {
 	broadSQL, _, broadArgs := repo.buildMixedSearchCursorSQL(parseSearchQuery("Parentspill"), []string{"episode"}, 21, 0, filter, false, &searchCursorSQL{})
 	// Inspect the unchanged scored relation and page limit independently of
 	// hydration; disabling nested loops is only for the parent join spill.
-	broadSQL = broadSQL[:strings.Index(broadSQL, ", page AS (")] +
+	broadScored, _, ok := strings.Cut(broadSQL, ", page AS (")
+	if !ok {
+		t.Fatalf("broad search SQL has no page CTE:\n%s", broadSQL)
+	}
+	broadSQL = broadScored +
 		fmt.Sprintf(" SELECT content_id FROM scored WHERE $1::text IS NOT NULL ORDER BY %s LIMIT $%d", mixedSearchOrder(""), len(broadArgs))
 	if err := broadTx.QueryRow(ctx, "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON,TIMING OFF) "+broadSQL, broadArgs...).Scan(&plan); err != nil {
 		t.Fatal(err)

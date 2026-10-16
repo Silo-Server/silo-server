@@ -112,11 +112,13 @@ func probeCopyFragmentOrigin(ctx context.Context, opts TranscodeOpts, outputDir 
 		return 0, err
 	}
 	defer release()
+	//nolint:gosec // These paths come from the owned transcode output directory and its validated playlist entry. G304
 	init, err := os.Open(initPath)
 	if err != nil {
 		return 0, fmt.Errorf("open copy init: %w", err)
 	}
 	defer func() { _ = init.Close() }()
+	//nolint:gosec // These paths come from the owned transcode output directory and its validated playlist entry. G304
 	fragment, err := os.Open(fragmentPath)
 	if err != nil {
 		return 0, fmt.Errorf("open copy fragment: %w", err)

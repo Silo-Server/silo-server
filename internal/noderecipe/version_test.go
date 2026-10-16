@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
+//nolint:gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestRedisRecipePublicationVersionsProtectIdenticalWritesAndLegacyMigration(t *testing.T) {
 	endpoint := os.Getenv("SILO_TEST_REDIS_URL")
 	if endpoint == "" {

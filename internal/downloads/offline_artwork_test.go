@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 func TestArtworkUpstreamFailuresAreRetryableAndOmitTheURL(t *testing.T) {
@@ -102,8 +104,27 @@ func TestOfflineDepsKeepTheArtworkTimeout(t *testing.T) {
 	}
 	// A deadline over the whole exchange would also count time spent writing
 	// to a slow client; only the store's own waits are bounded.
-	if artworkClient.Timeout != 0 || artworkClient.Transport.(*http.Transport).ResponseHeaderTimeout == 0 {
-		t.Fatal("artwork client timeouts changed")
+	if artworkClient.Timeout != 0 {
+		t.Fatal("artwork client has a whole-exchange deadline")
+	}
+
+	// The store must start answering within artworkStallTimeout.
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	defer upstream.Close()
+	defer close(release)
+	defer func(old time.Duration) { artworkStallTimeout = old }(artworkStallTimeout)
+	artworkStallTimeout = 50 * time.Millisecond
+	client := &http.Client{Transport: artworkTransport()}
+	req, err := http.NewRequestWithContext(netguard.WithPrivateAccess(t.Context()), http.MethodGet, upstream.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := client.Do(req); err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("artwork fetch waited past the header timeout")
+	} else if !strings.Contains(err.Error(), "timeout awaiting response headers") {
+		t.Fatalf("artwork fetch error = %v, want a response header timeout", err)
 	}
 }
 
@@ -159,7 +180,8 @@ func TestArtworkSlowClientDoesNotTimeOutTheStore(t *testing.T) {
 		_, _ = w.Write(image)
 	}))
 	defer upstream.Close()
-	s := &Service{} // the production client
+	// The production client, reading an artwork store on loopback.
+	s := &Service{artworkStore: blobstoretest.NewDirect(upstream.URL)}
 	out := slowClientWriter{httptest.NewRecorder()}
 	if err := s.streamArtwork(context.Background(), out, nil, upstream.URL+"/backdrop.jpg"); err != nil || out.Body.Len() != len(image) {
 		t.Fatalf("err = %v, wrote %d of %d bytes", err, out.Body.Len(), len(image))
@@ -204,6 +226,29 @@ func TestArtworkStallBeforeFirstByteDropsImageHeaders(t *testing.T) {
 	err := s.streamArtwork(context.Background(), rec, nil, upstream.URL+"/poster.jpg")
 	if !errors.Is(err, ErrAssetUnavailable) || rec.Header().Get("Content-Length") != "" || rec.Header().Get("Cache-Control") != "" {
 		t.Fatalf("err = %v, headers %v", err, rec.Header())
+	}
+}
+
+// Artwork that is not on the artwork store, such as a metadata provider's URL
+// kept when caching it failed, may not reach the server's own network.
+func TestArtworkOffTheStoreStaysOffTheLocalNetwork(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("internal response"))
+	}))
+	defer upstream.Close()
+	store := blobstoretest.NewDirect("http://storage.invalid")
+	s := &Service{artworkStore: store} // the production client
+
+	rec := httptest.NewRecorder()
+	err := s.streamArtwork(context.Background(), rec, nil, upstream.URL+"/poster.jpg")
+	// The refusal is permanent, so it is not reported as worth a retry.
+	if !errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetUnavailable) || !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("err = %v, want ErrAssetNotFound from netguard.ErrPrivateDestination", err)
+	}
+	if hits.Load() != 0 || rec.Body.Len() != 0 {
+		t.Fatalf("upstream hits = %d, body %q; want no request", hits.Load(), rec.Body.String())
 	}
 }
 

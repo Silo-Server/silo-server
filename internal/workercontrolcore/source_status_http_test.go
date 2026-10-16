@@ -25,6 +25,8 @@ type statusSourceAdapter struct{ *workersource.Authority }
 func (a statusSourceAdapter) Release(ctx context.Context, node int, work string, generation uint64) error {
 	return a.RevokeWork(ctx, node, work, generation)
 }
+
+//nolint:funlen // HTTP reads and renewals classify unavailable versus stopped against the same source generation.
 func TestSourceHTTPAndRenewClassifyUnavailableVersusStopped(t *testing.T) {
 	_, coreKey, _ := ed25519.GenerateKey(rand.Reader)
 	nodePublic, nodeKey, _ := ed25519.GenerateKey(rand.Reader)

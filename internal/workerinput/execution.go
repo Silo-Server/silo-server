@@ -125,19 +125,28 @@ func RestrictArgs(ctx context.Context, args []string) ([]string, error) {
 	result := make([]string, 0, len(args)+8)
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-i" && i+1 < len(args) {
-			input := args[i+1]
-			if input != "-" && input != "pipe:0" {
-				if err := Validate(ctx, input); err != nil {
-					return nil, err
-				}
-				if _, remote := Lookup(ctx, input); remote {
-					result = append(result, "-protocol_whitelist", "http,tcp", "-format_whitelist", admittedMediaFormats)
-				}
+			options, err := inputRestrictions(ctx, args[i+1])
+			if err != nil {
+				return nil, err
 			}
+			result = append(result, options...)
 		}
 		result = append(result, args[i])
 	}
 	return result, nil
+}
+
+func inputRestrictions(ctx context.Context, input string) ([]string, error) {
+	if input == "-" || input == "pipe:0" {
+		return nil, nil
+	}
+	if err := Validate(ctx, input); err != nil {
+		return nil, err
+	}
+	if _, remote := Lookup(ctx, input); remote {
+		return []string{"-protocol_whitelist", "http,tcp", "-format_whitelist", admittedMediaFormats}, nil
+	}
+	return nil, nil
 }
 
 // CommandContext applies source restrictions before process creation. A refused
@@ -163,7 +172,7 @@ func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	if err != nil {
 		canceled, cancel := context.WithCancel(ctx)
 		cancel()
-		return exec.CommandContext(canceled, name, args...)
+		return exec.CommandContext(canceled, name, args...) //nolint:gosec // Canceled context refuses execution through the normal exec.Cmd error path.
 	}
 	// FFprobe accepts a positional input rather than -i.
 	for _, arg := range args {
@@ -172,7 +181,7 @@ func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 			break
 		}
 	}
-	return exec.CommandContext(ctx, name, restricted...)
+	return exec.CommandContext(ctx, name, restricted...) //nolint:gosec // Executable is operator-configured; admitted inputs and protocol restrictions are checked above.
 }
 func containsInputOption(args []string, value string) bool {
 	for i := 1; i < len(args); i++ {

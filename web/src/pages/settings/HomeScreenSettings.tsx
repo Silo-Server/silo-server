@@ -42,6 +42,7 @@ const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 const HOME_PREFERENCE_KEYS = [
   SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
   SETTING_KEYS.UI_NEXT_UP_MODE,
+  SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
 ] as const;
 
 /**
@@ -95,6 +96,8 @@ export default function HomeScreenSettings() {
   const saveHomePreference = useSetSettingValue();
   const hideWatchedItems =
     homePreferences.data?.[SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS]?.value === true;
+  const newReleasesFirst =
+    homePreferences.data?.[SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST]?.value === true;
   // Next up is device-overridable, so it saves through the writer that also
   // clears a device row shadowing the profile's choice.
   const nextUpWriter = useProfileDefaultWriter(homePreferences.data);
@@ -257,6 +260,17 @@ export default function HomeScreenSettings() {
       .catch(() => toast.error("Failed to reset the next up preference"));
   }
 
+  function handleNewReleasesFirstChange(enabled: boolean) {
+    saveHomePreference.mutate(
+      {
+        key: SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+        value: enabled,
+        identity: PROFILE_SCOPE,
+      },
+      { onError: () => toast.error("Failed to save Home preference") },
+    );
+  }
+
   function handleHideWatchedItemsChange(enabled: boolean) {
     saveHomePreference.mutate(
       { key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS, value: enabled, identity: PROFILE_SCOPE },
@@ -301,6 +315,8 @@ export default function HomeScreenSettings() {
         nextUpChosen={nextUp?.source === "profile"}
         onNextUpModeChange={handleNextUpModeChange}
         onNextUpReset={handleNextUpReset}
+        newReleasesFirst={newReleasesFirst}
+        onNewReleasesFirstChange={handleNewReleasesFirstChange}
         hideWatched={hideWatchedItems}
         onHideWatchedChange={handleHideWatchedItemsChange}
         disabled={

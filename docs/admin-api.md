@@ -1081,7 +1081,7 @@ Each entry:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `provider` | string | Provider key: `trakt`, `simkl`, or `mdblist` for the first-party plugins, otherwise `plugin:<installation id>:<capability id>`. |
+| `provider` | string | Provider key: `simkl` or `mdblist` for the first-party plugins, otherwise `plugin:<installation id>:<capability id>`. |
 | `display_name` | string | Human name from the registry, or the key when the provider is not registered. |
 | `registered` | bool | False when the provider only exists in stored rows. |
 | `scrobbling` | bool | The provider declares the scrobble-playback capability. |
@@ -1127,8 +1127,8 @@ Each entry:
       "scrobbles_24h": 0
     },
     {
-      "provider": "trakt",
-      "display_name": "Trakt",
+      "provider": "simkl",
+      "display_name": "Simkl",
       "registered": true,
       "scrobbling": true,
       "exporting": true,
@@ -2181,8 +2181,10 @@ prospective combined values. Single-key validation preserves the existing paired
 setting repair behavior. Empty values retain the established clear/default rules.
 
 Both writes are nonretryable. Enabling diagnostics can probe storage before the
-transaction, and runtime notifications after commit are not durable command
-receipts. A lost response does not establish whether the update committed. The
+transaction, a change to the Redis connection connects to Redis before it (see
+[Saving the Redis connection](admin-settings-api.md#saving-the-redis-connection)),
+and runtime notifications after commit are not durable command receipts. A
+lost response does not establish whether the update committed. The
 web captures the displayed validator, copied values and acting profile before an
 offline pause, does not refresh/replay a failed mutation, and keeps dirty edits on
 the original baseline across background reads and 412 responses. Changing acting
@@ -2268,7 +2270,8 @@ the handshake is served on this process, the protocol (`silo.admin-logs.v2`) and
 selections (`app`, `audit`). `POST /api/v2/admin/logs/ws-ticket` (`createAdminLogsSocketTicket`)
 delegates the acting administrator's current access-token login session for one connection.
 API keys and credentials without a bounded expiry cannot mint; a login whose effective role is
-not administrator (a secondary profile on an administrator account) is refused with 403. The
+not administrator (a secondary profile on an administrator account, or a profile-less session
+on a household with a PIN-protected or access-limited profile) is refused with 403. The
 ticket is opaque, single-use, expires within 30 seconds and binds the account, login session,
 role, profile proof and resolved access scope. The response carries `ticket`, `expires_in`,
 `max_connection_seconds` (300) and `protocol`, is not cached, and minting is naturally
@@ -2286,7 +2289,8 @@ proof and administrator role are validated again before 101.
 
 The connection ends at the earlier of five minutes or access-token expiry, and the handler
 rechecks session, account, profile and administrator role every 15 seconds with a two-second
-bound; a failed check or a demotion closes the socket. Reconnect with a newly minted credential;
+bound; a failed check or a demotion closes the socket, including once the household of a
+profile-less session gains a PIN-protected or access-limited profile. Reconnect with a newly minted credential;
 this is bounded revocation detection, not instantaneous. Without Redis the ticket is
 process-local and requires affinity to the minting node.
 
@@ -2770,7 +2774,9 @@ started from. Otherwise it skips the
 write without an error, leaves `last_run_at` and `last_error` as they were (so the next
 cycle polls the new upstream without waiting for the interval), records its starting
 marker as the event's `marker_after` with a note that the marker was not stored, and
-the next poll starts from the reset marker.
+the next poll starts from the reset marker. A poll that fails after such a reset
+likewise leaves `last_error` and `last_run_at` as the reset left them; its error is
+recorded only on the poll's event, with a note that it was not stored on the source.
 
 Configuration keys/values, connection and label are normalized as in the bridge.
 Webhook mode is restricted to the built-in identity, with auto/sonarr/radarr provider
@@ -3044,7 +3050,12 @@ by `id`. Both listeners share one projection: global configuration values contai
 public fields the manifest declares and list configured secret names in
 `configured_secrets`; a configuration whose schema is missing from the manifest is projected
 empty. The reserved built-in host row is excluded and a projection that contains it is an
-internal error. Timestamps are RFC 3339 UTC milliseconds.
+internal error. Timestamps are RFC 3339 UTC milliseconds. In every plugin view that lists
+capabilities (installations, catalog entries, and the install, upload and update responses), a
+`request_router.v1` capability carries `request_router`, whose `api_key_optional` and
+`base_url_optional` say which request server fields its plugin can do without; both are false
+when the plugin declares neither. For an installation they come from the capability stored at
+install or update, which is what routing reads.
 
 Both reads require an acting administrator and answer 503 when the
 plugin service or stores are not wired. The web plugins page and admin sidebar read these
@@ -3090,7 +3101,8 @@ version in place.
 
 `POST /api/v2/admin/plugins/installations/{id}/restart` stops the installation's process
 and, for a resident plugin, starts it again with a fresh failure budget; a non-resident plugin
-is only stopped and launches on its next use. A disabled installation is 409. Success is 200
+is only stopped, its recorded start failure is cleared, and it launches on its next use. A
+disabled installation is 409. Success is 200
 with the installation, whose `runtime` reports the outcome, including a launch that failed.
 Repeating the request converges on one running process, so it is naturally idempotent.
 
@@ -3100,7 +3112,9 @@ exponential backoff from 1 s to 60 s, and is parked as `failed` after ten consec
 failures until restarted or reconfigured), `state` (`stopped`, `starting`, `running`,
 `backoff`, `failed`), `restart_count`, `last_error`, `last_started_at` and `next_restart_at`.
 Plugins declaring `network_access_provider.v1` are resident; every other plugin starts on
-first use and reports only `running` or `stopped`.
+first use and reports `running`, `stopped`, or `failed` when its last launch on the answering
+server failed, with `last_error` saying why. A later successful launch, an administrator
+restart, an update or a configuration change clears that failure.
 
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete

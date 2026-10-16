@@ -58,6 +58,7 @@ func (s *viewerAssignmentCounter) Snapshot(ctx context.Context, node int) (worke
 	return s.MemoryStore.Snapshot(ctx, node)
 }
 
+//nolint:funlen // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestWorkerViewerSnapshotBatchesEquivalentContentAndSiblingCredentials(t *testing.T) {
 	f := newContentFixture(t)
 	queries := &viewerQueryCounter{}
@@ -255,9 +256,9 @@ func TestWorkerViewerBatchKeepsCredentialsIndependentAndRechecksPolicy(t *testin
 	if _, err = f.pool.Exec(ctx, "UPDATE users SET transcode_allowed=FALSE WHERE id=$1", f.user); err != nil {
 		t.Fatal(err)
 	}
-	copy := base
-	copy.PlayMethod = "remux"
-	copyToken := viewerBatchToken(t, copy, secret)
+	cloned := base
+	cloned.PlayMethod = "remux"
+	copyToken := viewerBatchToken(t, cloned, secret)
 	check([]string{copyToken, b}, nil, workercontrolcore.ErrDenied)
 	check([]string{b, copyToken}, workercontrolcore.ErrDenied, nil)
 	if _, err = f.pool.Exec(ctx, "UPDATE users SET transcode_allowed=TRUE WHERE id=$1", f.user); err != nil {

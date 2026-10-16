@@ -42,7 +42,7 @@ func TestSourceTransferResumesExactRemainingRange(t *testing.T) {
 			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(data)))
 		}
 		w.Header().Set("ETag", `"r"`)
-		w.Header().Set("Content-Length", fmt.Sprint(end-start+1))
+		w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
 		w.WriteHeader(status)
 		if calls.Add(1) == 1 {
 			_, _ = w.Write(data[start : start+16384])
@@ -121,12 +121,13 @@ func TestSourceTransferRetryCancellationReleasesReader(t *testing.T) {
 	}
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
 	for len(a.reads) != 0 {
 		select {
 		case <-deadline.C:
 			t.Fatal("reader quota not released")
-		default:
-			time.Sleep(time.Millisecond)
+		case <-ticker.C:
 		}
 	}
 	if h.Validate(t.Context()) != nil {
@@ -256,7 +257,7 @@ func TestSourceTransferDefinitiveLossDuringRetryRetiresHandle(t *testing.T) {
 
 func TestSourceTransferTransientExhaustionRetainsHandle(t *testing.T) {
 	for _, status := range []int{429, 500, 503} {
-		t.Run(fmt.Sprint(status), func(t *testing.T) {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			var calls atomic.Int64
 			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); http.Error(w, "temporary", status) }))
 			defer origin.Close()

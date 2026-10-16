@@ -521,10 +521,10 @@ func (r *ImageCacheJobRepository) ClaimDue(ctx context.Context, workerID string,
 	if err := r.recoverExpiredRunning(ctx, ""); err != nil {
 		return nil, err
 	}
-	return r.claimDue(ctx, workerID, "", false, limit)
+	return r.claimDue(ctx, workerID, "", limit)
 }
 
-func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetContentID string, localOnly bool) error {
+func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetContentID string) error {
 	if r == nil || r.pool == nil {
 		return nil
 	}
@@ -558,9 +558,6 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 		  AND status IN ('queued', 'failed')
 		  AND (status = 'failed' OR next_attempt_at > NOW() OR starts_with(last_error, $2))
 		  AND NOT ` + heldLocalDiscoverySQL
-	if localOnly {
-		query += " AND " + localImageCacheSourceSQL
-	}
 	_, err := r.pool.Exec(ctx, query, targetContentID, localImageStorageUnavailable)
 	if err != nil {
 		return fmt.Errorf("retrying target metadata image cache jobs: %w", err)
@@ -568,15 +565,15 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 	return nil
 }
 
-func (r *ImageCacheJobRepository) claimDueForTarget(ctx context.Context, workerID, targetContentID string, localOnly bool, limit int) ([]*models.MetadataImageCacheJob, error) {
+func (r *ImageCacheJobRepository) claimDueForTarget(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error) {
 	targetContentID = strings.TrimSpace(targetContentID)
 	if targetContentID == "" {
 		return nil, nil
 	}
-	return r.claimDue(ctx, workerID, targetContentID, localOnly, limit)
+	return r.claimDue(ctx, workerID, targetContentID, limit)
 }
 
-func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targetContentID string, localOnly bool) (bool, error) {
+func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targetContentID string) (bool, error) {
 	if r == nil || r.pool == nil {
 		return false, nil
 	}
@@ -590,9 +587,6 @@ func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targ
 			FROM metadata_image_cache_jobs
 			WHERE ` + imageCacheTargetScope("$1") + `
 			  AND status = 'running'`
-	if localOnly {
-		query += " AND " + localImageCacheSourceSQL
-	}
 	var running bool
 	if err := r.pool.QueryRow(ctx, query+")", targetContentID).Scan(&running); err != nil {
 		return false, fmt.Errorf("checking running metadata image cache jobs: %w", err)
@@ -600,9 +594,8 @@ func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targ
 	return running, nil
 }
 
-// claimDue claims due queued jobs, optionally only those for one target scope
-// and only local file:// sources.
-func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, targetContentID string, localOnly bool, limit int) ([]*models.MetadataImageCacheJob, error) {
+// claimDue claims due queued jobs, optionally only those for one target scope.
+func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error) {
 	if r == nil || r.pool == nil || limit <= 0 {
 		return nil, nil
 	}
@@ -610,7 +603,7 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 	if targetContentID != "" {
 		args = append(args, targetContentID)
 	}
-	rows, err := r.pool.Query(ctx, claimDueQuery(targetContentID != "", localOnly), args...)
+	rows, err := r.pool.Query(ctx, claimDueQuery(targetContentID != ""), args...)
 	if err != nil {
 		return nil, fmt.Errorf("claiming metadata image cache jobs: %w", err)
 	}
@@ -619,7 +612,7 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 
 // claimDueQuery claims up to $1 due jobs for worker $2, within target scope
 // $3 when targeted.
-func claimDueQuery(targeted, localOnly bool) string {
+func claimDueQuery(targeted bool) string {
 	due := "next_attempt_at <= NOW()"
 	if targeted {
 		// A refresh's own discoveries are its to copy now, hold or not.
@@ -634,9 +627,6 @@ func claimDueQuery(targeted, localOnly bool) string {
 	`
 	if targeted {
 		query += " AND " + imageCacheTargetScope("$3")
-	}
-	if localOnly {
-		query += " AND " + localImageCacheSourceSQL
 	}
 	return query + `
 			ORDER BY next_attempt_at ASC, id ASC

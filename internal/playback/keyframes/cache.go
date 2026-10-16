@@ -242,8 +242,9 @@ func storeLocked(key cacheKey, idx Index, err error) {
 // can reopen independently. Context bounds its lifetime; Validate checks the
 // current caller's authority even when an index is already cached.
 type Source struct {
-	Identity   string
-	Size       int64
+	Identity string
+	Size     int64
+	//nolint:containedctx // The admitted range reader retains its owning context for the source lifetime.
 	Context    context.Context
 	Validate   func(context.Context) error
 	OpenReader func(context.Context) (io.ReaderAt, io.Closer, error)

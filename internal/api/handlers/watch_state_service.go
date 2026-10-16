@@ -141,7 +141,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
 	}
 
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watched", userStateEventState{
 		Played: boolPtr(played),
 	})
@@ -152,6 +152,41 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 		AffectedCount: len(targets),
 		Played:        played,
 	}, nil
+}
+
+// ClearResumePosition clears the profile's resume position on a movie or
+// episode and keeps its watched state and watch history; an item without a
+// resume position is a no-op. A season, series or ebook has no single resume
+// position (400 invalid_watch_target); an unknown or inaccessible item is 404,
+// as is a kind the watched-state resolver does not handle, such as an
+// audiobook.
+// It is the command behind the v2 operation; the frozen v1 API has none.
+func (h *ItemsHandler) ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalog.AccessFilter) error {
+	// Only the target's type is needed: a season or series is rejected
+	// without loading its episodes.
+	target, err := h.lookupWatchedTarget(ctx, contentID, filter)
+	if err != nil {
+		if isNotFound(err) {
+			return apiError(http.StatusNotFound, "not_found", "Item not found")
+		}
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear resume position")
+	}
+	if target.Type != itemTypeMovie && target.Type != itemTypeEpisode {
+		return apiError(http.StatusBadRequest, "invalid_watch_target", "Only a movie or an episode has a resume position")
+	}
+	if h.watchState == nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	cleared, err := h.watchState.ClearResumePosition(ctx, userID, profileID, contentID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear resume position")
+	}
+	if !cleared {
+		return nil
+	}
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "progress", userStateEventState{})
+	return nil
 }
 
 // markLeafTargetsWatched records a manual play for every leaf target the

@@ -324,9 +324,15 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 // watchDetailProblem maps a watch detail error to its problem: a target that
 // is not directly playable fails validation of the path.
 func watchDetailProblem(err error) error {
+	return watchTargetProblem(err, locationPathID)
+}
+
+// watchTargetProblem maps a watch-state error to its problem: a target the
+// operation cannot act on fails validation of the path parameter at location.
+func watchTargetProblem(err error, location string) error {
 	if apiErr, ok := errors.AsType[*handlers.APIError](err); ok && apiErr.Code == "invalid_watch_target" {
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationPathID, Code: codeInvalid, Detail: apiErr.Message})
+			WithErrors(ProblemError{Location: location, Code: codeInvalid, Detail: apiErr.Message})
 	}
 	return serviceProblem(err)
 }
@@ -524,4 +530,5 @@ type WatchService interface {
 	ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error)
 	WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error)
 	SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played bool, filter catalogpkg.AccessFilter) (handlers.WatchedStateView, error)
+	ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) error
 }

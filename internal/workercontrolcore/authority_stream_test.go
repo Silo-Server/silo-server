@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
+//nolint:containedctx // The response-writer barrier observes its request cancellation while holding the first write.
 type authorityFirstWrite struct {
 	http.ResponseWriter
 	once   sync.Once
@@ -41,6 +42,7 @@ func (w *authorityFirstWrite) Write(p []byte) (int, error) {
 	return n, err
 }
 
+//nolint:funlen // The first-write barrier and concurrent authority refresh must stay in one ordered stream-revocation scenario.
 func TestSourceHTTPInvalidationKeepsHealthyReadAndInterruptsRevokedRead(t *testing.T) {
 	for _, change := range []string{"unrelated-work", "finish-admission", "stop"} {
 		t.Run(change, func(t *testing.T) {
@@ -138,7 +140,7 @@ func TestSourceHTTPInvalidationKeepsHealthyReadAndInterruptsRevokedRead(t *testi
 			}
 			releaseAuthority()
 			rest, readErr := io.ReadAll(response.Body)
-			got := append(prefix, rest...)
+			got := bytes.Join([][]byte{prefix, rest}, nil)
 			if change == "stop" {
 				if readErr == nil || len(got) >= len(data) {
 					t.Fatal("genuinely revoked source read completed")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -169,6 +170,8 @@ func assertMemoryGatesReleased(t *testing.T, state *PlaybackSessionStore) {
 		t.Fatalf("leaked %d work gates", len(state.recipeWorks))
 	}
 }
+
+//nolint:funlen,gocyclo // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
 func TestMemoryRecipeLifecycleMutationsSerializeWithReceipt(t *testing.T) {
 	for _, phase := range []string{"publish", "ack", "undo", "commit"} {
 		for _, operation := range []string{"update", "delete", "terminal", "put", "negotiated", "replace", "expiry", "pending-expiry", "terminal-expiry", "finalizable", "claim", "release", "complete", "stage", "get-expiry"} {
@@ -452,7 +455,7 @@ func TestMemoryRecipeRedisReceiptsPreserveRollbackAndSuccessors(t *testing.T) {
 
 func TestMemoryRecipeExpiredDuringRedisRetiresExactCandidate(t *testing.T) {
 	for _, successor := range []bool{false, true} {
-		t.Run(fmt.Sprint(successor), func(t *testing.T) {
+		t.Run(strconv.FormatBool(successor), func(t *testing.T) {
 			start := time.Now()
 			var elapsed atomic.Int64
 			state := NewPlaybackSessionStore(time.Hour, func() time.Time { return start.Add(time.Duration(elapsed.Load())) })
