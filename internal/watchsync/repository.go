@@ -2137,13 +2137,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return result
 }
 
-type listItemStateRows interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-}
-
-func scanListItemStates(rows listItemStateRows) ([]ListItemState, error) {
+func scanListItemStates(rows pgx.Rows) ([]ListItemState, error) {
 	var states []ListItemState
 	for rows.Next() {
 		var state ListItemState

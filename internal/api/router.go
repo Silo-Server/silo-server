@@ -1781,7 +1781,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		markersHandler = handlers.NewMarkersHandler(
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
-		markersHandler.BaseContext = deps.AppContext
+		markersHandler.BaseContext = deps.AppContext //nolint:fatcontext // set once on a new handler to the app context
 		if deps.DB != nil {
 			markersHandler.Libraries = catalog.NewFolderRepository(deps.DB)
 		}

@@ -2943,6 +2943,9 @@ func (s *DetailService) fetchBookAlsoByAuthor(ctx context.Context, contentID str
 		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath, filter)
 		out = append(out, item)
 	}
+	if rows.Err() != nil {
+		return []AudiobookRelatedItem{}
+	}
 	return out
 }
 
@@ -3009,6 +3012,9 @@ func (s *DetailService) fetchBookSimilarByGenres(ctx context.Context, contentID 
 		}
 		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath, filter)
 		out = append(out, item)
+	}
+	if rows.Err() != nil {
+		return []AudiobookRelatedItem{}
 	}
 	return out
 }
@@ -3084,6 +3090,9 @@ func (s *DetailService) fetchBookSeries(ctx context.Context, contentID string, m
 		item.PosterURL = s.presignAudiobookPosterURL(ctx, poster, filter)
 		entries = append(entries, item)
 	}
+	if rows.Err() != nil {
+		return nil
+	}
 	if len(entries) < 2 {
 		return nil
 	}
@@ -3147,6 +3156,9 @@ func (s *DetailService) fetchAudiobookOtherNarrations(ctx context.Context, conte
 		}
 		item.Narrators = splitDelimitedNames(narrators)
 		out = append(out, item)
+	}
+	if rows.Err() != nil {
+		return []AudiobookNarration{}
 	}
 	return out
 }

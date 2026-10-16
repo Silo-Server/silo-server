@@ -80,6 +80,9 @@ func (f releaseFixture) eventTargets(t *testing.T) []string {
 		}
 		ids = append(ids, id)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("list release events: %v", err)
+	}
 	slices.Sort(ids)
 	return ids
 }

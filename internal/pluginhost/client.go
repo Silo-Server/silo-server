@@ -110,14 +110,14 @@ func newClient(installationID int, rpc *sdkruntime.Client, manifest *pluginv1.Pl
 	return &Client{
 		installationID: installationID,
 		startSeq:       startSeq,
-		manifest:       proto.Clone(manifest).(*pluginv1.PluginManifest),
+		manifest:       proto.CloneOf(manifest),
 		rpc:            rpc,
 		capabilities:   capabilities,
 	}
 }
 
 func (c *Client) Manifest() *pluginv1.PluginManifest {
-	return proto.Clone(c.manifest).(*pluginv1.PluginManifest)
+	return proto.CloneOf(c.manifest)
 }
 
 func (c *Client) Capabilities() []*pluginv1.CapabilityDescriptor {
@@ -126,7 +126,7 @@ func (c *Client) Capabilities() []*pluginv1.CapabilityDescriptor {
 
 	result := make([]*pluginv1.CapabilityDescriptor, 0, len(c.capabilities))
 	for _, capability := range c.capabilities {
-		result = append(result, proto.Clone(capability).(*pluginv1.CapabilityDescriptor))
+		result = append(result, proto.CloneOf(capability))
 	}
 	return result
 }

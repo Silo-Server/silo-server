@@ -1557,6 +1557,9 @@ func (h *ItemsHandler) listAudiobookSortMetrics(
 			resp.SeriesName = value
 		}
 	}
+	if err := rows.Err(); err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing audiobook sort metrics", "component", "api", "sort", sortField, "error", err)
+	}
 }
 
 func audiobookPersonSortMetricQuery(kind int) string {

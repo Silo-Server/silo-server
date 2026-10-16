@@ -169,7 +169,7 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 		if res.Err != nil {
 			return "", res.Err
 		}
-		return res.Val.(string), nil
+		return res.Val.(string), nil //nolint:errcheck,forcetypeassert // c.group's only DoChan closure returns a string
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
