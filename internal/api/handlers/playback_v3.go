@@ -4813,7 +4813,9 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 		var err error
 		rollbackSession, err = transport.applySession()
 		if err != nil {
-			if rollbackErr, _ := rollbackFailedReplanV3(transport, nil); rollbackErr != nil {
+			// With no session to restore, only the transport can fail.
+			rollbackErr, _ := rollbackFailedReplanV3(transport, nil)
+			if rollbackErr != nil {
 				slog.ErrorContext(r.Context(), "protocol v3 unapplied replacement transport cancellation failed", "session", sessionID, "error", rollbackErr)
 				return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to cancel the unapplied replacement transport")
 			}
@@ -4824,8 +4826,10 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 		if errors.Is(err, playback.ErrAttemptStoppedV3) {
 			// A stop landed on another replica while this replan ran: tear the
 			// replacement transport and the local session down and report the
-			// session gone; the deny marker refuses the plan anyway.
-			if transportRollbackErr, _ := rollbackFailedReplanV3(transport, rollbackSession); transportRollbackErr != nil {
+			// session gone; the deny marker refuses the plan anyway. The abort
+			// below makes a failed session restore moot.
+			transportRollbackErr, _ := rollbackFailedReplanV3(transport, rollbackSession)
+			if transportRollbackErr != nil {
 				slog.ErrorContext(r.Context(), "protocol v3 replacement transport cancellation failed", "session", sessionID, "error", transportRollbackErr)
 			}
 			_ = h.abortPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID)

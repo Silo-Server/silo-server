@@ -632,7 +632,8 @@ func (m *ArtifactManager) reconcileServer(ctx context.Context, remove bool, acto
 		return summary, nil
 	}
 	summary := sumUntracked(untracked)
-	return summary, m.repo.UpsertStorageSample(ctx, 0, m.owner, listing.Usage, &summary)
+	err = m.repo.UpsertStorageSample(ctx, 0, m.owner, listing.Usage, &summary)
+	return summary, err
 }
 
 // reconcileNode lists one node's artifact directory and records its untracked
@@ -656,7 +657,8 @@ func (m *ArtifactManager) reconcileNode(ctx context.Context, n *nodepool.Node, r
 	untracked := findUntracked(listing.Files, nodeArtifactFileName, tracked, time.Now())
 	if !remove {
 		summary := sumUntracked(untracked)
-		return summary, m.repo.UpsertStorageSample(ctx, n.ID, "", listing.Usage, &summary)
+		err = m.repo.UpsertStorageSample(ctx, n.ID, "", listing.Usage, &summary)
+		return summary, err
 	}
 	var removed, left []downloadstorage.File
 	deleted := make(map[string]bool)

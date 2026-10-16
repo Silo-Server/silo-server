@@ -221,7 +221,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		}
 		outcome, err := s.handleExistingPlugin(ctx, existing, entry)
 		if err != nil {
-			summary.recordFailure("process plugin update %s: %v", existing.PluginID, err)
+			summary.recordFailuref("process plugin update %s: %v", existing.PluginID, err)
 			continue
 		}
 		switch outcome {
@@ -244,7 +244,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 			}
 			installedDefault, err := s.handleNewPlugin(ctx, pluginID, entry)
 			if err != nil {
-				summary.recordFailure("auto-install default plugin %s: %v", pluginID, err)
+				summary.recordFailuref("auto-install default plugin %s: %v", pluginID, err)
 			} else if installedDefault {
 				summary.DefaultPluginsInstalled++
 			}
@@ -349,7 +349,7 @@ func (s *AutoUpdateService) pluginsToAutoInstall(ctx context.Context, opts AutoU
 	}
 	required, err := s.requiredPlugins(ctx)
 	if err != nil {
-		summary.recordFailure("list required plugins: %v", err)
+		summary.recordFailuref("list required plugins: %v", err)
 		return pluginIDs
 	}
 	for _, pluginID := range required {
@@ -524,11 +524,11 @@ const (
 	autoUpdateOutcomeNotified
 )
 
-// recordFailure masks credential assignments and URL userinfo before storing
+// recordFailuref masks credential assignments and URL userinfo before storing
 // the message: failures reach the server log, the task's result data, and the
 // task error shown to admins, and their text can carry repository or plugin
 // diagnostics.
-func (s *AutoUpdateSummary) recordFailure(format string, args ...any) {
+func (s *AutoUpdateSummary) recordFailuref(format string, args ...any) {
 	s.FailedOperations++
 	s.Failures = append(s.Failures, logredact.SanitizeText(fmt.Sprintf(format, args...)))
 }

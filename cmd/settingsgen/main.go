@@ -33,7 +33,7 @@ func main() {
 
 	contract, err := settingscontract.Load()
 	if err != nil {
-		fail("loading contract: %v", err)
+		failf("loading contract: %v", err)
 	}
 
 	var body []byte
@@ -48,10 +48,10 @@ func main() {
 	case "swift":
 		body, err = generateSwift(contract)
 	default:
-		fail("unknown -lang %q: want go, ts, kotlin or swift", *lang)
+		failf("unknown -lang %q: want go, ts, kotlin or swift", *lang)
 	}
 	if err != nil {
-		fail("generating %s: %v", *lang, err)
+		failf("generating %s: %v", *lang, err)
 	}
 
 	if *out == "" {
@@ -59,11 +59,11 @@ func main() {
 		return
 	}
 	if err := os.WriteFile(*out, body, 0o644); err != nil { //nolint:gosec // generated source
-		fail("writing %s: %v", *out, err)
+		failf("writing %s: %v", *out, err)
 	}
 }
 
-func fail(format string, args ...any) {
+func failf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "settingsgen: "+format+"\n", args...)
 	os.Exit(1)
 }

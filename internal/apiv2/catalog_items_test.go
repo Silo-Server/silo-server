@@ -75,7 +75,7 @@ func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req 
 		return handlers.CatalogFacetSearchView{}, f.err
 	}
 	f.lastReq = req
-	if facet == "author" && strings.HasPrefix("frank herbert", q) {
+	if facet == "author" && strings.HasPrefix("frank herbert", q) { //nolint:gocritic // the fake matches a typed prefix of the name
 		return handlers.CatalogFacetSearchView{
 			Matches: []string{"Frank Herbert"}, HasMore: limit == 1,
 			Values: []catalogpkg.FacetValue{{Value: "Frank Herbert", Count: 6}}, ValuesHasMore: limit == 1,

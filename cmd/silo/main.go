@@ -771,7 +771,7 @@ func main() {
 	// package-level global.
 	dataCipher, err := secret.New(bc.SecretKey)
 	if err != nil {
-		log.Fatalf("secret cipher: %v", err)
+		log.Fatalf("secret cipher: %v", err) //nolint:gocritic // exiting closes the debug listener with the process
 	}
 	// The API listener also answers TLS on its own port, with a key derived
 	// from SECRET_KEY, so signed-in clients can use the server's local-network
