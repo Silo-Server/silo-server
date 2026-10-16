@@ -67,7 +67,7 @@ type NotificationSeries struct {
 	Reasons       NotificationSeriesReasons `json:"reasons" doc:"The profile's relationships to the series"`
 	ActiveReasons NotificationSeriesReasons `json:"active_reasons" doc:"The reasons the profile's notification preferences let notify; all false when they silence the series"`
 	Notifies      bool                      `json:"notifies" doc:"True when at least one reason is active"`
-	NextUpEpisode *NotificationEpisodeRef   `json:"next_up_episode,omitempty" doc:"With an active Next Up reason, the episode it waits for: on that reason alone, an earlier new episode does not notify"`
+	NextUpAfter   *NotificationEpisodeRef   `json:"next_up_after,omitempty" doc:"With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"`
 }
 
 // NotificationSeriesCollection is the listNotificationSeries envelope.
@@ -197,12 +197,21 @@ func (reg *Registry) listNotificationSeries(ctx context.Context, cursors *Cursor
 	}
 	order := notificationSeriesOrder(in.Sort)
 	keep := notificationSeriesMatch(in, query)
-	matches := make([]notifications.NotifiedSeries, 0, len(all))
+	candidates := make([]notifications.NotifiedSeries, 0, len(all))
+	ids := make([]string, 0, len(all))
 	for _, s := range all {
 		if keep(s) {
-			matches = append(matches, s)
+			candidates = append(candidates, s)
+			ids = append(ids, s.SeriesID)
 		}
 	}
+	// Pages hold only series the viewer may see, so a cursor never carries a
+	// hidden series' sort fields and no page comes back empty with more behind it.
+	visible, err := reg.deps.PersonalLists.VisibleItemIDs(ctx, viewer, ids)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	matches := slices.DeleteFunc(candidates, func(s notifications.NotifiedSeries) bool { return !visible[s.SeriesID] })
 	slices.SortFunc(matches, order)
 	start := 0
 	if after != nil {
@@ -212,8 +221,7 @@ func (reg *Registry) listNotificationSeries(ctx context.Context, cursors *Cursor
 			start = i
 		}
 	}
-	// A limit+1 probe decides has_more from the list itself, so a series the
-	// viewer may not see never hides the ones behind it.
+	// A limit+1 probe decides has_more.
 	page := matches[start:min(start+in.Limit+1, len(matches))]
 	next := ""
 	if len(page) > in.Limit {
@@ -222,11 +230,11 @@ func (reg *Registry) listNotificationSeries(ctx context.Context, cursors *Cursor
 			return nil, serviceProblem(err)
 		}
 	}
-	ids := make([]string, len(page))
+	pageIDs := make([]string, len(page))
 	for i, s := range page {
-		ids[i] = s.SeriesID
+		pageIDs[i] = s.SeriesID
 	}
-	cards, err := reg.deps.PersonalLists.ResolveCards(ctx, viewer, ids)
+	cards, err := reg.deps.PersonalLists.ResolveCards(ctx, viewer, pageIDs)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -251,9 +259,12 @@ func notificationSeriesOf(s notifications.NotifiedSeries, item CatalogItem) Noti
 		ActiveReasons: notificationSeriesReasonsOf(s.Active),
 		Notifies:      s.Active.Any(),
 	}
+	// Next Up waits for any episode keyed at or past last-finished + 1, which
+	// need not exist (after a season finale the next is the following season's
+	// first), so the contract names the finished episode instead.
 	if s.NextExpectedEpisodeKey != nil {
-		season, episode := notifications.SplitEpisodeKey(*s.NextExpectedEpisodeKey)
-		out.NextUpEpisode = &NotificationEpisodeRef{SeasonNumber: season, EpisodeNumber: episode}
+		season, episode := notifications.SplitEpisodeKey(*s.NextExpectedEpisodeKey - 1)
+		out.NextUpAfter = &NotificationEpisodeRef{SeasonNumber: season, EpisodeNumber: episode}
 	}
 	return out
 }

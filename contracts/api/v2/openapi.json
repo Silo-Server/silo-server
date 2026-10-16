@@ -36211,9 +36211,9 @@
             "$ref": "#/components/schemas/CatalogItem",
             "description": "The series as a catalog card"
           },
-          "next_up_episode": {
+          "next_up_after": {
             "$ref": "#/components/schemas/NotificationEpisodeRef",
-            "description": "With an active Next Up reason, the episode it waits for: on that reason alone, an earlier new episode does not notify"
+            "description": "With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"
           },
           "notifies": {
             "description": "True when at least one reason is active",

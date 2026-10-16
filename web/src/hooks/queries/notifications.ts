@@ -113,6 +113,9 @@ export function useNotificationSeries(
     getNextPageParam: (last) => last.next_cursor,
     // A new search or sort keeps the previous list on screen until it loads.
     placeholderData: keepPreviousData,
+    // Favorites, watchlist, and progress change the list from other pages, so
+    // reopening the view reads it again.
+    refetchOnMount: "always",
     enabled: enabled && context !== null,
     retry: false,
   });

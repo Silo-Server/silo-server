@@ -223,7 +223,7 @@ it("lists the series that notify, then the ones the preferences silence", () => 
         reasons: reasons({ next_up: true }),
         active_reasons: reasons({ next_up: true }),
         notifies: true,
-        next_up_episode: { season_number: 2, episode_number: 9 },
+        next_up_after: { season_number: 2, episode_number: 8 },
       }),
       seriesEntry("series:omitb", "Only Murders", {
         reasons: reasons({ favorite: true, watchlist: true }),
@@ -243,7 +243,7 @@ it("lists the series that notify, then the ones the preferences silence", () => 
   expect(screen.getByRole("button", { name: "Series" })).toBeInTheDocument();
   expect(screen.queryByText("Displayed episode")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Mark all read" })).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /Andor/ })).toHaveTextContent("When S2E9 arrives");
+  expect(screen.getByRole("link", { name: /Andor/ })).toHaveTextContent("Any episode after S2E8");
   const omitb = screen.getByRole("link", { name: /Only Murders/ });
   expect(omitb).toHaveTextContent("Any new episode");
   expect(omitb).toHaveTextContent("Watchlist (off)");
@@ -324,4 +324,15 @@ it("keeps loading when a page resolves to no visible series", () => {
   expect(screen.queryByText("No series notify you yet")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Load more" }));
   expect(active.fetchNextPage).toHaveBeenCalledOnce();
+});
+it("clears the search box when the Series button resets the view", async () => {
+  state.capability = { series: { available: true } };
+  state.series = { active: seriesQuery([]), inactive: seriesQuery([]) };
+  renderAt("/notifications?view=series&q=bear");
+  const search = screen.getByRole("searchbox", { name: "Search series" });
+  expect(search).toHaveValue("bear");
+  fireEvent.click(screen.getByRole("button", { name: "Series" }));
+  await waitFor(() => expect(search).toHaveValue(""));
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(state.seriesOptions.at(-1)).toMatchObject({ q: "" });
 });

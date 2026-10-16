@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"slices"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
 type notificationSeriesPage struct {
@@ -53,10 +55,10 @@ func TestNotificationSeriesListsReasonsAndOmitsHiddenSeries(t *testing.T) {
 		t.Fatal("a complete list has no next page")
 	}
 	andor, bear, slow := page.Items[0], page.Items[1], page.Items[2]
-	if !andor.Notifies || !andor.ActiveReasons.NextUp || andor.NextUpEpisode == nil || *andor.NextUpEpisode != (NotificationEpisodeRef{SeasonNumber: 2, EpisodeNumber: 9}) {
+	if !andor.Notifies || !andor.ActiveReasons.NextUp || andor.NextUpAfter == nil || *andor.NextUpAfter != (NotificationEpisodeRef{SeasonNumber: 2, EpisodeNumber: 8}) {
 		t.Fatalf("next up series = %+v", andor)
 	}
-	if !bear.Notifies || !bear.Reasons.Favorite || !bear.Reasons.ContinueWatching || bear.NextUpEpisode != nil {
+	if !bear.Notifies || !bear.Reasons.Favorite || !bear.Reasons.ContinueWatching || bear.NextUpAfter != nil {
 		t.Fatalf("favorite series = %+v", bear)
 	}
 	if slow.Notifies || !slow.Reasons.Watchlist || slow.ActiveReasons != (NotificationSeriesReasons{}) {
@@ -77,14 +79,17 @@ func TestNotificationSeriesStatusFilter(t *testing.T) {
 	}
 }
 
-// A page whose only series the viewer may not see is empty but still has a
-// next page, so a hidden series never hides the ones behind it.
+// Series the viewer may not see are dropped before paging: every page is
+// full, and no cursor is minted at a hidden series.
 func TestNotificationSeriesPagesByTitle(t *testing.T) {
 	h, _ := notificationSeriesHandler(t)
 	var got []string
 	query := "?limit=1"
 	for range 5 {
 		page := getNotificationSeries(t, h, query)
+		if len(page.Items) != 1 {
+			t.Fatalf("page %s holds %d series, want 1", query, len(page.Items))
+		}
 		got = append(got, notificationSeriesIDs(page.Items)...)
 		if !page.Page.HasMore {
 			break
@@ -172,4 +177,14 @@ func TestNotificationSeriesCapabilityAndAvailability(t *testing.T) {
 
 func notificationSeriesFixtureCases() []fixtureCase {
 	return []fixtureCase{{name: "notification_list_notification_series", operationID: opListNotificationSeries, scenario: "Series that can notify the acting profile, with one the viewer may not see omitted.", method: http.MethodGet, path: "/api/v2/notifications/series", headers: profileOwner(), status: http.StatusOK, schema: "#/components/schemas/NotificationSeriesCollection", assertHeaders: []string{"Content-Type", "Cache-Control"}}}
+}
+
+// Next Up waits for any episode past the last finished one; after a season
+// finale that is the next season's first, so the response names the finale.
+func TestNotificationSeriesNextUpNamesTheFinishedEpisode(t *testing.T) {
+	expected := notifications.EpisodeKey(1, 10) + 1
+	got := notificationSeriesOf(notifications.NotifiedSeries{Active: notifications.ReasonFlags{NextUp: true}, NextExpectedEpisodeKey: &expected}, CatalogItem{})
+	if got.NextUpAfter == nil || *got.NextUpAfter != (NotificationEpisodeRef{SeasonNumber: 1, EpisodeNumber: 10}) {
+		t.Fatalf("next_up_after = %+v, want S1E10", got.NextUpAfter)
+	}
 }

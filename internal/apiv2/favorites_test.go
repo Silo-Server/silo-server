@@ -77,6 +77,18 @@ func (f *fakePersonalLists) ListFavoritesPage(_ context.Context, viewer handlers
 	return page, cards, nil
 }
 
+// VisibleItemIDs reports every id the catalog "has" as visible.
+func (f *fakePersonalLists) VisibleItemIDs(_ context.Context, _ handlers.PersonalListViewer, ids []string) (map[string]bool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	visible := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		visible[id] = !f.missing[id]
+	}
+	return visible, nil
+}
+
 // ResolveCards resolves a series card for every id the catalog "has".
 func (f *fakePersonalLists) ResolveCards(_ context.Context, viewer handlers.PersonalListViewer, ids []string) ([]handlers.CollectionItemView, error) {
 	f.viewers = append(f.viewers, viewer)

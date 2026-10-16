@@ -48,9 +48,11 @@ entry carrying every library's reasons.
 Each entry has the series as a catalog card in `item`, the profile's
 relationships in `reasons`, and in `active_reasons` the ones the profile's
 preferences let notify. `notifies` is true when any reason is active. With an
-active Next Up reason, `next_up_episode` names the episode it waits for; on
-that reason alone, an earlier new episode does not notify. The other reasons
-notify on any new episode. Delivery still skips an episode the profile was
+active Next Up reason, `next_up_after` names the last episode the profile
+finished; on that reason alone, only a new episode after it notifies. It names
+the finished episode rather than the next one because the next may not exist
+yet: after a season finale, the following season's first episode notifies.
+The other reasons notify on any new episode. Delivery still skips an episode the profile was
 already notified about and a series the profile can no longer open.
 
 Filters combine:
@@ -71,9 +73,10 @@ then item ID.
 The list accepts `limit` and `cursor`. The cursor carries every sort field of
 the last entry, so the next page resumes after it even if that series has left
 the list, and it binds the account, profile, viewer policy, filters, and sort.
-Series the viewer may not see are omitted after paging, so a page can hold
-fewer than `limit` entries while `page.has_more` is true. `image_size` selects
-the card artwork variant.
+Series the viewer may not see are dropped before paging with one batch access
+check, so a cursor never names a hidden series. A page can still hold fewer
+than `limit` entries if access changes between that check and card resolution.
+`image_size` selects the card artwork variant.
 
 The interest index follows favorites, watchlist, and progress changes
 asynchronously, so a just-favorited series can take a moment to appear.

@@ -26248,8 +26248,8 @@ export interface components {
       active_reasons: components["schemas"]["NotificationSeriesReasons"];
       /** @description The series as a catalog card */
       item: components["schemas"]["CatalogItem"];
-      /** @description With an active Next Up reason, the episode it waits for: on that reason alone, an earlier new episode does not notify */
-      next_up_episode?: components["schemas"]["NotificationEpisodeRef"];
+      /** @description With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies */
+      next_up_after?: components["schemas"]["NotificationEpisodeRef"];
       /** @description True when at least one reason is active */
       notifies: boolean;
       /** @description The profile's relationships to the series */

@@ -27,6 +27,7 @@ type personalDataItemRepository interface {
 	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.MediaItem, error)
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]bool, error)
 }
 
 type LocalListEventDispatcher interface {
@@ -445,6 +446,15 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
 	}
 	return entries, items, nil
+}
+
+// VisibleItemIDs reports which of the given catalog items the viewer may see.
+func (h *PersonalDataHandler) VisibleItemIDs(ctx context.Context, viewer PersonalListViewer, ids []string) (map[string]bool, error) {
+	visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, viewer.Access)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+	}
+	return visible, nil
 }
 
 // ResolveCards answers the cards of the given catalog items the viewer may
@@ -869,15 +879,19 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 	size := viewer.ImageSize
 	posterHint := requestVariantHint("featured", size)
 	cardHint := requestVariantHint("card", size)
+	itemIDs := make([]string, len(mediaItems))
+	for i, mi := range mediaItems {
+		itemIDs[i] = mi.ContentID
+	}
+	accessible, err := h.itemRepo.EnsureAccessibleIDs(ctx, itemIDs, filter)
+	if err != nil {
+		return nil, err
+	}
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
-		if err := h.itemRepo.EnsureAccessible(ctx, mi.ContentID, filter); err != nil {
-			if errors.Is(err, catalog.ErrItemNotFound) {
-				continue
-			}
-			return nil, err
+		if accessible[mi.ContentID] {
+			accessibleItems = append(accessibleItems, mi)
 		}
-		accessibleItems = append(accessibleItems, mi)
 	}
 
 	userStates := map[string]*itemUserStateResponse{}

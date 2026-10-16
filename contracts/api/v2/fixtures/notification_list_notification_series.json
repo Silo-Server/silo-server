@@ -22,9 +22,9 @@
         "next_up": true
       },
       "notifies": true,
-      "next_up_episode": {
+      "next_up_after": {
         "season_number": 2,
-        "episode_number": 9
+        "episode_number": 8
       }
     },
     {

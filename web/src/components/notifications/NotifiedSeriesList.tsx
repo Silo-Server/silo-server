@@ -39,9 +39,9 @@ const REASON_PREFERENCES: Record<Reason, { key: keyof NotificationPreferences; l
 /** What a new episode has to be for the series to notify. */
 function triggerText(series: NotifiedSeries): string {
   const { favorite, watchlist, continue_watching: continueWatching } = series.active_reasons;
-  const code = series.next_up_episode && formatEpisodeCode(series.next_up_episode);
+  const code = series.next_up_after && formatEpisodeCode(series.next_up_after);
   if (favorite || watchlist || continueWatching || !code) return "Any new episode";
-  return `When ${code} arrives`;
+  return `Any episode after ${code}`;
 }
 
 /** Why a listed series does not notify: the switches that silence it. */
@@ -176,6 +176,12 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
     // Only a settled edit writes the URL; series.q follows from it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced]);
+  useEffect(() => {
+    // The URL changed from elsewhere (the Series button resets it); our own
+    // writes match the settled text and leave typing in progress alone.
+    if (series.q !== debounced) setText(series.q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series.q]);
   return (
     <div className="mb-3 flex flex-col gap-2 px-3 sm:flex-row sm:items-center">
       <div className="relative min-w-0 flex-1">
