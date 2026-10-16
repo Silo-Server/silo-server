@@ -472,6 +472,8 @@ type ItemUserState struct {
 	Played      bool `json:"played"`
 	IsFavorite  bool `json:"is_favorite"`
 	InWatchlist bool `json:"in_watchlist"`
+	// NotInterested is served by v2 only; the frozen v1 shape leaves it out.
+	NotInterested bool `json:"-"`
 }
 
 // CastCredit is the item-detail API shape for a cast member.

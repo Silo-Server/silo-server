@@ -539,3 +539,27 @@ func TestAuthProviderRecheckInterval(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeAdminSettingLocalURLIsAnOrigin(t *testing.T) {
+	for raw, want := range map[string]string{
+		"":                            "",
+		" http://192.168.1.20:8080/ ": "http://192.168.1.20:8080",
+		"https://silo.lan":            "https://silo.lan",
+	} {
+		got, err := NormalizeAdminSetting(ServerLocalURLSettingKey, raw)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeAdminSetting(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{
+		"192.168.1.20:8080",
+		"ftp://192.168.1.20",
+		"http://192.168.1.20:8080/silo",
+		"http://192.168.1.20:8080/?x=1",
+		"http://user@192.168.1.20:8080",
+	} {
+		if got, err := NormalizeAdminSetting(ServerLocalURLSettingKey, raw); err == nil {
+			t.Fatalf("NormalizeAdminSetting(%q) = %q, want an error", raw, got)
+		}
+	}
+}

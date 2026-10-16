@@ -24,6 +24,16 @@ before it became available is therefore recorded without a release event. The ad
 file in the library for flat items. The window leaves room for new episodes
 whose metadata lands a few days after the file.
 
+The detector also stores that decision on the availability row: an episode's
+`episode_availability.released_at` is set when it was recorded as a release
+(seeded library, inside the window), even while release events are turned off,
+and stays empty for back catalog and late matches. A profile that turns on
+`ui.next_up_new_releases_first` (off by default) gets Next Up ranked by the
+later of when it finished a series' previous episode and the `released_at` of
+the next episode (earliest availability row in the libraries the viewer can
+reach), so a caught-up series moves to the front when a new episode or season
+arrives. Changing what counts as a release changes that order too.
+
 Event kinds:
 
 - `episode` — carries series/episode identity and fans out to interested
@@ -114,6 +124,14 @@ Deliveries are deduplicated per `(profile, release event)` and, for
 `episode.available`, per `(profile, episode)` across libraries, so
 dual-quality library setups notify at most once. Reprocessing an event is
 idempotent.
+
+The notified-series list (`GET /api/v2/notifications/series`) shows a profile
+the same index fanout evaluates. `ActiveReasons` is the event-independent half
+of these rules, shared by fanout and the list, so the two cannot disagree about
+which reasons a preference silences. The list filters series through the
+catalog's card access check rather than fanout's per-library one, and it leaves
+out the per-episode checks (Next Up's expected episode and the
+already-notified cursor), which depend on the episode that arrives.
 
 ## Release-event retention
 

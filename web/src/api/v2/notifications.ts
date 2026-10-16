@@ -8,7 +8,7 @@ import type {
   NotificationPreferences,
   NotificationReasonFlags,
 } from "@/api/types";
-import { v2, type V2Result } from "./request";
+import { v2, type V2Query, type V2Result } from "./request";
 export const captureNotificationAuthority = captureAdminAuthority;
 export const notificationScope = adminAuthorityScope;
 export const requireNotificationAuthority = requireAdminAuthority;
@@ -65,6 +65,50 @@ export async function listNotifications(
     notifications: body.items.map(notification),
     next_cursor: body.page.has_more ? body.page.next_cursor : undefined,
     read_cutoff: body.read_cutoff,
+  };
+}
+export type NotifiedSeries = V2Result<"GET /api/v2/notifications/series">["items"][number];
+export type NotifiedSeriesStatus = "active" | "inactive";
+type NotifiedSeriesQuery = NonNullable<V2Query<"GET /api/v2/notifications/series">>;
+/** The search, reason filter, and sort the Series view applies to both lists. */
+export type NotifiedSeriesOptions = {
+  q?: string;
+  reason?: NotifiedSeriesQuery["reason"];
+  sort?: NotifiedSeriesQuery["sort"];
+};
+export async function listNotificationSeries(
+  status: NotifiedSeriesStatus,
+  options: NotifiedSeriesOptions,
+  cursor?: string,
+  profileContext = captureNotificationAuthority(),
+) {
+  requireNotificationAuthority(profileContext);
+  const body = await v2("GET /api/v2/notifications/series", {
+    query: {
+      status,
+      limit: 50,
+      cursor,
+      image_size: "small",
+      q: options.q || undefined,
+      reason: options.reason,
+      sort: options.sort,
+    },
+    profileContext,
+  });
+  requireNotificationAuthority(profileContext);
+  if (
+    !Array.isArray(body.items) ||
+    !body.page ||
+    typeof body.page.has_more !== "boolean" ||
+    (body.page.has_more &&
+      (typeof body.page.next_cursor !== "string" ||
+        !body.page.next_cursor ||
+        body.page.next_cursor === cursor))
+  )
+    throw new Error("Invalid series page. Reload notifications.");
+  return {
+    series: body.items,
+    next_cursor: body.page.has_more ? body.page.next_cursor : undefined,
   };
 }
 export async function unreadNotificationCount(profileContext = captureNotificationAuthority()) {

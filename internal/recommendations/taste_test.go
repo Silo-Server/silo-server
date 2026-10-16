@@ -122,9 +122,11 @@ func TestPositiveTasteItemsKeepsPositiveTitlesOnly(t *testing.T) {
 		"f-abandoned":     {ImplicitWeight: WeightWatchLow},
 		"g-meh-unwatched": {Rating: stars(3)},
 		"h-no-embedding":  {ImplicitWeight: WeightWatchHigh},
+		// A title marked Not interested leaves however loved it was.
+		"i-marked": {Rating: stars(5), ExplicitWeight: WeightRated5, ImplicitWeight: WeightWatchHigh, IntentWeight: WeightFavorited, Favorited: true, NotInterested: true},
 	}
 	embeddings := map[string][]float32{}
-	for i, id := range []string{"a-liked", "b-loved", "c-seed-pick", "d-watchlisted", "e-disliked", "f-abandoned", "g-meh-unwatched"} {
+	for i, id := range []string{"a-liked", "b-loved", "c-seed-pick", "d-watchlisted", "e-disliked", "f-abandoned", "g-meh-unwatched", "i-marked"} {
 		embeddings[id] = axis(i)
 	}
 
@@ -140,8 +142,8 @@ func TestPositiveTasteItemsKeepsPositiveTitlesOnly(t *testing.T) {
 		t.Fatalf("titles counting toward the level = %d, want 3 (the watchlist-only title does not)", levelTitles)
 	}
 	vec := tasteVector(items)
-	if vec[4] != 0 || vec[5] != 0 || vec[6] != 0 {
-		t.Fatalf("taste vector = %v, want nothing along the disliked, abandoned and 3-star titles", vec)
+	if vec[4] != 0 || vec[5] != 0 || vec[6] != 0 || vec[7] != 0 {
+		t.Fatalf("taste vector = %v, want nothing along the disliked, abandoned, 3-star and marked titles", vec)
 	}
 	if !(vec[1] > vec[0] && vec[0] > vec[3] && vec[3] > 0) {
 		t.Fatalf("taste vector = %v, want loved > liked > watchlisted > 0", vec)

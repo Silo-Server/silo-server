@@ -394,6 +394,7 @@ func (h *PlaybackHandler) moveTranscodeToLocalV3(
 	if fromStore {
 		// The stored card rebuilt a node transport; a local one never reads it.
 		h.deleteNodeRecipeV3(ctx, remoteTransportID(session))
+		h.followSessionRecipeMoveV3(ctx, session.ID, local)
 	}
 	h.retireUnreachableTransportV3(ctx, dead.NodeURL, remoteTransportID(session), nil)
 	slog.WarnContext(ctx, "moved a transcode off an unreachable node", "component", "api",
@@ -509,6 +510,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		h.retireUnreachableTransportV3(ctx, dead.NodeURL, transportID, func(ctx context.Context) {
 			h.putNodeRecipeIfRouteV3(ctx, session.ID, playback.TranscodeRoute{NodeURL: node.URL, TransportID: transportID}, next)
 		})
+		h.followSessionRecipeMoveV3(ctx, session.ID, next)
 	} else {
 		h.retireUnreachableTransportV3(ctx, dead.NodeURL, transportID, nil)
 	}

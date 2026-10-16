@@ -29,7 +29,6 @@ import {
   SYNCED_OFF,
   TMDB_LIST_HELP,
   TMDB_LIST_LINK,
-  TRAKT_SCHEDULE_STOPPED,
   YOU_DECIDE,
   ineligibleLibrariesLine,
   youDecideItems,
@@ -396,10 +395,8 @@ function ListSettings({
   onChange,
   libraries,
   librariesNote,
-  librariesLocked,
   eligibleKinds,
   limit,
-  limitLocked,
   onLimitChange,
   schedule,
   onScheduleChange,
@@ -412,10 +409,8 @@ function ListSettings({
   onChange: (update: (draft: CollectionDraft) => CollectionDraft) => void;
   libraries: readonly LibraryOption[];
   librariesNote?: string;
-  librariesLocked?: boolean;
   eligibleKinds?: string[];
   limit: number | undefined;
-  limitLocked?: boolean;
   onLimitChange: (limit: number | undefined) => void;
   schedule: string;
   onScheduleChange: (schedule: string) => void;
@@ -435,7 +430,6 @@ function ListSettings({
           allLabel={isServer ? undefined : ALL_MY_LIBRARIES_LABEL}
           eligibleKinds={eligibleKinds}
           ineligibleReason={eligibleKinds ? ONLY_KIND_REASON[eligibleKinds[0]!] : undefined}
-          disabled={librariesLocked}
           onChange={(libraryIds) => onChange((current) => ({ ...current, libraryIds }))}
           warning={
             librariesNote ? (
@@ -449,7 +443,6 @@ function ListSettings({
         mode="synced"
         sortConfig={draft.rawSortConfig}
         limit={limit}
-        limitLocked={limitLocked}
         allowPersonalized={!isServer}
         onSortChange={(rawSortConfig) => onChange((current) => ({ ...current, rawSortConfig }))}
         onLimitChange={onLimitChange}
@@ -675,13 +668,11 @@ function SavedSource({
   isServer,
   list,
   name,
-  sourceUrl,
   onChange,
 }: {
   isServer: boolean;
   list: ListDraft;
   name: string;
-  sourceUrl: string;
   onChange: (fields: Partial<ListDraft>) => void;
 }) {
   switch (list.source) {
@@ -708,16 +699,13 @@ function SavedSource({
         <FixedSource list={list} />
       );
     case "tmdb_discover":
-    case "trakt":
-      return (
-        <LockedSourceSummary source={list.source} config={list.stored} sourceUrl={sourceUrl} />
-      );
+      return <LockedSourceSummary config={list.stored} />;
   }
 }
 
 /**
  * What the list controls and what the editor controls, side by side. Discover
- * and legacy Trakt lists say this in their locked summary instead.
+ * lists say this in their locked summary instead.
  */
 function WhoDecides({ scheduleEditable }: { scheduleEditable: boolean }) {
   const id = useId();
@@ -766,7 +754,7 @@ export interface SavedListSync {
 /**
  * A saved Synced list: a failed sync at the top, the sync status strip, the
  * list it follows (a link, a chart, a TMDB collection ID, or a locked summary
- * for Discover and legacy Trakt lists), then its libraries, order and schedule.
+ * for Discover lists), then its libraries, order and schedule.
  */
 function SavedListContents({
   scopeKind,
@@ -784,17 +772,13 @@ function SavedListContents({
   const kinds = eligibleLibraryKinds(mediaKind);
   const only = mediaKind === "movie" || mediaKind === "tv" ? mediaKind : null;
   const left = libraries.filter((library) => !fits(library, kinds)).map((library) => library.name);
-  const trakt = list.source === "trakt";
   const chosen = libraries.filter((library) => draft.libraryIds.includes(library.id));
-  // The server won't restart a stopped Trakt schedule, and a profile's
-  // schedule stays put until the server says it may change.
-  let scheduleLockedReason: string | undefined;
-  if (trakt && !sync.schedule.trim()) scheduleLockedReason = TRAKT_SCHEDULE_STOPPED;
-  if (!isServer && capabilities?.sync_schedule_editable === false) {
-    scheduleLockedReason = PERSONAL_SCHEDULE_LOCKED;
-  }
-  const scheduleLocked =
-    Boolean(scheduleLockedReason) || (!isServer && !capabilities?.sync_schedule_editable);
+  // A profile's schedule stays put until the server says it may change.
+  const scheduleLockedReason =
+    !isServer && capabilities?.sync_schedule_editable === false
+      ? PERSONAL_SCHEDULE_LOCKED
+      : undefined;
+  const scheduleLocked = !isServer && !capabilities?.sync_schedule_editable;
   // A new source unticks libraries that can't hold its titles, as on create.
   const updateList = (fields: Partial<ListDraft>) =>
     onChange((current) => {
@@ -831,12 +815,9 @@ function SavedListContents({
         isServer={isServer}
         list={list}
         name={view.name}
-        sourceUrl={view.raw.source_url ?? ""}
         onChange={updateList}
       />
-      {list.source === "tmdb_discover" || trakt ? null : (
-        <WhoDecides scheduleEditable={!scheduleLocked} />
-      )}
+      {list.source === "tmdb_discover" ? null : <WhoDecides scheduleEditable={!scheduleLocked} />}
       <ListSettings
         // Discard puts back the settings' own state too, such as an open custom schedule.
         key={`settings-${saved.discards ?? 0}`}
@@ -845,10 +826,8 @@ function SavedListContents({
         onChange={onChange}
         libraries={libraries}
         librariesNote={only && left.length > 0 ? ineligibleLibrariesLine(only, left) : undefined}
-        librariesLocked={trakt}
         eligibleKinds={kinds}
         limit={list.limit}
-        limitLocked={trakt}
         onLimitChange={(limit) => updateList({ limit })}
         schedule={list.schedule}
         onScheduleChange={(schedule) => updateList({ schedule })}

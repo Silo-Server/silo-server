@@ -66,7 +66,10 @@ type canonicalWeightComponents struct {
 	ImplicitWeight float64
 	IntentWeight   float64
 	Favorited      bool
-	Genres         []string
+	// NotInterested marks a title the profile marked Not interested: it
+	// leaves the taste vector whatever else the profile did with it.
+	NotInterested bool
+	Genres        []string
 }
 
 // countsTowardLevel reports whether a title counts toward the profile's

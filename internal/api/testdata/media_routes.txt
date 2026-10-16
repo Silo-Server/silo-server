@@ -80,7 +80,6 @@ GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
 POST /api/v2/admin/collections/import/tmdb-list	non-media
-POST /api/v2/admin/collections/import/trakt	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
 POST /api/v2/admin/collections/preview	non-media
@@ -463,6 +462,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/not-interested	non-media
 GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
@@ -504,7 +504,6 @@ GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
 POST /api/v2/collections/import/tmdb-list	non-media
-POST /api/v2/collections/import/trakt	non-media
 GET /api/v2/collections/order	non-media
 PUT /api/v2/collections/order	non-media
 POST /api/v2/collections/preview	non-media
@@ -528,6 +527,7 @@ GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
 DELETE /api/v2/devices/{device_id}	non-media
+PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
 GET /api/v2/diagnostics/capabilities	non-media
 POST /api/v2/diagnostics/reports	non-media
@@ -651,6 +651,10 @@ DELETE /api/v2/markers/files/{file_id}/{segment}	non-media
 GET /api/v2/markers/items/{item_id}	non-media
 PUT /api/v2/markers/items/{item_id}	non-media
 GET /api/v2/network-access/capabilities	non-media
+GET /api/v2/not-interested	non-media
+DELETE /api/v2/not-interested/{item_id}	non-media
+GET /api/v2/not-interested/{item_id}	non-media
+PUT /api/v2/not-interested/{item_id}	non-media
 GET /api/v2/notifications	non-media
 GET /api/v2/notifications/capabilities	non-media
 DELETE /api/v2/notifications/discord-link	non-media
@@ -673,6 +677,7 @@ POST /api/v2/notifications/push/devices	non-media
 GET /api/v2/notifications/push/devices/capabilities	non-media
 DELETE /api/v2/notifications/push/devices/{device_id}	non-media
 POST /api/v2/notifications/read-all	non-media
+GET /api/v2/notifications/series	non-media
 GET /api/v2/notifications/sync	non-media
 GET /api/v2/notifications/unread-count	non-media
 GET /api/v2/notifications/web-push/subscriptions	non-media
@@ -695,6 +700,7 @@ GET /api/v2/openapi.json	non-media
 POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
+GET /api/v2/playback/bandwidth-probe	media	transfer	viewer_egress	false	true
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media
@@ -1354,7 +1360,6 @@ GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
 POST /api/v2/admin/collections/import/tmdb-list	non-media
-POST /api/v2/admin/collections/import/trakt	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
 POST /api/v2/admin/collections/preview	non-media
@@ -1737,6 +1742,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/not-interested	non-media
 GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
@@ -1778,7 +1784,6 @@ GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
 POST /api/v2/collections/import/tmdb-list	non-media
-POST /api/v2/collections/import/trakt	non-media
 GET /api/v2/collections/order	non-media
 PUT /api/v2/collections/order	non-media
 POST /api/v2/collections/preview	non-media
@@ -1802,6 +1807,7 @@ GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
 DELETE /api/v2/devices/{device_id}	non-media
+PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
 GET /api/v2/diagnostics/capabilities	non-media
 POST /api/v2/diagnostics/reports	non-media
@@ -1925,6 +1931,10 @@ DELETE /api/v2/markers/files/{file_id}/{segment}	non-media
 GET /api/v2/markers/items/{item_id}	non-media
 PUT /api/v2/markers/items/{item_id}	non-media
 GET /api/v2/network-access/capabilities	non-media
+GET /api/v2/not-interested	non-media
+DELETE /api/v2/not-interested/{item_id}	non-media
+GET /api/v2/not-interested/{item_id}	non-media
+PUT /api/v2/not-interested/{item_id}	non-media
 GET /api/v2/notifications	non-media
 GET /api/v2/notifications/capabilities	non-media
 DELETE /api/v2/notifications/discord-link	non-media
@@ -1947,6 +1957,7 @@ POST /api/v2/notifications/push/devices	non-media
 GET /api/v2/notifications/push/devices/capabilities	non-media
 DELETE /api/v2/notifications/push/devices/{device_id}	non-media
 POST /api/v2/notifications/read-all	non-media
+GET /api/v2/notifications/series	non-media
 GET /api/v2/notifications/sync	non-media
 GET /api/v2/notifications/unread-count	non-media
 GET /api/v2/notifications/web-push/subscriptions	non-media
@@ -1969,6 +1980,7 @@ GET /api/v2/openapi.json	non-media
 POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
+GET /api/v2/playback/bandwidth-probe	media	transfer	viewer_egress	false	true
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media

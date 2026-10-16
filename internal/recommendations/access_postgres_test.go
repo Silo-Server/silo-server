@@ -123,7 +123,7 @@ func TestFindSimilarAppliesAccessLimitsInSQLPostgres(t *testing.T) {
 
 	// Because You Watched ranks the same way, so the restricted row is full.
 	engine := NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, nil, config.RecommendationsConfig{DiversityLambda: 1})
-	row, err := engine.becauseYouWatched(ctx, f.anchor, 5, map[string]struct{}{}, catalog.AccessFilter{AllowedLibraryIDs: []int{f.kidsLib}})
+	row, err := engine.becauseYouWatched(ctx, engine.rowBuilder(), f.anchor, 5, map[string]struct{}{}, catalog.AccessFilter{AllowedLibraryIDs: []int{f.kidsLib}})
 	if err != nil {
 		t.Fatal(err)
 	}

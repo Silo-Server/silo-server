@@ -205,6 +205,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	imagesHandler.collectionPosters = itemsHandler.collectionPosters
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
+	imagesHandler.artworkStore = deps.ArtworkStore
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -515,7 +516,7 @@ func withDefaults(deps Dependencies) Dependencies {
 		}
 	}
 	if deps.HTTPClient == nil {
-		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+		deps.HTTPClient = newCompatImageClient()
 	}
 
 	// Build ContentService from repos if not provided

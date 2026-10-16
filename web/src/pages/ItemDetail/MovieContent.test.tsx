@@ -72,6 +72,11 @@ vi.mock("@/hooks/queries/watchlist", () => ({
   useToggleWatchlist: mocks.useToggleWatchlist,
 }));
 
+vi.mock("@/hooks/queries/notInterested", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/notInterested")>()),
+  useToggleNotInterested: () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
+}));
+
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
 }));

@@ -27,6 +27,7 @@ type personalDataItemRepository interface {
 	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.MediaItem, error)
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]bool, error)
 }
 
 type LocalListEventDispatcher interface {
@@ -447,6 +448,26 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 	return entries, items, nil
 }
 
+// VisibleItemIDs reports which of the given catalog items the viewer may see.
+func (h *PersonalDataHandler) VisibleItemIDs(ctx context.Context, viewer PersonalListViewer, ids []string) (map[string]bool, error) {
+	visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, viewer.Access)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+	}
+	return visible, nil
+}
+
+// ResolveCards answers the cards of the given catalog items the viewer may
+// see, in the order given. Items the catalog no longer has or the viewer may
+// not see have no card.
+func (h *PersonalDataHandler) ResolveCards(ctx context.Context, viewer PersonalListViewer, ids []string) ([]CollectionItemView, error) {
+	items, err := resolveItemsByIDs(h, ctx, viewer, ids)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve items")
+	}
+	return items, nil
+}
+
 // filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
 // The entries stay in the store (and on synced providers) so a newly added
 // episode makes the series reappear; only the display surface hides them.
@@ -858,15 +879,19 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 	size := viewer.ImageSize
 	posterHint := requestVariantHint("featured", size)
 	cardHint := requestVariantHint("card", size)
+	itemIDs := make([]string, len(mediaItems))
+	for i, mi := range mediaItems {
+		itemIDs[i] = mi.ContentID
+	}
+	accessible, err := h.itemRepo.EnsureAccessibleIDs(ctx, itemIDs, filter)
+	if err != nil {
+		return nil, err
+	}
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
-		if err := h.itemRepo.EnsureAccessible(ctx, mi.ContentID, filter); err != nil {
-			if errors.Is(err, catalog.ErrItemNotFound) {
-				continue
-			}
-			return nil, err
+		if accessible[mi.ContentID] {
+			accessibleItems = append(accessibleItems, mi)
 		}
-		accessibleItems = append(accessibleItems, mi)
 	}
 
 	userStates := map[string]*itemUserStateResponse{}

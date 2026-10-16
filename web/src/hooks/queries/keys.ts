@@ -103,6 +103,11 @@ export const favoriteKeys = {
   check: (itemId: string) => ["favorites", "check", itemId] as const,
 };
 
+export const notInterestedKeys = {
+  all: ["notInterested"] as const,
+  list: () => ["notInterested", "list"] as const,
+};
+
 export const watchlistKeys = {
   all: ["watchlist"] as const,
   list: () => ["watchlist", "list"] as const,
@@ -245,6 +250,7 @@ export const settingsKeys = {
 export const notificationKeys = {
   all: ["notifications"] as const,
   list: (status: "all" | "unread" = "all") => ["notifications", "list", status] as const,
+  series: (status: "active" | "inactive") => ["notifications", "series", status] as const,
   unreadCount: () => ["notifications", "unread-count"] as const,
   preferences: () => ["notifications", "preferences"] as const,
   emailPreferences: () => ["notifications", "email-preferences"] as const,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ const signalPageSize = 1000
 type signalRepo interface {
 	GetWatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error)
 	GetFavoriteItemIDs(ctx context.Context, userID int, profileID string) ([]string, error)
+	GetNotInterestedMarks(ctx context.Context, userID int, profileID string) ([]NotInterestedMark, error)
 	GetWatchProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error)
 	GetEbookReaderProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error)
 	GetRecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error)
@@ -182,9 +184,10 @@ func (s *SignalReader) readWatchedItemIDSet(ctx context.Context, userID int, pro
 }
 
 // RecommendationExclusionSet returns the canonical IDs the profile's
-// recommendations leave out: the watched set and the profile's favorites,
-// which include its taste-seed picks. A favorited episode excludes its series,
-// as a watched one does. Watchlist titles stay recommendable.
+// recommendations leave out: the watched set, the profile's favorites, which
+// include its taste-seed picks, and the titles it marked Not interested. A
+// favorited episode excludes its series, as a watched one does. Watchlist
+// titles stay recommendable.
 func (s *SignalReader) RecommendationExclusionSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
 	excluded, err := s.WatchedItemIDSet(ctx, userID, profileID)
 	if err != nil {
@@ -198,14 +201,58 @@ func (s *SignalReader) RecommendationExclusionSet(ctx context.Context, userID in
 	if err != nil {
 		return nil, fmt.Errorf("resolve favorite item IDs: %w", err)
 	}
-	merged := make(map[string]struct{}, len(excluded)+len(favorites))
+	marks, err := s.NotInterestedMarks(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	merged := make(map[string]struct{}, len(excluded)+len(favorites)+len(marks))
 	for id := range excluded {
 		merged[id] = struct{}{}
 	}
 	for id := range favorites {
 		merged[id] = struct{}{}
 	}
+	// Marks are kept to movies and series, already canonical.
+	for _, mark := range marks {
+		merged[mark.MediaItemID] = struct{}{}
+	}
 	return merged, nil
+}
+
+// NotInterestedMark is a movie or series the profile marked Not interested,
+// and when.
+type NotInterestedMark struct {
+	MediaItemID string
+	MarkedAt    time.Time
+}
+
+// NotInterestedMarks lists every title the profile marked Not interested,
+// newest first.
+func (s *SignalReader) NotInterestedMarks(ctx context.Context, userID int, profileID string) ([]NotInterestedMark, error) {
+	store, ok, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return s.repo.GetNotInterestedMarks(ctx, userID, profileID)
+	}
+
+	var marks []NotInterestedMark
+	var after *userstore.ListKey
+	for {
+		page, err := store.ListNotInterestedPage(ctx, profileID, after, signalPageSize)
+		if err != nil {
+			return nil, fmt.Errorf("list not interested marks from store: %w", err)
+		}
+		for _, e := range page {
+			marks = append(marks, NotInterestedMark{MediaItemID: e.MediaItemID, MarkedAt: parseSignalTime(e.AddedAt, time.Time{})})
+		}
+		if len(page) < signalPageSize {
+			return marks, nil
+		}
+		last := page[len(page)-1]
+		after = &userstore.ListKey{AddedAt: last.AddedAt, MediaItemID: last.MediaItemID}
+	}
 }
 
 // ratedItemLister lists every rating of a profile. *catalog.RatingsRepo
@@ -444,9 +491,9 @@ type itemRatingReader interface {
 // anchorItemIDs returns up to n Because You Watched anchors for the profile:
 // its most recently completed titles of recommendableMediaTypes still in the
 // catalog, newest first, of the latest anchorCandidateLimit, leaving out
-// those it rated DislikedRatingMax or lower. A row headed "Because You
-// Watched" a title the profile disliked contradicts its taste. With no
-// ratings reader nothing is left out. The worker, the Reader and Watch
+// those it marked Not interested or rated DislikedRatingMax or lower. A row
+// headed "Because You Watched" a title the profile disliked contradicts its
+// taste. With no ratings reader rated titles stay. The worker, the Reader and Watch
 // Tonight all choose anchors here, since a read can only use an anchor whose
 // row the worker cached.
 func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, n int) ([]string, error) {
@@ -456,6 +503,20 @@ func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatin
 	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, max(n, anchorCandidateLimit))
 	if err != nil {
 		return nil, err
+	}
+	if len(recent) > 0 {
+		marks, err := signals.NotInterestedMarks(ctx, userID, profileID)
+		if err != nil {
+			return nil, fmt.Errorf("read not interested marks: %w", err)
+		}
+		marked := make(map[string]struct{}, len(marks))
+		for _, m := range marks {
+			marked[m.MediaItemID] = struct{}{}
+		}
+		recent = slices.DeleteFunc(slices.Clone(recent), func(id string) bool {
+			_, ok := marked[id]
+			return ok
+		})
 	}
 	if ratings != nil && len(recent) > 0 {
 		rated, err := ratings.ListForItems(ctx, userID, profileID, recent)

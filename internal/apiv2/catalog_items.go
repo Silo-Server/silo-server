@@ -1396,7 +1396,7 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		card.BackdropIsEpisodeStill = new(false)
 	}
 	if s := d.UserState; s != nil {
-		card.UserState = &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist}
+		card.UserState = &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist, NotInterested: s.NotInterested}
 	}
 	for _, f := range d.WorkFormats {
 		card.WorkFormats = append(card.WorkFormats, CatalogWorkFormat{Type: f.Type, ContentID: f.ContentID, LibraryID: idOfPositive(f.LibraryID)})

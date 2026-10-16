@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -20,7 +21,7 @@ import (
 )
 
 type recommendationsEngine interface {
-	SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*recommendations.TasteProfileSummary, error)
 }
@@ -151,7 +152,7 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 	}
 
 	filter := requestAccessFilter(r)
-	items, err := h.SimilarItems(r.Context(), itemID, limit, filter)
+	items, err := h.SimilarItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit, filter)
 	if err == nil {
 		items, err = h.keepAccessible(r.Context(), items, filter)
 	}
@@ -283,7 +284,8 @@ func (h *RecommendationsHandler) HandleRecentlyAdded(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
 }
 
-// filterRecommendations removes watched items and low-rated items from the list.
+// filterRecommendations removes watched, marked Not interested and rated items
+// from the list.
 func (h *RecommendationsHandler) filterRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
 	items = h.excludeWatchedRecommendations(ctx, userID, profileID, items)
 	return h.excludeRatedRecommendations(ctx, userID, profileID, items)
@@ -293,7 +295,7 @@ func (h *RecommendationsHandler) excludeWatchedRecommendations(ctx context.Conte
 	if len(items) == 0 {
 		return items
 	}
-	watchedSet, err := h.watchedItemIDSet(ctx, userID, profileID)
+	watchedSet, err := h.skippedItemIDSet(ctx, userID, profileID)
 	if err != nil {
 		slog.WarnContext(ctx, "loading the watched set failed; recommendations are not filtered for it", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return items
@@ -319,6 +321,31 @@ func (h *RecommendationsHandler) watchedItemIDSet(ctx context.Context, userID in
 		return map[string]struct{}{}, nil
 	}
 	return h.signals.WatchedItemIDSet(ctx, userID, profileID)
+}
+
+// skippedItemIDSet is the titles a live recommendation list leaves out for the
+// profile: its watched set and the titles it marked Not interested. The
+// watched set may be shared (see recommendations.WithWatchedSetMemo), so a
+// profile with marks gets a copy. Marks that cannot be read are logged and
+// left out, so a failed read never also undoes the watched filter.
+func (h *RecommendationsHandler) skippedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
+	watched, err := h.watchedItemIDSet(ctx, userID, profileID)
+	if err != nil || h.signals == nil {
+		return watched, err
+	}
+	marks, err := h.signals.NotInterestedMarks(ctx, userID, profileID)
+	if err != nil {
+		slog.WarnContext(ctx, "loading Not interested marks failed; live recommendations are not filtered for them", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		return watched, nil
+	}
+	if len(marks) == 0 {
+		return watched, nil
+	}
+	skipped := maps.Clone(watched)
+	for _, m := range marks {
+		skipped[m.MediaItemID] = struct{}{}
+	}
+	return skipped, nil
 }
 
 // excludeRatedRecommendations drops every title the profile rated, as the
@@ -673,7 +700,7 @@ func (h *RecommendationsHandler) blendUpcomingIntoDiscoverRows(
 		}
 	}
 
-	watchedSet, err := h.watchedItemIDSet(ctx, userID, profileID)
+	watchedSet, err := h.skippedItemIDSet(ctx, userID, profileID)
 	if err != nil {
 		return discoverRows, err
 	}

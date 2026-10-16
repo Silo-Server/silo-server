@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 17;
+export const SETTINGS_REVISION = 18;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -300,6 +300,8 @@ export const SETTING_KEYS = {
   UI_LIBRARY_PAGE_STATE: "ui.library_page_state",
   /** Next up episodes */
   UI_NEXT_UP_MODE: "ui.next_up_mode",
+  /** Show new episodes first */
+  UI_NEXT_UP_NEW_RELEASES_FIRST: "ui.next_up_new_releases_first",
   /** Remember library view */
   UI_REMEMBER_LIBRARY_PAGE_STATE: "ui.remember_library_page_state",
   /** Pinned sidebar items */
@@ -1454,6 +1456,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "combined", label: "With Continue Watching", introducedIn: 1 },
       { value: "separate", label: "Separate row", introducedIn: 1 },
     ],
+  },
+  "ui.next_up_new_releases_first": {
+    key: "ui.next_up_new_releases_first",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 18,
+    scopes: ["profile"],
+    scopeIntroducedIn: [18],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Show new episodes first",
+    description:
+      "Move a show you've caught up on to the front of Continue Watching and Next Up when a new episode or season arrives.",
+    category: "navigation",
+    control: "switch",
   },
   "ui.remember_library_page_state": {
     key: "ui.remember_library_page_state",

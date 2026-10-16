@@ -266,7 +266,7 @@ func TestSensitiveSettingKeys_Audited(t *testing.T) {
 		"tmdb.api_key",
 		"requests.radarr.api_key",
 		"requests.sonarr.api_key",
-		"watchsync.trakt.client_secret",
+		"watchsync.simkl.client_secret",
 		"email.smtp_password",
 		"discord.client_secret",
 		"discord.bot_token",

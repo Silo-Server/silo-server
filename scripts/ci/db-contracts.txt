@@ -18,6 +18,9 @@
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
+./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
+./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
+./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
 # Series air-date sort keys advance when a known episode airs.
@@ -109,6 +112,10 @@
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
+# With metadata.cache_images off, stored artwork goes back to its provider
+# source, and items whose stored art has none are queued for a refresh.
+./internal/metadata TestStoredArtworkReleaseDB
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking
@@ -148,6 +155,7 @@
 ./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
+./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
@@ -175,6 +183,13 @@
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
+./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
+./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves
+./internal/userstore/pgstore TestPostgresConcurrentProfileDeletesWithCrossVisibility
+./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
+./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
+./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 
@@ -357,3 +372,14 @@
 ./internal/metadata TestMatchQueuesSkipIgnoredItemsDB
 ./internal/metadata TestRefreshLeavesIgnoredItemAloneDB
 ./internal/adminjob TestLibraryRefreshSkipsIgnoredItemsDB
+
+# A played mark later in the same second as a history removal stays visible.
+./internal/userstore/pgstore TestImportedWritesAfterSameSecondRemovalDB
+./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB
+
+# A history import run stays within its source limits from the queue to
+# Postgres: large Jellyfin, Emby and Plex sources import completely with paged
+# listings and chunked lookups, and a listing that decodes into millions of
+# values fails the run without allocating it.
+./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
+./internal/historyimport TestImportRunFailsOnExpandingSourceListing

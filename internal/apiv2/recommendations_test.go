@@ -181,7 +181,7 @@ type recommendationRowDoc struct {
 
 func requireFakeCard(t *testing.T, card map[string]json.RawMessage) {
 	t.Helper()
-	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true}`} {
+	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true,"not_interested":false}`} {
 		if string(card[k]) != want {
 			t.Errorf("%s = %s, want %s", k, card[k], want)
 		}

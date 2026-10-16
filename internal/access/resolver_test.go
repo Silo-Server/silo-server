@@ -160,6 +160,21 @@ func (s stubStore) ListFavoritesByMediaItems(context.Context, string, []string) 
 	panic("unused")
 }
 func (s stubStore) IsFavorite(context.Context, string, string) (bool, error) { panic("unused") }
+func (s stubStore) MarkNotInterested(context.Context, string, string) (bool, error) {
+	panic("unused")
+}
+func (s stubStore) UnmarkNotInterested(context.Context, string, string) (bool, error) {
+	panic("unused")
+}
+func (s stubStore) GetNotInterested(context.Context, string, string) (*userstore.NotInterestedEntry, error) {
+	panic("unused")
+}
+func (s stubStore) ListNotInterestedPage(context.Context, string, *userstore.ListKey, int) ([]userstore.NotInterestedEntry, error) {
+	panic("unused")
+}
+func (s stubStore) ListNotInterestedByMediaItems(context.Context, string, []string) (map[string]bool, error) {
+	panic("unused")
+}
 func (s stubStore) GetFavorite(context.Context, string, string) (*userstore.Favorite, error) {
 	panic("unused")
 }

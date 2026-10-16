@@ -9,13 +9,22 @@ import {
   unlinkNotificationDiscord,
 } from "@/api/v2/notificationDiscord";
 import type { QueryClient } from "@tanstack/react-query";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { captureProfileRequestContext, StaleApiRequestContextError } from "@/api/client";
 import {
   captureNotificationAuthority,
   notificationScope,
   requireNotificationAuthority,
   listNotifications,
+  listNotificationSeries,
+  type NotifiedSeriesOptions,
+  type NotifiedSeriesStatus,
   unreadNotificationCount,
   notificationPreferences,
   updateNotificationPreferences,
@@ -49,6 +58,10 @@ export const notificationInboxKeys = {
   ],
   count: (scope = notificationScope()) => [...notificationKeys.unreadCount(), scope],
   preferences: (scope = notificationScope()) => [...notificationKeys.preferences(), scope],
+  series: (status: NotifiedSeriesStatus, scope = notificationScope()) => [
+    ...notificationKeys.series(status),
+    scope,
+  ],
 };
 function invalidateInbox(queryClient: QueryClient, scope = notificationScope()) {
   for (const status of ["all", "unread"] as const)
@@ -83,6 +96,29 @@ export function useNotifications(status: "all" | "unread" = "all") {
     retry: false,
   });
   return { ...query, restart: () => queryClient.resetQueries({ queryKey, exact: true }) };
+}
+/** The series whose new episodes can notify the profile, or whose
+ * notifications its preferences silence, ordered by title. */
+export function useNotificationSeries(
+  status: NotifiedSeriesStatus,
+  options: NotifiedSeriesOptions,
+  enabled = true,
+) {
+  const context = captureProfileRequestContext();
+  return useInfiniteQuery({
+    queryKey: [...notificationInboxKeys.series(status, notificationScope(context)), options],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      listNotificationSeries(status, options, pageParam, context ?? captureNotificationAuthority()),
+    getNextPageParam: (last) => last.next_cursor,
+    // A new search or sort keeps the previous list on screen until it loads.
+    placeholderData: keepPreviousData,
+    // Favorites, watchlist, and progress change the list from other pages, so
+    // reopening the view reads it again.
+    refetchOnMount: "always",
+    enabled: enabled && context !== null,
+    retry: false,
+  });
 }
 export function useUnreadNotificationCount(enabled = true) {
   const context = captureProfileRequestContext();
@@ -140,10 +176,13 @@ export function useUpdateNotificationPreferences() {
       updateNotificationPreferences(input, context),
     retry: false,
     onSuccess: (prefs) => {
-      queryClient.setQueryData(
-        notificationInboxKeys.preferences(notificationScope(context)),
-        prefs,
-      );
+      const scope = notificationScope(context);
+      queryClient.setQueryData(notificationInboxKeys.preferences(scope), prefs);
+      // Preferences decide which listed series notify.
+      for (const status of ["active", "inactive"] as const)
+        void queryClient.invalidateQueries({
+          queryKey: notificationInboxKeys.series(status, scope),
+        });
     },
     onError: () => toast.error("Failed to save notification preferences"),
   });
@@ -519,7 +558,9 @@ export function applyNotificationsSnapshot(queryClient: QueryClient, rows: AppNo
 }
 
 /** Formats the "S2E5" style episode code for a notification row. */
-export function formatEpisodeCode(notification: AppNotification): string | null {
+export function formatEpisodeCode(
+  notification: Pick<AppNotification, "season_number" | "episode_number">,
+): string | null {
   if (notification.season_number == null || notification.episode_number == null) {
     return null;
   }

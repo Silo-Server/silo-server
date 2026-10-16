@@ -49,7 +49,6 @@ function rowCount(count: number) {
 
 function batchFailureText({ title, reason, message }: BatchFailure) {
   if (reason === "changed") return `${title} changed since you opened this page.`;
-  if (reason === "legacy") return `${title} is a Trakt row, which can't be turned back on.`;
   return `${title}: ${message}`;
 }
 

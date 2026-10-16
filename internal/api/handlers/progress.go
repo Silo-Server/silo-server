@@ -582,19 +582,7 @@ func (h *ProgressHandler) episodeSeries(ctx context.Context, contentIDs, checked
 			unchecked = append(unchecked, id)
 		}
 	}
-	if len(unchecked) > 0 && h.LibraryLookup != nil {
-		if scope, ok := access.GetScope(ctx); ok {
-			allowed, err := h.LibraryLookup.FilterAccessibleContentIDs(ctx, unchecked, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaturityLimits)
-			if err != nil {
-				slog.WarnContext(ctx, "check progress events' series access", "component", "api", "error", err)
-			}
-			for id, ok := range allowed {
-				if ok {
-					visible[id] = true
-				}
-			}
-		}
-	}
+	h.markInScope(ctx, unchecked, visible)
 	ids := make([]string, 0, len(visible))
 	for _, id := range contentIDs {
 		if visible[id] {
@@ -616,4 +604,26 @@ func (h *ProgressHandler) episodeSeries(ctx context.Context, contentIDs, checked
 		}
 	}
 	return series
+}
+
+// markInScope marks the ids the viewer's scope allows as visible. Without a
+// scope or a library lookup, none are; on a lookup error, the ones it did
+// return are.
+func (h *ProgressHandler) markInScope(ctx context.Context, ids []string, visible map[string]bool) {
+	if len(ids) == 0 || h.LibraryLookup == nil {
+		return
+	}
+	scope, ok := access.GetScope(ctx)
+	if !ok {
+		return
+	}
+	allowed, err := h.LibraryLookup.FilterAccessibleContentIDs(ctx, ids, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaturityLimits)
+	if err != nil {
+		slog.WarnContext(ctx, "check progress events' series access", "component", "api", "error", err)
+	}
+	for id, ok := range allowed {
+		if ok {
+			visible[id] = true
+		}
+	}
 }

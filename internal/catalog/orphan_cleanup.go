@@ -91,6 +91,10 @@ const orphanedMediaItemSafetyConditions = `NOT EXISTS (
 	WHERE ur.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
+	SELECT 1 FROM public.user_not_interested uni
+	WHERE uni.media_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
 	SELECT 1 FROM public.user_series_playback_preferences uspp
 	WHERE uspp.series_id = mi.content_id
   )

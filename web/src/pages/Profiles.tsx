@@ -1,9 +1,14 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { Lock, Plus } from "lucide-react";
+import { Lock, Plus, UserCog } from "lucide-react";
 import { toast } from "sonner";
 
-import type { Profile } from "@/api/types";
+import {
+  captureProfileRequestContextAs,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
+import type { Profile, UserLibrary } from "@/api/types";
 import { ProfileEditorDialog } from "@/components/profiles/ProfileEditorDialog";
 import { ProfilePinDialog } from "@/components/profiles/ProfilePinDialog";
 import { pinLockoutMessage } from "@/components/profiles/pinLockout";
@@ -12,9 +17,24 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useAuth } from "@/hooks/useAuth";
-import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
+import { listUserLibraries, useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
+
+type ManagePurpose = "add" | "manage";
+/** What a PIN prompt on the picker unlocks. */
+type PinPurpose = "select" | ManagePurpose;
+
+const PIN_PURPOSE_DESCRIPTIONS: Partial<Record<PinPurpose, string>> = {
+  add: "Adding a profile needs the primary profile's PIN.",
+  manage: "Managing profiles needs the primary profile's PIN.",
+};
+
+/** A new profile being created as the verified primary profile. */
+interface AddProfileSession {
+  profileContext: ProfileRequestContextSnapshot;
+  libraries: UserLibrary[];
+}
 
 export default function Profiles() {
   const {
@@ -26,7 +46,11 @@ export default function Profiles() {
   } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
   const [editorOpen, setEditorOpen] = useState(false);
-  const [pinProfile, setPinProfile] = useState<Profile | null>(null);
+  const [pinRequest, setPinRequest] = useState<{ profile: Profile; purpose: PinPurpose } | null>(
+    null,
+  );
+  const [addSession, setAddSession] = useState<AddProfileSession | null>(null);
+  const [preparingAdd, setPreparingAdd] = useState(false);
   const { selectProfile, verifyProfilePin, logout } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -42,12 +66,72 @@ export default function Profiles() {
 
   function handleSelect(profile: Profile) {
     if (profile.has_pin) {
-      setPinProfile(profile);
+      setPinRequest({ profile, purpose: "select" });
       return;
     }
 
     selectProfile(profile);
     enterApp();
+  }
+
+  // Adding and managing profiles verify the household's primary profile
+  // first, as the apps do: its PIN when it has one. The server decides
+  // whether the account may manage profiles at all.
+  function startManaging(purpose: ManagePurpose) {
+    const primary = profiles.find((profile) => profile.is_primary);
+    if (!primary) {
+      toast.error("Couldn't find the primary profile needed to manage profiles.");
+      return;
+    }
+    if (primary.has_pin) {
+      setPinRequest({ profile: primary, purpose });
+      return;
+    }
+    void continueManaging(purpose, primary, null);
+  }
+
+  async function continueManaging(
+    purpose: ManagePurpose,
+    primary: Profile,
+    profileToken: string | null,
+  ) {
+    if (purpose === "manage") {
+      selectProfile(primary, profileToken ?? undefined);
+      navigate("/settings/profiles");
+      return;
+    }
+
+    // The new profile is created as the primary profile without selecting
+    // it, so the browser's profile stays as it was and the person still
+    // picks who's watching. The editor lists the primary's libraries, not
+    // those of a profile this browser may still remember.
+    const profileContext = captureProfileRequestContextAs(primary.id, profileToken);
+    if (!profileContext) {
+      toast.error("Your session ended. Sign in again.");
+      return;
+    }
+    setPreparingAdd(true);
+    try {
+      const libraries = await listUserLibraries({ profileContext });
+      setAddSession({ profileContext, libraries });
+    } catch (err) {
+      if (!(err instanceof StaleApiRequestContextError)) {
+        toast.error("Couldn't open the new profile form. Try again.");
+      }
+    } finally {
+      setPreparingAdd(false);
+    }
+  }
+
+  function handlePinVerified(profile: Profile, profileToken: string) {
+    const purpose = pinRequest?.purpose ?? "select";
+    setPinRequest(null);
+    if (purpose === "select") {
+      selectProfile(profile, profileToken);
+      enterApp();
+      return;
+    }
+    void continueManaging(purpose, profile, profileToken);
   }
 
   async function handleCreateSuccess(
@@ -142,6 +226,7 @@ export default function Profiles() {
           <div key={profile.id} className="group relative">
             <button
               onClick={() => handleSelect(profile)}
+              disabled={preparingAdd}
               aria-label={profile.has_pin ? `${profile.name} (PIN protected)` : profile.name}
               className="surface-panel hover:border-primary flex w-[148px] flex-col items-center gap-3 rounded-[1.75rem] p-5 transition-all duration-150 hover:-translate-y-1"
             >
@@ -162,21 +247,54 @@ export default function Profiles() {
             </button>
           </div>
         ))}
+        <button
+          type="button"
+          onClick={() => startManaging("add")}
+          disabled={preparingAdd}
+          className="group border-border hover:border-primary text-muted-foreground hover:text-foreground flex w-[148px] flex-col items-center gap-3 rounded-[1.75rem] border-2 border-dashed p-5 transition-all duration-150 hover:-translate-y-1 disabled:pointer-events-none disabled:opacity-60"
+        >
+          <span className="border-border group-hover:border-primary/40 flex h-20 w-20 items-center justify-center rounded-full border-2 transition-colors">
+            <Plus className="h-8 w-8" aria-hidden="true" />
+          </span>
+          <span className="text-sm font-medium">Add profile</span>
+        </button>
       </div>
 
-      <Button variant="outline" size="sm" onClick={logout} className="relative z-10 mt-2">
-        Sign out
-      </Button>
+      <div className="relative z-10 mt-2 flex flex-wrap justify-center gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => startManaging("manage")}
+          disabled={preparingAdd}
+        >
+          <UserCog className="h-4 w-4" />
+          Manage profiles
+        </Button>
+        <Button variant="outline" size="sm" onClick={logout}>
+          Sign out
+        </Button>
+      </div>
 
       <ProfilePinDialog
-        profile={pinProfile}
-        onClose={() => setPinProfile(null)}
-        onVerified={(profile, token) => {
-          setPinProfile(null);
-          selectProfile(profile, token);
-          enterApp();
-        }}
+        profile={pinRequest?.profile ?? null}
+        description={pinRequest ? PIN_PURPOSE_DESCRIPTIONS[pinRequest.purpose] : undefined}
+        onClose={() => setPinRequest(null)}
+        onVerified={handlePinVerified}
         verifyPin={verifyProfilePin}
+      />
+
+      <ProfileEditorDialog
+        open={addSession !== null}
+        libraries={addSession?.libraries ?? []}
+        avatarUploadEnabled={avatarUploadEnabled}
+        advisoryAgeSupported={maxAdvisoryAgeSupported}
+        requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+        profileContext={addSession?.profileContext}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAddSession(null);
+          }
+        }}
       />
     </div>
   );

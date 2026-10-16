@@ -429,8 +429,14 @@ function shouldReconcileAfterMutationError(error: unknown): boolean {
   return !isDefinitiveSettingMutationRejection(error);
 }
 
+// Profile preferences that change which cards Home's rows hold or their order.
+const HOME_REFRESH_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+  SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+]);
+
 function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, key?: string) {
-  if (key !== SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS) return;
+  if (!key || !HOME_REFRESH_KEYS.has(key)) return;
   // Home uses observer-less fetchQuery calls. Mark its data stale before
   // resetting the load queue, including when the settings screen has unmounted.
   return queryClient
@@ -604,7 +610,10 @@ export type SettingsCapabilities = Pick<
   Partial<
     Pick<
       V2Result<"GET /api/v2/settings/contract/capabilities">,
-      "supports_batched_effective" | "supports_idempotent_writes" | "supports_atomic_shortcuts"
+      | "supports_batched_effective"
+      | "supports_idempotent_writes"
+      | "supports_atomic_shortcuts"
+      | "supports_device_rename"
     >
   >;
 

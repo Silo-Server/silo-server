@@ -97,6 +97,9 @@ func TestPlaybackCapabilitiesV2IsAlwaysAvailable(t *testing.T) {
 	if !slices.Contains(view.Features, "marker_segments_v1") {
 		t.Fatal("marker collections are not advertised")
 	}
+	if !slices.Contains(view.Features, "bandwidth_probe_v1") {
+		t.Fatal("the bandwidth probe is not advertised")
+	}
 	for _, feature := range []string{"watch_party_source_fallback_v1", "watch_party_coordinator_v1"} {
 		if slices.Contains(view.Features, feature) {
 			t.Fatalf("unconfigured Watch Party feature advertised: %s", feature)

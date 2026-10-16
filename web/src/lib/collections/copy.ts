@@ -532,11 +532,6 @@ export const FRANCHISE_ID_INVALID = "Use the number from the collection's link, 
 export const DISCOVER_LOCKED = "Made by a starter pack. Its rules can't be changed here.";
 export const DISCOVER_STILL_EDITABLE =
   "You can still change its name, artwork, max titles, schedule and where it shows.";
-export const TRAKT_LOCKED =
-  "New Trakt lists aren't supported. This one keeps its source and libraries.";
-export const TRAKT_STILL_EDITABLE =
-  "You can still change its name, artwork, order, schedule and where it shows.";
-export const TRAKT_SCHEDULE_STOPPED = "A stopped Trakt list can't be scheduled again.";
 export const PERSONAL_SCHEDULE_LOCKED =
   "This server doesn't let profiles change a list's schedule.";
 export const LIST_DECIDES = "The list decides";

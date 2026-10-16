@@ -76,6 +76,24 @@ describe("typed setting mutations", () => {
     },
   );
 
+  it("refreshes Home when Show new episodes first changes", async () => {
+    v2Mock.mockResolvedValueOnce({});
+    const { queryClient, wrapper } = createHarness();
+    const homeKey = sectionKeys.homeItems("continue-watching");
+    queryClient.setQueryData(homeKey, { section: { items: [] } });
+    queryClient.setQueryData(mediaSurfaceKeys.refreshSignal(), 0);
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        key: SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+        value: true,
+        identity: { scope: "profile" },
+      });
+    });
+    expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
+  });
+
   it("refreshes Home when the preference is cleared", async () => {
     v2Mock.mockResolvedValueOnce({});
     const { queryClient, wrapper } = createHarness();

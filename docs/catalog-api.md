@@ -244,8 +244,8 @@ The frozen `/api/v1/collections/preview` response is unchanged and carries no po
 
 ## Personal collection imports
 
-A personal collection imported with `importMDBListCollection`, `importTMDBCollection`,
-`importTMDBListCollection`, or `importTraktCollection` holds only titles its owner profile
+A personal collection imported with `importMDBListCollection`, `importTMDBCollection`, or
+`importTMDBListCollection` holds only titles its owner profile
 can access: titles in the owner's allowed libraries that pass its rating limits. Those are
 the `max_content_rating` ceiling, with the server's `access.unrated_content` setting for
 unrated titles, and the `max_advisory_age` limit, with `require_advisory_age` (see
@@ -278,7 +278,7 @@ Each viewer of a shared collection still sees only the titles that viewer can ac
 ## Personal sync schedules
 
 `updateCollection` (`PATCH /api/v2/collections/{id}`) accepts `sync_schedule` on a synced list
-(a collection imported from MDBList, TMDB, or Trakt). The value is a cadence name, `daily`,
+(a collection imported from MDBList or TMDB). The value is a cadence name, `daily`,
 `weekly`, or `monthly`, or `""` to stop scheduled syncs; `syncCollection` still syncs on demand.
 Cron expressions are a validation failure for every account, administrators included, and so is
 `sync_schedule` on a manual or smart collection or `null`. A cadence sets `next_sync_at` to the
@@ -406,6 +406,16 @@ cannot extend that deadline. Cold or expired membership requires a fresh build;
 an older in-flight build cannot replace the current generation. Badge summaries
 and per-profile playability are recomputed during this grace period.
 
+## Continue Watching row
+
+When the profile's `ui.next_up_mode` is `combined` (the default), Continue
+Watching merges in-progress cards with next-up episodes, keeps one card per
+series, orders the cards by most recent activity, and returns at most the row's
+`item_limit` cards. A next-up card's activity is when the profile finished the
+previous episode; with `ui.next_up_new_releases_first` on, it is when the next
+episode was released to the server if that came later. With `separate`, the row holds only in-progress cards and
+Next Up is its own row.
+
 ## Bridge note
 
 The alpha `/api/v1` surface exposes the same saved-sort and capability features at
@@ -423,6 +433,25 @@ clients must send it unchanged rather than construct it from visible timestamps.
 by the stored timestamp column so the existing profile/time indexes can serve the page. Visible
 `added_at` fields remain UTC timestamps with millisecond precision. The frozen v1 list queries and their timestamp
 formatting are unchanged.
+
+## Not interested
+
+A profile marks a movie or series it does not want recommended with
+`PUT /api/v2/not-interested/{item_id}` and clears the mark with `DELETE` on the
+same path; both answer `204` and repeat safely. Episodes and seasons answer `422`;
+mark the series. `GET /api/v2/not-interested` pages the marks as catalog cards,
+newest first, with the same kind of cursor as the favorites list, and
+`GET /api/v2/not-interested/{item_id}` answers one mark or `404`. Every card's
+`user_state.not_interested` carries the flag. Detect support with
+`GET /api/v2/capabilities/not-interested`.
+
+A mark keeps the title out of the profile's recommendation and discovery rows
+and ranks similar titles lower there, after a rebuild that starts within
+seconds; it leaves library browsing, search, item detail, playback, favorites
+and the watchlist alone. A change publishes `user_state.changed` with
+`change: "not_interested"` and a `not_interested` boolean, so the profile's other
+clients can update. The frozen v1 surface has no mark and does not show it. See
+[recommendations.md](architecture/recommendations.md#rows).
 
 ## Watchlist titles outside the library
 

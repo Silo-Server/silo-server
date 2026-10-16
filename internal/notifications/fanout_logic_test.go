@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -108,6 +109,45 @@ func TestEvaluateRecipientReasons(t *testing.T) {
 	})
 }
 
+func TestSplitEpisodeKeyInvertsEpisodeKey(t *testing.T) {
+	for _, c := range [][2]int{{0, 0}, {1, 2}, {2, 999999}, {12, 10500}} {
+		if season, episode := SplitEpisodeKey(EpisodeKey(c[0], c[1])); season != c[0] || episode != c[1] {
+			t.Errorf("SplitEpisodeKey(EpisodeKey(%d, %d)) = %d, %d", c[0], c[1], season, episode)
+		}
+	}
+}
+
+func TestReasonFlagsHas(t *testing.T) {
+	f := ReasonFlags{Watchlist: true, NextUp: true}
+	for reason, want := range map[string]bool{ReasonFavorite: false, ReasonWatchlist: true, ReasonContinueWatching: false, ReasonNextUp: true, "other": false} {
+		if got := f.Has(reason); got != want {
+			t.Errorf("Has(%q) = %v, want %v", reason, got, want)
+		}
+	}
+}
+
+// ActiveReasons is the event-independent half of EvaluateRecipient: the
+// reasons preferences let notify, with Next Up needing a known episode.
+func TestActiveReasons(t *testing.T) {
+	key := EpisodeKey(1, 4)
+	all := SeriesInterest{Favorite: true, Watchlist: true, ContinueWatching: true, NextUpCandidate: true, NextExpectedEpisodeKey: &key}
+	prefs := DefaultPreferences("p")
+	if got := ActiveReasons(all, prefs); got != (ReasonFlags{Favorite: true, Watchlist: true, ContinueWatching: true, NextUp: true}) {
+		t.Errorf("all enabled = %+v", got)
+	}
+	prefs.NotifyWatchlist = false
+	if got := ActiveReasons(all, prefs); got.Watchlist || !got.Favorite {
+		t.Errorf("watchlist off = %+v", got)
+	}
+	if got := ActiveReasons(SeriesInterest{NextUpCandidate: true}, prefs); got.Any() {
+		t.Errorf("next up without an expected episode = %+v", got)
+	}
+	prefs.Enabled = false
+	if got := ActiveReasons(all, prefs); got.Any() {
+		t.Errorf("disabled = %+v", got)
+	}
+}
+
 func TestApplyBurstCap(t *testing.T) {
 	event := func(library int, series string, key int) ReleaseEvent {
 		return ReleaseEvent{
@@ -194,20 +234,32 @@ func TestMemoryTicketStore(t *testing.T) {
 	store := NewTicketStore(nil)
 	ctx := context.Background()
 
-	ticket, ttl, err := store.Mint(ctx, 7, "profile-1")
+	minted := Ticket{UserID: 7, ProfileID: "profile-1", ProfileToken: "proof"}
+	ticket, ttl, err := store.Mint(ctx, minted)
 	if err != nil || ticket == "" || ttl <= 0 {
 		t.Fatalf("mint failed: %q %v %v", ticket, ttl, err)
 	}
 
-	userID, profileID, ok := store.Consume(ctx, ticket)
-	if !ok || userID != 7 || profileID != "profile-1" {
-		t.Fatalf("consume returned %d %q %v", userID, profileID, ok)
+	binding, ok := store.Consume(ctx, ticket)
+	if !ok || binding != minted {
+		t.Fatalf("consume returned %+v %v", binding, ok)
 	}
 
-	if _, _, ok := store.Consume(ctx, ticket); ok {
+	if _, ok := store.Consume(ctx, ticket); ok {
 		t.Fatal("tickets must be single-use")
 	}
-	if _, _, ok := store.Consume(ctx, "unknown"); ok {
+	if _, ok := store.Consume(ctx, "unknown"); ok {
 		t.Fatal("unknown tickets must be rejected")
+	}
+
+	// A token no signed one could be is not kept: the viewer gate does not
+	// read X-Profile-Token for a profile without a PIN.
+	oversized := Ticket{UserID: 7, ProfileID: "profile-1", ProfileToken: strings.Repeat("x", maxTicketProofBytes+1)}
+	ticket, _, err = store.Mint(ctx, oversized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding, ok := store.Consume(ctx, ticket); !ok || binding != (Ticket{UserID: 7, ProfileID: "profile-1"}) {
+		t.Fatalf("oversized proof consumed as %+v %v", binding, ok)
 	}
 }

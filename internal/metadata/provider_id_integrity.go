@@ -745,6 +745,15 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET added_at = LEAST(user_watchlist.added_at, EXCLUDED.added_at)`},
 	{"delete source watchlist", `DELETE FROM user_watchlist WHERE media_item_id = $1`},
+	{"merge not interested", `
+			INSERT INTO user_not_interested (user_id, profile_id, media_item_id, added_at)
+			SELECT user_id, profile_id, $2, MIN(added_at)
+			FROM user_not_interested
+			WHERE media_item_id = $1
+			GROUP BY user_id, profile_id
+			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
+			SET added_at = LEAST(user_not_interested.added_at, EXCLUDED.added_at)`},
+	{"delete source not interested", `DELETE FROM user_not_interested WHERE media_item_id = $1`},
 	{"merge ratings", `
 			INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at)
 			SELECT DISTINCT ON (user_id, profile_id) user_id, profile_id, $2, rating, rated_at

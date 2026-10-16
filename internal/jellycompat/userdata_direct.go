@@ -112,6 +112,20 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 	return result, nil
 }
 
+// ListNotInterestedByMediaItems reports which of mediaItemIDs the session's
+// profile marked Not interested.
+func (s *directUserDataService) ListNotInterestedByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]bool, error) {
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+	result, err := store.ListNotInterestedByMediaItems(ctx, session.ProfileID, mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list not interested by media items: %w", err)
+	}
+	return result, nil
+}
+
 func (s *directUserDataService) ListFavoritesByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]bool, error) {
 	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
 	if err != nil {

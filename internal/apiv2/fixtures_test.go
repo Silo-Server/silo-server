@@ -1759,7 +1759,45 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, catalogLettersFixtureCases()...)
 	cases = append(cases, pushRegistrationReceiptFixtureCases()...)
 	cases = append(cases, adminNotificationPushDeliveryFixtureCases()...)
-	return append(cases, unmatchedItemIgnoreFixtureCases()...)
+	cases = append(cases, unmatchedItemIgnoreFixtureCases()...)
+	cases = append(cases, notInterestedFixtureCases()...)
+	return append(cases, notificationSeriesFixtureCases()...)
+}
+
+// notInterestedFixtureCases pin the Not interested marks: the paged list, one
+// mark, the refusals, and the capability document.
+func notInterestedFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "list_not_interested_ok", operationID: opListNotInterested,
+			scenario: "The first page of the titles a profile marked Not interested as catalog cards, newest mark first, with an opaque cursor for the next page.",
+			method:   http.MethodGet, path: "/api/v2/not-interested?limit=1", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/NotInterestedCollection"},
+		{name: "get_not_interested_ok", operationID: "getNotInterested",
+			scenario: "The profile marked the title Not interested: the mark with when it was made.",
+			method:   http.MethodGet, path: "/api/v2/not-interested/movie:c", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/NotInterestedEntry"},
+		{name: "get_not_interested_not_found", operationID: "getNotInterested",
+			scenario: "The profile has not marked the title.",
+			method:   http.MethodGet, path: "/api/v2/not-interested/movie:nope", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "mark_not_interested_episode_rejected", operationID: "markNotInterested",
+			scenario: "An episode cannot be marked; the series can.",
+			method:   http.MethodPut, path: "/api/v2/not-interested/episode:x", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "mark_not_interested_not_found", operationID: "markNotInterested",
+			scenario: "A title the viewer may not see cannot be marked.",
+			method:   http.MethodPut, path: "/api/v2/not-interested/movie:hidden", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "unmark_not_interested_locked_profile", operationID: "unmarkNotInterested",
+			scenario: "A PIN-locked profile without X-Profile-Token.",
+			method:   http.MethodDelete, path: "/api/v2/not-interested/movie:c", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_not_interested_capability_ok", operationID: "getNotInterestedCapability",
+			scenario: "Profiles on this server can mark movies and series Not interested.",
+			method:   http.MethodGet, path: "/api/v2/capabilities/not-interested", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/NotInterestedCapability"},
+	}
 }
 
 // resumePositionFixtureCases pin clearing a resume position and the progress
@@ -1955,7 +1993,12 @@ func fixtureDeps() Dependencies {
 	deps.OrderedAndroidPush = new(fakeOrderedPush)
 	fixtureProviders := netaccess.NewStatusCache()
 	fixtureProviders.Report(netaccess.Status{InstallationID: 7, Provider: "stub", State: netaccess.StateConnected, Origin: "https://silo.overlay.example.test"})
-	deps.ServerConnections = ServerConnections{PublicURL: func() string { return "https://silo.example.test" }, Providers: fixtureProviders}
+	deps.ServerConnections = ServerConnections{
+		PublicURL:   func() string { return "https://silo.example.test" },
+		LocalURL:    func() string { return "http://silo.lan.example.test:8080" },
+		Providers:   fixtureProviders,
+		LocalTLSPin: "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
+	}
 	deps.SubtitleAIReads = &fakeSubtitleAIReads{}
 	deps.Downloads = &fakeDownloadRegistry{}
 	deps.DownloadCreation = &fakeDownloadCreation{row: &downloads.Download{ID: "entry", ContentID: "movie", MediaFileID: 42, Revision: 1, CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Status: downloads.StatusReady, Quality: downloads.QualityOriginal, EffectiveQuality: downloads.QualityOriginal, Format: downloads.FormatOriginal, DeviceID: "device-one"}, page: downloads.CreatePage{BatchID: "intent", Skipped: []downloads.SkippedDownload{{EpisodeID: "missing", Reason: "no_file"}}}}
@@ -2030,6 +2073,7 @@ func fixtureDeps() Dependencies {
 	deps.HomeSections = home
 	deps.Recipes = home
 	deps.PersonalLists = &fakePersonalLists{favorites: favoriteRows(), watchlist: watchlistRows(), missing: map[string]bool{"movie:hidden": true, "series:hidden": true}}
+	deps.NotInterested = &fakeNotInterested{marks: notInterestedRows(), missing: map[string]bool{"movie:hidden": true}}
 	deps.Ratings = &fakeRatings{ratings: ratingRows(), hidden: map[string]bool{"movie:hidden": true}}
 	deps.History = newFakeHistory()
 	deps.Watch = &fakeWatch{}

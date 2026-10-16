@@ -7,7 +7,13 @@ import uploadProfileAvatarOk from "../../../../contracts/api/v2/fixtures/upload_
 import verifyProfilePinOk from "../../../../contracts/api/v2/fixtures/verify_profile_pin_ok.json";
 import verifyProfilePinWrong from "../../../../contracts/api/v2/fixtures/verify_profile_pin_wrong.json";
 
-import { setAccessToken, setProfileId } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  captureProfileRequestContextAs,
+  setAccessToken,
+  setProfileId,
+  setProfileToken,
+} from "@/api/client";
 import {
   createProfile,
   listHouseholdSessions,
@@ -36,6 +42,7 @@ beforeEach(() => {
   sessionStorage.clear();
   setAccessToken("tok-user");
   setProfileId("p-owner");
+  setProfileToken(null);
 });
 
 describe("profile queries on the v2 contract", () => {
@@ -93,6 +100,26 @@ describe("profile queries on the v2 contract", () => {
     expect(created.allowed_library_ids).toEqual(
       createProfileCreated.allowed_library_ids.map(Number),
     );
+  });
+
+  it("creates a profile as an explicit profile without touching the active one", async () => {
+    setProfileToken("pvt-child");
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      json(createProfileCreated, 201, { ...JSON_HEADERS, Location: "/api/v2/profiles/p-kid" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const primary = captureProfileRequestContextAs("p-primary", "pvt-primary");
+    if (!primary) throw new Error("no session");
+    await createProfile({ name: "Kid" }, primary);
+
+    const headers = requestOf(fetchMock, 0).init.headers;
+    expect(headers["X-Profile-Id"]).toBe("p-primary");
+    expect(headers["X-Profile-Token"]).toBe("pvt-primary");
+    expect(captureProfileRequestContext()).toMatchObject({
+      profileId: "p-owner",
+      profileToken: "pvt-child",
+    });
   });
 
   it("verifies a PIN and passes the token through; a wrong PIN is a plain false", async () => {

@@ -177,6 +177,11 @@
 ./internal/scanner TestEbookScanBatchesSkipQueries
 ./internal/scanner TestEbookSkipPreloadPreservesEligibility
 
+# Variant finalization: one narrow scope load, one owner lookup, and one
+# batched write of the variant columns alone.
+./internal/scanner TestFinalizeVariantsBatchesQueriesDB
+./internal/scanner TestFinalizeVariantsLoadsMovieDiscsOutsideTheScopeDB
+
 # ID-less direct ranges reuse full session payloads while checking identities.
 ./internal/jellycompat TestWebOSDurableRangeDoesNotReloadSnapshots
 
@@ -187,10 +192,6 @@
 # Artwork reference check (revision GC and storage sweep): every sweep surface
 # whose path column has an index uses it under a generic plan.
 ./internal/metadata TestArtworkReferenceChecksUsePathIndexesDB
-
-# The local-only image-cache claim, run while metadata.cache_images is off, uses
-# its partial index instead of reading the remote jobs left queued.
-./internal/metadata TestLocalImageCacheClaimUsesLocalDueIndexDB
 
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
