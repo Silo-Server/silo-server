@@ -73,15 +73,18 @@ func (r *WebhookRepository) ListByProfile(ctx context.Context, profileID string)
 }
 
 // ListEnabledByProfiles loads enabled webhooks for a set of profiles, keyed
-// by profile. Used by the fanout outbox enqueue inside its transaction.
-func (r *WebhookRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) (map[string][]Webhook, error) {
-	out := make(map[string][]Webhook, len(profileIDs))
-	if len(profileIDs) == 0 {
+// by account and profile: profile IDs repeat across accounts. Used by the
+// outbox enqueue inside the delivery's transaction.
+func (r *WebhookRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx, profiles []profileKey) (map[profileKey][]Webhook, error) {
+	out := make(map[profileKey][]Webhook, len(profiles))
+	if len(profiles) == 0 {
 		return out, nil
 	}
+	userIDs, profileIDs := profileKeyArrays(profiles)
 	rows, err := tx.Query(ctx,
-		`SELECT `+webhookColumns+` FROM notification_webhooks WHERE profile_id = ANY($1) AND enabled`,
-		profileIDs)
+		`SELECT `+webhookColumns+` FROM notification_webhooks
+		WHERE (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])) AND enabled`,
+		userIDs, profileIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled webhooks: %w", err)
 	}
@@ -90,7 +93,8 @@ func (r *WebhookRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx
 		return nil, err
 	}
 	for _, hook := range hooks {
-		out[hook.ProfileID] = append(out[hook.ProfileID], hook)
+		key := profileKey{hook.UserID, hook.ProfileID}
+		out[key] = append(out[key], hook)
 	}
 	return out, nil
 }

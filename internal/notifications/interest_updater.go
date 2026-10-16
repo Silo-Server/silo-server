@@ -78,6 +78,17 @@ func (k profileKey) String() string { return strconv.Itoa(k.userID) + "/" + k.pr
 // handler would otherwise encode the unexported fields as {}.
 func (k profileKey) LogValue() slog.Value { return slog.StringValue(k.String()) }
 
+// profileKeyArrays splits keys into the parallel account and profile arrays a
+// query matches with (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])).
+func profileKeyArrays(keys []profileKey) ([]int, []string) {
+	userIDs := make([]int, len(keys))
+	profileIDs := make([]string, len(keys))
+	for i, key := range keys {
+		userIDs[i], profileIDs[i] = key.userID, key.profileID
+	}
+	return userIDs, profileIDs
+}
+
 // NewInterestUpdater creates an InterestUpdater.
 func NewInterestUpdater(
 	pool *pgxpool.Pool,

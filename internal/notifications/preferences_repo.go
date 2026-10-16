@@ -43,16 +43,13 @@ func (r *PreferencesRepository) Get(ctx context.Context, userID int, profileID s
 // missing rows to all-enabled. Used by the fanout worker.
 func (r *PreferencesRepository) GetMany(ctx context.Context, tx pgx.Tx, profiles []profileKey) (map[profileKey]Preferences, error) {
 	out := make(map[profileKey]Preferences, len(profiles))
-	userIDs := make([]int, 0, len(profiles))
-	profileIDs := make([]string, 0, len(profiles))
 	for _, profile := range profiles {
 		out[profile] = DefaultPreferences(profile.userID, profile.profileID)
-		userIDs = append(userIDs, profile.userID)
-		profileIDs = append(profileIDs, profile.profileID)
 	}
 	if len(profiles) == 0 {
 		return out, nil
 	}
+	userIDs, profileIDs := profileKeyArrays(profiles)
 	rows, err := tx.Query(ctx, `
 		SELECT p.user_id, p.profile_id, p.enabled, p.notify_favorites, p.notify_watchlist,
 		       p.notify_continue_watching, p.notify_next_up, p.updated_at

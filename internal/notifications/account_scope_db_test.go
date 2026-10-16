@@ -87,6 +87,40 @@ func TestSameProfileIDOnTwoAccounts(t *testing.T) {
 	}
 }
 
+// TestSameProfileIDFanoutTargets covers channel targets when both accounts'
+// "default" profiles follow the series: each account gets its own delivery,
+// and each delivery queues attempts for its own account's webhook, web push
+// subscription, and Apple push device only.
+func TestSameProfileIDFanoutTargets(t *testing.T) {
+	pool := inboxPageDB(t)
+	ctx := t.Context()
+	c := seedAccessCatalog(t, pool)
+	seedFanoutEvent(t, pool, c, nil)
+	seedTwoAccountTargets(t, pool)
+	if _, err := pool.Exec(ctx, `INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite)
+		VALUES (1, 'default', $1, $2, true), (2, 'default', $1, $2, true)`, c.library, c.series); err != nil {
+		t.Fatalf("seed interest: %v", err)
+	}
+
+	worker := newAccessFanoutWorker(pool, scopeByProfile{"default": {}})
+	worker.settings = NewSettings(mapSettingReader{SettingFanoutSettleSeconds: "0", SettingWebhooksEnabled: "true"})
+	worker.SetWebhookOutbox(NewWebhookRepository(pool), newProfileRateLimiter())
+	worker.SetWebPushOutbox(NewWebPushRepository(pool))
+	worker.SetPushOutbox(NewPushDeviceRepository(pool))
+	if _, err := worker.processBatch(ctx); err != nil {
+		t.Fatalf("processBatch: %v", err)
+	}
+	if got := accountRecipients(t, pool, "event-1"); !slices.Equal(got, []string{"1/default", "2/default"}) {
+		t.Fatalf("event-1 recipients = %v, want both accounts' default profiles", got)
+	}
+	for _, account := range []string{"1", "2"} {
+		want := []string{"browser-" + account, "hook-" + account, "phone-" + account}
+		if got := attemptTargets(t, pool, `d.release_event_id = 'event-1' AND d.user_id = `+account); !slices.Equal(got, want) {
+			t.Fatalf("account %s attempts = %v, want %v", account, got, want)
+		}
+	}
+}
+
 // checkInboxPerAccount: each account's "default" profile lists, counts, and
 // reads only its own delivery of event-1.
 func checkInboxPerAccount(t *testing.T, deliveries *DeliveryRepository) {

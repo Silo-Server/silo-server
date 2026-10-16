@@ -156,12 +156,7 @@ func (r *InterestRepository) GuardedSetLastNotified(ctx context.Context, tx pgx.
 	if len(profiles) == 0 {
 		return nil
 	}
-	userIDs := make([]int, 0, len(profiles))
-	profileIDs := make([]string, 0, len(profiles))
-	for _, profile := range profiles {
-		userIDs = append(userIDs, profile.userID)
-		profileIDs = append(profileIDs, profile.profileID)
-	}
+	userIDs, profileIDs := profileKeyArrays(profiles)
 	_, err := tx.Exec(ctx, `
 		UPDATE profile_series_interest psi
 		SET last_notified_episode_key = $1
