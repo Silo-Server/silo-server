@@ -3,6 +3,8 @@ package pgstore
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -39,9 +41,10 @@ func TestPostgresDeleteProfileAuditedSeesConcurrentUpdate(t *testing.T) {
 		err  error
 	}
 	done := make(chan result, 1)
+	deletePool, deleteApp := newDeleteSessionPool(t)
 	go func() {
 		var name string
-		err := store.DeleteProfileAudited(ctx, "kid", func(_ pgx.Tx, deleted *userstore.Profile) error {
+		err := newStore(deletePool, userID).DeleteProfileAudited(ctx, "kid", func(_ pgx.Tx, deleted *userstore.Profile) error {
 			name = deleted.Name
 			return nil
 		})
@@ -49,7 +52,7 @@ func TestPostgresDeleteProfileAuditedSeesConcurrentUpdate(t *testing.T) {
 	}()
 
 	// Commit only once the delete is blocked on the update's row lock.
-	waitForBlockedDelete(t, pool, func() {
+	waitForBlockedDelete(t, pool, deleteApp, func() {
 		select {
 		case r := <-done:
 			t.Fatalf("delete finished before the update committed: %+v", r)
@@ -90,15 +93,16 @@ func TestPostgresDeleteProfileAuditedWaitsForSettingClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	deletePool, deleteApp := newDeleteSessionPool(t)
 	deleteDone := make(chan error, 1)
 	clearErr := store.WithSettingMutationTransaction(ctx, "", func(writer userstore.SettingMutationWriter) error {
 		if removed, err := writer.DeleteSettingValue(ctx, identity); err != nil || !removed {
 			t.Fatalf("DeleteSettingValue = %v, %v", removed, err)
 		}
 		go func() {
-			deleteDone <- store.DeleteProfileAudited(ctx, "kid", func(pgx.Tx, *userstore.Profile) error { return nil })
+			deleteDone <- newStore(deletePool, userID).DeleteProfileAudited(ctx, "kid", func(pgx.Tx, *userstore.Profile) error { return nil })
 		}()
-		waitForBlockedDelete(t, pool, func() {
+		waitForBlockedDelete(t, pool, deleteApp, func() {
 			select {
 			case err := <-deleteDone:
 				t.Fatalf("delete finished while the clear was open: %v", err)
@@ -119,16 +123,35 @@ func TestPostgresDeleteProfileAuditedWaitsForSettingClear(t *testing.T) {
 	}
 }
 
-// waitForBlockedDelete returns once a session in this database waits on a
-// lock, calling failIfDone on each poll so the caller can fail early.
-func waitForBlockedDelete(t *testing.T, pool *pgxpool.Pool, failIfDone func()) {
+// newDeleteSessionPool opens a pool whose sessions carry a unique
+// application_name, so waitForBlockedDelete can tell the delete's session
+// apart from other tests sharing the database.
+func newDeleteSessionPool(t *testing.T) (*pgxpool.Pool, string) {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf("profile-delete-audit-%d", time.Now().UnixNano())
+	cfg.ConnConfig.RuntimeParams["application_name"] = name
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool, name
+}
+
+// waitForBlockedDelete returns once a session named app waits on a lock,
+// calling failIfDone on each poll so the caller can fail early.
+func waitForBlockedDelete(t *testing.T, pool *pgxpool.Pool, app string, failIfDone func()) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var waiting bool
 		if err := pool.QueryRow(t.Context(), `SELECT EXISTS (
 			SELECT 1 FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock')`).Scan(&waiting); err != nil {
+			WHERE application_name = $1 AND wait_event_type = 'Lock')`, app).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting {
