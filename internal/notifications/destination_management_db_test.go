@@ -47,6 +47,7 @@ func destinationAccountsDB(t *testing.T) *pgxpool.Pool {
 		CREATE TABLE web_push_subscriptions (LIKE public.web_push_subscriptions INCLUDING ALL);
 		CREATE TABLE web_push_delivery_attempts (LIKE public.web_push_delivery_attempts INCLUDING ALL);
 		CREATE TABLE push_devices (LIKE public.push_devices INCLUDING ALL);
+		CREATE TABLE android_push_installations (LIKE public.android_push_installations INCLUDING ALL);
 		CREATE TABLE apple_push_installations (LIKE public.apple_push_installations INCLUDING ALL);
 		CREATE TABLE notification_deliveries (LIKE public.notification_deliveries INCLUDING ALL);
 		CREATE TABLE notification_preferences (LIKE public.notification_preferences INCLUDING ALL);
