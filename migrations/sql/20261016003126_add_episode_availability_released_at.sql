@@ -1,5 +1,5 @@
+-- +goose NO TRANSACTION
 -- +goose Up
--- +goose StatementBegin
 -- released_at records the availability detector's decision that an episode was
 -- released to the server: the row was inserted after its library's first full
 -- scan (notification_library_seed_state) and its file arrived within the
@@ -7,6 +7,11 @@
 -- is set to the row's available_at; NULL means the episode was recorded
 -- silently. Next Up orders a series by this time when its next episode was
 -- released after the profile finished the previous one.
+--
+-- The migration runs outside a transaction so the column add holds its
+-- exclusive lock only briefly; the backfill below then runs on its own and
+-- doesn't block Next Up or the notifications fanout reading the table on
+-- other nodes during a rolling upgrade. Both statements are safe to rerun.
 ALTER TABLE public.episode_availability
     ADD COLUMN IF NOT EXISTS released_at timestamptz;
 
@@ -28,9 +33,6 @@ WHERE ss.library_id = ea.library_id
         AND el.episode_id = ea.episode_id
         AND el.first_seen_at >= ea.available_at - interval '14 days'
   );
--- +goose StatementEnd
 
 -- +goose Down
--- +goose StatementBegin
 ALTER TABLE public.episode_availability DROP COLUMN IF EXISTS released_at;
--- +goose StatementEnd
