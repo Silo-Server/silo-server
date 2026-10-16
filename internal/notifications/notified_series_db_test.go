@@ -26,8 +26,8 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	}{
 		{`INSERT INTO media_items (content_id, type, title, sort_title, genres, year, latest_episode_added_at) VALUES
 			('series:bear', 'series', 'The Bear', 'Bear', '{}', 2022, '2026-03-04T05:06:07Z'),
-			('series:andor', 'series', 'Andor', NULL, '{}', NULL, NULL),
-			('series:inert', 'series', 'Inert', NULL, '{}', NULL, NULL)`, nil},
+			('series:andor', 'series', 'Andor', '', '{}', 0, NULL),
+			('series:inert', 'series', 'Inert', '', '{}', 0, NULL)`, nil},
 		{`INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite, watchlist, next_up_candidate, next_expected_episode_key) VALUES
 			(1, 'p1', 1, 'series:bear', true, false, false, NULL),
 			(1, 'p1', 2, 'series:bear', false, false, true, $1),
