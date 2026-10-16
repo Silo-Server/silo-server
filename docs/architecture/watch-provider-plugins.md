@@ -75,6 +75,10 @@ from old connections. Migration `20261016134645_retire_trakt_watch_sync` deleted
 `watchsync.trakt.*` settings and migration markers, and disabled any installed
 copy. Watch history imported under the `trakt` source stays.
 
+Only that plugin ID is retired. A community Trakt plugin with its own plugin ID
+registers like any other third-party plugin, under a per-installation key; it
+starts with no connections, since the old ones were deleted.
+
 ## Connection settings
 
 A plugin can declare connection settings in its watch-sync descriptor: preferences a
