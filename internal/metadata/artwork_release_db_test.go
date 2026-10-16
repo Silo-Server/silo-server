@@ -1,0 +1,192 @@
+package metadata
+
+import (
+	"context"
+	"os"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// storedArtworkReleaseTestPool isolates the release in session-local tables
+// with the columns it reads, on one connection, so it neither sees nor writes
+// the shared test database's catalog and setting.
+func storedArtworkReleaseTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(t.Context(), `
+	CREATE TEMP TABLE server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+	CREATE TEMP TABLE media_items (
+		content_id TEXT PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'matched', locked_fields INTEGER[] NOT NULL DEFAULT '{}',
+		last_refreshed TIMESTAMPTZ,
+		poster_path TEXT DEFAULT '', poster_source_path TEXT DEFAULT '', poster_thumbhash TEXT DEFAULT '',
+		backdrop_path TEXT DEFAULT '', backdrop_source_path TEXT DEFAULT '', backdrop_thumbhash TEXT DEFAULT '',
+		logo_path TEXT DEFAULT '', logo_source_path TEXT DEFAULT '',
+		banner_path TEXT DEFAULT '', banner_source_path TEXT DEFAULT '', banner_thumbhash TEXT DEFAULT '',
+		thumb_path TEXT DEFAULT '', thumb_source_path TEXT DEFAULT '', thumb_thumbhash TEXT DEFAULT '',
+		clearart_path TEXT DEFAULT '', clearart_source_path TEXT DEFAULT '',
+		disc_path TEXT DEFAULT '', disc_source_path TEXT DEFAULT '',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TEMP TABLE media_item_localizations (
+		content_id TEXT NOT NULL, language TEXT NOT NULL,
+		poster_path TEXT DEFAULT '', poster_source_path TEXT DEFAULT '', poster_thumbhash TEXT DEFAULT '',
+		backdrop_path TEXT DEFAULT '', backdrop_source_path TEXT DEFAULT '', backdrop_thumbhash TEXT DEFAULT '',
+		logo_path TEXT DEFAULT '', logo_source_path TEXT DEFAULT '',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (content_id, language)
+	);
+	CREATE TEMP TABLE media_item_backdrops (content_id TEXT NOT NULL, path TEXT DEFAULT '');
+	CREATE TEMP TABLE seasons (
+		content_id TEXT PRIMARY KEY, series_id TEXT NOT NULL,
+		poster_path TEXT DEFAULT '', poster_source_path TEXT DEFAULT '', poster_thumbhash TEXT DEFAULT '',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TEMP TABLE season_localizations (
+		season_content_id TEXT NOT NULL, language TEXT NOT NULL,
+		poster_path TEXT DEFAULT '', poster_source_path TEXT DEFAULT '', poster_thumbhash TEXT DEFAULT '',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (season_content_id, language)
+	);
+	CREATE TEMP TABLE episodes (
+		content_id TEXT PRIMARY KEY, series_id TEXT NOT NULL,
+		still_path TEXT DEFAULT '', still_source_path TEXT DEFAULT '', still_thumbhash TEXT DEFAULT '',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TEMP TABLE metadata_refresh_debt (
+		target_type TEXT NOT NULL, content_id TEXT NOT NULL,
+		priority INTEGER NOT NULL DEFAULT 0, reason_mask BIGINT NOT NULL DEFAULT 0,
+		next_refresh_at TIMESTAMPTZ NOT NULL, claimed_at TIMESTAMPTZ,
+		lease_expires_at TIMESTAMPTZ, last_attempt_at TIMESTAMPTZ, last_success_at TIMESTAMPTZ,
+		attempt_count INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (target_type, content_id)
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	return pool
+}
+
+func newTestStoredArtworkReleaser(pool *pgxpool.Pool) *StoredArtworkReleaser {
+	r := NewStoredArtworkReleaser(pool)
+	// Small pages exercise paging; the advisory lock would hold the only
+	// connection.
+	r.pageSize = 2
+	r.lock = func(context.Context) (func(), bool, error) { return func() {}, true, nil }
+	return r
+}
+
+// With caching off, a pass points every stored copy of provider artwork on an
+// unlocked movie or series back at its provider source, keeping its
+// thumbhash; copies with no provider source stay and their matched item gets
+// refresh debt (unless refreshed this week); locked items and books are
+// untouched; a second pass changes nothing; and with caching on a pass does
+// nothing.
+func TestStoredArtworkReleaseDB(t *testing.T) {
+	pool := storedArtworkReleaseTestPool(t)
+	ctx := t.Context()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	const (
+		stored = "tmdb/movies/1/poster/original.r1.webp"
+		source = "tmdb://poster/p.jpg"
+		local  = "local/movies/1/backdrop/original.r1.webp"
+	)
+	exec(`INSERT INTO server_settings VALUES ('metadata.cache_images', 'true')`)
+	// movie-a: stored provider poster, stored local backdrop, never refreshed.
+	exec(`INSERT INTO media_items (content_id, type, poster_path, poster_source_path, poster_thumbhash,
+		backdrop_path, backdrop_source_path, backdrop_thumbhash) VALUES
+		('movie-a', 'movie', $1, $2, 'hash', $3, 'file:///m/a/fanart.jpg?v=1-1', 'bhash')`, stored, source, local)
+	// movie-b: locked artwork; movie-c: an audiobook; movie-d: refreshed today
+	// with a stored local poster; movie-e: extra backdrops only.
+	exec(`INSERT INTO media_items (content_id, type, locked_fields, poster_path, poster_source_path) VALUES
+		('movie-b', 'movie', '{10}', $1, $2), ('book-c', 'audiobook', '{}', $1, $2)`, stored, source)
+	exec(`INSERT INTO media_items (content_id, type, last_refreshed, poster_path, poster_source_path) VALUES
+		('movie-d', 'movie', NOW(), $1, 'file:///m/d/poster.jpg?v=1-1'), ('movie-e', 'movie', NOW() - interval '30 days', '', '')`, local)
+	exec(`INSERT INTO media_item_backdrops VALUES ('movie-e', 'local/x')`)
+	// movie-f: unmatched, with a stored local poster: no provider can help.
+	exec(`INSERT INTO media_items (content_id, type, status, poster_path, poster_source_path) VALUES
+		('movie-f', 'movie', 'unmatched', $1, 'file:///m/f/poster.jpg?v=1-1')`, local)
+	exec(`INSERT INTO media_item_localizations (content_id, language, poster_path, poster_source_path, poster_thumbhash)
+		VALUES ('movie-a', 'fr', $1, 'tmdb://poster/fr.jpg', 'frhash'), ('movie-b', 'fr', $1, 'tmdb://poster/fr.jpg', 'frhash')`, stored)
+	exec(`INSERT INTO media_items (content_id, type) VALUES ('series-s', 'series')`)
+	exec(`INSERT INTO seasons (content_id, series_id, poster_path, poster_source_path) VALUES ('season-1', 'series-s', $1, 'tvdb://s1.jpg')`, stored)
+	exec(`INSERT INTO season_localizations (season_content_id, language, poster_path, poster_source_path) VALUES ('season-1', 'de', $1, 'tvdb://s1de.jpg')`, stored)
+	exec(`INSERT INTO episodes (content_id, series_id, still_path, still_source_path) VALUES
+		('episode-1', 'series-s', $1, 'https://img.example/e1.jpg'), ('episode-2', 'series-s', $1, 'file:///m/s/e2-thumb.jpg?v=1-1')`, stored)
+
+	r := newTestStoredArtworkReleaser(pool)
+	stats, err := r.Run(ctx)
+	if err != nil || stats.Released != 0 || stats.RefreshesQueued != 0 {
+		t.Fatalf("caching on: stats = %+v, err = %v; want nothing done", stats, err)
+	}
+
+	exec(`UPDATE server_settings SET value = 'false'`)
+	stats, err = r.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// movie-a, its fr localization, season-1, its de localization, episode-1.
+	if stats.Released != 5 {
+		t.Errorf("released = %d, want 5", stats.Released)
+	}
+	text := func(sql string, args ...any) string {
+		t.Helper()
+		var v string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&v); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return v
+	}
+	for name, got := range map[string][2]string{
+		"movie-a poster":        {text(`SELECT poster_path || '|' || poster_thumbhash FROM media_items WHERE content_id = 'movie-a'`), source + "|hash"},
+		"movie-a backdrop":      {text(`SELECT backdrop_path || '|' || backdrop_thumbhash FROM media_items WHERE content_id = 'movie-a'`), local + "|bhash"},
+		"movie-a fr poster":     {text(`SELECT poster_path || '|' || poster_thumbhash FROM media_item_localizations WHERE content_id = 'movie-a'`), "tmdb://poster/fr.jpg|frhash"},
+		"movie-b poster":        {text(`SELECT poster_path FROM media_items WHERE content_id = 'movie-b'`), stored},
+		"movie-b fr poster":     {text(`SELECT poster_path FROM media_item_localizations WHERE content_id = 'movie-b'`), stored},
+		"book-c poster":         {text(`SELECT poster_path FROM media_items WHERE content_id = 'book-c'`), stored},
+		"season-1 poster":       {text(`SELECT poster_path FROM seasons`), "tvdb://s1.jpg"},
+		"season-1 de poster":    {text(`SELECT poster_path FROM season_localizations`), "tvdb://s1de.jpg"},
+		"episode-1 still":       {text(`SELECT still_path FROM episodes WHERE content_id = 'episode-1'`), "https://img.example/e1.jpg"},
+		"episode-2 local still": {text(`SELECT still_path FROM episodes WHERE content_id = 'episode-2'`), stored},
+	} {
+		if got[0] != got[1] {
+			t.Errorf("%s = %q, want %q", name, got[0], got[1])
+		}
+	}
+	// movie-a (local backdrop), movie-e (extra backdrops) and series-s (local
+	// still); not movie-d, refreshed today, nor movie-f, unmatched.
+	debts := text(`SELECT string_agg(content_id || ':' || reason_mask, ',' ORDER BY content_id) FROM metadata_refresh_debt WHERE target_type = 'item'`)
+	if want := "movie-a:64,movie-e:64,series-s:64"; debts != want {
+		t.Errorf("refresh debt = %q, want %q", debts, want)
+	}
+
+	stats, err = r.Run(ctx)
+	if err != nil || stats.Released != 0 {
+		t.Fatalf("second pass: stats = %+v, err = %v; want nothing released", stats, err)
+	}
+
+	// A copy published after a pass, while caching is back on, stays.
+	exec(`UPDATE server_settings SET value = 'true'`)
+	exec(`UPDATE media_items SET poster_path = $1 WHERE content_id = 'movie-a'`, stored)
+	if _, err := r.Run(ctx); err != nil {
+		t.Fatalf("Run with caching on: %v", err)
+	}
+	if got := text(`SELECT poster_path FROM media_items WHERE content_id = 'movie-a'`); got != stored {
+		t.Errorf("movie-a poster with caching on = %q, want the stored copy kept", got)
+	}
+}

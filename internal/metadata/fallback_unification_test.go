@@ -941,7 +941,7 @@ func TestBuildItemLocalizationRecord_PreservesExistingWhenRefreshIsBlank(t *test
 		LogoPath:          "s3://logo.png",
 	}
 
-	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false)
+	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false, true)
 
 	if *loc != *existing {
 		t.Fatalf("localization = %#v, want %#v", loc, existing)
@@ -958,7 +958,7 @@ func TestBuildSeasonLocalizationRecord_PreservesExistingPosterOnBlankRefresh(t *
 		PosterThumbhash: "season-thumb",
 	}
 
-	loc := buildSeasonLocalizationRecord(existing, "season-1", "fr", SeasonResult{}, MergeReplaceUnlocked)
+	loc := buildSeasonLocalizationRecord(existing, "season-1", "fr", SeasonResult{}, MergeReplaceUnlocked, true)
 
 	if *loc != *existing {
 		t.Fatalf("localization = %#v, want %#v", loc, existing)
@@ -1118,7 +1118,8 @@ func TestBuildLocalizationRecordsDoNotCarryAITextForward(t *testing.T) {
 	for _, mode := range []MergeMode{MergeFillEmpty, MergeReplaceUnlocked} {
 		season := buildSeasonLocalizationRecord(&models.SeasonLocalization{
 			Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
-		}, "season-1", "fr", SeasonResult{}, mode)
+		}, "season-1", "fr", SeasonResult{}, mode, true)
+
 		if season.Overview != "" {
 			t.Errorf("mode %v: season overview = %q, want empty", mode, season.Overview)
 		}
@@ -1146,7 +1147,8 @@ func TestBuildItemLocalizationRecordKeepsAITextOnFillEmptyRefresh(t *testing.T) 
 	item := buildItemLocalizationRecord(&models.MediaItemLocalization{
 		Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
 		Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
-	}, "series-1", "fr", "series", &MetadataResult{Overview: "English overview", Tagline: "English tagline"}, nil, MergeFillEmpty, "fr", false)
+	}, "series-1", "fr", "series", &MetadataResult{Overview: "English overview", Tagline: "English tagline"}, nil, MergeFillEmpty, "fr", false, true)
+
 	if item.Overview != "Apercu IA" || item.Tagline != "Phrase IA" {
 		t.Fatalf("overview/tagline = %q/%q, want the AI translation kept", item.Overview, item.Tagline)
 	}

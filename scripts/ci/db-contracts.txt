@@ -112,6 +112,10 @@
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
+# With metadata.cache_images off, stored artwork goes back to its provider
+# source, and items whose stored art has none are queued for a refresh.
+./internal/metadata TestStoredArtworkReleaseDB
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking

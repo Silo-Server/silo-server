@@ -3208,6 +3208,19 @@ func main() {
 			)
 			taskMgr.Register(cacheImagesTask)
 			taskMgr.Register(tasks.NewBackfillMetadataImagesTask(metadataImageCacheProcessor))
+			if releaser := metadata.NewStoredArtworkReleaser(deps.DB); releaser != nil {
+				taskMgr.Register(tasks.NewReleaseStoredArtworkTask(releaser))
+				// Turning caching off releases stored artwork now, not at the
+				// next hourly pass.
+				configWatcher.OnChange(func(previous, updated *config.Config) {
+					if previous == nil || !previous.Metadata.CacheImages || updated.Metadata.CacheImages {
+						return
+					}
+					if _, err := taskMgr.StartTask(tasks.ReleaseStoredArtworkTaskKey); err != nil {
+						slog.Debug("metadata: stored artwork release not started", "error", err)
+					}
+				})
+			}
 		}
 		if deps.Blobs.Assets != nil {
 			identity := deps.Blobs.Assets.Identity()
