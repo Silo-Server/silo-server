@@ -77,6 +77,13 @@ type metadataItemRepo interface {
 	ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error)
 }
 
+// metadataPersonRepo resolves credited people and claims their local photos.
+// The concrete *catalog.PersonRepository satisfies this interface.
+type metadataPersonRepo interface {
+	localPersonPhotoRepo
+	BatchFindOrCreate(ctx context.Context, people []models.Person) ([]int64, error)
+}
+
 type metadataItemDeleteRepo interface {
 	Delete(ctx context.Context, contentID string) ([]string, error)
 }
@@ -440,7 +447,7 @@ type MetadataService struct {
 	seasonLocalizationRepo  metadataSeasonLocalizationRepo
 	episodeLocalizationRepo metadataEpisodeLocalizationRepo
 	autoTranslator          AutoTranslator // optional; set via SetAutoTranslator
-	personRepo              *catalog.PersonRepository
+	personRepo              metadataPersonRepo
 	videoRepo               metadataVideoRepo
 	enrichmentState         enrichmentStateStore
 	ratingSourceRepo        metadataRatingSourceRepo
@@ -565,7 +572,7 @@ func NewMetadataService(
 		groupOverrideRepo = scanner.NewMediaGroupOverrideRepository(pool)
 		observedLocationRepo = scanner.NewObservedLocationRepository(pool)
 	}
-	return &MetadataService{
+	svc := &MetadataService{
 		chainRepo:               chainRepo,
 		pluginResolver:          pluginResolver,
 		enabledChecker:          enabledChecker,
@@ -580,7 +587,6 @@ func NewMetadataService(
 		itemAliasRepo:           itemAliasRepo,
 		seasonLocalizationRepo:  seasonLocalizationRepo,
 		episodeLocalizationRepo: episodeLocalizationRepo,
-		personRepo:              personRepo,
 		videoRepo:               videoRepo,
 		ratingSourceRepo:        ratingSourceRepo,
 		fileRepo:                fileRepo,
@@ -598,6 +604,11 @@ func NewMetadataService(
 		chainCache:              make(map[string]chainCacheEntry),
 		chainCacheTTL:           60 * time.Second,
 	}
+	// A nil *PersonRepository stored in the interface would pass s.personRepo != nil.
+	if personRepo != nil {
+		svc.personRepo = personRepo
+	}
+	return svc
 }
 
 // SetImageCacher enables S3 image caching during metadata persistence.
@@ -3032,30 +3043,32 @@ func (s *MetadataService) mergeAndPersist(
 				// A failed local re-apply is retried by the next check.
 				return nil, fmt.Errorf("finding people: %w", err)
 			}
-			slog.WarnContext(ctx, "metadata: batch find/create people failed", "component", "metadata", "error", err)
+			// Keep the stored cast: no credit got an ID, so replacing it now
+			// would store only the credits that already had one, often none.
+			slog.WarnContext(ctx, "metadata: batch find/create people failed; keeping stored people", "component", "metadata", "content_id", contentID, "error", err)
 		} else {
 			for i := range item.People {
 				item.People[i].Person.ID = personIDs[i]
 			}
-		}
-		// Filter out entries where FindOrCreate failed (Person.ID stayed 0).
-		valid := item.People[:0]
-		for _, p := range item.People {
-			if p.Person.ID != 0 {
-				valid = append(valid, p)
+			// Filter out entries where FindOrCreate failed (Person.ID stayed 0).
+			valid := item.People[:0]
+			for _, p := range item.People {
+				if p.ID != 0 {
+					valid = append(valid, p)
+				}
 			}
-		}
-		if req.localReapply && len(valid) != len(item.People) {
-			// A partial cast would replace the stored one.
-			return nil, fmt.Errorf("resolving people: %d of %d unresolved", len(item.People)-len(valid), len(item.People))
-		}
-		if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
-			if req.localReapply {
-				return nil, fmt.Errorf("replacing people: %w", err)
+			if req.localReapply && len(valid) != len(item.People) {
+				// A partial cast would replace the stored one.
+				return nil, fmt.Errorf("resolving people: %d of %d unresolved", len(item.People)-len(valid), len(item.People))
 			}
-			slog.WarnContext(ctx, "metadata: failed to replace people", "component", "metadata", "content_id", contentID, "error", err)
+			if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
+				if req.localReapply {
+					return nil, fmt.Errorf("replacing people: %w", err)
+				}
+				slog.WarnContext(ctx, "metadata: failed to replace people", "component", "metadata", "content_id", contentID, "error", err)
+			}
+			s.applyLocalPersonPhotos(ctx, contentID, valid)
 		}
-		s.applyLocalPersonPhotos(ctx, contentID, valid)
 	}
 
 	// Persist remote videos (trailers etc.), filtered by the library's
