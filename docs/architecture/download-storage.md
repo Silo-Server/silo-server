@@ -46,6 +46,16 @@ transcode node (`node:<id>`). Each has a budget: the node's
 `download.artifact_max_bytes`. A node can also set `download_artifact_dir_override`;
 the node applies it at its next restart.
 
+With `download.artifact_dir` blank, the API server's directory is
+`silo-download-artifacts` beside `playback.transcode_dir` (`/tmp/silo-download-artifacts`
+by default), never inside it: the orphaned-transcode sweep deletes unknown
+subdirectories of the transcode directory. A node with no directory set uses
+`download-artifacts` inside its own transcode directory. Because the server's default
+sits outside the transcode mount, the default `docker-compose.yml` mounts it
+separately under `SILO_DATA_ROOT`; without that mount the files live in the
+container layer and every container recreation sends them through missing-file
+recovery.
+
 Maintenance runs every five minutes on one replica at a time, under the session
 advisory lock `pg_try_advisory_lock(0x5110d1, 1)`. The lock is held on a dedicated
 session outside the pool, so the pass's own queries work even with
