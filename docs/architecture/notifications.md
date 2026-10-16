@@ -24,6 +24,16 @@ before it became available is therefore recorded without a release event. The ad
 file in the library for flat items. The window leaves room for new episodes
 whose metadata lands a few days after the file.
 
+The detector also stores that decision on the availability row: an episode's
+`episode_availability.released_at` is set when it was recorded as a release
+(seeded library, inside the window), even while release events are turned off,
+and stays empty for back catalog and late matches. Next Up ranks a series by
+the later of when the profile finished its previous episode and the
+`released_at` of its next episode (earliest availability row in the libraries
+the viewer can reach), so a caught-up series moves to the front when a new
+episode or season arrives. Changing what counts as a release changes that
+order too.
+
 Event kinds:
 
 - `episode` — carries series/episode identity and fans out to interested

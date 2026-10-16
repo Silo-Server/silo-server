@@ -2300,6 +2300,7 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 	q := catalog.NextUpQuery{
 		UserID:          session.StreamAppUserID,
 		ProfileID:       session.ProfileID,
+		AccessFilter:    h.resolveAccessFilter(r.Context(), session),
 		Limit:           query.limit + query.startIndex, // fetch enough to paginate
 		EnableResumable: parseBool(qp.Get("enableResumable"), false),
 	}

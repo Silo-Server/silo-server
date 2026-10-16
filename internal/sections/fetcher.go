@@ -49,7 +49,7 @@ type SectionItemMeta struct {
 	DurationSeconds   *float64
 	ProgressUpdatedAt *string
 	ItemSource        string    // "in_progress" or "next_up"
-	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+	SortTimestamp     time.Time // orders Continue Watching: progress time, or a next-up row's catalog.NextUpResult.ActivityAt
 }
 
 const recentSeasonPremiereBadgeWindowDays = 14
@@ -853,11 +853,12 @@ func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID st
 	}
 
 	results, err := f.NextUpRepo.ListNextUp(ctx, catalog.NextUpQuery{
-		UserID:     userID,
-		ProfileID:  profileID,
-		LibraryID:  libraryID,
-		LibraryIDs: libraryIDs,
-		Limit:      limit,
+		UserID:       userID,
+		ProfileID:    profileID,
+		LibraryID:    libraryID,
+		LibraryIDs:   libraryIDs,
+		AccessFilter: filter,
+		Limit:        limit,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -895,7 +896,7 @@ func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID st
 			continue
 		}
 		m.ItemSource = "next_up"
-		m.SortTimestamp = res.CompletedAt
+		m.SortTimestamp = res.ActivityAt
 		meta[res.ContentID] = m
 
 		item, ok := itemByID[res.ContentID]
