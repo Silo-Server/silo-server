@@ -371,3 +371,7 @@
 # A played mark later in the same second as a history removal stays visible.
 ./internal/userstore/pgstore TestImportedWritesAfterSameSecondRemovalDB
 ./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB
+
+# Local artwork in a title folder linked out of the library is vouched for by
+# present cataloged files of the same title under that folder.
+./internal/catalog TestCatalogedFilesUnderListsPresentFilesOfTheTitleDB
