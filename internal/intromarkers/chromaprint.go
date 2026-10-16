@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -72,7 +73,7 @@ func (e *ChromaprintExtractor) extractWindow(ctx context.Context, candidate Cand
 	if window.empty() {
 		return nil, nil
 	}
-	result, err := analysisRunner(e.config).Run(ctx, fingerprintRequest(ctx, candidate, window))
+	result, err := runAnalysis(ctx, e.config, analysisRunner(e.config), fingerprintRequest(ctx, candidate, window))
 	if err != nil {
 		return nil, fmt.Errorf("extracting chromaprint for file %d: %w", candidate.FileID, err)
 	}
@@ -86,7 +87,67 @@ func backgroundAnalysis(ctx context.Context) bool {
 	return !mediasample.Interactive(ctx)
 }
 
-// analysisRunner runs intro detection's ffmpeg processes.
+// analysisRunner runs intro detection's ffmpeg processes. Its requests go
+// through runAnalysis, which gives them their deadlines.
 func analysisRunner(cfg Config) mediasample.Runner {
 	return mediasample.Runner{FFmpegPath: cfg.FFmpegPath, Workload: processmetrics.Analysis}
+}
+
+// Every attempt of an analysis run has a deadline that grows with the media
+// it reads: analysisDeadlineBase for starting ffmpeg, opening the input, and
+// seeking, plus the running time of the stretch it reads, so a 10-minute
+// intro window gets 12 minutes. Storage that can play a file reads it at
+// least as fast as it plays, and decoding the tail's keyframes in software
+// took under a minute for a 4K episode, so a run still going at its deadline
+// has almost always stalled. A host busy enough to starve background
+// decoding can also reach it; that run fails the same way and is tried
+// again later. The cap only keeps a pathological window inside what
+// mediasample accepts.
+const (
+	analysisDeadlineBase = 2 * time.Minute
+	maxAnalysisDeadline  = 6 * time.Hour
+)
+
+// analysisDeadline is the deadline of each attempt of req.
+func analysisDeadline(cfg Config, req mediasample.Request) time.Duration {
+	if cfg.attemptTimeout > 0 {
+		return cfg.attemptTimeout
+	}
+	span := time.Duration(sampledSeconds(req) * float64(time.Second)).Round(time.Second)
+	return min(analysisDeadlineBase+span, maxAnalysisDeadline)
+}
+
+// sampledSeconds is the stretch of media req reads, in seconds.
+func sampledSeconds(req mediasample.Request) float64 {
+	switch {
+	case req.Window != nil:
+		return max(req.Window.DurationSeconds, 0)
+	case req.Samples != nil && len(req.Samples.Seconds) > 1:
+		return req.Samples.Seconds[len(req.Samples.Seconds)-1] - req.Samples.Seconds[0]
+	}
+	return 0
+}
+
+// runAnalysis runs req on runner with each of its attempts, or its one
+// software attempt when it plans none, bounded by analysisDeadline. An
+// attempt still running at its deadline is killed and fails as
+// mediasample.ReasonTimeout, which is not permanent, so the file is analyzed
+// again on a later run. A tail pass whose hardware attempt times out tries
+// software on a deadline of its own.
+func runAnalysis(ctx context.Context, cfg Config, runner mediasample.Runner, req mediasample.Request) (mediasample.Result, error) {
+	deadline := analysisDeadline(cfg, req)
+	attempts := req.Attempts
+	if len(attempts) == 0 {
+		attempts = []mediasample.Attempt{{}}
+	}
+	req.Attempts = make([]mediasample.Attempt, len(attempts))
+	for i, attempt := range attempts {
+		attempt.TimeoutSeconds = deadline.Seconds()
+		req.Attempts[i] = attempt
+	}
+	result, err := runner.Run(ctx, req)
+	if mediasample.Classify(err) == mediasample.ReasonTimeout {
+		err = fmt.Errorf("ffmpeg did not finish within its %s deadline: %w", deadline, err)
+	}
+	return result, err
 }

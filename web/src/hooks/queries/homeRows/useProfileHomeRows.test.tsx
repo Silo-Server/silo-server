@@ -196,33 +196,6 @@ describe("useProfileHomeRows", () => {
     expect(result.current.sections.map((s) => s.id)).toEqual(["c", "a", "b"]);
   });
 
-  it("sends every merged change, including one to a legacy Trakt row with no saved override", async () => {
-    pages.home!.rows = [
-      entry("a"),
-      entry("trakt", { position: 1, config: { source: "trakt", list: "trending" } }),
-      entry("b", { position: 2 }),
-    ];
-    const { result } = await ready();
-    hold("PUT /api/v2/profile/sections");
-
-    act(() => result.current.setHidden("a", true));
-    // The Trakt row and another row change while the first save is in flight.
-    act(() => result.current.saveSection({ ...result.current.sections[1]!, title: "Trakt" }));
-    act(() => result.current.setHidden("b", true));
-
-    await settle("PUT /api/v2/profile/sections");
-    await settle("PUT /api/v2/profile/sections");
-    await waitFor(() => expect(result.current.pending).toBe(false));
-
-    // The first save stores only the row it changed, so the shown Trakt row
-    // is left out; the merged one names it.
-    expect(puts[0]!.overrides.map((o) => o.section_id)).toEqual(["a"]);
-    expect(puts[1]!.overrides).toContainEqual(
-      expect.objectContaining({ section_id: "trakt", title: "Trakt" }),
-    );
-    expect(hiddenIds(puts[1]!.overrides)).toEqual(["a", "b"]);
-  });
-
   it("does not pin an admin edit that lands between two saves of one burst", async () => {
     const { result } = await ready();
     hold("PUT /api/v2/profile/sections");
@@ -249,23 +222,19 @@ describe("useProfileHomeRows", () => {
   });
 
   it("keeps an older edit when its save fails and a newer save is queued", async () => {
-    pages.home!.rows = [
-      entry("a"),
-      entry("trakt", { position: 1, config: { source: "trakt", list: "trending" } }),
-      entry("b", { position: 2 }),
-    ];
+    pages.home!.rows = [entry("a"), entry("r", { position: 1 }), entry("b", { position: 2 })];
     const { result } = await ready();
     hold("PUT /api/v2/profile/sections");
 
-    // The Trakt row's edit is in flight when the next change is made.
-    act(() => result.current.saveSection({ ...result.current.sections[1]!, title: "Trakt" }));
+    // Row r's edit is in flight when the next change is made.
+    act(() => result.current.saveSection({ ...result.current.sections[1]!, title: "Renamed" }));
     act(() => result.current.setHidden("b", true));
     await settle("PUT /api/v2/profile/sections", v2Problem(500, "internal", "boom"));
     await settle("PUT /api/v2/profile/sections");
     await waitFor(() => expect(result.current.pending).toBe(false));
 
     expect(puts.at(-1)!.overrides).toContainEqual(
-      expect.objectContaining({ section_id: "trakt", title: "Trakt" }),
+      expect.objectContaining({ section_id: "r", title: "Renamed" }),
     );
     expect(hiddenIds(puts.at(-1)!.overrides)).toEqual(["b"]);
   });
@@ -305,27 +274,23 @@ describe("useProfileHomeRows", () => {
   });
 
   it("leaves the last profile's queued rows out of the next profile's save", async () => {
-    pages.home!.rows = [
-      entry("a"),
-      entry("trakt", { position: 1, config: { source: "trakt", list: "trending" } }),
-      entry("b", { position: 2 }),
-    ];
+    pages.home!.rows = [entry("a"), entry("r", { position: 1 }), entry("b", { position: 2 })];
     const { result } = await ready();
     hold("PUT /api/v2/profile/sections");
 
     act(() => result.current.setHidden("a", true));
     await waitFor(() => expect(held.get("PUT /api/v2/profile/sections")).toHaveLength(1));
     // Queued behind the save in flight, then dropped by the profile switch.
-    act(() => result.current.saveSection({ ...result.current.sections[1]!, title: "Trakt" }));
+    act(() => result.current.saveSection({ ...result.current.sections[1]!, title: "Renamed" }));
     setProfileId("child");
-    act(() => result.current.move("b", ["b", "a", "trakt"]));
+    act(() => result.current.move("b", ["b", "a", "r"]));
     await settle("PUT /api/v2/profile/sections");
     await settle("PUT /api/v2/profile/sections");
     await waitFor(() => expect(result.current.pending).toBe(false));
 
     expect(puts.map((put) => put.profileId)).toEqual(["parent", "child"]);
-    // The child never touched the legacy Trakt row, so its save leaves it out.
-    expect(puts[1]!.overrides.map((o) => o.section_id)).not.toContain("trakt");
+    // The parent's queued rename never reaches the child's save.
+    expect(puts[1]!.overrides).not.toContainEqual(expect.objectContaining({ title: "Renamed" }));
   });
 
   it("holds edits after a failed save until the page is read again", async () => {
@@ -353,16 +318,12 @@ describe("useProfileHomeRows", () => {
     expect(hiddenIds(puts[1]!.overrides)).toEqual(["a", "b"]);
   });
 
-  it("keeps a saved edit to a legacy Trakt row when the overrides fail to reload before the next save", async () => {
-    pages.home!.rows = [
-      entry("a"),
-      entry("trakt", { position: 1, config: { source: "trakt", list: "trending" } }),
-      entry("b", { position: 2 }),
-    ];
+  it("keeps a saved edit when the overrides fail to reload before the next save", async () => {
+    pages.home!.rows = [entry("a"), entry("r", { position: 1 }), entry("b", { position: 2 })];
     const { result } = await ready();
     hold("PUT /api/v2/profile/sections");
 
-    act(() => result.current.saveSection({ ...result.current.sections[1]!, title: "Trakt" }));
+    act(() => result.current.saveSection({ ...result.current.sections[1]!, title: "Renamed" }));
     act(() => result.current.setHidden("b", true));
     hold("GET /api/v2/profile/sections");
     await settle("PUT /api/v2/profile/sections");
@@ -371,7 +332,7 @@ describe("useProfileHomeRows", () => {
     await waitFor(() => expect(puts).toHaveLength(2));
 
     expect(puts[1]!.overrides).toContainEqual(
-      expect.objectContaining({ section_id: "trakt", title: "Trakt" }),
+      expect.objectContaining({ section_id: "r", title: "Renamed" }),
     );
     expect(hiddenIds(puts[1]!.overrides)).toEqual(["b"]);
   });

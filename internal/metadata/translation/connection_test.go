@@ -61,7 +61,7 @@ func TestMetadataJobUsesEnqueueProviderAcrossQueuedAndBatchedWork(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Model != "selected-model" || job.IdempotencyKey != idempotencyKey(TargetItem, "series1", "fr", job.Model) {
+	if job.Model != "selected-model" || job.IdempotencyKey != idempotencyKey(TargetItem, "series1", "fr", job.Model, true, false) {
 		t.Fatal("recorded model did not use live selection")
 	}
 	current.Store(new(llm.Config{BaseURL: "https://later.example.test", ChatModel: "changed-while-queued"}))

@@ -31,7 +31,6 @@ function makeRow(id: string, overrides: Partial<HomeRow> = {}): HomeRow {
     hero: false,
     shown: true,
     own: false,
-    legacyTrakt: false,
     ...overrides,
   };
 }
@@ -233,11 +232,6 @@ describe("HomeRowsPage", () => {
     await userEvent.keyboard(" ");
     expect(document.activeElement).toBe(toggle());
     expect(toggle()).not.toBeChecked();
-  });
-
-  it("does not let a legacy Trakt row be turned back on", () => {
-    render(<FakePage initialRows={[makeRow("a", { shown: false, legacyTrakt: true })]} />);
-    expect(screen.getByRole("switch", { name: "Row A is off for everyone" })).toBeDisabled();
   });
 
   it("marks the current page and disables the switcher while a write is pending", async () => {

@@ -21,7 +21,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
-	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
@@ -167,9 +166,6 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		return config.PlaybackConfig{Routing: config.DefaultPlaybackRoutingPolicy()}
 	}
-	if deps.DB != nil {
-		playbackHandler.profileStaler = recommendations.NewRepo(deps.DB)
-	}
 	playbackHandler.NodePlanner = deps.NodePlanner
 	playbackHandler.JWTSecret = deps.JWTSecret
 	// Compat transcode reconstruct is driven by the recipe carried in the durable
@@ -184,7 +180,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.RegisterShutdownWork != nil {
 		deps.RegisterShutdownWork(cleanupDone)
 	}
-	playbackHandler.profileRefreshRequester = deps.RecWorker
+	if deps.RecWorker != nil {
+		playbackHandler.signalsNotifier = deps.RecWorker
+	}
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
 	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
@@ -207,8 +205,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	imagesHandler.collectionPosters = itemsHandler.collectionPosters
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
+	imagesHandler.artworkStore = deps.ArtworkStore
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
-	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.DetailSvc, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
+	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
 	r.Get("/System/Info/Public", systemHandler.HandlePublicInfo)
 	r.Get("/System/Info", systemHandler.HandleInfo)
@@ -517,7 +516,7 @@ func withDefaults(deps Dependencies) Dependencies {
 		}
 	}
 	if deps.HTTPClient == nil {
-		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+		deps.HTTPClient = newCompatImageClient()
 	}
 
 	// Build ContentService from repos if not provided
@@ -543,9 +542,9 @@ func withDefaults(deps Dependencies) Dependencies {
 
 	// Build UserDataService from store provider if not provided
 	if deps.UserDataService == nil && deps.UserStoreProvider != nil && deps.ItemRepo != nil {
-		var staler profileStaler
-		if deps.DB != nil {
-			staler = recommendations.NewRepo(deps.DB)
+		var signalsNotifier signalsChangedNotifier
+		if deps.RecWorker != nil {
+			signalsNotifier = deps.RecWorker
 		}
 		var pool *pgxpool.Pool
 		if deps.BrowseRepo != nil {
@@ -558,8 +557,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.ProviderIDRepo,
 			deps.DetailSvc,
 			catalog.NewContinueWatchingProgressFilter(pool),
-			staler,
-			deps.RecWorker,
+			signalsNotifier,
 			deps.WatchCompletionObserver,
 		)
 		svc.events = deps.UserStateEvents

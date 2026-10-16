@@ -88,8 +88,6 @@ export type OrderBlockProps =
       onSortChange: (sortConfig: Record<string, unknown>) => void;
       onLimitChange: (limit: number | undefined) => void;
       allowPersonalized: boolean;
-      /** Max titles shown but fixed, as on a legacy Trakt list. */
-      limitLocked?: boolean;
     }
   | {
       mode: "smart";
@@ -222,17 +220,15 @@ function MaxTitlesInput({
   limit,
   placeholder,
   max,
-  disabled,
   onCommit,
 }: {
   limit: number | undefined;
   placeholder: string;
   max?: number;
-  disabled?: boolean;
   onCommit: (input: HTMLInputElement) => void;
 }) {
   return (
-    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px] has-[input:disabled]:cursor-not-allowed has-[input:disabled]:opacity-50">
+    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]">
       <Input
         key={limit ?? ""}
         type="number"
@@ -242,8 +238,7 @@ function MaxTitlesInput({
         aria-label="Max titles"
         placeholder={placeholder}
         defaultValue={limit ?? ""}
-        disabled={disabled}
-        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 disabled:opacity-100"
+        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
         onBlur={(event) => onCommit(event.currentTarget)}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
@@ -265,7 +260,6 @@ function SyncedOrder({
   onSortChange,
   onLimitChange,
   allowPersonalized,
-  limitLocked,
 }: Extract<OrderBlockProps, { mode: "synced" }>) {
   const id = useId();
   const shownRatingSources = useShownRatingSources();
@@ -308,7 +302,6 @@ function SyncedOrder({
           limit={limit}
           placeholder="Whole list"
           max={COLLECTION_MAX_ITEMS}
-          disabled={limitLocked}
           onCommit={commitLimit}
         />
       </div>

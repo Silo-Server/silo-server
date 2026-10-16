@@ -44,7 +44,7 @@ func TestLocalMetadataURLSourceRouting(t *testing.T) {
 	if served != "" || source != nfoPosterSource {
 		t.Errorf("splitProviderImagePath = %q, %q; want only the source", served, source)
 	}
-	path, _, source := preserveCachedArtwork(nfoPosterSource, "", "tmdb/movies/1/poster/original.webp", "https://image.tmdb.org/p.jpg", "th")
+	path, _, source := preserveCachedArtwork(nfoPosterSource, "", "tmdb/movies/1/poster/original.webp", "https://image.tmdb.org/p.jpg", "th", true)
 	if path != "tmdb/movies/1/poster/original.webp" || source != nfoPosterSource {
 		t.Errorf("preserveCachedArtwork = %q from %q; want the cached copy kept until the NFO's lands", path, source)
 	}

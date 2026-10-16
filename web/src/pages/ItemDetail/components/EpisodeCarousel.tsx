@@ -194,6 +194,7 @@ function EpisodeCarouselCard({
             showCollectionActions={false}
             showWatchedShortcut
             hasPartialProgress={progress != null}
+            hasResumePosition={(ep.user_data?.position_seconds ?? 0) > 0}
             quickActionMode={quickActionMode}
             longPressRef={cardRef}
             itemTitle={episodeTitle}

@@ -30,8 +30,9 @@ const (
 // RuntimeState is the admin-visible view of one installation's process.
 // Resident is true for installations the supervisor owns (started at boot,
 // restarted on crash); the other fields describe the supervisor's machine.
-// For a lazily started plugin State is running or stopped and the counters
-// stay zero.
+// For a lazily started plugin State is running or stopped, or failed from
+// RuntimeStateOf when its last launch on this host failed (LastError says
+// why); the counters stay zero.
 type RuntimeState struct {
 	Resident      bool
 	State         ResidentState
@@ -799,6 +800,22 @@ func (s *Service) RuntimeState(installationID int) RuntimeState {
 	return state
 }
 
+// RuntimeStateOf is RuntimeState for the admin API. A lazily started plugin
+// that is not running also reads failed when its last launch on this host
+// failed for the installation's current release and runtime generation,
+// with LastError saying why.
+func (s *Service) RuntimeStateOf(installation *Installation) RuntimeState {
+	state := s.RuntimeState(installation.ID)
+	if s == nil || state.Resident || state.State != ResidentStopped {
+		return state
+	}
+	if message, failed := s.lazyStartFailures.lastError(installation); failed {
+		state.State = ResidentFailed
+		state.LastError = message
+	}
+	return state
+}
+
 // RestartInstallation stops the installation's process and, for a resident,
 // starts it again immediately with a fresh failure budget. A non-resident
 // plugin is only stopped; its next RPC launches it lazily.
@@ -844,6 +861,9 @@ func (s *Service) RestartInstallation(ctx context.Context, installationID int) e
 	if !errors.Is(err, ErrNotResident) {
 		return err
 	}
+	// Like a resident's fresh failure budget, an administrator restart clears
+	// a lazy plugin's recorded start failure; its next use launches it again.
+	s.lazyStartFailures.clear(installationID)
 	if s.host == nil {
 		return nil
 	}

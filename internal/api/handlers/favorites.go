@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchlist"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -26,6 +27,7 @@ type personalDataItemRepository interface {
 	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.MediaItem, error)
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]bool, error)
 }
 
 type LocalListEventDispatcher interface {
@@ -34,17 +36,16 @@ type LocalListEventDispatcher interface {
 
 // PersonalDataHandler handles favorites, watchlist, and history endpoints.
 type PersonalDataHandler struct {
-	storeProvider           userstore.UserStoreProvider
-	itemRepo                personalDataItemRepository
-	episodeRepo             *catalog.EpisodeRepository
-	seasonRepo              *catalog.SeasonRepository
-	detailSvc               *catalog.DetailService
-	EventsHub               *evt.Hub
-	localListDispatcher     LocalListEventDispatcher
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
-	ebookProgressStore      EbookReaderProgressLister
-	watchlistTitles         *watchlist.Titles
+	storeProvider       userstore.UserStoreProvider
+	itemRepo            personalDataItemRepository
+	episodeRepo         *catalog.EpisodeRepository
+	seasonRepo          *catalog.SeasonRepository
+	detailSvc           *catalog.DetailService
+	EventsHub           *evt.Hub
+	localListDispatcher LocalListEventDispatcher
+	signalsNotifier     SignalsChangedNotifier
+	ebookProgressStore  EbookReaderProgressLister
+	watchlistTitles     *watchlist.Titles
 }
 
 // NewPersonalDataHandler creates a new PersonalDataHandler.
@@ -64,14 +65,10 @@ func (h *PersonalDataHandler) SetEbookReaderProgressStore(store EbookReaderProgr
 	h.ebookProgressStore = store
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *PersonalDataHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *PersonalDataHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *PersonalDataHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 func (h *PersonalDataHandler) SetEpisodeRepo(repo *catalog.EpisodeRepository) {
@@ -230,8 +227,9 @@ func (h *PersonalDataHandler) GetFavorite(ctx context.Context, viewer PersonalLi
 }
 
 // AddFavorite adds an item the viewer may see to the profile's favorites.
-// Adding an item that is already a favorite is a no-op that still notifies
-// the same listeners, so a retried add converges.
+// Listeners hear only about an add that inserted the row: adding an item
+// that is already a favorite succeeds and notifies nobody, so a retried add
+// repeats no side effect.
 func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
@@ -240,34 +238,33 @@ func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalLi
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
-	if err := store.AddFavorite(ctx, viewer.ProfileID, itemID); err != nil {
+	added, err := store.AddFavorite(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add favorite")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
-		IsFavorite: boolPtr(true),
-	})
+	if added {
+		h.notifyListChange(ctx, watchsync.ListKindFavorites, watchsync.ListChangeAdded, viewer, itemID)
+	}
 	return nil
 }
 
 // RemoveFavorite removes an item from the profile's favorites. Removing an
-// item that is not a favorite succeeds, so a retried remove converges. No
-// access check runs: the item may have left the viewer's scope since it was
-// added, and the profile must still be able to drop it.
+// item that is not a favorite succeeds and notifies nobody, so a retried
+// remove converges and repeats no side effect. No access check runs: the
+// item may have left the viewer's scope since it was added, and the profile
+// must still be able to drop it.
 func (h *PersonalDataHandler) RemoveFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	if err := store.RemoveFavorite(ctx, viewer.ProfileID, itemID); err != nil {
+	removed, err := store.RemoveFavorite(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove favorite")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
-		IsFavorite: boolPtr(false),
-	})
+	if removed {
+		h.notifyListChange(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer, itemID)
+	}
 	return nil
 }
 
@@ -323,6 +320,29 @@ func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *htt
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// listChangeNoticeTimeout bounds the notices for one committed favorites or
+// watchlist change, which no longer end with the request.
+const listChangeNoticeTimeout = 30 * time.Second
+
+// notifyListChange tells every listener about a favorites or watchlist row a
+// write inserted or deleted: connected watch providers, the profile's
+// recommendations, and the profile's clients. The row is already committed,
+// so the notices run on a context the request's cancellation does not reach.
+// A client that disconnects now would retry, and its retry changes no row and
+// sends nothing.
+func (h *PersonalDataHandler) notifyListChange(ctx context.Context, list watchsync.ListKind, change watchsync.ListChange, viewer PersonalListViewer, itemID string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), listChangeNoticeTimeout)
+	defer cancel()
+	h.dispatchLocalListEvent(ctx, list, change, viewer.UserID, viewer.ProfileID, itemID)
+	notifySignalsChanged(ctx, h.signalsNotifier, viewer.UserID, viewer.ProfileID)
+	member := change == watchsync.ListChangeAdded
+	state, stateChange := userStateEventState{IsFavorite: &member}, "favorite"
+	if list == watchsync.ListKindWatchlist {
+		state, stateChange = userStateEventState{InWatchlist: &member}, "watchlist"
+	}
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", stateChange, state)
 }
 
 func (h *PersonalDataHandler) dispatchLocalListEvent(ctx context.Context, list watchsync.ListKind, change watchsync.ListChange, userID int, profileID string, itemID string) {
@@ -428,6 +448,26 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 	return entries, items, nil
 }
 
+// VisibleItemIDs reports which of the given catalog items the viewer may see.
+func (h *PersonalDataHandler) VisibleItemIDs(ctx context.Context, viewer PersonalListViewer, ids []string) (map[string]bool, error) {
+	visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, viewer.Access)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+	}
+	return visible, nil
+}
+
+// ResolveCards answers the cards of the given catalog items the viewer may
+// see, in the order given. Items the catalog no longer has or the viewer may
+// not see have no card.
+func (h *PersonalDataHandler) ResolveCards(ctx context.Context, viewer PersonalListViewer, ids []string) ([]CollectionItemView, error) {
+	items, err := resolveItemsByIDs(h, ctx, viewer, ids)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve items")
+	}
+	return items, nil
+}
+
 // filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
 // The entries stay in the store (and on synced providers) so a newly added
 // episode makes the series reappear; only the display surface hides them.
@@ -479,8 +519,9 @@ func (h *PersonalDataHandler) GetWatchlistEntry(ctx context.Context, viewer Pers
 }
 
 // AddToWatchlist adds an item the viewer may see to the profile's
-// watchlist. Adding an item that is already on it is a no-op that still
-// notifies the same listeners, so a retried add converges.
+// watchlist. Listeners hear only about an add that inserted the row: adding
+// an item that is already on it succeeds and notifies nobody, so a retried
+// add repeats no side effect.
 func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
@@ -489,34 +530,33 @@ func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer Persona
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
-	if err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+	added, err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(true),
-	})
+	if added {
+		h.notifyListChange(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer, itemID)
+	}
 	return nil
 }
 
 // RemoveFromWatchlist removes an item from the profile's watchlist.
-// Removing an item that is not on it succeeds, so a retried remove
-// converges. No access check runs: the item may have left the viewer's
-// scope since it was added, and the profile must still be able to drop it.
+// Removing an item that is not on it succeeds and notifies nobody, so a
+// retried remove converges and repeats no side effect. No access check
+// runs: the item may have left the viewer's scope since it was added, and
+// the profile must still be able to drop it.
 func (h *PersonalDataHandler) RemoveFromWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	if err := store.RemoveFromWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+	removed, err := store.RemoveFromWatchlist(ctx, viewer.ProfileID, itemID)
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
 	}
-	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
-	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(false),
-	})
+	if removed {
+		h.notifyListChange(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer, itemID)
+	}
 	return nil
 }
 
@@ -747,7 +787,7 @@ func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, pro
 		addMediaItems(resolvedIDs)
 		filelessIDs = append(filelessIDs, fileless...)
 	}
-	watchedFileless, err := watchedHistoryItemIDs(ctx, store, profileID, filelessIDs)
+	watchedFileless, err := watchstate.WatchedItemIDs(ctx, store, profileID, filelessIDs)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove history")
 	}
@@ -757,7 +797,7 @@ func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, pro
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove history")
 	}
 
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	for _, mediaItemID := range mediaItemIDs {
 		publishUserStateEvent(
 			ctx,
@@ -839,15 +879,19 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 	size := viewer.ImageSize
 	posterHint := requestVariantHint("featured", size)
 	cardHint := requestVariantHint("card", size)
+	itemIDs := make([]string, len(mediaItems))
+	for i, mi := range mediaItems {
+		itemIDs[i] = mi.ContentID
+	}
+	accessible, err := h.itemRepo.EnsureAccessibleIDs(ctx, itemIDs, filter)
+	if err != nil {
+		return nil, err
+	}
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
-		if err := h.itemRepo.EnsureAccessible(ctx, mi.ContentID, filter); err != nil {
-			if errors.Is(err, catalog.ErrItemNotFound) {
-				continue
-			}
-			return nil, err
+		if accessible[mi.ContentID] {
+			accessibleItems = append(accessibleItems, mi)
 		}
-		accessibleItems = append(accessibleItems, mi)
 	}
 
 	userStates := map[string]*itemUserStateResponse{}
@@ -1053,53 +1097,6 @@ func (h *PersonalDataHandler) seasonEpisodeIDs(ctx context.Context, seasonID str
 		return nil, nil, catalog.ErrItemNotFound
 	}
 	return h.episodeRepo.PartitionIDsBySeason(ctx, seasonID)
-}
-
-// watchedHistoryItemIDBatch bounds each filter read below SQLite's default
-// limit of 32,766 bound variables.
-const watchedHistoryItemIDBatch = 1000
-
-// watchedHistoryItemIDs keeps the IDs the profile has visible history or
-// resume progress for, once each, in input order.
-func watchedHistoryItemIDs(ctx context.Context, store userstore.UserStore, profileID string, ids []string) ([]string, error) {
-	ids = compactHistoryItemIDs(ids)
-	var watched []string
-	for start := 0; start < len(ids); start += watchedHistoryItemIDBatch {
-		batch := ids[start:min(start+watchedHistoryItemIDBatch, len(ids))]
-		groups := make(map[string][]string, len(batch))
-		for _, id := range batch {
-			groups[id] = []string{id}
-		}
-		withHistory, err := store.LatestHistoryIDs(ctx, profileID, groups)
-		if err != nil {
-			return nil, err
-		}
-		withProgress, err := store.ListProgressByMediaItems(ctx, profileID, batch)
-		if err != nil {
-			return nil, err
-		}
-		for _, id := range batch {
-			_, history := withHistory[id]
-			_, progress := withProgress[id]
-			if history || progress {
-				watched = append(watched, id)
-			}
-		}
-	}
-	return watched, nil
-}
-
-func compactHistoryItemIDs(ids []string) []string {
-	seen := make(map[string]struct{}, len(ids))
-	unique := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		unique = append(unique, id)
-	}
-	return unique
 }
 
 func (h *PersonalDataHandler) userStoreFor(ctx context.Context, userID int, profileID string) (userstore.UserStore, string, bool) {

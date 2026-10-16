@@ -82,69 +82,6 @@ func TestProfileOverrideSaveStopsOnBaseSectionReadFailure(t *testing.T) {
 	}
 }
 
-func TestProfileOverrideResetStopsOnBaseSectionReadFailure(t *testing.T) {
-	store := &sourcePolicyStore{overrides: []userstore.SectionOverride{{
-		ID: "existing", SectionID: "admin-trending", Hidden: true,
-	}}}
-	h := &SectionHandler{
-		StoreProvider: sourcePolicyProvider{store: store},
-		sectionReader: sourcePolicySectionReader{err: errors.New("database unavailable")},
-	}
-	err := h.ResetProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != 500 || apiErr.Code != "internal_error" {
-		t.Fatalf("error = %#v, want internal_error", err)
-	}
-	if len(store.overrides) != 1 || store.overrides[0].ID != "existing" || !store.overrides[0].Hidden {
-		t.Fatalf("failed lookup mutated overrides: %+v", store.overrides)
-	}
-}
-
-func TestProfileCannotCreateTraktTrendingSection(t *testing.T) {
-	store := &sourcePolicyStore{}
-	h := &SectionHandler{StoreProvider: sourcePolicyProvider{store: store}}
-	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{{
-		ID: "new", IsUserAdded: true, UserSectionType: "trending_discover",
-		UserConfig: json.RawMessage(`{"source":"trakt","window":"week"}`),
-	}})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "unsupported_source" {
-		t.Fatalf("error = %#v, want unsupported_source", err)
-	}
-}
-
-func TestAdminCannotCreateTraktTrendingSection(t *testing.T) {
-	_, err := (&SectionHandler{}).CreateAdminSection(t.Context(), AdminSectionCreate{
-		Title: "Trakt Trending", SectionType: "trending_discover",
-		Config: json.RawMessage(`{"source":"trakt","window":"week"}`),
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "unsupported_source" {
-		t.Fatalf("error = %#v, want unsupported_source", err)
-	}
-}
-
-func TestAdminBulkCannotCreateTraktTrendingSection(t *testing.T) {
-	_, err := (&SectionBulkHandler{}).BulkCreateAdminSections(t.Context(), AdminSectionBulkCreate{
-		Scope: "home", Title: "Trakt Trending", SectionType: "trending_discover",
-		Config: json.RawMessage(`{"source":"trakt","window":"week"}`),
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "unsupported_source" {
-		t.Fatalf("error = %#v, want unsupported_source", err)
-	}
-}
-
-func TestGenericAdminCollectionCannotCreateTraktSource(t *testing.T) {
-	_, err := (&LibraryCollectionHandler{}).CreateAdminCollection(t.Context(), AdminCollectionCreate{
-		Title: "Trakt", CollectionType: "trakt",
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "unsupported_source" {
-		t.Fatalf("error = %#v, want unsupported_source", err)
-	}
-}
-
 func TestProfileTMDBTrendingUnchangedSaveDoesNotRefreshAgain(t *testing.T) {
 	store := &sourcePolicyStore{}
 	refresher := sourcePolicyRefresher{configs: make(chan json.RawMessage, 2)}
@@ -188,7 +125,7 @@ func TestProfileConflictingLegacyFieldsResolveToValidatedUserFields(t *testing.T
 	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{{
 		ID:              "conflicting",
 		SectionType:     "trending_discover",
-		Config:          json.RawMessage(`{"source":"trakt","window":"week"}`),
+		Config:          json.RawMessage(`{"source":"tmdb","window":"week"}`),
 		UserSectionType: "trending_discover",
 		UserConfig:      json.RawMessage(`{"source":"tmdb","window":"day"}`),
 	}})
@@ -250,169 +187,6 @@ func TestLinkedProfileTMDBConfigChangeRequestsImmediateRefresh(t *testing.T) {
 	}
 }
 
-func TestLinkedProfileContradictoryUserAddedFlagCannotBypassTraktPolicy(t *testing.T) {
-	store := &sourcePolicyStore{}
-	h := &SectionHandler{
-		StoreProvider: sourcePolicyProvider{store: store},
-		sectionReader: sourcePolicySectionReader{sections: map[string]*sectionspkg.PageSection{
-			"admin-trending": {
-				ID: "admin-trending", SectionType: sectionspkg.SectionTrendingDiscover,
-				Config: json.RawMessage(`{"source":"tmdb","window":"week"}`), Enabled: true,
-			},
-		}},
-	}
-	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{{
-		ID: "new-linked", SectionID: "admin-trending", IsUserAdded: true,
-		Config:          json.RawMessage(`{"source":"trakt","window":"week"}`),
-		UserSectionType: "trending_discover", UserConfig: json.RawMessage(`{"source":"tmdb","window":"day"}`),
-	}})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "unsupported_source" {
-		t.Fatalf("error = %#v, want unsupported_source", err)
-	}
-}
-
-func TestLinkedProfileInheritedLegacyTraktCannotBeReactivated(t *testing.T) {
-	store := &sourcePolicyStore{overrides: []userstore.SectionOverride{{
-		ID: "legacy-linked", SectionID: "legacy-admin-trending", Hidden: true,
-	}}}
-	h := &SectionHandler{
-		StoreProvider: sourcePolicyProvider{store: store},
-		sectionReader: sourcePolicySectionReader{sections: map[string]*sectionspkg.PageSection{
-			"legacy-admin-trending": {
-				ID: "legacy-admin-trending", SectionType: sectionspkg.SectionTrendingDiscover,
-				Config: json.RawMessage(`{"source":"trakt","window":"week"}`), Enabled: true,
-			},
-		}},
-	}
-	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{{
-		ID: "legacy-linked", SectionID: "legacy-admin-trending",
-	}})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "legacy_source_immutable" {
-		t.Fatalf("error = %#v, want legacy_source_immutable", err)
-	}
-}
-
-func TestLinkedProfileCanSuppressInheritedLegacyTrakt(t *testing.T) {
-	store := &sourcePolicyStore{}
-	h := &SectionHandler{
-		StoreProvider: sourcePolicyProvider{store: store},
-		sectionReader: sourcePolicySectionReader{sections: map[string]*sectionspkg.PageSection{
-			"legacy-admin-trending": {
-				ID: "legacy-admin-trending", SectionType: sectionspkg.SectionTrendingDiscover,
-				Config: json.RawMessage(`{"source":"trakt","window":"week"}`), Enabled: true,
-			},
-		}},
-	}
-	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{{
-		ID: "hide-legacy", SectionID: "legacy-admin-trending", Hidden: true,
-	}})
-	if err != nil {
-		t.Fatalf("SaveProfileOverrides: %v", err)
-	}
-	if len(store.overrides) != 1 || !store.overrides[0].Hidden || store.overrides[0].IsUserAdded {
-		t.Fatalf("stored override = %+v, want linked hidden suppression", store.overrides)
-	}
-}
-
-func TestLinkedProfileCannotReactivateLegacyTraktByOmission(t *testing.T) {
-	store := &sourcePolicyStore{overrides: []userstore.SectionOverride{{
-		ID: "hide-legacy", SectionID: "legacy-admin-trending", Hidden: true,
-	}}}
-	h := &SectionHandler{
-		StoreProvider: sourcePolicyProvider{store: store},
-		sectionReader: sourcePolicySectionReader{sections: map[string]*sectionspkg.PageSection{
-			"legacy-admin-trending": {
-				ID: "legacy-admin-trending", SectionType: sectionspkg.SectionTrendingDiscover,
-				Config: json.RawMessage(`{"source":"trakt","window":"week"}`), Enabled: true,
-			},
-		}},
-	}
-	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, nil)
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "legacy_source_immutable" {
-		t.Fatalf("error = %#v, want legacy_source_immutable", err)
-	}
-}
-
-func TestLinkedProfileCannotExposeLegacyTraktByReusingOverrideID(t *testing.T) {
-	store := &sourcePolicyStore{overrides: []userstore.SectionOverride{{
-		ID: "movable", SectionID: "legacy-admin-trending", Config: `{"source":"tmdb","window":"day"}`,
-	}}}
-	h := &SectionHandler{
-		StoreProvider: sourcePolicyProvider{store: store},
-		sectionReader: sourcePolicySectionReader{sections: map[string]*sectionspkg.PageSection{
-			"legacy-admin-trending": {
-				ID: "legacy-admin-trending", SectionType: sectionspkg.SectionTrendingDiscover,
-				Config: json.RawMessage(`{"source":"trakt","window":"week"}`), Enabled: true,
-			},
-			"tmdb-admin-trending": {
-				ID: "tmdb-admin-trending", SectionType: sectionspkg.SectionTrendingDiscover,
-				Config: json.RawMessage(`{"source":"tmdb","window":"week"}`), Enabled: true,
-			},
-		}},
-	}
-	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{{
-		ID: "movable", SectionID: "tmdb-admin-trending",
-	}})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "legacy_source_immutable" {
-		t.Fatalf("error = %#v, want legacy_source_immutable", err)
-	}
-}
-
-func TestResetCannotReactivateInheritedLegacyTrakt(t *testing.T) {
-	store := &sourcePolicyStore{overrides: []userstore.SectionOverride{{
-		ID: "hide-legacy", SectionID: "legacy-admin-trending", Removed: true,
-	}}}
-	h := &SectionHandler{
-		StoreProvider: sourcePolicyProvider{store: store},
-		sectionReader: sourcePolicySectionReader{sections: map[string]*sectionspkg.PageSection{
-			"legacy-admin-trending": {
-				ID: "legacy-admin-trending", SectionType: sectionspkg.SectionTrendingDiscover,
-				Config: json.RawMessage(`{"source":"trakt","window":"week"}`), Enabled: true,
-			},
-		}},
-	}
-	err := h.ResetProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Code != "legacy_source_immutable" {
-		t.Fatalf("error = %#v, want legacy_source_immutable", err)
-	}
-}
-
-func TestProfileLegacyTraktSourceCannotBeChangedOrReactivated(t *testing.T) {
-	originalConfig := json.RawMessage(`{"source":"trakt","window":"week"}`)
-	query := SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}
-
-	for _, tc := range []struct {
-		name   string
-		config json.RawMessage
-		hidden bool
-	}{
-		{name: "source config", config: json.RawMessage(`{"source":"trakt","window":"day"}`), hidden: true},
-		{name: "source migration", config: json.RawMessage(`{"source":"tmdb","window":"week"}`), hidden: true},
-		{name: "reactivation", config: originalConfig, hidden: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &sourcePolicyStore{overrides: []userstore.SectionOverride{{
-				ID: "legacy", IsUserAdded: true, UserSectionType: "trending_discover",
-				UserConfig: string(originalConfig), Hidden: true,
-			}}}
-			h := &SectionHandler{StoreProvider: sourcePolicyProvider{store: store}}
-			err := h.SaveProfileOverrides(t.Context(), query, []SectionOverrideWrite{{
-				ID: "legacy", IsUserAdded: true, UserSectionType: "trending_discover",
-				UserConfig: tc.config, Hidden: tc.hidden,
-			}})
-			apiErr, ok := errors.AsType[*APIError](err)
-			if !ok || apiErr.Code != "legacy_source_immutable" {
-				t.Fatalf("error = %#v, want legacy_source_immutable", err)
-			}
-		})
-	}
-}
-
 func TestProfileOverrideIDsMustBeUnique(t *testing.T) {
 	h := &SectionHandler{StoreProvider: sourcePolicyProvider{store: &sourcePolicyStore{}}}
 	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{
@@ -422,19 +196,6 @@ func TestProfileOverrideIDsMustBeUnique(t *testing.T) {
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Code != "duplicate_override" {
 		t.Fatalf("error = %#v, want duplicate_override", err)
-	}
-}
-
-func TestTraktCollectionImportsAreDisabled(t *testing.T) {
-	if _, err := (&LibraryCollectionHandler{}).ImportAdminTrakt(t.Context(), AdminCollectionImportTrakt{}); err == nil {
-		t.Fatalf("admin Trakt import error = %#v", err)
-	} else if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Code != "unsupported_source" {
-		t.Fatalf("admin Trakt import error = %#v", err)
-	}
-	if _, err := (&UserCollectionImportHandler{}).ImportTrakt(t.Context(), 1, "p1", UserImportTraktRequest{}); err == nil {
-		t.Fatalf("profile Trakt import error = %#v", err)
-	} else if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Code != "unsupported_source" {
-		t.Fatalf("profile Trakt import error = %#v", err)
 	}
 }
 

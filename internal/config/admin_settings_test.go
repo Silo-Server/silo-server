@@ -486,7 +486,6 @@ func TestOpslogCaptureLevelAcceptsWarningAlias(t *testing.T) {
 func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 	effective := EffectiveAdminSettings(nil)
 	want := map[string]string{
-		"recommendations.embedding_provider":     "ollama",
 		"recommendations.embeddings_job_timeout": "24h",
 		"policy.editor_enabled":                  "false",
 		"policy.eval_timeout_ms":                 "100",
@@ -537,6 +536,30 @@ func TestAuthProviderRecheckInterval(t *testing.T) {
 	} {
 		if got := AuthProviderRecheckInterval(raw); got != want {
 			t.Errorf("AuthProviderRecheckInterval(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
+func TestNormalizeAdminSettingLocalURLIsAnOrigin(t *testing.T) {
+	for raw, want := range map[string]string{
+		"":                            "",
+		" http://192.168.1.20:8080/ ": "http://192.168.1.20:8080",
+		"https://silo.lan":            "https://silo.lan",
+	} {
+		got, err := NormalizeAdminSetting(ServerLocalURLSettingKey, raw)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeAdminSetting(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{
+		"192.168.1.20:8080",
+		"ftp://192.168.1.20",
+		"http://192.168.1.20:8080/silo",
+		"http://192.168.1.20:8080/?x=1",
+		"http://user@192.168.1.20:8080",
+	} {
+		if got, err := NormalizeAdminSetting(ServerLocalURLSettingKey, raw); err == nil {
+			t.Fatalf("NormalizeAdminSetting(%q) = %q, want an error", raw, got)
 		}
 	}
 }

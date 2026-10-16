@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "Only a movie or series can be marked Not interested",
+  "instance": "urn:silo:request:000000000000000000000307"
+}

@@ -498,13 +498,16 @@ func TestSeriesWithoutSeasonOrEpisodeNFOs_UnchangedFallback(t *testing.T) {
 	}
 }
 
-// Local sidecar art is copied into artwork storage whatever
-// metadata.cache_images says: the setting governs downloading remote artwork,
-// and without a copy local art cannot be served at all. A refresh hands every
-// local slot (item, season, episode) to the discovering process's copier and
-// queues nothing else for it. Until a copy lands, a slot with nothing cached
-// serves the best remote image; once it lands, local wins again.
-func TestLocalArtworkCopiedWhateverImageCaching(t *testing.T) {
+// Local sidecar art is used only while metadata.cache_images is on. With it
+// on, a refresh hands every local slot (item, season, episode) to the
+// discovering process's copier and queues nothing else for it; until a copy
+// lands, a slot with nothing cached serves the best remote image, and once it
+// lands, local wins. With it off, the refresh ignores local art and serves the
+// remote images, and turning it off after the copies landed moves each slot a
+// provider fills back to the provider image, even through a fill-empty refresh
+// with an unrated poster; a slot no provider fills (the backdrop here) keeps
+// its copy. NFO text applies either way.
+func TestLocalArtworkUsedOnlyWithImageCaching(t *testing.T) {
 	const (
 		remotePoster = "https://img.example/series-poster.jpg"
 		remoteSeason = "https://img.example/season-1.jpg"
@@ -571,6 +574,29 @@ func TestLocalArtworkCopiedWhateverImageCaching(t *testing.T) {
 
 			refresh(metadata.ModeInitialMatch)
 			item, season, episode := slots()
+			if item.Overview != "90-day home fitness program." {
+				t.Errorf("item overview = %q, want the NFO plot", item.Overview)
+			}
+			if !cacheImages {
+				for name, got := range map[string][2]string{
+					"item poster":   {item.PosterPath, item.PosterSourcePath},
+					"item backdrop": {item.BackdropPath, item.BackdropSourcePath},
+					"season poster": {season.PosterPath, season.PosterSourcePath},
+					"episode still": {episode.StillPath, episode.StillSourcePath},
+				} {
+					want := map[string]string{"item poster": remotePoster, "season poster": remoteSeason, "episode still": remoteStill}[name]
+					if got[0] != want || got[1] != want {
+						t.Errorf("%s path/source = %q/%q, want the remote image %q for both", name, got[0], got[1], want)
+					}
+				}
+				if copies := x.LocalArtworkCopies(); len(copies) != 0 {
+					t.Errorf("copier got %#v, want nothing with caching off", copies)
+				}
+				if jobs := x.EnqueuedImageJobs(); len(jobs) != 0 {
+					t.Errorf("queued %#v, want nothing with caching off", jobs)
+				}
+				return
+			}
 			for name, source := range map[string]string{
 				"item poster":   item.PosterSourcePath,
 				"item backdrop": item.BackdropSourcePath,
@@ -626,6 +652,27 @@ func TestLocalArtworkCopiedWhateverImageCaching(t *testing.T) {
 			} {
 				if !strings.HasPrefix(path, "local/") {
 					t.Errorf("%s path after the copy = %q, want the cached local copy", name, path)
+				}
+			}
+			localBackdrop := item.BackdropPath
+
+			// Turning caching off: a fill-empty refresh hands each slot a
+			// provider fills to the provider, unrated or not.
+			x.Service().SetAutoCacheImages(false)
+			remote.images[0].Rating = 0
+			refresh(metadata.ModeScheduledRefresh)
+			item, season, episode = slots()
+			for name, got := range map[string][2]string{
+				"item poster":          {item.PosterPath, remotePoster},
+				"item poster source":   {item.PosterSourcePath, remotePoster},
+				"season poster":        {season.PosterPath, remoteSeason},
+				"season poster source": {season.PosterSourcePath, remoteSeason},
+				"episode still":        {episode.StillPath, remoteStill},
+				"episode still source": {episode.StillSourcePath, remoteStill},
+				"item backdrop":        {item.BackdropPath, localBackdrop},
+			} {
+				if got[0] != got[1] {
+					t.Errorf("%s path with caching off = %q, want %q", name, got[0], got[1])
 				}
 			}
 		})

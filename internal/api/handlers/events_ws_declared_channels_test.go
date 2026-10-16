@@ -347,7 +347,7 @@ func TestEventsWebSocketAdminDecisionUsesTicketProfile(t *testing.T) {
 	for profile, wantAdmin := range map[string]bool{"parent": true, "kid": false} {
 		t.Run(profile, func(t *testing.T) {
 			tickets := notifications.NewTicketStore(nil)
-			ticket, _, err := tickets.Mint(t.Context(), 1, profile)
+			ticket, _, err := tickets.Mint(t.Context(), notifications.Ticket{UserID: 1, ProfileID: profile})
 			if err != nil {
 				t.Fatal(err)
 			}

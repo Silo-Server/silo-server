@@ -450,13 +450,12 @@ Branding remains public so it can render before sign-in:
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/v2/theme/capabilities` | Branding, CSS-override, and asset-storage availability |
+| GET | `/api/v2/theme/capabilities` | Branding and asset-storage availability |
 | GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent color and asset URLs, storage availability |
-| GET | `/api/v2/theme/admin-css` | JSON object with `vars` and `raw_css` strings |
 | GET / HEAD | `/api/v2/branding/assets/{kind}` | Image bytes or matching headers without a body |
 
-Discovery uses the existing branding service and theme settings. When dependencies
-are absent, configuration returns default branding and empty overrides; capabilities
+Discovery uses the existing branding service. When dependencies are absent,
+configuration returns default branding; capabilities
 report availability explicitly. Discovery responses are not cached. The bundled web
 uses these v2 reads. Native server-identity discovery must adopt the same public
 endpoint through its negotiated API-version handling.
@@ -472,14 +471,20 @@ A valid kind without a configured asset returns `404`; missing asset storage ret
 
 The frozen v1 routes and administrator asset upload/delete operations are unchanged.
 
-The web client has one theme, Cinema Dark. Only an administrator customizes it, with
-the accent color and the overrides `admin-css` returns (`ui.admin_theme_vars` and
-`ui.admin_custom_css`), layered on that theme. The v2 branding document therefore
-has no default theme and no light-theme logo URLs, and v2 has no theme catalog.
-The frozen v1 `/theme/branding` response is unchanged: it still reports a stored
-`default_theme` and light logo URLs. The server keeps those settings for v1 alone. The v1
-`/theme/catalog`, `/theme/catalog/refresh` and `/theme/download` routes keep their
-behavior, and `theme.catalog_url` its default, until v1 retires.
+The web client has one theme, Cinema Dark. The only customization is the
+administrator's accent color (`branding.accent_color`), which the web client
+reads from the branding document and applies to the primary action color, the
+focus ring and the sidebar accent, turning the labels on those surfaces white
+when white reads better on the accent. A stored value that is not a `#rgb` or
+`#rrggbb` hex color is ignored, as email ignores it. Email buttons, the shell's `theme-color` and
+the web app manifest use it too. The v2 branding document has no default theme
+or light-theme logo URLs, and v2 has no theme overrides or theme catalog.
+The frozen v1 routes are unchanged: `/theme/branding` still reports a stored
+`default_theme` and light logo URLs, and `/theme/admin-css` still reports the
+stored `ui.admin_theme_vars` and `ui.admin_custom_css`. The server keeps those
+settings for v1 alone; nothing else reads them. The v1 `/theme/catalog`,
+`/theme/catalog/refresh` and `/theme/download` routes keep their behavior, and
+`theme.catalog_url` its default, until v1 retires.
 
 ### Retired theme settings
 
@@ -944,7 +949,10 @@ family-scoped winner.
 
 The device registry lists each device a profile uses, with its name, platform
 and `last_seen_at`. `GET /api/v2/devices` and the administrator device reads
-list it. The server registers the device named by `X-Silo-Device-Id`, with the
+list it. A profile can also give its entry a `custom_name` through
+`PATCH /api/v2/devices/{device_id}`; `GET /api/v2/devices` returns it when set,
+and clients show it in place of the reported name. Registration below never
+changes it (see [API contract](architecture/api-contract.md#self-service-device-settings)). The server registers the device named by `X-Silo-Device-Id`, with the
 optional `X-Silo-Device-Name` and `X-Silo-Device-Platform`, for the acting
 profile when the device:
 
@@ -1032,11 +1040,24 @@ process memory limit at one worker per 512 MiB and applies to the next run
 without a restart.
 
 `metadata.cache_images` defaults to `true` on fresh installations. It no longer
-requires a public S3 bucket because local artwork storage is available. It
-governs provider artwork only: local sidecar artwork found next to media files
-is copied into artwork storage and served whatever its value, because clients
-cannot load it any other way. An image URL an NFO file names is downloaded like
-provider artwork, so it is used only while the setting is on.
+requires a public S3 bucket because local artwork storage is available. With it
+off, clients load item artwork straight from the providers: refreshes select no
+local artwork (sidecar files, files or image URLs an NFO names, extra
+backdrops), nothing is copied into artwork storage, and NFO text still applies.
+Artwork stored earlier goes back to its providers through a hidden task that
+runs at startup, daily, and when the setting is turned off: a stored copy of
+provider artwork serves its provider source again, and a matched movie or
+series whose poster, backdrop, or logo has no provider source, or that keeps
+extra backdrops, or that a storage recovery left without artwork, is queued
+for a metadata refresh at most once a week. The item keeps that art until a
+refresh finds a provider image. A localized copy saved without any source is
+cleared, so the item's or season's own artwork shows. Items with locked
+artwork keep what they have; choosing artwork in Edit Metadata locks it, for a
+season or episode on the whole series. Banner, landscape thumb, clear art, and
+disc art come only from local files, so copies already stored stay. Nothing is
+deleted directly; the artwork revision GC collects the displaced copies.
+Turning the setting back on caches artwork for later refreshes; the Backfill
+Metadata Images task stores the provider artwork already served by URL.
 
 `catalog.scope_versions_to_library` (default `false`) makes a library-scoped v2
 catalog read return only the versions stored in the `library_id` it was given.

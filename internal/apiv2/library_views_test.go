@@ -430,7 +430,7 @@ func TestLibraryLayoutAndSections(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	card := body.Sections[0].Items[0]
-	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true}`, "item_source": `"in_progress"`} {
+	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true,"not_interested":false}`, "item_source": `"in_progress"`} {
 		if string(card[k]) != want {
 			t.Errorf("%s = %s, want %s", k, card[k], want)
 		}

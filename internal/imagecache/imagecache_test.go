@@ -318,8 +318,62 @@ func TestCacheRefusesLocalNetworkSourceWithoutPrivateAccess(t *testing.T) {
 		ContentID:   "550",
 		ImageType:   metadata.ImagePoster,
 	})
-	if err == nil || !strings.Contains(err.Error(), "private image host") {
-		t.Fatalf("Cache error = %v, want private image host refusal", err)
+	if !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("Cache error = %v, want netguard.ErrPrivateDestination", err)
+	}
+	if got := s3.keys(); len(got) != 0 {
+		t.Fatalf("uploaded keys = %v, want none", got)
+	}
+}
+
+// Provider artwork URLs are untrusted, so the cache refuses every address
+// netguard does not class as Public: CGNAT (Tailscale), cloud metadata, and
+// NAT64 forms of either. The context is already canceled, so an address the
+// check misses fails with context.Canceled instead of being dialed.
+func TestCacheRefusesNonPublicSourcesWithoutPrivateAccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, host := range []string{
+		"100.64.1.1",
+		"100.101.102.103",
+		"100.100.100.200",
+		"198.18.0.1",
+		"0.1.2.3",
+		"[64:ff9b::a9fe:a9fe]",
+		"[64:ff9b::a00:5]",
+		"[::ffff:100.64.1.1]",
+	} {
+		t.Run(host, func(t *testing.T) {
+			s3 := &mockS3{bucket: "media"}
+			_, err := New(s3).Cache(ctx, CacheRequest{
+				SourceURL:   "http://" + host + "/poster.jpg",
+				ProviderID:  "tmdb",
+				ContentType: "movies",
+				ContentID:   "550",
+				ImageType:   metadata.ImagePoster,
+			})
+			if !errors.Is(err, netguard.ErrPrivateDestination) && !errors.Is(err, netguard.ErrBlockedDestination) {
+				t.Fatalf("Cache error = %v, want a netguard refusal", err)
+			}
+		})
+	}
+}
+
+// A host name passes the early literal-IP check, so the transport has to
+// refuse the private address it resolves to when it dials.
+func TestCacheRefusesHostResolvingToLocalNetworkWithoutPrivateAccess(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	s3 := &mockS3{bucket: "media"}
+
+	_, err := New(s3).Cache(context.Background(), CacheRequest{
+		SourceURL:   strings.Replace(srv.URL, "127.0.0.1", "localhost", 1) + "/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	})
+	if !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("Cache error = %v, want netguard.ErrPrivateDestination", err)
 	}
 	if got := s3.keys(); len(got) != 0 {
 		t.Fatalf("uploaded keys = %v, want none", got)

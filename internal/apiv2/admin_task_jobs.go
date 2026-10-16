@@ -113,7 +113,7 @@ func registerAdminTaskJobs(reg *Registry) {
 	cancel.DefaultStatus = 202
 	cancel.Errors = []int{409}
 	cancel.Responses = map[string]*huma.Response{"200": {
-		Description: "The job was already canceled.",
+		Description: "The job is canceled: it was already canceled, or it was a queued image cache cleanup that this request canceled at once.",
 		Content:     map[string]*huma.MediaType{mediaTypeJSON: {Schema: &huma.Schema{Ref: adminTaskJobSchemaRef}}},
 	}}
 	Register(reg, Operation{Operation: cancel, Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}, reg.cancelAdminTaskJob)
@@ -130,7 +130,7 @@ func (reg *Registry) cancelAdminTaskJob(ctx context.Context, in *AdminTaskJobInp
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	if job.JobType != adminjob.JobTypeStorageTransition {
+	if job.JobType != adminjob.JobTypeStorageTransition && job.JobType != adminjob.JobTypeImageCacheCleanup {
 		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled from this endpoint")
 	}
 	canceller, ok := reg.deps.AdminTaskJobs.(interface {
@@ -192,7 +192,10 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 			}
 			out.LibraryName = request.LibraryName
 		}
-		if job.Status == adminjob.StatusCompleted {
+		// A canceled image cache cleanup keeps the totals deleted before the
+		// cancel, so report them the same way as a completed job.
+		if job.Status == adminjob.StatusCompleted ||
+			(job.JobType == adminjob.JobTypeImageCacheCleanup && job.Status == adminjob.StatusCancelled) {
 			var result AdminTaskJobLibraryResult
 			if json.Unmarshal(job.ResultPayload, &result) == nil {
 				out.LibraryResult = &result

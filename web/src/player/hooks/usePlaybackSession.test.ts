@@ -2574,6 +2574,38 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     unmount();
   });
 
+  it("does not reconnect a session a reanchor found ended before that state renders", async () => {
+    const harness = reconnectHarness({
+      replan: () =>
+        jsonResponse(
+          {
+            type: "https://siloserver.org/docs/api/v2/problems/playback_session_ended",
+            title: "Playback session ended",
+            status: 410,
+            detail: "An administrator ended this playback session",
+          },
+          { status: 410 },
+        ),
+      restart: () => jsonResponse(playable("session-2"), { status: 201 }),
+    });
+    const { result, unmount } = await startPlaying();
+    const session = result.current;
+
+    // The player's reopen fallback runs as soon as the reanchor settles, from a
+    // render that still says connected.
+    await act(async () => {
+      expect(await session.reanchorSeek(240)).toBe(false);
+      session.recoverConnection(240, true);
+    });
+    await advance(RECONNECT_MAX_DELAY_MS * 2);
+
+    expect(harness.replanBodies).toHaveLength(1);
+    expect(harness.startBodies).toHaveLength(1);
+    expect(result.current.connectionStatus).toBe("ended");
+
+    unmount();
+  });
+
   it("starts a new session when the server's installation changed", async () => {
     let restarts = 0;
     const harness = reconnectHarness({

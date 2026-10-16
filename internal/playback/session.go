@@ -51,9 +51,9 @@ type Session struct {
 	IsJellyfinCompat              bool   // immutable origin identity for Jellyfin compatibility sessions
 	// RequireMediaAuthorization distinguishes v3 transports whose session ID is
 	// only a route identifier from legacy HLS transports where that UUID also
-	// acts as the bearer capability. It is live-session state by design: secure
-	// transports carry no reconstruction token and start a fresh attempt after
-	// an API restart.
+	// acts as the bearer capability. Secure transports carry no reconstruction
+	// token; a session rebuilt from the API's server-side recovery card gets the
+	// flag back from that card (RecipeCard.RequireMediaAuthorization).
 	RequireMediaAuthorization bool
 
 	TranscodeNodeURL     string // URL of assigned transcode node (empty = local/integrated)
@@ -114,6 +114,12 @@ type Session struct {
 	activeTransportCount       int
 	replacementPlayMethod      PlayMethod
 	streamRevision             uint64
+	// confirmedPauseSequence fences progress already accepted when a realtime
+	// pause state was confirmed; replaying it must not undo that confirmation.
+	confirmedPauseSequence int64
+	// positionSequence is the latest accepted progress sequence the live
+	// position reflects or supersedes (a sample, or a seek planned after it).
+	positionSequence int64
 	// remoteTransport marks a session whose media bytes are served by another
 	// node, so this server never sees the transport request that would
 	// otherwise keep it alive. See SetRemoteTransport.
@@ -201,8 +207,14 @@ type SessionReplacement struct {
 	EffectiveMediaFileID int
 	StreamState          SessionStreamState
 	PositionSeconds      *float64
-	IsPaused             bool
-	PreservePaused       bool
+	// PositionSequence is the latest accepted progress sequence when the
+	// replacement was planned; PositionSeconds supersedes samples up to it.
+	// A sample another replica accepts after that read but before the
+	// replacement applies still counts as newer, so a realtime confirmation
+	// may show its pre-seek position until the player's next report.
+	PositionSequence int64
+	IsPaused         bool
+	PreservePaused   bool
 }
 
 // SessionReplacementRollback is an opaque compare-and-swap token returned by
@@ -215,6 +227,7 @@ type SessionReplacementRollback struct {
 	previousStreamState          SessionStreamState
 	previousPosition             float64
 	previousPaused               bool
+	previousPositionSequence     int64
 	restoreProgress              bool
 	previousReplacementMethod    PlayMethod
 }
@@ -974,6 +987,16 @@ func transcodingDisabledError(requiresVideoTranscode, requiresAudioTranscode boo
 
 // UpdateProgress updates the playback position and pause state for a session.
 func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPaused bool) error {
+	return m.updateProgress(sessionID, position, isPaused, -1)
+}
+
+// UpdateProgressSample keeps a confirmed pause state when an already accepted
+// sequenced sample is replayed. Position and activity still persist normally.
+func (m *SessionManager) UpdateProgressSample(sessionID string, sample ProgressSampleV3) error {
+	return m.updateProgress(sessionID, sample.Position, sample.IsPaused, sample.Sequence)
+}
+
+func (m *SessionManager) updateProgress(sessionID string, position float64, isPaused bool, sequence int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -983,11 +1006,46 @@ func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPa
 	}
 
 	s.Position = position
-	s.IsPaused = isPaused
+	s.positionSequence = max(s.positionSequence, sequence)
+	if sequence < 0 || sequence > s.confirmedPauseSequence {
+		s.IsPaused = isPaused
+	}
 	s.StopReported = false
 	s.streamRevision++
 	m.touchSessionLocked(s)
 	return nil
+}
+
+// SetPaused records the pause state the player confirmed for a remote pause
+// or resume. A non-nil latest is the latest accepted progress, which another
+// replica may have accepted without this live session seeing it; its position
+// replaces the live one unless the live position already reflects it or a
+// later seek. It reports whether the pause state changed.
+func (m *SessionManager) SetPaused(sessionID string, paused bool, acceptedSequence int64, latest *ProgressSampleV3) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return false, ErrSessionNotFound
+	}
+	s.confirmedPauseSequence = max(s.confirmedPauseSequence, acceptedSequence)
+	moved := false
+	if latest != nil && latest.Sequence > s.positionSequence {
+		s.positionSequence = latest.Sequence
+		moved = s.Position != latest.Position
+		s.Position = latest.Position
+	}
+	if s.IsPaused == paused {
+		if moved {
+			s.streamRevision++
+		}
+		return false, nil
+	}
+	s.IsPaused = paused
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	return true, nil
 }
 
 // MarkStopReported records that a client reported this session stopped
@@ -1271,6 +1329,7 @@ func (m *SessionManager) applyReplacementLocked(
 	if replacement.PositionSeconds != nil {
 		rollback.previousPosition = s.Position
 		rollback.previousPaused = s.IsPaused
+		rollback.previousPositionSequence = s.positionSequence
 		rollback.restoreProgress = true
 	}
 
@@ -1281,6 +1340,7 @@ func (m *SessionManager) applyReplacementLocked(
 	applySessionStreamStateLocked(s, replacement.StreamState)
 	if replacement.PositionSeconds != nil {
 		s.Position = *replacement.PositionSeconds
+		s.positionSequence = max(s.positionSequence, replacement.PositionSequence)
 		if !replacement.PreservePaused {
 			s.IsPaused = replacement.IsPaused
 		}
@@ -1311,6 +1371,7 @@ func (m *SessionManager) RollbackReplacement(sessionID string, rollback SessionR
 	if rollback.restoreProgress {
 		s.Position = rollback.previousPosition
 		s.IsPaused = rollback.previousPaused
+		s.positionSequence = rollback.previousPositionSequence
 	}
 	s.replacementPlayMethod = rollback.previousReplacementMethod
 	s.streamRevision++
@@ -1413,6 +1474,57 @@ func (m *SessionManager) SetTranscodeRoute(sessionID string, route TranscodeRout
 	s.streamRevision++
 	m.touchSessionLocked(s)
 	return nil
+}
+
+// TranscodeExecutorMove is the new executor for a running transcode whose
+// previous executor stopped answering. The transport identity, the egress, and
+// every byte-affecting field stay as they were: only where FFmpeg runs changes.
+type TranscodeExecutorMove struct {
+	// NodeURL is the transcode node now running the transport, or empty when
+	// this API process runs it.
+	NodeURL string
+	// Execution and ExecutionNodeID are the routing vocabulary for the new
+	// executor. They are applied only to a session that already carries a
+	// committed routing assignment.
+	Execution       string
+	ExecutionNodeID int
+	// TranscodeHWAccel is the encoder backend the new executor reported. Empty
+	// keeps the previous value.
+	TranscodeHWAccel string
+}
+
+// MoveTranscodeExecutor re-points a live transcode at a new executor only while
+// the session still serves expected. It reports false, changing nothing, when a
+// replan or another move already replaced that route, so a stale move can never
+// overwrite a newer one. The check covers this process only: the moved route
+// is not shared with other API processes, and a session rebuilt from its
+// stream token still names the old node.
+func (m *SessionManager) MoveTranscodeExecutor(sessionID string, expected TranscodeRoute, move TranscodeExecutorMove) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return false, ErrSessionNotFound
+	}
+	if s.TranscodeNodeURL != expected.NodeURL || s.TranscodeTransportID != expected.TransportID {
+		return false, nil
+	}
+	s.TranscodeNodeURL = move.NodeURL
+	// A session without a routing assignment predates node routing. Writing
+	// only the execution half would read as a partially committed route, which
+	// the serve paths refuse.
+	if s.RoutingWorkload != "" {
+		s.RoutingExecution = move.Execution
+		s.RoutingExecutionNodeID = move.ExecutionNodeID
+		s.RoutingExecutionNodeURL = move.NodeURL
+	}
+	if move.TranscodeHWAccel != "" {
+		s.TranscodeHWAccel = move.TranscodeHWAccel
+	}
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	return true, nil
 }
 
 // SetRealtimeConnection marks whether a realtime control connection is active for a session.

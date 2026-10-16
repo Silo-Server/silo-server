@@ -41,7 +41,12 @@ func TestMediaRouteManifest(t *testing.T) {
 		return func(routes []streamtelemetry.WalkedRoute) { snapshots[index]["/api/v2/*"] = routes }
 	}
 	minimal := newChiRouter(Dependencies{Config: cfg, v2RouteSnapshot: observeV2(0)})
-	maximal := newChiRouter(Dependencies{DB: pool, Config: cfg, FileRepo: scanner.NewFileRepository(pool), FolderRepo: catalog.NewFolderRepository(pool), SessionMgr: playback.NewSessionManager(0, 0), v2RouteSnapshot: observeV2(1)})
+	// A live registry makes observeNative resolve every wrapped pattern, so a
+	// handler wired to an undeclared media route panics here, not at startup.
+	telemetryCfg := streamtelemetry.DefaultConfig("test")
+	telemetryCfg.Enabled = true
+	telemetry := streamtelemetry.NewRegistry(telemetryCfg, streamtelemetry.NewLocalStore(), nil)
+	maximal := newChiRouter(Dependencies{DB: pool, Config: cfg, FileRepo: scanner.NewFileRepository(pool), FolderRepo: catalog.NewFolderRepository(pool), SessionMgr: playback.NewSessionManager(0, 0), StreamTelemetry: telemetry, v2RouteSnapshot: observeV2(1)})
 	actual, err := streamtelemetry.BuildRouteManifest([]chi.Routes{minimal, maximal}, nativeMediaRoutes, snapshots...)
 	if err != nil {
 		t.Fatal(err)

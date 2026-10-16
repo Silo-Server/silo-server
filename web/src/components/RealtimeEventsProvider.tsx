@@ -51,7 +51,7 @@ import {
   isDownloadPreparationProgressEvent,
   type AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
-import { adminDownloadStorageRootKey } from "@/api/v2/adminDownloadStorage";
+import { adminDownloadStorageRootKey } from "@/api/v2/adminDownloadStorageCache";
 import { adminStatsKey } from "@/hooks/queries/admin/stats";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -60,10 +60,12 @@ import {
   adminKeys,
   historyImportKeys,
   libraryKeys,
+  notInterestedKeys,
   requestKeys,
   sectionKeys,
 } from "@/hooks/queries/keys";
 import {
+  dropInactiveWatchDetail,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
@@ -81,10 +83,18 @@ interface UserStatePayload {
   profile_id: string;
   content_id?: string;
   series_id?: string;
-  change: "progress" | "favorite" | "watchlist" | "history" | "watched" | "home_dismissal";
+  change:
+    | "progress"
+    | "favorite"
+    | "watchlist"
+    | "history"
+    | "watched"
+    | "home_dismissal"
+    | "not_interested";
   played?: boolean;
   is_favorite?: boolean;
   in_watchlist?: boolean;
+  not_interested?: boolean;
 }
 
 const CATALOG_ITEM_CHANGED_EVENTS = new Set([
@@ -383,11 +393,13 @@ function handleUserStateEvent(
         payload.played ?? detail.user_state?.played ?? detail.user_data?.played ?? false;
       const isFavorite = payload.is_favorite ?? detail.user_state?.is_favorite ?? false;
       const inWatchlist = payload.in_watchlist ?? detail.user_state?.in_watchlist ?? false;
+      const notInterested = payload.not_interested ?? detail.user_state?.not_interested ?? false;
       if (
         played === (detail.user_data?.played ?? false) &&
         played === (detail.user_state?.played ?? false) &&
         isFavorite === (detail.user_state?.is_favorite ?? false) &&
-        inWatchlist === (detail.user_state?.in_watchlist ?? false)
+        inWatchlist === (detail.user_state?.in_watchlist ?? false) &&
+        notInterested === (detail.user_state?.not_interested ?? false)
       ) {
         return detail;
       }
@@ -397,24 +409,45 @@ function handleUserStateEvent(
           payload.played == null
             ? detail.user_data
             : { ...detail.user_data, played: payload.played },
-        user_state: { played, is_favorite: isFavorite, in_watchlist: inWatchlist },
+        user_state: {
+          played,
+          is_favorite: isFavorite,
+          in_watchlist: inWatchlist,
+          not_interested: notInterested,
+        },
       };
     });
   }
 
-  // The patch above only carries played/favourite/watchlist, which is the whole
-  // of what a favorite or watchlist event changes. Every other change — progress
+  // The patch above only carries played/favourite/watchlist/not-interested,
+  // which is the whole of what a favorite, watchlist or not-interested event
+  // changes. Every other change — progress
   // above all, which arrives with no state at all — also moves fields the patch
   // cannot reconstruct (position_seconds, is_in_progress, season counts), so the
   // detail query still has to be refreshed for those.
-  const detailFullyPatched = payload.change === "favorite" || payload.change === "watchlist";
+  const detailFullyPatched =
+    payload.change === "favorite" ||
+    payload.change === "watchlist" ||
+    payload.change === "not_interested";
+  if (payload.change === "not_interested") {
+    void queryClient.invalidateQueries({ queryKey: notInterestedKeys.all });
+  }
+  // A closed player would start from its cached watch detail's resume
+  // position, so drop it now rather than after the coalesced refresh; the
+  // refresh still reaches the series it led to.
+  const knownRelatedIds =
+    payload.content_id && (payload.change === "progress" || payload.change === "watched")
+      ? dropInactiveWatchDetail(queryClient, payload.content_id)
+      : undefined;
   scheduleMediaSurfaceInvalidation(
     queryClient,
     payload.content_id
       ? {
           itemId: payload.content_id,
           skipItemDetail: detailFullyPatched,
-          skipSimilarItems: true,
+          // A mark changes which titles More like this lists.
+          skipSimilarItems: payload.change !== "not_interested",
+          knownRelatedIds,
         }
       : { skipSimilarItems: true },
   );

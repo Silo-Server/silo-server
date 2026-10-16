@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 17,
+  "revision": 18,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1232,6 +1232,20 @@
       "description": "Whether upcoming episodes stay with Continue Watching or get their own row.",
       "recommended_control": "select",
       "notes": "Registered from the legacy unprefixed key next_up_mode. The server reads it directly when assembling home sections, so it cannot be client-local; that read moves to the canonical resolver at cutover. The legacy value was untyped and absent meant combined, which is why combined is the default rather than a third \"unset\" member."
+    },
+    {
+      "key": "ui.next_up_new_releases_first",
+      "introduced_in": 18,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "category": "navigation",
+      "label": "Show new episodes first",
+      "description": "Move a show you've caught up on to the front of Continue Watching and Next Up when a new episode or season arrives.",
+      "recommended_control": "switch",
+      "notes": "The server applies it when ordering next-up rows (Home Continue Watching, the separate Next Up row, and Jellyfin /Shows/NextUp), so it cannot be client-local. An episode counts as new when the availability detector recorded it as a release: it arrived after its library's first full scan and its file is new (episode_availability.released_at). Profile scope so the order follows the viewer across devices; default false keeps the last-watched order a profile has always had."
     },
     {
       "key": "nav.primary_menu",

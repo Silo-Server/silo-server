@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 17
+const Revision = 18
 
 // Setting keys, one constant per definition.
 const (
@@ -133,6 +133,8 @@ const (
 	UiLibraryPageState = "ui.library_page_state"
 	// Next up episodes
 	UiNextUpMode = "ui.next_up_mode"
+	// Show new episodes first
+	UiNextUpNewReleasesFirst = "ui.next_up_new_releases_first"
 	// Remember library view
 	UiRememberLibraryPageState = "ui.remember_library_page_state"
 	// Pinned sidebar items
@@ -207,6 +209,7 @@ var Remote = []string{
 	UiLibraryOrder,
 	UiLibraryPageState,
 	UiNextUpMode,
+	UiNextUpNewReleasesFirst,
 	UiRememberLibraryPageState,
 	UiSidebarPins,
 	UiTextScale,

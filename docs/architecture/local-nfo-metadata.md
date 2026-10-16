@@ -438,14 +438,17 @@ Caching and refresh:
   that offers no artwork at all leaves the slot, local source included, as it
   is. Locked artwork gets no stand-in, and neither does an image URL an NFO
   names: its slot stays empty until the image cache has downloaded it.
-- `metadata.cache_images` governs remote artwork only. With it off, local art
-  files are still selected, copied, and served: the drain claims local jobs
-  only (through the partial index `metadata_image_cache_jobs_local_due_idx`, so
-  remote jobs left queued are not read), a manual refresh waits for local jobs
-  only, and the provider-artwork backfill stays off. An image URL an NFO names
-  is a download, never served directly, so with caching off it is not selected
-  (`localSourceUsable`) and the slot takes provider artwork, as it does for
-  person photos.
+- With `metadata.cache_images` off, clients load artwork straight from the
+  providers, so no local artwork is used (`localArtworkUsable`): refreshes,
+  targeted season and episode refreshes, scan re-applies, and person photos
+  drop local candidates, items keep no extra backdrops, and the image cache
+  claims, copies, and downloads nothing. NFO text still applies. A refresh
+  also stops keeping stored copies: `preserveCachedArtwork` lets a provider
+  path replace one unless the artwork is locked, and an unlocked item's stored
+  poster, backdrop, and logo count as empty for `applyBestImages`, so even a
+  fill-empty refresh takes an unrated provider image. Artwork stored before the
+  setting went off is released by `StoredArtworkReleaser` (see
+  [settings-api.md](../settings-api.md)).
 
 Precedence: local artwork beats remote providers wherever the NFO provider
 sits in the chain.
@@ -520,8 +523,8 @@ reference is a path relative to the NFO or an http(s) URL:
   sidecar file: `isLocalImageSourcePath` counts it, it waits in
   `*_source_path` until the image cache downloads it through its
   public-address guard, it is never served to clients or fetched by
-  jellycompat's image proxy, and it is not used while
-  `metadata.cache_images` is off. Like a sidecar, it is re-copied by a
+  jellycompat's image proxy, and, like all local artwork, it is not used
+  while `metadata.cache_images` is off. Like a sidecar, it is re-copied by a
   refresh or the ladder backfill, not by the provider-artwork sweeps. Its
   copy is attributed to the `nfo` provider and keyed like a provider's
   (`nfo/{contentType}/{contentID}/{imageType}/...`); only `file://` copies
@@ -549,8 +552,8 @@ still waiting for its copy, stays. It queues a person image-cache job whose `ser
 title, so the processor confines a local read to that title's library roots;
 a title's interactive artwork refresh leaves those person jobs out of its
 scope. A person refresh keeps a cached NFO photo over a provider's. Like other
-local artwork, a sidecar photo is copied whatever `metadata.cache_images` says;
-a photo URL an NFO names is used only while the setting is on.
+local artwork, NFO photos are used only while `metadata.cache_images` is on;
+photos already copied stay (the stored-artwork release leaves people alone).
 
 ### Admin image picker
 

@@ -38,6 +38,7 @@ export interface UserPolicyState {
   maxTranscodes: number | null;
   maxRemoteStreamBitrateKbps: number | null;
   maxLocalStreamBitrateKbps: number | null;
+  maxProfiles: number | null;
   transcodeAllowed: boolean | null;
   audioTranscodeAllowed: boolean | null;
   downloadAllowed: boolean | null;
@@ -54,6 +55,7 @@ const POLICY_FIELDS = {
   maxTranscodes: "max_transcodes",
   maxRemoteStreamBitrateKbps: "max_remote_stream_bitrate_kbps",
   maxLocalStreamBitrateKbps: "max_local_stream_bitrate_kbps",
+  maxProfiles: "max_profiles",
   transcodeAllowed: "transcode_allowed",
   audioTranscodeAllowed: "audio_transcode_allowed",
   downloadAllowed: "download_allowed",
@@ -119,6 +121,7 @@ export function policyInheritHints(
     max_transcodes: group.max_transcodes,
     max_remote_stream_bitrate_kbps: group.max_remote_stream_bitrate_kbps,
     max_local_stream_bitrate_kbps: group.max_local_stream_bitrate_kbps,
+    max_profiles: group.max_profiles,
     transcode_allowed: group.transcode_allowed,
     audio_transcode_allowed: group.audio_transcode_allowed,
     download_allowed: group.download_allowed,
@@ -208,7 +211,7 @@ interface PolicyContext {
 // so the form keeps these drafts itself and refuses to save while any remain,
 // even when the Limits tab is not mounted and native validation cannot see the
 // box. Keeping the text, not just a flag, lets a remounted field show it again.
-export type LimitPolicyKey = "maxStreams" | "maxTranscodes";
+export type LimitPolicyKey = "maxStreams" | "maxTranscodes" | "maxProfiles";
 
 export interface LimitValidity {
   invalidLimitDrafts: ReadonlyMap<LimitPolicyKey, string>;
@@ -243,8 +246,8 @@ function BooleanPolicyRow({
   const id = useId();
   const selectValue = value === null ? INHERIT : value ? "allowed" : "blocked";
   return (
-    <div className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-      <div className="min-w-0">
+    <div className="border-border flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border px-3 py-2">
+      <div className="min-w-32 flex-1 break-words">
         <Label htmlFor={id}>{label}</Label>
         {description && <p className="text-muted-foreground text-xs">{description}</p>}
       </div>
@@ -253,7 +256,10 @@ function BooleanPolicyRow({
         onValueChange={(next) => onValueChange(next === INHERIT ? null : next === "allowed")}
         disabled={disabled}
       >
-        <SelectTrigger id={id} className="w-40 shrink-0">
+        <SelectTrigger
+          id={id}
+          className="max-w-full min-w-40 shrink-0 text-left whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -271,10 +277,10 @@ function BooleanPolicyRow({
   );
 }
 
-function limitDraftValue(draft: string): number | null {
+function limitDraftValue(draft: string, min: number): number | null {
   if (draft.trim() === "") return null;
   const parsed = Number(draft);
-  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  if (!Number.isInteger(parsed) || parsed < min) return null;
   return parsed;
 }
 
@@ -326,6 +332,7 @@ function LimitPolicyField({
   onValueChange,
   source,
   effectiveValue,
+  min = 0,
   invalidDraft,
   onInvalidDraftChange,
 }: {
@@ -334,6 +341,8 @@ function LimitPolicyField({
   onValueChange: (value: number | null) => void;
   source: PolicyDefaultSource;
   effectiveValue?: number;
+  /** The lowest value; with 0 allowed it means unlimited. */
+  min?: number;
   // The invalid text left behind when the field last unmounted, or undefined.
   // The field reopens overridden with that text so it shows the pending edit
   // instead of the stale saved value.
@@ -348,7 +357,13 @@ function LimitPolicyField({
   // The raw string stays local so a cleared or half-typed box is an unsaved
   // edit instead of collapsing to 0 or NaN.
   const [draft, setDraft] = useState(() => invalidDraft ?? (value === null ? "" : String(value)));
-  const draftValue = limitDraftValue(draft);
+  const draftValue = limitDraftValue(draft, min);
+  const help =
+    draftValue === null
+      ? `Enter a whole number${min > 0 ? ` of at least ${min}` : ""}, or turn Override off to ${DEFAULT_SOURCE_TEXT[source].revert}.`
+      : min === 0
+        ? "0 = unlimited"
+        : undefined;
 
   function handleOverrideChange(checked: boolean) {
     setOverridden(checked);
@@ -368,7 +383,7 @@ function LimitPolicyField({
 
   function handleDraftChange(raw: string) {
     setDraft(raw);
-    const parsed = limitDraftValue(raw);
+    const parsed = limitDraftValue(raw, min);
     onInvalidDraftChange(parsed === null ? raw : undefined);
     if (parsed === null) return;
     onValueChange(parsed);
@@ -392,17 +407,13 @@ function LimitPolicyField({
       <Input
         id={id}
         type="number"
-        min={0}
+        min={min}
         step={1}
         required
         value={draft}
         onChange={(event) => handleDraftChange(event.target.value)}
       />
-      <p className="text-muted-foreground text-xs">
-        {draftValue === null
-          ? `Enter a whole number, or turn Override off to ${DEFAULT_SOURCE_TEXT[source].revert}.`
-          : "0 = unlimited"}
-      </p>
+      {help && <p className="text-muted-foreground text-xs">{help}</p>}
     </PolicyOverrideField>
   );
 }
@@ -633,6 +644,16 @@ export function PolicyLimitFields({
             : PLAYBACK_QUALITY_OPTIONS.find((option) => option.value === qualityValue)?.description}
         </p>
       </div>
+      <LimitPolicyField
+        label="Max Profiles"
+        min={1}
+        value={state.maxProfiles}
+        onValueChange={(maxProfiles) => onChange({ ...state, maxProfiles })}
+        source={source}
+        effectiveValue={effective?.max_profiles}
+        invalidDraft={invalidLimitDrafts.get("maxProfiles")}
+        onInvalidDraftChange={(draft) => onInvalidLimitDraftChange("maxProfiles", draft)}
+      />
     </>
   );
 }

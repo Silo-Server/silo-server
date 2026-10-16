@@ -515,6 +515,9 @@ type RemoteFavorite struct {
 	SeasonNumber  int
 	EpisodeNumber int
 	FavoritedAt   time.Time
+	// FavoritedAtGuessed marks a FavoritedAt the provider did not send, which
+	// the host filled in with the import time.
+	FavoritedAtGuessed bool
 }
 
 type RemotePlay struct {

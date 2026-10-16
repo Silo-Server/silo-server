@@ -535,7 +535,7 @@ func TestStartRejectsValuesTheSettingsAPIWould(t *testing.T) {
 func TestStartIgnoresUnrelatedStoredSettings(t *testing.T) {
 	for name, unrelated := range map[string]map[string]string{
 		"bootstrap Redis transport":  {"ratelimit.backend": "redis"},
-		"legacy watch provider pair": {"watchsync.trakt.client_id": "legacy-client"},
+		"legacy watch provider pair": {"watchsync.simkl.client_id": "legacy-client"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			settings := &memorySettings{values: map[string]string{

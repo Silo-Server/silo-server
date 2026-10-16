@@ -16,6 +16,7 @@ import {
   adminKeys,
   catalogKeys,
   collectionKeys,
+  itemKeys,
   libraryKeys,
   requestKeys,
   sectionKeys,
@@ -879,6 +880,42 @@ describe("RealtimeEventsProvider", () => {
       user_data: { played: true },
       user_state: { played: true, is_favorite: true },
     });
+  });
+
+  it("drops a closed player's cached watch detail when progress changes elsewhere", async () => {
+    const queryClient = new QueryClient();
+    const watchKey = itemKeys.watchDetail("movie-1");
+    const otherKey = itemKeys.watchDetail("movie-2");
+    queryClient.setQueryData(watchKey, {
+      content_id: "movie-1",
+      user_data: { position_seconds: 600 },
+    });
+    queryClient.setQueryData(otherKey, {
+      content_id: "movie-2",
+      user_data: { position_seconds: 60 },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <div />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {});
+    await act(async () => {
+      FakeWebSocket.instances[0]?.emitMessage({
+        type: "event",
+        channel: "user_state",
+        event: "user_state.changed",
+        data: { profile_id: "profile-1", content_id: "movie-1", change: "progress" },
+      });
+    });
+
+    // Dropped at once: a play started now would use its resume position.
+    expect(queryClient.getQueryData(watchKey)).toBeUndefined();
+    expect(queryClient.getQueryData(otherKey)).toBeDefined();
   });
 
   it("refetches request state once per burst of request notifications, for any profile", async () => {

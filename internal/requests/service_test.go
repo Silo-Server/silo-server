@@ -3182,8 +3182,14 @@ type fakeRouterProvider struct {
 	// progressCapable marks the installations whose router declares
 	// reports_download_progress.
 	progressCapable map[int]bool
-	featuresErr     error
-	gotTVDBID       *int
+	// keyOptional marks the installations whose router declares
+	// api_key_optional.
+	keyOptional map[int]bool
+	// urlOptional marks the installations whose router declares
+	// base_url_optional.
+	urlOptional map[int]bool
+	featuresErr error
+	gotTVDBID   *int
 
 	// CheckStatus behavior.
 	statuses  []RouterTargetStatus
@@ -3208,6 +3214,7 @@ type fakeRouterProvider struct {
 	validateErr           error
 	validateCalls         int
 	gotValidateCapability string
+	gotValidateConn       ResolvedRouterConnection
 	gotValidateSiblings   []ResolvedRouterConnection
 }
 
@@ -3217,6 +3224,8 @@ func (f *fakeRouterProvider) RouterFeatures(_ context.Context, installationID in
 	return RouterFeatures{
 		SupportsSeasons:         f.seasonCapable[installationID],
 		ReportsDownloadProgress: f.progressCapable[installationID],
+		APIKeyOptional:          f.keyOptional[installationID],
+		BaseURLOptional:         f.urlOptional[installationID],
 	}, f.featuresErr
 }
 
@@ -3294,10 +3303,11 @@ func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, 
 	return true, "", nil
 }
 
-func (f *fakeRouterProvider) Validate(_ context.Context, _ int, capabilityID string, _ ResolvedRouterConnection, siblings []ResolvedRouterConnection) (map[string]string, string, error) {
+func (f *fakeRouterProvider) Validate(_ context.Context, _ int, capabilityID string, conn ResolvedRouterConnection, siblings []ResolvedRouterConnection) (map[string]string, string, error) {
 	f.mu.Lock()
 	f.validateCalls++
 	f.gotValidateCapability = capabilityID
+	f.gotValidateConn = conn
 	f.gotValidateSiblings = siblings
 	f.mu.Unlock()
 	return f.validateFieldErrors, f.validateFormError, f.validateErr

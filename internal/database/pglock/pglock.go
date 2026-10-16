@@ -142,6 +142,61 @@ func (l *Lock) AcquireAlso(ctx context.Context, key int64, wait time.Duration) (
 	return locked, nil
 }
 
+// Held reports whether l's session is still open. An error in AcquireAlso
+// or ReleaseAlso closes it, which drops every lock l held.
+func (l *Lock) Held() bool {
+	return l != nil && l.conn != nil
+}
+
+// Check runs a query on l's session and returns an error when the session
+// has closed, which released every lock l held. A failed query closes the
+// session, as in AcquireAlso, and Held then reports false.
+func (l *Lock) Check(ctx context.Context) error {
+	if l == nil || l.conn == nil {
+		return errors.New("checking advisory lock: no session holds a lock")
+	}
+	if _, err := l.conn.Exec(ctx, `SELECT 1`); err != nil {
+		conn := l.conn
+		l.conn = nil
+		_ = conn.Hijack().Close(context.WithoutCancel(ctx))
+		return fmt.Errorf("checking advisory lock session: %w", err)
+	}
+	return nil
+}
+
+// ReleaseAlso unlocks key, which AcquireAlso took on l's session, and keeps
+// l's other locks, so work that takes one key after another under a
+// longer-held lock does not hold them all to the end. When the unlock fails
+// or reports the key was not held, the session is closed, as in Release:
+// that drops l's other locks too, and Release becomes a no-op. A key l does
+// not hold, or a session already closed, is a no-op.
+func (l *Lock) ReleaseAlso(ctx context.Context, key int64) error {
+	if l == nil || l.conn == nil {
+		return nil
+	}
+	i := slices.Index(l.also, key)
+	if i < 0 {
+		return nil
+	}
+	l.also = slices.Delete(l.also, i, i+1)
+
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
+	defer cancel()
+	var unlocked bool
+	err := l.conn.QueryRow(releaseCtx, `SELECT pg_advisory_unlock($1)`, key).Scan(&unlocked)
+	if err == nil && unlocked {
+		return nil
+	}
+	conn := l.conn
+	l.conn = nil
+	l.also = nil
+	_ = conn.Hijack().Close(context.WithoutCancel(ctx))
+	if err != nil {
+		return fmt.Errorf("releasing advisory lock %d: %w", key, err)
+	}
+	return fmt.Errorf("releasing advisory lock %d: lock was not held", key)
+}
+
 // Session is a database session that can begin a transaction: a pooled
 // connection, or a connection of its own.
 type Session interface {

@@ -205,11 +205,7 @@ function RuleRow({
               )}
             >
               {rule.name}
-              {!rule.enabled ? (
-                <Badge variant="secondary" className="text-[10px]">
-                  Off
-                </Badge>
-              ) : null}
+              {!rule.enabled ? <Badge variant="secondary">Off</Badge> : null}
             </span>
             <span
               className={cn(
@@ -426,6 +422,7 @@ export function RequestRoutingList({
     rules,
     fallback,
     servers: scope.allServers,
+    installations: scope.installations,
     serverFields: (server: RequestIntegration) => serverOverrideFields(server, scope.installations),
     language: scope.language,
     forceDual: scope.forceDual,
