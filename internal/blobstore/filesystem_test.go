@@ -507,3 +507,81 @@ func TestFilesystemDeletePrefixMissingKeepsParents(t *testing.T) {
 		t.Fatalf("empty parent removed: %v", err)
 	}
 }
+
+// TestFilesystemDeletePrefixDoesNotFollowSymlinkToSameDirectory renames a
+// directory out of the prefix and leaves a symlink to it under its old name
+// between the Lstat and the descent. The opened directory is still the file
+// Lstat saw, so only the second look at the name catches the swap.
+func TestFilesystemDeletePrefixDoesNotFollowSymlinkToSameDirectory(t *testing.T) {
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, key := range []string{"item/h0/image.jpg", "other/keep.jpg"} {
+		if err = s.Put(ctx, key, []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(s.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	info, err := root.Lstat("item/h0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Rename(filepath.Join(s.root, "item", "h0"), filepath.Join(s.root, "other", "h0")); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(filepath.Join("..", "other", "h0"), filepath.Join(s.root, "item", "h0")); err != nil {
+		t.Fatal(err)
+	}
+
+	n := 0
+	if err = deleteChildren(ctx, root, "item/h0", info, &n); err == nil || n != 0 {
+		t.Fatalf("descent through symlink to the same directory = %d, %v; want 0 and an error", n, err)
+	}
+	if _, err = os.Stat(filepath.Join(s.root, "other", "h0", "image.jpg")); err != nil {
+		t.Fatalf("file outside the prefix was removed: %v", err)
+	}
+}
+
+// TestFilesystemDeletePrefixReadsInBatches deletes a directory with more
+// entries than one batch, including a full batch of entries that cannot be
+// removed, and checks that every removable entry is still deleted.
+func TestFilesystemDeletePrefixReadsInBatches(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("directory permissions do not apply to root")
+	}
+	defer func(old int) { deleteBatch = old }(deleteBatch)
+	deleteBatch = 2
+
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := range 7 {
+		if err = s.Put(ctx, fmt.Sprintf("item/h%d/image.jpg", i), []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, h := range []string{"h2", "h5"} {
+		stuck := filepath.Join(s.root, "item", h)
+		if err = os.Chmod(stuck, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(stuck, 0o755) })
+	}
+
+	n, err := s.DeletePrefix(ctx, "item")
+	if err == nil || n != 5 {
+		t.Fatalf("batched delete = %d, %v; want 5 and an error", n, err)
+	}
+	keys, _, err := s.List(ctx, "item/", "", 100)
+	if err != nil || len(keys) != 2 {
+		t.Fatalf("remaining = %v, %v; want the two stuck files", keys, err)
+	}
+}
