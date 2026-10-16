@@ -104,16 +104,17 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 		batchesRun := 0
 		exhausted := false
 
-		// The walk visits series by completion time, but results are ordered
-		// by ActivityAt, so a batch keeps every walked series' row: trimming it
-		// to the remaining limit could drop a newly released episode that
-		// outranks one kept. Candidates are whole batches, and the walk stops
-		// between batches once it has at least nextUpMinCandidates of them, so
-		// every limit up to that ranks the same set and a smaller limit reads
-		// a prefix of a larger one. A series finished before every walked one
-		// is not reranked even when its next episode was just released — the
-		// bound the walk exists for.
-		candidates := max(limit, nextUpMinCandidates)
+		// The walk visits series by completion time. The first whole batches
+		// holding at least nextUpRankedCandidates rows are ranked by
+		// ActivityAt, so a newly released episode can lift its series to the
+		// front; a batch keeps every walked series' row because trimming it
+		// by completion time could drop one. Rows from later batches, walked
+		// only for larger limits, follow in completion order without being
+		// lifted. The ranked set never depends on the limit, so every limit
+		// reads a prefix of one order and a Jellyfin client paging by raising
+		// the limit sees no row twice.
+		walkUntil := max(limit, nextUpRankedCandidates)
+		ranked := -1
 		for batch := 0; batch < nextUpAnchorMaxBatches; batch++ {
 			batchResults, frontier, err := r.listNextUpBatch(ctx, q, cursor)
 			if err != nil {
@@ -121,8 +122,11 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 			}
 			batchesRun++
 			results = append(results, batchResults...)
+			if ranked < 0 && len(results) >= nextUpRankedCandidates {
+				ranked = len(results)
+			}
 
-			if len(results) >= candidates {
+			if len(results) >= walkUntil {
 				exhausted = true
 				break
 			}
@@ -141,7 +145,10 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 				"results_found", len(results))
 		}
 
-		sortNextUpByActivity(results)
+		if ranked < 0 {
+			ranked = len(results)
+		}
+		sortNextUpByActivity(results[:ranked])
 		if len(results) > limit {
 			results = results[:limit]
 		}
@@ -212,11 +219,12 @@ const nextUpAnchorMaxSeries = 96
 // as a runaway guard.
 const nextUpAnchorMaxBatches = 10
 
-// nextUpMinCandidates is how many next-up rows a global call ranks before it
-// stops walking, whatever its limit: the Home row size. Callers asking for
-// fewer rows, and a Jellyfin client paging by raising the limit, then read
-// prefixes of one order.
-const nextUpMinCandidates = 100
+// nextUpRankedCandidates is how many next-up rows a global call ranks by
+// ActivityAt, rounded up to whole walk batches, whatever its limit: the Home
+// row size. A series finished before all of them keeps its completion-time
+// place even when its next episode was just released — the bound the walk
+// exists for.
+const nextUpRankedCandidates = 100
 
 // listNextUpBatch walks one batch of up to nextUpAnchorMaxSeries series and
 // returns every walked series' next-up row.

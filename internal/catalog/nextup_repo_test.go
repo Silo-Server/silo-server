@@ -1041,6 +1041,67 @@ func TestNextUpRepository_SmallerLimitReadsPrefixOfLargerLimit(t *testing.T) {
 	assertNextUpOrder(t, first, episodes[5])
 }
 
+func TestNextUpRepository_PagesPastRankedCandidatesKeepOneOrder(t *testing.T) {
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-pages-%d", time.Now().UnixNano())
+	userID, profileID, folderID := seedNextUpTestOwner(t, ctx, pool, prefix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM episode_availability WHERE library_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"-%")
+	})
+
+	// Two full walk batches of series with a next episode, plus one series
+	// finished before all of them whose next episode was just released. It
+	// sits outside the ranked candidates, so every page keeps it last.
+	total := 2*nextUpAnchorMaxSeries + 1
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, stmt := range []string{
+		`INSERT INTO media_items (content_id, type, title, status, genres)
+		 SELECT $1 || '-s' || n, 'series', 'Series ' || n, 'matched', '{}'::text[] FROM generate_series(1, $2) n`,
+		`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
+		 SELECT $1 || '-s' || n || '-e' || e, $1 || '-s' || n, 1, e, 'E' || e FROM generate_series(1, $2) n, generate_series(1, 2) e`,
+	} {
+		if _, err := pool.Exec(ctx, stmt, prefix, total); err != nil {
+			t.Fatalf("seed series: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_files (episode_id, media_folder_id, file_path, duration)
+		SELECT $1 || '-s' || n || '-e2', $3, '/nextup-pages/' || $1 || '/' || n || '.mkv', 1800
+		FROM generate_series(1, $2) n`, prefix, total, folderID); err != nil {
+		t.Fatalf("seed files: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+		SELECT $1, $2, $3 || '-s' || n || '-e1', 0, 1800, TRUE, $4::timestamptz - n * interval '1 minute'
+		FROM generate_series(1, $5) n`, userID, profileID, prefix, now.Add(-time.Hour), total); err != nil {
+		t.Fatalf("seed progress: %v", err)
+	}
+	oldest := fmt.Sprintf("%s-s%d", prefix, total)
+	seedNextUpAvailability(t, ctx, pool, folderID, oldest+"-e2", oldest, 2, now.Add(-time.Minute), true)
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	all, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: total + 23})
+	if err != nil {
+		t.Fatalf("ListNextUp all: %v", err)
+	}
+	if len(all) != total || all[total-1].SeriesID != oldest {
+		t.Fatalf("ListNextUp returned %d rows ending with %s, want %d ending with %s", len(all), all[len(all)-1].SeriesID, total, oldest)
+	}
+	for limit := 24; limit < total; limit += 24 {
+		page, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: limit})
+		if err != nil {
+			t.Fatalf("ListNextUp limit %d: %v", limit, err)
+		}
+		for i := range page {
+			if page[i].ContentID != all[i].ContentID {
+				t.Fatalf("limit %d row %d = %s, want %s", limit, i, page[i].ContentID, all[i].ContentID)
+			}
+		}
+	}
+}
+
 func TestSortNextUpByActivity_BreaksTiesByCompletionThenSeries(t *testing.T) {
 	t.Parallel()
 
