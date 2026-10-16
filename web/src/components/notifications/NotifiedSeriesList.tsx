@@ -209,7 +209,7 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
     // The URL changed from elsewhere (the Series button resets it); our own
     // writes match the settled text and leave typing in progress alone.
     if (series.q !== debounced) setText(series.q);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- typing in progress must not reset on its own debounce
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on URL changes only, not on each keystroke
   }, [series.q]);
   return (
     <div className="mb-3 flex flex-col gap-2 px-3 sm:flex-row sm:items-center">
