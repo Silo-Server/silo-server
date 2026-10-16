@@ -17,6 +17,8 @@ push-registration protocol retain their existing shapes.
 | `GET /preferences` | Profile ID and five preference booleans |
 | `PUT /preferences` | Updated preferences; omitted fields retain their values |
 | `GET /series` | The series whose new episodes can notify the profile, as `items` and `page` |
+| `PUT /series/{series_id}/mute` | 204; mutes the series for the profile, already muted succeeds, a series the viewer may not see is 404 |
+| `DELETE /series/{series_id}/mute` | 204; unmutes the series, not muted succeeds |
 
 The inbox list accepts `status=all|unread`, `limit` up to 200, and `cursor`.
 A cursor binds the acting account/profile, filter, page size, last delivery tuple,
@@ -41,13 +43,18 @@ retain their timestamps, and migration seeds the boundary from their maximum.
 
 `GET /series` (`listNotificationSeries`) lists every series the acting profile
 favorited, put on its watchlist, is partway through, or waits on a next episode
-of. It reads the same interest index episode fanout reads, so it names exactly
-the series a new episode is evaluated for. A series in several libraries is one
-entry carrying every library's reasons.
+of, and every series it muted. It reads the same interest index and mutes
+episode fanout reads, so it names exactly the series a new episode is evaluated
+for. A series in several libraries is one entry carrying every library's
+reasons.
 
 Each entry has the series as a catalog card in `item`, the profile's
 relationships in `reasons`, and in `active_reasons` the ones the profile's
-preferences let notify. `notifies` is true when any reason is active. With an
+preferences let notify. `muted` is true when the profile muted the series.
+`notifies` is true when any reason is active and the series is not muted. A
+muted series keeps its `active_reasons`, so a client can say what would notify
+after an unmute, and it is listed even with no reason left, so the profile can
+still unmute it. With an
 active Next Up reason, `next_up_after` names the last episode the profile
 finished; on that reason alone, only a new episode after it notifies. It names
 the finished episode rather than the next one because the next may not exist
@@ -57,8 +64,9 @@ already notified about and a series the profile can no longer open.
 
 Filters combine:
 
-- `status=active` keeps the series that notify, `status=inactive` the ones the
-  preferences silence, and the default `all` keeps both.
+- `status=active` keeps the series that notify, `status=inactive` the ones that
+  do not (the preferences silence every reason, or the profile muted the
+  series), and the default `all` keeps both.
 - `reason=favorite|watchlist|continue_watching|next_up` keeps the series with
   that relationship, whether or not the preferences let it notify.
 - `q` keeps the series whose title or sort title contains the text,
@@ -81,6 +89,27 @@ than `limit` entries if access changes between that check and card resolution.
 The interest index follows favorites, watchlist, and progress changes
 asynchronously, so a just-favorited series can take a moment to appear.
 `series.available` in `GET /capabilities` reports the operation.
+
+### Muting one series
+
+`PUT /series/{series_id}/mute` (`muteNotificationSeries`) mutes one series for
+the acting profile: it gets no new-episode notification for that series on any
+channel, whatever its reasons, until it unmutes. Favorites, the watchlist, Home,
+and watch history do not change, and other profiles on the account are not
+affected. The mute does not lapse when the profile watches the series again.
+Muting a series already muted succeeds and changes nothing. An ID that names no
+series, or a series the viewer may not see, is 404.
+
+`DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
+The series notifies again for its active reasons from the next new episode;
+episodes that arrived while it was muted are not announced afterwards.
+Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
+profile can lift a mute on a series it can no longer open.
+
+Notifications already delivered stay in the inbox, and a delivery fanout
+created before the mute committed can still reach its channels. Both writes
+answer 204 with no body. `series.mute` in `GET /capabilities` reports both
+operations and the `muted` field.
 
 ## Fixed read cutoff
 

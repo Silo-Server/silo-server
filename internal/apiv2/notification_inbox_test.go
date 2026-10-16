@@ -29,11 +29,13 @@ type fakeNotificationInbox struct {
 	empty  bool
 	// series is the notified-series list; nil answers fixtureNotifiedSeries.
 	series []notifications.NotifiedSeries
+	// mutes and unmutes record the series each call named, as profile/series.
+	mutes, unmutes []string
 }
 
 // fixtureNotifiedSeries is a profile's notified-series list in service
 // order: Next Up alone, two active reasons, a series the viewer may not see,
-// and a watchlist series the preferences silence.
+// a watchlist series the preferences silence, and a muted favorite.
 func fixtureNotifiedSeries() []notifications.NotifiedSeries {
 	nextUp := notifications.EpisodeKey(2, 9)
 	day := func(n int) time.Time { return fixedTime().Add(time.Duration(n) * 24 * time.Hour) }
@@ -43,7 +45,24 @@ func fixtureNotifiedSeries() []notifications.NotifiedSeries {
 		{SeriesID: "series:bear", SeriesSortFields: notifications.SeriesSortFields{SortKey: "bear", Title: "The Bear", Year: 2024, AddedAt: day(1), LatestEpisodeAddedAt: latest(5)}, Reasons: notifications.ReasonFlags{Favorite: true, ContinueWatching: true}, Active: notifications.ReasonFlags{Favorite: true, ContinueWatching: true}},
 		{SeriesID: "series:hidden", SeriesSortFields: notifications.SeriesSortFields{SortKey: "hidden", Title: "Hidden", AddedAt: day(2)}, Reasons: notifications.ReasonFlags{Favorite: true}, Active: notifications.ReasonFlags{Favorite: true}},
 		{SeriesID: "series:slow-horses", SeriesSortFields: notifications.SeriesSortFields{SortKey: "slow horses", Title: "Slow Horses", Year: 2023, AddedAt: day(3), LatestEpisodeAddedAt: latest(1)}, Reasons: notifications.ReasonFlags{Watchlist: true}},
+		{SeriesID: "series:wire", SeriesSortFields: notifications.SeriesSortFields{SortKey: "wire", Title: "The Wire", Year: 2002, AddedAt: day(4), LatestEpisodeAddedAt: latest(2)}, Reasons: notifications.ReasonFlags{Favorite: true}, Active: notifications.ReasonFlags{Favorite: true}, Muted: true},
 	}
+}
+
+// notificationNotASeriesID is an item the viewer may see that is no series.
+const notificationNotASeriesID = "movie:heat-1995"
+
+func (f *fakeNotificationInbox) MuteNotificationSeries(_ context.Context, _ int, profile, seriesID string) error {
+	if seriesID == notificationNotASeriesID {
+		return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Series not found"}
+	}
+	f.mutes = append(f.mutes, profile+"/"+seriesID)
+	return nil
+}
+
+func (f *fakeNotificationInbox) UnmuteNotificationSeries(_ context.Context, profile, seriesID string) error {
+	f.unmutes = append(f.unmutes, profile+"/"+seriesID)
+	return nil
 }
 
 func (f *fakeNotificationInbox) ListNotifiedSeries(context.Context, string) ([]notifications.NotifiedSeries, error) {

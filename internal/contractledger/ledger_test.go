@@ -1127,6 +1127,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"muteNotificationSeries":                   "V2-only mute of one series' new-episode notifications (v1 is frozen). Muting a muted series inserts no row, so a replay converges on the same mute.",
+	"unmuteNotificationSeries":                 "V2-only lift of a series mute (v1 is frozen). Unmuting a series that is not muted deletes nothing, so a replay converges.",
 	"markNotInterested":                        "V2-only Not interested mark (v1 is frozen). Marking a marked title changes no row and sends no notice, so a replay converges on the same mark.",
 	"unmarkNotInterested":                      "V2-only clearing of a Not interested mark (v1 is frozen). Clearing an absent mark changes no row and sends no notice, so a replay converges.",
 	"translateLibraryMetadata":                 "V2-only library prewarm of AI metadata translation (v1 is frozen). It coalesces on the library's active prewarm for the language; a replay after it finished starts another prewarm that finds only what is still missing, so nothing is translated twice.",

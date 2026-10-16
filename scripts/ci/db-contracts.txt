@@ -156,6 +156,11 @@
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
+./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
+./internal/notifications TestSeriesMutesList
+./internal/notifications TestSeriesMutesUnmuteAndPurge
+./internal/metadata TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres
+./internal/catalog/reattribute TestMovePairsMovesNotificationMutesDB
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase

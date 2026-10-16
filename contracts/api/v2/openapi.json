@@ -36132,12 +36132,16 @@
             "$ref": "#/components/schemas/CatalogItem",
             "description": "The series as a catalog card"
           },
+          "muted": {
+            "description": "The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted.",
+            "type": "boolean"
+          },
           "next_up_after": {
             "$ref": "#/components/schemas/NotificationEpisodeRef",
             "description": "With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"
           },
           "notifies": {
-            "description": "True when at least one reason is active",
+            "description": "True when at least one reason is active and the profile has not muted the series",
             "type": "boolean"
           },
           "reasons": {
@@ -36149,7 +36153,8 @@
           "item",
           "reasons",
           "active_reasons",
-          "notifies"
+          "notifies",
+          "muted"
         ],
         "type": "object"
       },
@@ -36159,10 +36164,15 @@
           "available": {
             "description": "GET /notifications/series lists the series whose new episodes can notify the profile",
             "type": "boolean"
+          },
+          "mute": {
+            "description": "PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted",
+            "type": "boolean"
           }
         },
         "required": [
-          "available"
+          "available",
+          "mute"
         ],
         "type": "object"
       },
@@ -174699,7 +174709,7 @@
     },
     "/api/v2/notifications/series": {
       "get": {
-        "description": "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, filtered and sorted as asked (by title by default). Each carries its reasons and which of them the profile's notification preferences let notify. Series the viewer may not see are omitted.",
+        "description": "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted.",
         "operationId": "listNotificationSeries",
         "parameters": [
           {
@@ -174775,13 +174785,13 @@
             }
           },
           {
-            "description": "active keeps the series the profile's preferences let notify; inactive keeps the ones they silence",
+            "description": "active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series",
             "explode": false,
             "in": "query",
             "name": "status",
             "schema": {
               "default": "all",
-              "description": "active keeps the series the profile's preferences let notify; inactive keeps the ones they silence",
+              "description": "active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series",
               "enum": [
                 "all",
                 "active",
@@ -174954,6 +174964,310 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/series/{series_id}/mute": {
+      "delete": {
+        "description": "The series notifies the acting profile again for its active reasons, from the next new episode on; episodes that arrived while it was muted are not announced. Unmuting a series that is not muted succeeds and changes nothing. No access check runs, so a profile can lift a mute on a series it can no longer see.",
+        "operationId": "unmuteNotificationSeries",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier of the series",
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier of the series",
+              "examples": [
+                "series-tvdb-81189"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unmute new-episode notifications for one series.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "description": "The acting profile gets no new-episode notification for the series on any channel, whatever its reasons, until it unmutes. Favorites, the watchlist, Home, and watch history are unchanged, and other profiles are unaffected. Muting a series already muted succeeds and changes nothing. A series the viewer may not see, or an item that is not a series, is 404.",
+        "operationId": "muteNotificationSeries",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Catalog item identifier of the series",
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "description": "Catalog item identifier of the series",
+              "examples": [
+                "series-tvdb-81189"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mute new-episode notifications for one series.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },

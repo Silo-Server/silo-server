@@ -6,6 +6,7 @@ import {
   listNotificationSeries,
   markAllNotificationsRead,
   markNotificationRead,
+  setNotificationSeriesMuted,
   updateNotificationPreferences,
 } from "./notifications";
 const row = {
@@ -100,6 +101,7 @@ it("never refreshes or replays inbox and preference mutations", async () => {
     () => markNotificationRead("delivery-1"),
     () => markAllNotificationsRead("cutoff"),
     () => updateNotificationPreferences({ enabled: false }),
+    () => setNotificationSeriesMuted("series:bear", true),
   ]) {
     fetch.mockClear();
     await expect(run()).rejects.toMatchObject({ status: 401 });
@@ -170,4 +172,20 @@ it("pages notified series by status and rejects a page that repeats its cursor",
   await expect(listNotificationSeries("inactive", {}, "next")).rejects.toThrow(
     "Invalid series page",
   );
+});
+it("mutes with PUT and unmutes with DELETE on the series' mute", async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockImplementation(async () => new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetch);
+  await setNotificationSeriesMuted("series:bear", true);
+  await setNotificationSeriesMuted("series:bear", false);
+  const calls = fetch.mock.calls.map(([input, init]) => [
+    new URL(String(input), "http://silo.test").pathname,
+    init?.method,
+  ]);
+  expect(calls).toEqual([
+    ["/api/v2/notifications/series/series%3Abear/mute", "PUT"],
+    ["/api/v2/notifications/series/series%3Abear/mute", "DELETE"],
+  ]);
 });

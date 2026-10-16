@@ -14,9 +14,15 @@ import (
 
 // The notified-series list: every series whose new episodes the acting
 // profile has a reason to hear about, the index episode fanout reads, so a
-// profile can see why a series notifies it or why it does not.
+// profile can see why a series notifies it or why it does not. A profile can
+// mute one series, which stops its new-episode notifications whatever its
+// reasons, until it unmutes.
 
-const opListNotificationSeries = "listNotificationSeries"
+const (
+	opListNotificationSeries   = "listNotificationSeries"
+	opMuteNotificationSeries   = "muteNotificationSeries"
+	opUnmuteNotificationSeries = "unmuteNotificationSeries"
+)
 
 // The listNotificationSeries sort fields besides the default title.
 const (
@@ -36,7 +42,7 @@ type NotificationSeriesInput struct {
 	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJ0IjoiYmVhciJ9"`
-	Status string `query:"status" default:"all" enum:"all,active,inactive" doc:"active keeps the series the profile's preferences let notify; inactive keeps the ones they silence"`
+	Status string `query:"status" default:"all" enum:"all,active,inactive" doc:"active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series"`
 	Reason string `query:"reason" enum:"favorite,watchlist,continue_watching,next_up" doc:"Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason"`
 	Q      string `query:"q" maxLength:"200" doc:"Keeps the series whose title or sort title contains this text, case-insensitively" example:"bear"`
 	Sort   string `query:"sort" default:"title" enum:"title,-title,year,-year,added_at,-added_at,latest_episode_added,-latest_episode_added" doc:"One field, descending with a leading '-'. added_at is when the series joined the catalog; latest_episode_added when it last gained an episode. A series without a year or an episode sorts last either way; ties order by title."`
@@ -66,7 +72,8 @@ type NotificationSeries struct {
 	Item          CatalogItem               `json:"item" doc:"The series as a catalog card"`
 	Reasons       NotificationSeriesReasons `json:"reasons" doc:"The profile's relationships to the series"`
 	ActiveReasons NotificationSeriesReasons `json:"active_reasons" doc:"The reasons the profile's notification preferences let notify; all false when they silence the series"`
-	Notifies      bool                      `json:"notifies" doc:"True when at least one reason is active"`
+	Notifies      bool                      `json:"notifies" doc:"True when at least one reason is active and the profile has not muted the series"`
+	Muted         bool                      `json:"muted" doc:"The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted."`
 	NextUpAfter   *NotificationEpisodeRef   `json:"next_up_after,omitempty" doc:"With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"`
 }
 
@@ -144,8 +151,8 @@ func orderMissingLast(aMissing, bMissing bool, c int, desc bool) int {
 func notificationSeriesMatch(in *NotificationSeriesInput, query string) func(notifications.NotifiedSeries) bool {
 	return func(s notifications.NotifiedSeries) bool {
 		switch {
-		case in.Status == notificationSeriesActive && !s.Active.Any(),
-			in.Status == notificationSeriesInactive && s.Active.Any():
+		case in.Status == notificationSeriesActive && !s.Notifies(),
+			in.Status == notificationSeriesInactive && s.Notifies():
 			return false
 		case in.Reason != "" && !s.Reasons.Has(in.Reason):
 			return false
@@ -158,10 +165,68 @@ func registerNotificationSeries(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	op := notificationOperation(http.MethodGet, "/series", opListNotificationSeries)
 	op.Summary = "List the series whose new episodes can notify the acting profile."
-	op.Description = "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, filtered and sorted as asked (by title by default). Each carries its reasons and which of them the profile's notification preferences let notify. Series the viewer may not see are omitted."
+	op.Description = "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted."
 	Register(reg, op, func(ctx context.Context, in *NotificationSeriesInput) (*NotificationSeriesOutput, error) {
 		return reg.listNotificationSeries(ctx, cursors, in)
 	})
+
+	mute := notificationOperation(http.MethodPut, "/series/{series_id}/mute", opMuteNotificationSeries)
+	mute.DefaultStatus = http.StatusNoContent
+	mute.Summary = "Mute new-episode notifications for one series."
+	mute.Description = "The acting profile gets no new-episode notification for the series on any channel, whatever its reasons, until it unmutes. Favorites, the watchlist, Home, and watch history are unchanged, and other profiles are unaffected. Muting a series already muted succeeds and changes nothing. A series the viewer may not see, or an item that is not a series, is 404."
+	Register(reg, mute, reg.muteNotificationSeries)
+
+	unmute := notificationOperation(http.MethodDelete, "/series/{series_id}/mute", opUnmuteNotificationSeries)
+	unmute.DefaultStatus = http.StatusNoContent
+	unmute.Summary = "Unmute new-episode notifications for one series."
+	unmute.Description = "The series notifies the acting profile again for its active reasons, from the next new episode on; episodes that arrived while it was muted are not announced. Unmuting a series that is not muted succeeds and changes nothing. No access check runs, so a profile can lift a mute on a series it can no longer see."
+	Register(reg, unmute, reg.unmuteNotificationSeries)
+}
+
+// NotificationSeriesMuteInput names the series to mute or unmute.
+type NotificationSeriesMuteInput struct {
+	SeriesID ID `path:"series_id" minLength:"1" doc:"Catalog item identifier of the series" example:"series-tvdb-81189"`
+}
+
+func (reg *Registry) muteNotificationSeries(ctx context.Context, in *NotificationSeriesMuteInput) (*struct{}, error) {
+	svc, p := reg.notificationInbox()
+	if p != nil {
+		return nil, p
+	}
+	if reg.deps.PersonalLists == nil {
+		return nil, unavailable("notification series")
+	}
+	viewer, p := personalListViewer(ctx, "")
+	if p != nil {
+		return nil, p
+	}
+	seriesID := string(in.SeriesID)
+	visible, err := reg.deps.PersonalLists.VisibleItemIDs(ctx, viewer, []string{seriesID})
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	if !visible[seriesID] {
+		return nil, NewProblem(TypeNotFound, "Series not found.")
+	}
+	if err := svc.MuteNotificationSeries(ctx, viewer.UserID, viewer.ProfileID, seriesID); err != nil {
+		return nil, serviceProblem(err)
+	}
+	return nil, nil
+}
+
+func (reg *Registry) unmuteNotificationSeries(ctx context.Context, in *NotificationSeriesMuteInput) (*struct{}, error) {
+	svc, p := reg.notificationInbox()
+	if p != nil {
+		return nil, p
+	}
+	_, profileID, p := viewerIdentity(ctx)
+	if p != nil {
+		return nil, p
+	}
+	if err := svc.UnmuteNotificationSeries(ctx, profileID, string(in.SeriesID)); err != nil {
+		return nil, serviceProblem(err)
+	}
+	return nil, nil
 }
 
 func (reg *Registry) listNotificationSeries(ctx context.Context, cursors *Cursors, in *NotificationSeriesInput) (*NotificationSeriesOutput, error) {
@@ -257,7 +322,8 @@ func notificationSeriesOf(s notifications.NotifiedSeries, item CatalogItem) Noti
 		Item:          item,
 		Reasons:       notificationSeriesReasonsOf(s.Reasons),
 		ActiveReasons: notificationSeriesReasonsOf(s.Active),
-		Notifies:      s.Active.Any(),
+		Notifies:      s.Notifies(),
+		Muted:         s.Muted,
 	}
 	// Next Up waits for any episode keyed at or past last-finished + 1, which
 	// need not exist (after a season finale the next is the following season's

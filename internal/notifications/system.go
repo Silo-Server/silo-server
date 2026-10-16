@@ -456,6 +456,9 @@ func (s *System) PurgeProfile(ctx context.Context, profileID string) error {
 	if err := s.Interests.DeleteAllForProfile(ctx, profileID); err != nil {
 		return fmt.Errorf("purge interest rows: %w", err)
 	}
+	if err := s.Interests.deleteMutesForProfile(ctx, profileID); err != nil {
+		return fmt.Errorf("purge series mutes: %w", err)
+	}
 	if err := s.Deliveries.DeleteAllForProfile(ctx, profileID); err != nil {
 		return fmt.Errorf("purge deliveries: %w", err)
 	}

@@ -16,7 +16,8 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE profile_series_interest (LIKE public.profile_series_interest INCLUDING ALL);
 		CREATE TABLE media_items (LIKE public.media_items INCLUDING ALL);
-		CREATE TABLE notification_preferences (LIKE public.notification_preferences INCLUDING ALL)`); err != nil {
+		CREATE TABLE notification_preferences (LIKE public.notification_preferences INCLUDING ALL);
+		CREATE TABLE profile_series_notification_mutes (LIKE public.profile_series_notification_mutes INCLUDING ALL)`); err != nil {
 		t.Fatalf("create tables: %v", err)
 	}
 	nextUp, laterNextUp := EpisodeKey(2, 3), EpisodeKey(2, 5)

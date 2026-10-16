@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   prefs: undefined as unknown,
   series: {} as Record<string, unknown>,
   seriesOptions: [] as unknown[],
+  mute: { mutate: vi.fn(), isPending: false, variables: undefined as unknown },
 }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
 vi.mock("@/api/v2/notifications", () => ({ notificationScope: () => "owner" }));
@@ -35,6 +36,7 @@ vi.mock("@/hooks/queries/notifications", async (importOriginal) => ({
   useMarkNotificationRead: () => ({ mutate: vi.fn() }),
   useNotificationPreferences: () => ({ data: state.prefs, isLoading: false }),
   useUpdateNotificationPreferences: () => ({ mutate: vi.fn() }),
+  useSetNotificationSeriesMuted: () => state.mute,
 }));
 const row = {
   id: "one",
@@ -56,6 +58,9 @@ beforeEach(() => {
   state.prefs = undefined;
   state.series = {};
   state.seriesOptions = [];
+  state.mute.mutate.mockReset();
+  state.mute.isPending = false;
+  state.mute.variables = undefined;
 });
 afterEach(cleanup);
 it("submits the displayed cutoff once while the mutation remains pending", async () => {
@@ -335,4 +340,78 @@ it("clears the search box when the Series button resets the view", async () => {
   await waitFor(() => expect(search).toHaveValue(""));
   await new Promise((resolve) => setTimeout(resolve, 400));
   expect(state.seriesOptions.at(-1)).toMatchObject({ q: "" });
+});
+it("mutes a series from its row and lists muted series under Won't notify with Unmute", () => {
+  state.capability = { series: { available: true, mute: true } };
+  state.prefs = prefs;
+  state.series = {
+    active: seriesQuery([
+      seriesEntry("series:andor", "Andor", {
+        reasons: reasons({ favorite: true }),
+        active_reasons: reasons({ favorite: true }),
+        notifies: true,
+        muted: false,
+      }),
+    ]),
+    inactive: seriesQuery([
+      seriesEntry("series:wire", "The Wire", {
+        reasons: reasons({ favorite: true }),
+        active_reasons: reasons({ favorite: true }),
+        notifies: false,
+        muted: true,
+      }),
+    ]),
+  };
+  renderAt("/notifications?view=series");
+  fireEvent.click(screen.getByRole("button", { name: "Mute Andor" }));
+  expect(state.mute.mutate).toHaveBeenLastCalledWith({
+    seriesId: "series:andor",
+    title: "Andor",
+    muted: true,
+  });
+  const wire = screen.getByRole("link", { name: /The Wire/ });
+  expect(wire).toHaveTextContent("Muted");
+  expect(wire).toHaveTextContent("Favorite (off)");
+  expect(screen.queryByRole("button", { name: "Mute The Wire" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Unmute The Wire" }));
+  expect(state.mute.mutate).toHaveBeenLastCalledWith({
+    seriesId: "series:wire",
+    title: "The Wire",
+    muted: false,
+  });
+});
+it("disables the row whose mute is in flight", () => {
+  state.capability = { series: { available: true, mute: true } };
+  state.mute.isPending = true;
+  state.mute.variables = { seriesId: "series:andor", title: "Andor", muted: true };
+  const entry = (id: string, title: string) =>
+    seriesEntry(id, title, {
+      reasons: reasons({ favorite: true }),
+      active_reasons: reasons({ favorite: true }),
+      notifies: true,
+      muted: false,
+    });
+  state.series = {
+    active: seriesQuery([entry("series:andor", "Andor"), entry("series:bear", "The Bear")]),
+    inactive: seriesQuery([]),
+  };
+  renderAt("/notifications?view=series");
+  expect(screen.getByRole("button", { name: "Mute Andor" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Mute The Bear" })).toBeEnabled();
+});
+it("offers no Mute when the server cannot mute a series", () => {
+  state.capability = { series: { available: true } };
+  state.series = {
+    active: seriesQuery([
+      seriesEntry("series:andor", "Andor", {
+        reasons: reasons({ favorite: true }),
+        active_reasons: reasons({ favorite: true }),
+        notifies: true,
+      }),
+    ]),
+    inactive: seriesQuery([]),
+  };
+  renderAt("/notifications?view=series");
+  expect(screen.getByRole("link", { name: /Andor/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Mute/ })).not.toBeInTheDocument();
 });
