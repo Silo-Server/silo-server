@@ -25,6 +25,11 @@ type NextUpQuery struct {
 	EnableResumable  bool       // include in-progress episodes
 	EnableRewatching bool       // accepted but deferred (no-op)
 	DateCutoff       *time.Time // only series with activity after this date
+	// RankByRelease orders results by ActivityAt, so a series whose next
+	// episode was released after the profile finished the previous one moves
+	// up (the profile's ui.next_up_new_releases_first). Off, results keep the
+	// completion-time order and ActivityAt equals CompletedAt.
+	RankByRelease bool
 
 	// droppedSeriesIDs are the profile's actively dropped series, which a
 	// global lookup excludes. ListNextUp loads them; a series-scoped lookup
@@ -104,19 +109,28 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 		batchesRun := 0
 		exhausted := false
 
-		// The walk visits series by completion time. The first whole batches
-		// holding at least nextUpRankedCandidates rows are ranked by
-		// ActivityAt, so a newly released episode can lift its series to the
-		// front; a batch keeps every walked series' row because trimming it
-		// by completion time could drop one. Rows from later batches, walked
-		// only for larger limits, follow in completion order without being
-		// lifted. The ranked set never depends on the limit, so every limit
-		// reads a prefix of one order and a Jellyfin client paging by raising
-		// the limit sees no row twice.
-		walkUntil := max(limit, nextUpRankedCandidates)
+		// The walk visits series by completion time and, by default, stops
+		// once it has limit rows, each batch asking only for the rows still
+		// missing. With RankByRelease, the first whole batches holding at
+		// least nextUpRankedCandidates rows are ranked by ActivityAt, so a
+		// newly released episode can lift its series to the front; a batch
+		// then keeps every walked series' row because trimming it by
+		// completion time could drop one. Rows from later batches, walked only
+		// for larger limits, follow in completion order without being lifted.
+		// The ranked set never depends on the limit, so every limit reads a
+		// prefix of one order and a Jellyfin client paging by raising the
+		// limit sees no row twice.
+		walkUntil := limit
+		if q.RankByRelease {
+			walkUntil = max(limit, nextUpRankedCandidates)
+		}
 		ranked := -1
 		for batch := 0; batch < nextUpAnchorMaxBatches; batch++ {
-			batchResults, frontier, err := r.listNextUpBatch(ctx, q, cursor)
+			batchLimit := walkUntil - len(results)
+			if q.RankByRelease {
+				batchLimit = nextUpAnchorMaxSeries
+			}
+			batchResults, frontier, err := r.listNextUpBatch(ctx, q, batchLimit, cursor)
 			if err != nil {
 				return nil, err
 			}
@@ -145,10 +159,12 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 				"results_found", len(results))
 		}
 
-		if ranked < 0 {
-			ranked = len(results)
+		if q.RankByRelease {
+			if ranked < 0 {
+				ranked = len(results)
+			}
+			sortNextUpByActivity(results[:ranked])
 		}
-		sortNextUpByActivity(results[:ranked])
 		if len(results) > limit {
 			results = results[:limit]
 		}
@@ -227,13 +243,14 @@ const nextUpAnchorMaxBatches = 10
 const nextUpRankedCandidates = 100
 
 // listNextUpBatch walks one batch of up to nextUpAnchorMaxSeries series and
-// returns every walked series' next-up row.
+// returns up to limit of their next-up rows, newest completion first.
 func (r *NextUpRepository) listNextUpBatch(
 	ctx context.Context,
 	q NextUpQuery,
+	limit int,
 	cursor *nextUpWalkCursor,
 ) ([]NextUpResult, *nextUpWalkFrontier, error) {
-	query, args := buildListNextUpQuery(q, nextUpAnchorMaxSeries, cursor)
+	query, args := buildListNextUpQuery(q, limit, cursor)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("querying next-up episodes: %w", err)
@@ -368,9 +385,15 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		argIdx++
 	}
 
-	releaseScope, releaseArgs := nextUpReleaseScope(q, argIdx)
-	args = append(args, releaseArgs...)
-	releaseLateral := fmt.Sprintf(nextUpReleaseLateral, releaseScope)
+	// Without RankByRelease the release lookup is skipped and a row's
+	// activity is its completion time.
+	releaseLateral, activityExpr := "", "es.updated_at"
+	if q.RankByRelease {
+		releaseScope, releaseArgs := nextUpReleaseScope(q, argIdx)
+		args = append(args, releaseArgs...)
+		releaseLateral = fmt.Sprintf(nextUpReleaseLateral, releaseScope)
+		activityExpr = "GREATEST(es.updated_at, released.released_at)"
+	}
 
 	// When resumable items are disabled, suppress next-up only if the series has
 	// newer in-progress activity than the most recent completed episode. Older
@@ -559,7 +582,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 			next_ep.season_number,
 			next_ep.episode_number,
 			es.updated_at,
-			GREATEST(es.updated_at, released.released_at)
+			%s
 		FROM %s es
 		JOIN media_items si ON si.content_id = es.series_id
 		JOIN LATERAL (
@@ -580,7 +603,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		) next_ep ON true
 		%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, completedEpisodesCTE, inProgressExclusion, sourceTable, releaseLateral)
+		LIMIT $3`, completedEpisodesCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral)
 		return query, args
 	}
 
@@ -592,7 +615,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 			next_ep.season_number,
 			next_ep.episode_number,
 			es.updated_at AS completed_at,
-			GREATEST(es.updated_at, released.released_at) AS activity_at
+			%s AS activity_at
 		FROM %s es
 		JOIN media_items si ON si.content_id = es.series_id
 		JOIN LATERAL (
@@ -613,7 +636,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		) next_ep ON true
 		%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, sourceTable, releaseLateral)
+		LIMIT $3`, activityExpr, sourceTable, releaseLateral)
 
 	query := fmt.Sprintf(`
 		WITH %s

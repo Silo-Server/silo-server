@@ -412,8 +412,8 @@ When the profile's `ui.next_up_mode` is `combined` (the default), Continue
 Watching merges in-progress cards with next-up episodes, keeps one card per
 series, orders the cards by most recent activity, and returns at most the row's
 `item_limit` cards. A next-up card's activity is when the profile finished the
-previous episode, or when the next episode was released to the server if that
-came later. With `separate`, the row holds only in-progress cards and
+previous episode; with `ui.next_up_new_releases_first` on, it is when the next
+episode was released to the server if that came later. With `separate`, the row holds only in-progress cards and
 Next Up is its own row.
 
 ## Bridge note

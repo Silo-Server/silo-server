@@ -44,10 +44,11 @@ func (c *nextUpWalkTracer) take() []string {
 
 // TestContinueWatchingCombinedRowKeepsNewestCardsDB pins the combined
 // Continue Watching row: in-progress and next-up cards merge newest first and
-// the row stops at its item limit. The next-up walk is never bounded by the
-// in-progress cards' times, even when they fill the row on their own: a series
-// finished before all of them makes the row when its next episode was just
-// released.
+// the row stops at its item limit. When the in-progress cards fill the row on
+// their own, the next-up walk only reads series completed since the oldest of
+// them, since anything older could not make the row. A profile showing new
+// releases first is the exception: a series finished before all of them leads
+// the row when its next episode was just released, so its walk is unbounded.
 func TestContinueWatchingCombinedRowKeepsNewestCardsDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -145,28 +146,45 @@ func TestContinueWatchingCombinedRowKeepsNewestCardsDB(t *testing.T) {
 	fetcher := NewFetcher(pool)
 	fetcher.StoreProvider = provider
 	fetcher.NextUpRepo = catalog.NewNextUpRepository(pool, provider)
-	viewerCtx := access.SetScope(ctx, access.Scope{UserID: userID, ProfileID: profileID, NextUpMode: NextUpModeCombined})
-
 	tests := []struct {
-		name  string
-		limit int
-		want  []string
+		name             string
+		newReleasesFirst bool
+		limit            int
+		want             []string
+		boundedWalk      bool
 	}{
 		{
-			// The rewatch series counts once, so in-progress cards alone fill
-			// the row; the newly released episode still leads it.
-			name:  "in-progress cards fill the row",
-			limit: 3,
-			want:  []string{episode(returning, 2), episode(rewatch, 2), movies[0]},
+			// The rewatch series counts once, so three in-progress cards fill
+			// the row and the walk stops at the second movie.
+			name:        "in-progress cards fill the row",
+			limit:       3,
+			want:        []string{episode(rewatch, 2), movies[0], episode(recent, 2)},
+			boundedWalk: true,
 		},
 		{
 			name:  "row short of its limit",
 			limit: 10,
-			want:  []string{episode(returning, 2), episode(rewatch, 2), movies[0], episode(recent, 2), movies[1], movies[2], movies[3], episode(old, 2)},
+			want:  []string{episode(rewatch, 2), movies[0], episode(recent, 2), movies[1], movies[2], movies[3], episode(old, 2), episode(returning, 2)},
+		},
+		{
+			name:             "new releases first, in-progress cards fill the row",
+			newReleasesFirst: true,
+			limit:            3,
+			want:             []string{episode(returning, 2), episode(rewatch, 2), movies[0]},
+		},
+		{
+			name:             "new releases first, row short of its limit",
+			newReleasesFirst: true,
+			limit:            10,
+			want:             []string{episode(returning, 2), episode(rewatch, 2), movies[0], episode(recent, 2), movies[1], movies[2], movies[3], episode(old, 2)},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			viewerCtx := access.SetScope(ctx, access.Scope{
+				UserID: userID, ProfileID: profileID,
+				NextUpMode: NextUpModeCombined, NextUpNewReleasesFirst: tt.newReleasesFirst,
+			})
 			tracer.take()
 			section := ResolvedSection{
 				ID:          id("section"),
@@ -189,8 +207,8 @@ func TestContinueWatchingCombinedRowKeepsNewestCardsDB(t *testing.T) {
 				t.Fatal("fetch issued no next-up walk")
 			}
 			for _, walk := range walks {
-				if strings.Contains(walk, "uwp.updated_at >= $") {
-					t.Fatalf("next-up walk is bounded by completion time:\n%s", walk)
+				if bounded := strings.Contains(walk, "uwp.updated_at >= $"); bounded != tt.boundedWalk {
+					t.Fatalf("next-up walk bounded = %v, want %v:\n%s", bounded, tt.boundedWalk, walk)
 				}
 			}
 		})

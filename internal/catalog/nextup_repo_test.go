@@ -833,7 +833,7 @@ func TestNextUpRepository_ReleasedEpisodeMovesCaughtUpSeriesForward(t *testing.T
 	})
 
 	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
-	results, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: 20})
+	results, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 20})
 	if err != nil {
 		t.Fatalf("ListNextUp: %v", err)
 	}
@@ -845,16 +845,28 @@ func TestNextUpRepository_ReleasedEpisodeMovesCaughtUpSeriesForward(t *testing.T
 		t.Errorf("binge ActivityAt=%v, want its completion %v", got.ActivityAt, bingeDone)
 	}
 
+	// Without the profile's opt-in, the order stays by completion time.
+	results, err = repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListNextUp by completion: %v", err)
+	}
+	assertNextUpOrder(t, results, episodes[3], episodes[5], episodes[1])
+	for _, res := range results {
+		if !res.ActivityAt.Equal(res.CompletedAt) {
+			t.Errorf("%s ActivityAt=%v without RankByRelease, want its completion %v", res.ContentID, res.ActivityAt, res.CompletedAt)
+		}
+	}
+
 	// A limit below the candidate count keeps the released episode: the walk
 	// visits the rerun before the weekly show, but the order is by activity.
-	results, err = repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: 2})
+	results, err = repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 2})
 	if err != nil {
 		t.Fatalf("ListNextUp limit 2: %v", err)
 	}
 	assertNextUpOrder(t, results, episodes[3], episodes[1])
 
 	// The series' own lookup reports the same activity time.
-	results, err = repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, SeriesID: weekly, Limit: 1})
+	results, err = repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, SeriesID: weekly, Limit: 1})
 	if err != nil {
 		t.Fatalf("ListNextUp scoped: %v", err)
 	}
@@ -901,7 +913,7 @@ func TestNextUpRepository_EarliestAvailabilityDecidesRelease(t *testing.T) {
 	})
 
 	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
-	results, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: 20})
+	results, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 20})
 	if err != nil {
 		t.Fatalf("ListNextUp: %v", err)
 	}
@@ -914,7 +926,7 @@ func TestNextUpRepository_EarliestAvailabilityDecidesRelease(t *testing.T) {
 
 	// A viewer who can reach only the second library sees the release.
 	results, err = repo.ListNextUp(ctx, NextUpQuery{
-		UserID: userID, ProfileID: profileID, Limit: 20,
+		UserID: userID, ProfileID: profileID, Limit: 20, RankByRelease: true,
 		AccessFilter: AccessFilter{AllowedLibraryIDs: []int{otherFolder}},
 	})
 	if err != nil {
@@ -953,7 +965,7 @@ func TestNextUpRepository_ReleaseOutsideScopeKeepsCompletionOrder(t *testing.T) 
 	})
 
 	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
-	base := NextUpQuery{UserID: userID, ProfileID: profileID, Limit: 20}
+	base := NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 20}
 	results, err := repo.ListNextUp(ctx, base)
 	if err != nil {
 		t.Fatalf("ListNextUp: %v", err)
@@ -1029,12 +1041,12 @@ func TestNextUpRepository_SmallerLimitReadsPrefixOfLargerLimit(t *testing.T) {
 	})
 
 	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
-	all, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: 3})
+	all, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 3})
 	if err != nil {
 		t.Fatalf("ListNextUp limit 3: %v", err)
 	}
 	assertNextUpOrder(t, all, episodes[5], episodes[1], episodes[3])
-	first, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: 1})
+	first, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: 1})
 	if err != nil {
 		t.Fatalf("ListNextUp limit 1: %v", err)
 	}
@@ -1082,7 +1094,7 @@ func TestNextUpRepository_PagesPastRankedCandidatesKeepOneOrder(t *testing.T) {
 	seedNextUpAvailability(t, ctx, pool, folderID, oldest+"-e2", oldest, 2, now.Add(-time.Minute), true)
 
 	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
-	all, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: total + 23})
+	all, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: total + 23})
 	if err != nil {
 		t.Fatalf("ListNextUp all: %v", err)
 	}
@@ -1090,7 +1102,7 @@ func TestNextUpRepository_PagesPastRankedCandidatesKeepOneOrder(t *testing.T) {
 		t.Fatalf("ListNextUp returned %d rows ending with %s, want %d ending with %s", len(all), all[len(all)-1].SeriesID, total, oldest)
 	}
 	for limit := 24; limit < total; limit += 24 {
-		page, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, Limit: limit})
+		page, err := repo.ListNextUp(ctx, NextUpQuery{UserID: userID, ProfileID: profileID, RankByRelease: true, Limit: limit})
 		if err != nil {
 			t.Fatalf("ListNextUp limit %d: %v", limit, err)
 		}

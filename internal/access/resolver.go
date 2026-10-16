@@ -109,6 +109,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
 		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides
 		scope.NextUpMode = preferences.NextUpMode
+		scope.NextUpNewReleasesFirst = preferences.NextUpNewReleasesFirst
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
 		verified, err := VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
