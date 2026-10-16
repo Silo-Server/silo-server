@@ -18,8 +18,10 @@ ALTER TABLE public.episode_availability
 -- Backfill with the detector's rule, taking the time the row was recorded as
 -- the detection time. The 14 days mirror newReleaseWindow
 -- (internal/notifications/release_repo.go). The detector saw the episode's
--- library membership when it recorded the row; an episode whose membership
--- is gone now (its file is missing) cannot be judged and stays unreleased.
+-- library membership when it recorded the row, which began no later than the
+-- row. An episode whose membership is gone now (its file is missing), or
+-- began after the row (its file was removed and came back), cannot be judged
+-- and stays unreleased.
 UPDATE public.episode_availability ea
 SET released_at = ea.available_at
 FROM public.notification_library_seed_state ss
@@ -32,6 +34,7 @@ WHERE ss.library_id = ea.library_id
       WHERE el.media_folder_id = ea.library_id
         AND el.episode_id = ea.episode_id
         AND el.first_seen_at >= ea.available_at - interval '14 days'
+        AND el.first_seen_at <= ea.available_at
   );
 
 -- +goose Down

@@ -20,16 +20,18 @@ INSERT INTO episode_availability VALUES
 	(1, 'new', NOW() - INTERVAL '5 days'),
 	(1, 'late-match', NOW() - INTERVAL '5 days'),
 	(1, 'no-membership', NOW() - INTERVAL '5 days'),
+	(1, 'restored', NOW() - INTERVAL '5 days'),
 	(2, 'unseeded', NOW() - INTERVAL '5 days');
 INSERT INTO episode_libraries VALUES
 	('back-catalog', 1, NOW() - INTERVAL '101 days'),
 	('new', 1, NOW() - INTERVAL '6 days'),
 	('late-match', 1, NOW() - INTERVAL '60 days'),
+	('restored', 1, NOW() - INTERVAL '1 day'),
 	('unseeded', 2, NOW() - INTERVAL '5 days');`)
 
 	migrationExec(t, tx, adminMigrationSQL(t, "20261016003126_add_episode_availability_released_at", schema, false))
 
-	want := map[string]bool{"back-catalog": false, "new": true, "late-match": false, "no-membership": false, "unseeded": false}
+	want := map[string]bool{"back-catalog": false, "new": true, "late-match": false, "no-membership": false, "restored": false, "unseeded": false}
 	for id, released := range want {
 		var got bool
 		if err := tx.QueryRow(t.Context(),
