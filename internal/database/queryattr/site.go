@@ -79,10 +79,29 @@ func skipFunction(name string) bool {
 		strings.HasPrefix(name, modulePrefix+"internal/database")
 }
 
+// shortWalk covers the usual path from the tracer through pgx to the calling
+// site. runtime.Callers cost grows with the frames it unwinds; in a production
+// build the full walk measured about 10 µs per query, so it runs only when the
+// short one finds no site.
+const shortWalk = 8
+
 func caller() *site {
 	var stack [32]uintptr
-	n := runtime.Callers(3, stack[:])
-	for _, pc := range stack[:n] {
+	n := runtime.Callers(3, stack[:shortWalk])
+	if s := firstSite(stack[:n]); s != nil {
+		return s
+	}
+	if n == shortWalk {
+		n = runtime.Callers(3, stack[:])
+		if s := firstSite(stack[shortWalk:n]); s != nil {
+			return s
+		}
+	}
+	return internSite("unknown")
+}
+
+func firstSite(stack []uintptr) *site {
+	for _, pc := range stack {
 		if cached, ok := pcs.Load(pc); ok {
 			if s, _ := cached.(*site); s != nil {
 				return s
@@ -106,5 +125,5 @@ func caller() *site {
 			return s
 		}
 	}
-	return internSite("unknown")
+	return nil
 }
