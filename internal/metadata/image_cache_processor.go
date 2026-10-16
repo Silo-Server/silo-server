@@ -1301,12 +1301,12 @@ func localFileIOError(err error) bool {
 
 // readLocalImageBesideCatalogedFile opens dir, which resolves to
 // resolvedDir, as a root and reads localPath through it when one of files,
-// cataloged paths under dir, physically sits in that folder and is the same
-// file inside the root as at its cataloged path. Paths inside the root are
-// taken from resolved paths, as readConfinedLocalImage does, so a link inside
-// the folder that stays in it, absolute or not, doesn't stop the read. trusted
-// reports whether a file vouched for the folder; when none did, err is a
-// storage failure met while checking.
+// cataloged paths under dir, is the same file inside the root as at its
+// cataloged path. The image's path inside the root comes from its resolved
+// path, as in readConfinedLocalImage, so a link inside the folder that stays
+// in it, absolute or not, doesn't stop the read. trusted reports whether a
+// file vouched for the folder; when none did, err is a storage failure met
+// while checking.
 func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir string, files []string) (data []byte, trusted bool, err error) {
 	imageRel, err := filepath.Rel(resolvedDir, filepath.Join(resolvedImageDir, filepath.Base(localPath)))
 	if err != nil || !filepath.IsLocal(imageRel) {
@@ -1324,16 +1324,13 @@ func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImag
 		}
 	}
 	for _, file := range files {
-		resolvedFile, err := filepath.EvalSymlinks(file)
-		if err != nil {
-			noteIOErr(err)
-			continue
-		}
-		// A cataloged file behind another link out of the folder is no proof.
-		rel, err := filepath.Rel(resolvedDir, resolvedFile)
+		rel, err := filepath.Rel(dir, file)
 		if err != nil || !filepath.IsLocal(rel) {
 			continue
 		}
+		// Look through the opened folder first. os.Root won't follow a link
+		// out of it, so a cataloged file behind one is no proof, and the
+		// link's target, which may be a stalled mount, is never touched.
 		inside, err := root.Stat(rel)
 		if err != nil {
 			noteIOErr(err)
