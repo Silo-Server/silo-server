@@ -277,8 +277,8 @@ func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// Headshots ride the profile ladder ({500, 300}), not the poster ladder,
-	// which now carries a w780 rung. Resolving them as posters would name a
-	// profile/w780 key that is never generated — and the server-side ladder
+	// which carries wider rungs. Resolving them as posters would name a
+	// profile/w1000 key that is never generated — and the server-side ladder
 	// fallback deliberately skips profile, so nothing would rescue it.
 	resolvedImage := compatPresignImageWithExpiry(h.detailSvc, r.Context(), person.PhotoPath, artworkkey.ImageProfile, imageSize)
 	imageURL := resolvedImage.URL

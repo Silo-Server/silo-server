@@ -1976,15 +1976,15 @@ func main() {
 		}
 		if deps.Blobs.Assets != nil {
 			imageResolver.SetArtworkResolver(deps.ArtworkResolver)
-			// Local storage publishes with an atomic rename, so the catalog
-			// can trust the manifest as written. Only external delivery (a
-			// public or token-authenticated read endpoint in front of S3)
-			// can lag behind a write and needs the verified-keys lookup.
-			if deps.ArtworkDelivery.External {
-				imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(
-					deps.DB, deps.ArtworkDelivery.Scope, true,
-				))
-			}
+			// Every backend reads the publication manifest, because a key the
+			// catalog holds can name a rung its revision predates: after a
+			// ladder change, existing artwork lacks the new widest rung until
+			// the ladder backfill regenerates it. Only external delivery (a
+			// public or token-authenticated read endpoint in front of S3) can
+			// also lag behind a write, so only it runs the verifier.
+			imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(
+				deps.DB, deps.ArtworkDelivery.Scope, deps.ArtworkDelivery.External,
+			))
 		}
 		deps.ImageResolver = imageResolver
 		deps.PluginImageResolver = imageResolver

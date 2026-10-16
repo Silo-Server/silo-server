@@ -27,15 +27,15 @@ func personCreditPhoto(t *testing.T, size imagesize.Size) (*recordingCatalogImag
 	return resolver, credits[0]
 }
 
-// Without a requested size a headshot is presigned exactly as stored, which is
-// what this has always returned — rewriting the key here would change every
-// existing client's cast list. Plugin-backed photos get the large hint so
+// Without a requested size a cached headshot is the profile ladder's medium
+// rung, the w500 the people endpoints serve, never the stored original, which
+// can be up to 3840px tall. Plugin-backed photos get the large hint so
 // providers such as TMDB serve a headshot sharp enough for a high-density card.
-func TestPersonCreditPhotoUnsetUnchanged(t *testing.T) {
+func TestPersonCreditPhotoUnsetIsMediumRung(t *testing.T) {
 	resolver, credit := personCreditPhoto(t, imagesize.Unset)
 
-	if resolver.path != testPhotoPath {
-		t.Errorf("resolved path = %q, want the stored key %q untouched", resolver.path, testPhotoPath)
+	if want := "tmdb/people/287/profile/w500.abc123.webp"; resolver.path != want {
+		t.Errorf("resolved path = %q, want %q", resolver.path, want)
 	}
 	if resolver.variant != "large" {
 		t.Errorf("resolver variant = %q, want large", resolver.variant)

@@ -28,8 +28,8 @@ the contract, so anything else is rejected by request validation as
 `422 validation_failed` — a typo is a client bug, and quietly serving a default
 would hide it behind artwork that is merely the wrong resolution.
 
-Omitting the parameter keeps the per-context defaults exactly as they were, so no
-existing client is affected.
+Omitting the parameter keeps the server's per-context defaults, described
+below.
 
 The parameter is accepted on:
 
@@ -38,12 +38,16 @@ The parameter is accepted on:
 - seasons, a single season, and episodes
 - home and library sections, including single-section items
 - the personal lists: `/api/v2/favorites`, `/api/v2/watchlist`, and `/api/v2/history`
+- shuffles, the not-interested list, and notification series
 
 Other surfaces ignore it.
 
 Within item detail this covers cast and crew headshots too: they follow the
 `profile` ladder, which has no wide rung, so `large` and `medium` land on the
-same 500px image.
+same 500px image. Without the parameter they are that 500px image as well.
+
+Without the parameter, an episode still standing in for a backdrop in a section
+hero or Continue Watching uses the widest still rung that fits, 1280px.
 
 The `/api/v2/catalog/people` operations do **not** take the parameter — their headshots are
 always the 500px variant. Browsing a person's filmography does honor it, because
@@ -57,23 +61,23 @@ looks wrong.
 
 | Image type | `small` | `medium` | `large` | `original` |
 | --- | --- | --- | --- | --- |
-| poster | 300 | 500 | 780 | up to 1920 |
-| still | 300 | 500 | 780 | up to 1920 |
-| backdrop | 300 | 1920 | 1920 | up to 1920 |
-| logo | 500 | 500 | 1280 | up to 1920 |
-| profile | 300 | 500 | 500 | up to 1920 |
-| banner | 500 | 500 | 1000 | up to 1920 |
-| thumb | 300 | 500 | 1280 | up to 1920 |
-| clearart | 500 | 500 | 1000 | up to 1920 |
-| disc | 300 | 500 | 1000 | up to 1920 |
+| poster | 300 | 500 | 1000 | up to 3840 |
+| still | 300 | 500 | 1280 | up to 3840 |
+| backdrop | 300 | 1920 | 2560 | up to 3840 |
+| logo | 500 | 500 | 1280 | up to 3840 |
+| profile | 300 | 500 | 500 | up to 3840 |
+| banner | 500 | 500 | 1000 | up to 3840 |
+| thumb | 300 | 500 | 1280 | up to 3840 |
+| clearart | 500 | 500 | 1000 | up to 3840 |
+| disc | 300 | 500 | 1000 | up to 3840 |
 
 The last four rows are the [extended item artwork](#extended-item-artwork); only
 `/api/v2` lists them.
 
 `medium` is the width the server chose before this parameter existed, which is
-why it is not always the middle rung. `original` is the cached original, capped
-on ingest at 1920px on its longest edge — it is not the provider's untouched
-file.
+why it is not always the middle rung. `original` is the cached original at the
+source's full resolution, re-encoded as WebP and capped on ingest at 3840px on
+its longest edge — it is not the provider's untouched file.
 
 Artwork hosted by a metadata plugin rather than cached in the bucket has no
 fixed width. For those the size is forwarded to the plugin as a semantic variant
@@ -119,9 +123,9 @@ GET /api/v2/images/capabilities
   "extended_item_artwork": true,
   "sizes": ["small", "medium", "large", "original"],
   "widths": {
-    "poster": { "small": 300, "medium": 500, "large": 780 },
-    "backdrop": { "small": 300, "medium": 1920, "large": 1920 },
-    "still": { "small": 300, "medium": 500, "large": 780 },
+    "poster": { "small": 300, "medium": 500, "large": 1000 },
+    "backdrop": { "small": 300, "medium": 1920, "large": 2560 },
+    "still": { "small": 300, "medium": 500, "large": 1280 },
     "logo": { "small": 500, "medium": 500, "large": 1280 },
     "profile": { "small": 300, "medium": 500, "large": 500 },
     "banner": { "small": 500, "medium": 500, "large": 1000 },
@@ -129,7 +133,7 @@ GET /api/v2/images/capabilities
     "clearart": { "small": 500, "medium": 500, "large": 1000 },
     "disc": { "small": 300, "medium": 500, "large": 1000 }
   },
-  "original_max_width_px": 1920
+  "original_max_width_px": 3840
 }
 ```
 
@@ -158,10 +162,13 @@ storage loss schedules image caching for regenerable provider artwork while
 retaining catalog pointers and surviving variants;
 delivery-only failures retain the catalog pointers and are checked again.
 
-Before external delivery is verified, the server avoids newly added wide rungs
-and selects a published smaller size or original. Legacy artwork without a
+On every storage backend, a size the artwork's revision did not publish, such as
+a rung a ladder change added that the ladder backfill has not generated yet,
+resolves to a smaller size it did publish. Legacy artwork without a
 publication manifest uses an established smaller size until the ladder backfill
-regenerates it. A completed delivery check restricts selection to working keys.
+regenerates it. Before external delivery is verified, the server also avoids
+newly added wide rungs and selects a published smaller size or original. A
+completed delivery check restricts selection to working keys.
 If none remain, the URL is empty and the client should display its placeholder.
 Images can still fail at a particular client or CDN edge; this must not prevent
 rendering titles, episode counts, progress, or navigation.
@@ -223,9 +230,16 @@ series and season artwork visible. See
 ## Jellyfin compatibility
 
 The Jellyfin-protocol surface maps its own `MaxWidth`/`MaxHeight`/`FillWidth`/
-`FillHeight` parameters onto the same ladder: up to 320px is `small`, 780px to
-1199px is `large`, 1200px and above is `original`, and everything else is
-`medium`.
+`FillHeight` parameters onto the same ladder. It serves the narrowest of `small`,
+`medium` and `large` that is at least four fifths of the requested width on the
+ladder of the image that serves the request (`Primary` is a poster, an episode
+still or a headshot, and an item without the requested type can fall back to
+another), and `original` when even `large` is narrower. A height counts as the
+width it implies at that image's usual aspect ratio: 2:3 for posters and
+headshots, 16:9 for stills, `Backdrop` and `Thumb`. `MaxWidth` and `MaxHeight`
+bound the image, so with both the smaller width wins; `FillWidth` and
+`FillHeight` describe a box the image covers, so the larger wins. With no
+parameters, `Backdrop` is `medium` and every other type is `small`.
 
 Movies and series advertise their banner, thumb, clear art and disc art under the
 Jellyfin image types `Banner`, `Thumb`, `Art` and `Disc` in `ImageTags`, and every

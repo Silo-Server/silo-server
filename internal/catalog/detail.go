@@ -2561,11 +2561,11 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 		if path == "" || path == "-" || strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 			continue
 		}
-		// An absent size preserves the stored key and historical plugin hint;
-		// explicit sizes use the same profile ladder as individual resolution.
-		if filter.ImageSize != imagesize.Unset {
-			path = cachedImageVariantPath(path, artworkkey.ImageProfile, string(filter.ImageSize))
-		}
+		// Cached headshots resolve on the profile ladder; an absent size is its
+		// medium rung, the w500 the people endpoints serve, because the stored
+		// original can be up to 3840px tall and no cast card draws that.
+		// Plugin-hosted photos keep the historical large hint above.
+		path = cachedImageVariantPath(path, artworkkey.ImageProfile, string(filter.ImageSize))
 		photoPaths[i] = path
 		if _, ok := seen[path]; !ok {
 			seen[path] = struct{}{}
@@ -4744,7 +4744,7 @@ func cachedImageVariantPath(path, imageType, size string) string {
 	if strings.Contains(path, "://") {
 		return path
 	}
-	variant := cachedImageVariantKey(imageType, size)
+	variant := cachedImageVariantKey(artworkkey.ImageTypeOf(path, imageType), size)
 	if variant == "" {
 		return path
 	}
@@ -4776,24 +4776,42 @@ func ImageTypeFromCachedPath(path string) string {
 }
 
 // BackdropVariantPath rewrites a cached "/original." image path to the
-// requested backdrop variant (e.g. "w1280" or "w1920"). Episode "backdrops"
-// are frequently the episode still, which the cache only generates at
-// w500/w300 — so requesting a backdrop width 404s. For still/poster/logo
-// paths this clamps to that type's largest cached variant instead. Full URLs,
-// plugin-prefixed paths, and non-"/original." paths pass through unchanged.
+// requested backdrop variant (e.g. "w1280" or "w1920"). A backdrop slot does not
+// always hold a backdrop: an episode's is frequently its still, whose ladder has
+// no backdrop widths, so requesting one would 404. Any other type gets the
+// widest rung of its own ladder that is no wider than the request (an episode
+// still in a w1920 slot gets w1280). Full URLs, plugin-prefixed paths, and
+// non-"/original." paths pass through unchanged.
 func BackdropVariantPath(path, desiredVariant string) string {
 	if path == "" || strings.Contains(path, "://") || !strings.Contains(path, "/original.") {
 		return path
 	}
 	variant := desiredVariant
-	switch imageType := imageTypeFromCachedPath(path); imageType {
-	case "still", "poster", "logo":
-		variant = cachedImageVariantKey(imageType, "")
+	if imageType := artworkkey.ImageTypeOf(path, artworkkey.ImageBackdrop); imageType != artworkkey.ImageBackdrop {
+		variant = widestRungWithin(imageType, desiredVariant)
 	}
 	if variant == "" {
 		return path
 	}
 	return strings.Replace(path, "/original.", "/"+variant+".", 1)
+}
+
+// widestRungWithin returns the widest rung of imageType's ladder that is no
+// wider than the width rung desired names, or the narrowest rung when every
+// rung is wider. A desired variant that names no width gets the type's
+// default.
+func widestRungWithin(imageType, desired string) string {
+	limit, ok := imagesize.VariantWidthPx(desired)
+	widths := artworkkey.VariantWidths(imageType)
+	if !ok || len(widths) == 0 {
+		return cachedImageVariantKey(imageType, "")
+	}
+	for _, width := range widths {
+		if width <= limit {
+			return "w" + strconv.Itoa(width)
+		}
+	}
+	return "w" + strconv.Itoa(widths[len(widths)-1])
 }
 
 // cachedImageVariantKey picks the cached artwork variant for an image type and

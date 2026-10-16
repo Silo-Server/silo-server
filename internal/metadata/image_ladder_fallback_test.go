@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestCatalogArtworkColdReadsNeverProbe(t *testing.T) {
 		manifest := manifestReader{}
 		var paths []string
 		for i := range 37 {
-			key := fmt.Sprintf("tmdb/series/1/seasons/%d/poster/w780.rev.webp", i)
+			key := fmt.Sprintf("tmdb/series/1/seasons/%d/poster/w1000.rev.webp", i)
 			paths = append(paths, key)
 			original := variantKey(key, "original")
 			manifest[original] = ArtworkAvailability{Published: []string{key, variantKey(key, "w500"), original}, External: true}
@@ -64,7 +65,7 @@ func TestCatalogArtworkColdReadsNeverProbe(t *testing.T) {
 }
 
 func TestSelectPublishedVariant(t *testing.T) {
-	const key = "tmdb/series/1/poster/w780.rev.webp"
+	key := "tmdb/series/1/poster/" + posterLargeRung + ".rev.webp"
 	medium, small, original := variantKey(key, "w500"), variantKey(key, "w300"), variantKey(key, "original")
 	for _, tc := range []struct {
 		name  string
@@ -89,6 +90,26 @@ func TestSelectPublishedVariant(t *testing.T) {
 	}
 }
 
+// Artwork without a manifest was cached before the ladder grew, so any rung
+// above the type's medium clamps to medium however many rungs were added.
+func TestLegacyArtworkClampsToEstablishedRung(t *testing.T) {
+	for _, tc := range []struct{ key, want string }{
+		{"tmdb/movies/1/poster/w1000.webp", "tmdb/movies/1/poster/w500.webp"},
+		{"tmdb/movies/1/poster/w780.webp", "tmdb/movies/1/poster/w500.webp"},
+		{"tmdb/movies/1/poster/w300.webp", "tmdb/movies/1/poster/w300.webp"},
+		{"tmdb/series/1/seasons/1/episodes/1/still/w1280.webp", "tmdb/series/1/seasons/1/episodes/1/still/w500.webp"},
+		{"tmdb/movies/1/backdrop/w2560.webp", "tmdb/movies/1/backdrop/w1920.webp"},
+		{"tmdb/movies/1/backdrop/w1280.webp", "tmdb/movies/1/backdrop/w1280.webp"},
+		{"tmdb/movies/1/logo/w1280.webp", "tmdb/movies/1/logo/w500.webp"},
+		{"tmdb/movies/1/backdrop/original.webp", "tmdb/movies/1/backdrop/original.webp"},
+		{"tmdb/movies/1/profile/w500.webp", "tmdb/movies/1/profile/w500.webp"},
+	} {
+		if got := selectPublishedVariant(tc.key, ArtworkAvailability{}, false); got != tc.want {
+			t.Errorf("selectPublishedVariant(%q, legacy) = %q, want %q", tc.key, got, tc.want)
+		}
+	}
+}
+
 func TestVariantKeyRebuild(t *testing.T) {
 	tests := []struct {
 		key     string
@@ -109,7 +130,7 @@ func TestVariantKeyRebuild(t *testing.T) {
 
 func TestOriginalArtworkFallsBackToResizedVariant(t *testing.T) {
 	original := "tmdb/movies/550/poster/original.abc123.webp"
-	large, medium := variantKey(original, "w780"), variantKey(original, "w500")
+	large, medium := variantKey(original, "w1000"), variantKey(original, "w500")
 	for _, tc := range []struct {
 		name string
 		keys []string
@@ -135,13 +156,54 @@ func TestOriginalArtworkFallsBackToResizedVariant(t *testing.T) {
 }
 
 func TestStoredKeysResolveDirectlyWithoutAvailabilityReader(t *testing.T) {
-	// Local storage and direct S3 publish atomically, so the catalog trusts
-	// the manifest key it holds and asks for exactly that object.
+	// Without publication metadata the catalog asks for exactly the key it
+	// holds.
 	resolver := NewPluginImageResolver()
 	t.Cleanup(resolver.Close)
 	resolver.SetArtworkResolver(noProbeStore{t})
-	key := "tmdb/series/1/seasons/3/poster/w780.rev.webp"
+	key := "tmdb/series/1/seasons/3/poster/" + posterLargeRung + ".rev.webp"
 	if got := resolver.ResolveImageURL(t.Context(), key, "large"); got != "https://images.example/"+key {
 		t.Fatalf("stored key was rewritten: %s", got)
+	}
+}
+
+type recordingAvailability struct {
+	external bool
+	states   map[string]ArtworkAvailability
+	asked    []string
+}
+
+func (r *recordingAvailability) ArtworkAvailability(_ context.Context, paths []string) (map[string]ArtworkAvailability, error) {
+	r.asked = append(r.asked, paths...)
+	return r.states, nil
+}
+
+func (r *recordingAvailability) ExternalDelivery() bool { return r.external }
+
+// Where delivery cannot lag behind a write, only a rung a ladder change added
+// can be missing from a published revision, so established rungs resolve
+// without a lookup and only the added rung consults the manifest.
+func TestNonExternalReaderLooksUpOnlyAddedRungs(t *testing.T) {
+	medium := "tmdb/movies/1/poster/w500.rev.webp"
+	large := "tmdb/movies/2/poster/" + posterLargeRung + ".rev.webp"
+	reader := &recordingAvailability{states: map[string]ArtworkAvailability{
+		variantKey(large, "original"): {Published: []string{variantKey(large, "w500"), variantKey(large, "original")}},
+	}}
+	got := resolvePublishedLadderKeys(t.Context(), reader, []resolveEntry{{originalPath: medium}, {originalPath: large}})
+	if !slices.Equal(reader.asked, []string{variantKey(large, "original")}) {
+		t.Fatalf("looked up %v, want only the added rung's revision", reader.asked)
+	}
+	if got[medium] != medium {
+		t.Errorf("established rung resolved to %q, want itself", got[medium])
+	}
+	if want := variantKey(large, "w500"); got[large] != want {
+		t.Errorf("added rung resolved to %q, want the published %q", got[large], want)
+	}
+
+	// External delivery can lag behind any write, so every key is looked up.
+	external := &recordingAvailability{external: true}
+	resolvePublishedLadderKeys(t.Context(), external, []resolveEntry{{originalPath: medium}, {originalPath: large}})
+	if len(external.asked) != 2 {
+		t.Fatalf("external reader looked up %v, want both revisions", external.asked)
 	}
 }

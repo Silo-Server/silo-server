@@ -149,12 +149,12 @@ func (r *PluginImageResolver) SetArtworkResolver(resolver artworkurl.Resolver) {
 	r.urlCache.InvalidatePrefix("")
 }
 
-// SetArtworkAvailabilityReader supplies durable publication/delivery metadata
-// for external delivery, where a read endpoint can lag behind a storage write.
-// Without a reader the resolver trusts the key it is given: local storage
-// publishes atomically and direct S3 reads see the object as soon as the
-// upload returns. Catalog reads never use the storage client to discover
-// availability.
+// SetArtworkAvailabilityReader supplies durable publication/delivery metadata.
+// Every backend's catalog reads use it to pick a rung the revision actually
+// published, which matters after a ladder change; external delivery, where a
+// read endpoint can lag behind a storage write, also gets verified keys.
+// Without a reader the resolver trusts the key it is given. Catalog reads
+// never use the storage client to discover availability.
 func (r *PluginImageResolver) SetArtworkAvailabilityReader(reader ArtworkAvailabilityReader) {
 	r.mu.Lock()
 	r.artworkAvailability = reader

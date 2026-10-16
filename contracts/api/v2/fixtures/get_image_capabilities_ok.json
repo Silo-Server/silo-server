@@ -1,5 +1,5 @@
 {
-  "revision": "bb7c9622c71dd44c107f2aa42e5d4253e853209fbffac2d7e851b96bfa9b557f",
+  "revision": "9baa382c9bffaffc6eb5c23fc97a14fd19be2cba074834df8603a7ee03aabfdd",
   "state": "available",
   "allowed": true,
   "episode_still_provenance": true,
@@ -16,7 +16,7 @@
     "backdrop": {
       "small": 300,
       "medium": 1920,
-      "large": 1920
+      "large": 2560
     },
     "banner": {
       "small": 500,
@@ -41,7 +41,7 @@
     "poster": {
       "small": 300,
       "medium": 500,
-      "large": 780
+      "large": 1000
     },
     "profile": {
       "small": 300,
@@ -51,7 +51,7 @@
     "still": {
       "small": 300,
       "medium": 500,
-      "large": 780
+      "large": 1280
     },
     "thumb": {
       "small": 300,
@@ -59,7 +59,7 @@
       "large": 1280
     }
   },
-  "original_max_width_px": 1920,
+  "original_max_width_px": 3840,
   "storage_backend": "local",
   "delivery": "server"
 }

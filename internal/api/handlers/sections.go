@@ -17,6 +17,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
@@ -1732,7 +1733,7 @@ func (h *SectionHandler) localizeSectionItems(ctx context.Context, items []*mode
 // Continue Watching / Next Up special case below: a client that asked for one
 // size gets that size in every row.
 func sizedSectionBackdropPath(sectionType sections.SectionType, path string, size imagesize.Size) string {
-	return sizedImagePath(path, imageTypeForBackdropPath(path), size, sectionBackdropPath(sectionType, path))
+	return sizedImagePath(path, artworkkey.ImageBackdrop, size, sectionBackdropPath(sectionType, path))
 }
 
 // sectionBackdropPath keeps featured-style backdrops for most sections, but
