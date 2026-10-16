@@ -316,3 +316,12 @@ it("pages the notifying series before showing the silenced ones", () => {
   expect(active.fetchNextPage).toHaveBeenCalledOnce();
   expect(inactive.fetchNextPage).not.toHaveBeenCalled();
 });
+it("keeps loading when a page resolves to no visible series", () => {
+  state.capability = { series: { available: true } };
+  const active = { ...seriesQuery([]), hasNextPage: true, fetchNextPage: vi.fn() };
+  state.series = { active, inactive: seriesQuery([]) };
+  renderAt("/notifications?view=series");
+  expect(screen.queryByText("No series notify you yet")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  expect(active.fetchNextPage).toHaveBeenCalledOnce();
+});

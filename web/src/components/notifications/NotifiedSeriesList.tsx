@@ -269,7 +269,13 @@ export function NotifiedSeriesList({ onOpenPreferences }: { onOpenPreferences: (
         </Button>
       </div>
     );
-  } else if (notifying.length === 0 && silenced.length === 0) {
+  } else if (
+    notifying.length === 0 &&
+    silenced.length === 0 &&
+    // A page can resolve to no visible series and still have more behind it.
+    !active.hasNextPage &&
+    !inactive.hasNextPage
+  ) {
     body = filtered ? (
       <div className="text-muted-foreground py-16 text-center text-sm">
         No series match. Try another search or reason.
