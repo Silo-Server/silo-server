@@ -1108,23 +1108,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/admin/collections/import/trakt": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Import a Trakt collection. */
-    post: operations["importAdminTrakt"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v2/admin/collections/order": {
     parameters: {
       query?: never;
@@ -7190,23 +7173,6 @@ export interface paths {
     put?: never;
     /** Import a public TMDB list as a synced collection. Creates the collection and runs its first sync. Not idempotent: a retry after a lost response creates a second collection. */
     post: operations["importTMDBListCollection"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/collections/import/trakt": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Import a Trakt preset as a synced collection. Creates the collection and runs its first sync. Not idempotent: a retry after a lost response creates a second collection. */
-    post: operations["importTraktCollection"];
     delete?: never;
     options?: never;
     head?: never;
@@ -19264,33 +19230,6 @@ export interface components {
       /** Format: int64 */
       total_seconds: number;
     };
-    AdminTraktImport: {
-      description?: string;
-      featured?: boolean;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      library_id?: string;
-      library_ids?: string[];
-      /** Format: int64 */
-      limit?: number;
-      list_url?: string;
-      management_key?: string;
-      management_mode?: string;
-      management_source?: string;
-      media_type?: string;
-      poster_url?: string;
-      preset?: string;
-      /**
-       * @description Opaque identifier
-       * @example 1
-       */
-      profile_id?: string;
-      sort_config?: unknown;
-      sync_schedule?: string;
-      title: string;
-    };
     AdminTranslateLibraryInputBody: {
       /**
        * @description BCP 47 tag of the language to fill in
@@ -21944,7 +21883,6 @@ export interface components {
       tmdb_collection?: components["schemas"]["TMDBCollectionSpec"];
       tmdb_discover?: components["schemas"]["TMDBDiscoverSpec"];
       tmdb_list?: components["schemas"]["TMDBListSpec"];
-      trakt?: components["schemas"]["TraktSpec"];
     };
     CollectionTemplateBundle: {
       description: string;
@@ -26758,7 +26696,7 @@ export interface components {
     };
     PersonalCollection: {
       /**
-       * @description manual, smart, or an import source (mdblist, tmdb, trakt)
+       * @description manual, smart, or an import source (mdblist, tmdb)
        * @example manual
        */
       collection_type: string;
@@ -31086,61 +31024,6 @@ export interface components {
       statuses: string[];
       /** @description Item types the action applies to; empty when not configured */
       supported_types: string[];
-    };
-    TraktCollectionImport: {
-      /** @example  */
-      description?: string;
-      /** @description Display filter fragment */
-      display_query_definition?: unknown;
-      /**
-       * @description Show the collection to every profile on the login; defaults to false
-       * @example false
-       */
-      is_shared?: boolean;
-      /**
-       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
-       * @example [
-       *       "1"
-       *     ]
-       */
-      library_ids?: string[];
-      /**
-       * Format: int64
-       * @description Cap on synced items; the server's own maximum applies when omitted
-       * @example 50
-       */
-      limit?: number;
-      /**
-       * @description movie or show; the preset's default when omitted
-       * @example movie
-       */
-      media_type?: string;
-      /**
-       * @description A bundled template poster path or an image URL
-       * @example
-       */
-      poster_url?: string;
-      /**
-       * @description A Trakt preset name
-       * @example trending
-       */
-      preset: string;
-      /** @description Default sort document */
-      sort_config?: unknown;
-      /**
-       * @description Sync cadence name; the server default when omitted
-       * @example daily
-       */
-      sync_schedule?: string;
-      /**
-       * @description The new collection's name; trimmed
-       * @example Trending movies
-       */
-      title: string;
-    };
-    TraktSpec: {
-      media_type: string;
-      preset: string;
     };
     TransformationV3: {
       executor: string;
@@ -43285,144 +43168,6 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["AdminTMDBListImport"];
-      };
-    };
-    responses: {
-      /** @description Created */
-      201: {
-        headers: {
-          Location?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AdminCollectionImportResult"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Request Timeout */
-      408: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Request Entity Too Large */
-      413: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unsupported Media Type */
-      415: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  importAdminTrakt: {
-    parameters: {
-      query?: never;
-      header?: {
-        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
-        "X-Profile-Id"?: string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AdminTraktImport"];
       };
     };
     responses: {
@@ -95597,144 +95342,6 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["TMDBListCollectionImport"];
-      };
-    };
-    responses: {
-      /** @description Created */
-      201: {
-        headers: {
-          Location?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["CollectionImportResult"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Request Timeout */
-      408: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Request Entity Too Large */
-      413: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unsupported Media Type */
-      415: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  importTraktCollection: {
-    parameters: {
-      query?: never;
-      header: {
-        /** @description The household profile acting for this request; it must belong to the authenticated account. */
-        "X-Profile-Id": string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TraktCollectionImport"];
       };
     };
     responses: {

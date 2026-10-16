@@ -6,7 +6,6 @@
  * and the form shows none selected instead of guessing. Applying a variant
  * changes only the discriminator keys and keeps every other key.
  */
-import { isTraktConfig } from "@/lib/sectionTypes";
 import { NOT_OFFERED_FOR_NEW_ROWS, retiredKindLabel, rowKindLabel } from "./catalog";
 
 type Config = Record<string, unknown>;
@@ -377,23 +376,9 @@ export function showsLabel(sectionType: string, config: Config): string {
   return holiday ? `${rowKindLabel(sectionType)} (${holiday} only)` : rowKindLabel(sectionType);
 }
 
-/**
- * Rows whose kind cannot change: the server refuses config changes on legacy
- * Trakt rows.
- */
-export function kindLocked(config: Config): boolean {
-  return isTraktConfig(config);
-}
-
-/**
- * Rows whose variant cannot change: legacy Trakt rows, and Continue Reading
- * (ebooks, beta), which has no preset.
- */
+/** Rows whose variant cannot change: Continue Reading (ebooks, beta), which has no preset. */
 export function variantLocked(sectionType: string, config: Config): boolean {
-  return (
-    kindLocked(config) ||
-    (sectionType === "continue_watching" && config.continue_type === "reading")
-  );
+  return sectionType === "continue_watching" && config.continue_type === "reading";
 }
 
 const SUMMARY_CHIPS = 3;

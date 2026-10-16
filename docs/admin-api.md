@@ -1081,7 +1081,7 @@ Each entry:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `provider` | string | Provider key: `trakt`, `simkl`, or `mdblist` for the first-party plugins, otherwise `plugin:<installation id>:<capability id>`. |
+| `provider` | string | Provider key: `simkl` or `mdblist` for the first-party plugins, otherwise `plugin:<installation id>:<capability id>`. |
 | `display_name` | string | Human name from the registry, or the key when the provider is not registered. |
 | `registered` | bool | False when the provider only exists in stored rows. |
 | `scrobbling` | bool | The provider declares the scrobble-playback capability. |
@@ -1127,8 +1127,8 @@ Each entry:
       "scrobbles_24h": 0
     },
     {
-      "provider": "trakt",
-      "display_name": "Trakt",
+      "provider": "simkl",
+      "display_name": "Simkl",
       "registered": true,
       "scrobbling": true,
       "exporting": true,

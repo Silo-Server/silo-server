@@ -1,11 +1,12 @@
 package userdb
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
 
-const schemaVersion = 32
+const schemaVersion = 33
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -330,6 +331,14 @@ func runMigrations(db *sql.DB) error {
 			}
 		}
 		if _, err := tx.Exec("PRAGMA user_version = 32"); err != nil {
+			return err
+		}
+	}
+	if version < 33 {
+		if err := retireTraktSectionOverrides(tx); err != nil {
+			return fmt.Errorf("migration v33 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 33"); err != nil {
 			return err
 		}
 	}

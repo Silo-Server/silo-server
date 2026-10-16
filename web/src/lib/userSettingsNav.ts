@@ -428,9 +428,8 @@ export const USER_SETTINGS_GROUPS: UserSettingsNavGroup[] = [
         path: "watch-providers",
         label: "Watch Providers",
         icon: Cloud,
-        description: "Sync watch history, ratings, and watchlists with services like Trakt.",
+        description: "Sync watch history, ratings, and watchlists with services like Simkl.",
         keywords: [
-          "trakt",
           "simkl",
           "import",
           "export",

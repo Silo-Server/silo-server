@@ -13,7 +13,7 @@ export function ShowsSummary({
   sectionType: string;
   label: string;
   sentence: string;
-  /** Omitted when the kind cannot change (legacy Trakt rows). */
+  /** Omitted when the kind cannot change (a server row on Settings > Home Screen). */
   onChange?: () => void;
 }) {
   const group = rowKindGroup(sectionType);

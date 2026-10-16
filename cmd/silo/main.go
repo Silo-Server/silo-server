@@ -2906,14 +2906,12 @@ func main() {
 
 		// The trending refresher reuses the section repo (to find used source/
 		// window combos beyond the calendar's fixed feed), a snapshot repo, an
-		// item repo (external-ID matching), and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
-		// propagated onto deps.TrendingRefresher later in router.go.
+		// item repo (external-ID matching), and the TMDB fetcher.
 		trendingRefresher = sections.NewTrendingRefresher(
 			sections.NewTrendingDemandLister(sectionRepo, auth.NewUserRepository(deps.DB), userStoreProvider),
 			sections.NewTrendingSnapshotRepository(pool),
 			catalog.NewItemRepository(deps.DB),
 			collectionService.TMDBCollections,
-			collectionService.TraktCollections,
 		)
 		deps.TrendingRefresher = trendingRefresher
 
@@ -2935,8 +2933,6 @@ func main() {
 			// here; the router gives it its generator.
 			deps.PersonalCollectionCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
 			userSync.Collages = deps.PersonalCollectionCollages
-			// Trakt fetchers are wired in router.go (they need settingsRepo);
-			// router.go propagates them onto userSync once configured.
 			userCollectionScheduler = usercollections.NewScheduler(deps.DB, userSync, slog.Default())
 			deps.UserCollectionSync = userSync
 			deps.UserCollectionScheduler = userCollectionScheduler
@@ -4498,6 +4494,14 @@ func replaceWatchSyncPluginProviders(
 	})
 	for _, installation := range installations {
 		if installation == nil || installation.IsBuiltin() {
+			continue
+		}
+		if watchsync.RetiredPlugin(installation.PluginID) {
+			slog.WarnContext(ctx, "skip retired watch sync plugin; Silo no longer supports its provider",
+				"component", "app",
+				"installation_id", installation.ID,
+				"plugin_id", installation.PluginID,
+			)
 			continue
 		}
 		siloManaged, err := service.InstalledFromSiloRepository(ctx, installation)

@@ -2427,7 +2427,6 @@ var adminSettingDependencyGroups = [][]string{
 	{"s3.private_access_key", "s3.private_secret_key"},
 	{"s3.public_url_auth", "s3.public_read_endpoint", "s3.public_token_secret"},
 	{"email.enabled", "email.smtp_host", "email.from_address"},
-	{"watchsync.trakt.client_id", "watchsync.trakt.client_secret"},
 	{"watchsync.simkl.client_id", "watchsync.simkl.client_secret"},
 	{"ratelimit.backend", "redis.url"},
 	{"download.max_per_period", "download.period_duration"},

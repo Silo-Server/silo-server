@@ -122,7 +122,6 @@ type fakeCollectionImports struct {
 	lastMDB    handlers.UserImportMDBListRequest
 	lastTMDB   handlers.UserImportTMDBRequest
 	lastList   handlers.UserImportTMDBListRequest
-	lastTrakt  handlers.UserImportTraktRequest
 	lastQuery  string
 }
 
@@ -153,11 +152,6 @@ func (f *fakeCollectionImports) ImportTMDB(_ context.Context, _ int, _ string, r
 
 func (f *fakeCollectionImports) ImportTMDBList(_ context.Context, _ int, _ string, req handlers.UserImportTMDBListRequest) (handlers.UserImportView, error) {
 	f.lastList = req
-	return f.view()
-}
-
-func (f *fakeCollectionImports) ImportTrakt(_ context.Context, _ int, _ string, req handlers.UserImportTraktRequest) (handlers.UserImportView, error) {
-	f.lastTrakt = req
 	return f.view()
 }
 
@@ -406,20 +400,16 @@ func TestImportCollections(t *testing.T) {
 		t.Fatalf("%d %+v", rec.Code, ci.lastList)
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb-list", `{"title":"My list"}`, viewerHeaders()), TypeValidationFailed)
-	rec = do(t, h, http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"Trending","preset":"trending"}`, viewerHeaders())
-	if rec.Code != 201 || ci.lastTrakt.Preset != "trending" || ci.lastTrakt.MediaType != "" {
-		t.Fatalf("%d %+v", rec.Code, ci.lastTrakt)
-	}
 	// The seam's field error, the class, demo mode, and an unwired service.
 	deps.CollectionImports = &fakeCollectionImports{err: &handlers.APIError{Status: 400, Code: "bad_request", Message: "url must be an MDBList list", Field: "url"}}
 	p = requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/collections/import/mdblist", `{"title":"Top","url":"u"}`, viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.url" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"x","preset":"trending"}`, bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, bearer(memberToken)), TypeValidationFailed)
 	demo := deps
 	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypePermissionDenied)
+	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypePermissionDenied)
 	deps.CollectionImports = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypeDependencyUnavailable)
 }

@@ -46,7 +46,7 @@ describe("readAdminListState", () => {
 
   it("ignores values it doesn't know", () => {
     expect(
-      readAdminListState(new URLSearchParams("view=grid&libraryId=-2&type=trakt&failed=yes")),
+      readAdminListState(new URLSearchParams("view=grid&libraryId=-2&type=plex&failed=yes")),
     ).toEqual(STATE);
   });
 });

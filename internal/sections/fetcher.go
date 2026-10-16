@@ -3364,7 +3364,7 @@ func newTrendingEntry(tmdbID, tvdbID int, imdbID, mediaType string) trendingDisc
 	return e
 }
 
-// fetchTrendingDiscover surfaces external global trending (TMDB or Trakt),
+// fetchTrendingDiscover surfaces external global trending (TMDB),
 // mixing movies + series, matched to titles in the viewer's enabled libraries.
 // The external fetch + ID resolution are cached briefly so it does not hit the
 // upstream API on every home-page load.

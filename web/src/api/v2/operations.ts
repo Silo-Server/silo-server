@@ -587,7 +587,6 @@ export const v2Operations = {
   "POST /api/v2/admin/collections/import/mdblist": "importAdminMDBList",
   "POST /api/v2/admin/collections/import/tmdb": "importAdminTMDB",
   "POST /api/v2/admin/collections/import/tmdb-list": "importAdminTMDBList",
-  "POST /api/v2/admin/collections/import/trakt": "importAdminTrakt",
   "POST /api/v2/admin/collections/preview": "previewAdminCollection",
   "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply":
     "applyAdminCollectionTemplateBundle",
@@ -735,7 +734,6 @@ export const v2Operations = {
   "POST /api/v2/collections/import/mdblist": "importMDBListCollection",
   "POST /api/v2/collections/import/tmdb": "importTMDBCollection",
   "POST /api/v2/collections/import/tmdb-list": "importTMDBListCollection",
-  "POST /api/v2/collections/import/trakt": "importTraktCollection",
   "POST /api/v2/collections/preview": "previewCollection",
   "POST /api/v2/collections/{id}/sync": "syncCollection",
   "POST /api/v2/devices/push/apple": "registerApplePushDevice",

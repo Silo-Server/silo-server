@@ -348,7 +348,6 @@ export function savedListMediaKind(list: ListDraft): ListMediaKind {
     case "tmdb_franchise":
       return "movie";
     case "tmdb_discover":
-    case "trakt":
       return media === "movie" || media === "tv" ? media : "mixed";
     default:
       return "mixed";

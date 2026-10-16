@@ -123,7 +123,7 @@ the Providers page, not on the page that owns the
 feature: Playback decides *whether* Silo looks for intro and
 credits markers, while *which provider answers, in what order, and on what
 terms* is a row beside the subtitle and list providers, with a cross-link
-each way. Watch providers (Trakt, Simkl) open the Providers page, since each
+each way. Watch providers (Simkl, MDBList) open the Providers page, since each
 profile connects its own account to them. A provider only reads "Connected" when the provider could actually serve
 a request — its configuration saved and the provider switched on — so an
 installed plugin whose API key was never entered reads "Needs setup". Request

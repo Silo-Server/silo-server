@@ -244,8 +244,8 @@ The frozen `/api/v1/collections/preview` response is unchanged and carries no po
 
 ## Personal collection imports
 
-A personal collection imported with `importMDBListCollection`, `importTMDBCollection`,
-`importTMDBListCollection`, or `importTraktCollection` holds only titles its owner profile
+A personal collection imported with `importMDBListCollection`, `importTMDBCollection`, or
+`importTMDBListCollection` holds only titles its owner profile
 can access: titles in the owner's allowed libraries that pass its rating limits. Those are
 the `max_content_rating` ceiling, with the server's `access.unrated_content` setting for
 unrated titles, and the `max_advisory_age` limit, with `require_advisory_age` (see
@@ -278,7 +278,7 @@ Each viewer of a shared collection still sees only the titles that viewer can ac
 ## Personal sync schedules
 
 `updateCollection` (`PATCH /api/v2/collections/{id}`) accepts `sync_schedule` on a synced list
-(a collection imported from MDBList, TMDB, or Trakt). The value is a cadence name, `daily`,
+(a collection imported from MDBList or TMDB). The value is a cadence name, `daily`,
 `weekly`, or `monthly`, or `""` to stop scheduled syncs; `syncCollection` still syncs on demand.
 Cron expressions are a validation failure for every account, administrators included, and so is
 `sync_schedule` on a manual or smart collection or `null`. A cadence sets `next_sync_at` to the
