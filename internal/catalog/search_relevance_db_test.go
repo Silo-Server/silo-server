@@ -59,6 +59,12 @@ func TestSearchRelevancePostgres(t *testing.T) {
 			t.Fatalf("results = %v, want the alias hit, then The Good Place", got)
 		}
 	})
+	t.Run("typo matches check the alias with every word", func(t *testing.T) {
+		got := search(t, "lantrn harbor")
+		if !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(ids("lantern-harbor", "harbor-tales")))) {
+			t.Fatalf("results = %v, want Lantern Harbor and the item whose long alias has every word", got)
+		}
+	})
 	t.Run("relaxes only when no title has every word", func(t *testing.T) {
 		// "hidden" is three edits from "hiding", so no title has every word;
 		// the titles matching "the" and "place" remain.
@@ -141,6 +147,10 @@ func seedSearchRelevanceFixture(t *testing.T, pool *pgxpool.Pool) (int, func(str
 		}
 	}
 	id := func(name string) string { return prefix + "-" + name }
+	addAlias := func(name, title string) {
+		t.Helper()
+		exec(`INSERT INTO media_item_aliases(content_id,title,kind,provider) VALUES($1,$2,'alternate','fixture')`, id(name), title)
+	}
 	for _, item := range []struct{ name, kind, title, alias string }{
 		{"good-place", "series", "The Good Place", ""},
 		{"hiding-place", "movie", "The Hiding Place", ""},
@@ -163,12 +173,19 @@ func seedSearchRelevanceFixture(t *testing.T, pool *pgxpool.Pool) (int, func(str
 		{"star-wars-rebels", "series", "Star Wars Rebels", ""},
 		{"clone-wars", "movie", "Star Wars: The Clone Wars", ""},
 		{"star-wars-twice", "movie", "From Star Wars to Star Wars", ""},
+		{"lantern-harbor", "movie", "Lantern Harbor", ""},
+		{"harbor-tales", "movie", "Northern Lights", "Tales from the Lantern Keeper's Distant Northern Harbor"},
 	} {
 		exec(`INSERT INTO media_items(content_id,type,title,year) VALUES($1,$2,$3,2000)`, id(item.name), item.kind, item.title)
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id(item.name), library)
 		if item.alias != "" {
-			exec(`INSERT INTO media_item_aliases(content_id,title,kind,provider) VALUES($1,$2,'alternate','fixture')`, id(item.name), item.alias)
+			addAlias(item.name, item.alias)
 		}
+	}
+	// By whole-query similarity to "lantrn harbor", these short aliases outrank
+	// the item's long alias, the only one with both words.
+	for _, alias := range []string{"Harbor", "The Harbor", "Old Harbor", "Harbor Days"} {
+		addAlias("harbor-tales", alias)
 	}
 	return library, id
 }

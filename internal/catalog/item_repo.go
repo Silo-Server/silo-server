@@ -174,11 +174,12 @@ const fuzzyMaxResults = 50
 // query's cost; a larger LIMIT adds only row transfer and in-process scoring.
 const fuzzyCandidatePool = 500
 
-// fuzzyRerankMaxAliasesPerItem bounds the only extra metadata the in-process
-// typo reranker may read. Candidate rows are already capped by
-// fuzzyCandidatePool, so this makes its worst case 500 items / 2,000 relevant
-// aliases regardless of total library size.
-const fuzzyRerankMaxAliasesPerItem = 4
+// fuzzyRerankAliasesPerOrder bounds the only extra metadata the in-process
+// typo reranker may read: per item, this many aliases by similarity and this
+// many by word coverage (see loadFuzzyRerankAliases). Candidate rows are
+// already capped by fuzzyCandidatePool, so its worst case is 500 items / 4,000
+// relevant aliases regardless of total library size.
+const fuzzyRerankAliasesPerOrder = 4
 
 const (
 	fuzzyRerankMaxQueryTokens = 16
@@ -1452,7 +1453,13 @@ func (r *ItemRepository) execFuzzyBlock(ctx context.Context, searchText, dataSQL
 // loadFuzzyRerankAliases reads only aliases that passed the same indexed
 // strict-word predicate as the fuzzy candidate query. ROW_NUMBER applies the
 // cap per content ID; an item with pathological alias history cannot inflate
-// the in-process relevance workload.
+// the in-process relevance workload. Each item gets its most similar aliases,
+// which usually score best, and the aliases covering the most query words,
+// because admitFuzzyRanks drops an item whose loaded aliases miss a word.
+// Coverage sums each word's best strict word similarity, which neither word
+// order nor extra words lower. Similarity alone ranked "Harbor" and three
+// other short aliases above "Tales from the Lantern Keeper's Distant Northern
+// Harbor" for "lantrn harbor".
 func loadFuzzyRerankAliases(ctx context.Context, q searchQuerier, searchText string, items []*models.MediaItem) (map[string][]string, error) {
 	contentIDs := contentIDsFromMediaItems(items)
 	if len(contentIDs) == 0 {
@@ -1469,14 +1476,22 @@ func loadFuzzyRerankAliases(ctx context.Context, q searchQuerier, searchText str
 						0.65 * similarity($2, mia.normalized_title)
 							+ 0.35 * strict_word_similarity($2, mia.normalized_title) DESC,
 						mia.normalized_title ASC
-				) AS alias_rank
+				) AS similarity_rank,
+				ROW_NUMBER() OVER (
+					PARTITION BY mia.content_id
+					ORDER BY coverage.score DESC, mia.normalized_title ASC
+				) AS coverage_rank
 			FROM media_item_aliases mia
+			CROSS JOIN LATERAL (
+				SELECT sum(strict_word_similarity(word, mia.normalized_title)) AS score
+				FROM unnest(string_to_array($2, ' ')) AS word
+			) coverage
 			WHERE mia.content_id = ANY($1)
 			  AND $2 <<% mia.normalized_title
 		)
 		SELECT content_id, normalized_title
 		FROM matched
-		WHERE alias_rank <= $3`, contentIDs, fuzzyCandidateText(searchText), fuzzyRerankMaxAliasesPerItem)
+		WHERE similarity_rank <= $3 OR coverage_rank <= $3`, contentIDs, fuzzyCandidateText(searchText), fuzzyRerankAliasesPerOrder)
 	if err != nil {
 		return nil, fmt.Errorf("loading bounded fuzzy aliases: %w", err)
 	}

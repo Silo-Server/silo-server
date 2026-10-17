@@ -130,19 +130,22 @@ rank. With "the", "the godfathr" admitted a quarter of a 190,000-title catalog
 and ran close to the three-second search deadline. Whole-query similarity
 favors short titles, so a long title containing every word can rank in the
 hundreds. The whole-title similarity floor below still compares the full query.
-The server scores each candidate's title and its best aliases word by word,
-allowing 0 edits for words of up to two characters, 1 for three to five, and 2
-for longer words (Elasticsearch's fuzziness AUTO). A word may also match two
-adjacent title words joined, at one extra edit for ranking only. Stopwords
-("the", "a", "of", and similar) take no edits and need not appear. A candidate
-is kept only when it matches every other query word, as Elasticsearch's AND
-operator and Meilisearch's `all` strategy require. When no candidate matches
-every word and FTS found nothing, the candidates missing the fewest words
-remain, as Typesense's token dropping does; a candidate matching only stopwords
-never does. When FTS found hits, candidates also need whole-title similarity of
-at least 0.45, and none is kept unless it matches every word. At most 50 typo
-rows follow the FTS hits; the total is inexact when candidates or kept rows
-were capped. The offset and cursor paths share this scoring and admission.
+The server scores each candidate's title and up to eight aliases word by word:
+the four most similar to the query and the four covering the most query words,
+since similarity also ranks a long alias with every word below short aliases
+with one. It allows 0 edits for words of up to two characters, 1 for three to
+five, and 2 for longer words (Elasticsearch's fuzziness AUTO). A word may also
+match two adjacent title words joined, at one extra edit for ranking only.
+Stopwords ("the", "a", "of", and similar) take no edits and need not appear. A
+candidate is kept only when it matches every other query word, as
+Elasticsearch's AND operator and Meilisearch's `all` strategy require. When no
+candidate matches every word and FTS found nothing, the candidates missing the
+fewest words remain, as Typesense's token dropping does; a candidate matching
+only stopwords never does. When FTS found hits, candidates also need
+whole-title similarity of at least 0.45, and none is kept unless it matches
+every word. At most 50 typo rows follow the FTS hits; the total is inexact when
+candidates or kept rows were capped. The offset and cursor paths share this
+scoring and admission.
 
 ## Card enrichment
 

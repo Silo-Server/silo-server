@@ -1177,7 +1177,7 @@ func BenchmarkRerankFuzzyItemsCappedCandidateSet(b *testing.B) {
 	for i := range items {
 		contentID := fmt.Sprintf("item-%d", i)
 		items[i] = &models.MediaItem{ContentID: contentID, Title: fmt.Sprintf("Related Fantasy Title %d", i)}
-		for alias := 0; alias < fuzzyRerankMaxAliasesPerItem; alias++ {
+		for alias := 0; alias < 2*fuzzyRerankAliasesPerOrder; alias++ {
 			aliases[contentID] = append(aliases[contentID], fmt.Sprintf("Alternate Fantasy Title %d %d", i, alias))
 		}
 	}
