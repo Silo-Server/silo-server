@@ -105,7 +105,12 @@ sent yet, the submission retries with backoff; a later tier that fails that way
 becomes a failed target. Status checks go through the plugin installation that
 owns each target's server, and one plugin failing does not discard the statuses
 another reported. A media type with no routes keeps the plugin's own routing:
-every usable connection is handed over and the plugin picks.
+every usable connection is handed over and the plugin picks. Without
+`force_dual_quality`, the request asks such a plugin for 4K only when one of
+those connections says it takes 4K (a Sonarr/Radarr `is_default_4k`, or the
+Seerr plugin's `supports_4k` switch), so a Seerr without 4K does not leave a
+failed 4K target beside a finished HD copy. A plugin whose connections carry
+none of these keys is still asked for 4K and decides itself.
 
 Admins manage routes through `/api/v2/admin/request-routes` (in the web admin,
 Settings › Requests, which also hides the server switches routing now owns).
