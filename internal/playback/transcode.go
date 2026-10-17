@@ -268,6 +268,9 @@ type TranscodeSession struct {
 	// copyPlan is the planned segment list served instead of FFmpeg's
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
+	// copyPlanRejected is set once FFmpeg has cut a segment the plan
+	// doesn't list (checkCopyPlan).
+	copyPlanRejected bool
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -424,13 +427,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(ctx, opts)
-	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
-		// Rebuilding without the plan would serve FFmpeg's playlist to a
-		// player that may hold the planned one; a later request rebuilds.
-		releaseHWDevice()
-		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", ctx.Err())
-	}
+	copyPlan := resolveCopyPlan(opts)
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
 	}
@@ -512,6 +509,7 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 	s.waitErr = waitErr
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
+	s.checkCopyPlanOutput(waitErr)
 	close(done)
 }
 
@@ -2760,6 +2758,12 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 	timeline, err := parseManifestTimeline(manifest)
 	if err != nil {
 		return progress
+	}
+	if s.copyPlan != nil {
+		// An ended playlist doesn't say FFmpeg finished cleanly; only the
+		// exit (checkCopyPlanOutput) knows, so this checks what FFmpeg has
+		// moved past.
+		s.checkCopyPlan(timeline.entries, false)
 	}
 
 	for _, entry := range timeline.entries {

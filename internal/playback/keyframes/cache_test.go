@@ -2,11 +2,11 @@ package keyframes
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -21,7 +21,7 @@ func TestLoadCachesUntilTheFileChanges(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadVerified(t.Context(), path)
+	got, err := Load(path)
 	wantIndex(t, got, err)
 
 	// Same size and time with different bytes: still the cached index.
@@ -61,32 +61,22 @@ func TestLoadReportsOtherFilesAsUnindexed(t *testing.T) {
 	}
 }
 
-// The first Load starts the full check and doesn't use the index until it
-// passes.
-func TestLoadVerifiesInTheBackground(t *testing.T) {
+// The first Load returns the index, video end included, so the first
+// playback of a file can plan from it (#2453).
+func TestLoadReturnsTheIndexTheFirstTime(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "b.mkv")
 	if err := os.WriteFile(path, file(layout{}), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); !errors.Is(err, ErrUnverified) || !errors.Is(err, ErrNoIndex) {
-		t.Fatalf("first Load err = %v, want ErrUnverified (an ErrNoIndex)", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		got, err := Load(path)
-		if !errors.Is(err, ErrUnverified) {
-			wantIndex(t, got, err)
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the background check didn't finish")
-		}
-		time.Sleep(10 * time.Millisecond)
+	got, err := Load(path)
+	wantIndex(t, got, err)
+	if got.VideoEnd <= got.Keyframes[len(got.Keyframes)-1] {
+		t.Fatalf("VideoEnd = %v, want it after the last keyframe", got.VideoEnd)
 	}
 }
 
 // A malformed file is a lasting fact, cached like a missing index, not
-// checked again on every playback.
+// read again on every playback.
 func TestLoadCachesMalformedFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "broken.mkv")
 	// Cues pointing at an element that isn't a cluster: with the Cues first,
@@ -101,7 +91,7 @@ func TestLoadCachesMalformedFiles(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadVerified(t.Context(), path); !errors.Is(err, ErrNoIndex) {
+	if _, err := Load(path); !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("malformed file err = %v, want ErrNoIndex", err)
 	}
 	// Repaired in place with the same size and time: still the cached result.
@@ -111,23 +101,54 @@ func TestLoadCachesMalformedFiles(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); !errors.Is(err, ErrNoIndex) || errors.Is(err, ErrUnverified) {
+	if _, err := Load(path); !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("second load err = %v, want the cached ErrNoIndex", err)
 	}
 }
 
-// A full check whose caller has gone stops with the caller's error, which
-// isn't cached: the next check reads the file.
-func TestLoadVerifiedStopsWhenCanceled(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "canceled.mkv")
+// A file a playback rejected isn't planned from again until it changes.
+func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rejected.mkv")
 	if err := os.WriteFile(path, file(layout{}), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gone, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := LoadVerified(gone, path); !errors.Is(err, context.Canceled) || errors.Is(err, ErrNoIndex) {
-		t.Fatalf("canceled check: err = %v, want context.Canceled and not ErrNoIndex", err)
+	stamp := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
 	}
-	got, err := LoadVerified(t.Context(), path)
+	got, err := Load(path)
+	wantIndex(t, got, err)
+
+	if err := Reject(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); !errors.Is(err, ErrIncompleteIndex) || !errors.Is(err, ErrNoIndex) {
+		t.Fatalf("after Reject err = %v, want ErrIncompleteIndex (an ErrNoIndex)", err)
+	}
+
+	// A Load that read the file before the Reject and stores after it
+	// doesn't undo it.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}
+	if _, err := storeFirst(key, got, nil); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("a late load's store err = %v, want the rejection kept", err)
+	}
+
+	// Evicting the results doesn't forget the rejection.
+	for i := range maxCachedFiles + 1 {
+		storeFirst(cacheKey{path: filepath.Join("evict", strconv.Itoa(i))}, Index{}, ErrNoIndex)
+	}
+	if _, err := Load(path); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("after evictions err = %v, want the rejection kept", err)
+	}
+
+	later := stamp.Add(time.Hour)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	got, err = Load(path)
 	wantIndex(t, got, err)
 }
