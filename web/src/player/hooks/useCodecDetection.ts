@@ -89,12 +89,64 @@ const CONTAINER_MAP: Record<string, string[]> = {
   ogg: ["audio/ogg"],
 };
 
-export function detectMaxResolutionFromScreen(screenWidth: number, screenHeight: number): string {
-  const screenH = Math.max(screenHeight, screenWidth);
-  if (screenH >= 2160) return "2160p";
-  if (screenH >= 1440) return "1080p";
-  if (screenH >= 720) return "720p";
-  return "480p";
+/** The `max_resolution` reported until, or without, a Media Capabilities answer. */
+const UNPROBED_MAX_RESOLUTION = "2160p";
+
+// High profile at level 5.1, the lowest level that covers 2160p30.
+const H264_2160P_CONFIGURATION = {
+  type: "file",
+  video: {
+    contentType: 'video/mp4; codecs="avc1.640033"',
+    width: 3840,
+    height: 2160,
+    bitrate: 40_000_000,
+    framerate: 30,
+  },
+} satisfies MediaDecodingConfiguration;
+
+const H264_1080P_CONFIGURATION = {
+  type: "file",
+  video: {
+    contentType: `video/mp4; codecs="${VIDEO_CODEC_MAP.h264}"`,
+    width: 1920,
+    height: 1080,
+    bitrate: 10_000_000,
+    framerate: 30,
+  },
+} satisfies MediaDecodingConfiguration;
+
+/**
+ * Finds the largest video size this browser decodes, for `max_resolution`.
+ *
+ * Auto quality treats `max_resolution` as a device limit and transcodes
+ * anything taller, so it describes the decoder, never the screen: the browser
+ * scales a 1080p picture into a 720p window itself. Web evidence is `declared`
+ * with flat codec lists, so this is the only size bound the web sends.
+ *
+ * H.264 stands in for every codec as the one nearly every browser decodes,
+ * and the `file` type matches the media element loading a direct-play
+ * original. A 4K stream that is supported and either smooth or power
+ * efficient earns 2160p: a hardware decoder is enough, because Safari has
+ * answered `smooth: false` for streams its hardware decoder plays in real
+ * time (see probeHDR10PlaybackSupport). Otherwise a browser that decodes
+ * 1080p H.264 is capped there. With no usable answer (the API is missing,
+ * the query throws, or the browser rejects H.264 at both sizes, which says
+ * nothing about size) it reports 2160p: the codec lists still gate decoding,
+ * and the server's failure recovery replans a stream that will not play.
+ */
+export async function probeMaxDecodeResolution(): Promise<string> {
+  if (typeof navigator === "undefined" || !navigator.mediaCapabilities) {
+    return UNPROBED_MAX_RESOLUTION;
+  }
+
+  try {
+    const uhd = await navigator.mediaCapabilities.decodingInfo(H264_2160P_CONFIGURATION);
+    if (uhd.supported && (uhd.smooth || uhd.powerEfficient)) return "2160p";
+    const fhd = await navigator.mediaCapabilities.decodingInfo(H264_1080P_CONFIGURATION);
+    return fhd.supported ? "1080p" : UNPROBED_MAX_RESOLUTION;
+  } catch {
+    return UNPROBED_MAX_RESOLUTION;
+  }
 }
 
 /**
@@ -142,19 +194,31 @@ export async function probeHDR10PlaybackSupport(): Promise<boolean> {
 }
 
 let initialHDR10Probe: Promise<boolean> | null = null;
+let maxDecodeResolutionProbe: Promise<string> | null = null;
 
 /**
- * Starts the expensive Media Capabilities query once for the lifetime of the
+ * The decoder's size limit does not change with the output route, so unlike
+ * the HDR10 probe it runs once for the lifetime of the app.
+ */
+function maxDecodeResolution(): Promise<string> {
+  maxDecodeResolutionProbe ??= probeMaxDecodeResolution();
+  return maxDecodeResolutionProbe;
+}
+
+/**
+ * Starts the expensive Media Capabilities queries once for the lifetime of the
  * app. The shell calls this before playback is requested so opening a video
  * does not have to wait several seconds for the browser's first decoder probe.
  */
 export function prewarmCodecDetection(): Promise<boolean> {
+  void maxDecodeResolution();
   initialHDR10Probe ??= probeHDR10PlaybackSupport();
   return initialHDR10Probe;
 }
 
 export function resetCodecDetectionForTests(): void {
   initialHDR10Probe = null;
+  maxDecodeResolutionProbe = null;
 }
 
 function testMediaType(mime: string): boolean {
@@ -194,9 +258,10 @@ function testMediaElementType(mime: string): boolean {
  * Every answer here comes from `MediaSource.isTypeSupported(...)` or
  * `HTMLMediaElement.canPlayType(...)`, which is why the v3 capability block
  * built from this probe is `declared` evidence and never claims hardware decode
- * detail it cannot observe. The screen-derived resolution and the HDR media
- * queries are hints about the *output*, not the decoder, and the server treats
- * them as such.
+ * detail it cannot observe. The HDR media queries are hints about the
+ * *output*, not the decoder, and the server treats them as such.
+ * `maxResolution` starts at 2160p until useCodecDetection joins the
+ * asynchronous decoder probe (see probeMaxDecodeResolution).
  */
 export function probeWebCapabilities(): WebCapabilityProbe {
   const codecsVideo: string[] = [];
@@ -239,20 +304,6 @@ export function probeWebCapabilities(): WebCapabilityProbe {
       progressiveCodecsAudio.push(name);
     }
   }
-
-  // `screen` reports logical CSS pixels; a 2160p-class panel on a 2x display
-  // measures 1080p without the device pixel ratio applied.
-  const pixelRatio =
-    typeof window !== "undefined" &&
-    typeof window.devicePixelRatio === "number" &&
-    Number.isFinite(window.devicePixelRatio) &&
-    window.devicePixelRatio > 0
-      ? window.devicePixelRatio
-      : 1;
-  const maxResolution =
-    typeof screen !== "undefined"
-      ? detectMaxResolutionFromScreen(screen.width * pixelRatio, screen.height * pixelRatio)
-      : "1080p";
 
   // HDR detection (best effort). Wrap matchMedia so it keeps its Window
   // receiver — invoking a detached reference throws in some browsers.
@@ -301,7 +352,7 @@ export function probeWebCapabilities(): WebCapabilityProbe {
     progressiveCodecsVideo,
     codecsAudio,
     progressiveCodecsAudio,
-    maxResolution,
+    maxResolution: UNPROBED_MAX_RESOLUTION,
     hdr,
     hdrDetails,
     hls: hlsSupport.supported,
@@ -337,11 +388,12 @@ export function useCodecDetection(): SettledWebCapabilityProbe {
       const next = probeWebCapabilities();
       setCapabilities({ ...next, settled: false });
 
-      void hdr10Probe.then((hdr10) => {
+      void Promise.all([hdr10Probe, maxDecodeResolution()]).then(([hdr10, maxResolution]) => {
         if (disposed || generation !== probeGeneration) return;
         setCapabilities((current) => ({
           ...current,
           settled: true,
+          maxResolution,
           // The exact HDR10 query proves the HEVC Main10 base codec for the
           // progressive MP4 route even when the separate generic HEVC probe was
           // rejected. Keep that evidence scoped away from original and HLS.
