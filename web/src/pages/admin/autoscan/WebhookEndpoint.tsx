@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+import { LocalWebhookURL } from "./LocalWebhookURL";
 import { useWebhookEndpoint, type WebhookEndpoint } from "./useWebhookEndpoint";
 
 /** Rotation is destructive for the connected service, so it always confirms. */
@@ -110,6 +111,14 @@ export function WebhookEndpointSection({ source }: { source: AutoscanSource }) {
             Already set up in your download manager? Nothing to change — the URL stays the same
             unless you rotate it.
           </p>
+          {url && (
+            <div className="pt-2">
+              <LocalWebhookURL
+                url={url}
+                onCopy={(text) => endpoint.copy("select the URL manually", text)}
+              />
+            </div>
+          )}
         </>
       ) : (
         <div className="space-y-1.5">

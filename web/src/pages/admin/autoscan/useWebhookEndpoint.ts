@@ -57,10 +57,11 @@ export function useWebhookEndpoint(source: AutoscanSource) {
 
   const url = active && !uncertain && view?.webhook_url ? absoluteWebhookURL(view.webhook_url) : "";
 
-  async function copy(failureHint = "select the URL manually") {
-    if (!url || !authority || !isCapturedProfileAuthorityActive(authority)) return;
+  /** Copy the endpoint URL, or another form of it such as the local-network one. */
+  async function copy(failureHint = "select the URL manually", text = url) {
+    if (!url || !text || !authority || !isCapturedProfileAuthorityActive(authority)) return;
     try {
-      await copyTextToClipboard(url);
+      await copyTextToClipboard(text);
       if (isCapturedProfileAuthorityActive(authority)) toast.success("Webhook URL copied");
     } catch {
       if (isCapturedProfileAuthorityActive(authority))

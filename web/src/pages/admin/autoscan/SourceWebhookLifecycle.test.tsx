@@ -290,3 +290,27 @@ it.each(["rotation", "deletion", "reveal recovery"])(
     }
   },
 );
+
+it("copies the local-network URL only while the profile that opened the view is active", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise<Response>(() => {})),
+  );
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  localStorage.setItem("autoscan_webhook_local_base", "http://192.168.1.10:8080");
+  mount();
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy local webhook URL" }));
+  await waitFor(() =>
+    expect(writeText).toHaveBeenCalledWith(
+      "http://192.168.1.10:8080/api/v2/autoscan/webhooks/old-synthetic",
+    ),
+  );
+
+  writeText.mockClear();
+  setProfileId("b");
+  fireEvent.click(screen.getByRole("button", { name: "Copy local webhook URL" }));
+  await act(async () => {});
+  expect(writeText).not.toHaveBeenCalled();
+});

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
+import { LocalWebhookURL } from "./LocalWebhookURL";
 import { settingsPathFor, triggersFor } from "./webhookSetup";
 
 /**
@@ -64,6 +65,8 @@ export function WebhookInstructions({
           </Button>
         </div>
       </div>
+
+      <LocalWebhookURL url={url} />
 
       <div className="space-y-1.5">
         <Label>2. In your download manager, go to</Label>
