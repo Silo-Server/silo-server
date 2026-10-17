@@ -45,6 +45,16 @@ Existing installations retain their configured marker mode, which accepts `off`,
 
 Both paths honor provider priority, manual edits and deletions, and provider quota limits.
 
+Providers address an episode by its series' TMDB, TVDB, and IMDb IDs and the
+catalog's season and episode numbers; season 0 holds specials. When the catalog
+has them, lookups and contributions also carry the episode's own provider IDs
+and title. Episode rows match each metadata provider's episodes by number, so
+those IDs show which providers numbered the episode, and two of them can name
+different episodes where the providers number a series differently. The
+TheIntroDB plugin addresses an episode only TVDB supplied by its TVDB IDs and
+any other episode by TMDB. Automatic sharing skips specials; sharing a manually
+edited special's markers is allowed.
+
 A manual deletion removes every occurrence of that kind for the selected file.
 The empty range retains manual provenance: provider lookups, local detection,
 rescans, and file-identity changes cannot restore it. An explicit manual set

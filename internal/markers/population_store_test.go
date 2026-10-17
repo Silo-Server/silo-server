@@ -259,8 +259,8 @@ func TestMarkerResolverUsesShowIDsAndPreservesSpecials(t *testing.T) {
 		_, _ = fixture.pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id=$1`, episodeID)
 		_, _ = fixture.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, seriesID)
 	})
-	if _, err := fixture.pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,tmdb_id,imdb_id,tvdb_id,air_date)
-		VALUES($1,$2,0,2,'88','tt99','99','2026-09-30')`, episodeID, seriesID); err != nil {
+	if _, err := fixture.pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,tmdb_id,imdb_id,tvdb_id,title,air_date)
+		VALUES($1,$2,0,2,'88','tt99','99',' Special Two ','2026-09-30')`, episodeID, seriesID); err != nil {
 		t.Fatal(err)
 	}
 	resolver := NewDBExternalIDResolver(fixture.pool)
@@ -270,6 +270,9 @@ func TestMarkerResolverUsesShowIDsAndPreservesSpecials(t *testing.T) {
 	}
 	if ids.TmdbID != "" || ids.TvdbID != "" || ids.ImdbID != "tt42" || ids.SeasonNumber != 0 || ids.EpisodeNumber != 2 {
 		t.Fatalf("episode identity leaked into show lookup: %+v", ids)
+	}
+	if ids.Episode != (EpisodeIDs{TmdbID: "88", ImdbID: "tt99", TvdbID: "99"}) || ids.EpisodeTitle != "Special Two" {
+		t.Fatalf("episode refinement = %+v %q, want the episode's own IDs and trimmed title", ids.Episode, ids.EpisodeTitle)
 	}
 	if !ids.Released.Equal(time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("released=%v, want the episode air date", ids.Released)
