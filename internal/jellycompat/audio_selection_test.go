@@ -161,7 +161,7 @@ func (m *testCompatSessionManager) SetTranscodeNodeURL(sessionID, url string) er
 }
 
 // SetTranscodeStreamDetails records the execution facts supplied by the compatibility handler.
-func (m *testCompatSessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode) error {
+func (m *testCompatSessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode, targetResolution string, targetBitrateKbps int) error {
 	session, ok := m.sessions[sessionID]
 	if !ok {
 		return playback.ErrSessionNotFound
@@ -171,7 +171,70 @@ func (m *testCompatSessionManager) SetTranscodeStreamDetails(sessionID, targetVi
 	session.TranscodeAudio = transcodeAudio
 	session.TranscodeHWAccel = hwAccel
 	session.ToneMapMode = toneMapMode
+	session.TargetResolution = targetResolution
+	session.TargetBitrateKbps = targetBitrateKbps
 	return nil
+}
+
+// TestRecordTranscodeStreamDetailsIncludesTargetResolutionAndBitrate covers
+// #920: the admin sessions view fell back to displaying the source's own
+// resolution/bitrate for any jellycompat transcode, because
+// recordTranscodeStreamDetails never forwarded the encode's actual
+// TargetResolution/TargetBitrateKbps onto the upstream session — only the
+// native (non-compat) playback path did.
+func TestRecordTranscodeStreamDetailsIncludesTargetResolutionAndBitrate(t *testing.T) {
+	mgr := &testCompatSessionManager{
+		sessions: map[string]*playback.Session{
+			"upstream-1": {ID: "upstream-1"},
+		},
+	}
+	h := &PlaybackHandler{sessionMgr: mgr}
+
+	h.recordTranscodeStreamDetails(context.Background(), "upstream-1", playback.TranscodeOpts{
+		TargetCodecVideo:  "h264",
+		TargetCodecAudio:  "aac",
+		TargetResolution:  "480p",
+		TargetBitrateKbps: 420,
+	})
+
+	session, err := mgr.GetSession("upstream-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if session.TargetResolution != "480p" {
+		t.Errorf("TargetResolution = %q, want %q", session.TargetResolution, "480p")
+	}
+	if session.TargetBitrateKbps != 420 {
+		t.Errorf("TargetBitrateKbps = %d, want %d", session.TargetBitrateKbps, 420)
+	}
+}
+
+func TestRecordTranscodeStreamDetailsOmitsUnusedCopyTargets(t *testing.T) {
+	for _, audioCodec := range []string{"copy", "aac"} {
+		t.Run(audioCodec, func(t *testing.T) {
+			mgr := playback.NewSessionManager(0, 0)
+			mgr.RegisterReconstructed(&playback.Session{
+				ID: "upstream-1", TargetResolution: "1080p", TargetBitrateKbps: 8000,
+			})
+			h := &PlaybackHandler{sessionMgr: mgr}
+			opts := playback.TranscodeOpts{
+				TargetCodecVideo: "copy", TargetCodecAudio: audioCodec,
+				TargetResolution: "720p", TargetBitrateKbps: 3608,
+			}
+			h.recordTranscodeStreamDetails(t.Context(), "upstream-1", opts)
+
+			session, err := mgr.GetSession("upstream-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if session.TargetResolution != "" || session.TargetBitrateKbps != 0 {
+				t.Fatalf("copy stream reports unused video targets: resolution=%q bitrate=%d", session.TargetResolution, session.TargetBitrateKbps)
+			}
+			if session.TargetVideoCodec != "copy" || session.TargetAudioCodec != audioCodec || session.TranscodeAudio != (audioCodec == "aac") {
+				t.Fatalf("copy stream lost codec decisions: %+v", session)
+			}
+		})
+	}
 }
 
 type testCompatFileResolver struct {
