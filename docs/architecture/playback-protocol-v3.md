@@ -1506,7 +1506,8 @@ frame, read once per generation from that segment's first video PTS less the
 timestamp-map shift below. O is not `K·d` when the source clock does not start
 at zero: the first generation's grid starts at the first video frame, while an
 input seek counts from the container's start time. On MPEG-TS, whose
-timestamps wrap at 2^33 ticks, the window takes the cue clock's epoch. A
+timestamps wrap at 2^33 ticks, O takes the cue clock's epoch, and every window
+of the generation keeps it. A
 generation's output is read only while no restart is under way and no later
 generation has rewritten it; a generation whose origin cannot be read uses
 `[N·d, (N+1)·d)`. Every segment starts with

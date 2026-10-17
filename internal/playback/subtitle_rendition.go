@@ -268,15 +268,15 @@ func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) (
 		if ready {
 			data, err := s.readOutputFile(file)
 			if err == nil {
-				windowStart := s.subtitleWindowStart(ctx, file, segNum, renditionSegmentDuration(opts))
-				return subtitleSegmentDocument(opts, segNum, windowStart, data), nil
+				window := s.subtitleSegmentWindow(ctx, file, segNum, renditionSegmentDuration(opts))
+				return subtitleSegmentDocument(opts, segNum, window, data), nil
 			}
 			if !os.IsNotExist(err) {
 				return nil, fmt.Errorf("read subtitle cues: %w", err)
 			}
 		}
 		if !waitable || !time.Now().Before(deadline) {
-			return subtitleSegmentDocument(opts, segNum, 0, nil), nil
+			return subtitleSegmentDocument(opts, segNum, subtitleCueWindow{}, nil), nil
 		}
 		timer := time.NewTimer(subtitleCuePollInterval)
 		select {
@@ -288,16 +288,24 @@ func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) (
 	}
 }
 
-// subtitleWindowStart returns the cue-clock time, in seconds, at which video
-// segment segNum of the generation that wrote cue file begins. Without an
-// observed origin it falls back to the fixed grid from zero, which is right
-// for the common source whose clock starts at zero.
-func (s *TranscodeSession) subtitleWindowStart(ctx context.Context, file string, segNum int, segDur int) float64 {
+// subtitleCueWindow places a subtitle segment's window on the cue clock, in
+// seconds: it starts offset after origin, where the generation's first video
+// segment starts. An observed origin comes from MPEG-TS or fMP4 video
+// timestamps; without one, origin is zero and the window is the fixed grid,
+// which is right for the common source whose clock starts at zero.
+type subtitleCueWindow struct {
+	origin, offset float64
+	observed       bool
+}
+
+// subtitleSegmentWindow returns the window of segment segNum of the
+// generation that wrote cue file.
+func (s *TranscodeSession) subtitleSegmentWindow(ctx context.Context, file string, segNum int, segDur int) subtitleCueWindow {
 	start, origin, ok := s.subtitleSpanOrigin(ctx, file, segNum)
 	if !ok {
-		return float64(segNum * segDur)
+		return subtitleCueWindow{offset: float64(segNum * segDur)}
 	}
-	return origin + float64((segNum-start)*segDur)
+	return subtitleCueWindow{origin: origin, offset: float64((segNum - start) * segDur), observed: true}
 }
 
 // subtitleSpanOrigin returns the start segment and observed origin of the span
@@ -438,12 +446,13 @@ func renditionSegmentDuration(opts TranscodeOpts) int {
 // subtitleCueClockWrap90k is the MPEG-TS timestamp range.
 const subtitleCueClockWrap90k = int64(1) << 33
 
-// subtitleWindowEpoch moves a window start observed from MPEG-TS video, whose
-// timestamps wrap at 2^33 ticks (about 26.5 h), onto the cue clock, which
-// does not wrap: a source whose clock passes the rollover (a broadcast
+// subtitleWindowEpoch moves a generation's origin observed from MPEG-TS video,
+// whose timestamps wrap at 2^33 ticks (about 26.5 h), onto the cue clock,
+// which does not wrap: a source whose clock passes the rollover (a broadcast
 // capture) keeps counting in its cue file while its video segments start
-// over. The window takes the first epoch no more than half a range before
-// the generation's first cue, which can only lie after it at a rollover.
+// over. The origin takes the first epoch no more than half a range before the
+// generation's first cue, which can only lie after it at a rollover. The
+// epoch is the origin's, so every window of the generation keeps it.
 func subtitleWindowEpoch(start90k, firstCue90k int64) int64 {
 	if lag := firstCue90k - subtitleCueClockWrap90k/2 - start90k; lag >= 0 {
 		start90k += (lag/subtitleCueClockWrap90k + 1) * subtitleCueClockWrap90k
@@ -498,16 +507,17 @@ func parseSubtitleRenditionCues(cues []byte) []subtitleRenditionCue {
 }
 
 // subtitleSegmentDocument cuts one segment out of a generation's cue file:
-// every cue overlapping [windowStart, windowStart+d), in cue-clock seconds.
-// Cues keep their absolute source times and settings; a cue that spans
-// segments is repeated in each, as HLS expects, and players de-duplicate it.
-func subtitleSegmentDocument(opts TranscodeOpts, segNum int, windowStart float64, cues []byte) []byte {
+// every cue overlapping the window's d seconds. Cues keep their absolute
+// source times and settings; a cue that spans segments is repeated in each,
+// as HLS expects, and players de-duplicate it.
+func subtitleSegmentDocument(opts TranscodeOpts, segNum int, window subtitleCueWindow, cues []byte) []byte {
 	segDur := renditionSegmentDuration(opts)
 	parsed := parseSubtitleRenditionCues(cues)
-	start90k := int64(math.Round(windowStart * 90_000))
-	if HLSOutputContainer(opts) == OutputContainerMPEGTS && len(parsed) > 0 {
-		start90k = subtitleWindowEpoch(start90k, parsed[0].from*90)
+	origin90k := int64(math.Round(window.origin * 90_000))
+	if window.observed && HLSOutputContainer(opts) == OutputContainerMPEGTS && len(parsed) > 0 {
+		origin90k = subtitleWindowEpoch(origin90k, parsed[0].from*90)
 	}
+	start90k := origin90k + int64(math.Round(window.offset*90_000))
 	end90k := start90k + int64(segDur)*90_000
 	if segNum >= syntheticSegmentCount(opts.TotalDuration, segDur)-1 {
 		end90k = math.MaxInt64

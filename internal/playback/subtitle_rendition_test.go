@@ -221,7 +221,7 @@ func TestSubtitleSegmentDocumentCutsTheFixedGrid(t *testing.T) {
 		{13, header},
 		{1820, header + "\n01:00:40.500 --> 01:00:41.500\nLate cue\n"},
 	} {
-		if got := string(subtitleSegmentDocument(opts, tc.segment, float64(tc.segment*2), cues)); got != tc.want {
+		if got := string(subtitleSegmentDocument(opts, tc.segment, subtitleCueWindow{offset: float64(tc.segment * 2)}, cues)); got != tc.want {
 			t.Errorf("segment %d:\n%q\nwant\n%q", tc.segment, got, tc.want)
 		}
 	}
@@ -230,7 +230,7 @@ func TestSubtitleSegmentDocumentCutsTheFixedGrid(t *testing.T) {
 func TestSubtitleSegmentDocumentTimestampMapFollowsTheContainer(t *testing.T) {
 	opts := subtitleRenditionTestOpts("")
 	opts.TargetCodecVideo = transcodeCodecHEVC
-	if got := string(subtitleSegmentDocument(opts, 0, 0, nil)); got != "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n" {
+	if got := string(subtitleSegmentDocument(opts, 0, subtitleCueWindow{}, nil)); got != "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n" {
 		t.Fatalf("fMP4 segments keep the source clock: %q", got)
 	}
 }
@@ -240,7 +240,7 @@ func TestSubtitleSegmentDocumentKeepsCuesPastTheLastBoundary(t *testing.T) {
 	opts.TotalDuration = 21
 	// The last listed segment (10) covers the remainder and anything a
 	// slightly longer real stream carries past the probed duration.
-	got := string(subtitleSegmentDocument(opts, 10, 20, []byte(subtitleRenditionCues)))
+	got := string(subtitleSegmentDocument(opts, 10, subtitleCueWindow{offset: 20}, []byte(subtitleRenditionCues)))
 	if !strings.Contains(got, "Late cue") || !strings.Contains(got, "After the gap") {
 		t.Fatalf("last segment dropped trailing cues: %q", got)
 	}
@@ -249,7 +249,7 @@ func TestSubtitleSegmentDocumentKeepsCuesPastTheLastBoundary(t *testing.T) {
 func TestSubtitleSegmentDocumentSkipsACueStillBeingWritten(t *testing.T) {
 	opts := subtitleRenditionTestOpts("")
 	partial := []byte("WEBVTT\n\n00:01.000 --> 00:03.500\nFirst cue\n\n00:02.000 --> 00:0")
-	got := string(subtitleSegmentDocument(opts, 1, 2, partial))
+	got := string(subtitleSegmentDocument(opts, 1, subtitleCueWindow{offset: 2}, partial))
 	if strings.Count(got, "-->") != 1 || !strings.Contains(got, "First cue") {
 		t.Fatalf("partial cue leaked into the segment: %q", got)
 	}
@@ -262,7 +262,7 @@ func TestSubtitleSegmentDocumentFollowsTheObservedOrigin(t *testing.T) {
 	// A source whose clock starts at 7 s: video segment N starts at 7+2N, so
 	// the cue at 21-25 s belongs in segments 7 and 8, not 10-12.
 	for segment, want := range map[int]bool{6: false, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false} {
-		got := string(subtitleSegmentDocument(opts, segment, 7+float64(segment*2), cues))
+		got := string(subtitleSegmentDocument(opts, segment, subtitleCueWindow{origin: 7, offset: float64(segment * 2), observed: true}, cues))
 		if strings.Contains(got, "After the gap") != want {
 			t.Errorf("segment %d carries the 21 s cue=%v, want %v: %q", segment, !want, want, got)
 		}
@@ -279,19 +279,28 @@ func TestSubtitleSegmentDocumentFollowsTheCueClockAcrossTheMPEGTSRollover(t *tes
 	cues := []byte("WEBVTT\n\n26:30:41.500 --> 26:30:42.000\nBefore the rollover\n\n26:30:44.000 --> 26:30:45.000\nPast the rollover\n")
 	origin := 95441.0 - wrap // segment 0 starts at source 95441 s
 	for segment, want := range map[int]string{0: "Before the rollover", 1: "Past the rollover"} {
-		got := string(subtitleSegmentDocument(opts, segment, origin+float64(segment*2), cues))
+		got := string(subtitleSegmentDocument(opts, segment, subtitleCueWindow{origin: origin, offset: float64(segment * 2), observed: true}, cues))
 		if !strings.Contains(got, want) || strings.Count(got, "-->") != 1 {
 			t.Errorf("segment %d: %q, want only %q", segment, got, want)
 		}
 	}
 	// ffprobe can report the same time as a signed 33-bit value.
-	if got := string(subtitleSegmentDocument(opts, 1, origin-wrap+2, cues)); !strings.Contains(got, "Past the rollover") {
+	if got := string(subtitleSegmentDocument(opts, 1, subtitleCueWindow{origin: origin - wrap, offset: 2, observed: true}, cues)); !strings.Contains(got, "Past the rollover") {
 		t.Errorf("signed observation: %q", got)
 	}
 	// fMP4 timestamps do not wrap, so the same arithmetic must not alias.
 	opts.TargetCodecVideo = transcodeCodecHEVC
-	if got := string(subtitleSegmentDocument(opts, 1, origin+2, cues)); strings.Contains(got, "rollover") {
+	if got := string(subtitleSegmentDocument(opts, 1, subtitleCueWindow{origin: origin, offset: 2, observed: true}, cues)); strings.Contains(got, "rollover") {
 		t.Errorf("fMP4 window aliased across an epoch: %q", got)
+	}
+	// A long capture keeps its origin's epoch more than half a range later:
+	// segment 24000 starts 48000 s after the origin, at source 143441 s.
+	opts.TargetCodecVideo = transcodeCodecH264
+	opts.TotalDuration = 60_000
+	late := []byte(string(cues) + "\n39:50:41.500 --> 39:50:42.000\nThirteen hours later\n")
+	window := subtitleCueWindow{origin: origin, offset: 48_000, observed: true}
+	if got := string(subtitleSegmentDocument(opts, 24_000, window, late)); !strings.Contains(got, "Thirteen hours later") || strings.Count(got, "-->") != 1 {
+		t.Errorf("segment 24000 lost the origin's epoch: %q", got)
 	}
 }
 
@@ -370,7 +379,10 @@ func TestSubtitleSpanOriginIsObservedOncePerGeneration(t *testing.T) {
 
 	results := make(chan float64, 8)
 	for range 8 {
-		go func() { results <- session.subtitleWindowStart(t.Context(), opts.subtitleCueFile, 12, 2) }()
+		go func() {
+			window := session.subtitleSegmentWindow(t.Context(), opts.subtitleCueFile, 12, 2)
+			results <- window.origin + window.offset
+		}()
 	}
 	for range 8 {
 		// Segment 10 starts at source 17 s (27 s less the 10 s MPEG-TS shift).
@@ -388,7 +400,7 @@ func TestSubtitleSpanOriginBacksOffAfterAFailure(t *testing.T) {
 	session := subtitleOriginTestSession(t, ffmpegPath, 0)
 	opts := session.Opts()
 	for range 3 {
-		if got := session.subtitleWindowStart(t.Context(), opts.subtitleCueFile, 3, 2); got != 6 {
+		if got := session.subtitleSegmentWindow(t.Context(), opts.subtitleCueFile, 3, 2); got.observed || got.offset != 6 {
 			t.Fatalf("unobserved origin must fall back to the fixed grid: %v", got)
 		}
 	}
@@ -403,7 +415,10 @@ func TestSubtitleSpanOriginDiscardsAnObservationARestartOverlapped(t *testing.T)
 	opts := session.Opts()
 
 	done := make(chan float64, 1)
-	go func() { done <- session.subtitleWindowStart(t.Context(), opts.subtitleCueFile, 12, 2) }()
+	go func() {
+		window := session.subtitleSegmentWindow(t.Context(), opts.subtitleCueFile, 12, 2)
+		done <- window.origin + window.offset
+	}()
 	// Opening the FIFO waits for the fake ffprobe to start.
 	if _, err := os.ReadFile(filepath.Join(fake, "started")); err != nil {
 		t.Fatal(err)
@@ -451,8 +466,8 @@ func TestSubtitleSpanOriginObservesAnEarlierGenerationItsSuccessorKept(t *testin
 	session.startSubtitleSpanLocked(next)
 	session.mu.Unlock()
 
-	if got := session.subtitleWindowStart(t.Context(), opts.subtitleCueFile, 12, 2); got != 21 {
-		t.Fatalf("earlier generation's window start = %v, want 21", got)
+	if got := session.subtitleSegmentWindow(t.Context(), opts.subtitleCueFile, 12, 2); got.origin+got.offset != 21 {
+		t.Fatalf("earlier generation's window = %+v, want a start at 21", got)
 	}
 	if runs := fakeSubtitleFFprobeRuns(t, fake); runs != 1 {
 		t.Fatalf("ffprobe ran %d times", runs)
