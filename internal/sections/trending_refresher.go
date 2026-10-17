@@ -257,6 +257,14 @@ func (r *TrendingRefresher) fetchEntries(ctx context.Context, window string, fet
 	if err != nil {
 		return nil, err
 	}
+	// A trending list holds at most trendingFetchCap entries, so each gets its
+	// IMDb and TVDB IDs up front; a title the catalog holds without a TMDB ID
+	// still matches.
+	if enricher, ok := r.TMDBTrending.(catalog.TMDBExternalIDEnricher); ok {
+		if err := enricher.EnrichExternalIDs(ctx, entries); err != nil {
+			return nil, err
+		}
+	}
 	out := make([]trendingDiscoverEntry, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, newTrendingEntry(e.ID, e.TVDBID, e.IMDbID, e.MediaType))

@@ -256,8 +256,10 @@ whether it runs on import, through `syncCollection`, or on the collection's sche
 - The item limit fills with titles the owner can access. The sync checks every source entry
   it reads before it applies the limit, so titles outside the owner's access never take a
   slot. With an item limit set, the sync reads at most four times the limit from the source
-  (100 to 500 entries), so an owner with tight limits can get fewer titles than the limit
-  even when the full source list holds enough the owner can access.
+  (at least 100 entries), so an owner with tight limits can get fewer titles than the limit
+  even when the full source list holds enough the owner can access. The limit can be any
+  positive number. Without one, an MDBList sync reads up to 10,000 entries, a TMDB list sync
+  the whole list, and a TMDB preset its first 20.
 - `library_ids` keeps only titles in one of the listed libraries, and each title must still
   be one the owner can access. Omit it to match against everything the owner can access.
 - The sync summary counts only titles the owner can access. `items_matched` counts the

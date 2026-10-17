@@ -475,7 +475,7 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 		"count", len(results),
 	)
 
-	return s.completeTMDBEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts, "preset")
+	return s.completeTMDBEntrySync(ctx, collection, s.TMDBCollections, results, cfg.Limit, startedAt, opts, "preset")
 }
 
 // syncTMDBFranchiseCollection populates a collection from TMDB's curated
@@ -524,7 +524,7 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 		"count", len(results),
 	)
 
-	return s.completeTMDBEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts, "collection")
+	return s.completeTMDBEntrySync(ctx, collection, s.TMDBFranchises, results, cfg.Limit, startedAt, opts, "collection")
 }
 
 // validateTMDBDiscoverConfig returns a non-empty admin-facing failure message
@@ -593,7 +593,7 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 		"count", len(results),
 	)
 
-	return s.completeTMDBEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts, "discover")
+	return s.completeTMDBEntrySync(ctx, collection, s.TMDBDiscovers, results, cfg.Limit, startedAt, opts, "discover")
 }
 
 // syncTMDBListCollection populates a collection from a public, user-authored
@@ -626,13 +626,21 @@ func (s *LibraryCollectionService) syncTMDBListCollection(ctx context.Context, c
 		"count", len(results),
 	)
 
-	return s.completeTMDBEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts, "list")
+	return s.completeTMDBEntrySync(ctx, collection, s.TMDBLists, results, cfg.Limit, startedAt, opts, "list")
 }
 
 // completeTMDBEntrySync matches fetched TMDB entries against the collection's
 // libraries in source order and records the sync run. Shared by every TMDB
 // source mode; source names the mode in logs.
-func (s *LibraryCollectionService) completeTMDBEntrySync(ctx context.Context, collection *models.LibraryCollection, results []TMDBCollectionEntry, limit *int, startedAt time.Time, opts SyncCollectionOptions, source string) (*models.LibraryCollectionSyncRun, error) {
+// completeTMDBEntrySync matches the entries fetcher returned against the
+// collection's libraries and records the sync. fetcher fills in external IDs
+// for entries their TMDB ID leaves unmatched; see MatchTMDBEntries.
+func (s *LibraryCollectionService) completeTMDBEntrySync(ctx context.Context, collection *models.LibraryCollection, fetcher any, results []TMDBCollectionEntry, limit *int, startedAt time.Time, opts SyncCollectionOptions, source string) (*models.LibraryCollectionSyncRun, error) {
+	contentIDs, err := s.matchTMDBEntriesInLibraries(ctx, collection.LibraryIDs, fetcher, results)
+	if err != nil {
+		return nil, err
+	}
+
 	matchedItems := make([]LibraryCollectionItemInput, 0, len(results))
 	seenContentIDs := make(map[string]int, len(results))
 	warnings := make([]string, 0)
@@ -643,11 +651,8 @@ func (s *LibraryCollectionService) completeTMDBEntrySync(ctx context.Context, co
 
 	for i, entry := range results {
 		scannedEntries = i + 1
-		item, err := s.resolveTMDBEntry(ctx, collection.LibraryIDs, entry)
-		if err != nil {
-			return nil, err
-		}
-		if item == nil {
+		contentID := contentIDs[i]
+		if contentID == "" {
 			slog.DebugContext(ctx, "TMDB sync: no match", "component", "catalog",
 				"source", source,
 				"rank", i+1,
@@ -660,21 +665,21 @@ func (s *LibraryCollectionService) completeTMDBEntrySync(ctx context.Context, co
 			unmatchedCount++
 			continue
 		}
-		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
+		if firstRank, exists := seenContentIDs[contentID]; exists {
 			slog.DebugContext(ctx, "TMDB sync: duplicate match skipped", "component", "catalog",
 				"source", source,
 				"rank", i+1,
 				"title", entry.Title,
 				"type", entry.MediaType,
 				"tmdb_id", entry.ID,
-				"content_id", item.ContentID,
+				"content_id", contentID,
 				"first_rank", firstRank,
 			)
 			duplicateCount++
-			warnings = append(warnings, fmt.Sprintf("Duplicate TMDB entry for %s matched existing item %s", entry.Title, item.ContentID))
+			warnings = append(warnings, fmt.Sprintf("Duplicate TMDB entry for %s matched existing item %s", entry.Title, contentID))
 			continue
 		}
-		seenContentIDs[item.ContentID] = i + 1
+		seenContentIDs[contentID] = i + 1
 
 		slog.DebugContext(ctx, "TMDB sync: matched", "component", "catalog",
 			"source", source,
@@ -682,10 +687,10 @@ func (s *LibraryCollectionService) completeTMDBEntrySync(ctx context.Context, co
 			"title", entry.Title,
 			"type", entry.MediaType,
 			"tmdb_id", entry.ID,
-			"content_id", item.ContentID,
+			"content_id", contentID,
 		)
 		matchedItems = append(matchedItems, LibraryCollectionItemInput{
-			MediaItemID: item.ContentID,
+			MediaItemID: contentID,
 			Position:    len(matchedItems),
 			SourceRank:  i + 1,
 		})
@@ -705,35 +710,55 @@ func (s *LibraryCollectionService) completeTMDBEntrySync(ctx context.Context, co
 		"total", len(results),
 	)
 
-	if err := s.collections.ReplaceItems(ctx, collection.ID, matchedItems); err != nil {
+	return s.recordTMDBEntrySync(ctx, collection.ID, tmdbEntrySyncTally{
+		matched:      matchedItems,
+		warnings:     warnings,
+		unmatched:    unmatchedCount,
+		duplicates:   duplicateCount,
+		scanned:      scannedEntries,
+		limitReached: limitReached,
+	}, len(results), startedAt, opts)
+}
+
+// tmdbEntrySyncTally is what a TMDB sync found walking its entries.
+type tmdbEntrySyncTally struct {
+	matched      []LibraryCollectionItemInput
+	warnings     []string
+	unmatched    int
+	duplicates   int
+	scanned      int
+	limitReached bool
+}
+
+// recordTMDBEntrySync stores a TMDB sync's members and its run record out of
+// total fetched entries.
+func (s *LibraryCollectionService) recordTMDBEntrySync(ctx context.Context, collectionID string, tally tmdbEntrySyncTally, total int, startedAt time.Time, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
+	if err := s.collections.ReplaceItems(ctx, collectionID, tally.matched); err != nil {
 		return nil, err
 	}
 
 	status := "success"
-	if len(warnings) > 0 {
+	if len(tally.warnings) > 0 {
 		status = "warning"
 	}
-	message := fmt.Sprintf("Matched %d of %d entries", len(matchedItems), len(results))
-	if limitReached {
-		message = fmt.Sprintf("%s (item limit reached after %d scanned)", message, scannedEntries)
+	message := fmt.Sprintf("Matched %d of %d entries", len(tally.matched), total)
+	if tally.limitReached {
+		message = fmt.Sprintf("%s (item limit reached after %d scanned)", message, tally.scanned)
 	}
-	if duplicateCount > 0 {
-		message = fmt.Sprintf("%s (%d duplicates skipped)", message, duplicateCount)
+	if tally.duplicates > 0 {
+		message = fmt.Sprintf("%s (%d duplicates skipped)", message, tally.duplicates)
 	}
-	warningsJSON, err := json.Marshal(warnings)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling sync warnings: %w", err)
-	}
+	warningsJSON, _ := json.Marshal(tally.warnings)
 
 	completedAt := syncTimestamp()
 	run, err := s.collections.RecordSyncRun(ctx, RecordLibraryCollectionSyncRunInput{
-		CollectionID:   collection.ID,
+		CollectionID:   collectionID,
 		Status:         status,
 		Message:        message,
-		ItemsAdded:     len(matchedItems),
+		ItemsAdded:     len(tally.matched),
 		ItemsRemoved:   0,
-		ItemsMatched:   len(matchedItems),
-		ItemsUnmatched: unmatchedCount,
+		ItemsMatched:   len(tally.matched),
+		ItemsUnmatched: tally.unmatched,
 		Warnings:       warningsJSON,
 		StartedAt:      startedAt,
 		CompletedAt:    completedAt,
@@ -743,7 +768,7 @@ func (s *LibraryCollectionService) completeTMDBEntrySync(ctx context.Context, co
 	}
 
 	if !opts.SkipCollage {
-		s.MaybeGenerateCollage(ctx, collection.ID)
+		s.MaybeGenerateCollage(ctx, collectionID)
 	}
 
 	return run, nil
@@ -764,40 +789,30 @@ func (s *LibraryCollectionService) recordFailedCollectionSync(ctx context.Contex
 	})
 }
 
-// resolveTMDBEntry finds a media item in the library matching a TMDB preset entry.
-// It tries TMDB ID, IMDb ID, and TVDB ID (for TV shows) to maximize match rate.
-func (s *LibraryCollectionService) resolveTMDBEntry(ctx context.Context, libraryIDs []int, entry TMDBCollectionEntry) (*models.MediaItem, error) {
-	itemType := "movie"
-	if entry.MediaType == "tv" {
-		itemType = "series"
-	}
-
-	tmdbID := ""
-	if entry.ID > 0 {
-		tmdbID = fmt.Sprintf("%d", entry.ID)
-	}
-	tvdbID := ""
-	if entry.TVDBID > 0 {
-		tvdbID = fmt.Sprintf("%d", entry.TVDBID)
-	}
-
-	item, err := s.items.GetByExternalID(ctx, tmdbID, entry.IMDbID, tvdbID, itemType)
-	if err != nil {
-		if !errors.Is(err, ErrItemNotFound) {
-			return nil, err
-		}
-		return nil, nil
-	}
-
-	membership, err := s.libraryItems.GetItemsInFolders(ctx, []string{item.ContentID}, libraryIDs)
+// matchTMDBEntriesInLibraries returns, for each entry in order, the
+// content_id of the title it names in one of libraryIDs, or "" when it names
+// none there.
+func (s *LibraryCollectionService) matchTMDBEntriesInLibraries(ctx context.Context, libraryIDs []int, fetcher any, entries []TMDBCollectionEntry) ([]string, error) {
+	contentIDs, err := MatchTMDBEntries(ctx, s.items, fetcher, entries)
 	if err != nil {
 		return nil, err
 	}
-	if !membership[item.ContentID] {
-		return nil, nil
+	matched := make([]string, 0, len(contentIDs))
+	for _, id := range contentIDs {
+		if id != "" {
+			matched = append(matched, id)
+		}
 	}
-
-	return item, nil
+	inLibraries, err := s.libraryItems.GetItemsInFolders(ctx, matched, libraryIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i, id := range contentIDs {
+		if !inLibraries[id] {
+			contentIDs[i] = ""
+		}
+	}
+	return contentIDs, nil
 }
 
 func (s *LibraryCollectionService) fetchMDBListEntries(ctx context.Context, listURL string, maxEntries int) ([]mdblistEntry, error) {

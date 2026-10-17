@@ -524,13 +524,13 @@ describe("server Synced list editor", () => {
     expect(saveButton()).toBeDisabled();
   });
 
-  it("caps Max titles at 500, which sync can fill", async () => {
+  it("keeps Max titles above 500", async () => {
     serverList("mdblist", MDBLIST);
     showPage(SERVER_EDIT);
-    expect(await setMaxTitles("501")).toHaveValue(500);
+    expect(await setMaxTitles("10000")).toHaveValue(10000);
     await save(ADMIN_PATCH);
     expect(patches(ADMIN_PATCH)[0]).toMatchObject({
-      source_config: { mode: "mdblist_json", limit: 500 },
+      source_config: { mode: "mdblist_json", limit: 10000 },
     });
   });
 
