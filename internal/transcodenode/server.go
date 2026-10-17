@@ -2220,12 +2220,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)
 		}
+		// Under the session's lifecycle lock, as the force-reload teardown: a
+		// restart in flight, which holds it, finishes before the close, and
+		// none starts after it (the session is gone from the map).
+		unlock := s.lockSessionLifecycle(victim.id)
 		if err := s.closeSessionOffGPU(victim.session); err != nil {
 			errs = append(errs, fmt.Errorf("close session %s: %w", victim.id, err))
 		}
 		if s.tracker != nil {
 			s.tracker.Remove(ctx, victim.id)
 		}
+		unlock()
 	}
 	waitCtx, cancelWait := context.WithTimeout(ctx, progressiveRemuxShutdownTimeout)
 	defer cancelWait()

@@ -1159,9 +1159,14 @@ func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan stru
 		transcodes := m.transcodes
 		m.transcodes = make(map[string]*TranscodeSession)
 		m.transcodeMu.Unlock()
-		for _, session := range transcodes {
+		for id, session := range transcodes {
 			if session != nil {
+				// Under the session's lifecycle lock: a restart in flight,
+				// which holds it, finishes before the close, and none starts
+				// after it (the session is gone from the map).
+				unlock := m.LockSessionLifecycle(id)
 				_ = session.Close()
+				unlock()
 			}
 		}
 	}()
