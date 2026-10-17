@@ -314,6 +314,15 @@ func TestSubtitleWindowEpochKeepsLongZeroClockStreams(t *testing.T) {
 	if got := subtitleWindowEpoch(-90_000, 0); got != -90_000 {
 		t.Fatalf("window moved to %d", got)
 	}
+	// A zero-clock stream whose first cue comes 14 h in is still one epoch.
+	if got := subtitleWindowEpoch(0, 14*60*60*90_000); got != 0 {
+		t.Fatalf("origin moved to %d", got)
+	}
+	// An origin observed just below the rollover's wrap, with its cue just
+	// before the rollover, moves up one epoch.
+	if got := subtitleWindowEpoch(-3*90_000, 95_441*90_000); got != subtitleCueClockWrap90k-3*90_000 {
+		t.Fatalf("origin moved to %d", got)
+	}
 }
 
 // fakeSubtitleFFprobe installs an ffmpeg/ffprobe pair whose ffprobe counts its

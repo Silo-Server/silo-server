@@ -443,21 +443,28 @@ func renditionSegmentDuration(opts TranscodeOpts) int {
 	return opts.SegmentDuration
 }
 
-// subtitleCueClockWrap90k is the MPEG-TS timestamp range.
-const subtitleCueClockWrap90k = int64(1) << 33
+const (
+	// subtitleCueClockWrap90k is the MPEG-TS timestamp range.
+	subtitleCueClockWrap90k = int64(1) << 33
+	// subtitleEpochCueLead90k is how long before a generation's origin its
+	// first cue may start: a cue already showing at a seek point is written
+	// with its own start time.
+	subtitleEpochCueLead90k = int64(60 * 60 * 90_000)
+)
 
 // subtitleWindowEpoch moves a generation's origin observed from MPEG-TS video,
 // whose timestamps wrap at 2^33 ticks (about 26.5 h), onto the cue clock,
 // which does not wrap: a source whose clock passes the rollover (a broadcast
 // capture) keeps counting in its cue file while its video segments start
-// over. The origin takes the first epoch no more than half a range before the
-// generation's first cue, which can only lie after it at a rollover. The
-// epoch is the origin's, so every window of the generation keeps it.
-func subtitleWindowEpoch(start90k, firstCue90k int64) int64 {
-	if lag := firstCue90k - subtitleCueClockWrap90k/2 - start90k; lag >= 0 {
-		start90k += (lag/subtitleCueClockWrap90k + 1) * subtitleCueClockWrap90k
+// over. A generation starts no later than its first cue, give or take a cue
+// already showing, so the origin takes the latest epoch that keeps it there,
+// however long the first cue takes to arrive. The epoch is the origin's, so
+// every window of the generation keeps it.
+func subtitleWindowEpoch(origin90k, firstCue90k int64) int64 {
+	if ahead := firstCue90k + subtitleEpochCueLead90k - origin90k; ahead >= subtitleCueClockWrap90k {
+		origin90k += ahead / subtitleCueClockWrap90k * subtitleCueClockWrap90k
 	}
-	return start90k
+	return origin90k
 }
 
 // subtitleRenditionCue is one complete cue of a generation's cue file.
