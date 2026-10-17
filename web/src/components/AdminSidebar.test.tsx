@@ -95,9 +95,9 @@ function renderLiveSidebar(path = "/admin") {
   );
 }
 
-function stubLocalStorage() {
+function stubSessionStorage() {
   const memory = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
+  vi.stubGlobal("sessionStorage", {
     getItem: (key: string) => memory.get(key) ?? null,
     setItem: (key: string, value: string) => memory.set(key, value),
     removeItem: (key: string) => memory.delete(key),
@@ -111,7 +111,7 @@ describe("AdminSidebar", () => {
   });
 
   beforeEach(() => {
-    stubLocalStorage();
+    stubSessionStorage();
     mockUseSettingsAttention.mockReturnValue([]);
     mockUsePolicyCapability.mockReturnValue({
       data: {

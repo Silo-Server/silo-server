@@ -53,6 +53,7 @@ import AdminLayout from "./AdminLayout";
 function renderAdmin(initialPath = "/admin") {
   const router = createMemoryRouter(
     [
+      { path: "/", element: <h1>Home</h1> },
       {
         path: "/admin",
         element: <AdminLayout />,
@@ -134,6 +135,27 @@ describe("AdminLayout shell attribute", () => {
     expect(document.documentElement).toHaveAttribute("data-admin-shell", "true");
     unmount();
     expect(document.documentElement).not.toHaveAttribute("data-admin-shell");
+  });
+});
+
+describe("AdminLayout sidebar topics", () => {
+  const key = "silo.admin-nav.open-topics";
+  afterEach(() => sessionStorage.clear());
+
+  it("keeps the open topics across admin pages and closes them on leaving the admin", async () => {
+    sessionStorage.setItem(key, JSON.stringify({ server: true }));
+    const { router } = renderAdmin();
+
+    await act(async () => {
+      await router.navigate("/admin/users");
+    });
+    expect(sessionStorage.getItem(key)).toBe(JSON.stringify({ server: true }));
+
+    await act(async () => {
+      await router.navigate("/");
+    });
+    expect(screen.getByRole("heading", { name: "Home" })).toBeInTheDocument();
+    expect(sessionStorage.getItem(key)).toBeNull();
   });
 });
 
