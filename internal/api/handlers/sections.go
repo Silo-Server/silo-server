@@ -1612,9 +1612,10 @@ type featuredArtworkCard[K comparable] struct {
 }
 
 // resolveFeaturedArtwork resolves every card's poster, backdrop and logo
-// together, each slot at the request's size or target width for it, keyed
-// however the surface looks a card up: cached keys in one batch and
-// plugin-hosted art once per slot hint (see catalog.ArtworkBatch).
+// together, each slot at the request's size or target width for it: cached
+// keys in one batch and plugin-hosted art once per slot hint (see
+// catalog.ArtworkBatch). Home and library sections and recommendations share
+// it so a title's card artwork is the same file on every featured surface.
 func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.ArtworkPresigner, cards []featuredArtworkCard[K], art imagesize.Request) map[K]sectionItemImageURLs {
 	posterHint := requestVariantHint("featured", art.For(imagesize.SlotPoster))
 	backdropHint := requestVariantHint("featured", art.For(imagesize.SlotBackdrop))
@@ -1745,7 +1746,7 @@ func sizedSectionBackdropPath(sectionType sections.SectionType, path string, siz
 }
 
 // featuredArtworkPaths are an item card's poster, backdrop and logo keys on a
-// featured surface: home and library sections.
+// featured surface: home and library sections and recommendations.
 type featuredArtworkPaths struct {
 	posterPath   string
 	backdropPath string
@@ -1754,7 +1755,7 @@ type featuredArtworkPaths struct {
 
 // featuredItemArtworkPaths sizes an item card's artwork for a featured surface,
 // each slot at the request's size or target width for it. sectionType picks the
-// unsized backdrop default.
+// unsized backdrop default; recommendations pass none.
 func featuredItemArtworkPaths(item *models.MediaItem, sectionType sections.SectionType, art imagesize.Request) featuredArtworkPaths {
 	return featuredArtworkPaths{
 		posterPath:   sizedPosterPath(item.PosterPath, art.For(imagesize.SlotPoster)),

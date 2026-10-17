@@ -39,8 +39,12 @@ The parameter is accepted on:
 - home and library sections, including single-section items
 - the personal lists: `/api/v2/favorites`, `/api/v2/watchlist`, and `/api/v2/history`
 - shuffles, the not-interested list, and notification series
+- the recommendation reads: discover, For You, a recommendation section,
+  because-watched, popular, recently added, similar, similar users, the taste
+  seed grid, Watch Tonight and Watch Tonight cards
 
-Other surfaces ignore it.
+Other surfaces ignore it. The frozen `/api/v1` recommendation routes ignore it
+too.
 
 Within item detail this covers cast and crew headshots too: they follow the
 `profile` ladder, which has no wide rung, so `large` and `medium` land on the
@@ -56,6 +60,9 @@ that is `GET /api/v2/catalog?source=person` rather than a person operation.
 On the personal lists the per-slot defaults are asymmetric — a 500px poster
 beside a 300px backdrop — so an explicit size changes both, not just the one that
 looks wrong.
+
+Watch Tonight cards carry each cast member's `photo_url` on the profile ladder:
+500px without a size, like item detail.
 
 ## Per-slot widths
 

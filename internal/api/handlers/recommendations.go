@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -83,6 +85,22 @@ type discoverFetcher interface {
 
 type discoverPresigner interface {
 	PresignURL(ctx context.Context, path string, variant string) string
+	PresignURLsWithExpiry(ctx context.Context, paths []string, variant string) map[string]catalog.ResolvedImageURL
+}
+
+// featuredCardArtwork resolves recommendation cards' artwork in one batch,
+// keyed by content ID, through the resolver home sections use.
+func (h *RecommendationsHandler) featuredCardArtwork(ctx context.Context, items map[string]*models.MediaItem, art imagesize.Request) map[string]sectionItemImageURLs {
+	if h.DetailSvc == nil || len(items) == 0 {
+		return nil
+	}
+	cards := make([]featuredArtworkCard[string], 0, len(items))
+	for _, id := range slices.Sorted(maps.Keys(items)) {
+		if mi := items[id]; mi != nil {
+			cards = append(cards, featuredArtworkCard[string]{key: mi.ContentID, item: mi})
+		}
+	}
+	return resolveFeaturedArtwork(ctx, h.DetailSvc, cards, art)
 }
 
 // NewRecommendationsHandler creates a new RecommendationsHandler.
@@ -532,6 +550,7 @@ func (h *RecommendationsHandler) buildSectionItems(
 	scoredItems []recommendations.ScoredItem,
 	enrichment *itemEnrichment,
 	upcomingEvents map[string]upcomingEventResponse,
+	artwork map[string]sectionItemImageURLs,
 ) []sectionItemResponse {
 	out := make([]sectionItemResponse, 0, len(scoredItems))
 	for _, scored := range scoredItems {
@@ -564,11 +583,8 @@ func (h *RecommendationsHandler) buildSectionItems(
 		if item.Keywords == nil {
 			item.Keywords = []string{}
 		}
-		if h.DetailSvc != nil {
-			item.PosterURL = h.DetailSvc.PresignURL(ctx, featuredPosterPath(mi.PosterPath), "featured")
-			item.BackdropURL = h.DetailSvc.PresignURL(ctx, featuredBackdropPath(mi.BackdropPath), "featured")
-			item.LogoURL = h.DetailSvc.PresignURL(ctx, mi.LogoPath, "featured")
-		}
+		urls := artwork[mi.ContentID]
+		item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
 		if enrichment.overlays != nil {
 			item.OverlaySummary = enrichment.overlays[mi.ContentID]
 		}
