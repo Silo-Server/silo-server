@@ -19,7 +19,8 @@ import {
 
 const UNLIMITED = "0";
 const CUSTOM = "custom";
-const INVALID_MBPS = "Enter a value above 0 Mbps, such as 8 or 1.5 (up to 3 decimal places).";
+export const INVALID_STREAM_BITRATE_MBPS =
+  "Enter a value above 0 Mbps, such as 8 or 1.5 (up to 3 decimal places).";
 
 function choiceFor(kbps: number | null): string {
   if (kbps === null) return "";
@@ -35,18 +36,30 @@ export function StreamBitrateLimitInput({
   id,
   label,
   value,
+  invalidDraft,
   onValueChange,
+  onInvalidDraftChange,
   disabled = false,
 }: {
   id: string;
   label: string;
   value: number | null;
+  // Custom text that did not parse, kept by the form so it survives the
+  // Limits tab unmounting. Undefined means the current value is saveable.
+  invalidDraft?: string;
   onValueChange: (kbps: number | null) => void;
+  onInvalidDraftChange?: (draft: string | undefined) => void;
   disabled?: boolean;
 }) {
-  const [choice, setChoice] = useState(() => choiceFor(value));
+  const [choice, setChoice] = useState(() =>
+    invalidDraft !== undefined ? CUSTOM : choiceFor(value),
+  );
   const [draft, setDraft] = useState(() =>
-    value !== null && choiceFor(value) === CUSTOM ? streamBitrateLimitMbpsText(value) : "",
+    invalidDraft !== undefined
+      ? invalidDraft
+      : value !== null && choiceFor(value) === CUSTOM
+        ? streamBitrateLimitMbpsText(value)
+        : "",
   );
   const custom = choice === CUSTOM;
   const draftValue = parseStreamBitrateMbps(draft);
@@ -55,21 +68,25 @@ export function StreamBitrateLimitInput({
     if (next === "") return;
     setChoice(next);
     if (next !== CUSTOM) {
+      onInvalidDraftChange?.(undefined);
       onValueChange(Number(next));
       return;
     }
     // Start from the current cap so picking Custom alone changes nothing.
     const seed = value !== null && value > 0 ? streamBitrateLimitMbpsText(value) : "";
     setDraft(seed);
-    onValueChange(parseStreamBitrateMbps(seed));
+    const parsed = parseStreamBitrateMbps(seed);
+    onInvalidDraftChange?.(parsed === null ? seed : undefined);
+    onValueChange(parsed);
   }
 
   function handleDraftChange(input: HTMLInputElement) {
     const parsed = parseStreamBitrateMbps(input.value);
     // Surrounding forms block submission on this, so native validation and the
     // parser can't disagree about what is saveable.
-    input.setCustomValidity(parsed === null ? INVALID_MBPS : "");
+    input.setCustomValidity(parsed === null ? INVALID_STREAM_BITRATE_MBPS : "");
     setDraft(input.value);
+    onInvalidDraftChange?.(parsed === null ? input.value : undefined);
     onValueChange(parsed);
   }
 
@@ -97,6 +114,10 @@ export function StreamBitrateLimitInput({
               inputMode="decimal"
               autoComplete="off"
               required
+              ref={(input) => {
+                if (input && draftValue === null)
+                  input.setCustomValidity(INVALID_STREAM_BITRATE_MBPS);
+              }}
               aria-invalid={draft !== "" && draftValue === null}
               placeholder="e.g. 1.5"
               value={draft}
@@ -110,7 +131,7 @@ export function StreamBitrateLimitInput({
         )}
       </div>
       {custom && draftValue === null && (
-        <p className="text-muted-foreground text-xs">{INVALID_MBPS}</p>
+        <p className="text-muted-foreground text-xs">{INVALID_STREAM_BITRATE_MBPS}</p>
       )}
       {custom && draftValue !== null && isLowStreamBitrateLimit(draftValue) && (
         <p className="text-warning text-xs">

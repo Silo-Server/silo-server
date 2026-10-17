@@ -422,6 +422,8 @@ function StreamBitratePolicyField({
   label,
   value,
   onValueChange,
+  invalidDraft,
+  onInvalidDraftChange,
   source,
   effectiveValue,
   disabled,
@@ -429,6 +431,8 @@ function StreamBitratePolicyField({
   label: string;
   value: number | null;
   onValueChange: (value: number | null) => void;
+  invalidDraft?: string;
+  onInvalidDraftChange?: (draft: string | undefined) => void;
   source: PolicyDefaultSource;
   effectiveValue?: number;
   disabled?: boolean;
@@ -437,10 +441,11 @@ function StreamBitratePolicyField({
   // Same override model as LimitPolicyField: turning Override on seeds the
   // value the field already resolves to, and with no hint the field keeps its
   // default until the admin picks a limit.
-  const [overridden, setOverridden] = useState(value !== null);
+  const [overridden, setOverridden] = useState(value !== null || invalidDraft !== undefined);
 
   function handleOverrideChange(checked: boolean) {
     setOverridden(checked);
+    onInvalidDraftChange?.(undefined);
     onValueChange(checked ? (effectiveValue ?? null) : null);
   }
 
@@ -459,9 +464,11 @@ function StreamBitratePolicyField({
         id={id}
         label={label}
         value={value}
+        invalidDraft={invalidDraft}
         disabled={disabled}
-        // A custom box without a valid value keeps the last one; the form's
-        // required/pattern validation blocks saving until it is fixed.
+        // A custom box without a valid value keeps the last one; the form
+        // records that text and refuses the save instead of sending the stale cap.
+        onInvalidDraftChange={onInvalidDraftChange}
         onValueChange={(kbps) => {
           if (kbps !== null) onValueChange(kbps);
         }}
@@ -537,7 +544,13 @@ export function PolicyLimitFields({
   disabled,
   invalidLimitDrafts,
   onInvalidLimitDraftChange,
-}: PolicyContext & LimitValidity) {
+  invalidBitrateDrafts,
+  onInvalidBitrateDraftChange,
+}: PolicyContext &
+  LimitValidity & {
+    invalidBitrateDrafts?: ReadonlyMap<"remote" | "local", string>;
+    onInvalidBitrateDraftChange?: (which: "remote" | "local", draft: string | undefined) => void;
+  }) {
   const qualityId = useId();
   const qualityValue: PlaybackQualityPreset | typeof INHERIT =
     state.maxPlaybackQuality === null
@@ -570,6 +583,8 @@ export function PolicyLimitFields({
           onValueChange={(maxRemoteStreamBitrateKbps) =>
             onChange({ ...state, maxRemoteStreamBitrateKbps })
           }
+          invalidDraft={invalidBitrateDrafts?.get("remote")}
+          onInvalidDraftChange={(draft) => onInvalidBitrateDraftChange?.("remote", draft)}
           source={source}
           effectiveValue={effective?.max_remote_stream_bitrate_kbps}
           disabled={disabled}
@@ -580,6 +595,8 @@ export function PolicyLimitFields({
           onValueChange={(maxLocalStreamBitrateKbps) =>
             onChange({ ...state, maxLocalStreamBitrateKbps })
           }
+          invalidDraft={invalidBitrateDrafts?.get("local")}
+          onInvalidDraftChange={(draft) => onInvalidBitrateDraftChange?.("local", draft)}
           source={source}
           effectiveValue={effective?.max_local_stream_bitrate_kbps}
           disabled={disabled}

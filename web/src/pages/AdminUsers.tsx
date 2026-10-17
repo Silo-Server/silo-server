@@ -24,6 +24,7 @@ import {
   policyStateFromUser,
   type LimitPolicyKey,
 } from "@/components/UserPolicyFields";
+import { INVALID_STREAM_BITRATE_MBPS } from "@/components/StreamBitrateLimitInput";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { PageHeader } from "@/components/page/PageHeader";
@@ -76,6 +77,7 @@ import {
   getAdminUser,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
+import { V2ProblemError } from "@/api/v2/request";
 import { userDetailTabSearch } from "./admin-users/detail/userDetailTabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import InvitationsTab from "./admin-settings/InvitationsTab";
@@ -88,6 +90,7 @@ import {
 } from "@/lib/permissions";
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { newPasswordProblem } from "@/lib/newPassword";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -702,6 +705,46 @@ function formatRelativeTime(value?: string | null, fallback = "-") {
   return fallback;
 }
 
+// A validation failure's summary is "see errors"; the reason is in the field
+// details. Show those, and keep a real summary (a duplicate username, for
+// example) when there are no field details.
+function createUserErrorMessage(err: unknown): string {
+  if (err instanceof V2ProblemError) {
+    const details = (err.problem.errors ?? []).flatMap((item) => {
+      if (!item.detail) return [];
+      const field = item.location?.replace(/^body\./, "").replaceAll("_", " ");
+      return [field ? `${field}: ${item.detail}` : item.detail];
+    });
+    if (details.length > 0) return details.join(" ");
+  }
+  const message = err instanceof Error ? err.message : "";
+  // The summary only points at field details. Without those, it is not a reason.
+  if (!message || message.endsWith("see errors.")) return "Could not save user.";
+  return message;
+}
+
+// The form uses novalidate so a field on a hidden tab cannot swallow Save
+// before the password and username checks run. novalidate also makes
+// checkValidity() ignore every control, so read the validity flags directly:
+// an invalid custom bitrate must still stop the create.
+function firstInvalidControl(
+  form: HTMLFormElement,
+): HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null {
+  for (const el of form.elements) {
+    if (
+      !(el instanceof HTMLInputElement) &&
+      !(el instanceof HTMLSelectElement) &&
+      !(el instanceof HTMLTextAreaElement)
+    ) {
+      continue;
+    }
+    if (el.disabled || el.type === "hidden" || el.type === "button" || el.type === "submit")
+      continue;
+    if (!el.validity.valid) return el;
+  }
+  return null;
+}
+
 function CreateUserForm({
   onClose,
   onBusy,
@@ -733,8 +776,20 @@ function CreateUserForm({
   const [invalidLimitDrafts, setInvalidLimitDrafts] = useState<ReadonlyMap<LimitPolicyKey, string>>(
     new Map(),
   );
+  const [invalidBitrateDrafts, setInvalidBitrateDrafts] = useState<
+    ReadonlyMap<"remote" | "local", string>
+  >(() => new Map());
   const [dialogTab, setDialogTab] = useState("account");
   const formRef = useRef<HTMLFormElement>(null);
+  function handleInvalidBitrateDraftChange(which: "remote" | "local", draft: string | undefined) {
+    setInvalidBitrateDrafts((current) => {
+      if (draft === undefined ? !current.has(which) : current.get(which) === draft) return current;
+      const next = new Map(current);
+      if (draft === undefined) next.delete(which);
+      else next.set(which, draft);
+      return next;
+    });
+  }
   function handleInvalidLimitDraftChange(key: LimitPolicyKey, draft: string | undefined) {
     setInvalidLimitDrafts((current) => {
       if (current.get(key) === draft) return current;
@@ -747,6 +802,9 @@ function CreateUserForm({
   const usernameId = useId();
   const emailId = useId();
   const passwordId = useId();
+  const errorId = useId();
+  const passwordProblem = newPasswordProblem(password, password);
+  const passwordAlert = error !== "" && error === passwordProblem;
   const requireChangeId = useId();
   const roleId = useId();
   const markerEditId = useId();
@@ -794,17 +852,37 @@ function CreateUserForm({
       (createDefaultProfile && !capabilities.data.default_profile)
     )
       return;
+    if (username.trim() === "") {
+      setError("Enter a username.");
+      return;
+    }
     if (!isValidEmail(email)) {
       setError(INVALID_EMAIL_MESSAGE);
       return;
     }
+    if (passwordProblem) {
+      setError(passwordProblem);
+      return;
+    }
     // A cleared or half-typed limit is not in the policy state, which still
     // holds the last valid value; saving now would send that instead.
-    if (invalidLimitDrafts.size > 0) {
+    if (invalidLimitDrafts.size > 0 || invalidBitrateDrafts.size > 0) {
       // The Limits fields mount only once the tab has rendered, so render it
-      // now and then let the browser point at the invalid field.
+      // now and then let the browser point at the invalid field. A custom
+      // bitrate keeps its last valid cap in the policy, so an empty or
+      // unparseable box has to block the save on its own.
       flushSync(() => setDialogTab("limits"));
+      if (invalidBitrateDrafts.size > 0) setError(INVALID_STREAM_BITRATE_MBPS);
       formRef.current?.reportValidity();
+      return;
+    }
+    const blocked = formRef.current ? firstInvalidControl(formRef.current) : null;
+    if (blocked) {
+      const tab = blocked.closest("[data-dialog-tab]")?.getAttribute("data-dialog-tab");
+      if (tab === "account" || tab === "access" || tab === "limits") {
+        flushSync(() => setDialogTab(tab));
+      }
+      setError(blocked.validationMessage || "Check the highlighted field.");
       return;
     }
     busy.current = true;
@@ -826,7 +904,7 @@ function CreateUserForm({
       createMutation.reset();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save user.");
+      setError(createUserErrorMessage(err));
     } finally {
       busy.current = false;
       onBusy(false);
@@ -834,8 +912,7 @@ function CreateUserForm({
   }
 
   return (
-    <form ref={formRef} onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
-      {error && <p role="alert">{error}</p>}
+    <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
       <label className="mb-3 flex items-center gap-2">
         <input
           type="checkbox"
@@ -861,7 +938,7 @@ function CreateUserForm({
         </TabsList>
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <TabsContent value="account" className="mt-0 space-y-4">
+          <TabsContent value="account" data-dialog-tab="account" className="mt-0 space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor={usernameId}>Username</Label>
@@ -889,9 +966,25 @@ function CreateUserForm({
                   type="password"
                   autoComplete="new-password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setPassword(next);
+                    setError((current) =>
+                      current !== "" &&
+                      current === passwordProblem &&
+                      !newPasswordProblem(next, next)
+                        ? ""
+                        : current,
+                    );
+                  }}
                   required
+                  aria-invalid={passwordAlert}
+                  aria-errormessage={passwordAlert ? errorId : undefined}
+                  aria-describedby={`${passwordId}-hint`}
                 />
+                <p id={`${passwordId}-hint`} className="text-muted-foreground text-xs">
+                  At least 8 characters, at most 72 bytes.
+                </p>
                 <div className="flex items-center gap-2">
                   <Switch
                     id={requireChangeId}
@@ -926,7 +1019,7 @@ function CreateUserForm({
             </div>
           </TabsContent>
 
-          <TabsContent value="access" className="mt-0 space-y-4">
+          <TabsContent value="access" data-dialog-tab="access" className="mt-0 space-y-4">
             <div className="space-y-2">
               <Label htmlFor={accessGroupSelectId}>Group</Label>
               <Select
@@ -1004,7 +1097,7 @@ function CreateUserForm({
             />
           </TabsContent>
 
-          <TabsContent value="limits" className="mt-0 space-y-4">
+          <TabsContent value="limits" data-dialog-tab="limits" className="mt-0 space-y-4">
             <PolicyLimitFields
               state={policy}
               onChange={setPolicy}
@@ -1012,12 +1105,23 @@ function CreateUserForm({
               effective={inheritHints}
               invalidLimitDrafts={invalidLimitDrafts}
               onInvalidLimitDraftChange={handleInvalidLimitDraftChange}
+              invalidBitrateDrafts={invalidBitrateDrafts}
+              onInvalidBitrateDraftChange={handleInvalidBitrateDraftChange}
             />
           </TabsContent>
         </div>
       </Tabs>
 
       <div className="border-border mt-4 border-t pt-4">
+        {error && (
+          <p
+            id={errorId}
+            role="alert"
+            className="border-destructive/40 bg-destructive/10 text-destructive mb-3 rounded-md border px-3 py-2 text-sm"
+          >
+            {error}
+          </p>
+        )}
         <Button
           type="submit"
           className="w-full"
