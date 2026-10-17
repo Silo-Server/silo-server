@@ -17,14 +17,15 @@ func TestClampEventAt(t *testing.T) {
 	}{
 		{"zero defaults to now", time.Time{}, now},
 		{"far future clamps to now", now.Add(48 * time.Hour), now},
-		{"just past skew clamps to now", now.Add(progressClockSkew + time.Minute), now},
+		{"just past skew clamps to now", now.Add(3 * time.Minute), now},
+		{"at skew is kept", now.Add(2 * time.Minute), now.Add(2 * time.Minute)},
 		{"within skew is kept", now.Add(time.Minute), now.Add(time.Minute)},
 		{"past is kept", now.Add(-3 * time.Hour), now.Add(-3 * time.Hour)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := clampEventAt(tc.client, now); !got.Equal(tc.want) {
-				t.Fatalf("clampEventAt(%v) = %v, want %v", tc.client, got, tc.want)
+			if got := userstore.ClampProgressEventAt(tc.client, now); !got.Equal(tc.want) {
+				t.Fatalf("ClampProgressEventAt(%v) = %v, want %v", tc.client, got, tc.want)
 			}
 		})
 	}
