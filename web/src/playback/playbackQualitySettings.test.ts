@@ -29,10 +29,19 @@ describe("playbackQualitySettings", () => {
     });
   });
 
-  it("leaves both unset until the settings read resolves", () => {
-    expect(playbackQualitySettings(undefined, true)).toEqual({
+  it("leaves both unset until the settings read resolves on an unmetered link", () => {
+    expect(playbackQualitySettings(undefined, false)).toEqual({
       qualityPreference: undefined,
       maxBitrateKbps: undefined,
+    });
+  });
+
+  // Playback can start before the read resolves and does not replan when it
+  // does, so a metered start must not go out without a limit.
+  it("uses the cellular defaults until the settings read resolves on a metered link", () => {
+    expect(playbackQualitySettings(undefined, true)).toEqual({
+      qualityPreference: "720p",
+      maxBitrateKbps: 2000,
     });
   });
 });
