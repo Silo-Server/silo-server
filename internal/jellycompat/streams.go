@@ -3475,10 +3475,9 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		previousOpts := transcodeSession.Opts()
 		transcodeSession.SetAudioTrackIndex(audioTrackIndex)
 		transcodeSession.SetSourceAudioChannels(sourceAudioChannels)
-		startSegment := 0
-		if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
-			startSegment = int(positionSeconds / float64(segmentDuration))
-		}
+		// A keyframe-planned session's segments vary in length, so the
+		// session maps the position to its segment.
+		startSegment := transcodeSession.SegmentAt(positionSeconds)
 		if err := h.tm.RestartSessionLocked(ctx, playSession.UpstreamSessionID, transcodeSession, positionSeconds, startSegment); err != nil {
 			transcodeSession.SetAudioTrackIndex(previousOpts.AudioTrackIndex)
 			transcodeSession.SetSourceAudioChannels(previousOpts.SourceAudioChannels)
@@ -3501,8 +3500,9 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		// rebuilds ffmpeg from the newly selected audio track rather than the
 		// stale original. SetAudioTrackIndex mutated the live opts, so read them
 		// back. Best-effort: a stale recipe only costs node-restart resilience,
-		// not the live stream.
-		opts := transcodeSession.Opts()
+		// not the live stream. A keyframe-planned session's recipe keeps its
+		// start at the beginning, so a rebuild serves the same planned playlist.
+		opts := transcodeSession.RecipeOpts()
 		if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, opts); err != nil {
 			slog.WarnContext(ctx, "persist audio-restarted transcode recipe", "component", "jellycompat", "error", err,
 				"playback_session_id", playSession.ID)
