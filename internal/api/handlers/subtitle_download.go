@@ -38,5 +38,6 @@ func (h *SubtitleSearchHandler) downloadAuthorizedSubtitle(ctx context.Context, 
 		return nil, apiError(http.StatusInternalServerError, "download_error", "Failed to download subtitle")
 	}
 	h.requestAutoSync(ctx, sub)
+	h.announceAddedSubtitle(ctx, sub)
 	return sub, nil
 }

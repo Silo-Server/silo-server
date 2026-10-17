@@ -11,12 +11,20 @@ import (
 type dispatchTestConn struct {
 	mu       sync.Mutex
 	messages []any
+	// written, when set, receives a signal after each message.
+	written chan struct{}
 }
 
 func (c *dispatchTestConn) WriteJSON(v any) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.messages = append(c.messages, v)
+	c.mu.Unlock()
+	if c.written != nil {
+		select {
+		case c.written <- struct{}{}:
+		default:
+		}
+	}
 	return nil
 }
 

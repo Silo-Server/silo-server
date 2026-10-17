@@ -177,6 +177,19 @@ uncertain response must not trigger automatic retry or authentication replay.
 The immutable object publication rules and best-effort cleanup limits are
 specified in [subtitle storage](architecture/subtitle-storage.md).
 
+### Announcing an added subtitle
+
+After a provider download or an upload succeeds, on v2 or the v1 bridge, every
+playback session of the file on any API server receives the playback-socket
+`subtitle_ready` event that generated tracks already use. Its payload carries
+`file_id`, `subtitle_id`, `language`, `label` (the release name), and, when the
+server can resolve it, the new `track` at its frozen combined ordinal; without
+`track` the player refetches its plan. Players add the track to their list and
+must not select it. Only the session that requested the download may select the
+track it asked for, so another viewer's current subtitle never changes. The
+event is also sent when deduplication returned an existing row. API servers
+that predate the event ignore it on the cluster bus.
+
 The bridge download retains its existing request and response contract. This
 operation does not change Jellyfin subtitle delivery. Both native clients must
 adopt the new download operation separately; AI creation/cancellation and user
