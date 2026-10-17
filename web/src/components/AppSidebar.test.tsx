@@ -37,6 +37,9 @@ let mockPrimaryMenu: {
   >;
 } | null = null;
 let mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
+let mockRequestsEnabled = false;
+let mockProfileRequestsAllowed = true;
+let mockMyRequests: Array<{ id: string }> = [];
 
 vi.mock("@/hooks/useAuth", () => {
   const useAuth = () => ({
@@ -49,7 +52,7 @@ vi.mock("@/hooks/useAuth", () => {
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({
-    profile: { name: "Alex" },
+    profile: { name: "Alex", requests_allowed: mockProfileRequestsAllowed },
   }),
 }));
 
@@ -118,7 +121,10 @@ function pluginInstallation(
 
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestFeatureStatus: () => ({
-    data: { requests_enabled: false },
+    data: { requests_enabled: mockRequestsEnabled },
+  }),
+  useMyMediaRequests: (_params: unknown, options: { enabled?: boolean }) => ({
+    data: options.enabled ? mockMyRequests : undefined,
   }),
 }));
 
@@ -176,6 +182,25 @@ describe("AppSidebar", () => {
     mockPluginInstallations = [];
     mockPrimaryMenu = null;
     mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
+    mockRequestsEnabled = false;
+    mockProfileRequestsAllowed = true;
+    mockMyRequests = [];
+  });
+
+  it("links Requests for a blocked profile only while it has requests to manage", () => {
+    const hasRequestsLink = () =>
+      parseMarkup(renderSidebar("/")).querySelector('a[href="/requests"]') !== null;
+    mockRequestsEnabled = true;
+    expect(hasRequestsLink()).toBe(true);
+
+    mockProfileRequestsAllowed = false;
+    expect(hasRequestsLink()).toBe(false);
+
+    mockMyRequests = [{ id: "r1" }];
+    expect(hasRequestsLink()).toBe(true);
+
+    mockRequestsEnabled = false;
+    expect(hasRequestsLink()).toBe(false);
   });
 
   it("uses the cinema highlight text color for active catalog source links", () => {

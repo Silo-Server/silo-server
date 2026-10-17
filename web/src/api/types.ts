@@ -241,6 +241,11 @@ export interface Profile {
    * max_advisory_age are shown. No effect without a limit.
    */
   require_advisory_age?: boolean;
+  /**
+   * Whether the profile may use requests and request discovery. Absent on a
+   * server that predates the switch, which allows every profile.
+   */
+  requests_allowed?: boolean;
   quality_preference: string;
   language: string;
   preferred_metadata_language?: string;

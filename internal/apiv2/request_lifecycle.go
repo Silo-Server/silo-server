@@ -55,7 +55,7 @@ type FeatureStatus struct {
 	// and in_watchlist on discovery results and title detail. It follows
 	// RequestsEnabled because the operations answer 409 capability_disabled
 	// while requests are off.
-	WatchlistTitlesSupported bool `json:"watchlist_titles_supported" doc:"Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept."`
+	WatchlistTitlesSupported bool `json:"watchlist_titles_supported" doc:"Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled, and for a profile blocked from requests, when they answer 403; the entries are kept."`
 	// WatchlistRequests is the effective watchlist-requests setting for the
 	// viewer.
 	WatchlistRequests bool `json:"watchlist_requests" doc:"Whether adding a title the library doesn't have to the watchlist also requests it (or follows its request) for this viewer: requests and watchlist requests are on for the server, the profile has not opted out, and the viewer may request."`
@@ -226,7 +226,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			}
 		}
 		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true,
-			WatchlistTitlesSupported: status.RequestsEnabled && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed}}, nil
+			WatchlistTitlesSupported: status.RequestsEnabled && !status.ProfileRequestsBlocked && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed}}, nil
 	})
 	Register(reg, op(http.MethodPost, "/requests/{id}/cancel", "cancelRequest", "Cancel an accessible request."), func(ctx context.Context, in *RequestCancelInput) (*MediaRequestOutput, error) {
 		if requests == nil {

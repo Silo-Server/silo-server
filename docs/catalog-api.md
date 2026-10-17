@@ -896,6 +896,13 @@ book libraries, never carry an advisory age, so the limit never hides them.
 
 Frozen v1 responses do not expose these fields.
 
+Because media-request discovery is reached only partly by these limits, a
+household manager can also keep a profile out of requests and request
+discovery with `requests_allowed` (boolean, default `true`); see
+[media requests](architecture/media-requests.md#who-can-request). Detect it with
+`requests_allowed_supported` on the `listProfiles` response; v1 does not expose
+it either.
+
 ## Ratings on title pages
 
 Every client shows a title's external ratings the same way: the v2 item detail

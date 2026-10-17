@@ -180,4 +180,63 @@ describe("ProfileEditorDialog", () => {
     expect(document.body.textContent).toContain("Maximum content rating");
     expect(document.body.textContent).not.toContain("Maximum advisory age");
   });
+  function switchFor(text: string) {
+    const label = [...document.querySelectorAll("label")].find(
+      (element) => element.textContent === text,
+    );
+    return document.getElementById(label?.getAttribute("for") ?? "");
+  }
+
+  function requestsSwitch() {
+    return switchFor("Allow requests");
+  }
+
+  it("turns requests off with the kids preset and saves the switch", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue(makeProfile());
+    mocks.useUpdateProfile.mockReturnValue({ isPending: false, mutate: vi.fn(), mutateAsync });
+
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile()}
+          libraries={[]}
+          requestsAllowedSupported
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+    expect(requestsSwitch()?.getAttribute("aria-checked")).toBe("true");
+
+    await act(async () => {
+      document.getElementById("profile-is-child")?.click();
+    });
+    expect(requestsSwitch()?.getAttribute("aria-checked")).toBe("false");
+
+    // The preset also restricts libraries; lift that so the form validates.
+    await act(async () => {
+      switchFor("Restrict libraries")?.click();
+    });
+    await act(async () => {
+      document.querySelector<HTMLFormElement>("form")?.requestSubmit();
+    });
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ requests_allowed: false }) }),
+    );
+  });
+
+  it("hides the requests switch on a server without it", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile({ requests_allowed: false })}
+          libraries={[]}
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+    expect(document.body.textContent).toContain("Maximum content rating");
+    expect(document.body.textContent).not.toContain("Allow requests");
+  });
 });

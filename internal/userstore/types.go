@@ -23,7 +23,11 @@ type Profile struct {
 	// RequireAdvisoryAge hides titles with no advisory age from the profile
 	// (see access.MaturityLimits.RequireAdvisoryAge). It only takes effect
 	// with a MaxAdvisoryAge limit.
-	RequireAdvisoryAge         bool
+	RequireAdvisoryAge bool
+	// RequestsBlocked keeps the profile out of requests and request discovery
+	// even when its account may request. Stored as a block, not an allow, so
+	// the zero value of a profile built anywhere keeps today's behavior.
+	RequestsBlocked            bool
 	QualityPreference          string
 	Language                   string
 	PreferredMetadataLanguage  string // ISO 639-1; "" = inherit library metadata language
@@ -76,7 +80,9 @@ type UpdateProfileInput struct {
 	// positive age sets it.
 	MaxAdvisoryAge *int
 	// RequireAdvisoryAge: nil leaves it untouched.
-	RequireAdvisoryAge         *bool
+	RequireAdvisoryAge *bool
+	// RequestsBlocked: nil leaves it untouched.
+	RequestsBlocked            *bool
 	QualityPreference          *string
 	Language                   *string
 	PreferredMetadataLanguage  *string

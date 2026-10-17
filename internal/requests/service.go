@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type TMDBClient interface {
@@ -85,6 +86,7 @@ type Service struct {
 	entitlements      EntitlementResolver
 	groupProvider     access.GroupPolicyProvider
 	users             access.UserRepository
+	profiles          userstore.UserStoreProvider
 	requesterIdentity RequesterIdentityResolver
 	tvdbResolver      TVDBIDResolver
 	notifier          FulfillmentNotifier
@@ -127,6 +129,10 @@ func (s *Service) SetGroupPolicyProvider(p access.GroupPolicyProvider) { s.group
 // SetUserRepository wires the account loader so the per-user requests_allowed
 // override is honored on top of the access group's gate.
 func (s *Service) SetUserRepository(users access.UserRepository) { s.users = users }
+
+// SetProfileStores wires the profile loader so a profile's own requests block
+// applies on top of the account's switch. Without it no profile is blocked.
+func (s *Service) SetProfileStores(stores userstore.UserStoreProvider) { s.profiles = stores }
 
 func (s *Service) SetRequesterIdentityResolver(r RequesterIdentityResolver) {
 	s.requesterIdentity = r
@@ -628,7 +634,7 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	mediaType, err := normalizeSearchMediaType(mediaType)
@@ -649,6 +655,9 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, page int) (*DiscoverySection, error) {
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
+	}
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
+		return nil, err
 	}
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
 	if err != nil {
@@ -702,7 +711,7 @@ func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySe
 		return nil, fmt.Errorf("request service is not configured")
 	}
 	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
@@ -737,7 +746,7 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 		return nil, fmt.Errorf("request service is not configured")
 	}
 	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	mediaType, err := normalizeMediaType(mediaType)
@@ -902,7 +911,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
-	if err := s.ensureViewerRequestsAllowed(ctx, viewer.UserID); err != nil {
+	if err := s.ensureViewerRequestsAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	normalized, err := normalizeCreateInput(input)
@@ -1046,7 +1055,19 @@ func (s *Service) ListMine(ctx context.Context, viewer Viewer, filter ListFilter
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
-	reqs, err := s.store.ListMine(ctx, viewer.UserID, normalizeListFilter(filter))
+	filter = normalizeListFilter(filter)
+	// The account's list holds every profile's requests. A profile blocked
+	// from requests sees only its own: the others' titles come from TMDB,
+	// which the block keeps it out of.
+	blocked, err := s.profileRequestsBlocked(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	filter.RequestedByProfileID = ""
+	if blocked {
+		filter.RequestedByProfileID = viewer.ProfileID
+	}
+	reqs, err := s.store.ListMine(ctx, viewer.UserID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -1222,8 +1243,8 @@ func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Re
 	if err != nil {
 		return nil, err
 	}
-	if !viewer.IsAdmin && req.RequestedByUserID != viewer.UserID {
-		return nil, ErrForbidden
+	if err := s.ensureViewerMayManage(ctx, viewer, req); err != nil {
+		return nil, err
 	}
 	if err := s.attachTargets(ctx, req); err != nil {
 		return nil, err
@@ -1232,6 +1253,29 @@ func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Re
 		return nil, err
 	}
 	return req, nil
+}
+
+// ensureViewerMayManage lets a viewer read or withdraw a request: an admin
+// any, others their account's, and a profile blocked from requests only the
+// ones it made, as ListMine shows it.
+func (s *Service) ensureViewerMayManage(ctx context.Context, viewer Viewer, req *Request) error {
+	if viewer.IsAdmin {
+		return nil
+	}
+	if req.RequestedByUserID != viewer.UserID {
+		return ErrForbidden
+	}
+	if req.RequestedByProfileID == viewer.ProfileID {
+		return nil
+	}
+	blocked, err := s.profileRequestsBlocked(ctx, viewer)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Request, error) {
@@ -1294,8 +1338,8 @@ func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, 
 	if err != nil {
 		return nil, err
 	}
-	if !viewer.IsAdmin && req.RequestedByUserID != viewer.UserID {
-		return nil, ErrForbidden
+	if err := s.ensureViewerMayManage(ctx, viewer, req); err != nil {
+		return nil, err
 	}
 	guard := guardWithdrawable
 	if closeFailed && req.Outcome == OutcomeFailed {
@@ -1418,6 +1462,9 @@ func (s *Service) GetFeatureStatus(ctx context.Context, viewer Viewer) (FeatureS
 		// The account's own permission is left to the caller, which reads
 		// it for the request capability anyway.
 		status.WatchlistRequests = settings.WatchlistRequests && viewer.UserID != 0 && s.watchlistAutoRequest(ctx, viewer)
+		if status.ProfileRequestsBlocked, err = s.profileRequestsBlocked(ctx, viewer); err != nil {
+			return FeatureStatus{}, err
+		}
 	}
 	return status, nil
 }
@@ -1433,16 +1480,16 @@ func (s *Service) ensureRequestsEnabled(ctx context.Context) error {
 	return nil
 }
 
-// ensureViewerRequestsAllowed enforces the viewer's resolved requests gate
-// (account override on top of the access group). The account loader is
-// required: without it the gate could only see the group layer, which would
-// silently ignore a per-user deny, so a missing repository is a wiring error
-// rather than a permissive fallback.
-func (s *Service) ensureViewerRequestsAllowed(ctx context.Context, userID int) error {
+// ensureViewerRequestsAllowed enforces the viewer's resolved requests gate:
+// the account override on top of the access group, then the profile's own
+// block. The account loader is required: without it the gate could only see
+// the group layer, which would silently ignore a per-user deny, so a missing
+// repository is a wiring error rather than a permissive fallback.
+func (s *Service) ensureViewerRequestsAllowed(ctx context.Context, viewer Viewer) error {
 	if s.users == nil {
 		return fmt.Errorf("requests: user repository is not configured")
 	}
-	user, err := s.users.GetByID(ctx, userID)
+	user, err := s.users.GetByID(ctx, viewer.UserID)
 	if err != nil {
 		return ErrForbidden
 	}
@@ -1453,7 +1500,49 @@ func (s *Service) ensureViewerRequestsAllowed(ctx context.Context, userID int) e
 	if !effective.RequestsAllowed {
 		return ErrForbidden
 	}
+	return s.ensureProfileRequestsAllowed(ctx, viewer)
+}
+
+// ensureDiscoveryAllowed gates request discovery, which browses TMDB rather
+// than the library: requests must be on, and the viewer's profile must not be
+// blocked from requests. The library's parental controls reach discovery only
+// as a US certification filter, so a household manager blocks a profile to
+// keep it out entirely. An account denied requests keeps discovery; its
+// clients hide the feature on the capability's allowed flag.
+func (s *Service) ensureDiscoveryAllowed(ctx context.Context, viewer Viewer) error {
+	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return err
+	}
+	return s.ensureProfileRequestsAllowed(ctx, viewer)
+}
+
+// ensureProfileRequestsAllowed answers ErrForbidden when the household
+// manager has blocked the viewer's profile from requests, or the profile does
+// not exist. A viewer without a profile has no profile block.
+func (s *Service) ensureProfileRequestsAllowed(ctx context.Context, viewer Viewer) error {
+	blocked, err := s.profileRequestsBlocked(ctx, viewer)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return ErrForbidden
+	}
 	return nil
+}
+
+func (s *Service) profileRequestsBlocked(ctx context.Context, viewer Viewer) (bool, error) {
+	if s.profiles == nil || strings.TrimSpace(viewer.ProfileID) == "" {
+		return false, nil
+	}
+	store, err := s.profiles.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return false, fmt.Errorf("requests: opening user store: %w", err)
+	}
+	profile, err := store.GetProfile(ctx, viewer.ProfileID)
+	if err != nil {
+		return false, fmt.Errorf("requests: loading profile: %w", err)
+	}
+	return profile == nil || profile.RequestsBlocked, nil
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, viewer Viewer, settings Settings) (Settings, error) {

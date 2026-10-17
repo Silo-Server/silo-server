@@ -2086,10 +2086,16 @@ func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) (bool, e
 	return true, nil
 }
 
-func (f *fakeStore) ListMine(context.Context, int, ListFilter) ([]*Request, error) {
+func (f *fakeStore) ListMine(_ context.Context, _ int, filter ListFilter) ([]*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]*Request(nil), f.mine...), nil
+	var out []*Request
+	for _, req := range f.mine {
+		if filter.RequestedByProfileID == "" || req.RequestedByProfileID == filter.RequestedByProfileID {
+			out = append(out, req)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) ListAdmin(_ context.Context, filter ListFilter) ([]*Request, error) {

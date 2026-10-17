@@ -21,7 +21,7 @@ func (h *OnboardingHandler) ReadOnboardingFlow(ctx context.Context, userID int, 
 	if profile == nil {
 		return onboarding.Flow{}, apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
-	return onboarding.FlowFor(ctx, h.gates, surface, profile.IsChild), nil
+	return onboarding.FlowFor(ctx, h.gates, surface, profile.IsChild || profile.RequestsBlocked), nil
 }
 func (h *OnboardingHandler) progressStore(ctx context.Context, userID int) (userstore.OnboardingProgressStore, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)

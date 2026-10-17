@@ -22,7 +22,7 @@ import { useUnreadNotificationCount } from "@/hooks/queries/notifications";
 import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
 import { useCriticalContentLoaded } from "@/lib/startupPriority";
-import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
+import { useMyMediaRequests, useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useSidebarPins, useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
@@ -215,7 +215,17 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   const { primaryMenu } = useUICustomization();
   const { data: pluginSettings } = usePluginSettingsList();
   const requestStatus = useRequestFeatureStatus();
-  const showRequestsNav = requestStatus.data?.requests_enabled === true;
+  const requestsEnabled = requestStatus.data?.requests_enabled === true;
+  // A profile blocked from requests keeps the hub only to see and cancel the
+  // requests it made itself, so the link shows only when it has some. For
+  // such a profile the server lists only its own requests.
+  const profileRequestsBlocked = profile?.requests_allowed === false;
+  const ownRequests = useMyMediaRequests(
+    { limit: 1 },
+    { enabled: requestsEnabled && profileRequestsBlocked, pollDownloads: false },
+  );
+  const showRequestsNav =
+    requestsEnabled && (!profileRequestsBlocked || (ownRequests.data?.length ?? 0) > 0);
   // Optimistic while loading (the setting defaults to on, so hiding until the
   // capability resolves would flash); hidden when the admin kill switch is off
   // or the server has no notifications API (worker modes → query errors).

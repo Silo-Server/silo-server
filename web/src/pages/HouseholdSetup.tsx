@@ -28,6 +28,7 @@ export default function HouseholdSetup() {
     avatarUploadEnabled,
     maxAdvisoryAgeSupported,
     requireAdvisoryAgeSupported,
+    requestsAllowedSupported,
   } = useProfiles();
   const { data: libraries = [] } = useAvailableUserLibraries();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -148,6 +149,7 @@ export default function HouseholdSetup() {
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}
         requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+        requestsAllowedSupported={requestsAllowedSupported}
         onOpenChange={(open) => {
           setEditorOpen(open);
           if (!open) setEditing(null);

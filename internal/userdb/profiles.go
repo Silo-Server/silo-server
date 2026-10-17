@@ -62,14 +62,14 @@ func createProfile(exec preferenceSettingsExecutor, p Profile) error {
 	_, err := exec.Exec(`
 		INSERT INTO profiles (
 			id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
-			require_advisory_age,
+			require_advisory_age, requests_blocked,
 			quality_preference, language, subtitle_language, subtitle_mode,
 			auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview,
 			show_forced_subtitles,
 			library_restrictions_enabled, max_playback_quality, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
-		p.RequireAdvisoryAge,
+		p.RequireAdvisoryAge, p.RequestsBlocked,
 		p.QualityPreference, p.Language, p.SubtitleLanguage, p.SubtitleMode,
 		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
 		p.ShowForcedSubtitles, p.LibraryRestrictionsEnabled,
@@ -90,14 +90,14 @@ func GetProfile(db *sql.DB, id string) (*Profile, error) {
 	var p Profile
 	err := db.QueryRow(`
 		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
-		       require_advisory_age,
+		       require_advisory_age, requests_blocked,
 		       quality_preference, language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, show_forced_subtitles,
 		       library_restrictions_enabled, max_playback_quality, pin_revision, created_at, updated_at
 		FROM profiles WHERE id = ?`, id,
 	).Scan(
 		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
-		&p.RequireAdvisoryAge,
+		&p.RequireAdvisoryAge, &p.RequestsBlocked,
 		&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
 		&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.PINRevision, &p.CreatedAt, &p.UpdatedAt,
@@ -119,7 +119,7 @@ func GetProfile(db *sql.DB, id string) (*Profile, error) {
 func ListProfiles(db *sql.DB) ([]Profile, error) {
 	rows, err := db.Query(`
 		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
-		       require_advisory_age,
+		       require_advisory_age, requests_blocked,
 		       quality_preference, language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, show_forced_subtitles,
 		       library_restrictions_enabled, max_playback_quality, pin_revision, created_at, updated_at
@@ -134,7 +134,7 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 		var p Profile
 		if err := rows.Scan(
 			&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
-			&p.RequireAdvisoryAge,
+			&p.RequireAdvisoryAge, &p.RequestsBlocked,
 			&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
 			&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
 			&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.PINRevision, &p.CreatedAt, &p.UpdatedAt,
@@ -213,6 +213,10 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 	if u.RequireAdvisoryAge != nil {
 		setClauses = append(setClauses, "require_advisory_age = ?")
 		args = append(args, *u.RequireAdvisoryAge)
+	}
+	if u.RequestsBlocked != nil {
+		setClauses = append(setClauses, "requests_blocked = ?")
+		args = append(args, *u.RequestsBlocked)
 	}
 	if u.QualityPreference != nil {
 		setClauses = append(setClauses, "quality_preference = ?")

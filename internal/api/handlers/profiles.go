@@ -106,7 +106,10 @@ type ProfileCreateRequest struct {
 	MaxAdvisoryAge int `json:"-"`
 	// RequireAdvisoryAge hides titles with no advisory age. v2-only, like
 	// MaxAdvisoryAge.
-	RequireAdvisoryAge         bool   `json:"-"`
+	RequireAdvisoryAge bool `json:"-"`
+	// RequestsBlocked keeps the profile out of requests and request
+	// discovery. v2-only (json:"-"); v2 carries it as requests_allowed.
+	RequestsBlocked            bool   `json:"-"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
 	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
@@ -133,7 +136,9 @@ type ProfileUpdateRequest struct {
 	// it (json:"-").
 	MaxAdvisoryAge *int `json:"-"`
 	// RequireAdvisoryAge: nil leaves it untouched. v2-only (json:"-").
-	RequireAdvisoryAge         *bool   `json:"-"`
+	RequireAdvisoryAge *bool `json:"-"`
+	// RequestsBlocked: nil leaves it untouched. v2-only (json:"-").
+	RequestsBlocked            *bool   `json:"-"`
 	QualityPreference          *string `json:"quality_preference,omitempty"`
 	Language                   *string `json:"language,omitempty"`
 	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty"`
@@ -167,7 +172,9 @@ type ProfileView struct {
 	// so only v2 emits it (json:"-").
 	MaxAdvisoryAge int `json:"-"`
 	// RequireAdvisoryAge hides titles with no advisory age. v2-only (json:"-").
-	RequireAdvisoryAge         bool   `json:"-"`
+	RequireAdvisoryAge bool `json:"-"`
+	// RequestsBlocked keeps the profile out of requests. v2-only (json:"-").
+	RequestsBlocked            bool   `json:"-"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
 	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
@@ -253,13 +260,13 @@ func invalidAdvisoryAgeLimit() *APIError {
 // only touches fields the user is allowed to change on their own profiles.
 // Admin-only fields (access policy: library restrictions, content rating,
 // advisory-age limit and its strictness, playback-quality cap, child-profile
-// flag) must be
-// rejected for non-admins.
+// flag, requests block) must be rejected for non-admins.
 func isAllowedSelfServiceProfileUpdate(req ProfileUpdateRequest) bool {
 	return req.IsChild == nil &&
 		req.MaxContentRating == nil &&
 		req.MaxAdvisoryAge == nil &&
 		req.RequireAdvisoryAge == nil &&
+		req.RequestsBlocked == nil &&
 		req.LibraryRestrictionsEnabled == nil &&
 		req.AllowedLibraryIDs == nil &&
 		req.MaxPlaybackQuality == nil
@@ -405,6 +412,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	// admin bootstrap creations must leave those fields at their defaults.
 	if isBootstrap && !apimw.IsAdmin(ctx) &&
 		(req.IsChild || req.MaxContentRating != "" || req.MaxAdvisoryAge != 0 || req.RequireAdvisoryAge ||
+			req.RequestsBlocked ||
 			req.LibraryRestrictionsEnabled || len(req.AllowedLibraryIDs) > 0 ||
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
@@ -446,6 +454,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		MaxContentRating:           req.MaxContentRating,
 		MaxAdvisoryAge:             req.MaxAdvisoryAge,
 		RequireAdvisoryAge:         req.RequireAdvisoryAge,
+		RequestsBlocked:            req.RequestsBlocked,
 		QualityPreference:          req.QualityPreference,
 		Language:                   req.Language,
 		PreferredMetadataLanguage:  req.PreferredMetadataLanguage,
@@ -644,6 +653,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		MaxContentRating:           req.MaxContentRating,
 		MaxAdvisoryAge:             req.MaxAdvisoryAge,
 		RequireAdvisoryAge:         req.RequireAdvisoryAge,
+		RequestsBlocked:            req.RequestsBlocked,
 		QualityPreference:          req.QualityPreference,
 		Language:                   req.Language,
 		PreferredMetadataLanguage:  req.PreferredMetadataLanguage,
@@ -1034,6 +1044,7 @@ func (h *ProfileHandler) profileResponseWith(
 		MaxContentRating:           p.MaxContentRating,
 		MaxAdvisoryAge:             p.MaxAdvisoryAge,
 		RequireAdvisoryAge:         p.RequireAdvisoryAge,
+		RequestsBlocked:            p.RequestsBlocked,
 		QualityPreference:          p.QualityPreference,
 		Language:                   prefs.AudioLanguage,
 		PreferredMetadataLanguage:  prefs.MetadataLanguage,

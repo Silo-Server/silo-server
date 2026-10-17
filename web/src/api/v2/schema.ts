@@ -23641,7 +23641,7 @@ export interface components {
       state: "available" | "disabled" | "not_configured" | "unsupported";
       /** @description Whether adding a title the library doesn't have to the watchlist also requests it (or follows its request) for this viewer: requests and watchlist requests are on for the server, the profile has not opted out, and the viewer may request. */
       watchlist_requests: boolean;
-      /** @description Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept. */
+      /** @description Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled, and for a profile blocked from requests, when they answer 403; the entries are kept. */
       watchlist_titles_supported: boolean;
     };
     FileMarkers: {
@@ -28144,6 +28144,11 @@ export interface components {
        */
       quality_preference: string;
       /**
+       * @description Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager
+       * @example true
+       */
+      requests_allowed: boolean;
+      /**
        * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
        * @example false
        */
@@ -28189,6 +28194,11 @@ export interface components {
       max_advisory_age_supported: boolean;
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+      /**
+       * @description Whether profiles accept requests_allowed and the server enforces it
+       * @example true
+       */
+      requests_allowed_supported: boolean;
       /**
        * @description Whether profiles accept require_advisory_age and the server enforces it
        * @example true
@@ -28263,6 +28273,11 @@ export interface components {
        * @example auto
        */
       quality_preference?: string;
+      /**
+       * @description Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager. Omitted means allowed
+       * @example false
+       */
+      requests_allowed?: boolean;
       /**
        * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
        * @example true
@@ -28423,6 +28438,11 @@ export interface components {
        * @example auto
        */
       quality_preference?: string;
+      /**
+       * @description Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager
+       * @example false
+       */
+      requests_allowed?: boolean;
       /**
        * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
        * @example true

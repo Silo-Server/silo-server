@@ -21,6 +21,8 @@ type fakeLifecycle struct {
 	err        error
 	// requestsDisabled turns requests off for the server.
 	requestsDisabled bool
+	// profileBlocked reports the viewer's profile blocked from requests.
+	profileBlocked bool
 }
 
 func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, reason string) (*mediarequests.Request, error) {
@@ -31,7 +33,7 @@ func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, re
 }
 func (f *fakeLifecycle) GetFeatureStatus(_ context.Context, v mediarequests.Viewer) (mediarequests.FeatureStatus, error) {
 	f.viewer = v
-	return mediarequests.FeatureStatus{RequestsEnabled: !f.requestsDisabled, RatingRestrictionsEnforced: true}, f.err
+	return mediarequests.FeatureStatus{RequestsEnabled: !f.requestsDisabled, RatingRestrictionsEnforced: true, ProfileRequestsBlocked: f.profileBlocked}, f.err
 }
 
 type fakeWatchLifecycle struct {

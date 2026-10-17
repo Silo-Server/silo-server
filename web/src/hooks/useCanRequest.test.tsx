@@ -99,6 +99,29 @@ describe("useCanRequest", () => {
     });
   });
 
+  it("returns discoveryEnabled=false when the profile is blocked from requests", () => {
+    mocks.useRequestFeatureStatus.mockReturnValue({
+      data: { requests_enabled: true },
+      isLoading: false,
+    });
+    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p1", requests_allowed: false } });
+
+    let captured: ReturnType<typeof useCanRequest> | null = null;
+    render(
+      <CaptureHook
+        onResult={(r) => {
+          captured = r;
+        }}
+      />,
+    );
+
+    expect(captured).toEqual({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+  });
+
   it("returns isResolving=true and discoveryEnabled=false while the feature status is still loading", () => {
     mocks.useRequestFeatureStatus.mockReturnValue({ data: undefined, isLoading: true });
     mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p1" } });

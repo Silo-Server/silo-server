@@ -22,7 +22,7 @@ func TestUpdateProfile(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"quality_preference":"1080p","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
+	want := `{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_allowed":true,"quality_preference":"1080p","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -234,7 +234,7 @@ func TestListProfiles(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"items":[{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}],"avatar_upload_enabled":true,"max_advisory_age_supported":true,"require_advisory_age_supported":true}` + "\n"
+	want := `{"items":[{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"requests_allowed":true,"quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}],"avatar_upload_enabled":true,"max_advisory_age_supported":true,"require_advisory_age_supported":true,"requests_allowed_supported":true}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -712,5 +712,55 @@ func TestProfileRequireAdvisoryAge(t *testing.T) {
 	rec = do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid","max_advisory_age":8,"require_advisory_age":true}`, with(auth, "X-Profile-Id", "p-owner"))
 	if rec.Code != 201 || !profiles.lastCreate.Request.RequireAdvisoryAge || profiles.lastCreate.Request.MaxAdvisoryAge != 8 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// requests_allowed is the wire form of the stored requests block: omitted
+// leaves it alone (and creates an allowed profile), a value sets its inverse,
+// and null is rejected rather than read as false. The response always
+// carries it.
+func TestProfileRequestsAllowed(t *testing.T) {
+	view := fixtureProfileView()
+	view.RequestsBlocked = true
+	profiles := &fakeProfiles{view: view}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	auth := bearer(memberToken)
+
+	rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"is_child":true}`, auth)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if got := profiles.last.Request.RequestsBlocked; got != nil {
+		t.Fatalf("omitted requests_allowed reached the store as %v", *got)
+	}
+	if !strings.Contains(rec.Body.String(), `"requests_allowed":false,`) {
+		t.Fatalf("stored block not rendered: %s", rec.Body.String())
+	}
+
+	for _, allowed := range []bool{false, true} {
+		body := `{"requests_allowed":false}`
+		if allowed {
+			body = `{"requests_allowed":true}`
+		}
+		rec = do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", body, auth)
+		if got := profiles.last.Request.RequestsBlocked; rec.Code != 200 || got == nil || *got == allowed {
+			t.Fatalf("%s: %d, blocked %v", body, rec.Code, got)
+		}
+	}
+
+	for _, body := range []string{`{"requests_allowed":null}`, `{"requests_allowed":"false"}`} {
+		p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", body, auth), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "body.requests_allowed" {
+			t.Errorf("%s: errors = %+v", body, p.Errors)
+		}
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, with(auth, "X-Profile-Id", "p-owner"))
+	if rec.Code != 201 || profiles.lastCreate.Request.RequestsBlocked {
+		t.Fatalf("create without requests_allowed: %d blocked=%v", rec.Code, profiles.lastCreate.Request.RequestsBlocked)
+	}
+	rec = do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid","requests_allowed":false}`, with(auth, "X-Profile-Id", "p-owner"))
+	if rec.Code != 201 || !profiles.lastCreate.Request.RequestsBlocked {
+		t.Fatalf("create with requests_allowed false: %d %s", rec.Code, rec.Body.String())
 	}
 }

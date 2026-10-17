@@ -1012,6 +1012,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if userRepo != nil {
 			requestSvc.SetUserRepository(userRepo)
 		}
+		requestSvc.SetProfileStores(deps.UserStoreProvider)
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if tvdbResolver, ok := deps.MetadataService.(mediarequests.TVDBIDResolver); ok {
 			requestSvc.SetTVDBIDResolver(tvdbResolver)

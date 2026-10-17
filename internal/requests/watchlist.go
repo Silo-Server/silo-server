@@ -112,14 +112,16 @@ func (s *Service) WatchlistRequestsEnabled(ctx context.Context, viewer Viewer) (
 
 // WatchlistCeiling gates the watchlist-title operations, which live on the
 // requests surface: it answers ErrRequestsDisabled while requests are off,
-// and otherwise the viewer's parental rating ceiling ("" = unrestricted).
+// ErrForbidden for a profile blocked from requests (the titles come from
+// TMDB, like discovery), and otherwise the viewer's parental rating ceiling
+// ("" = unrestricted).
 // A title above the ceiling is hidden from the viewer's watchlist the way
 // Discover hides it.
 func (s *Service) WatchlistCeiling(ctx context.Context, viewer Viewer) (string, error) {
 	if err := validateViewer(viewer); err != nil {
 		return "", err
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return "", err
 	}
 	return s.viewerContentCeiling(ctx, viewer)
@@ -411,6 +413,13 @@ func (s *Service) WatchlistRequestStates(ctx context.Context, viewer Viewer, tit
 	if err != nil {
 		return nil, err
 	}
+	// The policy is the account's; a profile blocked from requests cannot
+	// request a title from its watchlist either.
+	blocked, err := s.profileRequestsBlocked(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	policy.Blocked = policy.Blocked || blocked
 	byType := map[MediaType][]WatchlistTitle{}
 	for _, t := range titles {
 		mediaType, err := normalizeMediaType(t.MediaType)

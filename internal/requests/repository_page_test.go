@@ -72,4 +72,11 @@ func TestRequestListKeysetDatabase(t *testing.T) {
 	if err != nil || len(filtered) != 0 {
 		t.Fatalf("filter: %+v, %v", filtered, err)
 	}
+	// A blocked profile's list keeps only that profile's rows.
+	if own, err := repo.ListMine(t.Context(), 1, ListFilter{RequestedByProfileID: "profile"}); err != nil || len(own) != 4 {
+		t.Fatalf("own profile: %d rows, %v; want 4", len(own), err)
+	}
+	if other, err := repo.ListMine(t.Context(), 1, ListFilter{RequestedByProfileID: "other"}); err != nil || len(other) != 0 {
+		t.Fatalf("other profile: %+v, %v; want none", other, err)
+	}
 }

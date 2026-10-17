@@ -30047,7 +30047,7 @@
             "type": "boolean"
           },
           "watchlist_titles_supported": {
-            "description": "Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept.",
+            "description": "Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled, and for a profile blocked from requests, when they answer 403; the entries are kept.",
             "type": "boolean"
           }
         },
@@ -40769,6 +40769,13 @@
             ],
             "type": "string"
           },
+          "requests_allowed": {
+            "description": "Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "require_advisory_age": {
             "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",
             "examples": [
@@ -40818,6 +40825,7 @@
           "max_content_rating",
           "max_advisory_age",
           "require_advisory_age",
+          "requests_allowed",
           "quality_preference",
           "language",
           "preferred_metadata_language",
@@ -40880,6 +40888,13 @@
             "$ref": "#/components/schemas/PageInfo",
             "description": "Cursor state; absent for bounded unpaginated collections"
           },
+          "requests_allowed_supported": {
+            "description": "Whether profiles accept requests_allowed and the server enforces it",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "require_advisory_age_supported": {
             "description": "Whether profiles accept require_advisory_age and the server enforces it",
             "examples": [
@@ -40892,6 +40907,7 @@
           "avatar_upload_enabled",
           "max_advisory_age_supported",
           "require_advisory_age_supported",
+          "requests_allowed_supported",
           "items"
         ],
         "type": "object"
@@ -41027,6 +41043,13 @@
             ],
             "maxLength": 32,
             "type": "string"
+          },
+          "requests_allowed": {
+            "description": "Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager. Omitted means allowed",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "require_advisory_age": {
             "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",
@@ -41362,6 +41385,13 @@
             ],
             "maxLength": 32,
             "type": "string"
+          },
+          "requests_allowed": {
+            "description": "Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "require_advisory_age": {
             "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",

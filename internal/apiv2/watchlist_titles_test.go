@@ -324,19 +324,21 @@ func TestWatchlistTitlesRequestsDisabled(t *testing.T) {
 	}
 }
 
-// The watchlist title operations answer 409 while requests are off, so the
-// status must not advertise them then.
+// The watchlist title operations answer 409 while requests are off and 403 for
+// a profile blocked from requests, so the status must not advertise them then.
 func TestRequestStatusWatchlistTitlesFollowRequestsEnabled(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		disabled bool
+		blocked  bool
 		want     bool
 	}{
-		{"requests on", false, true},
-		{"requests off", true, false},
+		{"requests on", false, false, true},
+		{"requests off", true, false, false},
+		{"profile blocked", false, true, false},
 	} {
 		deps := watchlistTitlesDeps(&fakeWatchlistTitles{}, &fakeWatchlistRequests{})
-		deps.RequestLifecycle = &fakeLifecycle{requestsDisabled: tc.disabled}
+		deps.RequestLifecycle = &fakeLifecycle{requestsDisabled: tc.disabled, profileBlocked: tc.blocked}
 		rec := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/requests/status", "", viewerHeaders())
 		var got struct {
 			Supported *bool `json:"watchlist_titles_supported"`
