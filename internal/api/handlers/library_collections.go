@@ -3188,7 +3188,7 @@ func (h *LibraryCollectionHandler) processArtworkInputs(r *http.Request, collect
 
 		switch {
 		case err == nil:
-		case err == http.ErrMissingFile:
+		case errors.Is(err, http.ErrMissingFile):
 			if sourceByType[imageType] == "" {
 				continue
 			}

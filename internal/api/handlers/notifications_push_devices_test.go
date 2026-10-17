@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,8 +60,8 @@ func (f *handlerPushStore) UpsertFCM(ctx context.Context, registration notificat
 	}, nil
 }
 
-func (f *handlerPushStore) DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error {
-	f.deleted = append(f.deleted, profileID+"/"+deviceID)
+func (f *handlerPushStore) DeleteByProfileDevice(ctx context.Context, userID int, profileID, deviceID string) error {
+	f.deleted = append(f.deleted, fmt.Sprintf("%d/%s/%s", userID, profileID, deviceID))
 	return f.err
 }
 

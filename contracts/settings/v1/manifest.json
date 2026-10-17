@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 18,
+  "revision": 19,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -796,16 +796,17 @@
       "key": "player.subtitle_sync_ms",
       "introduced_in": 1,
       "persistence": "remote",
-      "allowed_scopes": ["profile_device"],
-      "resolution_order": ["profile_device", "default"],
+      "allowed_scopes": [{ "scope": "profile", "introduced_in": 19 }, "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
       "value_schema": { "type": "integer", "minimum": -10000, "maximum": 10000 },
       "default_value": 0,
       "unit": "milliseconds",
-      "platforms": ["ios", "tvos", "macos", "android", "android_tv"],
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
       "category": "player",
       "label": "Subtitle sync offset",
-      "description": "Shift subtitles earlier or later on this device.",
-      "recommended_control": "slider"
+      "description": "Shift subtitles earlier or later for this profile. A device can keep its own offset.",
+      "recommended_control": "slider",
+      "notes": "Revision 19 adds the profile scope, so the offset follows the profile to every device like the other subtitle display settings, and adds the web client. A device value still wins on that device. Clients write the profile scope only when the server reports manifest revision 19 or later; older servers reject it."
     },
     {
       "key": "player.video_gravity",

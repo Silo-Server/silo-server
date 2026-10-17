@@ -43,7 +43,7 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 		if err == nil {
 			return r.enrichExisting(ctx, existingID, p)
 		}
-		if err != pgx.ErrNoRows {
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return 0, fmt.Errorf("lookup by tmdb_id: %w", err)
 		}
 	}
@@ -53,7 +53,7 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 		if err == nil {
 			return r.enrichExisting(ctx, existingID, p)
 		}
-		if err != pgx.ErrNoRows {
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return 0, fmt.Errorf("lookup by imdb_id: %w", err)
 		}
 	}
@@ -307,6 +307,9 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 			}
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("batch lookup by tmdb_id: %w", err)
+		}
 	}
 
 	// Phase 2: Batch lookup by imdb_id (remaining).
@@ -341,6 +344,9 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 			}
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("batch lookup by imdb_id: %w", err)
+		}
 	}
 
 	// Phase 3: Batch lookup by name (remaining). A name is not identity: only a
@@ -381,6 +387,9 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 			}
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("batch lookup by name: %w", err)
+		}
 	}
 
 	// Phase 4: Batch enrich found people. Item-credit data fills gaps and may
@@ -500,6 +509,9 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 			insertedSet[id] = true
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("batch insert people: %w", err)
+		}
 
 		// Assign IDs: either from successful insert or via re-query for race losers.
 		for j, ui := range newIndices {

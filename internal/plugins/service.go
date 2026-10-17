@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -891,7 +892,12 @@ func (s *Service) ensureClientForStart(ctx context.Context, installationID int, 
 	if err != nil {
 		return nil, err
 	}
-	return v.(pluginClient), nil
+	// A Host that reports success without a client leaves v nil.
+	client, ok := v.(pluginClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: plugin installation %d started without a client", pluginhost.ErrPluginUnhealthy, installationID)
+	}
+	return client, nil
 }
 
 func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {

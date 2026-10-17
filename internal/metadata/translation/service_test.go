@@ -556,7 +556,7 @@ func TestEnqueueValidatesInput(t *testing.T) {
 	}
 
 	disabled := NewService(context.Background(), Config{}, repo, content, locs, chat.fn, nil, nil)
-	if _, err := disabled.Enqueue(context.Background(), JobRequest{ContentID: "x", TargetLanguage: "fr"}); err != ErrNotConfigured {
+	if _, err := disabled.Enqueue(context.Background(), JobRequest{ContentID: "x", TargetLanguage: "fr"}); !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("disabled service err = %v, want ErrNotConfigured", err)
 	}
 }
@@ -608,7 +608,7 @@ func TestRequestOnViewCooldownAndGating(t *testing.T) {
 
 	// OnView off (zero-value config) refuses viewer requests outright.
 	off := NewService(context.Background(), Config{Enabled: true, Configured: true, ChatModel: "m"}, repo, content, locs, chat.fn, nil, nil)
-	if _, err := off.RequestOnView(context.Background(), TargetItem, "series1", "fr", nil); err != ErrNotConfigured {
+	if _, err := off.RequestOnView(context.Background(), TargetItem, "series1", "fr", nil); !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("on_view=off err = %v, want ErrNotConfigured", err)
 	}
 }

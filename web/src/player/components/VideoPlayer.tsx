@@ -32,6 +32,7 @@ import { useSubtitleSyncFeedback } from "../hooks/useSubtitleSyncFeedback";
 import { syncKeyOf } from "../utils/subtitleSync";
 import { SubtitleSyncIndicator } from "./SubtitleSyncIndicator";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
+import { useSubtitleDelay } from "../hooks/useSubtitleDelay";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
@@ -593,12 +594,9 @@ export function VideoPlayer({
   );
   const lastSubtitleIndexRef = useRef<number | null>(null);
   const subtitleSelectionWasManualRef = useRef(false);
-  // Per-session subtitle delay in ms. Positive = show later. Reset when the
-  // underlying file changes so sync adjustments don't carry across media.
-  const [subtitleDelayMs, setSubtitleDelayMs] = useState(0);
-  useEffect(() => {
-    setSubtitleDelayMs(0);
-  }, [activeFileId]);
+  // Subtitle delay in ms; positive shows later. It is the profile's timing
+  // offset, so a change here follows the profile to every device.
+  const [subtitleDelayMs, setSubtitleDelayMs] = useSubtitleDelay();
 
   // -- Live AI subtitle translation (streamed over the realtime websocket) --
   // While a translation runs, a synthetic "live" track is added to the list and

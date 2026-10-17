@@ -346,6 +346,9 @@ func TestFirstServerBecomesEverythingElseDatabase(t *testing.T) {
 			}
 			out[mediaType] = id
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		return out
 	}
 

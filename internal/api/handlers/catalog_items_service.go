@@ -309,6 +309,9 @@ func (h *CatalogHandler) QueryItems(ctx context.Context, v ItemViewer, req Catal
 		modelItems = append(modelItems, &item)
 		total = rowTotal
 	}
+	if err := rows.Err(); err != nil {
+		return CatalogQueryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to query items")
+	}
 	// COUNT(*) OVER () emits no rows when the data SELECT is empty, so total
 	// stays 0 even when the broader result set has matching rows (OFFSET past
 	// the last page). Re-query the count to give callers the real total.

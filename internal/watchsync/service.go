@@ -792,7 +792,7 @@ func (s *Service) syncConnectionWithRun(ctx context.Context, conn Connection, ru
 
 func (s *Service) tryLock(connectionID string) (func(), bool) {
 	value, _ := s.locks.LoadOrStore(connectionID, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
+	mu := value.(*sync.Mutex) //nolint:errcheck,forcetypeassert // locks stores only *sync.Mutex
 	if !mu.TryLock() {
 		return nil, false
 	}
@@ -2320,7 +2320,7 @@ func scrobbleDispatchKey(scrobbler Scrobbler, conn Connection, event ScrobbleEve
 
 func (s *Service) enqueueOrderedScrobble(key string, dispatch func()) {
 	value, _ := s.scrobbleQueues.LoadOrStore(key, &scrobbleQueue{})
-	queue := value.(*scrobbleQueue)
+	queue := value.(*scrobbleQueue) //nolint:errcheck,forcetypeassert // scrobbleQueues stores only *scrobbleQueue
 
 	queue.mu.Lock()
 	previous := queue.tail

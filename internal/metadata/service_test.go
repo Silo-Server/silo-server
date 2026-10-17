@@ -33,6 +33,9 @@ type fakeItemRepo struct {
 	mu    sync.Mutex
 	items map[string]*models.MediaItem
 
+	// replacedPeople records each ReplacePeople call by content ID.
+	replacedPeople map[string][]models.ItemPerson
+
 	// Trailer refresh cooldown state (metadataTrailerRefreshRepo).
 	trailersRequestedAt    map[string]time.Time
 	trailersRequestedAtErr error
@@ -178,7 +181,13 @@ func (r *fakeItemRepo) IncrementRefreshFailure(_ context.Context, contentID stri
 	return nil
 }
 
-func (r *fakeItemRepo) ReplacePeople(_ context.Context, _ string, _ []models.ItemPerson) error {
+func (r *fakeItemRepo) ReplacePeople(_ context.Context, contentID string, people []models.ItemPerson) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.replacedPeople == nil {
+		r.replacedPeople = make(map[string][]models.ItemPerson)
+	}
+	r.replacedPeople[contentID] = append([]models.ItemPerson(nil), people...)
 	return nil
 }
 

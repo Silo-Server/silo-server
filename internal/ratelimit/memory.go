@@ -128,7 +128,7 @@ func tokenDelay(lim *rate.Limiter, t time.Time) time.Duration {
 
 func (ml *MemoryLimiter) getOrCreate(key string, limit Rate) *memoryEntry {
 	if val, ok := ml.entries.Load(key); ok {
-		return val.(*memoryEntry)
+		return val.(*memoryEntry) //nolint:errcheck,forcetypeassert // entries stores only *memoryEntry
 	}
 	minuteBurst := int(math.Ceil(limit.RequestsPerMinute))
 	if minuteBurst < 1 {
@@ -140,7 +140,7 @@ func (ml *MemoryLimiter) getOrCreate(key string, limit Rate) *memoryEntry {
 	}
 	entry.touch()
 	actual, _ := ml.entries.LoadOrStore(key, entry)
-	return actual.(*memoryEntry)
+	return actual.(*memoryEntry) //nolint:errcheck,forcetypeassert // entries stores only *memoryEntry
 }
 
 // Clear removes all entries (called on config reload).
@@ -165,7 +165,7 @@ func (ml *MemoryLimiter) evictLoop() {
 		case <-ticker.C:
 			cutoff := time.Now().Add(-10 * time.Minute)
 			ml.entries.Range(func(key, value any) bool {
-				if value.(*memoryEntry).lastUsedTime().Before(cutoff) {
+				if value.(*memoryEntry).lastUsedTime().Before(cutoff) { //nolint:errcheck,forcetypeassert // entries stores only *memoryEntry
 					ml.entries.Delete(key)
 				}
 				return true

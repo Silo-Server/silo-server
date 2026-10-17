@@ -1151,6 +1151,9 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 		}
 	}
 	imgRows.Close()
+	if err := imgRows.Err(); err != nil {
+		return nil, fmt.Errorf("collecting image paths before delete: %w", err)
+	}
 
 	tag, err := tx.Exec(ctx, "DELETE FROM media_items WHERE content_id = $1", contentID)
 	if err != nil {

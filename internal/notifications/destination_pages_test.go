@@ -48,8 +48,8 @@ func TestNotificationDestinationPages(t *testing.T) {
 	}
 	if _, err = pool.Exec(ctx, `ALTER TABLE notification_webhooks ADD COLUMN notify_requests boolean NOT NULL DEFAULT false, ADD COLUMN revision bigint NOT NULL DEFAULT 1;
  ALTER TABLE notification_server_channels ADD COLUMN notify_new_audiobooks boolean NOT NULL DEFAULT true, ADD COLUMN notify_new_ebooks boolean NOT NULL DEFAULT true;
- INSERT INTO web_push_subscriptions (id,user_id,profile_id,endpoint,p256dh,auth,created_at) SELECT id,1,profile,'https://push.example.test/'||id,'key','auth','2026-09-01T00:00:00Z'::timestamptz FROM (VALUES ('01','owner'),('02','owner'),('03','owner'),('00','other')) AS v(id,profile);
- INSERT INTO notification_webhooks (id,user_id,profile_id,name,type,url_ciphertext,url_host,signing_secret_ciphertext,created_at) SELECT id,1,profile,id,'generic','ciphertext','example.test','secret','2026-09-01T00:00:00Z'::timestamptz FROM (VALUES ('01','owner'),('02','owner'),('03','owner'),('00','other')) AS v(id,profile);
+ INSERT INTO web_push_subscriptions (id,user_id,profile_id,endpoint,p256dh,auth,created_at) SELECT id,account,profile,'https://push.example.test/'||id,'key','auth','2026-09-01T00:00:00Z'::timestamptz FROM (VALUES ('01',1,'owner'),('02',1,'owner'),('03',1,'owner'),('00',1,'other'),('04',2,'owner')) AS v(id,account,profile);
+ INSERT INTO notification_webhooks (id,user_id,profile_id,name,type,url_ciphertext,url_host,signing_secret_ciphertext,created_at) SELECT id,account,profile,id,'generic','ciphertext','example.test','secret','2026-09-01T00:00:00Z'::timestamptz FROM (VALUES ('01',1,'owner'),('02',1,'owner'),('03',1,'owner'),('00',1,'other'),('04',2,'owner')) AS v(id,account,profile);
  INSERT INTO notification_server_channels (id,name,type,url_ciphertext,url_host,signing_secret_ciphertext,created_by_user_id,created_at) SELECT id,id,'generic','ciphertext','example.test','secret',1,'2026-09-01T00:00:00Z'::timestamptz FROM (VALUES ('01'),('02'),('03')) AS v(id);`); err != nil {
 		t.Fatal(err)
 	}
@@ -65,11 +65,11 @@ func TestNotificationDestinationPages(t *testing.T) {
 	pushes := NewWebPushRepository(pool)
 	hooks := NewWebhookRepository(pool)
 	channels := NewServerChannelRepository(pool)
-	a, err := pushes.ListPage(ctx, "owner", 2, nil)
+	a, err := pushes.ListPage(ctx, 1, "owner", 2, nil)
 	if err != nil || len(a) != 2 || a[0].ID != "01" || a[1].ID != "02" {
 		t.Fatalf("push page: %+v %v", a, err)
 	}
-	b, err := hooks.ListPage(ctx, "owner", 2, nil)
+	b, err := hooks.ListPage(ctx, 1, "owner", 2, nil)
 	if err != nil || len(b) != 2 || b[0].ID != "01" || b[1].ID != "02" {
 		t.Fatalf("webhook page: %+v %v", b, err)
 	}
@@ -77,15 +77,17 @@ func TestNotificationDestinationPages(t *testing.T) {
 	if err != nil || len(c) != 2 || c[0].ID != "01" || c[1].ID != "02" {
 		t.Fatalf("channel page: %+v %v", c, err)
 	}
+	// Row 04 belongs to a profile with the same ID on another account: it is
+	// never on account 1's pages.
 	// Cursor continuation must not depend on the boundary row still existing.
 	if _, err = pool.Exec(ctx, `DELETE FROM web_push_subscriptions WHERE id='02'; DELETE FROM notification_webhooks WHERE id='02'; DELETE FROM notification_server_channels WHERE id='02'`); err != nil {
 		t.Fatal(err)
 	}
-	a, err = pushes.ListPage(ctx, "owner", 2, key)
+	a, err = pushes.ListPage(ctx, 1, "owner", 2, key)
 	if err != nil || len(a) != 1 || a[0].ID != "03" {
 		t.Fatalf("push continuation: %+v %v", a, err)
 	}
-	b, err = hooks.ListPage(ctx, "owner", 2, key)
+	b, err = hooks.ListPage(ctx, 1, "owner", 2, key)
 	if err != nil || len(b) != 1 || b[0].ID != "03" {
 		t.Fatalf("webhook continuation: %+v %v", b, err)
 	}

@@ -81,7 +81,7 @@ func TestEpisodeExactTierCursorAndPlanPostgres(t *testing.T) {
 	parsed := parseSearchQuery("Star")
 	options := &searchCursorSQL{}
 	fullSQL, _, args := repo.buildMixedSearchCursorSQL(parsed, []string{"episode"}, 2000, 0, filter, false, options)
-	rows, err := pool.Query(ctx, fullSQL, args...)
+	rows, err := pool.Query(ctx, fullSQL, args...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		t.Fatal(err)
 	}

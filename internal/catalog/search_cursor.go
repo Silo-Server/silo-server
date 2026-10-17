@@ -146,7 +146,7 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 		_ = tx.Rollback(rollbackCtx)
 	}()
 	if !includeTotal && options.exactSQL != "" {
-		rows, err := tx.Query(ctx, options.exactSQL, searchPlanArgs(options.exactArgs)...)
+		rows, err := tx.Query(ctx, options.exactSQL, searchPlanArgs(options.exactArgs)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -163,7 +163,7 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 			return items, wrapped.keys, 0, nil
 		}
 	}
-	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...)
+	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -325,7 +325,7 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
 		return nil, false, err
 	}
-	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...)
+	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		return nil, false, err
 	}

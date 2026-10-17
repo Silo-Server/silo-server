@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 18;
+export const SETTINGS_REVISION = 19;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -1101,16 +1101,17 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     nullable: false,
     persistence: "remote",
     introducedIn: 1,
-    scopes: ["profile_device"],
-    scopeIntroducedIn: [1],
-    resolutionOrder: ["profile_device", "default"],
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [19, 1],
+    resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: 0,
     label: "Subtitle sync offset",
-    description: "Shift subtitles earlier or later on this device.",
+    description:
+      "Shift subtitles earlier or later for this profile. A device can keep its own offset.",
     category: "player",
     control: "slider",
     unit: "milliseconds",
-    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
     minimum: -10000,
     maximum: 10000,
   },
