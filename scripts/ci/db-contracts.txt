@@ -248,6 +248,11 @@
 # stays on the provider while another item of the same kind still holds it.
 ./internal/watchsync TestListItemsSharingProviderKeyDB
 
+# A sync flow saves only its own bookkeeping: tokens refreshed meanwhile stay,
+# its cursors merge with the stored ones, only a deferral that has ended is
+# cleared, and a connection disconnected meanwhile is not restored.
+./internal/watchsync TestConnectionSyncStateUpdatesDB
+
 # Plugin event deliveries: a claim takes at most its limit, never shares a row,
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
