@@ -22,6 +22,7 @@ import (
 const ownerHeader = "X-Silo-Source-Owner"
 const ownerRenewDomain = "silo/source-owner-renew/v1"
 const ownerRenewReplyDomain = "silo/source-owner-renew-reply/v1"
+const ownerRenewAction = "renew"
 
 func validateOwnerOptions(o Options) error {
 	if len(o.OwnerID) > 256 || strings.IndexFunc(o.OwnerID, func(r rune) bool { return r <= 32 }) >= 0 {
@@ -89,7 +90,7 @@ func (a *Authority) ownerRoute(r *http.Request) (node int, grant string, renew b
 		return 0, "", false, false
 	}
 	if len(parts) == 4 {
-		if parts[3] != "renew" || r.Method != http.MethodPost {
+		if parts[3] != ownerRenewAction || r.Method != http.MethodPost {
 			return 0, "", false, false
 		}
 		renew = true
@@ -193,7 +194,7 @@ func (a *Authority) renewOwner(ctx context.Context, record Record) (workerwire.S
 		return workerwire.Source{}, ErrUnavailable
 	}
 	body, _ := json.Marshal(ownerRenewRequest{record.OwnerID})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, record.Source.URL+"/renew", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, record.Source.URL+"/"+ownerRenewAction, bytes.NewReader(body))
 	if err != nil {
 		return workerwire.Source{}, ErrUnavailable
 	}
@@ -261,7 +262,12 @@ func (a *Authority) serveOwnerRenew(w http.ResponseWriter, r *http.Request, node
 		sourceError(w, r, 503)
 		return
 	}
+	encoded, err := json.Marshal(token)
+	if err != nil {
+		sourceError(w, r, 503)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(token)
+	_, _ = w.Write(append(encoded, '\n'))
 }

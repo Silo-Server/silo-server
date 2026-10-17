@@ -36,6 +36,7 @@ const DefaultTTL = 120 * time.Second
 const RenewAfter = 45 * time.Second
 const DefaultMaxReaders = 32
 const MaximumReaders = 4096
+const httpScheme = "http"
 
 type Limits struct {
 	MaxGrants              int
@@ -95,7 +96,7 @@ func New(o Options) (*Authority, error) {
 		return nil, ErrDenied
 	}
 	u, err := url.Parse(o.Origin)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+	if err != nil || (u.Scheme != httpScheme && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
 		return nil, ErrDenied
 	}
 	o.Origin = strings.TrimRight(o.Origin, "/")

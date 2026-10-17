@@ -220,7 +220,6 @@ func rewritePreservingPortableIdentity(t *testing.T, path string, pin FileIdenti
 			return
 		}
 		t.Error("filesystem ctime did not observe the gated rewrite")
-		return
 	}
 }
 
@@ -252,13 +251,13 @@ func TestSourceChunksCheckFullPinAfterReadBeforeWrite(t *testing.T) {
 				if w.Body.Len() != 0 {
 					t.Fatalf("bytes written after read-time mutation: %q", w.Body.String())
 				}
-			} else {
-				if w.Body.String() != "0123456789abcdef" {
-					t.Fatal(w.Body.String())
-				}
-				if got := observed.stats.Load(); got != 5 {
-					t.Fatalf("descriptor stats per4 chunks+final=%d, want5", got)
-				}
+				return
+			}
+			if w.Body.String() != "0123456789abcdef" {
+				t.Fatal(w.Body.String())
+			}
+			if got := observed.stats.Load(); got != 5 {
+				t.Fatalf("descriptor stats per4 chunks+final=%d, want5", got)
 			}
 		})
 	}
