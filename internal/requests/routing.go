@@ -31,6 +31,10 @@ const (
 	kindSonarr         = "sonarr"
 )
 
+// configSupports4K is the Seerr plugin's "This Seerr handles 4K requests"
+// switch. The plugin returns no 4K target from a connection without it.
+const configSupports4K = "supports_4k"
+
 // fallbackRouteName names a media type's fallback until an admin renames it.
 const fallbackRouteName = "Everything else"
 
