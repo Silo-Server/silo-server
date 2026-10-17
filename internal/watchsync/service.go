@@ -1448,6 +1448,10 @@ func listAllCompletedHistory(ctx context.Context, store completedHistoryLister, 
 
 // visiblePlays keeps the plays whose history entries are still visible.
 func visiblePlays(ctx context.Context, store completedHistoryLister, query userstore.CompletedHistoryQuery, plays []LocalPlay) ([]LocalPlay, error) {
+	if len(plays) == 0 {
+		// An empty media filter would read the whole history.
+		return plays, nil
+	}
 	query.MediaItemIDs = make([]string, 0, len(plays))
 	seen := make(map[string]bool, len(plays))
 	for _, play := range plays {
