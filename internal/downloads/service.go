@@ -1502,9 +1502,9 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 	return &FileTarget{Path: file.FilePath, DownloadID: dl.ID, MediaFileID: file.ID, ProxyEligible: sourceProxyEligible}, nil
 }
 
-// Download bandwidth settings are aggregate guarantees enforced by the API
-// process. Until proxy nodes share a distributed limiter, keep capped transfers
-// local rather than silently multiplying the configured limit per proxy node.
+// Capped transfers remain on the API egress path until proxy capability
+// negotiation can prove every selected worker shares the cluster byte budget.
+// This preserves correctness during rolling upgrades with older workers.
 func proxyDeliveryAllowed(cfg config.DownloadConfig) bool {
 	return cfg.ServerBandwidthBPS <= 0 && cfg.UserBandwidthBPS <= 0
 }

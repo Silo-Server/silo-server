@@ -224,6 +224,7 @@ type Dependencies struct {
 	OpsLogRepo                *opslog.Repo
 	FFmpegLogSink             playback.FFmpegLogSink
 	RedisClient               *redis.Client              // for session listing (may be nil)
+	DownloadBandwidthRedis    *redis.Client              // deadline-enabled client for shared download budgets (may be nil)
 	TaskManager               *taskmanager.TaskManager   // task manager (may be nil)
 	ArtifactManager           *downloads.ArtifactManager // download prepare-to-file pipeline (may be nil)
 	AdminJobCancelRegistry    *adminjob.CancelRegistry
@@ -2225,6 +2226,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.Config.Download.ServerBandwidthBPS,
 			deps.Config.Download.UserBandwidthBPS,
 		)
+		downloadBandwidth.SetSharedBudget(deps.DownloadBandwidthRedis, downloads.BandwidthRates(deps.DB))
 		downloadLimiter := downloads.NewQuantityLimiter(
 			downloadRepo,
 			deps.Config.Download.MaxConcurrentPerUser,
