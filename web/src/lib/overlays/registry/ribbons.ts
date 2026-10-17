@@ -35,7 +35,7 @@ export const RIBBON_OVERLAYS: readonly OverlayDef[] = [
     category: "ribbons",
     label: "Show Status",
     description: "Series lifecycle: Returning, Ended, Cancelled",
-    defaultPosition: "top-right",
+    defaultPosition: "top-left",
     defaultEnabled: false,
     iconId: "tv",
     iconCapable: true,
