@@ -52,4 +52,18 @@ func TestPersonalCollectionReadMemoStaysBounded(t *testing.T) {
 	if len(memo.entries) != 2 {
 		t.Fatalf("memo holds %d entries, want the 2 live ones", len(memo.entries))
 	}
+	// One expired entry in a full memo still leaves a tenth of headroom, so
+	// the next new keys do not each sweep the whole memo.
+	clear(memo.entries)
+	memo.put(personalCollectionReadKey{userID: -4}, 1, struct{}{}, now.Add(-personalCollectionReadMemoTTL))
+	for i := range personalCollectionReadMemoMaxEntries - 1 {
+		memo.put(personalCollectionReadKey{userID: i}, 1, struct{}{}, now)
+	}
+	memo.put(personalCollectionReadKey{userID: -5}, 1, struct{}{}, now)
+	if want := personalCollectionReadMemoMaxEntries * 9 / 10; len(memo.entries) != want {
+		t.Fatalf("memo holds %d entries, want %d", len(memo.entries), want)
+	}
+	if _, ok := memo.get(personalCollectionReadKey{userID: -5}, 1, now); !ok {
+		t.Fatal("the new entry was not kept")
+	}
 }
