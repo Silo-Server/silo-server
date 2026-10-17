@@ -18,16 +18,61 @@ const authorityRefreshAttempts = 2
 type authorityRefresh struct {
 	done chan struct{}
 	err  error
+	sent time.Time
 }
 
 // refresh coalesces callers without assigning any caller ownership of the RPC.
 // A canceled waiter leaves the runtime's bounded refresh available to others.
 func (r *Runtime) refresh(ctx context.Context) error {
+	_, err := r.waitRefresh(ctx)
+	return err
+}
+
+// refreshFor permits a captured snapshot to serve a later caller only when it
+// includes that caller's exact authority. Otherwise one newer flight must cover
+// the scope; a missing scope in a fresh response remains a definitive denial.
+func (r *Runtime) refreshFor(ctx context.Context, allowed func() bool) error {
+	minimum := time.Now()
+	for attempt := range 2 {
+		flight, err := r.waitRefresh(ctx)
+		if err != nil {
+			return err
+		}
+		if attempt != 0 && flight.sent.Before(minimum) {
+			break
+		}
+		if allowed() {
+			return nil
+		}
+		if !flight.sent.Before(minimum) {
+			break
+		}
+	}
+	return errors.New("worker snapshot does not include required authority")
+}
+
+// refreshCurrent also supports operations for which a fresh empty snapshot is
+// meaningful, such as configuration reload or retained-artifact deletion.
+func (r *Runtime) refreshCurrent(ctx context.Context) error {
+	minimum := time.Now()
+	for range 2 {
+		flight, err := r.waitRefresh(ctx)
+		if err != nil {
+			return err
+		}
+		if !flight.sent.Before(minimum) {
+			return nil
+		}
+	}
+	return errors.New("worker snapshot predates refresh request")
+}
+
+func (r *Runtime) waitRefresh(ctx context.Context) (*authorityRefresh, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := r.ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	r.refreshMu.Lock()
 	flight := r.refreshFlight
@@ -39,14 +84,14 @@ func (r *Runtime) refresh(ctx context.Context) error {
 	r.refreshMu.Unlock()
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	case <-r.ctx.Done():
-		return r.ctx.Err()
+		return nil, r.ctx.Err()
 	case <-flight.done:
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
-		return flight.err
+		return flight, flight.err
 	}
 }
 
@@ -90,6 +135,7 @@ func (r *Runtime) runRefresh(flight *authorityRefresh) {
 	if notify != nil {
 		notify()
 	}
+	flight.sent = sent
 	flight.err = err
 	close(flight.done)
 }

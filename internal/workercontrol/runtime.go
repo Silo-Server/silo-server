@@ -126,7 +126,7 @@ func New(ctx context.Context, options Options) (*Runtime, error) {
 		return nil, err
 	}
 	r.config = newLocalConfig(options)
-	r.config.setRefresh(r.refresh)
+	r.config.setRefresh(r.refreshCurrent)
 	r.tracker = &reportTracker{runtime: r, sessions: make(map[string]nodesessions.SessionInfo)}
 	r.verifier = &workeridentity.Verifier{Origin: options.Binding.NodeURL, Domain: workeridentity.DomainCoreCommand, AllowHTTP: options.Binding.AllowHTTP, ResolveKey: func(nodeID int) (ed25519.PublicKey, error) {
 		if nodeID != options.Binding.NodeID {
@@ -287,13 +287,11 @@ func (r *Runtime) verifyCommand(request *http.Request) error {
 		if err := r.proxyVerifier.VerifyKey(request, r.options.Binding.NodeID, body.ProxyPublicKey); err != nil {
 			return err
 		}
-		if !r.authority.OutputAllowed(body.AuthorityID) {
-			if err := r.refresh(request.Context()); err != nil || !r.authority.OutputAllowed(body.AuthorityID) {
-				return errors.New("viewer authority unavailable")
-			}
+		allowed := func() bool {
+			return r.authority.OutputAllowed(body.AuthorityID) && r.workAllowed(grant.WorkID, grant.Generation)
 		}
-		if !r.workAllowed(grant.WorkID, grant.Generation) {
-			if err := r.refresh(request.Context()); err != nil || !r.workAllowed(grant.WorkID, grant.Generation) {
+		if !allowed() {
+			if err := r.refreshFor(request.Context(), allowed); err != nil {
 				return errors.New("proxy output authority unavailable")
 			}
 		}
@@ -316,7 +314,10 @@ func (r *Runtime) verifyCommand(request *http.Request) error {
 		generation := r.authority.Generation(work)
 		if generation == 0 {
 			if strings.HasPrefix(request.URL.Path, "/downloads/") {
-				_ = r.refresh(request.Context())
+				_ = r.refreshFor(request.Context(), func() bool {
+					current := r.authority.Generation(work)
+					return current != 0 && r.workAllowed(work, current)
+				})
 			} else {
 				_, _ = r.currentRecipe(request.Context(), work)
 			}
@@ -353,7 +354,9 @@ func (r *Runtime) execute(w http.ResponseWriter, request *http.Request) {
 		http.Error(w, "invalid assignment", http.StatusBadRequest)
 		return
 	}
-	if err := r.refresh(request.Context()); err != nil || !r.workAllowed(assignment.WorkID, assignment.Generation) {
+	if err := r.refreshFor(request.Context(), func() bool {
+		return r.workAllowed(assignment.WorkID, assignment.Generation)
+	}); err != nil {
 		http.Error(w, "assignment authority unavailable", http.StatusServiceUnavailable)
 		return
 	}

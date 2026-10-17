@@ -33,6 +33,12 @@ func (f refreshTransport) RoundTrip(request *http.Request) (*http.Response, erro
 
 func newRefreshFixture(t *testing.T, serve func(http.ResponseWriter, *http.Request, refreshChallenge, func())) *Runtime {
 	t.Helper()
+	r, _ := newRefreshFixtureWithKey(t, serve, nil)
+	return r
+}
+
+func newRefreshFixtureWithKey(t *testing.T, serve func(http.ResponseWriter, *http.Request, refreshChallenge, func()), configure func(*workerwire.Snapshot)) (*Runtime, ed25519.PrivateKey) {
+	t.Helper()
 	corePublic, coreKey, _ := ed25519.GenerateKey(rand.Reader)
 	nodePublic, nodeKey, _ := ed25519.GenerateKey(rand.Reader)
 	core := httptest.NewUnstartedServer(nil)
@@ -50,7 +56,11 @@ func newRefreshFixture(t *testing.T, serve func(http.ResponseWriter, *http.Reque
 			return
 		}
 		serve(w, request, input, func() {
-			body, _ := json.Marshal(workerwire.Snapshot{Version: 1, NodeID: 17, BootID: input.BootID, Nonce: input.Nonce, Sequence: input.Sequence + 1, Active: map[string]uint64{"work": 4}, ValidForMillis: 2000})
+			snapshot := workerwire.Snapshot{Version: 1, NodeID: 17, BootID: input.BootID, Nonce: input.Nonce, Sequence: input.Sequence + 1, Active: map[string]uint64{"work": 4}, ValidForMillis: 2000}
+			if configure != nil {
+				configure(&snapshot)
+			}
+			body, _ := json.Marshal(snapshot)
 			grant, err := workeridentity.EncodeGrant(workeridentity.Grant{Version: 1, Domain: workeridentity.DomainSnapshotGrant, Audience: "http://worker.example.test", NodeID: 17, ExpiresAt: time.Now().Add(time.Minute).Unix(), Body: body}, coreKey)
 			if err != nil {
 				t.Error(err)
@@ -66,10 +76,11 @@ func newRefreshFixture(t *testing.T, serve func(http.ResponseWriter, *http.Reque
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = r.Close(context.Background()) })
-	return r
+	return r, coreKey
 }
 
 // refreshWaitContext observes when a caller starts waiting for the shared RPC.
+//
 //nolint:containedctx // Test wrapper preserves caller cancellation while exposing its wait through Done.
 type refreshWaitContext struct {
 	context.Context

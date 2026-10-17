@@ -140,7 +140,9 @@ func (r *Runtime) currentRecipe(ctx context.Context, workID string) (*playback.R
 	if response.Assignment.NodeID != r.options.Binding.NodeID || response.Assignment.WorkID != workID || response.Assignment.Version != 1 || grant.WorkID != workID || grant.Generation != response.Assignment.Generation {
 		return nil, errors.New("recipe scope mismatch")
 	}
-	if err := r.refresh(ctx); err != nil || !r.workAllowed(workID, response.Assignment.Generation) {
+	if err := r.refreshFor(ctx, func() bool {
+		return r.workAllowed(workID, response.Assignment.Generation)
+	}); err != nil {
 		return nil, errors.New("recipe authority unavailable")
 	}
 	handles, err := r.openSources(response.Assignment)
@@ -218,8 +220,13 @@ func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.C
 	if workID == "" || grant.WorkID != workID || grant.Generation == 0 {
 		return nil, errors.New("output grant has no matching work identity")
 	}
-	if authorityID == "" || !r.authority.OutputAllowed(authorityID) {
-		return nil, errors.New("viewer authority unavailable")
+	allowed := func() bool {
+		return r.authority.OutputAllowed(authorityID) && r.workAllowed(workID, grant.Generation)
+	}
+	if !allowed() {
+		if err := r.refreshFor(ctx, allowed); err != nil {
+			return nil, errors.New("viewer authority unavailable")
+		}
 	}
 	if claims.DownloadArtifactID == "" {
 		card, err := r.currentRecipe(ctx, workID)
@@ -228,11 +235,6 @@ func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.C
 		}
 		claims.MediaPath = card.InputPath
 	} else {
-		if !r.workAllowed(workID, grant.Generation) {
-			if err := r.refresh(ctx); err != nil {
-				return nil, err
-			}
-		}
 		if !r.workAllowed(workID, grant.Generation) {
 			return nil, errors.New("artifact authority unavailable")
 		}

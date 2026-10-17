@@ -36,7 +36,7 @@ func (r *Runtime) serveArtifactStop(w http.ResponseWriter, request *http.Request
 	// A restarted worker retains artifact bytes but no local generation map.
 	// Recover signed active/candidate authority before waiting on publication.
 	if !known {
-		if err := r.refresh(request.Context()); err != nil {
+		if err := r.refreshCurrent(request.Context()); err != nil {
 			http.Error(w, "artifact delete authority unavailable", http.StatusServiceUnavailable)
 			return
 		}

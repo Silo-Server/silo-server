@@ -179,6 +179,11 @@ attempt pairs. The leases fail closed if the core is unreachable. The core
 re-resolves current account, profile, library, content and operation permissions
 before extending authority. A durable recipe or a still-valid client token does
 not override a disabled account, deleted profile, disabled folder or stopped execution.
+A later admission can share an in-flight snapshot when it includes the required
+work generation and viewer authority. A missing scope requires one snapshot sent
+after the admission check began; a fresh denial remains final. Configuration
+reloads and deletion checks on retained artifacts also require a snapshot sent
+after the call began, since an empty response can be meaningful for those checks.
 Prepared jobs additionally pin the current durable attempt and lease owner;
 reusing the same owner string cannot authorize a previous retry.
 
