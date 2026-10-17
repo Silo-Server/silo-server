@@ -144,7 +144,7 @@ func TestClearResumePositionTargetsDB(t *testing.T) {
 	// Mark watched shares the lookup and still expands a season or series
 	// into its episodes; the reset above rejected them before that.
 	for _, want := range []struct{ id, kind string }{{movie, "movie"}, {series, "series"}, {season, "season"}, {episode, "episode"}} {
-		kind, targets, err := h.resolveWatchedTargets(ctx, want.id, true, catalog.AccessFilter{})
+		kind, _, targets, err := h.resolveWatchedTargets(ctx, want.id, true, catalog.AccessFilter{})
 		leaf := episode
 		if want.id == movie {
 			leaf = movie
