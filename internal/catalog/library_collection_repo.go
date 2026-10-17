@@ -747,7 +747,33 @@ func (r *LibraryCollectionRepository) Delete(ctx context.Context, id string) err
 	return err
 }
 
+// ReplaceItems makes items the collection's membership. It writes only the
+// difference: rows that left are deleted, rows whose position or source rank
+// changed are updated, and new rows are inserted. A title that stays keeps its
+// created_at. An unchanged list writes no item rows and does not touch the
+// collection, so the item triggers leave the collection revision alone. The
+// statement count does not grow with the list size.
 func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collectionID string, items []LibraryCollectionItemInput) error {
+	// Dedupe by media_item_id. Different source entries can resolve to the
+	// same library item (e.g. an IMDb and a TMDB entry pointing at the same
+	// local content_id, or one item present in several of the collection's
+	// bound folders), and library_collection_items has a composite PK
+	// (collection_id, media_item_id). First occurrence wins, preserving rank
+	// order. Position is renumbered over the surviving rows so it stays dense.
+	ids := make([]string, 0, len(items))
+	positions := make([]int, 0, len(items))
+	ranks := make([]int, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if _, dup := seen[item.MediaItemID]; dup {
+			continue
+		}
+		seen[item.MediaItemID] = struct{}{}
+		positions = append(positions, len(ids))
+		ids = append(ids, item.MediaItemID)
+		ranks = append(ranks, item.SourceRank)
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning collection item replacement: %w", err)
@@ -758,37 +784,43 @@ func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collecti
 		return err
 	}
 
-	if _, err := tx.Exec(ctx, "DELETE FROM library_collection_items WHERE collection_id = $1", collectionID); err != nil {
-		return fmt.Errorf("clearing collection items: %w", err)
+	deleted, err := tx.Exec(ctx, `
+		DELETE FROM library_collection_items t
+		WHERE t.collection_id = $1
+		  AND NOT EXISTS (
+		    SELECT 1 FROM unnest($2::text[]) AS desired(media_item_id)
+		    WHERE desired.media_item_id = t.media_item_id
+		  )
+	`, collectionID, ids)
+	if err != nil {
+		return fmt.Errorf("deleting removed collection items: %w", err)
 	}
 
-	// Dedupe by media_item_id before inserting. Different source entries can
-	// resolve to the same library item (e.g. an IMDb and a TMDB entry pointing
-	// at the same local content_id, or one item present in several of the
-	// collection's bound folders), and library_collection_items has a composite
-	// PK (collection_id, media_item_id). Inserting the same media_item_id twice
-	// would raise a duplicate-key violation that fails the whole sync. First
-	// occurrence wins, preserving rank order. Position is renumbered over the
-	// surviving rows so it stays dense.
-	seen := make(map[string]struct{}, len(items))
-	position := 0
-	for _, item := range items {
-		if _, dup := seen[item.MediaItemID]; dup {
-			continue
-		}
-		seen[item.MediaItemID] = struct{}{}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO library_collection_items (
-				collection_id, media_item_id, position, source_rank
-			) VALUES ($1, $2, $3, $4)
-		`, collectionID, item.MediaItemID, position, item.SourceRank); err != nil {
-			return fmt.Errorf("inserting collection item %s: %w", item.MediaItemID, err)
-		}
-		position++
+	updated, err := tx.Exec(ctx, `
+		UPDATE library_collection_items t
+		SET position = desired.position, source_rank = desired.source_rank, updated_at = NOW()
+		FROM unnest($2::text[], $3::int[], $4::int[]) AS desired(media_item_id, position, source_rank)
+		WHERE t.collection_id = $1 AND t.media_item_id = desired.media_item_id
+		  AND (t.position, t.source_rank) IS DISTINCT FROM (desired.position, desired.source_rank)
+	`, collectionID, ids, positions, ranks)
+	if err != nil {
+		return fmt.Errorf("repositioning collection items: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
-		return fmt.Errorf("touching library collection: %w", err)
+	inserted, err := tx.Exec(ctx, `
+		INSERT INTO library_collection_items (collection_id, media_item_id, position, source_rank)
+		SELECT $1, desired.media_item_id, desired.position, desired.source_rank
+		FROM unnest($2::text[], $3::int[], $4::int[]) AS desired(media_item_id, position, source_rank)
+		ON CONFLICT (collection_id, media_item_id) DO NOTHING
+	`, collectionID, ids, positions, ranks)
+	if err != nil {
+		return fmt.Errorf("inserting collection items: %w", err)
+	}
+
+	if deleted.RowsAffected()+updated.RowsAffected()+inserted.RowsAffected() > 0 {
+		if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
+			return fmt.Errorf("touching library collection: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
