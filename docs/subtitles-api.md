@@ -193,6 +193,16 @@ framing and other fields. Supported filename extensions are SRT, VTT, ASS, SSA,
 and SUB. The filename determines format; the file part can use
 `application/octet-stream`.
 
+The file must hold at least one cue the format can carry: an SRT or WebVTT
+timing line with text, a displayed ASS/SSA `Dialogue` event, or a MicroDVD or
+SubViewer cue for SUB. A renamed document, binary data, or plain text is
+refused with `400` and the detail "This file doesn't contain readable
+subtitles. Upload an SRT, VTT, ASS, SSA or SUB subtitle file." before anything
+is stored. Legacy single-byte encodings and UTF-16 with a byte-order mark pass
+the check. UTF-16 files are stored converted to UTF-8, and the 5 MiB limit
+also applies to the converted file; other bytes are stored as uploaded. The v1
+bridge shares this check.
+
 Authentication and profile gates precede multipart parsing. The shared service
 checks file and parent-item access before storage and derives uploader identity
 from the authenticated account. Demo mode refuses uploads. Language selection
