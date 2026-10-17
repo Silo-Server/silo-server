@@ -107,7 +107,14 @@ func TestNewPoolMovesVectorsInBinaryPostgres(t *testing.T) {
 		t.Fatalf("scanning NULL into *pgvector.Vector = %v, %v; want nil", optional, err)
 	}
 
-	// A new database has no vector extension until its first migration.
+	checkVectorCodecsOnNewDatabase(t, dsn)
+}
+
+// checkVectorCodecsOnNewDatabase checks that a pool connects to a new
+// database, which has no vector extension until its first migration, and that
+// every connection has the codecs once the migrations create it.
+func checkVectorCodecsOnNewDatabase(t *testing.T, dsn string) {
+	ctx := t.Context()
 	admin, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
