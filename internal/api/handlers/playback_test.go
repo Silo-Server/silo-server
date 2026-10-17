@@ -841,6 +841,56 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				if event[0].PositionSeconds != tt.wantEventPosition {
 					t.Fatalf("position = %v, want %v", event[0].PositionSeconds, tt.wantEventPosition)
 				}
+				if event[0].SessionEnded {
+					t.Fatal("a teardown the client can rebuild was reported as an ended session")
+				}
+			}
+		})
+	}
+}
+
+// Expiry and abort retire the session id, so their pause tells providers the
+// session ended. A session that keeps no progress is not scrobbled on abort.
+func TestRetiredSessionsReportEndedPause(t *testing.T) {
+	tests := []struct {
+		name               string
+		finalize           func(*PlaybackHandler, *playback.Session)
+		disablePersistence bool
+		wantPauses         int
+	}{
+		{"expiry", func(h *PlaybackHandler, s *playback.Session) { h.finalizeExpiredSession(context.Background(), s) }, false, 1},
+		{"abort", func(h *PlaybackHandler, s *playback.Session) {
+			h.finalizeSessionAbort(context.Background(), s, false, "")
+		}, false, 1},
+		{"abort without progress", func(h *PlaybackHandler, s *playback.Session) {
+			h.finalizeSessionAbort(context.Background(), s, false, "")
+		}, true, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
+			scrobbler := &recordingPlaybackWatchScrobbler{}
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
+			handler.WatchScrobbler = scrobbler
+
+			tt.finalize(handler, &playback.Session{
+				ID:                         "session-1",
+				UserID:                     1,
+				ProfileID:                  "profile-1",
+				MediaFileID:                file.ID,
+				Position:                   600,
+				DisableProgressPersistence: tt.disablePersistence,
+				StartedAt:                  time.Now().Add(-time.Minute),
+			})
+
+			if len(scrobbler.stops) != 0 || len(scrobbler.pauses) != tt.wantPauses {
+				t.Fatalf("pauses = %d, stops = %d, want %d pauses", len(scrobbler.pauses), len(scrobbler.stops), tt.wantPauses)
+			}
+			for _, event := range scrobbler.pauses {
+				if !event.SessionEnded {
+					t.Fatal("pause for a retired session was not marked ended")
+				}
 			}
 		})
 	}

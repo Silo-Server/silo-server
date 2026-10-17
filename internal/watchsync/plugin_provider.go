@@ -527,6 +527,11 @@ func (p *PluginProvider) ExportHistory(ctx context.Context, _ ServerConfig, conn
 	return result, rateLimited
 }
 
+// stopsEndedSessions marks plugins: a plugin may mirror live sessions, and
+// the plugin contract has no other signal that one ended. The service
+// exempts the first-party plugins that replaced Silo's built-ins.
+func (p *PluginProvider) stopsEndedSessions() {}
+
 func (p *PluginProvider) Start(ctx context.Context, _ ServerConfig, conn Connection, event ScrobbleEvent) error {
 	return p.applyScrobble(ctx, conn, event, pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_START)
 }

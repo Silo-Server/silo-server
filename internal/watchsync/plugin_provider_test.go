@@ -2439,3 +2439,34 @@ func TestPluginProviderEveryRemoteStateBatchCarriesPageWarnings(t *testing.T) {
 		})
 	}
 }
+
+// The first-party plugins under the former built-in keys keep the pause that
+// saves progress when a session ends; any other plugin receives a stop.
+func TestStopsEndedSessionsExemptsFirstPartyPlugins(t *testing.T) {
+	for _, tt := range []struct {
+		key  string
+		want bool
+	}{
+		{simklProviderKey, false},
+		{mdblistProviderKey, false},
+		{testPluginProviderKey, true},
+	} {
+		provider, err := NewPluginProvider(PluginProviderOptions{
+			InstallationID: 4,
+			ProviderKey:    tt.key,
+			CapabilityID:   testPluginCapabilityID,
+			Descriptor: &pluginv1.WatchSyncProviderDescriptor{
+				AuthMethods: []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+			},
+			ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
+				return &fakeWatchSyncPluginClient{}, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stopsEndedSessions(provider); got != tt.want {
+			t.Errorf("stopsEndedSessions(%s) = %v, want %v", tt.key, got, tt.want)
+		}
+	}
+}

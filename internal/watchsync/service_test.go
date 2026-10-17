@@ -3110,6 +3110,108 @@ func TestServiceScrobbleStopKeepsSessionOpenWhenProviderStopFails(t *testing.T) 
 	}
 }
 
+type endedSessionStopperStub struct{ keyedScrobblerStub }
+
+func (endedSessionStopperStub) stopsEndedSessions() {}
+
+// A session that ended without a user stop reaches a provider that mirrors
+// live sessions as a recorded stop, so the startup sweep does not stop it
+// again, while other providers keep the pause that saves progress.
+func TestServiceEndedSessionPauseStopsOnlyEndedSessionStoppers(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		sessionEnded bool
+		wantAction   string
+	}{
+		{"pause stays a pause", false, "pause"},
+		{"ended session stops", true, scrobbleActionStop},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			for _, key := range []string{"trakt", "plugin"} {
+				repo.settings["watchsync."+key+".client_id"] = "client-id"
+				repo.settings["watchsync."+key+".client_secret"] = "client-secret"
+			}
+			repo.scrobbleConnections = []Connection{
+				{ID: "conn-trakt", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true},
+				{ID: "conn-plugin", Provider: "plugin", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true},
+			}
+			traktStops := make(chan ScrobbleEvent, 1)
+			pluginStops := make(chan ScrobbleEvent, 1)
+			reg := NewRegistry()
+			if err := reg.Register(scrobblerStub{stopEvents: traktStops}); err != nil {
+				t.Fatalf("Register trakt: %v", err)
+			}
+			if err := reg.Register(endedSessionStopperStub{keyedScrobblerStub{
+				scrobblerStub: scrobblerStub{stopEvents: pluginStops}, key: "plugin",
+			}}); err != nil {
+				t.Fatalf("Register plugin: %v", err)
+			}
+			service := NewService(repo, reg)
+
+			if err := service.ScrobblePause(context.Background(), ScrobbleEvent{
+				PlaybackSessionID: "playback-1",
+				UserID:            7,
+				ProfileID:         "profile-1",
+				MediaItemID:       testMovieMediaID,
+				PositionSeconds:   120,
+				SessionEnded:      tt.sessionEnded,
+			}); err != nil {
+				t.Fatalf("ScrobblePause: %v", err)
+			}
+			waitForScrobbleQueues(t, service)
+
+			if got := len(traktStops); got != 0 {
+				t.Fatalf("trakt stops = %d, want 0", got)
+			}
+			wantPluginStops := 0
+			if tt.wantAction == scrobbleActionStop {
+				wantPluginStops = 1
+			}
+			if got := len(pluginStops); got != wantPluginStops {
+				t.Fatalf("plugin stops = %d, want %d", got, wantPluginStops)
+			}
+			pluginStopSent := false
+			for _, update := range repo.scrobbleUpdatesSnapshot() {
+				want := "pause"
+				if update.connectionID == "conn-plugin" {
+					want = tt.wantAction
+					pluginStopSent = pluginStopSent || update.stopSentAt != nil
+				}
+				if update.action != want {
+					t.Fatalf("%s action = %q, want %q", update.connectionID, update.action, want)
+				}
+				if update.connectionID == "conn-trakt" && update.stopSentAt != nil {
+					t.Fatalf("trakt pause recorded a sent stop: %+v", update)
+				}
+			}
+			if pluginStopSent != (wantPluginStops == 1) {
+				t.Fatalf("plugin stop recorded as sent = %v, want %v", pluginStopSent, wantPluginStops == 1)
+			}
+		})
+	}
+}
+
+// waitForScrobbleQueues waits until every queued provider dispatch finished.
+func waitForScrobbleQueues(t *testing.T, service *Service) {
+	t.Helper()
+	service.scrobbleQueues.Range(func(_, value any) bool {
+		queue := value.(*scrobbleQueue)
+		queue.mu.Lock()
+		tail := queue.tail
+		queue.mu.Unlock()
+		if tail == nil {
+			return true
+		}
+		select {
+		case <-tail:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for queued scrobbles")
+		}
+		return true
+	})
+}
+
 func TestServiceConfirmedStopWaitsForProviderAndReopensFailedReplacement(t *testing.T) {
 	repo := newServiceFakeRepo()
 	repo.scrobbleConnections = []Connection{{

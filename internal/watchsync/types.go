@@ -785,7 +785,11 @@ type ScrobbleEvent struct {
 	PositionSeconds   float64
 	DurationSeconds   float64
 	Completed         bool
-	OccurredAt        time.Time
+	// SessionEnded marks a pause sent because the playback session itself
+	// ended without a user stop: it expired idle or was aborted. Providers
+	// that mirror live sessions, which are plugins, receive a stop instead.
+	SessionEnded bool
+	OccurredAt   time.Time
 }
 
 func (w RemoteWatch) HistoryRecord() historyimport.Record {

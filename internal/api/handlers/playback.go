@@ -1210,12 +1210,23 @@ func (h *PlaybackHandler) touchSessionActivity(sessionID string) {
 }
 
 func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, userInitiated bool) {
-	h.finalizeSessionStopWithResult(ctx, session, syncNow, syncReason, userInitiated)
+	h.finalizeSessionStopWithResult(ctx, session, syncNow, syncReason, userInitiated, false)
+}
+
+// finalizeExpiredSession finalizes a session the liveness reaper expired. The
+// reaper then marks its attempt stopped, so a client starts a new session
+// rather than resuming this one, and watch providers that mirror live
+// sessions hear this one ended.
+func (h *PlaybackHandler) finalizeExpiredSession(ctx context.Context, session *playback.Session) {
+	h.finalizeSessionStopWithResult(ctx, session, false, "", false, true)
 }
 
 // finalizeSessionStopWithResult is finalizeSessionStop reporting the history
 // writer's result, which the v2 stop receipt carries.
-func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, userInitiated bool) watchstate.PlaybackStopResult {
+// sessionEnded is true when the attempt ends for good without a user stop,
+// as on expiry; a system teardown the client can rebuild under the same id
+// passes false.
+func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, userInitiated, sessionEnded bool) watchstate.PlaybackStopResult {
 	if h == nil || session == nil || session.ID == "" {
 		return watchstate.PlaybackStopResult{}
 	}
@@ -1233,26 +1244,27 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 		// session that relays the node's 404.
 		h.deleteSessionRecipeV3(ctx, session.ID)
 	}
-	stopResult := h.recordStoppedSession(ctx, session, userInitiated)
+	stopResult := h.recordStoppedSession(ctx, session, userInitiated, sessionEnded)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
 	return stopResult
 }
 
-func (h *PlaybackHandler) recordStoppedSession(ctx context.Context, session *playback.Session, userInitiated bool) watchstate.PlaybackStopResult {
+func (h *PlaybackHandler) recordStoppedSession(ctx context.Context, session *playback.Session, userInitiated, sessionEnded bool) watchstate.PlaybackStopResult {
 	stopResult := h.recordStopHistory(ctx, session)
-	h.notifyStoppedSession(ctx, session, stopResult, userInitiated)
+	h.notifyStoppedSession(ctx, session, stopResult, userInitiated, sessionEnded)
 	return stopResult
 }
 
-func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *playback.Session, stopResult watchstate.PlaybackStopResult, userInitiated bool) {
+func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *playback.Session, stopResult watchstate.PlaybackStopResult, userInitiated, sessionEnded bool) {
 	if h.WatchScrobbler != nil {
 		if event, ok := h.scrobbleEventForStoppedSession(ctx, session, stopResult); ok && (userInitiated || stopResult.Completed) {
 			if err := h.WatchScrobbler.ScrobbleStop(ctx, event); err != nil {
 				slog.WarnContext(ctx, "failed to queue watch provider stop scrobble", "component", "api", "session", session.ID, "error", err)
 			}
 		} else if ok {
+			event.SessionEnded = sessionEnded
 			if err := h.WatchScrobbler.ScrobblePause(ctx, event); err != nil {
 				slog.WarnContext(ctx, "failed to queue watch provider pause scrobble", "component", "api", "session", session.ID, "error", err)
 			}
@@ -1316,6 +1328,29 @@ func compatPlayHistoryID(sessionID string) string {
 	return uuid.NewSHA1(compatPlayHistoryNamespace, []byte(sessionID)).String()
 }
 
+// scrobbleAbortedSession reports an aborted session to watch providers.
+// abortPlaybackSession marks the attempt stopped, so a reconnect starts a
+// new session and the pause reaches providers that mirror live sessions
+// as ended. A session that keeps no progress is not scrobbled, as on stop.
+func (h *PlaybackHandler) scrobbleAbortedSession(ctx context.Context, session *playback.Session) {
+	if h.WatchScrobbler == nil || h.fileResolver == nil || session.DisableProgressPersistence {
+		return
+	}
+	file, err := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
+	if err != nil || file == nil {
+		return
+	}
+	targetID := playbackProgressTarget(file)
+	if targetID == "" {
+		return
+	}
+	event := h.scrobbleEventForSession(ctx, session, targetID, float64(file.Duration), session.Position)
+	event.SessionEnded = true
+	if err := h.WatchScrobbler.ScrobblePause(ctx, event); err != nil {
+		slog.WarnContext(ctx, "failed to queue watch provider abort scrobble", "component", "api", "session", session.ID, "error", err)
+	}
+}
+
 func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *playback.Session, syncNow bool, syncReason string) {
 	if h == nil || session == nil || session.ID == "" {
 		return
@@ -1325,17 +1360,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	}
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 
-	if h.WatchScrobbler != nil && h.fileResolver != nil {
-		if file, err := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID); err == nil && file != nil {
-			targetID := playbackProgressTarget(file)
-			if targetID != "" {
-				event := h.scrobbleEventForSession(ctx, session, targetID, float64(file.Duration), session.Position)
-				if err := h.WatchScrobbler.ScrobblePause(ctx, event); err != nil {
-					slog.WarnContext(ctx, "failed to queue watch provider abort scrobble", "component", "api", "session", session.ID, "error", err)
-				}
-			}
-		}
-	}
+	h.scrobbleAbortedSession(ctx, session)
 
 	if h.AdminStore != nil {
 		if err := h.AdminStore.DeleteSession(ctx, session.ID); err != nil {
@@ -1385,7 +1410,7 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 		}
 		// Expiry is a liveness reap, not a user stop, but it ends the attempt
 		// all the same (below), so nothing can reconstruct the session afterwards.
-		h.finalizeSessionStop(ctx, &sessionCopy, false, "", false)
+		h.finalizeExpiredSession(ctx, &sessionCopy)
 		// The attempt is over: mark its row stopped under a server-minted stop
 		// id so a start replay reports session_expired on every replica, and
 		// deny its tokens so no replica serves it again.
