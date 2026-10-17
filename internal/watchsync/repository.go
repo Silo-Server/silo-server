@@ -1346,7 +1346,9 @@ func (r *PostgresRepository) ListPendingHistoryExports(
 		  AND status IN ('pending', 'failed')
 		  AND attempt_count < 5
 		  AND ($3::uuid IS NULL OR (watched_at, id) > ($4::timestamptz, $3::uuid))
-		ORDER BY watched_at ASC, id ASC
+		-- Qualified: a bare "id" would sort by the id::text output column,
+		-- not the uuid the cursor compares.
+		ORDER BY watched_at ASC, watch_provider_history_exports.id ASC
 		LIMIT $2
 	`, connectionID, limit, afterID, after.WatchedAt)
 	if err != nil {
