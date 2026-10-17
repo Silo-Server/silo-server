@@ -569,6 +569,59 @@ func TestRelayMoveWritesStoredRecipeAfterRetiringOldNode(t *testing.T) {
 	}
 }
 
+// TestRelayMoveRewritesStoredRecipeAfterUnansweredRetire covers a hung node
+// that received the retire stop but did not answer it in time. Once it
+// resumes, it can still run that stop and delete the card naming the new node,
+// so the move writes the card again after the stop's signature has expired.
+func TestRelayMoveRewritesStoredRecipeAfterUnansweredRetire(t *testing.T) {
+	rewrites := make(chan func(), 1)
+	previous := afterNodeStopExpiresV3
+	afterNodeStopExpiresV3 = func(f func()) { rewrites <- f }
+	t.Cleanup(func() { afterNodeStopExpiresV3 = previous })
+
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			// No usable answer to the retire stop.
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}))
+	t.Cleanup(hung.Close)
+	healthy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{
+		pooledNode(1, hung.URL),
+		pooledNode(2, healthy.server.URL),
+	}, "ffmpeg")
+	f.planner.MarkTranscodeNodeUnreachable(hung.URL)
+	stored, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+	store := newSharedRecipeStore(*stored)
+	f.handler.NodeRecipeStore = store
+
+	rr := httptest.NewRecorder()
+	f.handler.HandleGetTranscodeSegment(rr, playbackTestRequest(http.MethodGet,
+		"/api/v2/playback/transcode/"+f.session.ID+"/segment/seg_00005.ts", nil,
+		map[string]string{"session_id": f.session.ID, "name": "seg_00005.ts"}))
+	if rr.Code != http.StatusOK || rr.Body.String() != "moved:seg_00005.ts" {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	waitForStoredRecipeNode(t, store, healthy.server.URL, 2)
+
+	var rewrite func()
+	select {
+	case rewrite = <-rewrites:
+	case <-time.After(10 * time.Second):
+		t.Fatal("an unanswered retire stop scheduled no later recipe write")
+	}
+	// The hung node resumes and runs the stop it received.
+	_ = store.Delete(context.Background(), rehomeTestTransport)
+	rewrite()
+	waitForStoredRecipeNode(t, store, healthy.server.URL, 2)
+}
+
 // TestConnectFailureIgnoresLocalSocketExhaustion pins that a dial this host
 // could not attempt does not condemn the node.
 func TestConnectFailureIgnoresLocalSocketExhaustion(t *testing.T) {

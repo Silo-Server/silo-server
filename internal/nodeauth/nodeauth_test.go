@@ -123,10 +123,10 @@ func TestVerifyEnforcesTheValidityWindow(t *testing.T) {
 		offset time.Duration
 		ok     bool
 	}{
-		{"within past", -maxSkew, true},
-		{"within future", maxSkew, true},
-		{"too old", -maxSkew - time.Second, false},
-		{"too far ahead", maxSkew + time.Second, false},
+		{"within past", -MaxSkew, true},
+		{"within future", MaxSkew, true},
+		{"too old", -MaxSkew - time.Second, false},
+		{"too far ahead", MaxSkew + time.Second, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := signedServerRequest(t, http.MethodGet, "http://node.test/status", nil, testNow.Add(tc.offset))

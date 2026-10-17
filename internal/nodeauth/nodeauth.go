@@ -34,9 +34,9 @@ import (
 const Scheme = "Silo-Node-HMAC-SHA256"
 
 const (
-	// maxSkew is how far a signed request's timestamp may be from the
+	// MaxSkew is how far a signed request's timestamp may be from the
 	// receiver's clock, in either direction.
-	maxSkew = 30 * time.Second
+	MaxSkew = 30 * time.Second
 	// maxBodyBytes bounds the body a receiver buffers to check its hash.
 	// Worker request bodies are small JSON documents.
 	maxBodyBytes = 1 << 20
@@ -62,7 +62,7 @@ var emptyBodyHash = sha256.Sum256(nil)
 
 // Sign authenticates req for the Silo worker registered at nodeURL. Call it
 // once the URL and body are final and just before sending: the signature
-// expires after maxSkew. A body without GetBody is read into memory and
+// expires after MaxSkew. A body without GetBody is read into memory and
 // replaced.
 //
 // The signature covers the request path relative to nodeURL, which is the
@@ -158,7 +158,7 @@ func verifySigned(r *http.Request, secret, params string, now time.Time) error {
 	}
 	// The MAC covers the timestamp, so a valid signature outside the window
 	// means the clocks disagree (or an old request was replayed).
-	if skew := now.Sub(time.Unix(seconds, 0)); skew > maxSkew || skew < -maxSkew {
+	if skew := now.Sub(time.Unix(seconds, 0)); skew > MaxSkew || skew < -MaxSkew {
 		if suppressed, ok := staleLog.allow(); ok {
 			slog.WarnContext(r.Context(), "refused a signed node request outside the 30-second window; check that this worker's clock agrees with its API servers and proxies",
 				"component", "nodeauth", "remote_addr", r.RemoteAddr, "offset_seconds", int64(skew.Seconds()), "suppressed", suppressed)

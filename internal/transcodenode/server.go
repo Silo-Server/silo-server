@@ -2544,6 +2544,30 @@ func (s *Server) pruneStoppedProgressiveRemuxesLocked(now time.Time) {
 	}
 }
 
+// recipeMovedToAnotherNode reports whether the stored recipe a stop is about to
+// delete names another executor. The API moves a transport off a hung node
+// under the same transport id and writes the new node's card once its stop to
+// the old node has answered or timed out; a stop that resumes after that must
+// not delete the successor's card. A card naming another stream_nodes row
+// belongs to that node however late the stop runs. A card without a row id is
+// kept only when it changed since the stop first read it.
+func (s *Server) recipeMovedToAnotherNode(ctx context.Context, transportID string, stopped *playback.RecipeCard) bool {
+	current, ok := s.recipeStore.Get(ctx, transportID)
+	if !ok || current == nil {
+		return false
+	}
+	if current.RoutingExecutionNodeID > 0 && s.nodeRowID != nil {
+		if nodeID, known := s.nodeRowID(); known && nodeID > 0 && nodeID != current.RoutingExecutionNodeID {
+			return true
+		}
+	}
+	if stopped == nil {
+		return false
+	}
+	return current.TranscodeNodeURL != stopped.TranscodeNodeURL ||
+		current.RoutingExecutionNodeID != stopped.RoutingExecutionNodeID
+}
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 
@@ -2559,9 +2583,11 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	durableProgressive := false
 	authorityFound := false
 	playbackSessionID := sessionID
+	var stoppedCard *playback.RecipeCard
 	if s.recipeStore != nil {
 		card, ok := s.recipeStore.Get(r.Context(), sessionID)
 		authorityFound = ok && card != nil
+		stoppedCard = card
 		durableProgressive = authorityFound && card.PlayMethod == playback.PlayRemux
 		if authorityFound && card.SessionID != "" {
 			playbackSessionID = card.SessionID
@@ -2610,7 +2636,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// replacement, so reporting success would make the stop revocable only until
 	// this process exits.
 	var authorityErr error
-	if s.recipeStore != nil {
+	if s.recipeStore != nil && !s.recipeMovedToAnotherNode(r.Context(), sessionID, stoppedCard) {
 		authorityErr = s.recipeStore.Delete(r.Context(), sessionID)
 		if authorityErr != nil {
 			slog.WarnContext(r.Context(), "delete transcode recipe on stop", "component", "transcodenode", "error", authorityErr, "session", sessionID, "playback_session_id", sessionID)

@@ -833,9 +833,11 @@ replanned. Now, when the API relays a remote HLS transcode (native protocol,
 API egress) and cannot reach the session's node, it moves the transcode itself:
 
 - **Trigger.** The relay got no HTTP response: the connection could not be
-  opened (refused, unroutable, DNS failure, dial timeout), or any transport
-  error occurred while the pool already lists the node as unhealthy or no
-  longer pools it. A node that answers with an HTTP error is alive; its answer
+  opened (refused, unroutable, DNS failure, dial timeout), the node left the
+  relay waiting and then did not answer a health probe either (a hung node; see
+  [node failure detection](node-failure-detection.md#hung-nodes)), or any
+  transport error occurred while the pool already lists the node as unhealthy
+  or no longer pools it. A node that answers with an HTTP error is alive; its answer
   is relayed and nothing moves. A dial that failed on this host's own resources
   (out of file descriptors or socket buffers, no local address) says nothing
   about the node and does not count.
@@ -883,8 +885,13 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
   in case it is only unreachable from here; a failed stop is logged as a
   warning, and the node's idle reaper ends a job that still runs. A stored node
   recipe follows the transport to its new node, written after that stop
-  because a node deletes a transport's stored recipe when it stops it; a
-  candidate's rollback stop restores the card for the same reason.
+  because a node deletes a transport's stored recipe when it stops it. A hung
+  node may run that stop after resuming. A node's stop keeps a card that names
+  another `stream_nodes` row, or that was replaced by one naming another
+  executor while the stop ran. When the stop gets no answer, the card is
+  written again once node auth would refuse it (`nodeauth.MaxSkew`, doubled
+  for clock offset). A candidate's rollback
+  stop restores the card for the same reason.
 - **Pacing.** Moves are single-flighted per session
   (`TranscodeManager.RehomeTranscode`), so every request that finds the node
   dead waits on one move, and each remote start holds a `reconstructSem` slot
