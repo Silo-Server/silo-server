@@ -110,6 +110,31 @@ describe("listAdminPlaybackHistory", () => {
       user_id: 7,
       media_file_id: 42,
       duration_seconds: null,
+      series_title: "",
+      season_number: null,
+      episode_number: null,
+    });
+  });
+
+  it("keeps an episode's series title and season and episode numbers", async () => {
+    const episode = {
+      ...entry,
+      session_id: "sess-2",
+      media_item_id: "episode-1",
+      media_title: "The Tide Turns",
+      media_type: "episode",
+      series_title: "Harbour Lights",
+      season_number: 2,
+      episode_number: 4,
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(page([episode]))));
+    const result = await listAdminPlaybackHistory({ limit: 1 }, adminPlaybackHistoryScope());
+    expect(result.items[0]).toMatchObject({
+      media_title: "The Tide Turns",
+      media_type: "episode",
+      series_title: "Harbour Lights",
+      season_number: 2,
+      episode_number: 4,
     });
   });
 
