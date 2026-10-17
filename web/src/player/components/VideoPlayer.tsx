@@ -683,7 +683,8 @@ export function VideoPlayer({
   const reportSubtitleFailure = useCallback((jobId: string, message?: string) => {
     if (reportedSubtitleFailureRef.current === jobId) return;
     reportedSubtitleFailureRef.current = jobId;
-    toast.error(message ? `Subtitle processing failed: ${message}` : "Subtitle processing failed");
+    // The server sends a complete, viewer-facing reason; show it under a short title.
+    toast.error("Subtitle processing failed", message ? { description: message } : undefined);
   }, []);
 
   const handleSubtitleJobAccepted = useCallback(

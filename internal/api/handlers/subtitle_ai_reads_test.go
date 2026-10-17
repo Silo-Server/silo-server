@@ -56,3 +56,18 @@ func TestSubtitleAIReadsAuthorizeBeforeJobs(t *testing.T) {
 		t.Fatalf("access error: %v", err)
 	}
 }
+
+func TestSubtitleAIBridgeJobRedactsLegacyFailure(t *testing.T) {
+	const raw = `translate cues 1-35: chat API returned 500: {"error": "boom"}`
+	legacy := &ai.Job{ID: 3, Status: ai.JobStatusFailed, ErrorMessage: raw}
+	got := publicSubtitleAIJob(legacy)
+	if got.ErrorMessage != ai.PublicFailureMessage(legacy.ErrorMessage) || got.ErrorMessage == legacy.ErrorMessage {
+		t.Fatalf("bridge read leaked raw error: %q", got.ErrorMessage)
+	}
+	if legacy.ErrorMessage != raw || got.ID != 3 {
+		t.Fatal("redaction must copy the job, not mutate it")
+	}
+	if publicSubtitleAIJob(nil) != nil {
+		t.Fatal("nil job")
+	}
+}

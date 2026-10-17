@@ -268,27 +268,22 @@ func checkAITranscriptionConnection(ctx context.Context, cfg *config.Config) con
 }
 
 func transcriptionCheckFailureMessage(err error) string {
-	if errors.Is(err, llm.ErrQuotaExhausted) {
+	switch llm.Classify(err) {
+	case llm.FailureQuotaExhausted:
 		return "Speech-to-text provider quota is exhausted. Check your provider balance and limits."
-	}
-	if status, ok := errors.AsType[*llm.HTTPError](err); ok {
-		switch status.StatusCode {
-		case http.StatusUnauthorized:
-			return "Speech-to-text authentication failed. Replace the speech-to-text API key, or clear it to use the Text AI key."
-		case http.StatusForbidden:
-			return "Speech-to-text access was denied. Check your API key permissions and allowed providers."
-		case http.StatusPaymentRequired:
-			return "Speech-to-text provider requires payment. Check your provider balance and spending limit."
-		case http.StatusNotFound:
-			return "Speech-to-text endpoint or model is unavailable. Check the base URL, model, and allowed providers."
-		case http.StatusTooManyRequests:
-			return "Speech-to-text provider is rate limiting requests. Try again later."
-		}
-		if status.StatusCode >= 500 {
-			return "Speech-to-text provider is temporarily unavailable. Try again later."
-		}
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	case llm.FailureUnauthorized:
+		return "Speech-to-text authentication failed. Replace the speech-to-text API key, or clear it to use the Text AI key."
+	case llm.FailureForbidden:
+		return "Speech-to-text access was denied. Check your API key permissions and allowed providers."
+	case llm.FailurePaymentRequired:
+		return "Speech-to-text provider requires payment. Check your provider balance and spending limit."
+	case llm.FailureNotFound:
+		return "Speech-to-text endpoint or model is unavailable. Check the base URL, model, and allowed providers."
+	case llm.FailureRateLimited:
+		return "Speech-to-text provider is rate limiting requests. Try again later."
+	case llm.FailureUnavailable:
+		return "Speech-to-text provider is temporarily unavailable. Try again later."
+	case llm.FailureTimeout:
 		return "Speech-to-text connection check timed out. Check provider availability and try again."
 	}
 	return ""

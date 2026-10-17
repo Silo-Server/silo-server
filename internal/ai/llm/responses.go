@@ -192,13 +192,13 @@ func readResponseStream(data io.Reader) (string, error) {
 				code = event.Response.Error.Code
 			}
 			if code == "subscription_sharing_usage_unavailable" {
-				return errors.New("ChatGPT usage is temporarily unavailable")
+				return &HTTPError{StatusCode: http.StatusServiceUnavailable, message: "ChatGPT usage is temporarily unavailable"}
 			}
 			if code == "subscription_sharing_user_unavailable" {
-				return errors.New("ChatGPT subscriber information is temporarily unavailable")
+				return &HTTPError{StatusCode: http.StatusServiceUnavailable, message: "ChatGPT subscriber information is temporarily unavailable"}
 			}
 			if code == "server_error" {
-				return errors.New("ChatGPT is temporarily unavailable")
+				return &HTTPError{StatusCode: http.StatusServiceUnavailable, message: "ChatGPT is temporarily unavailable"}
 			}
 			if code == subscriptionUsageLimitExceeded {
 				return &permanentError{ErrQuotaExhausted}
@@ -213,7 +213,7 @@ func readResponseStream(data io.Reader) (string, error) {
 			}
 			return &permanentError{errors.New("ChatGPT request failed; check the account and ChatGPT usage settings")}
 		case "response.incomplete":
-			return &permanentError{errors.New("ChatGPT returned an incomplete response")}
+			return &permanentError{unusable("ChatGPT returned an incomplete response")}
 		}
 		return nil
 	}
@@ -241,7 +241,7 @@ func readResponseStream(data io.Reader) (string, error) {
 		return "", err
 	}
 	if !completed || text.Len() == 0 {
-		return "", errors.New("ChatGPT stream ended before a complete text response")
+		return "", unusable("ChatGPT stream ended before a complete text response")
 	}
 	return text.String(), nil
 }

@@ -170,7 +170,7 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRe
 	}
 
 	if len(all) == 0 {
-		return nil, detected, fmt.Errorf("no speech recognized in the audio track")
+		return nil, detected, ErrNoSpeech
 	}
 	return all, detected, nil
 }
@@ -235,7 +235,7 @@ func (t *WhisperTranscriber) transcribeIncremental(
 	}
 
 	if len(all) == 0 {
-		return nil, detected, fmt.Errorf("no speech recognized in the audio track")
+		return nil, detected, ErrNoSpeech
 	}
 	return all, detected, nil
 }
@@ -276,7 +276,7 @@ func (t *WhisperTranscriber) transcribeChunk(
 		Timeout:  timeout,
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("%w: %w", errAudioRequest, err)
 	}
 	// Each chunk is read exactly once; deleting it as we go caps disk usage
 	// at one extraction rather than extraction + retranscription leftovers.
