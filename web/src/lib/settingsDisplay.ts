@@ -107,7 +107,8 @@ export function formatSettingValue(key: string, value: string | null | undefined
   }
   if (definition.unit === "kbps") {
     // A bandwidth cap reads in Mbps like its select; no value means no cap.
-    const raw = value || defaultValueToString(definition);
+    // A stored null is "No limit" even where the default is a cap.
+    const raw = value === null ? "" : value || defaultValueToString(definition);
     const kbps = Number(raw);
     return raw && Number.isFinite(kbps) ? formatBitrateKbps(kbps) : "No limit";
   }

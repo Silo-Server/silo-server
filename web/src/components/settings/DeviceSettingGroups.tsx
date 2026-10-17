@@ -141,7 +141,9 @@ function DeviceSettingRow({
   // the limit capped.
   const inheritedFrom =
     changedHere || profileWide || constrained ? null : sourceLabel(effective, ownerLabel);
-  const value = displayedValue(settingKey, effective?.value ?? definition.defaultValue);
+  // A stored null is a value ("No limit"), not a missing one, so only a
+  // missing answer falls back to the default.
+  const value = displayedValue(settingKey, effective ? effective.value : definition.defaultValue);
   const inlineControl = controlKindFor(definition) === "switch";
 
   return (

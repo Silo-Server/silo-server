@@ -382,6 +382,23 @@ describe("DeviceSettingGroups", () => {
     expect(screen.getByText("3.5 Mbps")).toBeInTheDocument();
   });
 
+  // The cellular cap defaults to 2 Mbps, so a stored null is a choice of its
+  // own and must not fall back to the default.
+  it("shows a stored no-limit cellular bitrate as No limit", () => {
+    renderGroups({
+      "playback.cellular_max_bitrate_kbps": effective({
+        key: "playback.cellular_max_bitrate_kbps",
+        value: null,
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByRole("combobox", { name: /^Cellular maximum bitrate/i })).toHaveTextContent(
+      "No limit",
+    );
+  });
+
   // The sliders shipped controlled with only onValueCommit, so the thumb
   // never moved and no keyboard or pointer gesture could change the value.
   // Keyboard steps are what jsdom can exercise; they commit through the same
