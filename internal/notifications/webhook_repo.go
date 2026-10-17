@@ -61,11 +61,13 @@ func scanWebhooks(rows pgx.Rows) ([]Webhook, error) {
 	return hooks, rows.Err()
 }
 
-// ListByProfile returns all of a profile's webhooks for the listing endpoint.
-func (r *WebhookRepository) ListByProfile(ctx context.Context, profileID string) ([]Webhook, error) {
+// ListByProfile returns all of an account profile's webhooks for the listing
+// endpoint. Profile IDs repeat across accounts, so every management query
+// matches the account too.
+func (r *WebhookRepository) ListByProfile(ctx context.Context, userID int, profileID string) ([]Webhook, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+webhookColumns+` FROM notification_webhooks WHERE profile_id = $1 ORDER BY created_at`,
-		profileID)
+		`SELECT `+webhookColumns+` FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2 ORDER BY created_at`,
+		userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("list webhooks: %w", err)
 	}
@@ -73,15 +75,18 @@ func (r *WebhookRepository) ListByProfile(ctx context.Context, profileID string)
 }
 
 // ListEnabledByProfiles loads enabled webhooks for a set of profiles, keyed
-// by profile. Used by the fanout outbox enqueue inside its transaction.
-func (r *WebhookRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) (map[string][]Webhook, error) {
-	out := make(map[string][]Webhook, len(profileIDs))
-	if len(profileIDs) == 0 {
+// by account and profile: profile IDs repeat across accounts. Used by the
+// outbox enqueue inside the delivery's transaction.
+func (r *WebhookRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx, profiles []profileKey) (map[profileKey][]Webhook, error) {
+	out := make(map[profileKey][]Webhook, len(profiles))
+	if len(profiles) == 0 {
 		return out, nil
 	}
+	userIDs, profileIDs := profileKeyArrays(profiles)
 	rows, err := tx.Query(ctx,
-		`SELECT `+webhookColumns+` FROM notification_webhooks WHERE profile_id = ANY($1) AND enabled`,
-		profileIDs)
+		`SELECT `+webhookColumns+` FROM notification_webhooks
+		WHERE (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])) AND enabled`,
+		userIDs, profileIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled webhooks: %w", err)
 	}
@@ -90,16 +95,18 @@ func (r *WebhookRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx
 		return nil, err
 	}
 	for _, hook := range hooks {
-		out[hook.ProfileID] = append(out[hook.ProfileID], hook)
+		key := profileKey{hook.UserID, hook.ProfileID}
+		out[key] = append(out[key], hook)
 	}
 	return out, nil
 }
 
-// GetByID returns one webhook scoped to the profile; (nil, nil) when absent.
-func (r *WebhookRepository) GetByID(ctx context.Context, profileID, id string) (*Webhook, error) {
+// GetByID returns one webhook scoped to the account profile; (nil, nil) when
+// absent.
+func (r *WebhookRepository) GetByID(ctx context.Context, userID int, profileID, id string) (*Webhook, error) {
 	hook, err := scanWebhook(r.pool.QueryRow(ctx,
-		`SELECT `+webhookColumns+` FROM notification_webhooks WHERE profile_id = $1 AND id = $2`,
-		profileID, id))
+		`SELECT `+webhookColumns+` FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2 AND id = $3`,
+		userID, profileID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -122,12 +129,12 @@ func (r *WebhookRepository) getByIDUnscoped(ctx context.Context, id string) (*We
 	return hook, nil
 }
 
-// ErrWebhookNameTaken is returned when a profile already has a webhook with
-// the requested name.
+// ErrWebhookNameTaken is returned when the account profile already has a
+// webhook with the requested name.
 var ErrWebhookNameTaken = errors.New("a webhook with this name already exists")
 
 // isWebhookNameViolation reports whether err is the unique violation on the
-// per-profile webhook name constraint, via the typed pgx error (string
+// webhook name constraint, unique per (user_id, profile_id), via the typed pgx error (string
 // matching on error text would break if message formatting changes).
 func isWebhookNameViolation(err error) bool {
 	var pgErr *pgconn.PgError
@@ -136,10 +143,11 @@ func isWebhookNameViolation(err error) bool {
 		pgErr.ConstraintName == "notification_webhooks_profile_name_key"
 }
 
-// InsertWithLimit persists a new webhook unless the profile is already at
-// maxPerProfile. The count and insert run under a per-profile advisory
-// transaction lock so concurrent creates cannot both pass the check and push
-// the profile past its cap.
+// InsertWithLimit persists a new webhook unless the account profile is
+// already at maxPerProfile. The count and insert run under a per-profile-ID
+// advisory transaction lock so concurrent creates cannot both pass the check
+// and push the profile past its cap. The lock is coarser than the count (it
+// also serializes a same-ID profile on another account), which is harmless.
 func (r *WebhookRepository) InsertWithLimit(ctx context.Context, hook Webhook, maxPerProfile int) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -154,7 +162,7 @@ func (r *WebhookRepository) InsertWithLimit(ctx context.Context, hook Webhook, m
 	}
 	var count int
 	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM notification_webhooks WHERE profile_id = $1`, hook.ProfileID,
+		`SELECT count(*) FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2`, hook.UserID, hook.ProfileID,
 	).Scan(&count); err != nil {
 		return fmt.Errorf("count webhooks: %w", err)
 	}
@@ -211,17 +219,17 @@ func (r *WebhookRepository) Update(ctx context.Context, hook Webhook) error {
 	return nil
 }
 
-// Delete removes a profile's webhook; attempts cascade. Idempotent.
-func (r *WebhookRepository) Delete(ctx context.Context, profileID, id string) error {
+// Delete removes an account profile's webhook; attempts cascade. Idempotent.
+func (r *WebhookRepository) Delete(ctx context.Context, userID int, profileID, id string) error {
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_webhooks WHERE profile_id = $1 AND id = $2`, profileID, id)
+		`DELETE FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2 AND id = $3`, userID, profileID, id)
 	return err
 }
 
-// DeleteAllForProfile removes a deleted profile's webhooks.
-func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, profileID string) error {
+// DeleteAllForProfile removes a deleted account profile's webhooks.
+func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_webhooks WHERE profile_id = $1`, profileID)
+		`DELETE FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	return err
 }
 
@@ -399,11 +407,11 @@ func (r *WebhookRepository) DeleteOldAttempts(ctx context.Context, now time.Time
 
 // ListPage returns at most limit records in stable creation order. Callers may
 // request one lookahead row; this read does not alter delivery state.
-func (r *WebhookRepository) ListPage(ctx context.Context, profile string, limit int, after *Cursor) ([]Webhook, error) {
-	query := `SELECT ` + webhookColumns + ` FROM notification_webhooks WHERE profile_id = $1`
-	args := []any{profile}
+func (r *WebhookRepository) ListPage(ctx context.Context, userID int, profile string, limit int, after *Cursor) ([]Webhook, error) {
+	query := `SELECT ` + webhookColumns + ` FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2`
+	args := []any{userID, profile}
 	if after != nil {
-		query += ` AND (created_at, id) > ($2, $3)`
+		query += ` AND (created_at, id) > ($3, $4)`
 		args = append(args, after.CreatedAt, after.ID)
 	}
 	query += fmt.Sprintf(" ORDER BY created_at, id LIMIT $%d", len(args)+1)
@@ -417,14 +425,14 @@ func (r *WebhookRepository) ListPage(ctx context.Context, profile string, limit 
 
 // DeleteGuarded holds the row lock across precondition evaluation and deletion.
 // The revision trigger covers bridge, configuration and provider writers too.
-func (r *WebhookRepository) DeleteGuarded(ctx context.Context, profile, id string, check func(int64) error) error {
+func (r *WebhookRepository) DeleteGuarded(ctx context.Context, userID int, profile, id string, check func(int64) error) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var revision int64
-	err = tx.QueryRow(ctx, `SELECT revision FROM notification_webhooks WHERE profile_id=$1 AND id=$2 FOR UPDATE`, profile, id).Scan(&revision)
+	err = tx.QueryRow(ctx, `SELECT revision FROM notification_webhooks WHERE user_id=$1 AND profile_id=$2 AND id=$3 FOR UPDATE`, userID, profile, id).Scan(&revision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrWebhookNotFound
 	}
@@ -434,15 +442,15 @@ func (r *WebhookRepository) DeleteGuarded(ctx context.Context, profile, id strin
 	if err = check(revision); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM notification_webhooks WHERE profile_id=$1 AND id=$2`, profile, id); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM notification_webhooks WHERE user_id=$1 AND profile_id=$2 AND id=$3`, userID, profile, id); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
 // ReplaceSigningSecret changes no configuration or provider bookkeeping fields.
-func (r *WebhookRepository) ReplaceSigningSecret(ctx context.Context, profile, id, ciphertext string) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE notification_webhooks SET signing_secret_ciphertext=$3, updated_at=now() WHERE profile_id=$1 AND id=$2 AND type='generic'`, profile, id, ciphertext)
+func (r *WebhookRepository) ReplaceSigningSecret(ctx context.Context, userID int, profile, id, ciphertext string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE notification_webhooks SET signing_secret_ciphertext=$4, updated_at=now() WHERE user_id=$1 AND profile_id=$2 AND id=$3 AND type='generic'`, userID, profile, id, ciphertext)
 	if err != nil {
 		return err
 	}
@@ -454,13 +462,13 @@ func (r *WebhookRepository) ReplaceSigningSecret(ctx context.Context, profile, i
 
 // UpdateGuarded reads, validates and updates configuration under the same row lock.
 // Secret/type and provider outcome columns are never copied from an editor.
-func (r *WebhookRepository) UpdateGuarded(ctx context.Context, profile, id string, apply func(*Webhook) error) (*Webhook, error) {
+func (r *WebhookRepository) UpdateGuarded(ctx context.Context, userID int, profile, id string, apply func(*Webhook) error) (*Webhook, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	hook, err := scanWebhook(tx.QueryRow(ctx, `SELECT `+webhookColumns+` FROM notification_webhooks WHERE profile_id=$1 AND id=$2 FOR UPDATE`, profile, id))
+	hook, err := scanWebhook(tx.QueryRow(ctx, `SELECT `+webhookColumns+` FROM notification_webhooks WHERE user_id=$1 AND profile_id=$2 AND id=$3 FOR UPDATE`, userID, profile, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrWebhookNotFound
 	}
@@ -471,12 +479,12 @@ func (r *WebhookRepository) UpdateGuarded(ctx context.Context, profile, id strin
 		return nil, err
 	}
 	row, err := scanWebhook(tx.QueryRow(ctx, `UPDATE notification_webhooks SET
- name=$3, url_ciphertext=$4, url_host=$5, enabled=$6,
- notify_favorites=$7, notify_watchlist=$8, notify_continue_watching=$9,
- notify_next_up=$10, notify_requests=$11, consecutive_failures=$12,
- disabled_reason=$13, updated_at=now()
- WHERE profile_id=$1 AND id=$2 RETURNING `+webhookColumns,
-		profile, id, hook.Name, hook.URLCiphertext, hook.URLHost, hook.Enabled,
+ name=$4, url_ciphertext=$5, url_host=$6, enabled=$7,
+ notify_favorites=$8, notify_watchlist=$9, notify_continue_watching=$10,
+ notify_next_up=$11, notify_requests=$12, consecutive_failures=$13,
+ disabled_reason=$14, updated_at=now()
+ WHERE user_id=$1 AND profile_id=$2 AND id=$3 RETURNING `+webhookColumns,
+		userID, profile, id, hook.Name, hook.URLCiphertext, hook.URLHost, hook.Enabled,
 		hook.NotifyFavorites, hook.NotifyWatchlist, hook.NotifyContinueWatching,
 		hook.NotifyNextUp, hook.NotifyRequests, hook.ConsecutiveFailures, hook.DisabledReason))
 	if isWebhookNameViolation(err) {

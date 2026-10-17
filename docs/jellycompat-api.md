@@ -194,7 +194,11 @@ carry none of the three. Similar and Suggestions ignore `Fields`.
 
 Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
 as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
-See [dropped-shows.md](architecture/dropped-shows.md).
+See [dropped-shows.md](architecture/dropped-shows.md). It orders series as
+Silo's Home does: by when the profile finished the previous episode, the order
+Jellyfin uses. A profile that turns on `ui.next_up_new_releases_first` instead
+gets a caught-up series back at the front when its next episode is released to
+the server. `nextUpDateCutoff` still filters on last played.
 
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,

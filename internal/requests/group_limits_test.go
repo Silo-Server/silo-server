@@ -172,6 +172,9 @@ func TestRequestAccessMigrationDatabase(t *testing.T) {
 		got = append(got, strings.Join([]string{limitMode, approvalMode, map[bool]string{true: "allowed", false: "blocked"}[allowed]}, "/"))
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	want := []string{"inherit/auto/blocked", "custom/inherit/blocked", "unlimited/manual/allowed"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("after migration: %v, want %v", got, want)

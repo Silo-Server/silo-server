@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -12,7 +13,7 @@ import (
 
 // WatchlistListInput is the listWatchlist query.
 type WatchlistListInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
@@ -73,7 +74,7 @@ func (reg *Registry) listWatchlist(ctx context.Context, cursors *Cursors, in *Wa
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
 	}
-	viewer, p := personalListViewer(ctx, in.ImageSize)
+	viewer, p := personalListViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}
@@ -99,7 +100,7 @@ func (reg *Registry) getWatchlistEntry(ctx context.Context, in *WatchlistItemInp
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -121,7 +122,7 @@ func (reg *Registry) addToWatchlist(ctx context.Context, in *WatchlistItemInput)
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -135,7 +136,7 @@ func (reg *Registry) deleteWatchlistEntry(ctx context.Context, in *WatchlistItem
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}

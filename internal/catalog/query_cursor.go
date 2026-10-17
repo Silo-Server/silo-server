@@ -209,7 +209,7 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 		return QueryCursorPage{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	rows, err := tx.Query(ctx, sql, args...)
+	rows, err := tx.Query(ctx, sql, args...) //nolint:rowserrcheck // scanItemsWithMangaCounts checks Err through the cursorRows wrapper
 	if err != nil {
 		return QueryCursorPage{}, fmt.Errorf("querying cursor page: %w", err)
 	}

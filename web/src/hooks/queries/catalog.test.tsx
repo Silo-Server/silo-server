@@ -13,7 +13,10 @@ vi.mock("@tanstack/react-query", () => ({
   keepPreviousData: Symbol("keepPreviousData"),
   useQueries: (...args: unknown[]) => mocks.useQueries(...args),
   useQuery: (...args: unknown[]) => mocks.useQuery(...args),
-  useQueryClient: () => ({ getQueryState: mocks.getQueryState }),
+  useQueryClient: () => ({
+    getQueryState: mocks.getQueryState,
+    getQueryCache: () => ({ findAll: () => [] }),
+  }),
 }));
 
 vi.mock("@/api/v2/request", () => ({
@@ -231,7 +234,13 @@ describe("useCatalogWindow", () => {
         }>;
       }) => {
         const offsets = queries.map((query) => query.queryKey[2].offset ?? 0);
-        const hasPlaceholderData = queries.some((query) => "placeholderData" in query);
+        // keepPreviousData would hand each slot whatever page it held before
+        // the window moved; a placeholder may only come from the same offset.
+        const hasPlaceholderData = queries.some((query) =>
+          typeof query.placeholderData === "function"
+            ? (query.placeholderData as () => unknown)() !== undefined
+            : query.placeholderData !== undefined,
+        );
 
         if (offsets.join(",") === "60") {
           return [{ data: makePage(60, limit), isLoading: false }];

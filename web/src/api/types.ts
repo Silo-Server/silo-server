@@ -1333,7 +1333,7 @@ export interface EpisodesResponse {
 }
 
 // Collections
-export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb";
 
 export type UserCollectionSyncStatus = "" | "running" | "success" | "failed" | "warning";
 // UI-only presets for the two display-filter dropdowns. They no longer map to
@@ -1554,7 +1554,7 @@ export interface LibraryCollection {
   slug: string;
   title: string;
   description: string;
-  collection_type: "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+  collection_type: "manual" | "smart" | "mdblist" | "tmdb";
   visibility: "visible" | "hidden";
   sort_order: number;
   group_id?: string | null;
@@ -1624,7 +1624,7 @@ export interface CreateLibraryCollectionRequest {
   slug?: string;
   title: string;
   description?: string;
-  collection_type?: "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+  collection_type?: "manual" | "smart" | "mdblist" | "tmdb";
   visibility?: "visible" | "hidden";
   sort_order?: number;
   group_id?: string | null;
@@ -1750,35 +1750,6 @@ export interface ImportTMDBCollectionRequest {
 }
 
 export interface ImportTMDBCollectionResponse {
-  collection: LibraryCollection;
-  sync_run?: LibraryCollectionSyncRun;
-}
-
-export interface ImportTraktCollectionRequest {
-  library_id?: number;
-  library_ids?: number[];
-  title: string;
-  description?: string;
-  // preset/media_type drive a discovery-feed collection; list_url drives a
-  // user-authored Trakt list. Exactly one path is used per request.
-  preset?: "trending" | "popular" | "recommended";
-  media_type?: "movie" | "tv";
-  profile_id?: string;
-  list_url?: string;
-  limit?: number;
-  featured?: boolean;
-  poster_url?: string;
-  poster_source_url?: string;
-  backdrop_source_url?: string;
-  sync_schedule?: string;
-  management_mode?: LibraryCollectionManagementMode;
-  management_source?: string;
-  management_key?: string;
-  /** Default order viewers land on; `{}` keeps the source list's own order. */
-  sort_config?: CollectionSortConfig;
-}
-
-export interface ImportTraktCollectionResponse {
   collection: LibraryCollection;
   sync_run?: LibraryCollectionSyncRun;
 }

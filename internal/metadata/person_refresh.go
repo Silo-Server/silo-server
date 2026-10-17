@@ -301,6 +301,7 @@ func (s *PersonRefreshService) refreshPerson(
 			person.PhotoPath,
 			person.PhotoSourcePath,
 			person.PhotoThumbhash,
+			true,
 		)
 	}
 

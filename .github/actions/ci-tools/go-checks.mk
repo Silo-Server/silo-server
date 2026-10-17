@@ -17,12 +17,13 @@ contracts:
 	$(MAKE) -j1 -f Makefile verify-settings-bindings verify-playback-fixtures verify-route-inventory
 	$(MAKE) -j1 -f Makefile verify-migration-ledger verify-apiv2-openapi CONTRACT_GO_TESTS=0
 	git fetch --no-tags origin "+refs/heads/$${CONTRACT_BASE_REF}:refs/remotes/origin/$${CONTRACT_BASE_REF}"
+	$(MAKE) -j1 -f Makefile verify-v1-route-freeze BASE_REF="origin/$${CONTRACT_BASE_REF}"
 	$(MAKE) -j1 -f Makefile verify-apiv2-contract CONTRACT_GO_TESTS=0 BASE_REF="origin/$${CONTRACT_BASE_REF}"
 
 # Go's test cache cannot see files a test's child process reads, so these
 # packages always rerun; the grep fails when a new test starts go, git, or node
 # outside them or the packages whose subprocess inputs are immutable.
-UNCACHED := cmd/silo internal/jellycompat internal/pluginhost internal/plugins
+UNCACHED := cmd/silo internal/jellycompat internal/pluginhost internal/plugins scripts/ci/sizeratchet scripts/ci/migrationcheck
 # subprocess-manifest: scripts/ci/subprocess-tests.json
 # deferred: no recorded occurrence; retain UNCACHED and the subprocess guard.
 IMMUTABLE := internal/contractledger internal/contractspec internal/debugserver

@@ -562,9 +562,8 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
     id: "providers",
     label: "Providers",
     description:
-      "Watch-provider plugins such as Trakt and Simkl, subtitle provider accounts, the MDBList lists key, and skip-marker providers.",
+      "Watch-provider plugins such as Simkl, subtitle provider accounts, the MDBList lists key, and skip-marker providers.",
     keywords: [
-      "trakt",
       "simkl",
       "scrobble",
       "watch providers",

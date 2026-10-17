@@ -189,13 +189,13 @@ func TestPersonalCollectionCollagesFollowTheViewerDB(t *testing.T) {
 
 	t.Run("the owner's collage is its own", func(t *testing.T) {
 		ownerSources, _ := collages.ListSources(ctx, userID, []PersonalCollectionDefinition{manualDef}, unrestricted)
-		ownerRef := CollectionCollageRef{CollectionID: manual.ID, Key: CollectionCollageKey(ownerSources[manual.ID])}
+		ownerKey := CollectionCollageKey(ownerSources[manual.ID])
 		if err := prepareCollage(ctx, collages, userID, manualDef, unrestricted); err != nil {
 			t.Fatalf("prepare: %v", err)
 		}
 		got := collages.Posters(ctx, userID, []PersonalCollectionDefinition{manualDef}, unrestricted)[manual.ID]
-		if got.CollageKey != ownerRef.Key || got.CollageKey == kidRef.Key {
-			t.Fatalf("owner poster = %+v, want collage %s", got, ownerRef.Key)
+		if got.CollageKey != ownerKey || got.CollageKey == kidRef.Key {
+			t.Fatalf("owner poster = %+v, want collage %s", got, ownerKey)
 		}
 	})
 

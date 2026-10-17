@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -40,7 +39,7 @@ func TestEpisodeImageProvenanceBeforeSigning(t *testing.T) {
 			if fallback.PosterIsEpisodeStill == nil || *fallback.PosterIsEpisodeStill != tc.posterStill || fallback.BackdropIsEpisodeStill == nil || *fallback.BackdropIsEpisodeStill != tc.backdropStill {
 				t.Fatalf("fallback provenance = %v / %v", fallback.PosterIsEpisodeStill, fallback.BackdropIsEpisodeStill)
 			}
-			wt := (&RecommendationsHandler{}).buildSectionItem(context.Background(), item, nil, nil)
+			wt := (&RecommendationsHandler{}).buildSectionItem(item, nil, nil, sectionItemImageURLs{})
 			if wt.PosterIsEpisodeStill != item.PosterIsEpisodeStill || wt.BackdropIsEpisodeStill != item.BackdropIsEpisodeStill {
 				t.Fatal("Watch Tonight card drops provenance")
 			}

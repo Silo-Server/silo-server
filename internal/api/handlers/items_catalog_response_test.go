@@ -81,7 +81,7 @@ func TestItemListCardImageURLsUsesBatchResolver(t *testing.T) {
 		},
 	}
 
-	urls := handler.itemListCardImageURLs(context.Background(), items, imagesize.Unset)
+	urls := handler.itemListCardImageURLs(context.Background(), items, imagesize.Request{})
 
 	if resolver.singleCalls != 0 {
 		t.Fatalf("single resolver calls = %d, want 0", resolver.singleCalls)

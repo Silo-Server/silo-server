@@ -244,8 +244,8 @@ The frozen `/api/v1/collections/preview` response is unchanged and carries no po
 
 ## Personal collection imports
 
-A personal collection imported with `importMDBListCollection`, `importTMDBCollection`,
-`importTMDBListCollection`, or `importTraktCollection` holds only titles its owner profile
+A personal collection imported with `importMDBListCollection`, `importTMDBCollection`, or
+`importTMDBListCollection` holds only titles its owner profile
 can access: titles in the owner's allowed libraries that pass its rating limits. Those are
 the `max_content_rating` ceiling, with the server's `access.unrated_content` setting for
 unrated titles, and the `max_advisory_age` limit, with `require_advisory_age` (see
@@ -278,7 +278,7 @@ Each viewer of a shared collection still sees only the titles that viewer can ac
 ## Personal sync schedules
 
 `updateCollection` (`PATCH /api/v2/collections/{id}`) accepts `sync_schedule` on a synced list
-(a collection imported from MDBList, TMDB, or Trakt). The value is a cadence name, `daily`,
+(a collection imported from MDBList or TMDB). The value is a cadence name, `daily`,
 `weekly`, or `monthly`, or `""` to stop scheduled syncs; `syncCollection` still syncs on demand.
 Cron expressions are a validation failure for every account, administrators included, and so is
 `sync_schedule` on a manual or smart collection or `null`. A cadence sets `next_sync_at` to the
@@ -405,6 +405,16 @@ An idle scope retains that original expiry until a reader requests the refresh. 
 cannot extend that deadline. Cold or expired membership requires a fresh build;
 an older in-flight build cannot replace the current generation. Badge summaries
 and per-profile playability are recomputed during this grace period.
+
+## Continue Watching row
+
+When the profile's `ui.next_up_mode` is `combined` (the default), Continue
+Watching merges in-progress cards with next-up episodes, keeps one card per
+series, orders the cards by most recent activity, and returns at most the row's
+`item_limit` cards. A next-up card's activity is when the profile finished the
+previous episode; with `ui.next_up_new_releases_first` on, it is when the next
+episode was released to the server if that came later. With `separate`, the row holds only in-progress cards and
+Next Up is its own row.
 
 ## Bridge note
 
@@ -611,7 +621,8 @@ PostgreSQL search retains the complete relevance tuple or requested SQL sort
 rather than a numeric page. It selects the FTS or bounded fuzzy retrieval family
 on the first page and retains that choice. The existing fuzzy candidate cap and
 reranking remain in force. A fuzzy-family query that becomes a richer FTS query
-returns `invalid_cursor` so the client can restart. PostgreSQL search retains its
+returns `invalid_cursor` so the client can restart, as does a cursor issued by a
+server whose PostgreSQL ranking differed. PostgreSQL search retains its
 three-second deadline inside the overall browse deadline.
 
 Meilisearch captures the configured ranked result window in one provider response,

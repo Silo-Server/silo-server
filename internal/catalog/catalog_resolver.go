@@ -548,7 +548,7 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 	case "genre", "custom_filter":
 		def, err := parseCatalogSectionQueryDefinition(section.Config)
 		if err != nil {
-			return nil, fmt.Errorf("%w: parsing section query definition: %v", ErrInvalidCatalogRequest, err)
+			return nil, fmt.Errorf("%w: parsing section query definition: %w", ErrInvalidCatalogRequest, err)
 		}
 		if section.Scope == "library" && section.LibraryID != nil {
 			def.LibraryIDs = []int{*section.LibraryID}
@@ -861,7 +861,7 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 	if IsLiveQueryType(collection.CollectionType) {
 		def, err := parseCatalogCollectionQueryDefinition([]byte(collection.QueryDefinition))
 		if err != nil {
-			return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
+			return nil, fmt.Errorf("%w: parsing user collection query_definition: %w", ErrInvalidCatalogRequest, err)
 		}
 		def = ApplySmartCollectionItemLimit(def)
 		if catalogRequestHasOverlay(req) || strings.TrimSpace(collection.DisplayQueryDefinition) != "" {

@@ -49,7 +49,7 @@ type SectionItemMeta struct {
 	DurationSeconds   *float64
 	ProgressUpdatedAt *string
 	ItemSource        string    // "in_progress" or "next_up"
-	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+	SortTimestamp     time.Time // orders Continue Watching: progress time, or a next-up row's catalog.NextUpResult.ActivityAt
 }
 
 const recentSeasonPremiereBadgeWindowDays = 14
@@ -503,7 +503,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	// watch-progress store, so reading sections pull from that table and skip
 	// the next-up handling below.
 	if continueType == ContinueTypeReading {
-		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, false, orderedItems, itemMeta, completedCache,
 			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
 				if err != nil {
@@ -530,8 +530,11 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		}, nil
 	}
 
+	combined := ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp &&
+		NextUpMode(ctx, store, profileID) == NextUpModeCombined
+
 	dropped := f.activeDroppedSeries(ctx, userID, profileID)
-	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, combined, orderedItems, itemMeta, completedCache,
 		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
 			if err != nil {
@@ -543,30 +546,35 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		return SectionWithItems{}, err
 	}
 
-	nextUpMode := ""
-	if ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp {
-		nextUpMode = NextUpMode(ctx, store, profileID)
-	}
-	if ContinueTypeAllowsNextUp(continueType) && nextUpMode == NextUpModeCombined {
-		nextUpItems, nextUpMeta, nextUpErr := f.FetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit)
+	// Combined mode merges next-up cards into the row and keeps the newest
+	// limit cards of the two. A next-up card normally sorts by when its
+	// previous episode was completed, so once the in-progress cards fill the
+	// row the lookup only needs series completed since the oldest of them.
+	// With new releases first, a series finished before all of them still
+	// leads the row when its next episode was just released, so the lookup is
+	// not bounded.
+	if combined {
+		newReleasesFirst := NextUpNewReleasesFirst(ctx, store, profileID)
+		var since *time.Time
+		if !newReleasesFirst {
+			since = continueNextUpCutoff(orderedItems, itemMeta, limit)
+		}
+		nextUpItems, nextUpMeta, nextUpErr := f.fetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit, since, newReleasesFirst)
 		if nextUpErr != nil {
 			slog.ErrorContext(ctx, "fetching next-up items", "component", "sections", "error", nextUpErr)
 		} else {
 			orderedItems = append(orderedItems, nextUpItems...)
 			maps.Copy(itemMeta, nextUpMeta)
 		}
-	}
-
-	if nextUpMode == NextUpModeCombined && len(orderedItems) > 1 {
 		orderedItems = collapseContinueWatchingSeriesCandidates(orderedItems, itemMeta)
-	}
-
-	if nextUpMode == NextUpModeCombined && len(orderedItems) > 1 {
 		sort.SliceStable(orderedItems, func(i, j int) bool {
 			left := itemMeta[orderedItems[i].ContentID].SortTimestamp
 			right := itemMeta[orderedItems[j].ContentID].SortTimestamp
 			return left.After(right)
 		})
+		if len(orderedItems) > limit {
+			orderedItems = orderedItems[:limit]
+		}
 	}
 
 	if orderedItems == nil {
@@ -588,7 +596,9 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 // exhausted, or continueProgressMaxScanned entries have been scanned. Paging
 // past the requested limit matters because dismissal filtering and
 // library/access scoping happen after the source query: trimming at the
-// source LIMIT would under-fill the section whenever dismissals exist.
+// source LIMIT would under-fill the section whenever dismissals exist. With
+// collapseSeries, a series' in-progress episodes count as one card, as the
+// combined row shows them.
 func (f *Fetcher) collectContinueProgressItems(
 	ctx context.Context,
 	store userstore.UserStore,
@@ -600,6 +610,7 @@ func (f *Fetcher) collectContinueProgressItems(
 	libraryIDs []int,
 	filter catalog.AccessFilter,
 	limit int,
+	collapseSeries bool,
 	orderedItems []*models.MediaItem,
 	itemMeta map[string]SectionItemMeta,
 	completedCache *catalog.CompletedProgressCache,
@@ -637,8 +648,8 @@ func (f *Fetcher) collectContinueProgressItems(
 		if err != nil {
 			return nil, err
 		}
-		orderedItems = appendUniqueContinueItems(orderedItems, pageItems, seen, limit)
 		maps.Copy(itemMeta, pageMeta)
+		orderedItems = appendContinuePage(orderedItems, pageItems, itemMeta, seen, limit, collapseSeries)
 		if rawProgressCount < pageLimit {
 			break
 		}
@@ -646,23 +657,51 @@ func (f *Fetcher) collectContinueProgressItems(
 	return orderedItems, nil
 }
 
-// appendUniqueContinueItems appends pageItems to orderedItems up to limit,
-// skipping content IDs already recorded in seen and recording every appended
-// ID. Pages come from a live LIMIT/OFFSET scan, so without this guard an item
+// appendContinuePage appends one page of cards to orderedItems, skipping
+// content IDs already recorded in seen and recording every appended ID, then
+// with collapseSeries keeps one card per series, and trims the row to limit.
+// Pages come from a live LIMIT/OFFSET scan, so without the seen guard an item
 // shifted across a page boundary by a concurrent progress write would surface
-// twice in the same section.
-func appendUniqueContinueItems(orderedItems, pageItems []*models.MediaItem, seen map[string]struct{}, limit int) []*models.MediaItem {
+// twice in the same section. The whole page goes in before the trim because
+// collapsing can shrink the row: trimming first would drop this page's later
+// cards while the next page's older ones took their places.
+func appendContinuePage(orderedItems, pageItems []*models.MediaItem, meta map[string]SectionItemMeta, seen map[string]struct{}, limit int, collapseSeries bool) []*models.MediaItem {
 	for _, item := range pageItems {
-		if len(orderedItems) >= limit {
-			break
-		}
 		if _, dup := seen[item.ContentID]; dup {
 			continue
 		}
 		seen[item.ContentID] = struct{}{}
 		orderedItems = append(orderedItems, item)
 	}
+	if collapseSeries {
+		orderedItems = collapseContinueWatchingSeriesCandidates(orderedItems, meta)
+	}
+	if len(orderedItems) > limit {
+		orderedItems = orderedItems[:limit]
+	}
 	return orderedItems
+}
+
+// continueNextUpCutoff bounds the next-up lookup of a combined row. When the
+// in-progress cards fill the row on their own, a next-up card older than all
+// of them sorts below limit cards and cannot make the row, so the lookup only
+// needs series completed at or after the oldest in-progress card. Nil when
+// the row is not full or a card has no timestamp to sort by.
+func continueNextUpCutoff(items []*models.MediaItem, meta map[string]SectionItemMeta, limit int) *time.Time {
+	if len(items) < limit {
+		return nil
+	}
+	var oldest time.Time
+	for i, item := range items {
+		ts := meta[item.ContentID].SortTimestamp
+		if ts.IsZero() {
+			return nil
+		}
+		if i == 0 || ts.Before(oldest) {
+			oldest = ts
+		}
+	}
+	return &oldest
 }
 
 // ebookContinueWatchingProgressQuery lists in-progress ebook resume points for
@@ -825,7 +864,7 @@ func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSecti
 		limit = 20
 	}
 
-	items, meta, err := f.FetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit)
+	items, meta, err := f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil, NextUpNewReleasesFirst(ctx, store, profileID))
 	if err != nil {
 		return SectionWithItems{}, err
 	}
@@ -847,17 +886,35 @@ func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSecti
 // FetchNextUpItems returns the next unwatched episode per series for the given user profile.
 // It delegates to NextUpRepository for the optimized LATERAL JOIN query, then resolves
 // the full MediaItem objects via fetchEpisodeTargetsByContentIDs.
+// The order follows the profile's ui.next_up_new_releases_first.
 func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, limit int) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
+	if f.NextUpRepo == nil || f.StoreProvider == nil {
+		return nil, nil, nil
+	}
+	store, err := f.StoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting user store: %w", err)
+	}
+	return f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil, NextUpNewReleasesFirst(ctx, store, profileID))
+}
+
+// fetchNextUpItems is FetchNextUpItems with the profile's new-releases-first
+// preference already resolved, limited when since is set to series whose
+// newest completed episode is at or after since.
+func (f *Fetcher) fetchNextUpItems(ctx context.Context, userID int, profileID string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, limit int, since *time.Time, newReleasesFirst bool) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if f.NextUpRepo == nil {
 		return nil, nil, nil
 	}
 
 	results, err := f.NextUpRepo.ListNextUp(ctx, catalog.NextUpQuery{
-		UserID:     userID,
-		ProfileID:  profileID,
-		LibraryID:  libraryID,
-		LibraryIDs: libraryIDs,
-		Limit:      limit,
+		UserID:        userID,
+		ProfileID:     profileID,
+		LibraryID:     libraryID,
+		LibraryIDs:    libraryIDs,
+		AccessFilter:  filter,
+		Limit:         limit,
+		DateCutoff:    since,
+		RankByRelease: newReleasesFirst,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -895,7 +952,7 @@ func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID st
 			continue
 		}
 		m.ItemSource = "next_up"
-		m.SortTimestamp = res.CompletedAt
+		m.SortTimestamp = res.ActivityAt
 		meta[res.ContentID] = m
 
 		item, ok := itemByID[res.ContentID]
@@ -3307,7 +3364,7 @@ func newTrendingEntry(tmdbID, tvdbID int, imdbID, mediaType string) trendingDisc
 	return e
 }
 
-// fetchTrendingDiscover surfaces external global trending (TMDB or Trakt),
+// fetchTrendingDiscover surfaces external global trending (TMDB),
 // mixing movies + series, matched to titles in the viewer's enabled libraries.
 // The external fetch + ID resolution are cached briefly so it does not hit the
 // upstream API on every home-page load.
@@ -4138,31 +4195,16 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 
 	conditions = append(conditions,
 		"mi.type = 'series'",
-		// The profile has watched at least one episode of this series...
-		`EXISTS (
-			SELECT 1
-			FROM episodes we
-			JOIN user_watch_history uwh ON uwh.media_item_id = we.content_id
-			WHERE we.series_id = mi.content_id
-			  AND uwh.user_id = $1
-			  AND uwh.profile_id = $2
-		)`,
-		// ...and a season newer than any they've watched arrived recently
-		// with at least one playable file in an in-scope library.
+		// A season newer than any the profile has watched (joined from
+		// `watched` below) arrived recently with at least one playable file
+		// in an in-scope library.
 		fmt.Sprintf(`EXISTS (
 			SELECT 1
 			FROM episodes ne
 			WHERE ne.series_id = mi.content_id
 			  AND ne.season_number > 0
 			  AND ne.created_at > NOW() - make_interval(days => $3)
-			  AND ne.season_number > COALESCE((
-				SELECT MAX(we2.season_number)
-				FROM episodes we2
-				JOIN user_watch_history uwh2 ON uwh2.media_item_id = we2.content_id
-				WHERE we2.series_id = mi.content_id
-				  AND uwh2.user_id = $1
-				  AND uwh2.profile_id = $2
-			  ), 0)
+			  AND ne.season_number > COALESCE(w.max_season, 0)
 			  AND EXISTS (
 				SELECT 1 FROM media_files mf
 				WHERE mf.episode_id = ne.content_id
@@ -4182,8 +4224,21 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 		limit = 20
 	}
 
+	// `watched` reads the profile's history once: the series it has watched
+	// and the highest season watched in each. Correlating that lookup per
+	// series let Postgres's cached generic plan (which can't see how much
+	// history $1/$2 select) rescan the whole history once per watched series,
+	// turning a ~0.5s query into 10-40s for long-history profiles.
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s WHERE %s
+		`WITH watched AS MATERIALIZED (
+			SELECT we.series_id, MAX(we.season_number) AS max_season
+			FROM user_watch_history uwh
+			JOIN episodes we ON we.content_id = uwh.media_item_id
+			WHERE uwh.user_id = $1
+			  AND uwh.profile_id = $2
+			GROUP BY we.series_id
+		)
+		SELECT %s FROM %s JOIN watched w ON w.series_id = mi.content_id WHERE %s
 		ORDER BY (
 			SELECT MAX(ord.created_at)
 			FROM episodes ord

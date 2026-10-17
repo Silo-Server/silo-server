@@ -2958,8 +2958,7 @@ func (s *Service) Vote(
 		return nil, fmt.Errorf("watch together suggestions unavailable")
 	}
 
-	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
-	if err != nil {
+	if _, _, err := s.getOrLoadLiveRoom(ctx, roomID); err != nil {
 		return nil, err
 	}
 
@@ -2982,8 +2981,7 @@ func (s *Service) Vote(
 	}
 
 	s.mu.Lock()
-	live = s.rooms[roomID]
-	if live != nil {
+	if live := s.rooms[roomID]; live != nil {
 		dispatches := s.prepareSuggestionDispatchesLocked(live, suggestions)
 		s.mu.Unlock()
 		s.sendDispatches(ctx, dispatches)
@@ -3006,8 +3004,7 @@ func (s *Service) Unvote(
 		return nil, fmt.Errorf("watch together suggestions unavailable")
 	}
 
-	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
-	if err != nil {
+	if _, _, err := s.getOrLoadLiveRoom(ctx, roomID); err != nil {
 		return nil, err
 	}
 
@@ -3030,8 +3027,7 @@ func (s *Service) Unvote(
 	}
 
 	s.mu.Lock()
-	live = s.rooms[roomID]
-	if live != nil {
+	if live := s.rooms[roomID]; live != nil {
 		dispatches := s.prepareSuggestionDispatchesLocked(live, suggestions)
 		s.mu.Unlock()
 		s.sendDispatches(ctx, dispatches)

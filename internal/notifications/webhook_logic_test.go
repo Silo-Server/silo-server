@@ -39,7 +39,7 @@ func TestWebhookCreateAndTestBlockedWhenDisabled(t *testing.T) {
 	if _, _, err := service.Create(ctx, 1, "profile", WebhookInput{Name: &name, URL: &url}); !errors.Is(err, ErrWebhooksDisabled) {
 		t.Fatalf("Create error = %v, want ErrWebhooksDisabled", err)
 	}
-	if _, err := service.Test(ctx, "profile", "hook-id"); !errors.Is(err, ErrWebhooksDisabled) {
+	if _, err := service.Test(ctx, 1, "profile", "hook-id"); !errors.Is(err, ErrWebhooksDisabled) {
 		t.Fatalf("Test error = %v, want ErrWebhooksDisabled", err)
 	}
 }
@@ -681,14 +681,17 @@ func TestWebhookMatchesReasons(t *testing.T) {
 func TestProfileRateLimiter(t *testing.T) {
 	limiter := newProfileRateLimiter()
 	for i := 0; i < 3; i++ {
-		if !limiter.Allow("p1", 3) {
+		if !limiter.Allow(profileKey{1, "p1"}, 3) {
 			t.Fatalf("delivery %d must be allowed", i+1)
 		}
 	}
-	if limiter.Allow("p1", 3) {
+	if limiter.Allow(profileKey{1, "p1"}, 3) {
 		t.Fatal("4th delivery within the window must be limited")
 	}
-	if !limiter.Allow("p2", 3) {
+	if !limiter.Allow(profileKey{1, "p2"}, 3) {
 		t.Fatal("limits must be per-profile")
+	}
+	if !limiter.Allow(profileKey{2, "p1"}, 3) {
+		t.Fatal("a profile with the same ID on another account must have its own limit")
 	}
 }

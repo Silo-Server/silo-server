@@ -12088,6 +12088,27 @@
       "body_file": "notification_get_notification_unread_count.json"
     },
     {
+      "name": "notification_list_notification_series",
+      "operation_id": "listNotificationSeries",
+      "scenario": "Series that can notify the acting profile, with one the viewer may not see omitted.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/notifications/series",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotificationSeriesCollection",
+      "body_file": "notification_list_notification_series.json"
+    },
+    {
       "name": "notification_list_notifications",
       "operation_id": "listNotifications",
       "scenario": "Profile notification inbox with synthetic records.",
@@ -12148,6 +12169,47 @@
       "response_media_type": null,
       "schema": null,
       "body_file": null
+    },
+    {
+      "name": "notification_mute_notification_series",
+      "operation_id": "muteNotificationSeries",
+      "scenario": "The acting profile mutes one series: no new-episode notification for it on any channel until it unmutes. Repeating the call changes nothing.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/notifications/series/series:bear/mute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
+      "name": "notification_mute_notification_series_not_found",
+      "operation_id": "muteNotificationSeries",
+      "scenario": "A series the viewer may not see cannot be muted.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/notifications/series/series:hidden/mute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "notification_mute_notification_series_not_found.json"
     },
     {
       "name": "notification_relay_clear",
@@ -12270,6 +12332,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/NotificationSyncOutputBody",
       "body_file": "notification_sync_notifications.json"
+    },
+    {
+      "name": "notification_unmute_notification_series",
+      "operation_id": "unmuteNotificationSeries",
+      "scenario": "The acting profile unmutes a series; it notifies again from the next new episode. Unmuting a series that is not muted changes nothing.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/notifications/series/series:wire/mute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
     },
     {
       "name": "notification_update_notification_preferences",

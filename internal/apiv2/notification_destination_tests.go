@@ -14,7 +14,7 @@ const (
 )
 
 type NotificationDestinationTestService interface {
-	TestNotificationWebhook(context.Context, string, string) (*notifications.WebhookTestResult, error)
+	TestNotificationWebhook(context.Context, int, string, string) (*notifications.WebhookTestResult, error)
 	TestNotificationServerChannel(context.Context, string) (*notifications.WebhookTestResult, error)
 }
 
@@ -54,7 +54,11 @@ func registerNotificationDestinationTests(reg *Registry) {
 		if svc == nil {
 			return nil, unavailable("notification test delivery")
 		}
-		return notificationDestinationTestOutput(svc.TestNotificationWebhook(ctx, profileFrom(ctx), string(in.ID)))
+		user, profile, p := viewerIdentity(ctx)
+		if p != nil {
+			return nil, p
+		}
+		return notificationDestinationTestOutput(svc.TestNotificationWebhook(ctx, user, profile, string(in.ID)))
 	})
 	admin := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/notifications/server-channels/{id}/test", testNotificationServerChannelOperation, "admin", "Send one synchronous sample to a server notification channel."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	Register(reg, admin, func(ctx context.Context, in *NotificationDestinationTestInput) (*NotificationDestinationTestOutput, error) {

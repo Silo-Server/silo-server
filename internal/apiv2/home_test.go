@@ -313,11 +313,12 @@ func TestGetHomeLayoutIncludedSections(t *testing.T) {
 func TestListHomeSections(t *testing.T) {
 	deps, fake := homeDeps(t)
 	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=large", "", viewerHeaders())
+	rec := do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=large&backdrop_width=2688", "", viewerHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"continue_watching"`) || !strings.Contains(rec.Body.String(), `"total_count":1`) || !strings.Contains(rec.Body.String(), `"items":[{`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.Access.UserID != 1 || fake.lastViewer.Access.ProfileID != "p-owner" {
+	if fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.ImageWidths != (imagesize.Widths{Backdrop: 2688}) ||
+		fake.lastViewer.Access.UserID != 1 || fake.lastViewer.Access.ProfileID != "p-owner" {
 		t.Fatalf("viewer = %+v", fake.lastViewer)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=huge", "", viewerHeaders()), TypeValidationFailed)

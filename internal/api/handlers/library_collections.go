@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
@@ -456,29 +457,6 @@ type importTMDBDiscoverSpecBody struct {
 	OriginalLanguage string   `json:"original_language,omitempty"`
 }
 
-type importTraktRequest struct {
-	SortConfig  json.RawMessage `json:"sort_config,omitempty"`
-	LibraryID   int             `json:"library_id"`
-	LibraryIDs  []int           `json:"library_ids"`
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Preset      string          `json:"preset"`
-	MediaType   string          `json:"media_type"`
-	ProfileID   string          `json:"profile_id,omitempty"`
-	// ListURL selects a user-authored Trakt list
-	// (https://trakt.tv/users/{user}/lists/{slug}) instead of a preset.
-	ListURL           string `json:"list_url,omitempty"`
-	Limit             *int   `json:"limit,omitempty"`
-	Featured          bool   `json:"featured"`
-	PosterURL         string `json:"poster_url"`
-	PosterSourceURL   string `json:"poster_source_url"`
-	BackdropSourceURL string `json:"backdrop_source_url"`
-	SyncSchedule      string `json:"sync_schedule"`
-	ManagementMode    string `json:"management_mode,omitempty"`
-	ManagementSource  string `json:"management_source,omitempty"`
-	ManagementKey     string `json:"management_key,omitempty"`
-}
-
 type importCollectionResponse struct {
 	Collection libraryCollectionResponse        `json:"collection"`
 	SyncRun    *models.LibraryCollectionSyncRun `json:"sync_run,omitempty"`
@@ -700,7 +678,7 @@ func templateEligibleForLibrary(tmpl templates.Template, library *models.MediaFo
 		return tmpl.MediaKind == templates.MediaTV || tmpl.MediaKind == templates.MediaMixed
 	case "audiobook", "audiobooks":
 		// Audiobook libraries only accept audiobook-targeted templates.
-		// Today the catalog has none (built-ins are TMDB/Trakt/MDBList
+		// Today the catalog has none (built-ins are TMDB/MDBList
 		// movie/TV imports), so this evaluates to an empty gallery —
 		// the correct UX. Previously this fell through to default:true
 		// and offered admins broken movie/TV templates.
@@ -1079,7 +1057,7 @@ func (h *LibraryCollectionHandler) requireManualCollection(w http.ResponseWriter
 }
 
 // HandleReorderAdminCollectionItems handles PUT /admin/collections/{id}/items/order.
-// Manual collections only — synced types (mdblist/tmdb/trakt) and smart
+// Manual collections only — synced types (mdblist/tmdb) and smart
 // collections reject the call.
 func (h *LibraryCollectionHandler) HandleReorderAdminCollectionItems(w http.ResponseWriter, r *http.Request) {
 	collectionID, ok := h.requireManualCollection(w, r)
@@ -2532,18 +2510,20 @@ func (h *LibraryCollectionHandler) HandleImportTMDBCollection(w http.ResponseWri
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// HandleImportTraktCollection answers the frozen v1 admin Trakt import route.
+// Silo no longer supports Trakt, so every well-formed request is refused.
 func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWriter, r *http.Request) {
-	var req importTraktRequest
+	var req struct{}
 	if err := decodeJSONOrMultipart(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.importAdminTrakt(r.Context(), req, func(id, p, b string) error { return h.processArtworkInputs(r, id, p, b) })
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
+	writeAPIError(w, traktImportRetired())
+}
+
+// traktImportRetired is the error the frozen v1 Trakt import routes return.
+func traktImportRetired() error {
+	return apiError(http.StatusGone, "unsupported_source", "new Trakt collections are not supported")
 }
 
 // loadOrderedCollectionItems answers a manual collection's stored items in
@@ -2710,7 +2690,7 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 // setListingLogos fills in the logo of each card on a v2 collection page,
 // signed in one batch. items are the cards' media items in any order.
 func (h *LibraryCollectionHandler) setListingLogos(ctx context.Context, cards []itemListResponse, items []*models.MediaItem, access catalog.AccessFilter) {
-	urls := signListingLogos(ctx, h.detailSvc, localizedLogoPaths(ctx, h.detailSvc, items, access), access.ImageSize)
+	urls := signListingLogos(ctx, h.detailSvc, localizedLogoPaths(ctx, h.detailSvc, items, access), access.ImageSizeFor(imagesize.SlotLogo))
 	for i := range cards {
 		cards[i].LogoURL = urls[cards[i].ContentID]
 	}
@@ -3072,7 +3052,7 @@ type tmdbDiscoverConfigBody struct {
 //
 // The discover sub-object exists so additional discover-only fields don't
 // pollute the top-level libraryCollectionSourceConfig struct used for the
-// existing tmdb_preset / trakt_preset / mdblist_json modes.
+// existing tmdb_preset / mdblist_json modes.
 func buildTMDBDiscoverSourceConfig(mediaType string, spec importTMDBDiscoverSpecBody, limit *int) (json.RawMessage, error) {
 	payload := struct {
 		Mode      string                 `json:"mode"`
@@ -3112,48 +3092,6 @@ func buildTMDBDiscoverSourceURL(mediaType, sortBy string) string {
 	return fmt.Sprintf("tmdb://discover/%s?sort_by=%s", mediaType, sortBy)
 }
 
-// buildTraktListSourceConfig builds the source config for a user-authored
-// Trakt list (mode trakt_list, issue #214).
-func buildTraktListSourceConfig(listURL string, limit *int) (json.RawMessage, error) {
-	payload := struct {
-		Mode     string `json:"mode"`
-		Provider string `json:"provider"`
-		URL      string `json:"url"`
-		ListURL  string `json:"list_url"`
-		Limit    *int   `json:"limit,omitempty"`
-	}{
-		Mode:     "trakt_list",
-		Provider: "trakt",
-		URL:      listURL,
-		ListURL:  listURL,
-		Limit:    limit,
-	}
-	return json.Marshal(payload)
-}
-
-func buildTraktSourceConfig(preset, mediaType, profileID string, limit *int) (json.RawMessage, error) {
-	payload := struct {
-		Mode      string `json:"mode"`
-		Provider  string `json:"provider"`
-		Preset    string `json:"preset"`
-		MediaType string `json:"media_type"`
-		ProfileID string `json:"profile_id,omitempty"`
-		Limit     *int   `json:"limit,omitempty"`
-	}{
-		Mode:      "trakt_preset",
-		Provider:  "trakt",
-		Preset:    preset,
-		MediaType: mediaType,
-		ProfileID: profileID,
-		Limit:     limit,
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
 func normalizeTMDBPresetRequest(preset, mediaType, timeWindow string) (string, string, string, error) {
 	switch preset {
 	case "trending":
@@ -3190,43 +3128,11 @@ func normalizeTMDBPresetRequest(preset, mediaType, timeWindow string) (string, s
 	}
 }
 
-func normalizeTraktPresetRequest(preset, mediaType, profileID string) (string, string, string, error) {
-	preset = strings.TrimSpace(strings.ToLower(preset))
-	mediaType = strings.TrimSpace(strings.ToLower(mediaType))
-	profileID = strings.TrimSpace(profileID)
-
-	switch preset {
-	case "trending", "popular":
-	case "recommended":
-		if profileID == "" {
-			return "", "", "", fmt.Errorf("profile_id is required for Trakt recommended collections")
-		}
-	default:
-		return "", "", "", fmt.Errorf("preset must be one of \"trending\", \"popular\", or \"recommended\"")
-	}
-	switch mediaType {
-	case "movie", "tv":
-	default:
-		return "", "", "", fmt.Errorf("media_type must be \"movie\" or \"tv\"")
-	}
-	if preset != "recommended" {
-		profileID = ""
-	}
-	return preset, mediaType, profileID, nil
-}
-
 func buildTMDBSourceURL(preset, mediaType, timeWindow string) string {
 	if preset == "trending" {
 		return fmt.Sprintf("tmdb://%s/%s/%s", preset, mediaType, timeWindow)
 	}
 	return fmt.Sprintf("tmdb://%s/%s", preset, mediaType)
-}
-
-func buildTraktSourceURL(preset, mediaType, profileID string) string {
-	if preset == "recommended" {
-		return fmt.Sprintf("trakt://%s/%s/%s", preset, mediaType, profileID)
-	}
-	return fmt.Sprintf("trakt://%s/%s", preset, mediaType)
 }
 
 func (h *LibraryCollectionHandler) processCollectionImage(
@@ -3283,7 +3189,7 @@ func (h *LibraryCollectionHandler) processArtworkInputs(r *http.Request, collect
 
 		switch {
 		case err == nil:
-		case err == http.ErrMissingFile:
+		case errors.Is(err, http.ErrMissingFile):
 			if sourceByType[imageType] == "" {
 				continue
 			}

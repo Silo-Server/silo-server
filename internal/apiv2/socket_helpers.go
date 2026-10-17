@@ -20,8 +20,17 @@ func socketIdentity(ctx context.Context) (evt.SocketIdentity, *Problem) {
 	identity := evt.SocketIdentity{ImpersonatorUserID: claims.ImpersonatorUserID, UserID: claims.UserID, SessionID: claims.SessionID, Role: claims.Role, ProfileID: profileFrom(ctx), AccessExpiresAt: claims.ExpiresAt.Time}
 	if r := requestFrom(ctx); r != nil {
 		identity.ProfileToken = r.Header.Get(profileTokenHeader)
+		identity.DeviceID = socketDeviceID(r)
 	}
 	return identity, nil
+}
+
+// socketDeviceID is the request's X-Silo-Device-Id as a ticket keeps it for
+// the acting-admin decision. An id sign-in would not record (over 128
+// characters, or not shaped like one) is dropped rather than held with the
+// ticket.
+func socketDeviceID(r *http.Request) string {
+	return auth.ClientDeviceFromHeaders(r.Header).ID
 }
 
 func socketResponses(statuses []string, refused, established, headerDescription string) map[string]*huma.Response {

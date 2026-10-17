@@ -971,6 +971,15 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
 			SET dropped_at = GREATEST(user_dropped_series.dropped_at, EXCLUDED.dropped_at)`},
 	{"delete source dropped series", `DELETE FROM user_dropped_series WHERE series_id = $1`},
+	// A notification mute follows its series; the earlier mute's time is kept.
+	{"merge notification mutes", `
+			INSERT INTO profile_series_notification_mutes (user_id, profile_id, series_id, muted_at)
+			SELECT user_id, profile_id, $2, muted_at
+			FROM profile_series_notification_mutes
+			WHERE series_id = $1
+			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
+			SET muted_at = LEAST(profile_series_notification_mutes.muted_at, EXCLUDED.muted_at)`},
+	{"delete source notification mutes", `DELETE FROM profile_series_notification_mutes WHERE series_id = $1`},
 	{"merge watch provider dropped items", `
 			INSERT INTO watch_provider_dropped_items (connection_id, provider_account_id, series_id, provider_item_key, remote_seen, updated_at)
 			SELECT connection_id, provider_account_id, $2, '', false, NOW()

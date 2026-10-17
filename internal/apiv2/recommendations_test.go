@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
@@ -30,6 +31,7 @@ type fakeRecommendations struct {
 	lastExclude         map[string]struct{}
 	cardsHasMore        bool
 	swipePool           int
+	lastFilter          catalogpkg.AccessFilter
 }
 
 func fakeRecommendationRow() handlers.DiscoverRowView {
@@ -49,8 +51,8 @@ func (f *fakeRecommendations) BecauseWatchedCards(_ context.Context, _ int, _, i
 	return f.cards(limit)
 }
 
-func (f *fakeRecommendations) PopularCards(_ context.Context, _ int, _ string, days, limit int, _ catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
-	f.lastItemID, f.lastDays = "", days
+func (f *fakeRecommendations) PopularCards(_ context.Context, _ int, _ string, days, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
+	f.lastItemID, f.lastDays, f.lastFilter = "", days, filter
 	return f.cards(limit)
 }
 
@@ -236,6 +238,24 @@ func TestRecommendationCardLists(t *testing.T) {
 	}
 	deps.Recommendations = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/recommendations/popular", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+// Recommendation reads take the request's artwork sizes like every other
+// card surface: image_size and the per-slot widths reach the card builder.
+func TestRecommendationCardsTakeArtworkSizes(t *testing.T) {
+	deps, fake := recommendationDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/recommendations/popular?image_size=medium&backdrop_width=2688&logo_width=1760", "", viewerHeaders())
+	if rec.Code != 200 {
+		t.Fatalf("popular: %d %s", rec.Code, rec.Body.String())
+	}
+	want := imagesize.Request{Size: imagesize.Medium, Widths: imagesize.Widths{Backdrop: 2688, Logo: 1760}}
+	if got := fake.lastFilter.Artwork(); got != want {
+		t.Fatalf("seam artwork = %+v, want %+v", got, want)
+	}
+	for _, query := range []string{"image_size=huge", "backdrop_width=0", "poster_width=7681"} {
+		requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/popular?"+query, "", viewerHeaders()), TypeValidationFailed)
+	}
 }
 
 func TestRecommendationRows(t *testing.T) {

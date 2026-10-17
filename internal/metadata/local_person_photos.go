@@ -36,7 +36,7 @@ func (s *MetadataService) applyLocalPersonPhotos(ctx context.Context, contentID 
 	if s == nil || s.personRepo == nil || !s.localArtworkUsable() {
 		return
 	}
-	inputs := localPersonPhotoJobs(ctx, s.personRepo, contentID, usableLocalPersonPhotos(people, s.localSourceUsable))
+	inputs := localPersonPhotoJobs(ctx, s.personRepo, contentID, people)
 	s.enqueueImageCacheJobs(ctx, "person", contentID, inputs)
 }
 
@@ -142,22 +142,3 @@ func sameLocalPhotoFolder(a, b string) bool {
 
 // personImageContentType is the image cache's content type for people.
 const personImageContentType = "people"
-
-// usableLocalPersonPhotos returns people with each local photo source usable
-// rejects cleared, copying the slice only when it changes one.
-func usableLocalPersonPhotos(people []models.ItemPerson, usable func(string) bool) []models.ItemPerson {
-	var out []models.ItemPerson
-	for i, p := range people {
-		if p.LocalPhotoSource == "" || usable(p.LocalPhotoSource) {
-			continue
-		}
-		if out == nil {
-			out = slices.Clone(people)
-		}
-		out[i].LocalPhotoSource = ""
-	}
-	if out == nil {
-		return people
-	}
-	return out
-}

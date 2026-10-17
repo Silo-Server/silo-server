@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -25,18 +24,6 @@ type TMDBCollectionEntry struct {
 	Title     string
 	IMDbID    string
 	TVDBID    int
-}
-
-// TraktCollectionEntry is a lightweight Trakt discovery result used by collection sync.
-type TraktCollectionEntry struct {
-	TraktID   int
-	TMDBID    int
-	TVDBID    int
-	IMDbID    string
-	MediaType string
-	Title     string
-	Year      int
-	Rank      int
 }
 
 // TMDBCollectionFetcher abstracts the TMDB preset API so the catalog package
@@ -89,20 +76,6 @@ type TMDBListFetcher interface {
 	GetList(ctx context.Context, id, limit int) ([]TMDBCollectionEntry, error)
 }
 
-// TraktCollectionFetcher abstracts the Trakt discovery API.
-type TraktCollectionFetcher interface {
-	GetCollectionPreset(ctx context.Context, preset, mediaType string, limit int, accessToken string) ([]TraktCollectionEntry, error)
-	// GetUserList fetches a user-authored Trakt list in list order. Public
-	// lists need no access token.
-	GetUserList(ctx context.Context, user, list string, limit int, accessToken string) ([]TraktCollectionEntry, error)
-}
-
-// TraktAccessTokenResolver returns a profile-scoped Trakt access token for
-// personalized recommendation collection sync.
-type TraktAccessTokenResolver interface {
-	ResolveTraktAccessToken(ctx context.Context, profileID string) (string, error)
-}
-
 // CollageGenerator composes and stores collection collages. Stored collages
 // are deleted through the artwork revision collector, never directly.
 type CollageGenerator interface {
@@ -143,12 +116,6 @@ type LibraryCollectionService struct {
 	// TMDBLists is nil when TMDB is not configured. It serves the `tmdb_list`
 	// source mode (public user-authored lists).
 	TMDBLists TMDBListFetcher
-
-	// TraktCollections is nil when Trakt collection discovery is not configured.
-	TraktCollections TraktCollectionFetcher
-
-	// TraktTokenResolver is required for Trakt recommended collections.
-	TraktTokenResolver TraktAccessTokenResolver
 
 	// CollageGen is nil when S3/image processing is not configured.
 	CollageGen CollageGenerator
@@ -200,7 +167,7 @@ type libraryCollectionSourceConfig struct {
 
 	// Discover holds the TMDB /discover parameters for the `tmdb_discover`
 	// mode. The pointer lets the JSON omit the object entirely for non-
-	// discover modes so existing tmdb_preset / trakt_preset / mdblist_json
+	// discover modes so existing tmdb_preset / mdblist_json
 	// configs round-trip unchanged.
 	Discover *libraryCollectionDiscoverConfig `json:"discover,omitempty"`
 }
@@ -266,10 +233,6 @@ func (s *LibraryCollectionService) SyncCollectionWithOptions(ctx context.Context
 		run, err = s.syncTMDBDiscoverCollection(ctx, collection, source, opts)
 	case "tmdb_list":
 		run, err = s.syncTMDBListCollection(ctx, collection, source, opts)
-	case "trakt_preset":
-		run, err = s.syncTraktPresetCollection(ctx, collection, source, opts)
-	case "trakt_list":
-		run, err = s.syncTraktListCollection(ctx, collection, source, opts)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrLibraryCollectionSyncModeUnsupported, source.Mode)
 	}
@@ -298,8 +261,8 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	if len(listURLs) == 0 {
 		return nil, fmt.Errorf("mdblist sync: url is required")
 	}
-	// Read only as far as the same fetch-multiplier bound used for TMDB and
-	// Trakt sources. MDBList lists can hold thousands of entries; without this,
+	// Read only as far as the same fetch-multiplier bound used for TMDB
+	// sources. MDBList lists can hold thousands of entries; without this,
 	// the two GetByExternalIDs IN arrays balloon to the full list size even
 	// when the user's limit is small.
 	fetchLimit := collectionutil.SourceFetchLimit(limit)
@@ -786,240 +749,6 @@ func (s *LibraryCollectionService) completeTMDBEntrySync(ctx context.Context, co
 	return run, nil
 }
 
-func (s *LibraryCollectionService) syncTraktPresetCollection(ctx context.Context, collection *models.LibraryCollection, cfg libraryCollectionSourceConfig, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
-	startedAt := syncTimestamp()
-
-	if s.TraktCollections == nil {
-		return nil, fmt.Errorf("Trakt preset sync requires configured Trakt access")
-	}
-
-	preset := strings.TrimSpace(cfg.Preset)
-	mediaType := strings.TrimSpace(cfg.MediaType)
-	if mediaType == "" {
-		mediaType = "movie"
-	}
-	if preset != "trending" && preset != "popular" && preset != "recommended" {
-		return nil, fmt.Errorf("unsupported Trakt preset: %s", preset)
-	}
-	if mediaType != "movie" && mediaType != "tv" {
-		return nil, fmt.Errorf("unsupported Trakt media type: %s", mediaType)
-	}
-
-	accessToken := ""
-	if preset == "recommended" {
-		profileID := strings.TrimSpace(cfg.ProfileID)
-		if profileID == "" {
-			return s.recordFailedCollectionSync(ctx, collection.ID, startedAt, "Trakt recommendations require a profile")
-		}
-		if s.TraktTokenResolver == nil {
-			slog.ErrorContext(ctx, "Trakt recommendations: token resolver not configured", "component", "catalog",
-				"collection_id", collection.ID,
-				"profile_id", profileID,
-			)
-			return s.recordFailedCollectionSync(ctx, collection.ID, startedAt, "Trakt recommendations: server is not configured for Trakt sync")
-		}
-		token, err := s.TraktTokenResolver.ResolveTraktAccessToken(ctx, profileID)
-		if err != nil {
-			slog.ErrorContext(ctx, "Trakt recommendations: failed to resolve access token", "component", "catalog",
-				"collection_id", collection.ID,
-				"profile_id", profileID,
-				"error", err,
-			)
-			return s.recordFailedCollectionSync(ctx, collection.ID, startedAt, fmt.Sprintf("Trakt recommendations: failed to resolve access token: %v", err))
-		}
-		accessToken = token
-	}
-
-	fetchLimit := collectionutil.SourceFetchLimit(cfg.Limit)
-	results, err := s.TraktCollections.GetCollectionPreset(ctx, preset, mediaType, fetchLimit, accessToken)
-	if err != nil {
-		return nil, fmt.Errorf("fetching Trakt preset: %w", err)
-	}
-
-	slog.InfoContext(ctx, "Trakt preset sync: fetched results", "component", "catalog",
-		"collection_id", collection.ID,
-		"preset", preset,
-		"media_type", mediaType,
-		"count", len(results),
-	)
-
-	return s.completeTraktEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts)
-}
-
-// syncTraktListCollection populates a collection from a user-authored Trakt
-// list (issue #214). The list reference comes from cfg.URL, a trakt.tv list
-// URL like https://trakt.tv/users/{user}/lists/{slug}. Lists mix movies and
-// shows; matching and ordering reuse the preset pipeline.
-func (s *LibraryCollectionService) syncTraktListCollection(ctx context.Context, collection *models.LibraryCollection, cfg libraryCollectionSourceConfig, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
-	startedAt := syncTimestamp()
-
-	if s.TraktCollections == nil {
-		return nil, fmt.Errorf("Trakt list sync requires configured Trakt access")
-	}
-	listURL := strings.TrimSpace(cfg.ListURL)
-	if listURL == "" {
-		listURL = strings.TrimSpace(cfg.URL)
-	}
-	if listURL == "" {
-		listURL = strings.TrimSpace(collection.SourceURL)
-	}
-	user, list, err := ParseTraktListURL(listURL)
-	if err != nil {
-		return s.recordFailedCollectionSync(ctx, collection.ID, startedAt, err.Error())
-	}
-
-	fetchLimit := collectionutil.SourceFetchLimit(cfg.Limit)
-	results, err := s.TraktCollections.GetUserList(ctx, user, list, fetchLimit, "")
-	if err != nil {
-		return nil, fmt.Errorf("fetching Trakt list %s/%s: %w", user, list, err)
-	}
-
-	slog.InfoContext(ctx, "Trakt list sync: fetched results", "component", "catalog",
-		"collection_id", collection.ID,
-		"user", user,
-		"list", list,
-		"count", len(results),
-	)
-
-	return s.completeTraktEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts)
-}
-
-// ParseTraktListURL extracts the user and list slug from a trakt.tv list URL
-// (https://trakt.tv/users/{user}/lists/{slug}[?...]) or a bare
-// "{user}/{slug}" shorthand.
-func ParseTraktListURL(raw string) (user, list string, err error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", "", fmt.Errorf("Trakt list sync: url is required")
-	}
-	badFormat := func() (string, string, error) {
-		return "", "", fmt.Errorf("Trakt list sync: expected a URL like https://trakt.tv/users/{user}/lists/{list}, got %q", raw)
-	}
-	isURL := strings.Contains(trimmed, "://") || strings.Contains(strings.ToLower(trimmed), "trakt.tv")
-	if isURL {
-		normalized := trimmed
-		if !strings.Contains(normalized, "://") {
-			normalized = "https://" + normalized
-		}
-		parsed, parseErr := url.Parse(normalized)
-		if parseErr != nil {
-			return "", "", fmt.Errorf("Trakt list sync: invalid url %q", raw)
-		}
-		host := strings.ToLower(parsed.Hostname())
-		if host != "trakt.tv" && host != "www.trakt.tv" {
-			return badFormat()
-		}
-		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-		if len(parts) != 4 || parts[0] != "users" || parts[2] != "lists" {
-			return badFormat()
-		}
-		user, list = parts[1], parts[3]
-	} else {
-		// Bare "{user}/{slug}" shorthand.
-		parts := strings.Split(strings.Trim(trimmed, "/"), "/")
-		if len(parts) != 2 {
-			return badFormat()
-		}
-		user, list = parts[0], parts[1]
-	}
-	if user == "" || list == "" {
-		return badFormat()
-	}
-	return user, list, nil
-}
-
-// completeTraktEntrySync matches fetched Trakt entries against the
-// collection's libraries and records the sync run. Shared by the preset and
-// user-list sources.
-func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, collection *models.LibraryCollection, results []TraktCollectionEntry, limit *int, startedAt time.Time, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
-	matchedItems := make([]LibraryCollectionItemInput, 0, len(results))
-	seenContentIDs := make(map[string]int, len(results))
-	warnings := make([]string, 0)
-	unmatchedCount := 0
-	duplicateCount := 0
-	scannedEntries := 0
-	limitReached := false
-
-	for i, entry := range results {
-		scannedEntries = i + 1
-		item, err := s.resolveTraktEntry(ctx, collection.LibraryIDs, entry)
-		if err != nil {
-			return nil, err
-		}
-		if item == nil {
-			unmatchedCount++
-			continue
-		}
-		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
-			duplicateCount++
-			warnings = append(warnings, fmt.Sprintf("Duplicate Trakt entry for %s matched existing item %s", entry.Title, item.ContentID))
-			slog.InfoContext(ctx, "Trakt preset sync: duplicate match skipped", "component", "catalog",
-				"rank", i+1,
-				"title", entry.Title,
-				"content_id", item.ContentID,
-				"first_rank", firstRank,
-			)
-			continue
-		}
-		seenContentIDs[item.ContentID] = i + 1
-		sourceRank := entry.Rank
-		if sourceRank <= 0 {
-			sourceRank = i + 1
-		}
-		matchedItems = append(matchedItems, LibraryCollectionItemInput{
-			MediaItemID: item.ContentID,
-			Position:    len(matchedItems),
-			SourceRank:  sourceRank,
-		})
-		if collectionutil.ItemLimitReached(len(matchedItems), limit) {
-			limitReached = true
-			break
-		}
-	}
-
-	if err := s.collections.ReplaceItems(ctx, collection.ID, matchedItems); err != nil {
-		return nil, err
-	}
-
-	status := "success"
-	if len(warnings) > 0 {
-		status = "warning"
-	}
-	message := fmt.Sprintf("Matched %d of %d entries", len(matchedItems), len(results))
-	if limitReached {
-		message = fmt.Sprintf("%s (item limit reached after %d scanned)", message, scannedEntries)
-	}
-	if duplicateCount > 0 {
-		message = fmt.Sprintf("%s (%d duplicates skipped)", message, duplicateCount)
-	}
-	warningsJSON, err := json.Marshal(warnings)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling sync warnings: %w", err)
-	}
-
-	completedAt := syncTimestamp()
-	run, err := s.collections.RecordSyncRun(ctx, RecordLibraryCollectionSyncRunInput{
-		CollectionID:   collection.ID,
-		Status:         status,
-		Message:        message,
-		ItemsAdded:     len(matchedItems),
-		ItemsRemoved:   0,
-		ItemsMatched:   len(matchedItems),
-		ItemsUnmatched: unmatchedCount,
-		Warnings:       warningsJSON,
-		StartedAt:      startedAt,
-		CompletedAt:    completedAt,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if !opts.SkipCollage {
-		s.MaybeGenerateCollage(ctx, collection.ID)
-	}
-	return run, nil
-}
-
 func (s *LibraryCollectionService) recordFailedCollectionSync(ctx context.Context, collectionID string, startedAt time.Time, message string) (*models.LibraryCollectionSyncRun, error) {
 	warningsJSON, err := json.Marshal([]string{message})
 	if err != nil {
@@ -1069,72 +798,6 @@ func (s *LibraryCollectionService) resolveTMDBEntry(ctx context.Context, library
 	}
 
 	return item, nil
-}
-
-// resolveTraktEntry finds a local item matching a Trakt discovery entry.
-func (s *LibraryCollectionService) resolveTraktEntry(ctx context.Context, libraryIDs []int, entry TraktCollectionEntry) (*models.MediaItem, error) {
-	itemType := "movie"
-	if entry.MediaType == "tv" {
-		itemType = "series"
-	}
-	batch := ExternalIDBatch{}
-	if entry.TMDBID > 0 {
-		batch.TMDBIDs = []string{fmt.Sprintf("%d", entry.TMDBID)}
-	}
-	if entry.IMDbID != "" {
-		batch.IMDbIDs = []string{entry.IMDbID}
-	}
-	if entry.TVDBID > 0 && itemType == "series" {
-		batch.TVDBIDs = []string{fmt.Sprintf("%d", entry.TVDBID)}
-	}
-	lookup, err := s.items.GetByExternalIDs(ctx, batch, itemType)
-	if err != nil {
-		return nil, err
-	}
-	candidates := traktCandidatesByPriority(lookup, entry, itemType)
-	if len(candidates) == 0 {
-		return nil, nil
-	}
-
-	membership, err := s.libraryItems.GetItemsInFolders(ctx, candidates, libraryIDs)
-	if err != nil {
-		return nil, err
-	}
-	for _, candidate := range candidates {
-		if membership[candidate] {
-			return s.items.GetByID(ctx, candidate)
-		}
-	}
-
-	return nil, nil
-}
-
-func traktCandidatesByPriority(lookup *ExternalIDLookup, entry TraktCollectionEntry, itemType string) []string {
-	if lookup == nil {
-		return nil
-	}
-	var candidates []string
-	seen := make(map[string]struct{}, 3)
-	add := func(id string) {
-		if id == "" {
-			return
-		}
-		if _, ok := seen[id]; ok {
-			return
-		}
-		seen[id] = struct{}{}
-		candidates = append(candidates, id)
-	}
-	if itemType == "series" && entry.TVDBID > 0 {
-		add(lookup.ByTVDB[fmt.Sprintf("%d", entry.TVDBID)])
-	}
-	if entry.TMDBID > 0 {
-		add(lookup.ByTMDB[fmt.Sprintf("%d", entry.TMDBID)])
-	}
-	if entry.IMDbID != "" {
-		add(lookup.ByIMDb[entry.IMDbID])
-	}
-	return candidates
 }
 
 func (s *LibraryCollectionService) fetchMDBListEntries(ctx context.Context, listURL string, maxEntries int) ([]mdblistEntry, error) {

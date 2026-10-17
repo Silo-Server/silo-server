@@ -112,7 +112,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Every job except Go skips web/assets-source (230 MB of PNG files that
         # only the internal/collections/templates tests read).
-        with: &no-assets
+        with:
+          fetch-depth: 0
           filter: blob:none
           sparse-checkout: |
             /*
@@ -169,6 +170,18 @@ jobs:
       # - name: Audit workflow security with zizmor
       #   run: zizmor .github/workflows .github/actions
       # Declined: broad workflow security/hygiene; the action SHA gate remains active.
+      # - name: Lint Python with Ruff
+      #   run: ruff check .
+      # Declined: Python tooling is outside the selected checks.
+      # - name: Scan secrets
+      #   run: gitleaks detect
+      # Declined: secret scanning is outside the selected checks.
+      # - name: Check PR body sections
+      #   run: node scripts/ci/pr-body-check.mjs
+      # Not measured; needs a prototype. Prior sample: 72/100 lacked Evidence.
+      # - name: Check backtick documentation paths
+      #   run: make verify-backtick-paths
+      # Not measured; needs a prototype. Prior sample: 19 unresolved, about half false positives.
       - name: Verify no local paths leaked into committed docs
         run: make verify-local-paths
       # Linux checks out two paths that differ only in case without
@@ -202,6 +215,41 @@ jobs:
         run: |
           go build -o "$RUNNER_TEMP/casecollisions" ./.ci-tools/scripts/ci/casecollisions
           "$RUNNER_TEMP/casecollisions"
+
+      # A pull request checks out its merge with the target's current tip,
+      # and the payload's base.sha can be older than that tip, which would
+      # count the target's newer commits as the PR's. The make targets take
+      # the merge base with the freshly fetched target branch instead, as the
+      # contract checks do.
+      - name: Verify file line limits and bidi controls
+        shell: bash
+        env:
+          BASE_REF: origin/${{ github.base_ref || github.event.repository.default_branch }}
+        run: make verify-size-ratchet verify-bidi
+      - name: Verify migrations
+        shell: bash
+        env:
+          BASE_REF: origin/${{ github.base_ref || github.event.repository.default_branch }}
+        run: make verify-migrations
+      - name: Verify Prometheus rule tests
+        run: |
+          docker pull prom/prometheus:v3.5.0
+          make verify-prometheus-rules
+      # - name: Check migration lock risk with squawk
+      #   run: squawk migrations/sql/*.sql
+      # Not measured; needs a prototype. Prior sample: 457 findings in 146 files.
+      # - name: Check SELECT star on base tables
+      #   run: make verify-select-star
+      # Not measured; needs a prototype. Prior sample: 2 of 36 SELECT-star uses.
+      # - name: Check migration order
+      #   run: make verify-migration-order
+      # Not measured; needs a prototype and disposable histories.
+      # - name: Check spelling with codespell
+      #   run: codespell
+      # Declined: broad spelling cleanup.
+      # - name: Check raw setting-key literals
+      #   run: make lint-setting-keys
+      # Declined: generated bindings own settings access.
 
   # Contract assertions run once in the full suite; artifact generation and
   # semantic comparison retain their separate gate. PG17 race tests and
@@ -376,6 +424,17 @@ jobs:
       - name: Normalize tracked source mtimes
         run: python3 scripts/ci/content_mtimes.py
 
+      - name: Check Go module tidiness without rewriting
+        run: go mod tidy -diff
+      - name: Scan reachable Go vulnerabilities
+        if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck -scan=symbol -show=verbose ./...
+      # - name: Check dependency edges with depaware
+      #   run: depaware ./...
+      # Not measured; needs a prototype with reviewed edge allowances.
+
       - name: Run Go lint and contract checks
         shell: bash
         env:
@@ -494,7 +553,13 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with: &no-assets
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/web/assets-source/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Set up Go
         uses: ./.github/actions/setup-go
         id: setup-go
@@ -739,21 +804,21 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
-          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
-          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
+          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
+          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Restore and save the web check cache
         if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name != 'pull_request'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
-          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
-          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
+          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
+          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Lint and format check
         if: matrix.part == 'checks'
         env:
-          ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*') }}
+          ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json') }}
           PRETTIER_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
         run: |
           cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
@@ -763,6 +828,19 @@ jobs:
           pnpm run lint --concurrency auto --cache --cache-strategy content --cache-location "$cache_dir/eslint-${ESLINT_CACHE_ID}" || { echo "::error::ESLint failed"; failed=1; }
           wait $! || { echo "::error::Prettier failed"; failed=1; }
           exit "$failed"
+
+      - name: Audit the pinned dependency lockfile
+        if: matrix.part == 'checks' && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main'))
+        run: pnpm audit --audit-level=high
+      # - name: Check JSX accessibility
+      #   run: pnpm exec eslint . --config eslint-a11y.config.js
+      # Not measured; needs a prototype grounded in rendered tests.
+      # - name: Check import cycles with madge
+      #   run: pnpm exec madge --circular src
+      # Not measured; needs a prototype defining layers, aliases and type-only edges.
+      # - name: Check unused exports with Knip
+      #   run: pnpm exec knip
+      # Not measured; needs a prototype defining entrypoints and public consumers.
 
       - name: Restore the TypeScript cache
         if: matrix.part == 'build' && runner.environment == 'github-hosted' && github.event_name == 'pull_request'

@@ -53,7 +53,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
-	metatrakt "github.com/Silo-Server/silo-server/internal/metadata/trakt"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
@@ -282,7 +281,7 @@ type Dependencies struct {
 	ServerRestartStatus    *handlers.ServerRestartStatusTracker
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
-	// Trakt / MDBList) — the user-facing analogue of CollectionService.
+	// MDBList) — the user-facing counterpart of CollectionService.
 	UserCollectionSync      *usercollections.Service
 	UserCollectionScheduler *usercollections.Scheduler
 	// PersonalCollectionCollages serves and builds personal collection
@@ -293,8 +292,7 @@ type Dependencies struct {
 	PersonalCollectionCollages *catalog.PersonalCollectionCollages
 
 	// TrendingRefresher refreshes the persisted trending_discover snapshots.
-	// Built in main.go with TMDB wired; its Trakt fetcher is propagated here in
-	// router.go once the Trakt adapter exists (mirrors UserCollectionSync).
+	// Built in main.go with TMDB wired.
 	TrendingRefresher *sections.TrendingRefresher
 
 	// MDBListClient is used by user-facing list discovery endpoints
@@ -1783,7 +1781,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		markersHandler = handlers.NewMarkersHandler(
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
-		markersHandler.BaseContext = deps.AppContext
+		markersHandler.BaseContext = deps.AppContext //nolint:fatcontext // set once on a new handler to the app context
 		if deps.DB != nil {
 			markersHandler.Libraries = catalog.NewFolderRepository(deps.DB)
 		}
@@ -2095,47 +2093,16 @@ func newChiRouter(deps Dependencies) chi.Router {
 				client: tmdb.NewClient(apiKey, 40),
 			}
 		}
-		if libraryCollectionService.TraktCollections == nil {
-			// The client ID is resolved per call rather than captured here, so
-			// saving new Trakt credentials applies without a server restart.
-			adapter := &traktCollectionAdapter{
-				client:   metatrakt.NewClient("", 5),
-				settings: settingsRepo,
-			}
-			if clientIDs, ok := deps.WatchProviderService.(watchProviderAppClientIDs); ok {
-				adapter.watchProviders = clientIDs
-			}
-			libraryCollectionService.TraktCollections = adapter
-		}
-		if tokens, ok := deps.WatchProviderService.(watchProviderAccessTokens); ok && libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil {
-			libraryCollectionService.TraktTokenResolver = &traktCollectionTokenResolver{
-				pool:   deps.DB,
-				tokens: tokens,
-			}
-		}
-
-		// Propagate the now-wired Trakt + TMDB fetchers to the user-side sync
-		// service (constructed earlier in main.go before settingsRepo and the
-		// Trakt adapters existed, so its fetcher fields started nil).
+		// Propagate the now-wired TMDB fetchers to the user-side sync service
+		// (constructed earlier in main.go before settingsRepo existed, so its
+		// fetcher fields started nil).
 		if deps.UserCollectionSync != nil {
-			if deps.UserCollectionSync.TraktCollections == nil {
-				deps.UserCollectionSync.TraktCollections = libraryCollectionService.TraktCollections
-			}
-			if deps.UserCollectionSync.TraktTokenResolver == nil {
-				deps.UserCollectionSync.TraktTokenResolver = libraryCollectionService.TraktTokenResolver
-			}
 			if deps.UserCollectionSync.TMDBCollections == nil {
 				deps.UserCollectionSync.TMDBCollections = libraryCollectionService.TMDBCollections
 			}
 			if deps.UserCollectionSync.TMDBLists == nil {
 				deps.UserCollectionSync.TMDBLists = libraryCollectionService.TMDBLists
 			}
-		}
-
-		// Propagate the now-wired Trakt fetcher to the trending refresher (built
-		// in main.go with TMDB only, before the Trakt adapter existed).
-		if deps.TrendingRefresher != nil && deps.TrendingRefresher.TraktTrending == nil {
-			deps.TrendingRefresher.TraktTrending = libraryCollectionService.TraktCollections
 		}
 
 		// Wire the trending snapshot reader into the section fetcher. The
@@ -2510,7 +2477,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ScanControls = libraryHandler
 	}
 	if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil && deps.LogStreamHub != nil && sessionRepo != nil && userRepo != nil {
-		socket := handlers.NewAdminLogsSocketV2(handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub), evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+		socket := handlers.NewAdminLogsSocketV2(handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub), evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 		v2deps.AdminLogsSocket = socket
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2644,7 +2611,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if playbackHandler != nil {
 		v2deps.Playback = playbackHandler
 		if sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewPlaybackControlSocketV2(playbackHandler, deps.RedisClient, sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewPlaybackControlSocketV2(playbackHandler, deps.RedisClient, sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.PlaybackControlSocket = socket
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2763,7 +2730,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.WatchTogetherCapability = watchTogetherHandler
 		v2deps.WatchTogetherCreate = watchTogetherHandler
 		if deps.RedisClient != nil && sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewWatchTogetherSocketV2(watchTogetherHandler, watchtogether.NewRoomSocketCredentialStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewWatchTogetherSocketV2(watchTogetherHandler, watchtogether.NewRoomSocketCredentialStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.WatchTogetherSocket = socket
 			playbackHandler.WatchTogetherAvailable = true
 			if deps.OnConfigChange != nil {
@@ -2779,7 +2746,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		events.SetNotificationsSystem(deps.Notifications)
 		v2deps.EventsCapability = events
 		if sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.EventsSocket = socket
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2797,7 +2764,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.NotificationDestinationTests = inbox
 		v2deps.NotificationDestinationCreate = inbox
 		v2deps.OrderedAndroidPush = inbox
-		v2deps.OrderedApplePush = handlers.NewOrderedApplePushV2(deps.Notifications.PushDevices, jwtService, sessionRepo, userRepo, viewerResolver, checkPrimaryProfile)
+		v2deps.OrderedApplePush = handlers.NewOrderedApplePushV2(deps.Notifications.PushDevices, jwtService, sessionRepo, userRepo, viewerResolver, actingAdmin)
 		v2deps.AdminNotificationPush = deps.Notifications
 		v2deps.AdminNotificationDiscord = deps.Notifications
 		v2deps.NotificationChannels = deps.Notifications
@@ -3474,6 +3441,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					if sessionRepo != nil {
 						eventsHandler.SetSessionRoles(sessionRepo)
 					}
+					eventsHandler.SetProfileVerifier(viewerResolver)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 					r.Get("/events/capability", eventsHandler.HandleCapability)
 				}
@@ -5178,19 +5146,6 @@ func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog
 	return entries, nil
 }
 
-// traktClientIDSettingKey holds the Trakt app client ID that the built-in Trakt
-// watch provider used. The adapter falls back to it when no Trakt watch-sync
-// plugin is configured, so a server that uses Trakt only for collections keeps
-// working. It is deliberately not in config.restartRequiredKeys: the adapter
-// re-reads it before every upstream call.
-const traktClientIDSettingKey = "watchsync.trakt.client_id"
-
-// watchProviderAppClientIDs reads the app client ID a watch-sync plugin is
-// configured with.
-type watchProviderAppClientIDs interface {
-	AppClientID(ctx context.Context, providerKey string) (string, error)
-}
-
 // adminJobArtifactURLTTL matches the presigned lifetime an S3 deployment hands
 // out, so the two backends expire a download link on the same schedule.
 const adminJobArtifactURLTTL = 15 * time.Minute
@@ -5206,85 +5161,6 @@ func newAdminJobArtifactSigner(deps *Dependencies) *artworkurl.Signer {
 		return nil
 	}
 	return artworkurl.NewJobArtifactSigner(deps.CurrentConfig().Auth.JWTSecret, adminJobArtifactURLTTL)
-}
-
-type traktCollectionAdapter struct {
-	client *metatrakt.Client
-	// watchProviders supplies the Trakt watch-sync plugin's app client ID,
-	// the app that issued the profile tokens these calls send. Nil when watch
-	// sync is unavailable.
-	watchProviders watchProviderAppClientIDs
-	// settings is the fallback source of the app client ID. Nil only where no
-	// settings store exists (tests), where the client ID stays empty and the
-	// upstream call fails the same way it always did.
-	settings catalog.SettingsStore
-}
-
-// refreshClientID pushes the current app client ID onto the shared client:
-// the Trakt watch-sync plugin's, else the legacy setting. A read failure
-// leaves the last known value in place: failing the request at Trakt is more
-// useful than failing it here on a transient DB blip.
-func (a *traktCollectionAdapter) refreshClientID(ctx context.Context) {
-	if a.watchProviders != nil {
-		clientID, err := a.watchProviders.AppClientID(ctx, "trakt")
-		if err != nil {
-			return
-		}
-		if clientID != "" {
-			a.client.SetClientID(clientID)
-			return
-		}
-	}
-	if a.settings == nil {
-		return
-	}
-	if clientID, err := a.settings.Get(ctx, traktClientIDSettingKey); err == nil {
-		a.client.SetClientID(clientID)
-	}
-}
-
-func (a *traktCollectionAdapter) GetCollectionPreset(ctx context.Context, preset, mediaType string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
-	a.refreshClientID(ctx)
-	results, err := a.client.GetCollectionPreset(ctx, preset, mediaType, limit, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]catalog.TraktCollectionEntry, len(results))
-	for i, r := range results {
-		entries[i] = catalog.TraktCollectionEntry{
-			TraktID:   r.TraktID,
-			TMDBID:    r.TMDBID,
-			TVDBID:    r.TVDBID,
-			IMDbID:    r.IMDbID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-			Year:      r.Year,
-			Rank:      r.Rank,
-		}
-	}
-	return entries, nil
-}
-
-func (a *traktCollectionAdapter) GetUserList(ctx context.Context, user, list string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
-	a.refreshClientID(ctx)
-	results, err := a.client.GetUserList(ctx, user, list, limit, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]catalog.TraktCollectionEntry, len(results))
-	for i, r := range results {
-		entries[i] = catalog.TraktCollectionEntry{
-			TraktID:   r.TraktID,
-			TMDBID:    r.TMDBID,
-			TVDBID:    r.TVDBID,
-			IMDbID:    r.IMDbID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-			Year:      r.Year,
-			Rank:      r.Rank,
-		}
-	}
-	return entries, nil
 }
 
 // llmConfigFromServer derives the shared AI client config from the server

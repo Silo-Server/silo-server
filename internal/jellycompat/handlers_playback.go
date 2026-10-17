@@ -3007,7 +3007,7 @@ var compatFallbackCodecRank = map[string]int{
 func preferredAudioStreamIndex(version catalog.FileVersion, profile DeviceProfile) *int {
 	defaultIdx := defaultAudioStreamIndex(version)
 	if defaultIdx == nil {
-		return defaultIdx
+		return nil
 	}
 
 	defaultTrackIdx := *defaultIdx - len(version.VideoTracks)

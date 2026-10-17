@@ -122,6 +122,11 @@ vi.mock("../hooks/useASSSubtitles", () => ({
     return { isActive: false };
   },
 }));
+// The delay is the profile's saved offset; plain state stands in for the query.
+vi.mock("../hooks/useSubtitleDelay", async () => {
+  const { useState } = await import("react");
+  return { useSubtitleDelay: () => useState(0) };
+});
 vi.mock("../hooks/useSubtitleAppearance", () => ({
   useSubtitleAppearance: () => ({
     settings: { position: "bottom", fontSize: "large" },

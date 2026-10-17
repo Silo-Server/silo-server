@@ -1760,7 +1760,9 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, pushRegistrationReceiptFixtureCases()...)
 	cases = append(cases, adminNotificationPushDeliveryFixtureCases()...)
 	cases = append(cases, unmatchedItemIgnoreFixtureCases()...)
-	return append(cases, notInterestedFixtureCases()...)
+	cases = append(cases, notInterestedFixtureCases()...)
+	cases = append(cases, notificationSeriesFixtureCases()...)
+	return append(cases, notificationSeriesMuteFixtureCases()...)
 }
 
 // notInterestedFixtureCases pin the Not interested marks: the paged list, one

@@ -13,10 +13,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
-	"golang.org/x/sync/errgroup"
 )
 
 type TMDBClient interface {
@@ -2759,7 +2760,7 @@ func (s *Service) markSubmissionFailed(ctx context.Context, claimed Request, act
 			// lease and another claim holds the request now.
 			return s.store.GetRequest(ctx, claimed.ID)
 		}
-		return nil, fmt.Errorf("submit request failed: %w; mark failed: %v", submitErr, err)
+		return nil, fmt.Errorf("submit request failed: %w; mark failed: %v", submitErr, err) //nolint:errorlint // callers classify the submission error; the mark-failed error is only reported
 	}
 	return failed, nil
 }

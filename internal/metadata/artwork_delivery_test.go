@@ -14,8 +14,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
 
 type deliveryTestChecker struct {
@@ -68,7 +70,7 @@ func TestArtworkDeliveryPublicationAndReconciliation(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 	original := fmt.Sprintf("tmdb/movies/delivery-%d/poster/original.rev.webp", time.Now().UnixNano())
-	large, medium := variantKey(original, "w780"), variantKey(original, "w500")
+	large, medium := variantKey(original, posterLargeRung), variantKey(original, "w500")
 	keys := []string{original, large, medium}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, original)
@@ -297,6 +299,10 @@ func artworkDeliveryTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// posterLargeRung is the widest poster rung, the one the latest ladder version
+// added and the one an unverified delivery must not advertise.
+var posterLargeRung = imagesize.Variant(artworkkey.ImagePoster, imagesize.Large)
+
 // Production stalled here: an unavailable verdict recorded just before a
 // successful re-upload kept suppressing the artwork, and the queued recheck sat
 // behind every overdue routine check. A re-upload must restore a URL without a
@@ -306,7 +312,7 @@ func TestArtworkDeliveryRecoversRepublishedArtworkBehindBacklog(t *testing.T) {
 	ctx := t.Context()
 	prefix := fmt.Sprintf("tmdb/movies/delivery-backlog-%d", time.Now().UnixNano())
 	original := prefix + "/target/poster/original.rev.webp"
-	large, medium := variantKey(original, "w780"), variantKey(original, "w500")
+	large, medium := variantKey(original, posterLargeRung), variantKey(original, "w500")
 	keys := []string{original, large, medium}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path LIKE $1`, prefix+"/%")
@@ -403,7 +409,7 @@ func TestArtworkDeliveryStaleVerdictKeepsSurvivingVariants(t *testing.T) {
 	pool := artworkDeliveryTestPool(t)
 	ctx := t.Context()
 	original := fmt.Sprintf("tmdb/movies/delivery-stale-%d/poster/original.rev.webp", time.Now().UnixNano())
-	large, medium := variantKey(original, "w780"), variantKey(original, "w500")
+	large, medium := variantKey(original, posterLargeRung), variantKey(original, "w500")
 	keys := []string{original, large, medium}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, original)
@@ -435,11 +441,39 @@ func TestArtworkDeliveryStaleVerdictKeepsSurvivingVariants(t *testing.T) {
 	}
 }
 
+// Local storage and direct S3 never verify delivery, but a ladder change still
+// leaves existing revisions without the new widest rung until the backfill
+// regenerates them. Their reader answers from the publication manifest alone,
+// so a client asking for that rung gets the widest one the revision published.
+func TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery(t *testing.T) {
+	pool := artworkDeliveryTestPool(t)
+	ctx := t.Context()
+	original := fmt.Sprintf("tmdb/movies/delivery-local-%d/poster/original.rev.webp", time.Now().UnixNano())
+	large, previousLarge := variantKey(original, posterLargeRung), variantKey(original, "w780")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, original)
+	})
+	// The revision predates the current ladder: it has the previous ladder's
+	// widest rung, not the current one.
+	if err := catalog.NewArtworkRevisionTracker(pool).TrackArtworkRevision(ctx, original, "poster",
+		[]string{original, previousLarge, variantKey(original, "w500"), variantKey(original, "w300")}); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := NewPluginImageResolver()
+	t.Cleanup(resolver.Close)
+	resolver.SetArtworkResolver(noProbeStore{t})
+	resolver.SetArtworkAvailabilityReader(NewArtworkDeliveryStore(pool, "local|delivery-local", false))
+	if got := resolver.ResolveImageURL(ctx, large, "large"); got != "https://images.example/"+previousLarge {
+		t.Fatalf("resolved %q, want the widest published rung %s", got, previousLarge)
+	}
+}
+
 func TestArtworkDeliveryBacksOffIncompleteVerdicts(t *testing.T) {
 	pool := artworkDeliveryTestPool(t)
 	ctx := t.Context()
 	original := fmt.Sprintf("tmdb/movies/delivery-backoff-%d/poster/original.rev.webp", time.Now().UnixNano())
-	large, medium := variantKey(original, "w780"), variantKey(original, "w500")
+	large, medium := variantKey(original, posterLargeRung), variantKey(original, "w500")
 	keys := []string{original, large, medium}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, original)

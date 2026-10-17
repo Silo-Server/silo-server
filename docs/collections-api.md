@@ -29,8 +29,8 @@ the profile does not own.
 ## Sharing
 
 `is_shared` is the one sharing switch, on `createCollection`, `updateCollection` and the import
-operations (`importMDBListCollection`, `importTMDBCollection`, `importTMDBListCollection`,
-`importTraktCollection`). Clients label it **Show to other profiles**.
+operations (`importMDBListCollection`, `importTMDBCollection`, `importTMDBListCollection`).
+Clients label it **Show to other profiles**.
 
 `include_in_server_collections` is independent: it places the collection in the library
 Collections tab (`listLibraryUserCollections`, `getLibraryCollections`) of every profile that can

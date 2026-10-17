@@ -4051,19 +4051,17 @@
       "section": "admin-collections",
       "release_flow": "other_admin",
       "tier": 2,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"Trakt on every v1 route\"); still registered on the bridge surface, answering 410 unsupported_source, retired by the tombstone. No successor: Silo no longer supports Trakt.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/admin/collections/import/trakt",
-        "operation_id": "importAdminTrakt"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Administrator collection v2 operation uses shared services and typed string IDs. Bundled web consumes v2; legacy routes remain available. No existing Apple or Android administrator collection consumer was found. Jellyfin has no administrator editing surface.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "No durable request identity is provided. Delayed replay can repeat side effects or overwrite a later action; clients must not retry automatically."
+      "notes": "Section admin-collections. The v2 importAdminTrakt operation was removed before the v2 lock when Silo dropped Trakt support; it had refused every request with 410 unsupported_source since Trakt collection creation was turned off. No bundled web, native or Jellyfin consumer calls it. The frozen v1 route keeps answering 410 unsupported_source until the /api/v1 tombstone retires it. Removal ratified 2026-10-16 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -22756,20 +22754,18 @@
       ],
       "section": "personal-collections",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"Trakt on every v1 route\"); still registered on the bridge surface, answering 410 unsupported_source, retired by the tombstone. No successor: Silo no longer supports Trakt.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/collections/import/trakt",
-        "operation_id": "importTraktCollection"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Personal collection v2 operation uses the shared profile-scoped service. Storage capabilities distinguish unsupported SQLite imports, groups, artwork and reorder. Native Apple and Android adoption remains follow-up; bundled web consumes v2.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "No durable request identity or mutation generation is implemented. Delayed replay can repeat side effects or overwrite a later action; clients must not retry automatically."
+      "notes": "Section personal-collections. The v2 importTraktCollection operation was removed before the v2 lock when Silo dropped Trakt support; it had refused every request with 410 unsupported_source since Trakt collection creation was turned off. No bundled web, native or Jellyfin consumer calls it. The frozen v1 route keeps answering 410 unsupported_source until the /api/v1 tombstone retires it. Removal ratified 2026-10-16 (owner decision, Quick104)."
     },
     {
       "listener": "api",

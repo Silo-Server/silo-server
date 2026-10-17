@@ -28,8 +28,8 @@ func TestPreserveCachedArtworkKeepsCachedPathWhenSourceMatches(t *testing.T) {
 		"",
 		"tvdb/series/1/seasons/1/episodes/1/still/original.webp",
 		"tvdb://banners/episodes/1.jpg",
-		"thumb",
-	)
+		"thumb", true)
+
 	if path != "tvdb/series/1/seasons/1/episodes/1/still/original.webp" {
 		t.Fatalf("path = %q", path)
 	}
@@ -38,6 +38,20 @@ func TestPreserveCachedArtworkKeepsCachedPathWhenSourceMatches(t *testing.T) {
 	}
 	if source != "tvdb://banners/episodes/1.jpg" {
 		t.Fatalf("source = %q", source)
+	}
+}
+
+// With caching off and the artwork unlocked (keepStored false), a provider
+// path replaces a stored copy; with nothing offered the slot keeps it.
+func TestPreserveCachedArtworkReleasesStoredCopyWhenNotKept(t *testing.T) {
+	const stored = "tvdb/series/1/seasons/1/episodes/1/still/original.webp"
+	path, thumb, source := preserveCachedArtwork("tvdb://banners/episodes/2.jpg", "new", stored, "tvdb://banners/episodes/1.jpg", "old", false)
+	if path != "tvdb://banners/episodes/2.jpg" || thumb != "new" || source != path {
+		t.Fatalf("got %q/%q/%q, want the provider path served", path, thumb, source)
+	}
+	path, thumb, source = preserveCachedArtwork("", "", stored, "file:///m/thumb.jpg", "old", false)
+	if path != stored || thumb != "old" || source != "file:///m/thumb.jpg" {
+		t.Fatalf("got %q/%q/%q, want the stored copy kept when nothing is offered", path, thumb, source)
 	}
 }
 
@@ -106,8 +120,8 @@ func TestPreserveCachedArtworkRecordsNewProviderSource(t *testing.T) {
 		"",
 		"tvdb/series/1/seasons/1/episodes/1/still/original.webp",
 		"tvdb://banners/episodes/old.jpg",
-		"old-thumb",
-	)
+		"old-thumb", true)
+
 	if path != "tvdb/series/1/seasons/1/episodes/1/still/original.webp" {
 		t.Fatalf("cached path should remain visible until worker succeeds, got %q", path)
 	}

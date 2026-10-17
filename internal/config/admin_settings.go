@@ -950,12 +950,8 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 			return fmt.Errorf("email.from_address is required when email is enabled")
 		}
 	}
-	for _, provider := range []string{"trakt", "simkl"} {
-		clientID := strings.TrimSpace(effective["watchsync."+provider+".client_id"])
-		clientSecret := strings.TrimSpace(effective["watchsync."+provider+".client_secret"])
-		if (clientID == "") != (clientSecret == "") {
-			return fmt.Errorf("watchsync.%s client ID and client secret must be configured together", provider)
-		}
+	if (strings.TrimSpace(effective["watchsync.simkl.client_id"]) == "") != (strings.TrimSpace(effective["watchsync.simkl.client_secret"]) == "") {
+		return errors.New("watchsync.simkl client ID and client secret must be configured together")
 	}
 	if err := ValidateRedisRateLimitTransport(effective, capabilities.RedisBootstrapAvailable); err != nil {
 		return err

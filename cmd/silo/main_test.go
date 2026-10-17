@@ -631,10 +631,10 @@ func (f *fakeWatchSyncMigrationStore) HasConnections(context.Context, string) (b
 	return true, nil
 }
 
-func traktPluginCapabilities(t *testing.T) []*plugins.Capability {
+func watchSyncPluginCapabilities(t *testing.T, id, displayName string) []*plugins.Capability {
 	t.Helper()
 	records, err := plugins.CapabilityRecordsFromManifest(&pluginv1.PluginManifest{Capabilities: []*pluginv1.CapabilityDescriptor{{
-		Type: "watch_sync_provider.v1", Id: "trakt", DisplayName: "Trakt",
+		Type: "watch_sync_provider.v1", Id: id, DisplayName: displayName,
 		WatchSyncProvider: &pluginv1.WatchSyncProviderDescriptor{
 			AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE},
 			ExportWatched: true,
@@ -656,13 +656,13 @@ func traktPluginCapabilities(t *testing.T) []*plugins.Capability {
 func TestReloadWatchSyncPluginProvidersKeepsOneFirstPartyInstallation(t *testing.T) {
 	store := firstPartyWatchSyncStore{
 		installations: []*plugins.Installation{
-			{ID: 9, PluginID: "silo.watchprovider.trakt", Enabled: true, Kind: plugins.KindPlugin},
-			{ID: 7, PluginID: "silo.watchprovider.trakt", Enabled: true, Kind: plugins.KindPlugin},
+			{ID: 9, PluginID: "silo.watchprovider.simkl", Enabled: true, Kind: plugins.KindPlugin},
+			{ID: 7, PluginID: "silo.watchprovider.simkl", Enabled: true, Kind: plugins.KindPlugin},
 		},
-		capabilities: traktPluginCapabilities(t),
+		capabilities: watchSyncPluginCapabilities(t, "simkl", "Simkl"),
 	}
 	registry := watchsync.NewRegistry()
-	migration := &fakeWatchSyncMigrationStore{settings: map[string]string{"watchsync.trakt.client_id": "id"}}
+	migration := &fakeWatchSyncMigrationStore{settings: map[string]string{"watchsync.simkl.client_id": "id"}}
 	service := &fakeWatchSyncPluginService{}
 	if err := reloadWatchSyncPluginProviders(context.Background(), registry, store, service, nil, migration); err != nil {
 		t.Fatal(err)
@@ -671,14 +671,35 @@ func TestReloadWatchSyncPluginProvidersKeepsOneFirstPartyInstallation(t *testing
 		t.Fatalf("cache invalidations = %d, want one before reloading providers", service.cacheInvalidations)
 	}
 	summaries := registry.List()
-	if len(summaries) != 1 || summaries[0].Key != "trakt" {
-		t.Fatalf("registered providers = %#v, want only trakt", summaries)
+	if len(summaries) != 1 || summaries[0].Key != "simkl" {
+		t.Fatalf("registered providers = %#v, want only simkl", summaries)
 	}
 	if !slices.Equal(service.seeded, []int{7}) {
 		t.Fatalf("seeded installations = %v, want the older one", service.seeded)
 	}
-	if migration.settings["watchsync.plugin_migration.trakt"] == "" {
+	if migration.settings["watchsync.plugin_migration.simkl"] == "" {
 		t.Fatal("migration was not recorded")
+	}
+}
+
+// A retired plugin left installed registers no provider, under its old key or
+// any other, and records no migration.
+func TestReloadWatchSyncPluginProvidersSkipsRetiredPlugin(t *testing.T) {
+	store := firstPartyWatchSyncStore{
+		installations: []*plugins.Installation{{ID: 7, PluginID: "silo.watchprovider.trakt", Enabled: true, Kind: plugins.KindPlugin}},
+		capabilities:  watchSyncPluginCapabilities(t, "trakt", "Trakt"),
+	}
+	registry := watchsync.NewRegistry()
+	migration := &fakeWatchSyncMigrationStore{settings: map[string]string{}}
+	service := &fakeWatchSyncPluginService{}
+	if err := reloadWatchSyncPluginProviders(context.Background(), registry, store, service, nil, migration); err != nil {
+		t.Fatal(err)
+	}
+	if summaries := registry.List(); len(summaries) != 0 {
+		t.Fatalf("registered providers = %#v, want none", summaries)
+	}
+	if len(service.seeded) != 0 || len(migration.settings) != 0 {
+		t.Fatalf("seeded = %v, settings = %v; want nothing", service.seeded, migration.settings)
 	}
 }
 
@@ -686,13 +707,13 @@ func TestReloadWatchSyncPluginProvidersKeepsOneFirstPartyInstallation(t *testing
 // reloads again. The nested reload must not wait on the outer one.
 func TestReloadWatchSyncPluginProvidersSeedsOutsideTheReloadLock(t *testing.T) {
 	store := firstPartyWatchSyncStore{
-		installations: []*plugins.Installation{{ID: 7, PluginID: "silo.watchprovider.trakt", Enabled: true, Kind: plugins.KindPlugin}},
-		capabilities:  traktPluginCapabilities(t),
+		installations: []*plugins.Installation{{ID: 7, PluginID: "silo.watchprovider.simkl", Enabled: true, Kind: plugins.KindPlugin}},
+		capabilities:  watchSyncPluginCapabilities(t, "simkl", "Simkl"),
 	}
 	registry := watchsync.NewRegistry()
 	migration := &fakeWatchSyncMigrationStore{settings: map[string]string{
-		"watchsync.trakt.client_id":     "id",
-		"watchsync.trakt.client_secret": "secret",
+		"watchsync.simkl.client_id":     "id",
+		"watchsync.simkl.client_secret": "secret",
 	}}
 	service := &fakeWatchSyncPluginService{}
 	nested := make(chan error, 1)

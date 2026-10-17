@@ -289,25 +289,6 @@ describe("admin Synced list editor", () => {
     await saveAndWait(1);
     expect(v2Recorder.writes()).toEqual(goldens.adminEditTMDBList);
   });
-
-  it("sends no source for a legacy Trakt list", async () => {
-    answerAdmin(
-      adminSyncedCollection("trakt", {
-        source_url: "trakt://recommended/movie/p-owner",
-        source_config: {
-          mode: "trakt_preset",
-          preset: "recommended",
-          media_type: "movie",
-          profile_id: "p-owner",
-          limit: 40,
-        },
-      }),
-    );
-    show(<></>, "/admin/collections/c1/edit?libraryId=1");
-    await type("Name", "For you");
-    await saveAndWait(1);
-    expect(v2Recorder.writes()).toEqual(goldens.adminEditTrakt);
-  });
 });
 
 describe("personal Synced list editor", () => {

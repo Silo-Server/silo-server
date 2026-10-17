@@ -74,7 +74,7 @@ func (s *MetadataService) reapplyLocalItem(
 				return localReapplyNone, nil, fmt.Errorf("%s images: %w", provider.Slug(), err)
 			}
 			for _, image := range found {
-				if isLocalImageSourcePath(image.URL) && s.localSourceUsable(image.URL) {
+				if isLocalImageSourcePath(image.URL) {
 					images = append(images, image)
 				}
 			}
@@ -242,7 +242,9 @@ func (s *MetadataService) reapplyLocalSeriesChildren(
 			if err != nil {
 				return fmt.Errorf("%s seasons: %w", provider.Slug(), err)
 			}
-			dropLocalSeasonArtwork(seasons, s.localSourceUsable)
+			if !s.localArtworkUsable() {
+				dropLocalSeasonArtwork(seasons)
+			}
 			for _, season := range seasons {
 				if _, ok := seasonDirs[season.SeasonNumber]; ok {
 					accumulateSeasonResults(seasonResults, []SeasonResult{season})
@@ -275,7 +277,9 @@ func (s *MetadataService) reapplyLocalSeriesChildren(
 			if err != nil {
 				return fmt.Errorf("%s episodes: %w", provider.Slug(), err)
 			}
-			dropLocalEpisodeArtwork(episodes, s.localSourceUsable)
+			if !s.localArtworkUsable() {
+				dropLocalEpisodeArtwork(episodes)
+			}
 			for _, episode := range episodes {
 				if _, ok := episodeFiles[episode.EpisodeNumber]; ok && episode.SeasonNumber == seasonNumber {
 					accumulateEpisodeResults(episodeResults, []EpisodeResult{episode})

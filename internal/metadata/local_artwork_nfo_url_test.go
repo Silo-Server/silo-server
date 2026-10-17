@@ -9,11 +9,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/nfo"
 )
 
-// With Keep provider artwork off, an image URL an NFO names is not used: only
-// the image cache's download may fetch it. The slot takes the remote
-// provider's artwork, served directly, while local files, a sidecar or one the
-// NFO names, still win their slots.
-func TestNFONamedURLNeedsImageCaching(t *testing.T) {
+// With Keep provider artwork off, no local artwork is used: not a sidecar, not
+// a file the NFO names, and not an image URL it names. The slots take the
+// remote provider's artwork, served directly, or stay empty when no provider
+// has any, and nothing is queued.
+func TestLocalArtworkNeedsImageCaching(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Movies", "Art Film (2001)")
 	movie := filepath.Join(dir, "Art Film (2001).mkv")
 	writeFixtureFile(t, movie, "video")
@@ -53,19 +53,18 @@ func TestNFONamedURLNeedsImageCaching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("item: %v", err)
 	}
-	if want := filepath.Join(dir, "poster.jpg"); localSourceFile(t, item.PosterSourcePath) != want {
-		t.Errorf("poster source = %q, want the sidecar %q", item.PosterSourcePath, want)
-	}
-	if want := filepath.Join(dir, "art", "backdrop.jpg"); localSourceFile(t, item.BackdropSourcePath) != want {
-		t.Errorf("backdrop source = %q, want the NFO-named file %q", item.BackdropSourcePath, want)
+	if item.PosterPath != "" || item.PosterSourcePath != "" || item.BackdropPath != "" || item.BackdropSourcePath != "" {
+		t.Errorf("poster = %q/%q, backdrop = %q/%q; want both empty, as no provider has any",
+			item.PosterPath, item.PosterSourcePath, item.BackdropPath, item.BackdropSourcePath)
 	}
 	if item.LogoSourcePath != "https://image.tmdb.org/logo.png" || item.LogoPath != "https://image.tmdb.org/logo.png" {
 		t.Errorf("logo = path %q source %q, want the provider's logo served directly", item.LogoPath, item.LogoSourcePath)
 	}
-	for _, job := range x.EnqueuedImageJobs() {
-		if job.SourcePath == "nfo+https://img.example.org/nfo-logo.png" {
-			t.Errorf("queued the NFO-named URL with caching off: %+v", job)
-		}
+	if item.Title != "Art Film" {
+		t.Errorf("title = %q, want the NFO title", item.Title)
+	}
+	if jobs := x.EnqueuedImageJobs(); len(jobs) != 0 {
+		t.Errorf("queued %+v, want nothing with caching off", jobs)
 	}
 }
 

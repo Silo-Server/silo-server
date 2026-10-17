@@ -176,15 +176,12 @@ const writes = () =>
 
 describe("useAdminHomeRows", () => {
   it("maps the page's rows in server order", async () => {
-    rows = [
-      row("a", { featured: true }),
-      row("b", { enabled: false, config: { source_provider: "trakt" } }),
-    ];
+    rows = [row("a", { featured: true }), row("b", { enabled: false })];
     const { result } = setup();
     await ready(result);
     expect(result.current.adapter.rows).toEqual([
       expect.objectContaining({ id: "a", title: "Title a", hero: true, shown: true }),
-      expect.objectContaining({ id: "b", shown: false, legacyTrakt: true, own: false }),
+      expect.objectContaining({ id: "b", shown: false, own: false }),
     ]);
     expect(result.current.adapter.pages).toEqual([
       { ref: { kind: "home" }, label: "Home" },
@@ -482,21 +479,17 @@ describe("useAdminHomeRows", () => {
       });
     });
 
-    it("skips rows already in that state and refuses to turn a legacy Trakt row back on", async () => {
-      rows = [
-        row("a", { enabled: false }),
-        row("b", { enabled: true }),
-        row("t", { enabled: false, config: { source_provider: "trakt" } }),
-      ];
+    it("skips rows already in that state", async () => {
+      rows = [row("a", { enabled: false }), row("b", { enabled: true })];
       const { result } = setup();
       await ready(result);
       perRowVersions();
       let outcome!: Awaited<ReturnType<typeof result.current.adapter.setShownMany>>;
       await act(async () => {
-        outcome = await result.current.adapter.setShownMany(["a", "b", "t"], true);
+        outcome = await result.current.adapter.setShownMany(["a", "b"], true);
       });
       expect(outcome.changedIds).toEqual(["a"]);
-      expect(outcome.failures).toEqual([expect.objectContaining({ id: "t", reason: "legacy" })]);
+      expect(outcome.failures).toEqual([]);
       expect(writes().map((call) => call.args.path?.id)).toEqual(["a"]);
     });
 

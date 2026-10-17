@@ -169,7 +169,7 @@ func TestRepositoryInheritanceRematchingAndAccess(t *testing.T) {
 	newSeries := series + "-new"
 	for _, id := range []string{series, newSeries} {
 		exec(`INSERT INTO media_items(content_id,type,title) VALUES($1,'series','Theme test')`, id)
-		defer func() { _, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id=$1`, id) }()
+		defer func() { _, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id=$1`, id) }() //nolint:gocritic,revive // each fixture row is removed when the test returns
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id, folder)
 	}
 	exec(`INSERT INTO seasons(content_id,series_id,season_number) VALUES($1,$2,1)`, season, series)

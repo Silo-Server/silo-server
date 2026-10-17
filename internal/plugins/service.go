@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -514,13 +515,14 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 		if installation == nil {
 			continue
 		}
-		// Builtin installations have no archive or binary; skip them explicitly
-		// instead of leaning on the tolerated ErrArchiveNotFound branch below
-		// (any other load error here is fatal to startup).
+		// Builtin installations have no archive or binary.
 		if installation.IsBuiltin() {
 			continue
 		}
 		if _, err := s.ensureLoadedInstallation(ctx, installation); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			if errors.Is(err, ErrArchiveNotFound) {
 				slog.WarnContext(ctx,
 					"plugin preload skipped: archive not found for enabled installation", "component", "plugins",
@@ -530,7 +532,17 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 				)
 				continue
 			}
-			return fmt.Errorf("preload plugin installation %d: %w", installation.ID, err)
+			// One plugin whose stored archive no longer verifies must not
+			// keep the server from starting; a fresh node loads every plugin
+			// from its archive, so a fatal error here would crash-loop it.
+			// The plugin stays unavailable and its RPCs report the same error.
+			slog.ErrorContext(ctx,
+				"plugin preload failed; continuing without it", "component", "plugins",
+				"installation_id", installation.ID,
+				"plugin_id", installation.PluginID,
+				"version", installation.Version,
+				"error", err,
+			)
 		}
 	}
 	s.OnLifecycleChange(ctx)
@@ -880,7 +892,12 @@ func (s *Service) ensureClientForStart(ctx context.Context, installationID int, 
 	if err != nil {
 		return nil, err
 	}
-	return v.(pluginClient), nil
+	// A Host that reports success without a client leaves v nil.
+	client, ok := v.(pluginClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: plugin installation %d started without a client", pluginhost.ErrPluginUnhealthy, installationID)
+	}
+	return client, nil
 }
 
 func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {

@@ -39,6 +39,14 @@ func (r markItemRepo) EnsureAccessible(_ context.Context, id string, _ catalog.A
 	return catalog.ErrItemNotFound
 }
 
+func (r markItemRepo) EnsureAccessibleIDs(ctx context.Context, ids []string, filter catalog.AccessFilter) (map[string]bool, error) {
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = r.EnsureAccessible(ctx, id, filter) == nil
+	}
+	return out, nil
+}
+
 // Marking takes movies and series only, and tells recommendations once per
 // change: a repeated mark or unmark changes nothing and notifies nobody.
 func TestMarkNotInterested(t *testing.T) {

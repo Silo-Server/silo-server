@@ -2244,31 +2244,6 @@ func TestResolveQualityPolicyV3HonorsBandwidthCapInAllModes(t *testing.T) {
 	}
 }
 
-func TestResolveQualityPolicyV3MeteredWithoutEvidencePrefersConservativeRung(t *testing.T) {
-	source := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 20_000}
-	req := validStartRequestV3()
-	req.QualityPreference = "auto"
-	req.Metered = true
-	result := ResolveQualityPolicyV3(req, source)
-	if result.Height != 720 || !result.RequiresTranscode || result.Reason != "quality_metered_limit" || result.ExplicitRung {
-		t.Fatalf("metered auto = %#v", result)
-	}
-
-	estimate := 30_000
-	req.BandwidthEstimateKbps = &estimate
-	result = ResolveQualityPolicyV3(req, source)
-	if !result.PreservesSource || result.Reason != "quality_bandwidth_limit" {
-		t.Fatalf("metered with estimate = %#v", result)
-	}
-
-	req.BandwidthEstimateKbps = nil
-	req.Metered = false
-	result = ResolveQualityPolicyV3(req, source)
-	if !result.PreservesSource || result.RequiresTranscode {
-		t.Fatalf("unmetered auto = %#v", result)
-	}
-}
-
 func TestPlanPlaybackV3HDRDeviceCapFallsBackToOriginalQuality(t *testing.T) {
 	file := detailedFixtureFileV3()
 	req := validStartRequestV3()
