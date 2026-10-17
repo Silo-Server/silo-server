@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -18,32 +20,7 @@ import (
 func TestPersonalCollectionReadsRememberedDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
-	prefix := fmt.Sprintf("collection-read-memo-%d", time.Now().UnixNano())
-	library := seedCollagePosterLibrary(t, pool, prefix)
-	var userID int
-	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, prefix).Scan(&userID); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	t.Cleanup(func() {
-		ctx := context.Background()
-		_, _ = pool.Exec(ctx, `DELETE FROM user_personal_collections WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM artwork_revision_gc_candidates WHERE original_path LIKE $1`, "collection-images/%"+prefix+"%")
-	})
-	profile := prefix + "-profile"
-	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'owner')`, profile, userID); err != nil {
-		t.Fatalf("seed profile: %v", err)
-	}
-	titles := make([]string, 2)
-	for i := range titles {
-		titles[i] = fmt.Sprintf("%s-%d", prefix, i)
-		batchEquivExec(t, pool, `INSERT INTO media_items (content_id, type, title, sort_title) VALUES ($1, 'movie', $1, $1)`, titles[i])
-		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, titles[i], library)
-		t.Cleanup(func() {
-			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, titles[i])
-		})
-	}
+	prefix, userID, profile, library, titles := seedPersonalCollectionReadMemo(t, pool)
 
 	store, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, userID)
 	if err != nil {
@@ -124,4 +101,37 @@ func TestPersonalCollectionReadsRememberedDB(t *testing.T) {
 		collages.Posters(ctx, userID, def, viewer)
 		waitForStoredCollage(t, personalCollageStore{pool: pool, userID: userID}, CollectionCollageRef{CollectionID: manual.ID, Key: CollectionCollageKey([]string{poster})})
 	})
+}
+
+// seedPersonalCollectionReadMemo seeds an account with one profile, a library
+// and two titles in it without posters.
+func seedPersonalCollectionReadMemo(t *testing.T, pool *pgxpool.Pool) (prefix string, userID int, profile string, library int, titles []string) {
+	t.Helper()
+	ctx := context.Background()
+	prefix = fmt.Sprintf("collection-read-memo-%d", time.Now().UnixNano())
+	library = seedCollagePosterLibrary(t, pool, prefix)
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, prefix).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM user_personal_collections WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM artwork_revision_gc_candidates WHERE original_path LIKE $1`, "collection-images/%"+prefix+"%")
+	})
+	profile = prefix + "-profile"
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'owner')`, profile, userID); err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
+	titles = make([]string, 2)
+	for i := range titles {
+		titles[i] = fmt.Sprintf("%s-%d", prefix, i)
+		batchEquivExec(t, pool, `INSERT INTO media_items (content_id, type, title, sort_title) VALUES ($1, 'movie', $1, $1)`, titles[i])
+		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, titles[i], library)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, titles[i])
+		})
+	}
+	return prefix, userID, profile, library, titles
 }

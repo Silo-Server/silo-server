@@ -72,9 +72,13 @@ func (m *personalCollectionReadMemo[V]) put(key personalCollectionReadKey, revis
 				delete(m.entries, k)
 			}
 		}
-		// Every entry is live: forget all of them rather than grow.
-		if len(m.entries) >= personalCollectionReadMemoMaxEntries {
-			clear(m.entries)
+		// Every entry is live: forget an arbitrary tenth (map order is
+		// random) rather than grow, so most stay and the next sweeps are rare.
+		for k := range m.entries {
+			if len(m.entries) < personalCollectionReadMemoMaxEntries*9/10 {
+				break
+			}
+			delete(m.entries, k)
 		}
 	}
 	m.entries[key] = personalCollectionReadEntry[V]{revision: revision, expires: now.Add(personalCollectionReadMemoTTL), value: value}
