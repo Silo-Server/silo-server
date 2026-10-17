@@ -181,8 +181,9 @@ func assignmentValue(text string, i int) (start, end int) {
 // non-secret outer assignment (desc = api_key=SECRET) cannot hide a nested one.
 var secretAssignmentPattern = regexp.MustCompile(`(?i)([\w.-]*(?:password|passwd|secret|token|api[_-]?key|authorization|cookie)[\w.-]*"?\s*[:=]\s*)(?:(?:bearer|basic)\s+)?(?:"[^"]*"|[^\s"&,;]+)`)
 
-// urlUserinfoPattern matches the userinfo of a URL embedded in free text.
-var urlUserinfoPattern = regexp.MustCompile(`://[^/\s@]+@`)
+// urlUserinfoPattern matches through the last @ in a URL authority, since
+// unescaped @ characters may also appear in the userinfo.
+var urlUserinfoPattern = regexp.MustCompile(`://[^/?#\s]+@`)
 
 // SanitizeText masks credential assignments and URL userinfo in free-form
 // diagnostic text, such as a stored error message, and keeps everything else.
