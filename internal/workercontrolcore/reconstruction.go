@@ -3,10 +3,12 @@ package workercontrolcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
+	"github.com/Silo-Server/silo-server/internal/workersource"
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
@@ -73,6 +75,12 @@ func (s *Service) restoreSources(ctx context.Context, node Node, old workerwire.
 	for _, source := range old.Sources {
 		renewed, err := authority.Renew(ctx, node.ID, old.WorkID, old.Generation, source.Grant)
 		if err != nil {
+			if !errors.Is(err, workersource.ErrExpired) && !errors.Is(err, workersource.ErrNotFound) {
+				if status := workersource.HTTPStatus(err); status >= 500 || status == 429 {
+					return old, errors.Join(ErrUnavailable, err)
+				}
+				return old, ErrDenied
+			}
 			expired = true
 			break
 		}

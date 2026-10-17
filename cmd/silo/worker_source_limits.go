@@ -11,8 +11,8 @@ import (
 // Reader limits are host resource budgets. Read them once at startup rather
 // than sharing one capacity value between API replicas with different hosts.
 func workerSourceLimitsFromEnvironment() (workersource.Limits, error) {
-	const maximum = 4096
-	readers := 32
+	const maximum = workersource.MaximumReaders
+	readers := workersource.DefaultMaxReaders
 	if raw := os.Getenv("SILO_WORKER_SOURCE_MAX_READERS"); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil || value < 1 || value > maximum {

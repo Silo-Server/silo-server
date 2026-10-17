@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
+	"github.com/Silo-Server/silo-server/internal/workersource"
 )
 
 func TestThemeRecipeReconstructionUsesCatalogThemeSource(t *testing.T) {
@@ -134,7 +135,7 @@ type expiringSources struct {
 
 func (s *expiringSources) Renew(ctx context.Context, node int, work string, generation uint64, grant string) (workerwire.Source, error) {
 	if s.expired {
-		return workerwire.Source{}, ErrUnavailable
+		return workerwire.Source{}, workersource.ErrExpired
 	}
 	return s.Acquire(ctx, node, work, generation, "/private/approved.mp4", sourceMedia)
 }

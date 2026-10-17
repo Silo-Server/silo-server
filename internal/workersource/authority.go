@@ -192,9 +192,10 @@ func (a *Authority) Acquire(ctx context.Context, node int, work string, generati
 	id := sha256.Sum256(idBytes)
 	ref := workerwire.SourceRef{ID: hex.EncodeToString(id[:]), Kind: kind}
 	revisionBytes, _ := json.Marshal(struct {
-		ID  string
-		Pin FileIdentity
-	}{ref.ID, identity})
+		ID    string
+		Owner string
+		Pin   FileIdentity
+	}{ref.ID, a.options.OwnerID, identity})
 	revision := sha256.Sum256(revisionBytes)
 	ref.Revision = hex.EncodeToString(revision[:])
 	grant := uuid.NewString()

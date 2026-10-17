@@ -68,6 +68,30 @@ catalog files in enabled media folders and approved theme files can become
 sources. A descriptor binds a node, work identity, generation, immutable source
 revision, size and strong ETag. Arbitrary URLs and `.strm` sources are rejected.
 
+Source pins belong to the admitting API process: device, inode and change-time
+values cannot be compared across host mount namespaces. The revision digest
+also binds that process's random owner identity, so another host cannot reproduce
+the revision through coincident local metadata. Each grant retains its owner
+identity and routing origin only in the core store. Source descriptors continue
+to name the shared public origin.
+
+In a replicated API deployment, each process's startup-only
+`SILO_WORKER_SOURCE_URL` must name its own directly reachable HTTP/HTTPS origin,
+separate from the shared public origin. Other replicas relay source reads and
+worker renewals there before the owner consumes the worker proof nonce. Core
+reconstruction renewals use a separate signed request domain and a response
+bound to the exact request nonce, owner, work generation and source. Routing
+metadata never enters worker descriptors or FFmpeg arguments. Without a routing
+origin, grants are available only through their admitting process.
+
+An unavailable or restarted owner returns retryable 503 and cannot cause another
+replica to delete the grant, interpret its pin or replace its live assignment.
+Only a proven expired or missing grant permits reconstruction; the replacement
+must preserve the original owner-bound revision. The original process can
+recover an expired grant when its pin is unchanged. Cross-host or post-restart
+revision migration requires an immutable shared-storage version and is not
+supported by this protocol.
+
 The worker adapter presents each admitted source to FFmpeg through a private
 loopback HTTP URL. Its pooled HTTP client supplies the worker signature to the
 core. Worker signing keys and core filesystem paths do not enter FFmpeg
@@ -80,6 +104,11 @@ the same admission check.
 
 Core source delivery supports HEAD, conditional reads and single byte ranges.
 Every read checks its grant, strong file identity and continuing authority.
+Catalog path/kind existence facts have a bounded, non-sliding 250 ms lifetime
+measured from lookup start; errors and denials are not cached. The streaming
+watcher rechecks catalog membership. This cache grants no viewer permission.
+Each delivered chunk retains a full descriptor-and-path identity check after
+reading and immediately before writing; the redundant pre-read check is omitted.
 The adapter checks status, ETag, size and returned range before forwarding
 bytes. A normal transfer uses one sequential upstream response. Transport
 errors, 429/5xx responses and short bodies permit up to four total attempts

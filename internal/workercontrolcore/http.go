@@ -254,7 +254,12 @@ func (s *Service) recipe(w http.ResponseWriter, r *http.Request) {
 	}
 	reply, err := s.currentRecipe(r, node, r.PathValue("work"))
 	if err != nil {
-		http.Error(w, "current recipe unavailable", http.StatusForbidden)
+		status := http.StatusForbidden
+		if errors.Is(err, ErrUnavailable) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusServiceUnavailable
+			w.Header().Set("Retry-After", "1")
+		}
+		http.Error(w, "current recipe unavailable", status)
 		return
 	}
 	s.reply(w, node, "silo/worker-recipe/v1", reply.Assignment.WorkID, reply.Assignment.Generation, reply)
