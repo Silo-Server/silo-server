@@ -100,10 +100,12 @@ func (r *ItemRepository) searchCursorPage(ctx context.Context, query string, ite
 	if after == nil && eligibleForFuzzy(parsed) {
 		probeLimit = max(probeLimit, fuzzyFallbackThreshold)
 	}
-	if after == nil && searchOptions(request).GroupByWork && eligibleForFuzzy(parsed) {
+	// Grouping and the alphabetical jump both shrink the page, so probe the
+	// raw match family to decide whether it is sparse enough for fuzzy.
+	if after == nil && (searchOptions(request).GroupByWork || strings.TrimSpace(filter.NamePrefix) != "") && eligibleForFuzzy(parsed) {
 		probeOptions := searchOptions(request)
 		probeOptions.GroupByWork = false
-		probe, probeKeys, _, err := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, filter, false, false, 0, probeOptions)
+		probe, probeKeys, _, err := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, withoutNamePrefix(filter), false, false, 0, probeOptions)
 		if err != nil {
 			return SearchCursorPage{}, err
 		}
@@ -283,7 +285,7 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	if block == nil {
 		rawOptions := searchOptions(request)
 		rawOptions.GroupByWork = false
-		fts, keys, _, fetchErr := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, filter, false, false, 0, rawOptions)
+		fts, keys, _, fetchErr := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, withoutNamePrefix(filter), false, false, 0, rawOptions)
 		if fetchErr != nil {
 			return nil, false, fetchErr
 		}
@@ -298,6 +300,7 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 		candidates = append(candidates, searchCandidate{item: item, cursor: &SearchCursor{Mode: searchCursorCombined, Phase: searchCursorFTS, Keys: ftsKeys[i].Keys}})
 	}
 	if searchBlockHasExactTitle(fts, parsed.ExactTitleHint) {
+		candidates = filterSearchCandidatesNamePrefix(candidates, filter.NamePrefix)
 		candidates, err = r.groupSearchCandidates(ctx, candidates, searchOptions(request).GroupByWork, searchOptions(request).Definition.Limit)
 		return candidates, false, err
 	}
@@ -311,7 +314,7 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 		return nil, false, options.err
 	}
 	if sql == "" {
-		return candidates, false, nil
+		return filterSearchCandidatesNamePrefix(candidates, filter.NamePrefix), false, nil
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -384,8 +387,25 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	for _, rank := range ranks {
 		candidates = append(candidates, searchCandidate{item: rank.item, cursor: &SearchCursor{Mode: searchCursorCombined, Phase: searchCursorFuzzy, Keys: keysByID[rank.item.ContentID]}})
 	}
+	candidates = filterSearchCandidatesNamePrefix(candidates, filter.NamePrefix)
 	candidates, err = r.groupSearchCandidates(ctx, candidates, searchOptions(request).GroupByWork, searchOptions(request).Definition.Limit)
 	return candidates, truncated, err
+}
+
+// withoutNamePrefix returns the filter that decides a search's match family.
+// The alphabetical jump narrows the results of that family, never chooses it.
+func withoutNamePrefix(filter AccessFilter) AccessFilter {
+	filter.NamePrefix = ""
+	return filter
+}
+
+func filterSearchCandidatesNamePrefix(candidates []searchCandidate, prefix string) []searchCandidate {
+	if strings.TrimSpace(prefix) == "" {
+		return candidates
+	}
+	return slices.DeleteFunc(candidates, func(candidate searchCandidate) bool {
+		return !catalogNamePrefixMatches(candidate.item, prefix)
+	})
 }
 
 func (r *ItemRepository) searchCombinedCursorPage(ctx context.Context, parsed parsedSearchQuery, itemTypes []string, limit int, after *SearchCursor, filter AccessFilter, includeTotal bool, request ...SearchCursorOptions) (SearchCursorPage, error) {
@@ -540,7 +560,9 @@ func (r *ItemRepository) appendSearchCursorDefinition(cursor *searchCursorSQL, e
 	def.Sort = QuerySort{}
 	def.Limit = nil
 	executor := &QueryExecutor{Pool: r.pool, Scope: def.MediaScope}
-	predicate, values, err := collectionDefinitionPredicate(executor, def, filter)
+	// The definition chooses candidates with the family; the prefix only
+	// narrows the ranked result afterwards.
+	predicate, values, err := collectionDefinitionPredicate(executor, def, withoutNamePrefix(filter))
 	if err != nil {
 		cursor.err = err
 		return
@@ -617,6 +639,11 @@ func (r *ItemRepository) searchCandidatesExecutor(def QueryDefinition, access Ac
 		if episode && len(conditions) > 1 {
 			conditions[len(conditions)-1] = strings.Replace(conditions[len(conditions)-1], "ece.episode_id IN (", "mi.content_id IN (", 1)
 		}
+		prefixKey := sortTitleKeyExpr
+		if episode {
+			prefixKey = "mi.sort_key"
+		}
+		appendSearchNamePrefix(prefixKey, access, &conditions, &args, &index)
 		condition := strings.Join(conditions, " AND ")
 		relation := catalogBaseRelationForScope("")
 		if episode {
@@ -625,8 +652,9 @@ func (r *ItemRepository) searchCandidatesExecutor(def QueryDefinition, access Ac
 		branches = append(branches, "SELECT "+qualifiedItemColumns("mi")+", mi.last_air_date_at, mi.content_rating_age FROM "+relation+" WHERE "+condition)
 	}
 	executor := &QueryExecutor{Pool: r.pool, BaseRelationSQL: "(" + strings.Join(branches, " UNION ALL ") + ") mi"}
-	// The full access/definition predicate has already been applied in the
-	// mixed relation; repeating a media_items library join would drop episodes.
+	// The full access/definition predicate, name prefix included, has already
+	// been applied in the mixed relation; repeating a media_items library join
+	// would drop episodes.
 	executor.SourceWhere = cursorTruePredicate
 	executor.SourceArgs = args
 	if def.Sort.Field == defaultSortField {
@@ -664,7 +692,7 @@ func (r *ItemRepository) orderedSearchExecutor(ctx context.Context, parsed parse
 	}
 
 	if mode == "" {
-		probe, _, _, err := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, access, false, false, 0, relevance)
+		probe, _, _, err := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, withoutNamePrefix(access), false, false, 0, relevance)
 		if err != nil {
 			return nil, QueryDefinition{}, access, "", false, err
 		}

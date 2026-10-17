@@ -292,9 +292,26 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		scoredBody = "WITH " + strings.Join(innerCTEs, ",\n") + "\n" + scoredBody
 	}
 	scoredCTE := "WITH scored AS (\n" + scoredBody + "\n)"
+	// The alphabetical jump narrows the ranked rows only. Applying it while
+	// matching would let a letter with no title hits fall back to overview
+	// matches the unfiltered search never returns.
+	namePrefix := strings.TrimSpace(filter.NamePrefix) != ""
+	prefixIdx := 0
+	if namePrefix {
+		prefixIdx = argIdx
+		args = append(args, likePrefixPattern(filter.NamePrefix))
+		argIdx++
+	}
 	if cursor != nil && cursor.request.GroupByWork {
+		if namePrefix || cursor.request.Definition.Limit != nil {
+			// Like the combined path: prefix, then work representative, then cap.
+			scoredBody = "SELECT * FROM (" + scoredBody + ") source_scored"
+			if namePrefix {
+				scoredBody += " WHERE " + searchNamePrefixCondition("source_scored", prefixIdx)
+			}
+		}
 		if cap := cursor.request.Definition.Limit; cap != nil {
-			scoredBody = "SELECT * FROM (" + scoredBody + ") source_scored" + fmt.Sprintf(" ORDER BY %s LIMIT $%d", mixedSearchOrder(""), argIdx)
+			scoredBody += fmt.Sprintf(" ORDER BY %s LIMIT $%d", mixedSearchOrder(""), argIdx)
 			args = append(args, *cap)
 			argIdx++
 		}
@@ -310,6 +327,14 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		// (empty input returned above), types $1 explicitly, and is planned as a
 		// one-time filter without widening either indexed title lookup.
 		postFilter += ` WHERE $1::text IS NOT NULL`
+	}
+	if namePrefix {
+		condition := searchNamePrefixCondition("scored", prefixIdx)
+		if strings.Contains(postFilter, " WHERE ") {
+			postFilter += " AND " + condition
+		} else {
+			postFilter += " WHERE " + condition
+		}
 	}
 
 	if cursor != nil {
@@ -376,11 +401,11 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		JOIN %s ON true
 		ORDER BY %s`, qualifiedItemColumns("hydrated"), finalTotalColumn, hydratedRelation, mixedSearchOrder("page."))
 	countSQL = scoredCTE + fmt.Sprintf("\nSELECT COUNT(*)\n%s", countPostFilter)
-	if cursor == nil || !cursor.request.GroupByWork {
+	if (cursor == nil || !cursor.request.GroupByWork) && !namePrefix {
 		countSQL = buildMixedSearchCountSQL(mediaTitleConditions, mediaOverviewConditions, includeMediaItems,
 			episodeTitle, episodeOverview, lookup, yearIdx, phraseIdx)
 	}
-	if cursor != nil && episodeTitle != nil && !includeMediaItems {
+	if cursor != nil && episodeTitle != nil && !includeMediaItems && !namePrefix {
 		cursor.exactSQL, cursor.exactArgs = buildEpisodeExactTierSQL(parsed, filter, cursor, episodeTitle, lookup, yearIdx, phraseIdx, limit)
 	}
 	return dataSQL, countSQL, args
@@ -647,6 +672,31 @@ func buildMixedSearchCandidateBranch(
 		overviewRankExpr,
 		phraseIdx, titleVector, phraseIdx,
 		fromClause, strings.Join(conditions, " AND "))
+}
+
+// searchNamePrefixCondition matches a scored search row against the key title
+// sorting orders by: the sort title (or title) for media items, and for
+// episodes the expression episode_catalog_entries.sort_key is built from.
+// Rows are already narrowed by the text match, and each probe is a
+// primary-key lookup.
+func searchNamePrefixCondition(alias string, argIdx int) string {
+	return fmt.Sprintf(`(CASE WHEN %[3]s.type = 'episode'
+		THEN EXISTS (SELECT 1 FROM episodes e WHERE e.content_id = %[3]s.content_id AND LOWER(COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text)) LIKE $%[1]d ESCAPE '\')
+		ELSE EXISTS (SELECT 1 FROM media_items mi WHERE mi.content_id = %[3]s.content_id AND %[2]s) END)`,
+		argIdx, sortTitlePrefixCondition(argIdx), alias)
+}
+
+// appendSearchNamePrefix applies the alphabetical jump to one candidate branch
+// before sorting and limits. keyExpr is the key title sorting orders by: the
+// sort title (or title) for media items, sort_key for episodes.
+func appendSearchNamePrefix(keyExpr string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	prefix := strings.TrimSpace(filter.NamePrefix)
+	if prefix == "" {
+		return
+	}
+	*conditions = append(*conditions, fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", keyExpr, *argIdx))
+	*args = append(*args, likePrefixPattern(prefix))
+	*argIdx++
 }
 
 // appendEpisodeCatalogSearchAccess applies episode-library policy directly to
