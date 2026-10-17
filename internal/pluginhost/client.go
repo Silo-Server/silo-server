@@ -477,6 +477,18 @@ func (c *HTTPRoutesClient) Handle(ctx context.Context, req *pluginv1.HandleHTTPR
 	return c.client.Handle(callCtx, req)
 }
 
+func (c *WatchSyncProviderClient) InitAuthorize(ctx context.Context, req *pluginv1.WatchSyncInitAuthorizeRequest) (*pluginv1.WatchSyncInitAuthorizeResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.InitAuthorize(callCtx, req)
+}
+
+func (c *WatchSyncProviderClient) ExchangeCode(ctx context.Context, req *pluginv1.WatchSyncExchangeCodeRequest) (*pluginv1.WatchSyncCredentialResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ExchangeCode(callCtx, req)
+}
+
 func (c *WatchSyncProviderClient) ExchangeAPIKey(ctx context.Context, req *pluginv1.WatchSyncExchangeAPIKeyRequest) (*pluginv1.WatchSyncCredentialResponse, error) {
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()

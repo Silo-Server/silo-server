@@ -1396,6 +1396,10 @@ func main() {
 		watchProviderRegistry = watchsync.NewRegistry()
 		watchProviderRepo = watchsync.NewPostgresRepository(deps.DB, deps.SecretCipher)
 		watchProviderService = watchsync.NewService(watchProviderRepo, watchProviderRegistry)
+		watchProviderService.SetPublicURL(cfg.Server.PublicURL)
+		if deps.OnConfigChange != nil {
+			deps.OnConfigChange(func(_, updated *config.Config) { watchProviderService.SetPublicURL(updated.Server.PublicURL) })
+		}
 		deps.WatchProviderService = watchProviderService
 		deps.WatchProviderRegistry = watchProviderRegistry
 	}

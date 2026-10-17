@@ -32,6 +32,7 @@ export interface WatchProviderConnectionSetting {
 export const WatchProviderAuthMethod = {
   DeviceCode: "device_code",
   APIKey: "api_key",
+  AuthorizationCode: "authorization_code",
 } as const;
 export type WatchProviderAuthMethod =
   (typeof WatchProviderAuthMethod)[keyof typeof WatchProviderAuthMethod];
@@ -80,6 +81,7 @@ export interface WatchProviderConnection {
   /** Values of the provider's connection_settings, defaults included. Present once connected. */
   connection_settings?: Record<string, unknown>;
   credentials_configured: boolean;
+  oauth_redirect_uri?: string;
   connection_config_schema?: PluginConfigSchema[];
   last_inbound_sync_at?: string;
   last_progress_sync_at?: string;
@@ -187,6 +189,10 @@ export async function fetchWatchProviderConnection(provider: string) {
 
 export function startWatchProviderDeviceAuth(provider: string) {
   return v2("POST /api/v2/watch-providers/{provider}/auth/device-code", { path: { provider } });
+}
+
+export function startWatchProviderOAuth(provider: string) {
+  return v2("POST /api/v2/watch-providers/{provider}/auth/authorize", { path: { provider } });
 }
 
 export async function pollWatchProviderDeviceAuth(provider: string, authSessionId: string) {
@@ -324,6 +330,14 @@ export function useStartWatchProviderDeviceAuth(provider: string) {
     retry: false,
     mutationFn: () => startWatchProviderDeviceAuth(provider),
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to start auth"),
+  });
+}
+
+export function useStartWatchProviderOAuth(provider: string) {
+  return useMutation({
+    retry: false,
+    mutationFn: () => startWatchProviderOAuth(provider),
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to start sign-in"),
   });
 }
 

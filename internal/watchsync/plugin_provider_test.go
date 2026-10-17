@@ -29,24 +29,44 @@ const (
 )
 
 type fakeWatchSyncPluginClient struct {
-	exchangeResponse    *pluginv1.WatchSyncCredentialResponse
-	refreshResponse     *pluginv1.WatchSyncCredentialResponse
-	accountResponse     *pluginv1.WatchSyncGetAccountResponse
-	applyResponse       *pluginv1.WatchSyncApplyEventsResponse
-	deviceStartResponse *pluginv1.WatchSyncDeviceAuthorizationServiceStartResponse
-	devicePollResponse  *pluginv1.WatchSyncDeviceAuthorizationServicePollResponse
-	listResponse        *pluginv1.WatchSyncListRemoteStateResponse
-	listResponses       []*pluginv1.WatchSyncListRemoteStateResponse
-	applyStatus         pluginv1.WatchSyncApplyStatus // answers every event when applyResponse is nil
-	applyFault          *pluginv1.WatchSyncFault      // attached to each applyStatus answer
-	applyErr            error
-	applyRequest        *pluginv1.WatchSyncApplyEventsRequest
-	exchangeRequest     *pluginv1.WatchSyncExchangeAPIKeyRequest
-	refreshRequest      *pluginv1.WatchSyncRefreshCredentialsRequest
-	accountRequest      *pluginv1.WatchSyncGetAccountRequest
-	deviceStartRequest  *pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest
-	devicePollRequest   *pluginv1.WatchSyncDeviceAuthorizationServicePollRequest
-	listRequests        []*pluginv1.WatchSyncListRemoteStateRequest
+	exchangeResponse     *pluginv1.WatchSyncCredentialResponse
+	refreshResponse      *pluginv1.WatchSyncCredentialResponse
+	accountResponse      *pluginv1.WatchSyncGetAccountResponse
+	applyResponse        *pluginv1.WatchSyncApplyEventsResponse
+	authorizeResponse    *pluginv1.WatchSyncInitAuthorizeResponse
+	exchangeCodeResponse *pluginv1.WatchSyncCredentialResponse
+	deviceStartResponse  *pluginv1.WatchSyncDeviceAuthorizationServiceStartResponse
+	devicePollResponse   *pluginv1.WatchSyncDeviceAuthorizationServicePollResponse
+	listResponse         *pluginv1.WatchSyncListRemoteStateResponse
+	listResponses        []*pluginv1.WatchSyncListRemoteStateResponse
+	applyStatus          pluginv1.WatchSyncApplyStatus // answers every event when applyResponse is nil
+	applyFault           *pluginv1.WatchSyncFault      // attached to each applyStatus answer
+	applyErr             error
+	applyRequest         *pluginv1.WatchSyncApplyEventsRequest
+	exchangeRequest      *pluginv1.WatchSyncExchangeAPIKeyRequest
+	refreshRequest       *pluginv1.WatchSyncRefreshCredentialsRequest
+	accountRequest       *pluginv1.WatchSyncGetAccountRequest
+	authorizeRequest     *pluginv1.WatchSyncInitAuthorizeRequest
+	exchangeCodeRequest  *pluginv1.WatchSyncExchangeCodeRequest
+	deviceStartRequest   *pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest
+	devicePollRequest    *pluginv1.WatchSyncDeviceAuthorizationServicePollRequest
+	listRequests         []*pluginv1.WatchSyncListRemoteStateRequest
+}
+
+func (f *fakeWatchSyncPluginClient) InitAuthorize(_ context.Context, req *pluginv1.WatchSyncInitAuthorizeRequest) (*pluginv1.WatchSyncInitAuthorizeResponse, error) {
+	f.authorizeRequest = req
+	if f.authorizeResponse != nil {
+		return f.authorizeResponse, nil
+	}
+	return &pluginv1.WatchSyncInitAuthorizeResponse{}, nil
+}
+
+func (f *fakeWatchSyncPluginClient) ExchangeCode(_ context.Context, req *pluginv1.WatchSyncExchangeCodeRequest) (*pluginv1.WatchSyncCredentialResponse, error) {
+	f.exchangeCodeRequest = req
+	if f.exchangeCodeResponse != nil {
+		return f.exchangeCodeResponse, nil
+	}
+	return &pluginv1.WatchSyncCredentialResponse{}, nil
 }
 
 func (f *fakeWatchSyncPluginClient) StartDeviceAuthorization(_ context.Context, req *pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest) (*pluginv1.WatchSyncDeviceAuthorizationServiceStartResponse, error) {
@@ -156,18 +176,21 @@ func TestPluginProviderUsesConnectionSpecificHistorySource(t *testing.T) {
 }
 
 func TestPluginProviderRejectsUnsupportedInitialDescriptor(t *testing.T) {
-	_, err := NewPluginProvider(PluginProviderOptions{
+	provider, err := NewPluginProvider(PluginProviderOptions{
 		InstallationID: 4,
 		ProviderKey:    testPluginProviderKey,
 		CapabilityID:   testPluginCapabilityID,
 		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
-			AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_AUTHORIZATION_CODE},
+			AuthMethods: []pluginv1.WatchSyncAuthMethod{
+				pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE,
+				pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_AUTHORIZATION_CODE,
+			},
 			ExportWatched: true,
 		},
 		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) { return nil, nil },
 	})
-	if err == nil {
-		t.Fatal("expected authorization-code-only descriptor to be rejected")
+	if err != nil || provider.AuthMethod() != AuthMethodAuthorizationCode {
+		t.Fatalf("authorization code = %v, %v", provider, err)
 	}
 
 	_, err = NewPluginProvider(PluginProviderOptions{
@@ -781,6 +804,23 @@ func TestPluginProviderRejectsConnectionConfigForDeviceAuthorization(t *testing.
 	})
 	if err == nil || !strings.Contains(err.Error(), "connection config requires API-key authentication") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPluginProviderKeepsAPIKeyWhenAuthCodeHasConnectionConfig(t *testing.T) {
+	provider, err := NewPluginProvider(PluginProviderOptions{
+		InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
+		Descriptor: &pluginv1.WatchSyncProviderDescriptor{AuthMethods: []pluginv1.WatchSyncAuthMethod{
+			pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_AUTHORIZATION_CODE,
+			pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY,
+		}, ExportWatched: true},
+		ConnectionConfigSchema: []*pluginv1.ConfigSchema{{Key: "server"}},
+		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
+			return &fakeWatchSyncPluginClient{}, nil
+		},
+	})
+	if err != nil || provider.AuthMethod() != AuthMethodAPIKey {
+		t.Fatalf("auth method = %q err=%v", provider.AuthMethod(), err)
 	}
 }
 

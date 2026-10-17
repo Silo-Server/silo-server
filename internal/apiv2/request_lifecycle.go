@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -272,6 +274,13 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
+		if body.AuthMethod == watchsync.AuthMethodAuthorizationCode {
+			if oauth, ok := providers.(interface{ OAuthRedirectURI() (string, error) }); ok {
+				if uri, uriErr := oauth.OAuthRedirectURI(); uriErr == nil {
+					body.OAuthRedirectURI = uri
+				}
+			}
+		}
 		return &WatchProviderConnectionOutput{Body: body}, nil
 	}
 	Register(reg, op(http.MethodGet, "/watch-providers/{provider}/connection", opGetWatchProviderConnection, "Get the active profile's connection."), func(ctx context.Context, in *WatchProviderInput) (*WatchProviderConnectionOutput, error) {
@@ -345,6 +354,118 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		return nil, nil
 	})
+	type WatchProviderOAuthStart struct {
+		AuthorizationURL string `json:"authorization_url" format:"uri" doc:"Send the browser here to approve the provider"`
+		RedirectURI      string `json:"redirect_uri" format:"uri" doc:"Address that must be registered on the provider app"`
+	}
+	type WatchProviderOAuthStartOutput struct {
+		SetCookie http.Cookie `header:"Set-Cookie" doc:"HttpOnly SameSite=Lax binder scoped to the oauth callback path; only this browser can finish the sign-in"`
+		Body      WatchProviderOAuthStart
+	}
+	Register(reg, op(http.MethodPost, "/watch-providers/{provider}/auth/authorize", "startWatchProviderOAuth", "Start browser sign-in with a watch provider."), func(ctx context.Context, in *WatchProviderInput) (*WatchProviderOAuthStartOutput, error) {
+		u, p, err := scope(ctx)
+		if err != nil {
+			return nil, err
+		}
+		oauth, ok := providers.(interface {
+			OAuthRedirectURI() (string, error)
+			OnPublicOrigin(*http.Request) bool
+			StartOAuth(context.Context, int, string, string) (watchsync.OAuthStart, error)
+		})
+		if !ok {
+			return nil, unavailable("watch provider sign-in")
+		}
+		if _, err := oauth.OAuthRedirectURI(); err != nil {
+			return nil, watchProviderProblem(err)
+		}
+		if r := requestFrom(ctx); r == nil || !oauth.OnPublicOrigin(r) {
+			return nil, NewProblem(TypeConflict, "Open Silo at its public URL to connect a watch provider.")
+		}
+		started, err := oauth.StartOAuth(ctx, u, p, in.Provider)
+		if err != nil {
+			return nil, watchProviderProblem(err)
+		}
+		return &WatchProviderOAuthStartOutput{
+			SetCookie: started.BinderCookie,
+			Body:      WatchProviderOAuthStart{AuthorizationURL: started.AuthorizationURL, RedirectURI: started.RedirectURI},
+		}, nil
+	})
+	callback := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: Prefix + "/watch-providers/oauth/callback", OperationID: "completeWatchProviderOAuth", Tags: []string{requestsTag}, Summary: "Finish browser sign-in and redirect to watch-provider settings.", Parameters: []*huma.Param{
+		{Name: "state", In: "query", Schema: &huma.Schema{Type: huma.TypeString}},
+		{Name: "code", In: "query", Schema: &huma.Schema{Type: huma.TypeString}},
+		{Name: "error", In: "query", Schema: &huma.Schema{Type: huma.TypeString}},
+	}, Responses: map[string]*huma.Response{"302": {Description: "Sign-in outcome redirect to watch-provider settings", Headers: map[string]*huma.Header{"Location": {Schema: &huma.Schema{Type: huma.TypeString}}}, Content: map[string]*huma.MediaType{"text/html": {Schema: &huma.Schema{Type: huma.TypeString}}}}}}, Class: ClassPublic, ServiceBacked: true, RateLimitBucket: loginDomain}
+	RegisterRaw(reg, RawOperation{Operation: callback, Protocol: "redirect", Reason: "The provider redirects the browser here without Silo login headers; the stored one-time state and browser-binding cookie authenticate the sign-in."}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		redirectBack := func(provider, code string) {
+			query := url.Values{}
+			if provider != "" {
+				query.Set("watch_provider", provider)
+			}
+			if code != "" {
+				query.Set("watch_provider_error", code)
+			}
+			target := "/settings/watch-providers"
+			if encoded := query.Encode(); encoded != "" {
+				target += "?" + encoded
+			}
+			http.Redirect(w, r, target, http.StatusFound)
+		}
+		oauth, ok := providers.(interface {
+			FinishOAuth(context.Context, string, string, string) (string, error)
+			OAuthRedirectURI() (string, error)
+			OAuthBinderCallbackURL(context.Context, string) (string, error)
+		})
+		if !ok {
+			redirectBack("", "unavailable")
+			return
+		}
+		query := r.URL.Query()
+		state := query.Get("state")
+		clearBinder := func() {
+			if state == "" {
+				return
+			}
+			callbackURL, err := oauth.OAuthBinderCallbackURL(r.Context(), state)
+			if err != nil || callbackURL == "" {
+				if uri, uriErr := oauth.OAuthRedirectURI(); uriErr == nil {
+					callbackURL = uri
+				} else {
+					callbackURL = watchsync.OAuthCallbackPath
+				}
+			}
+			cookie := watchsync.ClearOAuthBinderCookie(state, callbackURL)
+			http.SetCookie(w, &cookie)
+		}
+		if query.Get("error") != "" {
+			clearBinder()
+			redirectBack("", "denied")
+			return
+		}
+		binder := ""
+		if c, err := r.Cookie(watchsync.OAuthBinderCookieNameForState(state)); err == nil {
+			binder = c.Value
+		}
+		provider, err := oauth.FinishOAuth(r.Context(), state, query.Get("code"), binder)
+		clearBinder()
+		if err != nil {
+			code := "exchange_failed"
+			switch {
+			case errors.Is(err, watchsync.ErrAuthSessionMismatch):
+				code = "invalid"
+			case errors.Is(err, watchsync.ErrAuthSessionExpired):
+				code = "expired"
+			case errors.Is(err, watchsync.ErrAuthSessionCompleted):
+				code = "expired"
+			case errors.Is(err, watchsync.ErrPublicURLRequired), errors.Is(err, watchsync.ErrPublicURLNotHTTPS):
+				code = "public_url"
+			}
+			redirectBack(provider, code)
+			return
+		}
+		redirectBack(provider, "")
+	}))
 	Register(reg, op(http.MethodPost, "/watch-providers/{provider}/auth/device-code", "startWatchProviderDeviceAuth", "Start device authorization with a watch provider."), func(ctx context.Context, in *WatchProviderInput) (*WatchProviderDeviceAuthOutput, error) {
 		u, p, err := scope(ctx)
 		if err != nil {
@@ -434,7 +555,8 @@ func watchProviderProblem(err error) *Problem {
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, watchsync.ErrConnectionNotFound) || errors.Is(err, watchsync.ErrAuthSessionMismatch) {
 		return NewProblem(TypeNotFound, "Watch-provider connection or authorization session not found.")
 	}
-	if errors.Is(err, watchsync.ErrAuthSessionCompleted) || errors.Is(err, watchsync.ErrAuthSessionExpired) || watchsync.IsDeviceAuthPending(err) {
+	if errors.Is(err, watchsync.ErrAuthSessionCompleted) || errors.Is(err, watchsync.ErrAuthSessionExpired) || watchsync.IsDeviceAuthPending(err) ||
+		errors.Is(err, watchsync.ErrPublicURLRequired) || errors.Is(err, watchsync.ErrPublicURLNotHTTPS) {
 		return NewProblem(TypeConflict, err.Error())
 	}
 	if _, ok := errors.AsType[watchsync.ProviderCapabilityError](err); ok {
@@ -528,6 +650,7 @@ type WatchProviderConnection struct {
 	ExportRatingsEnabled         bool                      `json:"export_ratings_enabled"`
 	SyncDroppedEnabled           bool                      `json:"sync_dropped_enabled"`
 	CredentialsConfigured        bool                      `json:"credentials_configured"`
+	OAuthRedirectURI             string                    `json:"oauth_redirect_uri,omitempty" doc:"https address to register on the provider when auth_method is authorization_code"`
 	ConnectionConfigSchema       []AdminPluginConfigSchema `json:"connection_config_schema,omitempty"`
 	LastInboundSyncAt            *Instant                  `json:"last_inbound_sync_at,omitempty"`
 	LastProgressSyncAt           *Instant                  `json:"last_progress_sync_at,omitempty"`

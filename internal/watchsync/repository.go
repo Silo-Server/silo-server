@@ -21,6 +21,7 @@ type Repository interface {
 	GetServerSetting(ctx context.Context, key string) (string, error)
 	UpsertAuthSession(ctx context.Context, session DeviceAuthSession) (DeviceAuthSession, error)
 	GetAuthSession(ctx context.Context, id string) (DeviceAuthSession, error)
+	ClaimAuthSession(ctx context.Context, id string, at time.Time) (DeviceAuthSession, error)
 	UpsertConnection(ctx context.Context, conn Connection) (Connection, error)
 	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 	GetConnection(ctx context.Context, provider string, userID int, profileID string) (Connection, bool, error)
@@ -306,6 +307,39 @@ func (r *PostgresRepository) GetAuthSession(ctx context.Context, id string) (Dev
 		return DeviceAuthSession{}, fmt.Errorf("get watch provider auth session %q: %w", id, err)
 	}
 	return session, nil
+}
+
+// ClaimAuthSession marks an incomplete, unexpired auth session completed in one
+// update so a second concurrent FinishOAuth cannot exchange another code for it.
+func (r *PostgresRepository) ClaimAuthSession(ctx context.Context, id string, at time.Time) (DeviceAuthSession, error) {
+	row := r.pool.QueryRow(ctx, `
+		UPDATE watch_provider_auth_sessions
+		SET completed_at = $2, updated_at = now()
+		WHERE id = $1::uuid
+		  AND completed_at IS NULL
+		  AND expires_at > $2
+		RETURNING
+			id::text, provider, user_id, profile_id, device_code, user_code,
+			verification_url, interval_seconds, expires_at, completed_at
+	`, id, at)
+	session, err := r.scanDeviceAuthSession(row)
+	if err == nil {
+		return session, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return DeviceAuthSession{}, fmt.Errorf("claim watch provider auth session %q: %w", id, err)
+	}
+	existing, getErr := r.GetAuthSession(ctx, id)
+	if getErr != nil {
+		return DeviceAuthSession{}, getErr
+	}
+	if existing.CompletedAt != nil {
+		return existing, ErrAuthSessionCompleted
+	}
+	if !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(at) {
+		return existing, ErrAuthSessionExpired
+	}
+	return existing, ErrAuthSessionMismatch
 }
 
 func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connection) (Connection, error) {

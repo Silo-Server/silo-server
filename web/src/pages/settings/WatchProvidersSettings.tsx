@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import {
   AlertCircle,
   Check,
@@ -23,6 +24,7 @@ import {
   useDeleteWatchProviderConnection,
   usePollWatchProviderDeviceAuth,
   useStartWatchProviderDeviceAuth,
+  useStartWatchProviderOAuth,
   useTriggerWatchProviderSync,
   useUpdateWatchProviderConnection,
   useWatchProviderConnection,
@@ -400,6 +402,7 @@ function WatchProviderCard({
   const { data: savedConnection, isLoading, isFetching } = useWatchProviderConnection(providerKey);
   const updateConnection = useUpdateWatchProviderConnection(providerKey);
   const startAuth = useStartWatchProviderDeviceAuth(providerKey);
+  const startOAuth = useStartWatchProviderOAuth(providerKey);
   const pollAuth = usePollWatchProviderDeviceAuth(providerKey);
   const connectAPIKey = useConnectWatchProviderAPIKey(providerKey);
   const deleteConnection = useDeleteWatchProviderConnection(providerKey);
@@ -460,11 +463,14 @@ function WatchProviderCard({
     (connection.connected && !connection.etag) ||
     updateConnection.isPending ||
     startAuth.isPending ||
+    startOAuth.isPending ||
     pollAuth.isPending ||
     connectAPIKey.isPending ||
     deleteConnection.isPending;
   const displayName = connection.display_name;
   const usesAPIKey = connection.auth_method === WatchProviderAuthMethod.APIKey;
+  const usesAuthorizationCode =
+    connection.auth_method === WatchProviderAuthMethod.AuthorizationCode;
   const showAuth = Boolean(authSession) && !connection.connected;
   const showAPIKey = usesAPIKey && apiKeyPrompt && !connection.connected;
   const runInfo = connection.connected ? deriveRunInfo(connection, latestRun) : null;
@@ -503,6 +509,8 @@ function WatchProviderCard({
     if (!connection.credentials_configured) return "Server setup required.";
     if (usesAPIKey)
       return `Connect with your ${displayName} API key to import watch history and scrobble playback.`;
+    if (usesAuthorizationCode)
+      return `Connect in the browser. Register the redirect address below on the ${displayName} app first.`;
     return "Connect to start importing watch history and scrobbling playback.";
   })();
 
@@ -535,6 +543,14 @@ function WatchProviderCard({
   const handleStartConnect = () => {
     if (usesAPIKey) {
       setApiKeyPrompt(true);
+      return;
+    }
+    if (usesAuthorizationCode) {
+      startOAuth.mutate(undefined, {
+        onSuccess: (started) => {
+          window.location.assign(started.authorization_url);
+        },
+      });
       return;
     }
     startAuth.mutate(undefined, {
@@ -614,7 +630,7 @@ function WatchProviderCard({
               onClick={handleStartConnect}
               className="flex-1 sm:flex-none"
             >
-              {startAuth.isPending || connectAPIKey.isPending ? (
+              {startAuth.isPending || startOAuth.isPending || connectAPIKey.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <CheckCircle2 className="h-4 w-4" />
@@ -624,6 +640,36 @@ function WatchProviderCard({
           )}
         </div>
       </header>
+
+      {usesAuthorizationCode && !connection.connected && connection.oauth_redirect_uri ? (
+        <div className="border-border/60 mt-4 rounded-xl border px-3 py-3">
+          <div className="text-sm font-medium">Redirect URI</div>
+          <p className="text-muted-foreground mt-0.5 text-xs leading-snug">
+            Paste this https address into the {displayName} app as its redirect URI.
+          </p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <code className="border-border bg-background/60 min-w-0 flex-1 truncate rounded-md border px-3 py-2 text-xs">
+              {connection.oauth_redirect_uri}
+            </code>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(connection.oauth_redirect_uri ?? "");
+                  toast.success("Redirect URI copied");
+                } catch {
+                  toast.error("Failed to copy the redirect URI");
+                }
+              }}
+            >
+              <Copy className="h-4 w-4" />
+              Copy
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {showAuth && authSession ? (
         <div className="mt-4">
@@ -929,8 +975,29 @@ function WatchProviderCard({
   );
 }
 
+const oauthReturnMessages: Record<string, string> = {
+  denied: "The provider did not approve the sign-in.",
+  invalid: "That sign-in link is no longer valid. Start again.",
+  expired: "The sign-in expired. Start again.",
+  public_url: "Set the server public URL to this server's https address, then start again.",
+  unavailable: "Browser sign-in is not available on this server.",
+  exchange_failed: "The provider did not finish the sign-in.",
+};
+
 export default function WatchProvidersSettings() {
   const { data, isLoading } = useWatchProviders();
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const provider = params.get("watch_provider");
+    const error = params.get("watch_provider_error");
+    if (!provider && !error) return;
+    if (error) toast.error(oauthReturnMessages[error] ?? oauthReturnMessages.exchange_failed);
+    else toast.success("Watch provider connected");
+    const next = new URLSearchParams(params);
+    next.delete("watch_provider");
+    next.delete("watch_provider_error");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
 
   if (isLoading) {
     return (

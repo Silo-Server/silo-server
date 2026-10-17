@@ -24,6 +24,8 @@ import (
 )
 
 type WatchSyncPluginClient interface {
+	InitAuthorize(context.Context, *pluginv1.WatchSyncInitAuthorizeRequest) (*pluginv1.WatchSyncInitAuthorizeResponse, error)
+	ExchangeCode(context.Context, *pluginv1.WatchSyncExchangeCodeRequest) (*pluginv1.WatchSyncCredentialResponse, error)
 	ExchangeAPIKey(context.Context, *pluginv1.WatchSyncExchangeAPIKeyRequest) (*pluginv1.WatchSyncCredentialResponse, error)
 	StartDeviceAuthorization(context.Context, *pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest) (*pluginv1.WatchSyncDeviceAuthorizationServiceStartResponse, error)
 	PollDeviceAuthorization(context.Context, *pluginv1.WatchSyncDeviceAuthorizationServicePollRequest) (*pluginv1.WatchSyncDeviceAuthorizationServicePollResponse, error)
@@ -105,7 +107,13 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 		return nil, fmt.Errorf("watch sync plugin %q %w", options.ProviderKey, err)
 	}
 	if authMethod != AuthMethodAPIKey && hasWatchSyncConnectionConfigSchema(options.ConnectionConfigSchema) {
-		return nil, fmt.Errorf("watch sync plugin %q connection config requires API-key authentication", options.ProviderKey)
+		if watchSyncDescriptorHasAuthMethod(options.Descriptor, pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY) {
+			// Browser OAuth does not collect connection config yet; keep the
+			// API-key path so these providers continue to load.
+			authMethod = AuthMethodAPIKey
+		} else {
+			return nil, fmt.Errorf("watch sync plugin %q connection config requires API-key authentication", options.ProviderKey)
+		}
 	}
 	if options.ResolveClient == nil {
 		return nil, fmt.Errorf("watch sync plugin client resolver is required")
@@ -250,8 +258,81 @@ func (p *PluginProvider) ConnectWithAPIKeyConfig(
 	return tokens, account, nil
 }
 
+func (p *PluginProvider) StartAuthorization(ctx context.Context, redirectURI, state string) (string, []byte, error) {
+	if p.authMethod != AuthMethodAuthorizationCode {
+		return "", nil, errors.New("watch sync plugin does not support authorization-code sign-in")
+	}
+	config, err := p.providerConfig(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
+	if err != nil {
+		return "", nil, watchSyncUnavailableError()
+	}
+	response, err := client.InitAuthorize(ctx, &pluginv1.WatchSyncInitAuthorizeRequest{
+		CapabilityId:   p.capabilityID,
+		ProviderConfig: config,
+		RedirectUri:    redirectURI,
+		State:          state,
+	})
+	if err != nil {
+		return "", nil, watchSyncRPCError()
+	}
+	if err := watchSyncFaultError(p.Key(), response.GetFault(), providerConfigSecretStrings(config)...); err != nil {
+		return "", nil, err
+	}
+	authorizationURL, err := validAuthorizationURL(response.GetAuthorizationUrl())
+	if err != nil {
+		return "", nil, err
+	}
+	if len(response.GetProviderState()) == 0 {
+		return "", nil, errors.New("watch sync plugin returned an incomplete authorization")
+	}
+	return authorizationURL, response.GetProviderState(), nil
+}
+
+func (p *PluginProvider) ExchangeAuthorizationCode(ctx context.Context, redirectURI, code string, providerState []byte) (TokenSet, error) {
+	if p.authMethod != AuthMethodAuthorizationCode {
+		return TokenSet{}, errors.New("watch sync plugin does not support authorization-code sign-in")
+	}
+	config, err := p.providerConfig(ctx)
+	if err != nil {
+		return TokenSet{}, err
+	}
+	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
+	if err != nil {
+		return TokenSet{}, watchSyncUnavailableError()
+	}
+	response, err := client.ExchangeCode(ctx, &pluginv1.WatchSyncExchangeCodeRequest{
+		CapabilityId:      p.capabilityID,
+		ProviderConfig:    config,
+		RedirectUri:       redirectURI,
+		AuthorizationCode: code,
+		ProviderState:     providerState,
+	})
+	if err != nil {
+		return TokenSet{}, watchSyncRPCError()
+	}
+	faultSecrets := append([]string{code}, providerConfigSecretStrings(config)...)
+	if err := watchSyncFaultError(p.Key(), response.GetFault(), faultSecrets...); err != nil {
+		return TokenSet{}, err
+	}
+	return tokenSetFromProto(response.GetCredentials())
+}
+
+func validAuthorizationURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	if err != nil || parsed == nil || !parsed.IsAbs() || parsed.Host == "" || parsed.User != nil || parsed.Scheme != "https" {
+		return "", errors.New("watch sync plugin returned an invalid authorization URL")
+	}
+	return parsed.String(), nil
+}
+
 func (p *PluginProvider) StartDeviceAuth(ctx context.Context, _ ServerConfig) (DeviceAuthSession, error) {
-	if p.authMethod != AuthMethodDeviceCode {
+	if p.authMethod != AuthMethodDeviceCode &&
+		!watchSyncDescriptorHasAuthMethod(p.descriptor, pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE) {
 		return DeviceAuthSession{}, errors.New("watch sync plugin does not support device authorization")
 	}
 	config, err := p.providerConfig(ctx)
@@ -1352,25 +1433,44 @@ func resultForEvent(results []*pluginv1.WatchSyncApplyResult, eventID string) *p
 }
 
 func supportedWatchSyncAuthMethod(descriptor *pluginv1.WatchSyncProviderDescriptor) (string, error) {
-	supported := make(map[string]struct{}, 2)
+	var apiKey, device, authCode bool
 	for _, method := range descriptor.GetAuthMethods() {
 		switch method {
+		case pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_AUTHORIZATION_CODE:
+			authCode = true
 		case pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY:
-			supported[AuthMethodAPIKey] = struct{}{}
+			apiKey = true
 		case pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE:
-			supported[AuthMethodDeviceCode] = struct{}{}
+			device = true
 		}
 	}
-	if len(supported) > 1 {
+	if apiKey && device {
 		return "", errors.New("advertises multiple host authentication methods; exactly one is required")
 	}
-	if _, ok := supported[AuthMethodAPIKey]; ok {
+	// Browser sign-in wins when a plugin can do it. Device code can stay in
+	// the descriptor so StartDeviceAuth still works for older hosts/clients.
+	if authCode {
+		return AuthMethodAuthorizationCode, nil
+	}
+	if apiKey {
 		return AuthMethodAPIKey, nil
 	}
-	if _, ok := supported[AuthMethodDeviceCode]; ok {
+	if device {
 		return AuthMethodDeviceCode, nil
 	}
 	return "", errors.New("does not advertise an authentication method supported by the host")
+}
+
+func watchSyncDescriptorHasAuthMethod(descriptor *pluginv1.WatchSyncProviderDescriptor, method pluginv1.WatchSyncAuthMethod) bool {
+	if descriptor == nil {
+		return false
+	}
+	for _, advertised := range descriptor.GetAuthMethods() {
+		if advertised == method {
+			return true
+		}
+	}
+	return false
 }
 
 func supportedWatchSyncMediaTypes(descriptor *pluginv1.WatchSyncProviderDescriptor) (map[pluginv1.WatchSyncMediaType]struct{}, error) {

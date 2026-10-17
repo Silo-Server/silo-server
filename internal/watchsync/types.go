@@ -47,8 +47,18 @@ const (
 )
 
 const (
-	AuthMethodDeviceCode = "device_code"
-	AuthMethodAPIKey     = "api_key"
+	AuthMethodDeviceCode        = "device_code"
+	AuthMethodAPIKey            = "api_key"
+	AuthMethodAuthorizationCode = "authorization_code"
+)
+
+// OAuthCallbackPath is the browser callback Trakt and other authorization-code
+// providers must have registered, appended to the server's https public URL.
+const OAuthCallbackPath = "/api/v2/watch-providers/oauth/callback"
+
+var (
+	ErrPublicURLRequired = errors.New("set the server public URL to this Silo's https address before connecting")
+	ErrPublicURLNotHTTPS = errors.New("the server public URL must be https; the provider rejects other redirect addresses")
 )
 
 type Provider interface {
