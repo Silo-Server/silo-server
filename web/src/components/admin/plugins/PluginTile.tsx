@@ -1,8 +1,10 @@
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Check, Download } from "lucide-react";
 import { useLocation } from "react-router";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Button } from "@/components/ui/button";
 import { useInstallPlugin } from "@/hooks/queries/admin/plugins";
@@ -11,6 +13,7 @@ import {
   pluginPagePath,
   pluginSummary,
   sourceLabel,
+  tierNotice,
 } from "@/lib/pluginPresentation";
 import { pluginStatus } from "@/lib/pluginStatus";
 import { cn } from "@/lib/utils";
@@ -156,6 +159,22 @@ export function CatalogPluginTile({
   const capabilities = entry.capabilities ?? [];
   const name = pluginDisplayName(entry.plugin_id, entry.presentation);
   const publisher = entry.presentation?.publisher_name?.trim();
+  // Community and external plugins carry a tier notice; the admin confirms it
+  // before installing, since the tile skips the plugin page that shows it.
+  const notice = tierNotice(entry.source_kind);
+  const [confirmInstall, setConfirmInstall] = useState(false);
+  // The dialog has no Radix trigger, so focus returns to the Install button by
+  // hand; otherwise it falls to the page body and a keyboard user loses their
+  // place in the catalog.
+  const installButton = useRef<HTMLButtonElement>(null);
+
+  function install() {
+    installPlugin.mutate({
+      repository_id: entry.repository_id,
+      plugin_id: entry.plugin_id,
+      version: entry.version,
+    });
+  }
 
   return (
     <TileShell dimmed={isInstalled} state={isInstalled ? "installed" : undefined}>
@@ -182,21 +201,31 @@ export function CatalogPluginTile({
             size="xs"
             variant="outline"
             className="relative z-10"
+            ref={installButton}
             aria-label={`Install ${name}`}
             disabled={installPlugin.isPending}
-            onClick={() =>
-              installPlugin.mutate({
-                repository_id: entry.repository_id,
-                plugin_id: entry.plugin_id,
-                version: entry.version,
-              })
-            }
+            onClick={() => (notice ? setConfirmInstall(true) : install())}
           >
             <Download aria-hidden="true" />
             {installPlugin.isPending ? "Installing…" : "Install"}
           </Button>
         )}
       </TileFooter>
+      {notice ? (
+        <ConfirmDialog
+          open={confirmInstall}
+          onOpenChange={setConfirmInstall}
+          title={`Install ${name}?`}
+          description={`${sourceLabel(entry.source_kind)}. ${notice}`}
+          confirmLabel="Install plugin"
+          onConfirm={install}
+          isPending={installPlugin.isPending}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            installButton.current?.focus();
+          }}
+        />
+      ) : null}
     </TileShell>
   );
 }
