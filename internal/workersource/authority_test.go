@@ -49,6 +49,7 @@ func testAuthority(t *testing.T, data string, limits Limits) (*Authority, string
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(a.Close)
 	return a, path, active
 }
 
@@ -415,7 +416,7 @@ func TestConcurrentReadersRespectQuota(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("first reader did not start")
 	}
-	if w := requestSource(a, source, "GET", ""); w.Code != 429 || w.Header().Get("Retry-After") == "" {
+	if w := requestSource(a, source, "GET", ""); w.Code != 503 || w.Header().Get("Retry-After") == "" {
 		t.Errorf("overlapping reader = %d", w.Code)
 	}
 	close(release)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,7 +38,7 @@ func (a *Authority) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		defer func() { <-a.readers }()
 	default:
 		w.Header().Set("Retry-After", "1")
-		sourceError(w, r, 429)
+		sourceError(w, r, http.StatusServiceUnavailable)
 		return
 	}
 	f, identity, err := openPin(record.Path)
@@ -110,12 +109,15 @@ func (a *Authority) authorizeSourceRequest(r *http.Request) (Record, int, int) {
 	if err := r.Context().Err(); err != nil {
 		return Record{}, 0, 408
 	}
-	record, err := a.options.Store.Get(r.Context(), parts[2])
+	record, err := a.requestRecord(r, parts[2])
 	if err != nil {
 		return Record{}, 0, sourceStatus(err)
 	}
 	if record.Source.NodeID != node || record.Source.Origin != a.options.Origin {
 		return Record{}, 0, 403
+	}
+	if record.OwnerID != a.options.OwnerID {
+		return Record{}, 0, http.StatusServiceUnavailable
 	}
 	if !a.options.Now().Before(record.ExpiresAt) {
 		return Record{}, 0, 410
@@ -123,7 +125,7 @@ func (a *Authority) authorizeSourceRequest(r *http.Request) (Record, int, int) {
 	if err := a.checkActive(r.Context(), node, record.Source.WorkID, record.Source.Generation); err != nil {
 		return Record{}, 0, HTTPStatus(err)
 	}
-	if err := a.options.PathApprover(r.Context(), record.Path, record.Source.Ref.Kind); err != nil {
+	if err := a.catalogAllowed(r.Context(), record.Path, record.Source.Ref.Kind); err != nil {
 		return Record{}, 0, HTTPStatus(err)
 	}
 	match := r.Header.Get("If-Match")
@@ -133,7 +135,7 @@ func (a *Authority) authorizeSourceRequest(r *http.Request) (Record, int, int) {
 	return record, node, 0
 }
 
-func (a *Authority) streamSource(w http.ResponseWriter, r *http.Request, node int, record Record, f *os.File, start, length int64, status int) {
+func (a *Authority) streamSource(w http.ResponseWriter, r *http.Request, node int, record Record, f sourceFile, start, length int64, status int) {
 	buffer := make([]byte, a.options.Limits.ChunkBytes)
 	streamCtx, cancelStream := context.WithCancel(r.Context())
 	defer cancelStream()
@@ -143,10 +145,6 @@ func (a *Authority) streamSource(w http.ResponseWriter, r *http.Request, node in
 	w.WriteHeader(status)
 	for offset, remaining := start, length; remaining > 0; {
 		if !authorized() {
-			return
-		}
-		if err := validatePin(f, record.Path, record.Identity); err != nil {
-			invalidate(err)
 			return
 		}
 		count := min(int64(len(buffer)), remaining)
@@ -163,11 +161,13 @@ func (a *Authority) streamSource(w http.ResponseWriter, r *http.Request, node in
 			}
 			return
 		}
-		if err := validatePin(f, record.Path, record.Identity); err != nil {
-			invalidate(err)
+		if !authorized() {
 			return
 		}
-		if !authorized() {
+		// Check both the descriptor and catalog pathname after the read and
+		// authority lookups, immediately before exposing this chunk's bytes.
+		if err := validatePin(f, record.Path, record.Identity); err != nil {
+			invalidate(err)
 			return
 		}
 		written, writeErr := w.Write(buffer[:n])
@@ -207,7 +207,7 @@ func (a *Authority) sourceStreamChecks(streamCtx context.Context, node int, reco
 		}
 		unexpired := a.options.Now().Before(record.ExpiresAt)
 		authorityMu.Unlock()
-		return unexpired && a.checkActive(checkCtx, node, record.Source.WorkID, record.Source.Generation) == nil && checkCtx.Err() == nil
+		return unexpired && a.checkActive(checkCtx, node, record.Source.WorkID, record.Source.Generation) == nil && a.catalogAllowed(checkCtx, record.Path, record.Source.Ref.Kind) == nil && checkCtx.Err() == nil
 	}
 	invalidate := func(err error) {
 		if streamCtx.Err() == nil {
@@ -219,7 +219,7 @@ func (a *Authority) sourceStreamChecks(streamCtx context.Context, node int, reco
 	return authorized, invalidate
 }
 
-func (a *Authority) watchSource(streamCtx context.Context, cancelStream context.CancelFunc, w http.ResponseWriter, record Record, f *os.File, authorized func() bool, invalidate func(error)) func() {
+func (a *Authority) watchSource(streamCtx context.Context, cancelStream context.CancelFunc, w http.ResponseWriter, record Record, f sourceFile, authorized func() bool, invalidate func(error)) func() {
 	controller := http.NewResponseController(w)
 	_ = controller.SetWriteDeadline(time.Now().Add(sourceWriteHorizon))
 	stopWatch, watchDone := make(chan struct{}), make(chan struct{})

@@ -5,6 +5,12 @@ import (
 	"reflect"
 )
 
+type sourceFile interface {
+	Stat() (os.FileInfo, error)
+	ReadAt([]byte, int64) (int, error)
+	Close() error
+}
+
 // FileIdentity is meaningful only on its source owner. It is not a whole-file
 // digest and cannot establish byte identity between different storage owners.
 type FileIdentity struct {
@@ -71,7 +77,7 @@ func openPin(path string) (*os.File, FileIdentity, error) {
 	return f, identity, nil
 }
 
-func validatePin(f *os.File, path string, pin FileIdentity) error {
+func validatePin(f interface{ Stat() (os.FileInfo, error) }, path string, pin FileIdentity) error {
 	for _, get := range []func() (os.FileInfo, error){
 		f.Stat,
 		func() (os.FileInfo, error) { return os.Stat(path) }, //nolint:gosec // Re-stat the approved catalog path to fence replacement of its pinned regular-file identity.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -94,6 +95,10 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	if err != nil {
 		return nil, err
 	}
+	ownerURL, err := workerSourceOwnerURL(os.Getenv("SILO_WORKER_SOURCE_URL"), origin)
+	if err != nil {
+		return nil, err
+	}
 	registry := &coreWorkerRegistry{repo: repo}
 	if err := registry.refresh(ctx); err != nil {
 		return nil, err
@@ -102,7 +107,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	recipes := noderecipe.NewStore(rdb, 0)
 	deny := playback.NewStreamDeny(rdb)
 	var service *workercontrolcore.Service
-	sources, err := workersource.New(workersource.Options{Origin: origin, Limits: sourceLimits, Store: workersource.NewRedisStore(rdb, ""), PathApprover: func(ctx context.Context, path, kind string) error {
+	sources, err := workersource.New(workersource.Options{Origin: origin, Limits: sourceLimits, OwnerURL: ownerURL, OwnerKey: key, Store: workersource.NewRedisStore(rdb, ""), PathApprover: func(ctx context.Context, path, kind string) error {
 		var active bool
 		var err error
 		switch kind {
@@ -138,6 +143,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	if err != nil {
 		return nil, err
 	}
+	context.AfterFunc(ctx, sources.Close)
 	reportSink := &workerReportSink{rdb: rdb, nodes: registry, recipes: recipes, assignments: store, plans: planstore.NewPostgres(pool), service: func() *workercontrolcore.Service { return service }}
 	outputAuthorities := workercontrolcore.NewRedisOutputAuthorities(rdb, "")
 	executionStatus := func(ctx context.Context, node workercontrolcore.Node, assignment workerwire.Assignment) (bool, error) {
@@ -223,7 +229,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	}, service.RequiresRecipe)
 	refreshWorkerRegistry(ctx, registry)
 	coreHandler := service.Handler()
-	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+	return sources.WrapOwner(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/internal/workers/output-grant" {
 			currentSecret := liveConfig().Auth.JWTSecret
 			if request.Method != http.MethodPost || nodeauth.Verify(request, currentSecret) != nil {
@@ -255,7 +261,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 			return
 		}
 		coreHandler.ServeHTTP(w, request)
-	}), nil
+	})), nil
 }
 
 func initializeHTTPWorkerProxy(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, cfg *config.Config, live func() *config.Config) error {

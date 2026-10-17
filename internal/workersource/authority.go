@@ -3,6 +3,7 @@ package workersource
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,10 +12,12 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/workeridentity"
 	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
@@ -31,6 +34,8 @@ var (
 
 const DefaultTTL = 120 * time.Second
 const RenewAfter = 45 * time.Second
+const DefaultMaxReaders = 32
+const MaximumReaders = 4096
 
 type Limits struct {
 	MaxGrants              int
@@ -38,18 +43,26 @@ type Limits struct {
 	MaxReaders, ChunkBytes int
 }
 type Options struct {
-	Store         Store
-	Origin        string
-	PathApprover  func(context.Context, string, string) error
-	Active        func(context.Context, int, string, uint64) bool
-	ActiveStatus  func(context.Context, int, string, uint64) (bool, error)
-	VerifyRequest func(*http.Request, int) error
-	Limits        Limits
-	Now           func() time.Time
+	// OwnerURL is a core-only, directly reachable per-process endpoint. It is
+	// never included in the source descriptor sent to a standalone worker.
+	OwnerID        string
+	OwnerURL       string
+	OwnerKey       ed25519.PrivateKey
+	OwnerTransport http.RoundTripper
+	Store          Store
+	Origin         string
+	PathApprover   func(context.Context, string, string) error
+	Active         func(context.Context, int, string, uint64) bool
+	ActiveStatus   func(context.Context, int, string, uint64) (bool, error)
+	VerifyRequest  func(*http.Request, int) error
+	Limits         Limits
+	Now            func() time.Time
 }
 
 // Record contains core-only metadata. Only Source may be sent to a worker.
 type Record struct {
+	OwnerID   string            `json:"owner_id"`
+	OwnerURL  string            `json:"owner_url"`
 	Source    workerwire.Source `json:"source"`
 	Path      string            `json:"path"`
 	Identity  FileIdentity      `json:"identity"`
@@ -67,9 +80,14 @@ type Store interface {
 }
 
 type Authority struct {
-	options     Options
-	routePrefix string
-	readers     chan struct{}
+	options        Options
+	routePrefix    string
+	readers        chan struct{}
+	approvalMu     sync.Mutex
+	approvals      map[pathKind]time.Time
+	approvalChecks map[pathKind]*approvalCheck
+	ownerVerifier  *workeridentity.Verifier
+	ownerClient    *http.Client
 }
 
 func New(o Options) (*Authority, error) {
@@ -81,6 +99,12 @@ func New(o Options) (*Authority, error) {
 		return nil, ErrDenied
 	}
 	o.Origin = strings.TrimRight(o.Origin, "/")
+	if o.OwnerID == "" {
+		o.OwnerID = uuid.NewString()
+	}
+	if err := validateOwnerOptions(o); err != nil {
+		return nil, err
+	}
 	if o.Now == nil {
 		o.Now = time.Now
 	}
@@ -91,15 +115,19 @@ func New(o Options) (*Authority, error) {
 		o.Limits.MaxSourceBytes = 1 << 40
 	}
 	if o.Limits.MaxReaders == 0 {
-		o.Limits.MaxReaders = 32
+		o.Limits.MaxReaders = DefaultMaxReaders
 	}
 	if o.Limits.ChunkBytes == 0 {
 		o.Limits.ChunkBytes = 64 << 10
 	}
-	if o.Limits.MaxGrants < 1 || o.Limits.MaxGrants > 65536 || o.Limits.MaxSourceBytes < 1 || o.Limits.MaxSourceBytes > 1<<52 || o.Limits.MaxReaders < 1 || o.Limits.MaxReaders > 4096 || o.Limits.ChunkBytes < 1 || o.Limits.ChunkBytes > 1<<20 {
+	if o.Limits.MaxGrants < 1 || o.Limits.MaxGrants > 65536 || o.Limits.MaxSourceBytes < 1 || o.Limits.MaxSourceBytes > 1<<52 || o.Limits.MaxReaders < 1 || o.Limits.MaxReaders > MaximumReaders || o.Limits.ChunkBytes < 1 || o.Limits.ChunkBytes > 1<<20 {
 		return nil, ErrQuota
 	}
-	return &Authority{options: o, routePrefix: strings.TrimRight(u.Path, "/") + "/api/internal/workers/", readers: make(chan struct{}, o.Limits.MaxReaders)}, nil
+	a := &Authority{options: o, routePrefix: strings.TrimRight(u.Path, "/") + "/api/internal/workers/", readers: make(chan struct{}, o.Limits.MaxReaders), approvals: make(map[pathKind]time.Time), approvalChecks: make(map[pathKind]*approvalCheck)}
+	if err := a.initializeOwner(); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 func validWork(node int, work string, generation uint64) bool {
@@ -171,7 +199,7 @@ func (a *Authority) Acquire(ctx context.Context, node int, work string, generati
 	ref.Revision = hex.EncodeToString(revision[:])
 	grant := uuid.NewString()
 	source := workerwire.Source{Ref: ref, Origin: a.options.Origin, URL: a.options.Origin + "/api/internal/workers/" + strconvNode(node) + "/sources/" + grant, Grant: grant, ETag: `"` + ref.Revision + `"`, Size: identity.Size, NodeID: node, WorkID: work, Generation: generation}
-	record := Record{Source: source, Path: path, Identity: identity, ExpiresAt: a.options.Now().Add(DefaultTTL)}
+	record := Record{OwnerID: a.options.OwnerID, OwnerURL: a.options.OwnerURL, Source: source, Path: path, Identity: identity, ExpiresAt: a.options.Now().Add(DefaultTTL)}
 	if err := validatePin(f, path, identity); err != nil {
 		return workerwire.Source{}, err
 	}
@@ -208,6 +236,9 @@ func (a *Authority) Renew(ctx context.Context, node int, work string, generation
 	r, err := a.scoped(ctx, node, work, generation, grant)
 	if err != nil {
 		return workerwire.Source{}, err
+	}
+	if r.OwnerID != a.options.OwnerID {
+		return a.renewOwner(ctx, r)
 	}
 	if err := a.options.PathApprover(ctx, r.Path, r.Source.Ref.Kind); err != nil {
 		return workerwire.Source{}, err
@@ -257,4 +288,4 @@ func (a *Authority) invalidate(ctx context.Context, grant string, cause error) e
 	}
 	return cause
 }
-func (a *Authority) Handler() http.Handler { return http.HandlerFunc(a.serveHTTP) }
+func (a *Authority) Handler() http.Handler { return a.WrapOwner(http.HandlerFunc(a.serveHTTP)) }
