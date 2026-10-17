@@ -88,3 +88,39 @@ func TestWorkActiveStatusDoesNotBypassBatchExecution(t *testing.T) {
 		t.Fatalf("single-work status bypassed the configured execution batch: active=%v err=%v", active, err)
 	}
 }
+
+func TestCurrentOutputsSharesRequestFactsAndRejectsNilSnapshotContext(t *testing.T) {
+	f := newOutputSnapshotFixture(t)
+	id := f.record(t, f.assignment(t, "work", true), "viewer")
+	type contextKey struct{}
+	fact := new(int)
+	var scopes int
+	f.service.options.SnapshotContext = func(ctx context.Context) context.Context {
+		scopes++
+		return context.WithValue(ctx, contextKey{}, fact)
+	}
+	f.service.options.ExecutionStatus = func(ctx context.Context, _ Node, _ workerwire.Assignment) (bool, error) {
+		if ctx.Value(contextKey{}) != fact {
+			t.Fatal("output registry sweep lost execution request facts")
+		}
+		return true, nil
+	}
+	verify := f.service.options.VerifyTokens
+	f.service.options.VerifyTokens = func(ctx context.Context, tokens []string) ([]TokenVerification, error) {
+		if ctx.Value(contextKey{}) != fact {
+			t.Fatal("output registry sweep lost viewer request facts")
+		}
+		return verify(ctx, tokens)
+	}
+	outputs, err := f.service.currentOutputs(t.Context(), f.node)
+	if err != nil || !outputs[id] || scopes != 1 {
+		t.Fatalf("output registry sweep did not use one request scope: scopes=%d outputs=%v err=%v", scopes, outputs, err)
+	}
+	f.service.options.SnapshotContext = func(context.Context) context.Context { return nil }
+	if outputs, err = f.service.currentOutputs(t.Context(), f.node); !errors.Is(err, ErrUnavailable) || outputs != nil {
+		t.Fatalf("nil snapshot context did not fail closed: outputs=%v err=%v", outputs, err)
+	}
+	if records, err := f.registry.List(t.Context(), 7); err != nil || len(records) != 1 {
+		t.Fatal("nil snapshot context changed retained output authority")
+	}
+}

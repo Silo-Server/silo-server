@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 
@@ -64,17 +65,30 @@ func workerDownloadStatus(ctx context.Context, pool *pgxpool.Pool, node int, a w
 // reader while checking prepared assignments in bounded SQL batches.
 func workerDownloadStatuses(ctx context.Context, pool *pgxpool.Pool, node int, assignments []workerwire.Assignment) ([]bool, error) {
 	out := make([]bool, len(assignments))
-	var indices []int
-	for i, assignment := range assignments {
-		if assignment.Path == workerPreparePath {
-			indices = append(indices, i)
-		}
+	type probe struct {
+		index      int
+		work       string
+		generation int64
 	}
-	for batch := range slices.Chunk(indices, workerContentBatchSize) {
+	var probes []probe
+	for i, assignment := range assignments {
+		if assignment.Path != workerPreparePath {
+			continue
+		}
+		generation := assignment.Generation
+		if generation == 0 {
+			return nil, workercontrolcore.ErrUnavailable
+		}
+		if generation > math.MaxInt64 {
+			return nil, workercontrolcore.ErrUnavailable
+		}
+		probes = append(probes, probe{index: i, work: assignment.WorkID, generation: int64(generation)})
+	}
+	for batch := range slices.Chunk(probes, workerContentBatchSize) {
 		works, generations := make([]string, 0, len(batch)), make([]int64, 0, len(batch))
-		for _, index := range batch {
-			works = append(works, assignments[index].WorkID)
-			generations = append(generations, int64(assignments[index].Generation)) // Store generations are signed bigint values.
+		for _, probe := range batch {
+			works = append(works, probe.work)
+			generations = append(generations, probe.generation)
 		}
 		rows, err := pool.Query(ctx, `SELECT request.ordinality, EXISTS(SELECT 1 FROM worker_http_download_attempts p JOIN download_artifacts a ON a.id=p.artifact_id
 		WHERE p.node_id=$1 AND p.work_id=request.work AND p.generation=request.generation AND (
@@ -99,7 +113,7 @@ func workerDownloadStatuses(ctx context.Context, pool *pgxpool.Pool, node int, a
 				return nil, workercontrolcore.ErrUnavailable
 			}
 			seen[ordinal-1] = true
-			out[batch[ordinal-1]] = active
+			out[batch[ordinal-1].index] = active
 		}
 		err = rows.Err()
 		rows.Close()

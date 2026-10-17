@@ -130,21 +130,26 @@ func (s *Service) snapshot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid challenge", http.StatusBadRequest)
 		return
 	}
-	snapshot, err := s.readOutputSnapshot(r.Context(), node)
+	ctx, err := s.snapshotContext(r.Context())
+	if err != nil {
+		http.Error(w, "worker authority unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	snapshot, err := s.readOutputSnapshot(ctx, node)
 	if err != nil {
 		http.Error(w, "worker authority unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var executionConfig *workerwire.ExecutionConfig
 	if s.options.ExecutionConfig != nil {
-		settings, err := s.options.ExecutionConfig(r.Context(), node.ID)
+		settings, err := s.options.ExecutionConfig(ctx, node.ID)
 		if err != nil || settings.Validate() != nil {
 			http.Error(w, "worker execution settings unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		executionConfig = &settings
 	}
-	outputs, err := s.outputsForSnapshot(r.Context(), node, snapshot)
+	outputs, err := s.outputsForSnapshot(ctx, node, snapshot)
 	if err != nil {
 		http.Error(w, "worker output authorities unavailable", http.StatusServiceUnavailable)
 		return

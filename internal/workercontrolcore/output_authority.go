@@ -422,6 +422,10 @@ func (s *Service) currentOutputs(ctx context.Context, node Node) (map[string]boo
 	if s.options.OutputAuthorities == nil {
 		return map[string]bool{}, nil
 	}
+	ctx, err := s.snapshotContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	snapshot, err := s.readOutputSnapshot(ctx, node)
 	if err != nil {
 		return nil, err

@@ -63,17 +63,6 @@ func (a *workerContentAuthority) allowedRecipe(ctx context.Context, card *playba
 	return allowed
 }
 
-func (a *workerContentAuthority) checkClaims(ctx context.Context, claims *streamtoken.Claims) (bool, error) {
-	if claims == nil {
-		return false, nil
-	}
-	card := playback.RecipeCardFromClaims(claims)
-	if claims.DownloadArtifactID != "" {
-		return a.checkRecipe(ctx, &card, claims)
-	}
-	return a.checkRecipe(ctx, &card, nil)
-}
-
 func (a *workerContentAuthority) checkRecipe(ctx context.Context, card *playback.RecipeCard, preparedClaims *streamtoken.Claims) (bool, error) {
 	allowed, err := a.checkRecipes(ctx, []*playback.RecipeCard{card}, []*streamtoken.Claims{preparedClaims})
 	if err != nil {

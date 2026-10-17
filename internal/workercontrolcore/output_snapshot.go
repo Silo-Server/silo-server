@@ -13,7 +13,6 @@ import (
 const MaxOutputVerificationTokens = maxOutputAuthorities
 
 type outputSnapshot struct {
-	checkContext    context.Context
 	records         []OutputAuthorityRecord
 	assignments     AuthoritySnapshot
 	active, pending map[string]uint64
@@ -22,14 +21,7 @@ type outputSnapshot struct {
 // Capture viewer records first. A later assignment publication can otherwise
 // look definitively missing against an assignment snapshot taken too early.
 func (s *Service) readOutputSnapshot(ctx context.Context, node Node) (outputSnapshot, error) {
-	if s.options.SnapshotContext != nil {
-		ctx = s.options.SnapshotContext(ctx)
-		if ctx == nil {
-			return outputSnapshot{}, ErrUnavailable
-		}
-	}
 	state := outputSnapshot{active: map[string]uint64{}, pending: map[string]uint64{}}
-	state.checkContext = ctx
 	var err error
 	if s.options.OutputAuthorities != nil {
 		state.records, err = s.options.OutputAuthorities.List(ctx, node.ID)
@@ -44,39 +36,9 @@ func (s *Service) readOutputSnapshot(ctx context.Context, node Node) (outputSnap
 	if err != nil {
 		return outputSnapshot{}, err
 	}
-	active := make([]workerwire.Assignment, 0, len(state.assignments.Active))
-	for work, a := range state.assignments.Active {
-		if a.NodeID != node.ID || a.WorkID != work || a.Generation == 0 {
-			return outputSnapshot{}, ErrUnavailable
-		}
-		active = append(active, a)
-	}
-	if s.options.ExecutionStatuses != nil && len(active) > 0 {
-		allowed, err := s.options.ExecutionStatuses(ctx, node, active)
-		if err != nil {
-			return outputSnapshot{}, err
-		}
-		if len(allowed) != len(active) {
-			return outputSnapshot{}, ErrUnavailable
-		}
-		for i, a := range active {
-			if allowed[i] {
-				state.active[a.WorkID] = a.Generation
-			}
-		}
-	} else {
-		for _, a := range active {
-			if err = ctx.Err(); err != nil {
-				return outputSnapshot{}, err
-			}
-			allowed, err := s.executionStatus(ctx, node, a)
-			if err != nil {
-				return outputSnapshot{}, err
-			}
-			if allowed {
-				state.active[a.WorkID] = a.Generation
-			}
-		}
+	state.active, err = s.activeSnapshotStatus(ctx, node, state.assignments.Active)
+	if err != nil {
+		return outputSnapshot{}, err
 	}
 	for work, a := range state.assignments.Pending {
 		if a.NodeID != node.ID || a.WorkID != work || a.Generation == 0 {
@@ -91,6 +53,65 @@ func (s *Service) readOutputSnapshot(ctx context.Context, node Node) (outputSnap
 		}
 	}
 	return state, ctx.Err()
+}
+
+// Snapshot callers create one request scope and pass it through execution and
+// viewer checks. The captured assignment/record data never owns that context.
+func (s *Service) snapshotContext(ctx context.Context) (context.Context, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.options.SnapshotContext != nil {
+		ctx = s.options.SnapshotContext(ctx)
+		if ctx == nil {
+			return nil, ErrUnavailable
+		}
+	}
+	return ctx, ctx.Err()
+}
+
+func (s *Service) activeSnapshotStatus(ctx context.Context, node Node, assignments map[string]workerwire.Assignment) (map[string]uint64, error) {
+	active := make([]workerwire.Assignment, 0, len(assignments))
+	for work, assignment := range assignments {
+		if assignment.NodeID != node.ID || assignment.WorkID != work || assignment.Generation == 0 {
+			return nil, ErrUnavailable
+		}
+		active = append(active, assignment)
+	}
+	if s.options.ExecutionStatuses != nil && len(active) > 0 {
+		return s.batchActiveSnapshotStatus(ctx, node, active)
+	}
+	out := make(map[string]uint64, len(active))
+	for _, assignment := range active {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		allowed, err := s.executionStatus(ctx, node, assignment)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			out[assignment.WorkID] = assignment.Generation
+		}
+	}
+	return out, ctx.Err()
+}
+
+func (s *Service) batchActiveSnapshotStatus(ctx context.Context, node Node, active []workerwire.Assignment) (map[string]uint64, error) {
+	allowed, err := s.options.ExecutionStatuses(ctx, node, active)
+	if err != nil {
+		return nil, err
+	}
+	if len(allowed) != len(active) {
+		return nil, ErrUnavailable
+	}
+	out := make(map[string]uint64, len(active))
+	for i, assignment := range active {
+		if allowed[i] {
+			out[assignment.WorkID] = assignment.Generation
+		}
+	}
+	return out, ctx.Err()
 }
 
 func (s *Service) pendingSnapshotStatus(ctx context.Context, node int, work string, generation uint64) (bool, error) {
@@ -162,9 +183,6 @@ func (s *Service) verifyOutputTokens(ctx context.Context, tokens []string) ([]To
 }
 
 func (s *Service) outputsForSnapshot(ctx context.Context, node Node, state outputSnapshot) (map[string]bool, error) {
-	if state.checkContext != nil {
-		ctx = state.checkContext
-	}
 	out := make(map[string]bool)
 	var eligible, retired []OutputAuthorityRecord
 	var tokens []string

@@ -445,7 +445,6 @@ func TestWorkerProductionSnapshotQueryBudget(t *testing.T) {
 	}
 }
 
-//nolint:funlen // Keep the production budget and artifact failure/recovery sequence together.
 func TestWorkerProductionPreparedSnapshotQueryBudget(t *testing.T) {
 	f := newProductionSnapshotFixture(t)
 	login := uuid.NewString()
