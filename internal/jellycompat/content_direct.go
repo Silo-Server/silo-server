@@ -452,6 +452,9 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		SubtitleLanguages:       splitCommaValues([]string{params.Get("subtitle_languages")}),
 		MaxPlaybackQuality:      filter.MaxPlaybackQuality,
 	}
+	if collectionID := params.Get("collection_id"); collectionID != "" {
+		filters.RestrictToLibraryCollection(collectionID)
+	}
 	// Limit=0 wants only the total. Count directly unless played state is a
 	// profile overlay applied after the catalog query.
 	if parseBool(params.Get("count_only"), false) && isPlayedFilter == "" &&
