@@ -298,3 +298,28 @@ func TestServiceExportWatchedUsesCredentialsRotatedDuringTheDrain(t *testing.T) 
 		t.Fatalf("saved connection token = %q (ok=%v, err=%v), want rotated", saved.AccessToken, ok, err)
 	}
 }
+
+// countingHistoryLister records the queries it receives.
+type countingHistoryLister struct {
+	queries []userstore.CompletedHistoryQuery
+}
+
+func (l *countingHistoryLister) ListCompletedHistory(_ context.Context, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
+	l.queries = append(l.queries, query)
+	return nil, nil
+}
+
+// An empty page must not query history: an empty media filter reads it all.
+func TestVisiblePlaysSkipsTheStoreForAnEmptyPage(t *testing.T) {
+	lister := &countingHistoryLister{}
+	plays, err := visiblePlays(t.Context(), lister, userstore.CompletedHistoryQuery{ProfileID: "profile-1"}, nil)
+	if err != nil || len(plays) != 0 || len(lister.queries) != 0 {
+		t.Fatalf("plays = %v, err = %v, queries = %d; want none and no store read", plays, err, len(lister.queries))
+	}
+	if _, err := visiblePlays(t.Context(), lister, userstore.CompletedHistoryQuery{ProfileID: "profile-1"}, []LocalPlay{{HistoryID: "h", MediaItemID: "m"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(lister.queries) != 1 || !slices.Equal(lister.queries[0].MediaItemIDs, []string{"m"}) {
+		t.Fatalf("queries = %+v, want one filtered to the page's item", lister.queries)
+	}
+}
