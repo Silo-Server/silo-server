@@ -167,10 +167,10 @@ async function decodesInRealTime(
  * (decodesInRealTime) reports 2160p. The `file` type matches the media element
  * loading a direct-play original. Only when all four fail does a browser that
  * decodes 1080p H.264 get a 1080p cap. With no usable answer (the API is
- * missing, a query throws, or the browser rejects H.264 even at 1080p, which
- * says nothing about size) it reports 2160p: the codec lists still gate
- * decoding, and the server's failure recovery replans a stream that will not
- * play.
+ * missing, the 1080p query throws, or the browser rejects H.264 even at
+ * 1080p, which says nothing about size) it reports 2160p: the codec lists
+ * still gate decoding, and the server's failure recovery replans a stream
+ * that will not play.
  */
 export async function probeMaxDecodeResolution(): Promise<string> {
   if (typeof navigator === "undefined" || !navigator.mediaCapabilities) {
@@ -178,10 +178,13 @@ export async function probeMaxDecodeResolution(): Promise<string> {
   }
 
   try {
-    const decodes4K = await Promise.all(
+    // A query the browser rejects (some Safari versions throw on codec
+    // strings they cannot parse) means that codec does not decode, and must
+    // not hide the other codecs' answers.
+    const decodes4K = await Promise.allSettled(
       UHD_DECODE_PROBES.map((probe) => decodesInRealTime(probe.uhd, probe.reference)),
     );
-    if (decodes4K.some(Boolean)) return "2160p";
+    if (decodes4K.some((answer) => answer.status === "fulfilled" && answer.value)) return "2160p";
     const fhd = await navigator.mediaCapabilities.decodingInfo(H264_1080P_CONFIGURATION);
     return fhd.supported ? "1080p" : UNPROBED_MAX_RESOLUTION;
   } catch {

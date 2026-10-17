@@ -116,6 +116,20 @@ describe("probeMaxDecodeResolution", () => {
     await expect(probeMaxDecodeResolution()).resolves.toBe("1080p");
   });
 
+  it("counts a 4K query the browser throws on as no, keeping the other answers", async () => {
+    const decodingInfo = vi.fn((configuration: MediaDecodingConfiguration) => {
+      const contentType = configuration.video?.contentType ?? "";
+      if (contentType.includes("av01")) return Promise.reject(new TypeError("unparsable codec"));
+      const height = configuration.video?.height;
+      if (contentType.includes("avc1") && height === 2160) return Promise.resolve(SOFTWARE_STUTTER);
+      if (contentType.includes("avc1") && height === 1080) return Promise.resolve(DECODED);
+      return Promise.resolve(NOT_DECODED);
+    });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("1080p");
+  });
+
   it("caps at 1080p when every codec rejects 4K", async () => {
     stubDecoder({ "avc1@1080": DECODED });
 
