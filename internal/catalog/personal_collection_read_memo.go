@@ -67,23 +67,27 @@ func (m *personalCollectionReadMemo[V]) put(key personalCollectionReadKey, revis
 		m.entries = make(map[personalCollectionReadKey]personalCollectionReadEntry[V])
 	}
 	if _, ok := m.entries[key]; !ok && len(m.entries) >= personalCollectionReadMemoMaxEntries {
-		for k, e := range m.entries {
-			if !now.Before(e.expires) {
-				delete(m.entries, k)
-			}
-		}
-		// Every entry is live: forget an arbitrary tenth (map order is
-		// random) rather than grow, so most stay and the next sweeps are rare.
-		if len(m.entries) >= personalCollectionReadMemoMaxEntries {
-			for k := range m.entries {
-				if len(m.entries) < personalCollectionReadMemoMaxEntries*9/10 {
-					break
-				}
-				delete(m.entries, k)
-			}
-		}
+		m.makeRoomLocked(now)
 	}
 	m.entries[key] = personalCollectionReadEntry[V]{revision: revision, expires: now.Add(personalCollectionReadMemoTTL), value: value}
+}
+
+// makeRoomLocked drops expired entries and, if too few expired, arbitrary
+// live entries (map order is random) down to nine tenths of the capacity
+// rather than grow. Most entries stay, and the next full sweep is at least a
+// tenth of the capacity away. The caller holds mu.
+func (m *personalCollectionReadMemo[V]) makeRoomLocked(now time.Time) {
+	for k, e := range m.entries {
+		if !now.Before(e.expires) {
+			delete(m.entries, k)
+		}
+	}
+	for k := range m.entries {
+		if len(m.entries) < personalCollectionReadMemoMaxEntries*9/10 {
+			break
+		}
+		delete(m.entries, k)
+	}
 }
 
 // personalCollectionRevisions returns the membership revision of each of
