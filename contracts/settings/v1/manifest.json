@@ -532,12 +532,12 @@
         "policy_input": "max_playback_quality",
         "constraint": "ceiling"
       },
-      "platforms": ["ios", "android"],
+      "platforms": ["ios", "android", "web"],
       "category": "playback",
       "label": "Cellular quality",
       "description": "The resolution to play at on mobile data or another metered connection.",
       "recommended_control": "select",
-      "notes": "The resolution axis that replaces playback.preferred_quality while the device is on mobile data or a connection the OS marks metered or expensive (a phone hotspot, Android metered Wi-Fi, iOS Low Data Mode). Clients detect the connection and send this pair as quality_preference and bandwidth_cap_kbps; the server never sees which network the device is on, which is why metered on the playback request is ignored. When the connection changes mid-playback the client replans with the other pair. Clients show the pair as one preset list, since bitrate is what matters on a data plan. The members match playback.preferred_quality without the deprecated original."
+      "notes": "The resolution axis that replaces playback.preferred_quality while the device is on mobile data or a connection the OS marks metered or expensive (a phone hotspot, Android metered Wi-Fi, iOS Low Data Mode). Clients detect the connection and send this pair as quality_preference and bandwidth_cap_kbps; the web app does so when the browser reports Data Saver or a cellular connection; the server never sees which network the device is on, which is why metered on the playback request is ignored. When the connection changes mid-playback the client replans with the other pair. Clients show the pair as one preset list, since bitrate is what matters on a data plan. The members match playback.preferred_quality without the deprecated original."
     },
     {
       "key": "playback.cellular_max_bitrate_kbps",
@@ -553,7 +553,7 @@
       },
       "default_value": 2000,
       "unit": "kbps",
-      "platforms": ["ios", "android"],
+      "platforms": ["ios", "android", "web"],
       "category": "playback",
       "label": "Cellular maximum bitrate",
       "description": "Cap how much data playback may use on mobile data or another metered connection.",

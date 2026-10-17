@@ -12,8 +12,9 @@ export interface PlaybackQualitySettings {
  * (Data Saver or a cellular connection) the cellular pair replaces the main
  * one, so a phone browser on mobile data starts within the same data limit
  * the apps use instead of at the source's full bitrate. Playback can start
- * before the settings read resolves and does not replan when it does, so a
- * metered start uses the contract defaults until then rather than no limit.
+ * before the settings read resolves and does not replan when it does, and an
+ * older server has no cellular pair to read, so a metered start without the
+ * pair uses its contract defaults rather than no limit.
  */
 export function playbackQualitySettings(
   effective: EffectiveSettingsMap | undefined,
@@ -25,10 +26,16 @@ export function playbackQualitySettings(
   const bitrateKey = metered
     ? SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS
     : SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS;
-  if (metered && !effective) {
+  if (metered) {
+    const quality = effective?.[qualityKey];
+    const bitrate = effective?.[bitrateKey];
     return {
-      qualityPreference: SETTING_DEFINITIONS[qualityKey].defaultValue as string,
-      maxBitrateKbps: SETTING_DEFINITIONS[bitrateKey].defaultValue as number | null,
+      qualityPreference: (quality
+        ? quality.value
+        : SETTING_DEFINITIONS[qualityKey].defaultValue) as string,
+      maxBitrateKbps: (bitrate ? bitrate.value : SETTING_DEFINITIONS[bitrateKey].defaultValue) as
+        | number
+        | null,
     };
   }
   return {

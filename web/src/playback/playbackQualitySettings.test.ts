@@ -36,6 +36,28 @@ describe("playbackQualitySettings", () => {
     });
   });
 
+  it("keeps a stored no-limit cellular bitrate", () => {
+    expect(
+      playbackQualitySettings(
+        { ...effective, [SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS]: setting(null) },
+        true,
+      ),
+    ).toEqual({ qualityPreference: "720p", maxBitrateKbps: null });
+  });
+
+  // An older server defines no cellular pair, so the read never returns it.
+  it("uses the cellular defaults on a metered link when the server has no cellular pair", () => {
+    const {
+      [SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY]: _quality,
+      [SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS]: _bitrate,
+      ...withoutCellular
+    } = effective;
+    expect(playbackQualitySettings(withoutCellular, true)).toEqual({
+      qualityPreference: "720p",
+      maxBitrateKbps: 2000,
+    });
+  });
+
   // Playback can start before the read resolves and does not replan when it
   // does, so a metered start must not go out without a limit.
   it("uses the cellular defaults until the settings read resolves on a metered link", () => {

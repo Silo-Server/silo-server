@@ -592,6 +592,14 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
     );
+  // A server below revision 20 rejects the whole batch for a key it does not
+  // define, so the cellular pair is read only where the server has it.
+  const supportsCellularQuality =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+    );
   // Resolved through the contract, so a device override winning over the
   // profile's own choice is the manifest's resolution order rather than a
   // precedence rule spelled out here.
@@ -615,8 +623,12 @@ function WatchPlaybackHostContent() {
       // tier under this so the setting does what its label says.
       SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
       // The pair that replaces those two on a metered link, as in the apps.
-      SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
-      SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS,
+      ...(supportsCellularQuality
+        ? [
+            SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+            SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS,
+          ]
+        : []),
     ],
     enabled: signedIn,
   });

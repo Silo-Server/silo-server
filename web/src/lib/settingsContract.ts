@@ -688,7 +688,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "playback",
     control: "select",
     unit: "kbps",
-    platforms: ["ios", "android"],
+    platforms: ["ios", "android", "web"],
     minimum: 100,
     maximum: 200000,
   },
@@ -706,7 +706,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "The resolution to play at on mobile data or another metered connection.",
     category: "playback",
     control: "select",
-    platforms: ["ios", "android"],
+    platforms: ["ios", "android", "web"],
     values: [
       { value: "auto", label: "Auto", introducedIn: 20 },
       { value: "480p", label: "480p", introducedIn: 20 },
