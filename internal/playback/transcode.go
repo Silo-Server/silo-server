@@ -2091,10 +2091,11 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 	defer s.mu.Unlock()
 
 	manifestPath := filepath.Join(s.outputDir, "stream.m3u8")
-	data, info, err := readManifestFile(manifestPath)
-	if err == nil && currentGeneration && s.inheritedManifest != nil && sameManifestFile(info, s.inheritedManifest) {
-		data, err = nil, os.ErrNotExist
+	var inherited os.FileInfo
+	if currentGeneration {
+		inherited = s.inheritedManifest
 	}
+	data, err := readManifestFile(manifestPath, inherited)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if !s.running {
@@ -2147,25 +2148,26 @@ func statManifest(outputDir string) os.FileInfo {
 	return info
 }
 
-// readManifestFile reads a playlist and describes the same open file. FFmpeg
-// replaces the playlist by rename, so a separate Stat by path could describe a
-// newer file than the bytes returned and let an inherited playlist pass as
-// current.
-func readManifestFile(path string) ([]byte, os.FileInfo, error) {
+// readManifestFile reads a playlist. When the open file is still inherited,
+// it reports os.ErrNotExist without reading the old playlist, which a startup
+// wait would otherwise read in full on every check. The comparison uses the
+// open file: FFmpeg replaces the playlist by rename, so a separate Stat by path
+// could describe a newer file than the bytes returned and let an inherited
+// playlist pass as current.
+func readManifestFile(path string, inherited os.FileInfo) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, nil, err
+	if inherited != nil && sameManifestFile(info, inherited) {
+		return nil, os.ErrNotExist
 	}
-	return data, info, nil
+	return io.ReadAll(f)
 }
 
 // sameManifestFile reports whether current is still the inherited playlist.
@@ -2176,6 +2178,14 @@ func sameManifestFile(current, inherited os.FileInfo) bool {
 		current.Size() == inherited.Size() &&
 		current.ModTime().Equal(inherited.ModTime())
 }
+
+// outputPollInterval is the pause between checks while a request waits for
+// FFmpeg output. FFmpeg tells the server nothing when it renames a finished
+// segment into place or rewrites the playlist, so a finished file can go
+// unnoticed for up to one interval. Every transcoded startup and seek waits on
+// output at least once. A check opens or stats one file, or reads the playlist
+// and stats its startup segments, so a short interval costs little.
+const outputPollInterval = 10 * time.Millisecond
 
 // WaitForManifest polls until the manifest is ready for playback or the timeout
 // expires. It keeps the initial request open long enough for FFmpeg to write
@@ -2221,7 +2231,7 @@ func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Dur
 			return nil, ctx.Err()
 		case <-deadline:
 			return nil, s.manifestTimeoutError(timeout)
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
@@ -3467,7 +3477,7 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 			select {
 			case <-deadline:
 				return "", ErrSegmentNotFound
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(outputPollInterval):
 				continue
 			}
 		}
@@ -3484,7 +3494,7 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 		select {
 		case <-deadline:
 			return "", ErrSegmentNotFound
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
@@ -3513,7 +3523,7 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 			select {
 			case <-deadline:
 				return nil, ErrSegmentNotFound
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(outputPollInterval):
 				continue
 			}
 		}
@@ -3527,7 +3537,7 @@ func (s *TranscodeSession) WaitForOpenSegment(name string, timeout time.Duration
 		select {
 		case <-deadline:
 			return nil, ErrSegmentNotFound
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(outputPollInterval):
 		}
 	}
 }
