@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
+
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -708,7 +710,7 @@ type HistoryExport struct {
 
 // maxHistoryExportPage bounds one read of a connection's pending history
 // exports: the largest batch a plugin may declare.
-const maxHistoryExportPage = 1000
+const maxHistoryExportPage = publicmanifest.MaxWatchSyncBatchSize
 
 // exportDrainReserve is how much of a run's deadline the history export
 // leaves unused: room for one plugin call that has already started and for
