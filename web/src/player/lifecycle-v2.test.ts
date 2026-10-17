@@ -29,7 +29,6 @@ const replan = buildReplanRequestV3({
   qualityPreference: "auto",
   attemptedPlanKeys: [],
   attemptCount: 1,
-  metered: false,
   clientCapabilities: fixtureClientCapabilitiesV3(),
   clientPlaybackContext: fixtureClientPlaybackContextV3(),
 });

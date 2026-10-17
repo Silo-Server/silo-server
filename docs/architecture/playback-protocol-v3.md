@@ -1010,7 +1010,7 @@ commentary track.
 
 Omitting `quality_preference` on any replan preserves the session's current
 preference; sending it replaces that preference. A track change therefore does
-not silently reset `original` or a pinned rung, and failure recovery does not
+not silently reset a pinned rung, and failure recovery does not
 discard the viewer's requested quality unless the client explicitly asks it to.
 Clients should still send the current preference when they know it, so their
 intent remains explicit in diagnostics.
@@ -1035,8 +1035,7 @@ play drop the subtitle, the server plays that file with subtitles off instead
 of moving to one of them, provided that plan can run; when no other version
 plays, the terminal stands. A replan that would have to drop the
 subtitle to return to the requested version stays on the version already
-playing, unless quality `original` pins the requested version; the requested
-version remains a fallback without the subtitle, ahead of any other version
+playing; the requested version remains a fallback without the subtitle, ahead of any other version
 without it, if no version that keeps it can play. Malformed
 selections (a track identity that does not parse or names another file, or a
 negative index) are still rejected.
@@ -1270,9 +1269,9 @@ must not branch on an unrecognized value.
 `hls_audio_adaptation`, `hls_packaging_required`, `subtitle_burn_in_required`,
 `client_dv7_to_dv81`, `client_dv7_to_hdr10`, `client_managed_dynamic_range`,
 `client_dv8_base_layer`, `evidence_insufficient_for_direct`,
-and the quality reasons `quality_original`, `quality_auto_source`,
-`quality_fixed_rung`, `quality_device_limit`, `quality_bandwidth_limit`,
-`quality_metered_limit`, `quality_bandwidth_cap`.
+and the quality reasons `quality_auto_source`, `quality_fixed_rung`,
+`quality_device_limit`, `quality_bandwidth_cap`, and `quality_original` (an
+automatic reduction could not run, so the source size was kept).
 
 ### 7.2 Degradation warnings
 
@@ -1523,9 +1522,10 @@ does not publish its preimage.
 selection, sends a `quality_change` replan with the entry's `label`. It does not
 compute rungs.
 
-The source rung is always present, labelled `original`, with
-`preserves_source: true`. On `/api/v2` it also carries `display_name`
-`Original`; the frozen `/api/v1` response leaves it unnamed. Transcode rungs are added below the source resolution
+On `/api/v2` the menu lists only fixed rungs. The source is not an entry,
+because `auto` already returns to it. The frozen `/api/v1` response still leads
+with an unnamed source entry labelled `original` (`preserves_source: true`),
+which now selects `auto`. Transcode rungs are added below the source resolution
 class, plus at the same class when they reduce bitrate, and only when HLS is
 available to the client, transcoding is enabled, the viewer's account may
 transcode video (`transcode_allowed`; admission still enforces it), and 4K
@@ -1548,16 +1548,17 @@ remux without video encoding.
 
 A 4K version whose 4K transcoding is disabled takes its lower qualities from a
 lower-resolution version instead, when the item has one and the request allows
-version fallback. The menu is then `original` (the requested 4K version), the
+version fallback. The menu then lists the
 first non-4K version in fallback order at its plain resolution class (`1080p`
 or `720p`, with that version's height and bitrate; omitted when the version is
 taller than its class or the requested version is not taller than it), and the
-rungs a transcode of that version can serve. When that version cannot play and
+rungs a transcode of that version can serve (`/api/v1` also leads with
+`original`, the requested 4K version). When that version cannot play and
 the fallback adopts a later non-4K version, the plan it returns describes the
 version it adopted.
 Choosing any of them refuses the 4K source, so the fallback plays the lower
 version: unchanged for its plain label or a rung it fits, transcoded for a lower
-rung. `original` returns to the 4K version. The menu stays the same while the
+rung. `auto` returns to the 4K version. The menu stays the same while the
 lower version plays. It needs HLS and transcoding enabled, because the 4K
 refusal under any other policy is not one the fallback acts on.
 
@@ -1591,22 +1592,32 @@ clamp their bitrate but does not silently demote their resolution. Plain labels
 remain accepted for stored/default preferences and size their output like
 `auto` below.
 
-`auto` picks its resolution from the shared bitrate ladder
-([quality-ladder.md](quality-ladder.md)): 80% of the bandwidth estimate or cap
-earns a class for the source's frame rate. A source whose height already fits
-the class is sent as-is when its bitrate allows, even when it is wider than the
-16:9 box (a 2560x1080 film at the 1080p class). Otherwise automatic and
-plain-label targets fit the source into that class's 16:9 box, so a 3840x1600
-film at the 1080p class streams at 1920x800, and encode at the class bitrate: 20000 kbps for 2160p, 6000
-for 1080p, 2000 for 720p, 1800 for 540p and 1500 for 480p, never above that 80%
-budget. A source that already fits the class but whose bitrate exceeds 80% of the
-bandwidth estimate is re-encoded at its own size within that budget rather than
-sent as-is; a source of unknown bitrate counts as needing its class's full
-bitrate. Under a cap, a source over the cap itself is re-encoded, and so is a
-video source of unknown bitrate, since it cannot be shown to fit. A transcode
-also never targets more than the source's own bitrate, counted in the output
-codec (H.264 for a scaled encode, or HEVC for any encode when the planner
-chooses HEVC).
+`auto` is best-effort direct play. It sends the source as-is unless the device
+rules it out, through a `max_resolution` below the source or decode
+capabilities the source does not fit, or the source's bitrate exceeds 80% of a
+measured `bandwidth_estimate_kbps`. A source that fits that budget is sent as-is
+at any resolution; the estimate only lowers a source the link cannot carry.
+Without an estimate `auto` assumes the link can carry the source. `metered` is
+accepted from older clients and ignored: a client on a cellular link sends its
+cellular quality as `quality_preference` and `bandwidth_cap_kbps` instead. A
+fixed rung or plain resolution never reads the estimate, so a viewer who wants
+the source whatever the estimate says picks a resolution. `original` used to be
+that choice; it is now an alias of `auto`.
+
+A source over the estimate's budget, or over `bandwidth_cap_kbps`, is
+re-encoded at the class that 80% of the estimate or cap earns on the shared
+bitrate ladder ([quality-ladder.md](quality-ladder.md)) for the source's frame
+rate. A source of unknown bitrate counts as needing its class's full bitrate
+against an estimate, and is always re-encoded under a cap, since it cannot be
+shown to fit. A source whose height already fits the earned class keeps its own
+size, even when it is wider than the 16:9 box (a 2560x1080 film at the 1080p
+class). Otherwise automatic and plain-label targets fit the source into that
+class's 16:9 box, so a 3840x1600 film at the 1080p class streams at 1920x800,
+and encode at the class bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
+720p, 1800 for 540p and 1500 for 480p, never above the estimate's 80% budget or
+the cap. A transcode also never targets more than the source's own bitrate,
+counted in the output codec (H.264 for a scaled encode, or HEVC for any encode
+when the planner chooses HEVC).
 
 `bandwidth_estimate_kbps` is optional and is the client's belief about its
 link, not a promise. An absent estimate removes the bandwidth term entirely, so
@@ -1639,10 +1650,11 @@ capability check there could trigger lazy node fetches that a source-preserving
 start must never pay for. A rung whose toolchain turns out to be missing degrades
 to a retryable terminal at replan time instead.
 
-Audio-only sources publish a single `original` rung — quality rungs are a video
-concept.
+Audio-only sources publish no rungs on `/api/v2` (a single `original` entry on
+`/api/v1`), since quality rungs are a video concept.
 
-`quality_preference` accepts `auto`, `original` (aliases `source`, `max`), the
+`quality_preference` accepts `auto`, the legacy `original` (aliases `source`,
+`max`), which means `auto`, the
 plain `2160p` / `1080p` / `720p` / `480p` values with their obvious aliases
 (`4k`, `uhd`, `fhd`, `hd`, `sd`), and the compound labels in the table above.
 An unrecognized value normalizes to `auto` and the response carries the

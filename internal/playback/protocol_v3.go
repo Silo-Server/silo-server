@@ -934,11 +934,15 @@ type DegradationWarningV3 struct {
 	Message string `json:"message"`
 }
 
-// QualityOriginalV3 is the quality preference that pins the source ladder
-// rung: the plan must preserve the source's own height and bitrate rather than
-// pick a transcode rung. Distinct from OriginalLanguageSentinel, which selects
-// a track's original language.
+// QualityOriginalV3 labels the source entry of the frozen v1 quality menu.
+// As a quality preference it is a legacy alias of "auto", which already
+// preserves the source whenever the device can play it. Distinct from
+// OriginalLanguageSentinel, which selects a track's original language.
 const QualityOriginalV3 = "original"
+
+// QualityAutoV3 is the default quality preference: preserve the source unless
+// the device, a bandwidth cap, or the server rules it out.
+const QualityAutoV3 = "auto"
 
 // Compound ladder rung labels pin a bitrate as well as a resolution class.
 // The plain resolution labels remain valid for stored/default preferences;
@@ -958,8 +962,9 @@ const (
 
 // AvailableQualityV3 is one server-ladder rung valid for this source and
 // client, published on the plan so clients can render a quality menu without
-// owning a bitrate table. The QualityOriginalV3 entry preserves the source;
-// DisplayName gives compound rungs their human-facing High/Medium/Low label.
+// owning a bitrate table. The QualityOriginalV3 entry preserves the source
+// and is published on v1 only; DisplayName gives compound rungs their
+// human-facing High/Medium/Low label.
 type AvailableQualityV3 struct {
 	Label           string `json:"label"`
 	DisplayName     string `json:"display_name,omitempty"`
@@ -1083,10 +1088,8 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 
 func NormalizeQualityV3(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "auto":
-		return "auto", false
-	case QualityOriginalV3, "source", "max":
-		return QualityOriginalV3, false
+	case "", QualityAutoV3, QualityOriginalV3, "source", "max":
+		return QualityAutoV3, false
 	case "2160p", "4k", "uhd":
 		return "2160p", false
 	case "1080p", "fhd":

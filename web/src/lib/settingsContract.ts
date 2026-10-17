@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 19;
+export const SETTINGS_REVISION = 20;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -216,6 +216,10 @@ export const SETTING_KEYS = {
   PLAYBACK_AUTO_SKIP_INTRO: "playback.auto_skip_intro",
   /** Auto-skip recaps */
   PLAYBACK_AUTO_SKIP_RECAP: "playback.auto_skip_recap",
+  /** Cellular maximum bitrate */
+  PLAYBACK_CELLULAR_MAX_BITRATE_KBPS: "playback.cellular_max_bitrate_kbps",
+  /** Cellular quality */
+  PLAYBACK_CELLULAR_PREFERRED_QUALITY: "playback.cellular_preferred_quality",
   /** Skip intros */
   PLAYBACK_INTRO_SKIP_MODE: "playback.intro_skip_mode",
   /** Maximum bitrate */
@@ -355,7 +359,8 @@ export interface SettingDefinition {
   platforms?: readonly string[];
   suggestedOptions?: SettingOptionSetId;
   unsetLabel?: string;
-  values?: readonly { value: unknown; label: string; introducedIn: number }[];
+  /** A deprecated member stays a valid stored value but is no longer offered. */
+  values?: readonly { value: unknown; label: string; introducedIn: number; deprecated?: boolean }[];
   /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */
   ordered?: boolean;
   minimum?: number;
@@ -668,6 +673,50 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "playback",
     control: "switch",
   },
+  "playback.cellular_max_bitrate_kbps": {
+    key: "playback.cellular_max_bitrate_kbps",
+    type: "integer",
+    nullable: true,
+    persistence: "remote",
+    introducedIn: 20,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [20, 20],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: 2000,
+    label: "Cellular maximum bitrate",
+    description: "Cap how much data playback may use on mobile data or another metered connection.",
+    category: "playback",
+    control: "select",
+    unit: "kbps",
+    platforms: ["ios", "android"],
+    minimum: 100,
+    maximum: 200000,
+  },
+  "playback.cellular_preferred_quality": {
+    key: "playback.cellular_preferred_quality",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 20,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [20, 20],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: "720p",
+    label: "Cellular quality",
+    description: "The resolution to play at on mobile data or another metered connection.",
+    category: "playback",
+    control: "select",
+    platforms: ["ios", "android"],
+    values: [
+      { value: "auto", label: "Auto", introducedIn: 20 },
+      { value: "480p", label: "480p", introducedIn: 20 },
+      { value: "720p", label: "720p", introducedIn: 20 },
+      { value: "1080p", label: "1080p", introducedIn: 20 },
+      { value: "2160p", label: "2160p / 4K", introducedIn: 20 },
+    ],
+    ordered: true,
+    constrainedBy: { policyInput: "max_playback_quality", constraint: "ceiling" },
+  },
   "playback.intro_skip_mode": {
     key: "playback.intro_skip_mode",
     type: "enum",
@@ -746,7 +795,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "720p", label: "720p", introducedIn: 1 },
       { value: "1080p", label: "1080p", introducedIn: 1 },
       { value: "2160p", label: "2160p / 4K", introducedIn: 1 },
-      { value: "original", label: "Original quality", introducedIn: 1 },
+      { value: "original", label: "Original quality", introducedIn: 1, deprecated: true },
     ],
     ordered: true,
     constrainedBy: { policyInput: "max_playback_quality", constraint: "ceiling" },

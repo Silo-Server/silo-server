@@ -38559,6 +38559,7 @@
             "type": "array"
           },
           "available_qualities": {
+            "description": "Fixed quality rungs a quality_change replan may request, in menu order. The source is not listed: quality_preference auto returns to it. Empty when no rung applies.",
             "items": {
               "$ref": "#/components/schemas/AvailableQualityV3"
             },
@@ -38723,6 +38724,7 @@
             "type": "integer"
           },
           "bandwidth_estimate_kbps": {
+            "description": "Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess.",
             "format": "int64",
             "type": "integer"
           },
@@ -38762,6 +38764,8 @@
             "type": "array"
           },
           "metered": {
+            "deprecated": true,
+            "description": "Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.",
             "type": "boolean"
           },
           "operation": {
@@ -38800,6 +38804,7 @@
             "type": "integer"
           },
           "quality_preference": {
+            "description": "auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source whenever the device can. original is a deprecated alias of auto.",
             "type": "string"
           },
           "replan_request_id": {
@@ -38824,7 +38829,6 @@
           "attempt_count",
           "quality_preference",
           "position_seconds",
-          "metered",
           "selected_tracks",
           "client_capabilities",
           "client_playback_context"
@@ -39660,6 +39664,7 @@
             "type": "integer"
           },
           "bandwidth_estimate_kbps": {
+            "description": "Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess.",
             "format": "int64",
             "type": "integer"
           },
@@ -39692,6 +39697,8 @@
             "type": "string"
           },
           "metered": {
+            "deprecated": true,
+            "description": "Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.",
             "type": "boolean"
           },
           "playback_attempt_id": {
@@ -39717,6 +39724,7 @@
             "type": "integer"
           },
           "quality_preference": {
+            "description": "auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source whenever the device can. original is a deprecated alias of auto.",
             "type": "string"
           },
           "start_position": {
@@ -39743,7 +39751,6 @@
           "playback_attempt_id",
           "quality_preference",
           "subtitle_fidelity_preference",
-          "metered",
           "client_capabilities",
           "client_playback_context"
         ],
@@ -40763,7 +40770,7 @@
             "type": "string"
           },
           "quality_preference": {
-            "description": "Free-form until the vocabulary is ratified (#135). Canonical values today: auto, original, 720p, 1080p, 2160p, 4k; empty when unset",
+            "description": "Free-form until the vocabulary is ratified (#135). Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto; empty when unset",
             "examples": [
               "auto"
             ],
@@ -41021,7 +41028,7 @@
             "type": "string"
           },
           "quality_preference": {
-            "description": "Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k",
+            "description": "Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto",
             "examples": [
               "auto"
             ],
@@ -41356,7 +41363,7 @@
             ]
           },
           "quality_preference": {
-            "description": "Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k",
+            "description": "Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto",
             "examples": [
               "auto"
             ],

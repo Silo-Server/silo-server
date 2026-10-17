@@ -426,7 +426,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	}
 
 	// Automatic quality reductions (device resolution limit, bandwidth
-	// estimate/cap, metered fallback) are best-effort. When the only reason to
+	// estimate or cap) are best-effort. When the only reason to
 	// transcode is such a reduction, a validated source-preserving route
 	// exists, and the transcode itself cannot execute (HDR sources have no
 	// validated reduced-quality recipe yet, or the client/server lacks the
@@ -1554,14 +1554,18 @@ type QualityResultV3 struct {
 
 // ResolveQualityPolicyV3 selects the delivery quality for a plan.
 //
-// bandwidth_cap_kbps is a hard delivery ceiling and is honored in every
-// quality mode: source-preserving delivery is degraded when the source bitrate
-// exceeds the cap, fixed rungs are lowered when their ladder bitrate exceeds
-// it, and "auto" folds the cap into bandwidth-based rung selection. A metered
-// connection with neither a cap nor a bandwidth estimate limits auto
-// selection to the conservative 720p rung — the rung auto would pick for a
-// mid-range bandwidth estimate — instead of assuming the link can sustain the
-// original stream.
+// "auto" is best-effort direct play: it preserves the source unless the
+// device's maximum resolution rules it out or the source's bitrate exceeds the
+// budget of a measured bandwidth estimate. A source that fits the budget is sent
+// as-is at any resolution; only one the link cannot carry drops to the class
+// the estimate earns. Without an estimate auto assumes the link can carry the
+// source; metered is ignored, since clients apply their own cellular quality.
+// A fixed rung or plain resolution never reads the estimate.
+//
+// bandwidth_cap_kbps is a hard delivery ceiling honored in every quality mode:
+// a source whose bitrate exceeds it is re-encoded at the cap's rung, and a
+// fixed rung whose ladder bitrate exceeds it is lowered. A source that fits
+// under the cap is still sent as-is.
 func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) QualityResultV3 {
 	quality, changed := NormalizeQualityV3(request.QualityPreference)
 	var warnings []DegradationWarningV3
@@ -1572,11 +1576,6 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	// The cap is a hard ceiling, so a video source whose bitrate is unknown
 	// cannot be shown to fit it, as with the server cap.
 	capExceededBySource := capKbps > 0 && (source.BitrateKbps > capKbps || source.BitrateKbps <= 0 && source.VideoCodec != "")
-	if quality == QualityOriginalV3 && !capExceededBySource {
-		result := originalQualityResultV3(source)
-		result.Warnings = warnings
-		return result
-	}
 	if rung, ok := ladderRungForLabelV3(quality); ok {
 		return compoundRungQualityResultV3(rung, source, capKbps, warnings)
 	}
@@ -1584,61 +1583,32 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	reason := "quality_auto_source"
 	explicitRung := false
 	capApplied := false
-	// budgetKbps is the share of a bandwidth estimate or cap that automatic
-	// quality plans for; the encode never targets more than it. A source over
-	// the estimate's budget is re-encoded at its own size rather than sent
-	// as-is; a cap keeps its own source rule below.
+	// budgetKbps is the share of a bandwidth estimate automatic quality plans
+	// for when the source exceeds it; the encode never targets more.
 	budgetKbps := 0
 	overEstimate := false
-	// classLimit is the tallest class the preference, device, bandwidth or
-	// cap allows, before the source's own height bounds targetHeight; 0 is
-	// no limit. It keeps a cropped source in the class it earned.
+	// classLimit is the tallest class the preference, device, estimate or cap
+	// allows, before the source's own height bounds targetHeight; 0 is no
+	// limit. It keeps a cropped source in the class it earned.
 	var classLimit int
-	switch {
-	case quality == QualityOriginalV3:
-		// Only reached when the source bitrate exceeds the cap: the cap is a
-		// hard ceiling and outranks the original preference.
-		targetHeight = streamLadderClassV3(capKbps, source)
-		classLimit = targetHeight
-		capApplied = true
-	case quality != "auto":
+	if quality != QualityAutoV3 {
 		targetHeight, _ = strconv.Atoi(strings.TrimSuffix(quality, "p"))
 		classLimit = targetHeight
 		reason = "quality_fixed_rung"
 		explicitRung = true
-	default:
+	} else {
 		maxHeight := resolutionHeightV3(request.Capabilities.MaxResolution)
 		if maxHeight > 0 && (targetHeight == 0 || maxHeight < targetHeight) {
 			targetHeight = maxHeight
 			reason = "quality_device_limit"
 		}
 		classLimit = maxHeight
-		bandwidth := optionalValueV3(request.BandwidthEstimateKbps)
-		fromEstimate := bandwidth > 0
-		if capKbps > 0 && (bandwidth == 0 || capKbps < bandwidth) {
-			bandwidth = capKbps
-			fromEstimate = false
-		}
-		if bandwidth > 0 {
-			earned := streamLadderClassV3(bandwidth, source)
+		if earned, budget, limited := estimateLimitV3(optionalValueV3(request.BandwidthEstimateKbps), targetHeight, classLimit, source); limited {
 			targetHeight = minPositiveV3(targetHeight, earned)
 			classLimit = minPositiveV3(classLimit, earned)
-			budgetKbps = streamBudgetKbpsV3(bandwidth)
-			// A source of unknown bitrate counts as needing the full bitrate
-			// of the class it would be sent at, so it goes as-is only when the
-			// budget covers that.
-			sourceKbps := source.BitrateKbps
-			if sourceKbps <= 0 {
-				sourceKbps = ladderClassBitrateKbpsV3(streamClassV3(minPositiveV3(targetHeight, source.Height), classLimit, source))
-			}
-			overEstimate = fromEstimate && sourceKbps > budgetKbps
+			budgetKbps = budget
+			overEstimate = true
 			reason = "quality_bandwidth_limit"
-		} else if request.Metered {
-			classLimit = minPositiveV3(classLimit, 720)
-			if capped := minPositiveV3(targetHeight, 720); capped != targetHeight {
-				targetHeight = capped
-				reason = "quality_metered_limit"
-			}
 		}
 	}
 	if targetHeight <= 0 {
@@ -1651,7 +1621,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	// preserve the source is forced down when the source bitrate exceeds the
 	// cap, and a transcode rung whose ladder bitrate exceeds the cap drops to
 	// the cap's rung.
-	if capKbps > 0 && !capApplied {
+	if capKbps > 0 {
 		wouldPreserve := source.Height > 0 && targetHeight >= source.Height
 		if (wouldPreserve && capExceededBySource) || (!wouldPreserve && ladderClassBitrateKbpsV3(targetHeight) > capKbps) {
 			capApplied = true
@@ -1713,6 +1683,26 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result
+}
+
+// estimateLimitV3 reports whether a measured bandwidth estimate limits
+// automatic quality: only when the source's bitrate exceeds 80% of it. It then
+// returns the ladder class the estimate earns and that 80% budget. A source of
+// unknown bitrate counts as needing the full bitrate of the class it would be
+// sent at.
+func estimateLimitV3(estimateKbps, targetHeight, classLimit int, source SourceDescriptorV3) (earned, budget int, limited bool) {
+	if estimateKbps <= 0 {
+		return 0, 0, false
+	}
+	sourceKbps := source.BitrateKbps
+	if sourceKbps <= 0 {
+		sourceKbps = ladderClassBitrateKbpsV3(streamClassV3(minPositiveV3(targetHeight, source.Height), classLimit, source))
+	}
+	budget = streamBudgetKbpsV3(estimateKbps)
+	if sourceKbps <= budget {
+		return 0, 0, false
+	}
+	return streamLadderClassV3(estimateKbps, source), budget, true
 }
 
 // compoundRungQualityResultV3 resolves one explicit menu step. Its resolution

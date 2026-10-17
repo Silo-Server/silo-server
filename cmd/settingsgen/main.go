@@ -245,7 +245,8 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  platforms?: readonly string[];\n")
 	out.WriteString("  suggestedOptions?: SettingOptionSetId;\n")
 	out.WriteString("  unsetLabel?: string;\n")
-	out.WriteString("  values?: readonly { value: unknown; label: string; introducedIn: number }[];\n")
+	out.WriteString("  /** A deprecated member stays a valid stored value but is no longer offered. */\n")
+	out.WriteString("  values?: readonly { value: unknown; label: string; introducedIn: number; deprecated?: boolean }[];\n")
 	out.WriteString("  /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */\n")
 	out.WriteString("  ordered?: boolean;\n")
 	out.WriteString("  minimum?: number;\n")
@@ -303,8 +304,12 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 				if err != nil {
 					return nil, err
 				}
-				fmt.Fprintf(&out, "      { value: %s, label: %s, introducedIn: %d },\n",
-					encoded, jsString(member.Label), memberRevision(def, member))
+				deprecated := ""
+				if member.Deprecated {
+					deprecated = ", deprecated: true"
+				}
+				fmt.Fprintf(&out, "      { value: %s, label: %s, introducedIn: %d%s },\n",
+					encoded, jsString(member.Label), memberRevision(def, member), deprecated)
 			}
 			out.WriteString("    ],\n")
 		}

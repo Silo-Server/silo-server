@@ -1754,7 +1754,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
 	timings.mark("planning")
-	if req.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && shouldTryAlternateFileV3(req.QualityPreference) {
+	if req.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) { //nolint:nestif // existing alternate-version fallback; only its quality condition changed
 		accessFilter := requestAccessFilter(r)
 		if alternates, alternateErr := h.findAlternateFiles(r.Context(), alternateBase, accessFilter); alternateErr == nil {
 			if alternateBase != requestedFile {
@@ -1847,7 +1847,6 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	}
 	result = retryIncompleteToneMapPlanningV3(result, toneMapCapabilityErr)
 	result = retryIncompletePlaybackSettingsV3(result, settingsErr)
-	h.clarifyOriginalQuality4KTerminalV3(r.Context(), requestAccessFilter(r), result.Terminal, requestedFile, !shouldTryAlternateFileV3(req.QualityPreference))
 	// The exact app identity is logged with every decision so a route or
 	// terminal reported against one build is attributable without asking the
 	// user which version they are running.
@@ -5011,7 +5010,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		if strings.TrimSpace(req.QualityPreference) != "" {
 			// Replans may omit unchanged intent. Normalizing an absent quality
-			// would silently reset "original" or a fixed rung to "auto".
+			// would silently reset a fixed rung to "auto".
 			start.QualityPreference = req.QualityPreference
 		}
 		start.StartPosition = &req.PositionSeconds
@@ -5099,11 +5098,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			// An output refresh may make the requested edition viable again,
 			// but it must not retire a healthy active alternate merely because
 			// the viewer selected a track unique to that alternate. Other intent
-			// changes must not drop the viewer's subtitle to get back there either,
-			// unless quality "original" pins the requested edition. Staying keeps
-			// the selection, so a fallback can still prefer a version that has it.
-			keepActiveEdition := (outputChange && (remapErr != nil || subtitleDropped)) ||
-				(subtitleDropped && shouldTryAlternateFileV3(start.QualityPreference))
+			// changes must not drop the viewer's subtitle to get back there either.
+			// Staying keeps the selection, so a fallback can still prefer a
+			// version that has it.
+			keepActiveEdition := (outputChange && remapErr != nil) || subtitleDropped
 			if keepActiveEdition {
 				effectiveFile = currentEffectiveFile
 				keptActiveEditionForSubtitle = subtitleDropped
@@ -5233,7 +5231,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	}
-	if start.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
+	if start.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(operation) { //nolint:nestif // existing alternate-version fallback; only its quality condition changed
 		accessFilter := requestAccessFilter(r)
 		alternates, alternateErr := h.findAlternateFiles(r.Context(), requestedFile, accessFilter)
 		if keptActiveEditionForSubtitle {
@@ -5337,7 +5335,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	result = retryIncompleteToneMapPlanningV3(result, toneMapCapabilityErr)
 	result = retryIncompletePlaybackSettingsV3(result, plannerSettingsErr)
-	h.clarifyOriginalQuality4KTerminalV3(r.Context(), requestAccessFilter(r), result.Terminal, requestedFile, replanAlternateFilePinnedByOriginalQualityV3(operation, start.QualityPreference))
 	// Media authentication is attempt-sticky (pinned in HandleReplanPlaybackV3),
 	// so this mode always equals the one the attempt started under: a reused
 	// transport cannot change the session's media security contract.
@@ -6106,10 +6103,6 @@ func lowerVersionForFileV3(lower *playback.LowerVersionV3, file *models.MediaFil
 	return &playback.LowerVersionV3{Requested: lower.Requested, Lower: playback.SourceDescriptorFromFileV3(file, 0)}
 }
 
-func shouldTryAlternateFileV3(qualityPreference string) bool {
-	return !strings.EqualFold(strings.TrimSpace(qualityPreference), "original")
-}
-
 const (
 	terminalNoAlternateVersionV3            = "no_alternate_version"
 	terminalHDRTranscodeUnsupportedV3       = playback.TerminalHDRTranscodeUnsupportedV3
@@ -6194,7 +6187,7 @@ func appendWarningOnceV3(warnings []playback.DegradationWarningV3, warning playb
 	return append(warnings, warning)
 }
 
-func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3, qualityPreference string) bool {
+func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3) bool {
 	switch operation {
 	case playback.ReplanOperationFailureRecoveryV3, playback.ReplanOperationQualityChangeV3, playback.ReplanOperationOutputChangeV3, playback.ReplanOperationTrackChangeV3:
 		// Quality, output, and track changes can make another version the only
@@ -6202,25 +6195,9 @@ func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3, qualityPr
 		// that an HDR source cannot support while an SDR alternate can. The
 		// subtitle identity is remapped before the alternate is adopted; seek-only
 		// operations remain pinned to the mounted source.
-		return shouldTryAlternateFileV3(qualityPreference)
+		return true
 	default:
 		return false
-	}
-}
-
-func replanAlternateFilePinnedByOriginalQualityV3(operation playback.ReplanOperationV3, qualityPreference string) bool {
-	if shouldTryAlternateFileV3(qualityPreference) {
-		return false
-	}
-	return operation == playback.ReplanOperationFailureRecoveryV3 || operation == playback.ReplanOperationQualityChangeV3 || operation == playback.ReplanOperationOutputChangeV3
-}
-
-func (h *PlaybackHandler) clarifyOriginalQuality4KTerminalV3(ctx context.Context, filter catalog.AccessFilter, terminal *playback.TerminalV3, requestedFile *models.MediaFile, alternateFilePinned bool) {
-	if !alternateFilePinned || terminal == nil || terminal.Reason != terminalNoAlternateVersionV3 || terminal.Message != playback.TerminalMessage4KTranscodeDisabledV3 {
-		return
-	}
-	if alternate, err := h.findAlternateFile(ctx, requestedFile, filter); err == nil && alternate != nil && !playback.Is4KMediaFileV3(alternate) {
-		terminal.Message = "4K transcoding is disabled and quality 'original' pins the 4K version; a compatible lower-resolution version of this title is available."
 	}
 }
 

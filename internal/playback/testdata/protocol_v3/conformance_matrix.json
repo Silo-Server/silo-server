@@ -174,7 +174,7 @@
       "expected": {
         "outcome": "playable",
         "delivery": "server_transcode_hls",
-        "decision_reason": "quality_original",
+        "decision_reason": "quality_auto_source",
         "plan_id": "plan:176744988a004fd5f2230c221961c41a",
         "plan_attempt_key": "v3:d1ecc0d9511b83b8",
         "selected_tracks": {

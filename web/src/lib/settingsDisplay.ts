@@ -61,12 +61,13 @@ export function isStructuredSetting(definition: SettingDisplay | null): boolean 
  * Enum members come straight from the contract. Open language tags use the
  * definition's generated advisory option set. A nullable definition gains a
  * leading, context-specific unset entry so a control can express clearing it.
+ * Deprecated members stay valid stored values but are not offered.
  */
 export function optionsFor(definition: SettingDisplay): SettingOption[] {
   if (definition.type === "language_tag") {
     return languageOptionsFor(definition.key);
   }
-  const members = (definition.values ?? []).map((member) => ({
+  const members = (definition.values ?? []).filter((member) => !member.deprecated).map((member) => ({
     value: String(member.value),
     // The manifest leaves a label empty when the member is its own label
     // (the date formats spell themselves).

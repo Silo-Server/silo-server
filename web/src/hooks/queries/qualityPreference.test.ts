@@ -19,10 +19,18 @@ function setResolved(value: unknown) {
 }
 
 describe("useQualityPreference", () => {
-  it("passes 'original' through unchanged — it is a distinct wire value from 'auto' (#849)", () => {
-    setResolved("original");
-    const { result } = renderHook(() => useQualityPreference("1080p"));
-    expect(result.current).toBe("original");
+  it("reads the deprecated 'original' and the older source spellings as auto", () => {
+    for (const value of ["original", "Original", "source", "max"]) {
+      setResolved(value);
+      const { result } = renderHook(() => useQualityPreference("1080p"));
+      expect(result.current).toBe("auto");
+    }
+  });
+
+  it("reads an 'original' profile column fallback as auto", () => {
+    setResolved(undefined);
+    const { result } = renderHook(() => useQualityPreference("original"));
+    expect(result.current).toBe("auto");
   });
 
   it("passes resolution rungs and auto through unchanged", () => {

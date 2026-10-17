@@ -1090,10 +1090,9 @@ function WatchPlaybackHostContent() {
     item: activeItem,
     currentProfile,
     seriesEpisodes,
-    // Passed through verbatim: "original" and "auto" are distinct wire values
-    // (the planner preserves the source for "original", adapts for "auto").
-    // Undefined until the read resolves, which leaves the profile-column
-    // fallback in place rather than blocking playback on a settings fetch.
+    // The session reads a legacy "original" as "auto". Undefined until the
+    // read resolves, which leaves the profile-column fallback in place rather
+    // than blocking playback on a settings fetch.
     qualityPreference: canonicalQuality,
   });
   // The resolved answer already folds in the profile layer, so the props built
