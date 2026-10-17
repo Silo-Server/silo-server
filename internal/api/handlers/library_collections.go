@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
@@ -2689,7 +2690,7 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 // setListingLogos fills in the logo of each card on a v2 collection page,
 // signed in one batch. items are the cards' media items in any order.
 func (h *LibraryCollectionHandler) setListingLogos(ctx context.Context, cards []itemListResponse, items []*models.MediaItem, access catalog.AccessFilter) {
-	urls := signListingLogos(ctx, h.detailSvc, localizedLogoPaths(ctx, h.detailSvc, items, access), access.ImageSize)
+	urls := signListingLogos(ctx, h.detailSvc, localizedLogoPaths(ctx, h.detailSvc, items, access), access.ImageSizeFor(imagesize.SlotLogo))
 	for i := range cards {
 		cards[i].LogoURL = urls[cards[i].ContentID]
 	}

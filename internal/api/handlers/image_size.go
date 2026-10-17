@@ -44,6 +44,13 @@ func requestImageSize(r *http.Request) imagesize.Size {
 	return size
 }
 
+// requestArtwork is the artwork preference of a /api/v1 request: its
+// image_size alone. Per-slot widths are a native v2 parameter; the frozen v1
+// surface never carries them.
+func requestArtwork(r *http.Request) imagesize.Request {
+	return imagesize.Request{Size: requestImageSize(r)}
+}
+
 // requestVariantHint returns the semantic variant hint to send to a plugin
 // resolver alongside a path resolved at the request's size. Without an explicit
 // size the caller's per-context hint stands.

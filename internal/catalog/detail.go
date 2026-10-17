@@ -1678,7 +1678,7 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err != nil {
 			return nil, err
 		}
-		s.attachExtraBackdrops(ctx, []*ItemDetail{detail}, string(filter.ImageSize), true)
+		s.attachExtraBackdrops(ctx, []*ItemDetail{detail}, filter.Artwork(), true)
 		return detail, nil
 	case target.season != nil:
 		return s.buildSeasonDetail(ctx, target.season, filter)
@@ -1896,7 +1896,7 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 		castCredits:      castCredits,
 		crewCredits:      crewCredits,
 		versionPref:      s.effectiveVersionDefaults(ctx, filter, seriesID),
-		backdropURL:      s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize)),
+		backdropURL:      s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop))),
 		audio:            s.newAudioPrefResolver(ctx, filter, seriesID),
 		subtitleDefaults: map[int]subtitleDefaults{},
 		trickplay:        s.trickplay,
@@ -2192,7 +2192,7 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 		}
 		result[id] = detail
 	}
-	s.attachExtraBackdrops(ctx, slices.Collect(maps.Values(result)), string(filter.ImageSize), false)
+	s.attachExtraBackdrops(ctx, slices.Collect(maps.Values(result)), filter.Artwork(), false)
 	return result, nil
 }
 
@@ -2405,9 +2405,9 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 
 	// Resolve image URLs: full URLs (TVDB/TMDB) pass through; S3 cached base paths get
 	// variant-resolved and presigned.
-	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
-	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
-	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSize))
+	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster)))
+	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
+	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSizeFor(imagesize.SlotLogo)))
 	detail.PosterPath = item.PosterPath
 	detail.BackdropPath = item.BackdropPath
 	detail.LogoPath = item.LogoPath
@@ -2549,13 +2549,8 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 	photoPaths := make([]string, len(people))
 	paths := make([]string, 0, len(people))
 	seen := make(map[string]struct{}, len(people))
-	// Without a requested size, ask plugins for their large headshot. The
-	// featured hint maps to TMDB's w185, which is softer than a cast card on a
-	// high-density screen; large maps to h632.
-	variant := imagesize.PluginVariantLarge
-	if filter.ImageSize != imagesize.Unset {
-		variant = sizeToVariant(string(filter.ImageSize))
-	}
+	size := filter.ImageSizeFor(imagesize.SlotPhoto)
+	variant := imagesize.PhotoPluginVariant(size)
 	for i, person := range people {
 		path := person.PhotoPath
 		if path == "" || path == "-" || strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
@@ -2565,7 +2560,7 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 		// medium rung, the w500 the people endpoints serve, because the stored
 		// original can be up to 3840px tall and no cast card draws that.
 		// Plugin-hosted photos keep the historical large hint above.
-		path = cachedImageVariantPath(path, artworkkey.ImageProfile, string(filter.ImageSize))
+		path = cachedImageVariantPath(path, artworkkey.ImageProfile, string(size))
 		photoPaths[i] = path
 		if _, ok := seen[path]; !ok {
 			seen[path] = struct{}{}
@@ -2811,7 +2806,7 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 	}
 	// Presign every chapter poster in one batch rather than per chapter — a
 	// long-running series has hundreds of chapters.
-	resolved := s.PresignImageURLs(ctx, posterPaths, "poster", string(filter.ImageSize))
+	resolved := s.PresignImageURLs(ctx, posterPaths, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster)))
 	for i := range chapters {
 		chapters[i].PosterURL = resolved[chapters[i].PosterURL]
 	}
@@ -2844,7 +2839,7 @@ func firstNonEmptyString(values []string) string {
 }
 
 func (s *DetailService) presignAudiobookPosterURL(ctx context.Context, posterPath string, filter AccessFilter) string {
-	return s.PresignImageURL(ctx, posterPath, "poster", string(filter.ImageSize))
+	return s.PresignImageURL(ctx, posterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster)))
 }
 
 func appendAudiobookItemAccessConditions(
@@ -3279,8 +3274,8 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		detail.AirDate = &airDate
 	}
 
-	detail.PosterURL = s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSize))
-	detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize))
+	detail.PosterURL = s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster)))
+	detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
 	return detail, nil
 }
 
@@ -3330,7 +3325,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		detail.Title = fmt.Sprintf("Episode %d", episode.EpisodeNumber)
 	}
 
-	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSize))
+	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSizeFor(imagesize.SlotPoster)))
 	detail.BackdropURL = seriesCtx.backdropURL
 
 	files := seriesCtx.filesByEpisode[episode.ContentID]
@@ -3411,8 +3406,8 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		if !filter.OmitWatchArtwork {
 			detail.PosterThumbhash = item.PosterThumbhash
 			detail.BackdropThumbhash = item.BackdropThumbhash
-			detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
-			detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
+			detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster)))
+			detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
 		}
 		s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files).applyToWatchDetail(detail)
 		return detail, nil
@@ -3486,7 +3481,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 
 	if !filter.OmitWatchArtwork {
 		detail.PosterThumbhash = episode.StillThumbhash
-		detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSize))
+		detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSizeFor(imagesize.SlotPoster)))
 	}
 
 	if seriesErr == nil && series != nil {
@@ -3498,7 +3493,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		detail.Year = series.Year
 		if !filter.OmitWatchArtwork {
 			detail.BackdropThumbhash = series.BackdropThumbhash
-			detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize))
+			detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
 		}
 	}
 
@@ -3564,8 +3559,8 @@ func (s *DetailService) buildExtraWatchDetail(ctx context.Context, contentID str
 		if !filter.OmitWatchArtwork {
 			detail.PosterThumbhash = parent.PosterThumbhash
 			detail.BackdropThumbhash = parent.BackdropThumbhash
-			detail.PosterURL = s.PresignImageURL(ctx, parent.PosterPath, "poster", string(filter.ImageSize))
-			detail.BackdropURL = s.PresignImageURL(ctx, parent.BackdropPath, "backdrop", string(filter.ImageSize))
+			detail.PosterURL = s.PresignImageURL(ctx, parent.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster)))
+			detail.BackdropURL = s.PresignImageURL(ctx, parent.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
 		}
 	}
 	return detail, nil
@@ -4667,7 +4662,7 @@ func (s *DetailService) PresignURLsWithExpiry(ctx context.Context, paths []strin
 		}
 		resolverPaths = append(resolverPaths, path)
 	}
-	if s.imageResolver != nil {
+	if s.imageResolver != nil && len(resolverPaths) > 0 {
 		if resolver, ok := s.imageResolver.(expiringImageResolver); ok {
 			for path, value := range resolver.ResolveImageURLsWithExpiry(ctx, resolverPaths, variant) {
 				resolved[path] = value
@@ -4696,6 +4691,9 @@ func (s *DetailService) PresignURLsWithExpiry(ctx context.Context, paths []strin
 // the client-facing size contract. Anything else — an absent or unparseable
 // hint — keeps the historical mapping below unchanged.
 func sizeToVariant(size string) string {
+	if _, ok := imagesize.Size(size).TargetWidth(); ok {
+		return imagesize.PluginVariant(imagesize.Size(size))
+	}
 	if parsed, err := imagesize.Parse(size); err == nil && parsed != imagesize.Unset {
 		return imagesize.PluginVariant(parsed)
 	}
@@ -4824,6 +4822,9 @@ func widestRungWithin(imageType, desired string) string {
 // defaults below, which are retained verbatim as the record of what the server
 // returned before image_size existed.
 func cachedImageVariantKey(imageType, size string) string {
+	if _, ok := imagesize.Size(size).TargetWidth(); ok {
+		return imagesize.Variant(imageType, imagesize.Size(size))
+	}
 	if parsed, err := imagesize.Parse(size); err == nil && parsed != imagesize.Unset {
 		return imagesize.Variant(imageType, parsed)
 	}

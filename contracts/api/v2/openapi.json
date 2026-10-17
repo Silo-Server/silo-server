@@ -31382,6 +31382,13 @@
             },
             "type": "array"
           },
+          "slot_width_params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Per-slot width query parameters, keyed by slot: poster (poster_url), backdrop (backdrop_url, backdrop_urls), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is",
+            "type": "object"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -31411,6 +31418,7 @@
           "extended_item_artwork",
           "season_list_artwork_param",
           "param",
+          "slot_width_params",
           "sizes",
           "widths",
           "original_max_width_px",
@@ -134786,19 +134794,102 @@
             }
           },
           {
-            "description": "Artwork variant to presign",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -135075,17 +135166,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -135871,17 +136047,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -136069,17 +136330,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -136267,17 +136613,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -137642,17 +138073,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -138525,17 +139041,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -138937,17 +139538,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -139132,17 +139818,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -139331,17 +140102,102 @@
             }
           },
           {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -158501,12 +159357,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -158517,6 +159373,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -159148,12 +160084,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -159164,6 +160100,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -161517,12 +162533,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign for included_sections, as on getHomeSectionItems; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign for included_sections, as on getHomeSectionItems; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -161533,6 +162549,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -161679,12 +162775,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -161695,6 +162791,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -161855,12 +163031,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -161871,6 +163047,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -168965,12 +170221,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -168981,6 +170237,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -169155,12 +170491,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -169171,6 +170507,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -170529,12 +171945,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -170545,6 +171961,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -174736,12 +176232,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -174752,6 +176248,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {
@@ -195768,19 +197344,102 @@
             }
           },
           {
-            "description": "Artwork variant to presign on the item cards",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign on the item cards",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -196341,19 +198000,102 @@
             }
           },
           {
-            "description": "Artwork variant to presign on the item cards",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign on the item cards",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -196520,19 +198262,102 @@
             }
           },
           {
-            "description": "Artwork variant to presign on the item cards",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign on the item cards",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -196740,19 +198565,102 @@
             }
           },
           {
-            "description": "Artwork variant to presign on the item cards",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign on the item cards",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
                 "large",
                 "original"
               ],
+              "examples": [
+                "medium"
+              ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -210738,12 +212646,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -210754,6 +212662,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -211384,12 +213372,12 @@
             }
           },
           {
-            "description": "Artwork variant to presign; absent picks each surface's default",
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
             "explode": false,
             "in": "query",
             "name": "image_size",
             "schema": {
-              "description": "Artwork variant to presign; absent picks each surface's default",
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
               "enum": [
                 "small",
                 "medium",
@@ -211400,6 +213388,86 @@
                 "medium"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           {

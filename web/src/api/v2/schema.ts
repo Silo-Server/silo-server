@@ -24242,6 +24242,10 @@ export interface components {
       /** @description Season-list boolean query parameter; false omits poster URLs and thumbhashes */
       season_list_artwork_param: string;
       sizes: string[];
+      /** @description Per-slot width query parameters, keyed by slot: poster (poster_url), backdrop (backdrop_url, backdrop_urls), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is */
+      slot_width_params: {
+        [key: string]: string;
+      };
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -89221,6 +89225,8 @@ export interface operations {
   listCatalogItems: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description For source=library_collection or user_collection */
         collection_id?: string;
         /** @description Repeat the key for several ratings */
@@ -89232,18 +89238,24 @@ export interface operations {
         group?: "work";
         /** @description JSON array of structured rule groups; use POST catalog/query for larger queries */
         groups?: string;
-        /** @description Artwork variant to presign */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Restrict to one library; required for library sections */
         library_id?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
         /** @description How the filters combine; default all */
         match?: "all" | "any";
         /** @description Alphabetical jump: only titles whose sort title (or title, when none is set) starts here */
         name_prefix?: string;
         /** @description For source=person */
         person_id?: string;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
         /** @description Search text */
         q?: string;
         /** @description Maximum items in the query result; zero means uncapped */
@@ -89270,6 +89282,8 @@ export interface operations {
           | "person";
         /** @description Metadata match state */
         status?: string;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
         /** @description Media scope: movie, series, episode, audiobook, ebook, manga, or video (movies and series). video_with_episodes, for source=query only, searches movies, series, and episodes when q is set and lists movies and series without q; check getCatalogSearchCapabilities.video_with_episodes_scope first */
         type?: string;
         year_max?: number;
@@ -89381,20 +89395,31 @@ export interface operations {
   listAudiobookGroups: {
     parameters: {
       query: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
         group_by: "author" | "narrator" | "series";
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The audiobook library */
         library_id: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
         /** @description Case-insensitive prefix on the group name */
         q?: string;
         /** @description true skips the exact count; the total is then an estimate */
         skip_total?: boolean;
         /** @description Default name */
         sort?: "name" | "count" | "duration";
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -89777,11 +89802,22 @@ export interface operations {
   getCatalogItem: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description The version the viewer selected; affects the effective playback answer */
         file_id?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -89894,11 +89930,22 @@ export interface operations {
   listCatalogItemEpisodes: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description The version the viewer selected; affects the effective playback answer */
         file_id?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -90009,11 +90056,22 @@ export interface operations {
   listCatalogItemMangaFiles: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description The version the viewer selected; affects the effective playback answer */
         file_id?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -90801,11 +90859,22 @@ export interface operations {
   listCatalogItemVersions: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description The version the viewer selected; affects the effective playback answer */
         file_id?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -91397,7 +91466,18 @@ export interface operations {
   queryCatalogItems: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -91668,11 +91748,22 @@ export interface operations {
   listSeriesSeasons: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Include poster URLs and thumbhashes; false skips poster preparation */
         include_artwork?: boolean;
         /** @description The library the series is being viewed in */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -91783,9 +91874,20 @@ export interface operations {
   getSeriesSeason: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the series is being viewed in */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -91898,9 +92000,20 @@ export interface operations {
   listSeasonEpisodes: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the series is being viewed in */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -103581,12 +103694,22 @@ export interface operations {
   listFavorites: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -104017,12 +104140,22 @@ export interface operations {
   listHistory: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -105637,10 +105770,20 @@ export interface operations {
   getHomeLayout: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign for included_sections, as on getHomeSectionItems; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter */
         include_items?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -105748,8 +105891,18 @@ export interface operations {
   listHomeSections: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -105857,8 +106010,18 @@ export interface operations {
   getHomeSectionItems: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -110755,8 +110918,18 @@ export interface operations {
   listLibrarySections: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -110867,8 +111040,18 @@ export interface operations {
   getLibrarySectionItems: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -111811,12 +111994,22 @@ export interface operations {
   listNotInterested: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -114887,12 +115080,20 @@ export interface operations {
   listNotificationSeries: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
         /** @description Keeps the series whose title or sort title contains this text, case-insensitively */
         q?: string;
         /** @description Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason */
@@ -114909,6 +115110,8 @@ export interface operations {
           | "-latest_episode_added";
         /** @description active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series */
         status?: "all" | "active" | "inactive";
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -128306,8 +128509,18 @@ export interface operations {
   createShuffle: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign on the item cards */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -128456,8 +128669,18 @@ export interface operations {
   getShuffle: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign on the item cards */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -128684,8 +128907,18 @@ export interface operations {
   advanceShuffle: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign on the item cards */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -128836,8 +129069,18 @@ export interface operations {
   skipShuffleItem: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign on the item cards */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -138398,12 +138641,22 @@ export interface operations {
   getWatchState: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Prefer this file when the item has several versions */
         file_id?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Present the item as a member of this library */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header?: {
         /** @description Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account. */
@@ -138844,12 +139097,22 @@ export interface operations {
   listWatchlist: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */

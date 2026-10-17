@@ -95,3 +95,23 @@ func TestPersonCreditPhotoSkipsMissingPaths(t *testing.T) {
 		}
 	}
 }
+
+// A photo width overrides image_size for headshots alone.
+func TestPersonCreditPhotoFollowsPhotoWidth(t *testing.T) {
+	resolver := &recordingCatalogImageResolver{}
+	detail := &DetailService{}
+	detail.SetImageResolver(resolver)
+	detail.personCredits(
+		context.Background(),
+		[]models.ItemPerson{{Person: models.Person{ID: 287, Name: "Brad Pitt", PhotoPath: testPhotoPath}}},
+		AccessFilter{ImageSize: imagesize.Large, ImageWidths: imagesize.Widths{Photo: 200, Backdrop: 2688}},
+	)
+	if want := "tmdb/people/287/profile/w300.abc123.webp"; resolver.path != want {
+		t.Errorf("resolved path = %q, want %q", resolver.path, want)
+	}
+	// A plugin's card headshot is softer than a cast card, so a width short of
+	// the original keeps the large hint.
+	if resolver.variant != imagesize.PluginVariantLarge {
+		t.Errorf("resolver variant = %q, want %q", resolver.variant, imagesize.PluginVariantLarge)
+	}
+}

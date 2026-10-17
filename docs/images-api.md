@@ -57,6 +57,38 @@ On the personal lists the per-slot defaults are asymmetric — a 500px poster
 beside a 300px backdrop — so an explicit size changes both, not just the one that
 looks wrong.
 
+## Per-slot widths
+
+One size for a whole response cannot serve a screen that draws one image of an
+item large and another small: a TV home row shows each item's poster as a card
+and its backdrop full-screen behind the row when the card has focus. Wherever
+`image_size` is accepted, a client can instead give the width in device pixels
+it draws each slot at:
+
+| Parameter | Slot |
+| --- | --- |
+| `poster_width` | every `poster_url` |
+| `backdrop_width` | every `backdrop_url` and `backdrop_urls` entry |
+| `logo_width` | every `logo_url` |
+| `still_width` | an episode row's `still_url` |
+| `photo_width` | a cast or crew `photo_url` |
+
+```http
+GET /api/v2/home/sections?image_size=medium&backdrop_width=2688&logo_width=1760
+```
+
+The server returns the narrowest cached size at least that wide on the image's
+own ladder, including sizes `image_size` cannot name (a 1000px backdrop slot gets
+the 1280px rung), and the original when every size is narrower. A slot is named
+for the field, not the image in it: an episode's `backdrop_url` often holds its
+still, and `backdrop_width` resolves it on the still ladder. A slot width
+overrides `image_size` for that slot; slots without one keep `image_size`, or the
+per-context default when it is absent too. Widths run from 1 to 7680; anything
+else is `422 validation_failed`. Artwork a metadata plugin hosts has no fixed
+widths and gets a semantic hint instead; a headshot keeps the `large` hint cast
+lists already use unless its width needs the original. Where a listing's continuation cursor
+is bound to `image_size`, it is bound to the widths too.
+
 ## Widths
 
 | Image type | `small` | `medium` | `large` | `original` |
@@ -118,6 +150,13 @@ GET /api/v2/images/capabilities
   "state": "available",
   "allowed": true,
   "param": "image_size",
+  "slot_width_params": {
+    "poster": "poster_width",
+    "backdrop": "backdrop_width",
+    "logo": "logo_width",
+    "still": "still_width",
+    "photo": "photo_width"
+  },
   "season_list_artwork_param": "include_artwork",
   "episode_still_provenance": true,
   "extended_item_artwork": true,

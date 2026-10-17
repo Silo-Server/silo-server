@@ -153,6 +153,14 @@ type PersonalListViewer struct {
 	ProfileID string
 	Access    catalog.AccessFilter
 	ImageSize imagesize.Size
+	// ImageWidths are per-slot target widths overriding ImageSize; only the
+	// native v2 API carries them.
+	ImageWidths imagesize.Widths
+}
+
+// Artwork is the viewer's artwork preference.
+func (v PersonalListViewer) Artwork() imagesize.Request {
+	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
 }
 
 func personalListViewerFromRequest(r *http.Request) PersonalListViewer {
@@ -736,7 +744,7 @@ func (h *PersonalDataHandler) historyDisplayCards(ctx context.Context, viewer Se
 	for _, d := range display {
 		ids = append(ids, d.DisplayID)
 	}
-	items, err := resolveItemsByIDs(h, ctx, PersonalListViewer{UserID: apimw.GetUserID(ctx), ProfileID: apimw.GetProfileID(ctx), Access: viewer.Access, ImageSize: viewer.ImageSize}, ids)
+	items, err := resolveItemsByIDs(h, ctx, PersonalListViewer{UserID: apimw.GetUserID(ctx), ProfileID: apimw.GetProfileID(ctx), Access: viewer.Access, ImageSize: viewer.ImageSize, ImageWidths: viewer.ImageWidths}, ids)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
 	}
@@ -876,9 +884,9 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 	// an unrecognized value. Unset keeps the per-slot defaults below, which are
 	// deliberately asymmetric (a featured poster beside a card backdrop); an
 	// explicit size applies to every image in the response instead.
-	size := viewer.ImageSize
-	posterHint := requestVariantHint("featured", size)
-	cardHint := requestVariantHint("card", size)
+	art := viewer.Artwork()
+	posterHint := requestVariantHint("featured", art.For(imagesize.SlotPoster))
+	cardHint := requestVariantHint("card", art.For(imagesize.SlotBackdrop))
 	itemIDs := make([]string, len(mediaItems))
 	for i, mi := range mediaItems {
 		itemIDs[i] = mi.ContentID
@@ -920,8 +928,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 			BackdropThumbhash: mi.BackdropThumbhash,
 			UserState:         userStates[mi.ContentID],
 		}
-		resp.PosterURL = h.presignURL(ctx, sizedPosterPath(mi.PosterPath, size), posterHint)
-		resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
+		resp.PosterURL = h.presignURL(ctx, sizedPosterPath(mi.PosterPath, art.For(imagesize.SlotPoster)), posterHint)
+		resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(mi.BackdropPath, art.For(imagesize.SlotBackdrop)), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 	logoPaths := localizedLogoPaths(ctx, h.detailSvc, accessibleItems, filter)
@@ -964,14 +972,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(ctx, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
+						resp.BackdropURL = h.presignURL(ctx, sizedCardPath(ep.StillPath, artworkkey.ImageStill, art.For(imagesize.SlotBackdrop)), cardHint)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
+						resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(parent.BackdropPath, art.For(imagesize.SlotBackdrop)), cardHint)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {
-						resp.PosterURL = h.presignURL(ctx, sizedPosterPath(parent.PosterPath, size), posterHint)
+						resp.PosterURL = h.presignURL(ctx, sizedPosterPath(parent.PosterPath, art.For(imagesize.SlotPoster)), posterHint)
 						resp.PosterThumbhash = parent.PosterThumbhash
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
@@ -986,7 +994,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 	}
 
-	for contentID, url := range signListingLogos(ctx, h.detailSvc, logoPaths, size) {
+	for contentID, url := range signListingLogos(ctx, h.detailSvc, logoPaths, art.For(imagesize.SlotLogo)) {
 		if item, ok := byID[contentID]; ok {
 			item.LogoURL = url
 		}
