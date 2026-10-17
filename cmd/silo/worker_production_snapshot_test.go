@@ -75,7 +75,7 @@ func newProductionSnapshotFixture(t *testing.T) *productionSnapshotFixture {
 	f := &productionSnapshotFixture{contentFixture: newContentFixture(t), secret: "production-snapshot-fixture-secret"}
 	raw := os.Getenv("SILO_TEST_REDIS_URL")
 	if raw == "" {
-		t.Skip("SILO_TEST_REDIS_URL is not set")
+		raw = startWorkerQueryRedis(t)
 	}
 	opts, err := redis.ParseURL(raw)
 	if err != nil {

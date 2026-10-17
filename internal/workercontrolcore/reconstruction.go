@@ -62,7 +62,11 @@ func (s *Service) begin(ctx context.Context, a workerwire.Assignment) (workerwir
 	return s.options.Store.Begin(ctx, a)
 }
 func (s *Service) restoreSources(ctx context.Context, node Node, old workerwire.Assignment) (workerwire.Assignment, error) {
-	if !s.executionActive(ctx, node, old) {
+	active, err := s.executionStatus(ctx, node, old)
+	if err != nil {
+		return old, errors.Join(ErrUnavailable, err)
+	}
+	if !active {
 		return old, ErrDenied
 	}
 	authority, ok := s.options.Sources.(interface {
