@@ -449,13 +449,14 @@ func TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery(t *testin
 	pool := artworkDeliveryTestPool(t)
 	ctx := t.Context()
 	original := fmt.Sprintf("tmdb/movies/delivery-local-%d/poster/original.rev.webp", time.Now().UnixNano())
-	large, medium := variantKey(original, posterLargeRung), variantKey(original, "w500")
+	large, previousLarge := variantKey(original, posterLargeRung), variantKey(original, "w780")
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, original)
 	})
-	// The revision predates the current ladder: it has every rung but the widest.
+	// The revision predates the current ladder: it has the previous ladder's
+	// widest rung, not the current one.
 	if err := catalog.NewArtworkRevisionTracker(pool).TrackArtworkRevision(ctx, original, "poster",
-		[]string{original, variantKey(original, "w780"), medium, variantKey(original, "w300")}); err != nil {
+		[]string{original, previousLarge, variantKey(original, "w500"), variantKey(original, "w300")}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -463,8 +464,8 @@ func TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery(t *testin
 	t.Cleanup(resolver.Close)
 	resolver.SetArtworkResolver(noProbeStore{t})
 	resolver.SetArtworkAvailabilityReader(NewArtworkDeliveryStore(pool, "local|delivery-local", false))
-	if got := resolver.ResolveImageURL(ctx, large, "large"); got != "https://images.example/"+medium {
-		t.Fatalf("resolved %q, want the published %s rung", got, medium)
+	if got := resolver.ResolveImageURL(ctx, large, "large"); got != "https://images.example/"+previousLarge {
+		t.Fatalf("resolved %q, want the widest published rung %s", got, previousLarge)
 	}
 }
 
