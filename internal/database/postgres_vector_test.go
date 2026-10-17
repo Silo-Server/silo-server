@@ -14,11 +14,12 @@ import (
 	"github.com/pgvector/pgvector-go"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/migrations"
 )
 
 // Pool connections move vectors in binary, every way Silo's queries use them,
-// and still connect to a database without the vector extension. The test role
-// needs CREATEDB.
+// still connect to a database without the vector extension, and pick the
+// codecs up once the migrations create it. The test role needs CREATEDB.
 func TestNewPoolMovesVectorsInBinaryPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -127,7 +128,7 @@ func TestNewPoolMovesVectorsInBinaryPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.Path = "/" + name
-	empty, err := NewPoolForRole(ctx, config.DatabaseConfig{URL: u.String(), MaxConnections: 1}, "application")
+	empty, err := NewPoolForRole(ctx, config.DatabaseConfig{URL: u.String(), MaxConnections: 4}, "application")
 	if err != nil {
 		t.Fatalf("pool for a database without the vector extension: %v", err)
 	}
@@ -135,5 +136,27 @@ func TestNewPoolMovesVectorsInBinaryPostgres(t *testing.T) {
 	var installed bool
 	if err := empty.QueryRow(ctx, `SELECT to_regtype('vector') IS NOT NULL`).Scan(&installed); err != nil || installed {
 		t.Fatalf("new database has the vector type: %v, %v", installed, err)
+	}
+
+	// The first migration creates the extension. Every connection afterwards,
+	// including the one opened above, moves vectors in binary.
+	if err := RunMigrations(ctx, empty, migrations.FS, "sql"); err != nil {
+		t.Fatal(err)
+	}
+	var conns []*pgxpool.Conn
+	defer func() {
+		for _, c := range conns {
+			c.Release()
+		}
+	}()
+	for range empty.Config().MaxConns {
+		c, err := empty.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conns = append(conns, c)
+		if _, ok := c.Conn().TypeMap().TypeForName("vector"); !ok {
+			t.Fatalf("connection %d has no vector codec after migrating", len(conns))
+		}
 	}
 }

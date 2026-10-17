@@ -258,8 +258,10 @@
 # Pool connections run with JIT off unless the server, database, role or
 # DATABASE_URL already chose jit.
 ./internal/database TestNewPoolDisablesJITUnlessConfiguredPostgres
+
 # Pool connections move vectors in binary, report a NULL vector as an error
-# rather than a panic, and still connect before the vector extension exists.
+# rather than a panic, still connect before the vector extension exists, and
+# switch to binary once the migrations create it.
 ./internal/database TestNewPoolMovesVectorsInBinaryPostgres
 
 # Operational log pages: a cursor prunes the partitions newer than it.
