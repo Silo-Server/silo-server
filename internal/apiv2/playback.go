@@ -52,7 +52,7 @@ type PlaybackStartBody struct {
 	FileID                     ID                                 `json:"file_id"`
 	ProfileID                  ID                                 `json:"profile_id"`
 	PlaybackAttemptID          string                             `json:"playback_attempt_id"`
-	QualityPreference          string                             `json:"quality_preference" doc:"auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source whenever the device can. original is a deprecated alias of auto."`
+	QualityPreference          string                             `json:"quality_preference" doc:"auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto."`
 	AllowAlternateVersions     *bool                              `json:"allow_alternate_versions,omitempty" nullable:"false" doc:"False keeps the requested source file for this attempt, including quality changes and failure recovery. Omitted or true allows alternate versions."`
 	SubtitleFidelityPreference playback.SubtitleFidelityV3        `json:"subtitle_fidelity_preference"`
 	StartPosition              *float64                           `json:"start_position,omitempty" nullable:"false"`
@@ -237,7 +237,7 @@ type PlaybackReplanBody struct {
 	AttemptedPlanKeys     []string                           `json:"attempted_plan_keys" maxItems:"16"`
 	LocalMutations        []string                           `json:"local_mutations,omitempty" maxItems:"8"`
 	AttemptCount          int                                `json:"attempt_count" minimum:"1" maximum:"8"`
-	QualityPreference     string                             `json:"quality_preference" doc:"auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source whenever the device can. original is a deprecated alias of auto."`
+	QualityPreference     string                             `json:"quality_preference" doc:"auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto."`
 	PositionSeconds       float64                            `json:"position_seconds" minimum:"0"`
 	Metered               bool                               `json:"metered,omitempty" doc:"Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead." deprecated:"true"`
 	BandwidthEstimateKbps *int                               `json:"bandwidth_estimate_kbps,omitempty" nullable:"false" doc:"Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess."`

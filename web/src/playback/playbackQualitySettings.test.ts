@@ -1,0 +1,38 @@
+import { describe, expect, it } from "vitest";
+import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS } from "@/lib/settingsContract";
+import { playbackQualitySettings } from "./playbackQualitySettings";
+
+function setting(value: unknown): EffectiveSetting {
+  return { value, source: "default" } as EffectiveSetting;
+}
+
+const effective: EffectiveSettingsMap = {
+  [SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]: setting("auto"),
+  [SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]: setting(null),
+  [SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY]: setting("720p"),
+  [SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS]: setting(2000),
+};
+
+describe("playbackQualitySettings", () => {
+  it("uses the main pair on an unmetered link", () => {
+    expect(playbackQualitySettings(effective, false)).toEqual({
+      qualityPreference: "auto",
+      maxBitrateKbps: null,
+    });
+  });
+
+  it("uses the cellular pair on a metered link", () => {
+    expect(playbackQualitySettings(effective, true)).toEqual({
+      qualityPreference: "720p",
+      maxBitrateKbps: 2000,
+    });
+  });
+
+  it("leaves both unset until the settings read resolves", () => {
+    expect(playbackQualitySettings(undefined, true)).toEqual({
+      qualityPreference: undefined,
+      maxBitrateKbps: undefined,
+    });
+  });
+});

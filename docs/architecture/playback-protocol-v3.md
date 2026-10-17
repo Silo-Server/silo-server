@@ -1270,7 +1270,8 @@ must not branch on an unrecognized value.
 `client_dv7_to_dv81`, `client_dv7_to_hdr10`, `client_managed_dynamic_range`,
 `client_dv8_base_layer`, `evidence_insufficient_for_direct`,
 and the quality reasons `quality_auto_source`, `quality_fixed_rung`,
-`quality_device_limit`, `quality_bandwidth_cap`, and `quality_original` (an
+`quality_device_limit`, `quality_bandwidth_limit` (a measured estimate could
+not carry the source), `quality_bandwidth_cap`, and `quality_original` (an
 automatic reduction could not run, so the source size was kept).
 
 ### 7.2 Degradation warnings

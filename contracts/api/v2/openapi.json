@@ -38804,7 +38804,7 @@
             "type": "integer"
           },
           "quality_preference": {
-            "description": "auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source whenever the device can. original is a deprecated alias of auto.",
+            "description": "auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto.",
             "type": "string"
           },
           "replan_request_id": {
@@ -39724,7 +39724,7 @@
             "type": "integer"
           },
           "quality_preference": {
-            "description": "auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source whenever the device can. original is a deprecated alias of auto.",
+            "description": "auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto.",
             "type": "string"
           },
           "start_position": {

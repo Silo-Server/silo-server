@@ -27226,7 +27226,7 @@ export interface components {
       position_seconds: number;
       /** Format: int64 */
       protocol_version: number;
-      /** @description auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source whenever the device can. original is a deprecated alias of auto. */
+      /** @description auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto. */
       quality_preference: string;
       /** @description Client-minted identity of this replan; a retry with the same body replays the durable decision */
       replan_request_id: string;
@@ -27685,7 +27685,7 @@ export interface components {
       progress_persistence?: "server" | "client";
       /** Format: int64 */
       protocol_version: number;
-      /** @description auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source whenever the device can. original is a deprecated alias of auto. */
+      /** @description auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto. */
       quality_preference: string;
       /** Format: double */
       start_position?: number;

@@ -612,3 +612,18 @@ func TestPlanPlaybackV3DirectPlaysWhateverTheLimitsAllow(t *testing.T) {
 		})
 	}
 }
+
+// An encode the device already requires stays within a measured estimate even
+// though the source itself would fit it: a 3 Mbps HEVC 4K source on a 1080p
+// device and a 4 Mbps link drops to the class the estimate earns.
+func TestResolveQualityPolicyV3DeviceEncodeStaysWithinTheEstimate(t *testing.T) {
+	req := validStartRequestV3()
+	req.QualityPreference = "auto"
+	req.Capabilities.MaxResolution = "1080p"
+	estimate := 4_000
+	req.BandwidthEstimateKbps = &estimate
+	got := ResolveQualityPolicyV3(req, SourceDescriptorV3{Width: 3840, Height: 2160, VideoCodec: "hevc", BitrateKbps: 3_000, FrameRate: 24})
+	if !got.RequiresTranscode || got.Height != 720 || got.BitrateKbps > 3_200 {
+		t.Fatalf("device-limited encode on a 4 Mbps link = %dp at %d kbps (transcode %v), want 720p within 3200 kbps", got.Height, got.BitrateKbps, got.RequiresTranscode)
+	}
+}

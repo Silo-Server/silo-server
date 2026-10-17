@@ -354,6 +354,24 @@ describe("qualityOptionsFromPlanV3", () => {
     }
   });
 
+  it("resolves a smaller delivered frame to its class when the source bitrate is unknown", () => {
+    const options = qualityOptionsFromPlanV3(
+      fixturePlanV3({
+        available_qualities: [
+          { label: "1080p-medium", height: 1080, bitrate_kbps: 6000, preserves_source: false },
+          { label: "720p-medium", height: 720, bitrate_kbps: 2000, preserves_source: false },
+        ],
+      }),
+    );
+    const source = { height: 1080 };
+    expect(
+      resolveActiveQualityOptionId(options, "1080p", { width: 1280, height: 720 }, source),
+    ).toBe("720p-medium");
+    expect(
+      resolveActiveQualityOptionId(options, "1080p", { width: 1920, height: 1080 }, source),
+    ).toBeNull();
+  });
+
   it("lights no row when the source fits the resolution cap alongside same-height rungs", () => {
     // A 1080p source above the Medium bitrate publishes 1080p High/Medium/Low,
     // but the planner preserves the source for a plain 1080p cap. No row is

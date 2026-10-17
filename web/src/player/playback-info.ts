@@ -226,7 +226,12 @@ export function resolveActiveQualityOptionId(
   const sourceHeight = source?.height;
   const sourceKbps = source?.bitrate_kbps;
   const deliveredKbps = delivered?.bitrate_kbps;
-  const capped = isPositive(deliveredKbps) && isPositive(sourceKbps) && deliveredKbps < sourceKbps;
+  const deliveredHeight = delivered?.height;
+  // A smaller delivered frame shows a reduction even when the source bitrate
+  // is unknown.
+  const capped =
+    (isPositive(deliveredKbps) && isPositive(sourceKbps) && deliveredKbps < sourceKbps) ||
+    (isPositive(deliveredHeight) && isPositive(sourceHeight) && deliveredHeight < sourceHeight);
   if (isPositive(sourceHeight) && !capped && sourceHeight <= aliasHeight) {
     return null;
   }

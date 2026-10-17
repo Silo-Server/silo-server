@@ -1603,10 +1603,18 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 			reason = "quality_device_limit"
 		}
 		classLimit = maxHeight
-		if earned, budget, limited := estimateLimitV3(optionalValueV3(request.BandwidthEstimateKbps), targetHeight, classLimit, source); limited {
+	}
+	if quality == QualityAutoV3 {
+		earned, budget, overSource := estimateLimitV3(optionalValueV3(request.BandwidthEstimateKbps), targetHeight, classLimit, source)
+		// A source the link can carry plays as-is. An encode the link forces,
+		// or one the device already requires, stays within the estimate.
+		deviceEncode := source.Height > 0 && targetHeight < source.Height
+		if budget > 0 && (overSource || deviceEncode) {
 			targetHeight = minPositiveV3(targetHeight, earned)
 			classLimit = minPositiveV3(classLimit, earned)
 			budgetKbps = budget
+		}
+		if overSource {
 			overEstimate = true
 			reason = "quality_bandwidth_limit"
 		}
@@ -1685,12 +1693,12 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	return result
 }
 
-// estimateLimitV3 reports whether a measured bandwidth estimate limits
-// automatic quality: only when the source's bitrate exceeds 80% of it. It then
-// returns the ladder class the estimate earns and that 80% budget. A source of
-// unknown bitrate counts as needing the full bitrate of the class it would be
-// sent at.
-func estimateLimitV3(estimateKbps, targetHeight, classLimit int, source SourceDescriptorV3) (earned, budget int, limited bool) {
+// estimateLimitV3 reads a measured bandwidth estimate for automatic quality:
+// the ladder class it earns, the 80% budget an encode stays within, and
+// whether the source's bitrate exceeds that budget. A source of unknown
+// bitrate counts as needing the full bitrate of the class it would be sent at.
+// Without an estimate it returns zeros.
+func estimateLimitV3(estimateKbps, targetHeight, classLimit int, source SourceDescriptorV3) (earned, budget int, overSource bool) {
 	if estimateKbps <= 0 {
 		return 0, 0, false
 	}
@@ -1699,10 +1707,7 @@ func estimateLimitV3(estimateKbps, targetHeight, classLimit int, source SourceDe
 		sourceKbps = ladderClassBitrateKbpsV3(streamClassV3(minPositiveV3(targetHeight, source.Height), classLimit, source))
 	}
 	budget = streamBudgetKbpsV3(estimateKbps)
-	if sourceKbps <= budget {
-		return 0, 0, false
-	}
-	return streamLadderClassV3(estimateKbps, source), budget, true
+	return streamLadderClassV3(estimateKbps, source), budget, sourceKbps > budget
 }
 
 // compoundRungQualityResultV3 resolves one explicit menu step. Its resolution
