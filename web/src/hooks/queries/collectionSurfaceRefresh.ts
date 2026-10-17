@@ -17,6 +17,9 @@ export async function invalidateUserCollectionQueries(
 export async function invalidateLibraryCollectionQueries(queryClient: QueryClient) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.all }),
+    // The Collections page's Server collections list, which the grid there
+    // reads beside each library's list.
+    queryClient.invalidateQueries({ queryKey: collectionKeys.server() }),
     queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
   ]);
 }
