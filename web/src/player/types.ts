@@ -295,6 +295,7 @@ export interface WatchPageProps {
   intro: PlayerTimeRange | null;
   /** null while the connected server's answer is still unknown; see VideoPlayer. */
   introSkipMode?: IntroSkipMode | null;
+  bufferingMode?: import("./buffering-quality").BufferingMode;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;

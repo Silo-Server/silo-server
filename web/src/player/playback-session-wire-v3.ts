@@ -79,6 +79,9 @@ function clampPosition(seconds: number): number {
 }
 
 export interface ReplanOptions {
+  bandwidthEstimateKbps?: number | null;
+  bandwidthEstimateSource?: "probe" | "observed_rebuffer";
+  learnedLimit?: "ignore" | "clear";
   operation: ReplanOperationV3;
   positionSeconds: number;
   /** Present only on `track_change`; `null` clears the subtitle selection. */
@@ -104,6 +107,8 @@ export interface StartRequestInput {
   subtitleTrackIndex?: number | null;
   bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
+  bandwidthEstimateSource?: "probe" | "observed_rebuffer";
+  learnedLimit?: "ignore" | "clear";
   clientCapabilities: ClientCodecCapabilitiesV3;
   clientPlaybackContext: ClientPlaybackContextV3;
 }
@@ -121,6 +126,10 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
   return {
     protocol_version: PROTOCOL_V3,
     client_features: clientFeaturesV3(input.extraClientFeatures),
+    ...(input.bandwidthEstimateSource
+      ? { bandwidth_estimate_source: input.bandwidthEstimateSource }
+      : {}),
+    ...(input.learnedLimit ? { learned_limit: input.learnedLimit } : {}),
     file_id: input.fileId,
     profile_id: input.profileId,
     playback_attempt_id: input.playbackAttemptId,
@@ -160,6 +169,8 @@ export interface ReplanRequestInput extends ReplanOptions {
   attemptCount: number;
   bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
+  bandwidthEstimateSource?: "probe" | "observed_rebuffer";
+  learnedLimit?: "ignore" | "clear";
   clientCapabilities: ClientCodecCapabilitiesV3;
   clientPlaybackContext: ClientPlaybackContextV3;
 }
@@ -188,6 +199,10 @@ export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3
   return {
     protocol_version: PROTOCOL_V3,
     client_features: clientFeaturesV3(input.extraClientFeatures),
+    ...(input.bandwidthEstimateSource
+      ? { bandwidth_estimate_source: input.bandwidthEstimateSource }
+      : {}),
+    ...(input.learnedLimit ? { learned_limit: input.learnedLimit } : {}),
     operation: input.operation,
     playback_attempt_id: input.playbackAttemptId,
     replan_request_id: input.replanRequestId,

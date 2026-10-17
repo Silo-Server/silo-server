@@ -4,7 +4,7 @@ import { playerFetchResponse, PlayerFetchError } from "./player-fetch";
 import { playerV2Origin } from "./player-v2";
 import type { DecisionResponseV3, ReplanRequestV3 } from "./protocol-v3";
 import { sessionInstallation } from "./session-mutations";
-import { decisionFromWireV2 } from "./start-v2";
+import { bufferingQualityWire, playbackCapabilitiesV2, decisionFromWireV2 } from "./start-v2";
 
 type ReplanBody = components["schemas"]["PlaybackReplanBody"];
 
@@ -28,7 +28,11 @@ export async function replanV2(
 ): Promise<DecisionResponseV3> {
   const installationId = sessionInstallation(sessionId);
   if (!installationId) throw new Error("Playback session was not started on API v2");
-  const payload: ReplanBody = { ...body, installation_id: installationId } as ReplanBody;
+  const cap = await playbackCapabilitiesV2(config);
+  const payload: ReplanBody = {
+    ...bufferingQualityWire(body, cap.features),
+    installation_id: installationId,
+  } as ReplanBody;
   const response = await playerFetchResponse(
     config,
     `${playerV2Origin(config)}/api/v2/playback/${encodeURIComponent(sessionId)}/replan`,

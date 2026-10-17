@@ -23,11 +23,7 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
-import {
-  onMeteredConnection,
-  readMeasuredBandwidthKbps,
-  readMeteredObservedLimitKbps,
-} from "./bandwidth-probe";
+import { onMeteredConnection, readMeasuredBandwidthKbps } from "./bandwidth-probe";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
 
@@ -254,7 +250,7 @@ export function buildDeliveriesV3(
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
   // On a metered link a probe result describes another link; only a limit
   // playback observed on a metered link describes this one.
-  return onMeteredConnection() ? readMeteredObservedLimitKbps() : readMeasuredBandwidthKbps();
+  return onMeteredConnection() ? undefined : readMeasuredBandwidthKbps();
 }
 
 /** Coarse form factor, used by the server only for quirk lookups. */

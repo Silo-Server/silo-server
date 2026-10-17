@@ -73,6 +73,7 @@ export const v2Operations = {
   "DELETE /api/v2/notifications/web-push/subscriptions/{id}":
     "deleteNotificationWebPushSubscription",
   "DELETE /api/v2/notifications/webhooks/{id}": "deleteNotificationWebhook",
+  "DELETE /api/v2/playback/connection/learned-limit": "resetPlaybackLearnedLimit",
   "DELETE /api/v2/playback/{session_id}": "stopPlayback",
   "DELETE /api/v2/profile/sections": "resetProfileSectionOverrides",
   "DELETE /api/v2/profiles/{id}": "deleteProfile",
@@ -427,6 +428,7 @@ export const v2Operations = {
   "GET /api/v2/password-resets/{token}": "lookupPasswordReset",
   "GET /api/v2/playback/bandwidth-probe": "getPlaybackBandwidthProbe",
   "GET /api/v2/playback/capabilities": "getPlaybackCapabilities",
+  "GET /api/v2/playback/connection": "getPlaybackConnection",
   "GET /api/v2/playback/sessions/control/capabilities": "getPlaybackControlSocketCapabilities",
   "GET /api/v2/playback/sessions/{session_id}/control/ws": "connectPlaybackControlSocket",
   "GET /api/v2/playback/transcode/{session_id}/master.m3u8": "getPlaybackManifest",

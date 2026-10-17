@@ -1,6 +1,12 @@
+import { BufferingQualityPill } from "./BufferingQualityPill";
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import { useAutoQualityDownshift } from "../hooks/useAutoQualityDownshift";
-import { recordObservedBandwidthLimitKbps } from "../bandwidth-probe";
+import type {
+  BufferingMode,
+  BufferingReplan,
+  BufferingSummary,
+  BufferingPlan,
+} from "../buffering-quality";
 import { skipTarget } from "../utils/skipTarget";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
@@ -196,6 +202,7 @@ interface VideoPlayerProps {
   /** Title for the replan error, used when surfacing the refusal as a toast. */
   replanErrorTitle?: string | null;
   sessionId: string;
+  bufferingTitleId?: string;
   selectedVersion?: PlayerFileVersion;
   versions?: PlayerFileVersion[];
   activeFileId?: number | null;
@@ -209,7 +216,12 @@ interface VideoPlayerProps {
   subtitleUrls: PlayerSubtitleInfo[];
   initialPosition: number;
   /** `quality_change` replan for a label taken from `plan.available_qualities`. */
-  onQualitySelect?: (label: string, currentPosition: number) => void;
+  onQualitySelect?: (
+    label: string,
+    currentPosition: number,
+    buffering?: BufferingReplan,
+    onAdopt?: (planId?: string) => void,
+  ) => void;
   /** `track_change` replan for a subtitle the server has to render. */
   onSubtitleTrackChange?: (combinedIndex: number | null, currentPosition: number) => void;
   /** `failure_recovery` replan after the client could not play the plan. */
@@ -250,6 +262,8 @@ interface VideoPlayerProps {
    * server to leave alone.
    */
   introSkipMode?: IntroSkipMode | null;
+  bufferingMode?: BufferingMode;
+  onBufferingSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
@@ -433,6 +447,9 @@ export function VideoPlayer({
   profileLanguage,
   intro,
   introSkipMode = "ask",
+  bufferingMode = "always",
+  bufferingTitleId,
+  onBufferingSummary,
   credits,
   recap = null,
   autoSkipRecap = false,
@@ -4124,29 +4141,77 @@ export function VideoPlayer({
   // carry it. When the link proves slower, record what it could not sustain
   // and replan Auto, which reads that lower estimate. Rooms have their own
   // lower-quality offer.
-  useAutoQualityDownshift({
+  const bufferingQuality = useAutoQualityDownshift({
     videoRef,
-    // Buffering while the session reconnects is the outage, not a slow link.
-    enabled:
-      activeQualityId === "auto" && !watchTogetherRoomActive && connectionStatus === "connected",
-    sessionId,
-    // Only an adopted plan resets stall history; in-place plan updates such
-    // as a newly ready subtitle must not drop a stall in progress.
-    planIdentity: planRevision,
-    deliveredKbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps,
+    enabled: !watchTogetherRoomActive,
+    sessionId: bufferingTitleId ?? sessionId,
+    mode: bufferingMode,
+    plan: useMemo(
+      () => ({
+        plan_id: plan.plan_id,
+        delivered_kbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps ?? 0,
+        quality: activeQualityId,
+        available_qualities: plan.available_qualities,
+        degradation_warnings: plan.degradation_warnings.map((w) => w.code),
+      }),
+      [plan, activeQualityId],
+    ),
+    obscured: !!activeIntroPrompt || nextEpisode.showCountdown,
     transportTrouble: () =>
+      connectionStatus !== "connected" ||
       (typeof navigator !== "undefined" && navigator.onLine === false) ||
       Date.now() - lastTransportErrorAtRef.current < TRANSPORT_TROUBLE_WINDOW_MS,
-    onDownshift: (estimateKbps) => {
-      recordObservedBandwidthLimitKbps(estimateKbps);
+    onReplan: (request, onAdopt) =>
+      onQualitySelect?.(request.quality_preference, currentTime, request, onAdopt),
+    onNotice: (key) =>
       setNotice({
-        title: "Lowering quality",
-        message: "Playback kept buffering, so Auto is switching to a lower bitrate.",
+        title:
+          key === "lowered"
+            ? "Quality lowered to stop buffering"
+            : "Can't lower quality for this video",
+        message: "",
         tone: "info",
-      });
-      handleQualitySelectRef.current("auto");
-    },
+      }),
+    onSummary: onBufferingSummary,
   });
+  useEffect(() => {
+    if (
+      !bufferingQuality.pill ||
+      activeIntroPrompt ||
+      nextEpisode.showCountdown ||
+      displayMode !== "foreground"
+    )
+      return;
+    const keydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const inPill = active?.closest('[data-buffering-prompt="true"]') != null;
+      if (
+        !inPill &&
+        active?.closest(
+          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
+        )
+      )
+        return;
+      const select = event.key === "Enter" || event.key === " ";
+      const back = event.key === "Escape" || event.key === "BrowserBack";
+      if (!select && !back) return;
+      if (select && !inPill && active !== document.body && active !== containerRef.current) return;
+      // Let the secondary button keep its own Select action.
+      if (select && inPill && active?.dataset.bufferingKeep === "true") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      bufferingQuality.answer(
+        event.key === "Escape" || event.key === "BrowserBack"
+          ? "back"
+          : bufferingQuality.pill?.kind === "undo"
+            ? "select_restore"
+            : "select_lower",
+      );
+    };
+    document.addEventListener("keydown", keydown, true);
+    return () => document.removeEventListener("keydown", keydown, true);
+  }, [bufferingQuality, activeIntroPrompt, nextEpisode.showCountdown, displayMode]);
 
   // Rebuild pacing belongs to one stream in one room.
   useEffect(() => {
@@ -4837,6 +4902,14 @@ export function VideoPlayer({
         </div>
       )}
 
+      {bufferingQuality.pill && !activeIntroPrompt && !nextEpisode.showCountdown && (
+        <BufferingQualityPill
+          kind={bufferingQuality.pill.kind}
+          remainingMs={bufferingQuality.pill.remainingMs}
+          keyboard={lastInputWasKeyboardRef.current}
+          answer={bufferingQuality.answer}
+        />
+      )}
       {/* Intro skip / undo prompt */}
       {!isDetached && activeIntroPrompt && (
         <IntroSkipButton
@@ -4929,7 +5002,10 @@ export function VideoPlayer({
           playbackSource={plan.source}
           isTranscoding={replanning}
           qualityError={replanError}
-          onQualitySelect={handleQualitySelect}
+          onQualitySelect={(id) => {
+            bufferingQuality.answer("quality_changed");
+            handleQualitySelect(id);
+          }}
           versionLocked={!!watchTogetherRoomId}
           versions={
             versions.length > 1

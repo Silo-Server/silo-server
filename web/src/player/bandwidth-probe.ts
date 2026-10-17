@@ -83,6 +83,7 @@ function parseStored(raw: string | null | undefined, now: number): StoredEstimat
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw) as Partial<StoredEstimate>;
+    if (parsed.observed) return undefined;
     if (typeof parsed.kbps !== "number" || typeof parsed.measuredAt !== "number") return undefined;
     if (now - parsed.measuredAt > BANDWIDTH_ESTIMATE_TTL_MS || parsed.measuredAt > now)
       return undefined;
@@ -91,7 +92,6 @@ function parseStored(raw: string | null | undefined, now: number): StoredEstimat
     return {
       kbps,
       measuredAt: parsed.measuredAt,
-      observed: parsed.observed === true,
       ...(typeof parsed.link === "string" ? { link: parsed.link } : {}),
     };
   } catch {
@@ -108,13 +108,8 @@ function readStored(now: number): StoredEstimate | undefined {
   return shared.measuredAt > page.measuredAt ? shared : page;
 }
 
-function writeStored(kbps: number, now: number, observed = false): void {
+function writeStored(kbps: number, now: number): void {
   const entry: StoredEstimate = { kbps, measuredAt: now };
-  if (observed) {
-    entry.observed = true;
-    const link = meteredLink();
-    if (link) entry.link = link;
-  }
   pageEntry = JSON.stringify(entry);
   storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, pageEntry);
 }
@@ -133,49 +128,6 @@ export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined 
   const stored = readStored(now);
   // A limit recorded on a metered link describes that link only.
   return stored && !stored.link ? stored.kbps : undefined;
-}
-
-/**
- * Records that playback could not sustain `kbps`. The cache only ever moves
- * down this way, so later starts and replans in the TTL plan for the slower
- * link instead of the optimistic probe.
- */
-export function recordObservedBandwidthLimitKbps(kbps: number, now = Date.now()): void {
-  const observed = clampKbps(kbps);
-  if (observed === undefined) return;
-  const current = readStored(now);
-  // Nothing to add when a lower limit is already recorded for this kind of
-  // link. Otherwise keep the lower value but record it for the current link,
-  // so a metered link honors it.
-  const sameLink = current?.link === meteredLink();
-  // A cached value caps the new limit unless it came from another kind of
-  // metered link, which does not describe this one. Writing even when the
-  // lower value is kept restarts its TTL: the link just confirmed it.
-  const cap = current && (sameLink || !current.link) ? current.kbps : observed;
-  writeStored(Math.min(observed, cap), now, true);
-}
-
-/**
- * Names the kind of metered link the viewer is on, from what the browser
- * reports: its connection type and whether Data Saver is on. Undefined on an
- * unmetered link. Not a network identity, but enough to keep a limit seen on
- * cellular from steering a Data Saver Wi-Fi network, and the reverse.
- */
-function meteredLink(): string | undefined {
-  if (!onMeteredConnection()) return undefined;
-  const connection = networkInformation();
-  return `${connection?.type ?? "unknown"}:${connection?.saveData === true ? "save-data" : "full"}`;
-}
-
-/**
- * The cached limit playback observed on this kind of metered link, for
- * planning on it. A limit observed on Wi-Fi or another kind of metered link
- * does not describe this one, and a probe result never applies here.
- */
-export function readMeteredObservedLimitKbps(now = Date.now()): number | undefined {
-  const link = meteredLink();
-  const stored = readStored(now);
-  return link && stored?.observed && stored.link === link ? stored.kbps : undefined;
 }
 
 /**
@@ -406,7 +358,7 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
     const stored = readStored(now);
     // A limit from a metered link says nothing about an unmetered one, so it
     // does not stand in for a probe there.
-    if (!stored || (stored.link && !meteredLink())) return false;
+    if (!stored || stored.link) return false;
     schedule(stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - now + 1000);
     return true;
   };

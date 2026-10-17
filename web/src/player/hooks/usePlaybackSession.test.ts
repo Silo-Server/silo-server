@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
-import { forgetBandwidthEstimate, recordObservedBandwidthLimitKbps } from "../bandwidth-probe";
+import { forgetBandwidthEstimate } from "../bandwidth-probe";
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { markPlaybackIntent } from "../first-frame";
 import {
@@ -508,8 +508,14 @@ describe("usePlaybackSession quality changes", () => {
 
     // What VideoPlayer does when Auto keeps stalling: record the lower
     // estimate, then replan Auto.
-    recordObservedBandwidthLimitKbps(4_200);
-    act(() => result.current.changeQuality("auto", 120));
+    act(() =>
+      result.current.changeQuality("auto", 120, {
+        operation: "quality_change",
+        quality_preference: "auto",
+        bandwidth_estimate_kbps: 4200,
+        bandwidth_estimate_source: "observed_rebuffer",
+      }),
+    );
     await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
     expect(bodiesTo("/playback/session-1/replan")[0]).toMatchObject({
       operation: "quality_change",

@@ -123,7 +123,7 @@ export async function startPlaybackV2(
     throw new Error("This server needs an update to keep Watch Party viewers on the same version.");
   const installationId = cap.installation_id;
   const payload = JSON.stringify({
-    ...body,
+    ...bufferingQualityWire(body, cap.features),
     file_id: String(body.file_id),
     installation_id: installationId,
   } satisfies components["schemas"]["PlaybackStartBody"]);
@@ -183,4 +183,26 @@ export async function startPlaybackV2(
       if (Date.now() >= deadline) throw error;
     }
   }
+}
+
+/** New optional fields are sent only after capability negotiation. */
+export function bufferingQualityWire<
+  T extends StartRequestV3 | import("./protocol-v3").ReplanRequestV3,
+>(body: T, features: string[]): T {
+  const result = { ...body, client_features: [...(body.client_features ?? [])] };
+  if (features.includes("buffering_quality_v1")) {
+    if (!result.client_features.includes("buffering_quality_v1"))
+      result.client_features.push("buffering_quality_v1");
+    if (result.bandwidth_estimate_kbps !== undefined) result.bandwidth_estimate_source ??= "probe";
+  } else {
+    delete result.bandwidth_estimate_source;
+    delete result.learned_limit;
+    result.client_features = result.client_features.filter((f) => f !== "buffering_quality_v1");
+  }
+  if (
+    features.includes("playback_plan_summary_v1") &&
+    !result.client_features.includes("playback_plan_summary_v1")
+  )
+    result.client_features.push("playback_plan_summary_v1");
+  return result;
 }

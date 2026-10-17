@@ -33,6 +33,7 @@ import (
 // of one v2 playback request. InstallationID is the value the client read
 // from capabilities; a mutation from a different installation is refused.
 type PlaybackCaller struct {
+	ConnectionDeviceID                                    string
 	UserID                                                int
 	ProfileID, InstallationID                             string
 	DeviceID, DeviceName, Platform                        string
@@ -204,6 +205,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 // handler and never carries credentials, a body stream, or a response writer.
 // nativeAPIV2ContextKey marks a request that arrived through /api/v2.
 type nativeAPIV2ContextKey struct{}
+type playbackConnectionDeviceContextKey struct{}
 
 // WithNativeAPIV2 marks ctx as serving /api/v2. The playback and stream
 // handlers are shared with the frozen /api/v1 routes, and contract additions
@@ -292,6 +294,7 @@ func withNativeServerFeaturesV3(response playback.DecisionResponseV3) playback.D
 
 func playbackCallerRequest(ctx context.Context, caller PlaybackCaller) *http.Request {
 	headers := make(http.Header)
+	ctx = context.WithValue(ctx, playbackConnectionDeviceContextKey{}, caller.ConnectionDeviceID)
 	headers.Set(deviceIDHeader, caller.DeviceID)
 	headers.Set(deviceNameHeader, caller.DeviceName)
 	headers.Set(devicePlatformHeader, caller.Platform)

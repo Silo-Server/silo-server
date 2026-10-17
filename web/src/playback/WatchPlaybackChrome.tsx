@@ -611,6 +611,12 @@ function WatchPlaybackHostContent() {
   // key did and makes all three behave as the contract says they do.
   const { data: effectivePlaybackSettings } = useEffectiveSettings({
     keys: [
+      ...(settingsCapabilitiesSupportKey(
+        settingsCapabilities.data,
+        SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
+      )
+        ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]
+        : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
@@ -1165,6 +1171,20 @@ function WatchPlaybackHostContent() {
           {...watchPageProps}
           maxBitrateKbps={maxBitrateKbps ?? null}
           introSkipMode={introSkipMode}
+          bufferingMode={
+            (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
+              | "never"
+              | "ask"
+              | "always"
+              | undefined) ??
+            (settingsCapabilities.data &&
+            !settingsCapabilitiesSupportKey(
+              settingsCapabilities.data,
+              SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
+            )
+              ? "always"
+              : "never")
+          }
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}
           canEditMarkers={canEditMarkers}

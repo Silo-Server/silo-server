@@ -38374,6 +38374,31 @@
         ],
         "type": "object"
       },
+      "PlaybackBandwidthLimit": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source": {
+            "enum": [
+              "observed_rebuffer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "source",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "PlaybackCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -38430,6 +38455,22 @@
           "revision",
           "state",
           "allowed"
+        ],
+        "type": "object"
+      },
+      "PlaybackConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "type": "string"
+          },
+          "learned_limit": {
+            "$ref": "#/components/schemas/PlaybackLearnedLimit"
+          }
+        },
+        "required": [
+          "connection",
+          "learned_limit"
         ],
         "type": "object"
       },
@@ -38550,6 +38591,29 @@
         ],
         "type": "object"
       },
+      "PlaybackLearnedLimit": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "observed_at",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "PlaybackMutation": {
         "additionalProperties": false,
         "properties": {
@@ -38596,6 +38660,9 @@
               "$ref": "#/components/schemas/AvailableQualityV3"
             },
             "type": "array"
+          },
+          "bandwidth_limit": {
+            "$ref": "#/components/schemas/PlaybackBandwidthLimit"
           },
           "claims": {
             "$ref": "#/components/schemas/ValidationClaimsV3"
@@ -38760,6 +38827,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "bandwidth_estimate_source": {
+            "enum": [
+              "probe",
+              "observed_rebuffer"
+            ],
+            "type": "string"
+          },
           "client_capabilities": {
             "$ref": "#/components/schemas/ClientCodecCapabilitiesV3"
           },
@@ -38786,6 +38860,13 @@
               "1"
             ],
             "minLength": 1,
+            "type": "string"
+          },
+          "learned_limit": {
+            "enum": [
+              "ignore",
+              "clear"
+            ],
             "type": "string"
           },
           "local_mutations": {
@@ -39700,6 +39781,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "bandwidth_estimate_source": {
+            "enum": [
+              "probe",
+              "observed_rebuffer"
+            ],
+            "type": "string"
+          },
           "client_capabilities": {
             "$ref": "#/components/schemas/ClientCodecCapabilitiesV3"
           },
@@ -39726,6 +39814,13 @@
               "1"
             ],
             "minLength": 1,
+            "type": "string"
+          },
+          "learned_limit": {
+            "enum": [
+              "ignore",
+              "clear"
+            ],
             "type": "string"
           },
           "metered": {
@@ -180872,6 +180967,309 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/playback/connection": {
+      "get": {
+        "operationId": "getPlaybackConnection",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackConnection"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read or reset the calling device's learned connection limit.",
+        "tags": [
+          "playback"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/playback/connection/learned-limit": {
+      "delete": {
+        "operationId": "resetPlaybackLearnedLimit",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read or reset the calling device's learned connection limit.",
+        "tags": [
+          "playback"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/playback/route-events": {
       "post": {
         "operationId": "reportPlaybackRouteEvent",
@@ -180895,6 +181293,18 @@
             "schema": {
               "examples": [
                 "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
               ],
               "type": "string"
             }
@@ -181741,6 +182151,18 @@
             }
           },
           {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "User-Agent",
             "schema": {
@@ -181849,18 +182271,6 @@
               "description": "Opaque distribution channel paired with X-Silo-Client",
               "examples": [
                 "release"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
-            "in": "header",
-            "name": "X-Silo-Device-Id",
-            "schema": {
-              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
-              "examples": [
-                "iphone-1"
               ],
               "type": "string"
             }
@@ -182654,6 +183064,18 @@
             }
           },
           {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "User-Agent",
             "schema": {
@@ -182975,6 +183397,18 @@
             }
           },
           {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "User-Agent",
             "schema": {
@@ -183291,6 +183725,18 @@
             "schema": {
               "examples": [
                 "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)",
+              "examples": [
+                "iphone-1"
               ],
               "type": "string"
             }

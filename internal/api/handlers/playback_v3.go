@@ -1698,6 +1698,10 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// The frozen /api/v1 surface negotiates only its original features.
 		// subrip_sidecar_v1 is attempt-sticky, so dropping it here keeps it out
 		// of every later replan of this attempt too.
+		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1)
+		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeaturePlaybackPlanSummaryV1)
+		req.BandwidthEstimateSource = ""
+		req.LearnedLimit = ""
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureSubripSidecarV3)
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureMarkerThumbnailsV3)
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureHLSSubtitleRenditionsV3)
@@ -1818,6 +1822,11 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if effectiveFile.PresentationPartTotal > 1 && effectiveFile.PresentationPartIndex > 0 {
 		alternateBase = effectiveFile
 	}
+	learnedLimit, limitErr := h.applyLearnedLimit(r, &req)
+	if limitErr != nil {
+		return playback.DecisionResponseV3{}, playbackStoreOperationError()
+	}
+	effectiveFile, req, audioIndex = h.lowerBufferedVersion(r, req, effectiveFile, audioIndex, settings)
 	lowerVersion := h.lowerVersionV3(r.Context(), req, alternateBase, settings, requestAccessFilter(r))
 	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile),
@@ -1826,6 +1835,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
+	markLearnedLimit(&result, learnedLimit, requestedFile, req, serverBitrateCapV3(r.Context()))
 	timings.mark("planning")
 	if req.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) { //nolint:nestif // existing alternate-version fallback; only its quality condition changed
 		accessFilter := requestAccessFilter(r)
@@ -5071,14 +5081,14 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				subtitleSelectionDiffersFromStartV3(req.SelectedTracks, start)
 		case qualityChange:
 			nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
-			intentChange = nextQuality != start.QualityPreference
+			intentChange = nextQuality != start.QualityPreference || req.LearnedLimit == playback.LearnedLimitClearV3
 		case outputChange:
 			intentChange = true
 		default:
 			switch req.Failure.Classification {
 			case "quality_changed":
 				nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
-				intentChange = nextQuality != start.QualityPreference
+				intentChange = nextQuality != start.QualityPreference || req.LearnedLimit == playback.LearnedLimitClearV3
 			case "audio_track_changed":
 				intentChange = audioSelectionDiffersFromStartV3(req.SelectedTracks, start)
 			case "subtitle_track_changed":
@@ -5103,6 +5113,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		start.StartPosition = &req.PositionSeconds
 		start.Metered = req.Metered
 		start.BandwidthEstimateKbps = copyOptionalIntV3(req.BandwidthEstimateKbps)
+		start.BandwidthEstimateSource = req.BandwidthEstimateSource
+		start.LearnedLimit = req.LearnedLimit
 		start.BandwidthCapKbps = copyOptionalIntV3(req.BandwidthCapKbps)
 		start.Capabilities = req.Capabilities
 		start.ClientPlaybackContext = req.ClientPlaybackContext
@@ -5266,8 +5278,18 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	var plannerSettings playback.PlannerSettingsV3
 	var plannerSettingsErr error
 	var lowerVersion *playback.LowerVersionV3
+	var learnedLimit *playback.BandwidthLimitV3
 	if !seekReanchor {
+		var limitErr error
+		learnedLimit, limitErr = h.applyLearnedLimit(r, &start)
+		if limitErr != nil {
+			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "connection_store_unavailable", message: "Connection observations are temporarily unavailable", retryable: true}
+		}
+
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
+		if qualityChange {
+			effectiveFile, start, audioIndex = h.lowerBufferedVersion(r, start, effectiveFile, audioIndex, plannerSettings)
+		}
 		if requestedEditionResolved {
 			lowerVersion = h.lowerVersionV3(r.Context(), start, requestedFile, plannerSettings, requestAccessFilter(r))
 		}
@@ -5297,6 +5319,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: additional})
 	}
+	markLearnedLimit(&result, learnedLimit, requestedFile, start, serverBitrateCapV3(r.Context()))
 	if outputChange && result.Terminal != nil && effectiveFile.ID != currentEffectiveFile.ID {
 		// Returning to the requested edition is speculative during an output
 		// refresh. Any terminal from that probe must fall back to the edition
@@ -7186,6 +7209,7 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 }
 
 var diagnosticKeysV3 = map[string]struct{}{
+	"played_ms": {}, "stall_count": {}, "stall_total_ms": {}, "stall_longest_ms": {}, "delivered_kbps": {}, "buffering_mode": {}, "buffering_action": {},
 	"decoder_name": {}, "decoder_init_ms": {}, "first_frame_ms": {},
 	"device_model": {}, "requested_quality": {}, "effective_quality": {},
 	"pcm_recovery": {}, "retry_outcome": {}, "replan_request_id": {},

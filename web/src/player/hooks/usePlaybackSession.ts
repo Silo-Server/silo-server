@@ -1,3 +1,4 @@
+import type { BufferingMode, BufferingReplan } from "../buffering-quality";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
@@ -186,7 +187,12 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
    */
   changeSubtitleTrack: (combinedIndex: number | null, currentPosition: number) => void;
   /** `quality_change` replan for a label taken from `plan.available_qualities`. */
-  changeQuality: (label: string, currentPosition: number) => void;
+  changeQuality: (
+    label: string,
+    currentPosition: number,
+    buffering?: BufferingReplan,
+    onAdopt?: (planId?: string) => void,
+  ) => void;
   /** `failure_recovery` replan after the client could not play the plan. */
   recoverFromFailure: (failure: FailureV3, currentPosition: number) => void;
   /**
@@ -226,6 +232,7 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     extra?: {
       failureClassification?: string;
       fallbackReason?: string;
+      planId?: string;
       diagnostics?: Record<string, string | number | boolean | undefined | null>;
     },
   ) => void;
@@ -388,6 +395,7 @@ export function usePlaybackSession(
   initialSubtitleTrackIndexByFileId?: Record<number, number>,
   initialBitmapSubtitleTrackIndexByFileId?: Record<number, number>,
   allowAlternateVersions = true,
+  bufferingMode: BufferingMode = "always",
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
   const probe = useCodecDetection();
@@ -442,6 +450,18 @@ export function usePlaybackSession(
 
   const sessionIdRef = useRef<string | null>(null);
   const planRef = useRef<PlanV3 | null>(null);
+  const summaryIdentitiesRef = useRef(
+    new Map<
+      string,
+      {
+        playbackAttemptId: string;
+        sessionId: string | null;
+        planId: string;
+        planAttemptId: string;
+        planAttemptKey: string;
+      }
+    >(),
+  );
   const planRevisionRef = useRef(0);
   const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
@@ -612,19 +632,31 @@ export function usePlaybackSession(
       extra?: {
         failureClassification?: string;
         fallbackReason?: string;
+        planId?: string;
         diagnostics?: Record<string, string | number | boolean | undefined | null>;
       },
     ) => {
+      if (
+        event === "plan_summary" &&
+        !serverFeaturesRef.current.includes("playback_plan_summary_v1")
+      )
+        return;
       const attemptId = playbackAttemptIdRef.current;
       if (!attemptId) return;
       const plan = planRef.current;
+      const summaryIdentity =
+        event === "plan_summary" && extra?.planId
+          ? summaryIdentitiesRef.current.get(extra.planId)
+          : undefined;
       const input = {
         event,
         playbackAttemptId: attemptId,
         ...routeEventPlanIdentityV3(plan, sessionIdRef.current, planAttemptIdRef.current),
         ...extra,
+        ...summaryIdentity,
       };
-      const sessionId = sessionIdRef.current;
+      const sessionId = summaryIdentity?.sessionId ?? sessionIdRef.current;
+      if (summaryIdentity) summaryIdentitiesRef.current.delete(summaryIdentity.planId);
       if (sessionId && hasSequencedProgress(sessionId)) {
         void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input));
       }
@@ -677,6 +709,17 @@ export function usePlaybackSession(
       planRef.current = plan;
       sessionEndedRef.current = false;
       sessionIdRef.current = sessionId ?? null;
+      summaryIdentitiesRef.current.set(plan.plan_id, {
+        playbackAttemptId: playbackAttemptIdRef.current ?? "",
+        sessionId: sessionId ?? null,
+        planId: plan.plan_id,
+        planAttemptId: planAttemptIdRef.current,
+        planAttemptKey: plan.plan_attempt_key,
+      });
+      if (summaryIdentitiesRef.current.size > 100) {
+        const oldest = summaryIdentitiesRef.current.keys().next().value;
+        if (oldest) summaryIdentitiesRef.current.delete(oldest);
+      }
       planRevisionRef.current += 1;
       hasAdoptedPlanRef.current = true;
       if (
@@ -737,6 +780,7 @@ export function usePlaybackSession(
         subtitleTrackIndex,
         bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
         bandwidthCapKbps: maxBitrateKbps,
+        learnedLimit: bufferingMode === "never" ? "ignore" : undefined,
         clientCapabilities,
         clientPlaybackContext,
       });
@@ -750,6 +794,7 @@ export function usePlaybackSession(
       config,
       explicitAudioTrackIndex,
       maxBitrateKbps,
+      bufferingMode,
     ],
   );
 
@@ -1219,8 +1264,13 @@ export function usePlaybackSession(
         qualityPreference: qualityRef.current,
         attemptedPlanKeys,
         attemptCount,
-        bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+        bandwidthEstimateKbps:
+          options.bandwidthEstimateKbps === undefined
+            ? detectBandwidthEstimateKbpsV3()
+            : options.bandwidthEstimateKbps,
+        bandwidthEstimateSource: options.bandwidthEstimateSource,
         bandwidthCapKbps: maxBitrateKbps,
+        learnedLimit: options.learnedLimit ?? (bufferingMode === "never" ? "ignore" : undefined),
         clientCapabilities,
         clientPlaybackContext,
       });
@@ -1364,6 +1414,7 @@ export function usePlaybackSession(
       config,
       endAdoption,
       maxBitrateKbps,
+      bufferingMode,
       retireActiveSession,
     ],
   );
@@ -1450,22 +1501,37 @@ export function usePlaybackSession(
   );
 
   const changeQuality = useCallback(
-    (label: string, currentPosition: number) => {
+    (
+      label: string,
+      currentPosition: number,
+      buffering?: BufferingReplan,
+      onAdopt?: (planId?: string) => void,
+    ) => {
       const normalized = normalizeQualityPreferenceV3(label);
       const previousPreference = qualityRef.current;
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
-      void replan({ operation: "quality_change", positionSeconds: currentPosition }).then(
-        (adopted) => {
-          if (adopted || qualityRef.current !== normalized) return;
-          qualityRef.current = previousPreference;
-          setState((current) =>
-            current.qualityPreference === normalized
-              ? { ...current, qualityPreference: previousPreference }
-              : current,
-          );
-        },
-      );
+      void replan({
+        operation: "quality_change",
+        positionSeconds: currentPosition,
+        ...(buffering
+          ? {
+              bandwidthEstimateKbps: buffering.bandwidth_estimate_kbps ?? null,
+              bandwidthEstimateSource: buffering.bandwidth_estimate_source,
+              learnedLimit: buffering.learned_limit,
+            }
+          : {}),
+      }).then((adopted) => {
+        onAdopt?.(adopted ? planRef.current?.plan_id : undefined);
+        if (adopted) return;
+        if (qualityRef.current !== normalized) return;
+        qualityRef.current = previousPreference;
+        setState((current) =>
+          current.qualityPreference === normalized
+            ? { ...current, qualityPreference: previousPreference }
+            : current,
+        );
+      });
     },
     [replan],
   );

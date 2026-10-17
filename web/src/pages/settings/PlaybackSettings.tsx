@@ -1,3 +1,4 @@
+import { PlaybackConnection } from "./PlaybackConnection";
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
@@ -429,14 +430,19 @@ export default function PlaybackSettings() {
     : capabilities.isSuccess
       ? "legacy"
       : "unknown";
+  const supportsBuffering = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
+  );
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
+      ...(supportsBuffering ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode],
+    [supportsIntroSkipMode, supportsBuffering],
   );
   const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
   const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
@@ -468,6 +474,35 @@ export default function PlaybackSettings() {
         description="Each of your devices can override these, and a household manager can cap them for this profile."
       >
         <QualitySetting />
+        {supportsBuffering && (
+          <SettingRow
+            label="Lower quality when buffering"
+            description="What Silo does on Auto when playback keeps buffering. Silo always asks before lowering a quality you picked."
+            control={(id) => (
+              <Select
+                value={read<string>(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE)}
+                disabled={pending}
+                onValueChange={(value) =>
+                  saveValue(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE, value)
+                }
+              >
+                <SelectTrigger id={id} className="w-full sm:w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {optionsFor(
+                    SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE],
+                  ).map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+        )}
+        {supportsBuffering && <PlaybackConnection />}
       </SettingsGroup>
 
       <SettingsGroup title="Skipping">

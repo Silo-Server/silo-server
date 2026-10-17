@@ -31,8 +31,6 @@ import {
   forgetBandwidthEstimate,
   measureBandwidthKbps,
   readMeasuredBandwidthKbps,
-  readMeteredObservedLimitKbps,
-  recordObservedBandwidthLimitKbps,
   scheduleBandwidthProbe,
   stopBandwidthProbes,
 } from "./bandwidth-probe";
@@ -180,103 +178,12 @@ describe("measured bandwidth cache", () => {
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
   });
 
-  it("only lowers the estimate when playback could not keep up", () => {
-    const now = Date.now();
+  it("discards browser-local limits saved before server learning", () => {
     storage.set(
       storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: 200_000, measuredAt: now }),
+      JSON.stringify({ kbps: 4200, measuredAt: Date.now(), observed: true }),
     );
-
-    recordObservedBandwidthLimitKbps(56_000, now);
-    expect(readMeasuredBandwidthKbps(now)).toBe(56_000);
-
-    recordObservedBandwidthLimitKbps(90_000, now);
-    expect(readMeasuredBandwidthKbps(now)).toBe(56_000);
-  });
-
-  it("marks a lower probe result as observed on a metered link without raising it", () => {
-    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
-    try {
-      const now = Date.now();
-      storage.set(
-        storage.KEYS.BANDWIDTH_ESTIMATE,
-        JSON.stringify({ kbps: 3_000, measuredAt: now }),
-      );
-      expect(readMeteredObservedLimitKbps(now)).toBeUndefined();
-
-      recordObservedBandwidthLimitKbps(4_200, now);
-      expect(readMeteredObservedLimitKbps(now)).toBe(3_000);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("re-records a lower Wi-Fi limit for a metered link that stalls", () => {
-    const now = Date.now();
-    recordObservedBandwidthLimitKbps(3_000, now);
-    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
-    try {
-      expect(readMeteredObservedLimitKbps(now)).toBeUndefined();
-      recordObservedBandwidthLimitKbps(4_200, now);
-      expect(readMeteredObservedLimitKbps(now)).toBe(3_000);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("does not offer a limit observed on an unmetered link to a metered one", () => {
-    recordObservedBandwidthLimitKbps(56_000);
-    expect(readMeasuredBandwidthKbps()).toBe(56_000);
-    expect(readMeteredObservedLimitKbps()).toBeUndefined();
-  });
-
-  it("does not carry a metered limit back onto an unmetered link", () => {
-    const now = Date.now();
-    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
-    try {
-      recordObservedBandwidthLimitKbps(4_200, now);
-      expect(readMeteredObservedLimitKbps(now)).toBe(4_200);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-    // Back on Wi-Fi: the cellular limit is neither an estimate nor fresh enough
-    // to skip a probe, and a Wi-Fi stall is not capped by it.
-    expect(readMeasuredBandwidthKbps(now)).toBeUndefined();
-    recordObservedBandwidthLimitKbps(30_000, now);
-    expect(readMeasuredBandwidthKbps(now)).toBe(30_000);
-  });
-
-  it("keeps a recorded limit when localStorage refuses the write", () => {
-    const set = vi.spyOn(storage, "set").mockImplementation(() => undefined);
-    try {
-      recordObservedBandwidthLimitKbps(14_000);
-      expect(readMeasuredBandwidthKbps()).toBe(14_000);
-    } finally {
-      set.mockRestore();
-    }
-  });
-
-  it("prefers a newer result another tab stored over this page's own", () => {
-    const now = Date.now();
-    recordObservedBandwidthLimitKbps(14_000, now - 60_000);
-    storage.set(
-      storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: 90_000, measuredAt: now - 1_000 }),
-    );
-    expect(readMeasuredBandwidthKbps(now)).toBe(90_000);
-  });
-
-  it("restarts the TTL when a stall confirms a lower limit", () => {
-    const start = Date.now();
-    recordObservedBandwidthLimitKbps(10_000, start);
-    const later = start + BANDWIDTH_ESTIMATE_TTL_MS - 1_000;
-    recordObservedBandwidthLimitKbps(20_000, later);
-    expect(readMeasuredBandwidthKbps(later + 10 * 60_000)).toBe(10_000);
-  });
-
-  it("records a limit when nothing was measured", () => {
-    recordObservedBandwidthLimitKbps(14_000);
-    expect(readMeasuredBandwidthKbps()).toBe(14_000);
+    expect(readMeasuredBandwidthKbps()).toBeUndefined();
   });
 });
 

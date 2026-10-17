@@ -167,6 +167,7 @@ function WatchPagePlayer({
   showForcedSubtitles,
   profileLanguage,
   introSkipMode,
+  bufferingMode = "always",
   autoSkipRecap,
   autoPlayNextPreview,
   canEditMarkers,
@@ -219,6 +220,7 @@ function WatchPagePlayer({
     initialSubtitleTrackIndexByFileId,
     initialBitmapSubtitleTrackIndexByFileId,
     !watchTogetherRoomId,
+    bufferingMode,
   );
 
   const fallbackHandledRef = useRef<string | null>(null);
@@ -710,6 +712,11 @@ function WatchPagePlayer({
       profileLanguage={profileLanguage}
       intro={activeMarkers.intro}
       introSkipMode={introSkipMode}
+      bufferingMode={bufferingMode}
+      bufferingTitleId={contentId}
+      onBufferingSummary={(plan, summary) =>
+        session.reportEvent("plan_summary", { planId: plan.plan_id, diagnostics: { ...summary } })
+      }
       credits={activeMarkers.credits}
       recap={activeMarkers.recap}
       autoSkipRecap={autoSkipRecap}

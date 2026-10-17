@@ -63,6 +63,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
@@ -1341,6 +1342,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
+			playbackHandler.Connections = &connectionstore.Store{Pool: deps.DB}
+			if deps.AppContext != nil {
+				go playbackHandler.Connections.RunCleanup(deps.AppContext)
+			}
 			// The v2 playback contract binds every mutation to this server's
 			// installation identity; a client that read capabilities from a
 			// different installation is refused. Nothing else depends on it, so a

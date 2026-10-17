@@ -276,7 +276,7 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     }
   });
 
-  it("uses a limit playback observed even on a metered link", () => {
+  it("discards the retired browser-local observed limit on a metered link", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 8, saveData: true } });
     localStorage.setItem(
       "silo-bandwidth-estimate",
@@ -288,7 +288,7 @@ describe("detectBandwidthEstimateKbpsV3", () => {
       }),
     );
     try {
-      expect(detectBandwidthEstimateKbpsV3()).toBe(4_200);
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
     } finally {
       localStorage.removeItem("silo-bandwidth-estimate");
     }
