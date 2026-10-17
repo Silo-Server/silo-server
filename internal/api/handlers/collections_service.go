@@ -314,8 +314,16 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 // item_count set to the members profileID can see: for another profile's
 // collection, only those its owner can access too. On /api/v2 a collection
 // without an uploaded or imported poster shows its collage for that profile,
-// once built. A collection whose owner cannot be resolved is left out.
+// once built. A collection whose owner cannot be resolved is left out. The
+// counts of hand-picked and imported collections may be remembered from an
+// earlier list read (catalog.PersonalCollectionMemberCounts).
 func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection) []PersonalCollectionView {
+	return h.collectionViewsCounted(ctx, store, userID, profileID, collections, h.MemberCounts)
+}
+
+// collectionViewsCounted is collectionViews counting members with
+// memberCounts, or afresh when it is nil.
+func (h *CollectionHandler) collectionViewsCounted(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection, memberCounts *catalog.PersonalCollectionMemberCounts) []PersonalCollectionView {
 	var reads ownedCollectionReads
 	if userstore.HasCatalogSQLState(store) {
 		sources := make([]ownedCollectionDefinition, 0, len(collections))
@@ -326,7 +334,7 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 				WantsCollage:                 strings.TrimSpace(c.PosterURL) == "",
 			})
 		}
-		reads = ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.Collages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
+		reads = ownerScopedCollectionReads(ctx, h.Executor, memberCounts, h.CollectionOwners, collagesForRead(ctx, h.Collages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	}
 	views := make([]PersonalCollectionView, 0, len(collections))
 	for _, c := range collections {
@@ -358,9 +366,10 @@ func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCo
 }
 
 // collectionView renders one stored collection as collectionViews does, and
-// fails when its owner's access cannot be resolved.
+// fails when its owner's access cannot be resolved. Its item_count is always
+// counted afresh: a collection's strong ETag binds its live count.
 func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.UserStore, userID int, profileID string, c userstore.Collection) (PersonalCollectionView, error) {
-	views := h.collectionViews(ctx, store, userID, profileID, []userstore.Collection{c})
+	views := h.collectionViewsCounted(ctx, store, userID, profileID, []userstore.Collection{c}, nil)
 	if len(views) == 0 {
 		return PersonalCollectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
 	}

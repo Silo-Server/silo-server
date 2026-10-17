@@ -47,6 +47,13 @@ at once; stored manual members are hidden, not deleted, and return with the acce
 to `item_count`, item pages, the catalog `user_collection` source, home rows and the library
 Collections tab. It never changes what a viewer can open elsewhere.
 
+List reads (`listCollections`, `getLibraryCollections`, `listLibraryUserCollections`) remember a
+hand-picked or imported collection's `item_count`, and that it has no title with a poster for a
+collage, per viewer for up to five minutes. A change to the collection's members or definition, or
+to the viewer's or creator's access, shows on the next read. A catalog change alone, such as a
+title leaving a library, a new rating or newly fetched artwork, can take up to five minutes to
+reach a list. `getCollection` always counts live.
+
 Smart rules on watch state, favorites and the watchlist, and display filters, are evaluated for
 the viewer. A shared collection never reveals its creator's activity.
 

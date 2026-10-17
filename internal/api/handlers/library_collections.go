@@ -63,6 +63,10 @@ type LibraryCollectionHandler struct {
 	// PersonalCollages serves the collages of the personal collections opted
 	// into a library tab; nil when artwork storage is not configured.
 	PersonalCollages *catalog.PersonalCollectionCollages
+	// PersonalMemberCounts counts the members a viewer sees in the
+	// hand-picked and imported personal collections opted into a library
+	// tab and remembers the counts between reads; nil counts on every read.
+	PersonalMemberCounts *catalog.PersonalCollectionMemberCounts
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse

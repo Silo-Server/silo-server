@@ -269,7 +269,7 @@ func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, us
 			WantsCollage:                 strings.TrimSpace(c.PosterPath) == "",
 		})
 	}
-	reads := ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.PersonalCollages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
+	reads := ownerScopedCollectionReads(ctx, h.Executor, h.PersonalMemberCounts, h.CollectionOwners, collagesForRead(ctx, h.PersonalCollages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	out := collections[:0]
 	for _, c := range collections {
 		if reads.unavailable[c.ID] {
