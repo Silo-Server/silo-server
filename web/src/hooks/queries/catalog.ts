@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient, type Query } from "@tanstack/react-query";
 
 import type { CatalogFiltersResponse, CatalogResponse } from "@/api/types";
 import { catalogFiltersFromV2, catalogItemFromV2 } from "@/api/v2/catalog";
@@ -276,6 +276,26 @@ export function useCatalogWindow(
     pageIndex === 0
       ? page0Key
       : catalogKeys.list({ ...remainingPageParams, limit, offset: pageIndex * limit, snapshot });
+  // Every page past the first is keyed by page 0's snapshot, so each page 0
+  // refetch (a realtime event invalidating the list, say) re-keys them all.
+  // Until a page loads under the new snapshot, show what it held under an
+  // earlier one instead of dropping the grid back to skeletons.
+  const earlierSnapshotPage = (pageIndex: number) => {
+    let newest: Query<CatalogPage>["state"] | undefined;
+    // The key without a snapshot matches this page under every snapshot.
+    const samePage = catalogKeys.list({ ...remainingPageParams, limit, offset: pageIndex * limit });
+    for (const query of queryClient.getQueryCache().findAll({ queryKey: samePage })) {
+      const { state } = query as Query<CatalogPage>;
+      if (
+        state.data !== undefined &&
+        state.data.snapshot !== snapshot &&
+        state.dataUpdatedAt > (newest?.dataUpdatedAt ?? 0)
+      ) {
+        newest = state;
+      }
+    }
+    return newest?.data;
+  };
   const continuationCursor = (page: CatalogPage | undefined) =>
     snapshot !== undefined &&
     page?.snapshot === snapshot &&
@@ -354,6 +374,7 @@ export function useCatalogWindow(
         queryKey: pageKey(pageIndex),
         queryFn: ({ signal }: { signal: AbortSignal }) => fetchRemainingPage(pageIndex, signal),
         ...remainingPageOptions,
+        placeholderData: () => earlierSnapshotPage(pageIndex),
         enabled:
           canFetchRemainingPages &&
           (!continuationIsIndexed || pageIndex >= visibleStartPage || firstVisiblePageSettled),
