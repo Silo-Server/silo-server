@@ -101,8 +101,10 @@ embed-stub:
 # Run the Go and frontend test suites.
 test: test-go test-web
 
+# The queryattr concurrency tests prove nothing without the race detector.
 test-go: embed-stub
 	go test ./...
+	go test -race -count=1 ./internal/database/queryattr/
 
 # Run the DB-backed query-budget pins listed in $(DB_PINS), then the database
 # contracts, against the migrated, disposable database named by

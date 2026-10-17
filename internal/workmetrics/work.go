@@ -9,13 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
 
 const (
@@ -107,6 +109,8 @@ type Run struct {
 
 // Start links an initiating request when present, then starts an independent
 // workload trace. No long-lived request span or durable identity is retained.
+// The returned context hides the request from query attribution, so workload
+// queries do not count on the initiating request's log line.
 func Start(ctx context.Context, workload string, queuedAt time.Time) (context.Context, *Run) {
 	parentCtx := ctx
 	category := Category(workload)
@@ -121,7 +125,7 @@ func Start(ctx context.Context, workload string, queuedAt time.Time) (context.Co
 		queueWait.WithLabelValues(category).Observe(run.start.Sub(queuedAt).Seconds())
 	}
 	lastProgress.WithLabelValues(category).SetToCurrentTime()
-	return context.WithValue(pprof.WithLabels(ctx, pprof.Labels(labelWorkload, category)), runKey{}, run), run
+	return context.WithValue(pprof.WithLabels(queryattr.Detach(ctx), pprof.Labels(labelWorkload, category)), runKey{}, run), run
 }
 
 // Do makes the bounded workload label available to CPU/goroutine profiling.
