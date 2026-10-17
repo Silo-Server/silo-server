@@ -33,6 +33,7 @@ type Options struct {
 	Binding                                     workeridentity.Binding
 	Scratch, FFmpeg, FFprobe, HWAccel, HWDevice string
 	MaxJobs                                     int
+	MaxSourceReaders, MaxInputs                 int
 	Transport                                   http.RoundTripper
 }
 
@@ -113,7 +114,7 @@ func New(ctx context.Context, options Options) (*Runtime, error) {
 	}
 	core, _ := url.Parse(options.Binding.CoreURL)
 	coreOrigin := core.Scheme + "://" + core.Host
-	r.inputs, err = workerinput.New(workerinput.Options{LocalRoot: options.Scratch, FFprobe: options.FFprobe, Origins: []string{coreOrigin}, AllowHTTP: options.Binding.AllowHTTP, Allowed: r.workAllowed, Sign: func(request *http.Request) error {
+	r.inputs, err = workerinput.New(workerinput.Options{LocalRoot: options.Scratch, FFprobe: options.FFprobe, Origins: []string{coreOrigin}, AllowHTTP: options.Binding.AllowHTTP, Allowed: r.workAllowed, MaxReads: options.MaxSourceReaders, MaxInputs: options.MaxInputs, Sign: func(request *http.Request) error {
 		return workeridentity.Sign(request, coreOrigin, workeridentity.DomainSourceRequest, options.Binding.NodePrivateKey, options.Binding.NodeID, options.Binding.AllowHTTP)
 	}, Transport: transport})
 	if err != nil {

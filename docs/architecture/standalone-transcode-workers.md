@@ -271,6 +271,16 @@ scratch paths and job ceiling stay operator-owned. The ceiling accounts for
 producer and probe lifetimes, including shared probes that outlive a cancelled
 caller. Source reads do not consume compute slots.
 
+Source admission has separate host budgets. Each API replica reads
+`SILO_WORKER_SOURCE_MAX_READERS` once at startup; the default is 32 and the
+supported range is 1–4096. The worker's `--max-source-readers` has the same
+default and range. Its `--max-inputs` bounds retained source handles separately
+(default 128, range 1–65536). A reader slot covers the complete transfer,
+including retries and downstream backpressure. Saturated HTTP inputs return
+503 with `Retry-After: 1`; they do not queue indefinitely or revoke the source.
+Capacity planning must include replacement transports and auxiliary or index
+reads alongside ordinary FFmpeg inputs.
+
 An admitted playback carries a server-owned `job_id` in its signed assignment and
 output authority. Healthy and replacement transports share that logical playback
 slot while retaining distinct work IDs. Native replans hold both the local session

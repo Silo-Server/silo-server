@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/workercontrol"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 )
 
 const (
@@ -35,6 +36,8 @@ func runStandaloneWorker(ctx context.Context, args []string) error {
 	hwAccel := flags.String("hw-accel", "auto", "local hardware acceleration policy")
 	hwDevice := flags.String("hw-device", "", "local GPU render device")
 	maxJobs := flags.Int("max-jobs", 0, "operator encoding ceiling; zero is unlimited")
+	maxSourceReaders := flags.Int("max-source-readers", workerinput.DefaultMaxReads, "maximum concurrent source reads")
+	maxInputs := flags.Int("max-inputs", workerinput.DefaultMaxInputs, "maximum admitted source handles")
 	if err := flags.Parse(args); err != nil {
 		if printWorkerCommandHelp(flags, err) {
 			return nil
@@ -43,6 +46,9 @@ func runStandaloneWorker(ctx context.Context, args []string) error {
 	}
 	if flags.NArg() != 0 || *bindingPath == "" {
 		return errors.New("worker requires --binding and no positional arguments")
+	}
+	if *maxSourceReaders < 1 || *maxSourceReaders > workerinput.MaximumReads || *maxInputs < 1 || *maxInputs > workerinput.MaximumInputs {
+		return errors.New("worker source resource limits are outside their supported ranges")
 	}
 	for _, name := range []string{workerDatabaseURL, workerRedisURL, workerSecretKey, workerJWTSecret} {
 		if os.Getenv(name) != "" {
@@ -65,7 +71,7 @@ func runStandaloneWorker(ctx context.Context, args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	runtime, err := workercontrol.New(ctx, workercontrol.Options{Binding: binding, Scratch: *scratch, FFmpeg: *ffmpeg, FFprobe: *ffprobe, HWAccel: *hwAccel, HWDevice: *hwDevice, MaxJobs: *maxJobs})
+	runtime, err := workercontrol.New(ctx, workercontrol.Options{Binding: binding, Scratch: *scratch, FFmpeg: *ffmpeg, FFprobe: *ffprobe, HWAccel: *hwAccel, HWDevice: *hwDevice, MaxJobs: *maxJobs, MaxSourceReaders: *maxSourceReaders, MaxInputs: *maxInputs})
 	if err != nil {
 		return err
 	}

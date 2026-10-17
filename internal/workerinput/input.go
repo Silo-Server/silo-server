@@ -25,6 +25,13 @@ type Source struct {
 	Generation                             uint64
 }
 
+const (
+	DefaultMaxReads  = 32
+	MaximumReads     = 4096
+	DefaultMaxInputs = 128
+	MaximumInputs    = 65536
+)
+
 type Options struct {
 	LocalRoot string
 	FFprobe   string
@@ -69,11 +76,14 @@ func New(options Options) (*Adapter, error) {
 			return nil, errors.New("invalid approved source origin")
 		}
 	}
-	if options.MaxInputs <= 0 {
-		options.MaxInputs = 128
+	if options.MaxInputs < 0 || options.MaxInputs > MaximumInputs || options.MaxReads < 0 || options.MaxReads > MaximumReads {
+		return nil, errors.New("worker input resource limit is outside its supported range")
 	}
-	if options.MaxReads <= 0 {
-		options.MaxReads = 32
+	if options.MaxInputs == 0 {
+		options.MaxInputs = DefaultMaxInputs
+	}
+	if options.MaxReads == 0 {
+		options.MaxReads = DefaultMaxReads
 	}
 	transport := options.Transport
 	if transport == nil {
@@ -205,6 +215,10 @@ func (a *Adapter) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	case <-h.ctx.Done():
 		w.WriteHeader(http.StatusForbidden)
+		return
+	default:
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "source reader capacity exhausted", http.StatusServiceUnavailable)
 		return
 	}
 	ctx, cancel := context.WithCancel(r.Context())

@@ -85,6 +85,10 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 		}
 		return nil, err
 	}
+	sourceLimits, err := workerSourceLimitsFromEnvironment()
+	if err != nil {
+		return nil, err
+	}
 	repo := workerregistration.New(pool, cipher)
 	key, err := repo.SigningKey(ctx)
 	if err != nil {
@@ -98,7 +102,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	recipes := noderecipe.NewStore(rdb, 0)
 	deny := playback.NewStreamDeny(rdb)
 	var service *workercontrolcore.Service
-	sources, err := workersource.New(workersource.Options{Origin: origin, Store: workersource.NewRedisStore(rdb, ""), PathApprover: func(ctx context.Context, path, kind string) error {
+	sources, err := workersource.New(workersource.Options{Origin: origin, Limits: sourceLimits, Store: workersource.NewRedisStore(rdb, ""), PathApprover: func(ctx context.Context, path, kind string) error {
 		var active bool
 		var err error
 		switch kind {
