@@ -29,6 +29,10 @@
 # Same-day episodes sorted by air date keep series title and season/episode order on every query path.
 ./internal/catalog TestQueryEpisodeAirDateTiesPostgres
 
+# PostgreSQL search keeps typo matches that contain every query word and ranks
+# titles starting with the query first, on the cursor and offset paths.
+./internal/catalog TestSearchRelevancePostgres
+
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB

@@ -91,6 +91,20 @@ func mixedSearchOrder(prefix string) string {
 	LOWER(%[1]stitle) ASC, %[1]scontent_id ASC`, prefix)
 }
 
+// titleRankNormalization divides ts_rank_cd by the document length (PostgreSQL
+// normalization flag 2), so among titles holding the query's words apart, the
+// shorter title ranks first. It also keeps a one-alias vector comparable with a
+// media title vector, which concatenates title, original title, and sort title.
+const titleRankNormalization = 2
+
+// titlePrefixQuery is the word-prefix title query bound to $2.
+const titlePrefixQuery = `to_tsquery('simple', $2)`
+
+// titleRankSQL ranks a simple title vector against a tsquery expression.
+func titleRankSQL(vector, tsquery string) string {
+	return fmt.Sprintf("ts_rank_cd(%s, %s, %d)", vector, tsquery, titleRankNormalization)
+}
+
 // yearSuffixedTitleSQL matches a title that is the query followed by the
 // item's own year. Providers disambiguate remakes and reboots that way, so
 // "Castle (2009)" is the exact title for a "Castle" search.
@@ -234,9 +248,10 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 
 	if includeMediaItems {
 		mediaAliasArms := mixedSearchAliasArms{
-			exactArm:      "COALESCE(search_alias.exact_title_match, 0) > 0",
-			contiguousArm: "COALESCE(search_alias.contiguous_title_match, 0) > 0",
-			prefixRank:    "COALESCE(search_alias.title_prefix_rank, 0)",
+			exactArm:        "COALESCE(search_alias.exact_title_match, 0) > 0",
+			contiguousRank:  "COALESCE(search_alias.contiguous_title_match, 0)",
+			prefixRank:      "COALESCE(search_alias.title_prefix_rank, 0)",
+			contiguousWords: "search_alias.contiguous_title_words",
 		}
 		titleBranches = append(titleBranches, buildMixedSearchCandidateBranch(
 			"mi.content_id", "mi.type", "mi.title", "mi.year",
@@ -410,9 +425,8 @@ func splitSearchItemTypes(itemTypes []string) (mediaTypes []string, includeEpiso
 }
 
 func searchTitleMatchCondition(titleVector string, extraArms ...string) string {
-	prefixQuery := `to_tsquery('simple', $2)`
 	arms := []string{
-		fmt.Sprintf(`($2 <> '' AND (%s) @@ %s)`, titleVector, prefixQuery),
+		fmt.Sprintf(`($2 <> '' AND (%s) @@ %s)`, titleVector, titlePrefixQuery),
 	}
 	arms = append(arms, extraArms...)
 	return "(" + strings.Join(arms, " OR ") + ")"
@@ -563,32 +577,77 @@ func mixedSearchAliasMatchCondition(lookup searchTitleLookup) string {
 // index-entry visits and pushed the plan over the JIT threshold.
 func buildMixedSearchAliasScoresCTE(lookup searchTitleLookup) string {
 	weightedAliasVector := `setweight(to_tsvector('simple', mia.normalized_title), 'A')`
-	prefixQuery := `to_tsquery('simple', $2)`
 	matchCondition := mixedSearchAliasMatchCondition(lookup)
 	return fmt.Sprintf(`alias_scores AS MATERIALIZED (
 		SELECT
 			mia.content_id,
-			MAX(CASE WHEN mia.normalized_title = $%d THEN 1 ELSE 0 END) AS exact_title_match,
-			MAX(CASE WHEN mia.normalized_title LIKE '%%' || $%d || '%%' THEN 1 ELSE 0 END) AS contiguous_title_match,
-			MAX(CASE WHEN $2 <> '' THEN ts_rank_cd(%s, %s) ELSE 0 END) AS title_prefix_rank
+			MAX(CASE WHEN mia.normalized_title = $%[1]d THEN 1 ELSE 0 END) AS exact_title_match,
+			MAX(%[2]s) AS contiguous_title_match,
+			MAX(CASE WHEN $2 <> '' THEN %[3]s ELSE 0 END) AS title_prefix_rank,
+			MIN(%[4]s) AS contiguous_title_words
 		FROM media_item_aliases mia
-		WHERE %s
+		WHERE %[5]s
 		GROUP BY mia.content_id
 	)`,
-		lookup.exactIdx, lookup.exactIdx,
-		weightedAliasVector, prefixQuery,
+		lookup.exactIdx,
+		titlePositionSQL([]string{"mia.normalized_title"}, lookup.exactIdx),
+		titleRankSQL(weightedAliasVector, titlePrefixQuery),
+		titleWordsSQL([]string{"mia.normalized_title"}, lookup.exactIdx),
 		matchCondition,
 	)
+}
+
+// titlePositionSQL scores where the normalized query ($exactIdx) appears in the
+// best of titles: 2 at the start, 1 elsewhere, 0 when absent. A title that
+// starts with the query is what a viewer typing it is most likely looking for:
+// "The Godfather Part II" for "the godfather" before "Paul Mooney: The
+// Godfather of Comedy". Normalized titles hold only letters, digits, and
+// spaces, so the query cannot carry a LIKE wildcard.
+func titlePositionSQL(titles []string, exactIdx int) string {
+	leading := make([]string, len(titles))
+	contiguous := make([]string, len(titles))
+	for i, title := range titles {
+		leading[i] = fmt.Sprintf("%s LIKE $%d || '%%'", title, exactIdx)
+		contiguous[i] = fmt.Sprintf("%s LIKE '%%' || $%d || '%%'", title, exactIdx)
+	}
+	return fmt.Sprintf("CASE WHEN %s THEN 2 WHEN %s THEN 1 ELSE 0 END",
+		strings.Join(leading, " OR "), strings.Join(contiguous, " OR "))
+}
+
+// titleWordsSQL counts the words of the shortest of titles containing the
+// normalized query ($exactIdx); it is NULL when none does.
+func titleWordsSQL(titles []string, exactIdx int) string {
+	counts := make([]string, len(titles))
+	for i, title := range titles {
+		counts[i] = fmt.Sprintf("CASE WHEN %[1]s LIKE '%%' || $%[2]d || '%%' THEN array_length(string_to_array(%[1]s, ' '), 1) END", title, exactIdx)
+	}
+	return fmt.Sprintf("CASE WHEN $%d <> '' THEN LEAST(%s) END", exactIdx, strings.Join(counts, ", "))
+}
+
+// titlePrefixRankSQL is title_prefix_rank: 0 without a prefix query ($2), so
+// short single words rank by the other keys. Otherwise it orders titles
+// containing the query by length alone: the shortest title containing it ranks
+// first. Cover density adds a cover for each repeat of a query word, so even
+// length-normalized it ranked the alias "The Godfather & the Lady" above "The
+// Godfather 2". Titles that only contain the query's words apart keep the
+// proximity rank.
+func titlePrefixRankSQL(words, rank string) string {
+	return fmt.Sprintf("(CASE WHEN $2 <> '' THEN COALESCE((1.0 / (1 + %s))::float8, %s) ELSE 0 END)::float8", words, rank)
 }
 
 // mixedSearchAliasArms carries the media branch's provider-alias extensions to
 // the per-branch ranking SELECT. Episodes have no aliases and pass nil.
 type mixedSearchAliasArms struct {
-	exactArm      string // OR'd into exact_title_match
-	contiguousArm string // OR'd into contiguous_title_match
-	prefixRank    string // GREATEST'd with title_prefix_rank
+	exactArm        string // OR'd into exact_title_match
+	contiguousRank  string // GREATEST'd with contiguous_title_match
+	prefixRank      string // GREATEST'd with the proximity rank in title_prefix_rank
+	contiguousWords string // LEAST'd with the shortest title containing the query
 }
 
+// buildMixedSearchCandidateBranch emits the ranks as float8: a cursor carries
+// each key as text and seeks with it cast to numeric, which PostgreSQL compares
+// with a real rank as float8, so a real key such as 1/3 never equals itself and
+// its ties are skipped on the next page. float8 text round-trips exactly.
 func buildMixedSearchCandidateBranch(
 	contentIDExpr, typeExpr, titleExpr, yearExpr, titleVector, overviewVector string,
 	exactTitleExprs []string,
@@ -601,23 +660,25 @@ func buildMixedSearchCandidateBranch(
 	distinctRows bool,
 ) string {
 	exactArms := make([]string, 0, len(exactTitleExprs)+1)
-	contiguousArms := make([]string, 0, len(exactTitleExprs)+1)
 	for _, expr := range exactTitleExprs {
 		exactArms = append(exactArms, fmt.Sprintf("%s = $%d", expr, exactIdx))
-		contiguousArms = append(contiguousArms, fmt.Sprintf("%s LIKE '%%' || $%d || '%%'", expr, exactIdx))
 	}
 	if yearSuffixedTitle != "" {
 		exactArms = append(exactArms, yearSuffixedTitleSQL(yearSuffixedTitle, yearExpr, exactIdx))
 	}
-	prefixQuery := `to_tsquery('simple', $2)`
-	prefixRankExpr := fmt.Sprintf("ts_rank_cd(%s, %s)", titleVector, prefixQuery)
+	positionExpr := titlePositionSQL(exactTitleExprs, exactIdx)
+	wordsExpr := titleWordsSQL(exactTitleExprs, exactIdx)
+	rankExpr := titleRankSQL(titleVector, titlePrefixQuery)
 	if aliasArms != nil {
-		// The shared alias_scores join supplies exact/contiguous flags and
-		// prefix rank for matched identities alongside the stored title vector.
+		// The shared alias_scores join supplies exact/position scores, word
+		// counts, and prefix rank for matched identities alongside the stored
+		// title vector.
 		exactArms = append(exactArms, aliasArms.exactArm)
-		contiguousArms = append(contiguousArms, aliasArms.contiguousArm)
-		prefixRankExpr = fmt.Sprintf("GREATEST(%s, %s)", prefixRankExpr, aliasArms.prefixRank)
+		positionExpr = fmt.Sprintf("GREATEST(%s, %s)", positionExpr, aliasArms.contiguousRank)
+		wordsExpr = fmt.Sprintf("LEAST(%s, %s)", wordsExpr, aliasArms.contiguousWords)
+		rankExpr = fmt.Sprintf("GREATEST(%s, %s)", rankExpr, aliasArms.prefixRank)
 	}
+	prefixRankExpr := titlePrefixRankSQL(wordsExpr, rankExpr)
 	overviewRankExpr := "0::real"
 	if rankOverview {
 		overviewRankExpr = fmt.Sprintf("ts_rank_cd(%s, websearch_to_tsquery('english', $1))", overviewVector)
@@ -632,20 +693,20 @@ func buildMixedSearchCandidateBranch(
 			%s AS type,
 			%s AS title,
 			CASE WHEN $%d <> '' AND (%s) THEN 1 ELSE 0 END AS exact_title_match,
-			CASE WHEN $%d <> '' AND (%s) THEN 1 ELSE 0 END AS contiguous_title_match,
+			CASE WHEN $%d <> '' THEN %s ELSE 0 END AS contiguous_title_match,
 			CASE WHEN $%d::int IS NOT NULL AND (%s) = $%d::int THEN 1 ELSE 0 END AS year_match,
-			CASE WHEN $2 <> '' THEN %s ELSE 0 END AS title_prefix_rank,
-			%s AS overview_rank,
-			CASE WHEN $%d <> '' THEN ts_rank_cd(%s, phraseto_tsquery('simple', public.normalize_search_text($%d))) ELSE 0 END AS phrase_rank
+			%s AS title_prefix_rank,
+			(%s)::float8 AS overview_rank,
+			(CASE WHEN $%d <> '' THEN %s ELSE 0 END)::float8 AS phrase_rank
 		FROM %s
 		WHERE %s`,
 		selectModifier, contentIDExpr, typeExpr, titleExpr,
 		exactIdx, strings.Join(exactArms, " OR "),
-		exactIdx, strings.Join(contiguousArms, " OR "),
+		exactIdx, positionExpr,
 		yearIdx, yearExpr, yearIdx,
 		prefixRankExpr,
 		overviewRankExpr,
-		phraseIdx, titleVector, phraseIdx,
+		phraseIdx, titleRankSQL(titleVector, fmt.Sprintf("phraseto_tsquery('simple', public.normalize_search_text($%d))", phraseIdx)),
 		fromClause, strings.Join(conditions, " AND "))
 }
 

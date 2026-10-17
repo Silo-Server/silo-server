@@ -621,7 +621,8 @@ PostgreSQL search retains the complete relevance tuple or requested SQL sort
 rather than a numeric page. It selects the FTS or bounded fuzzy retrieval family
 on the first page and retains that choice. The existing fuzzy candidate cap and
 reranking remain in force. A fuzzy-family query that becomes a richer FTS query
-returns `invalid_cursor` so the client can restart. PostgreSQL search retains its
+returns `invalid_cursor` so the client can restart, as does a cursor issued by a
+server whose PostgreSQL ranking differed. PostgreSQL search retains its
 three-second deadline inside the overall browse deadline.
 
 Meilisearch captures the configured ranked result window in one provider response,
