@@ -169,11 +169,16 @@ including ready artifacts retained beyond one day. Replacing, cancelling or
 stopping that generation removes its bindings atomically with the authority
 record.
 
-The worker refreshes signed authority snapshots once per second. Their short
-leases fail closed if the core is unreachable. The core re-resolves current
-account, profile, library, content and operation permissions before extending
-authority. A durable recipe or a still-valid client token does not override a
-disabled account, deleted profile, disabled folder or stopped execution.
+The worker refreshes signed authority snapshots every 500 milliseconds, measured
+from request send. One runtime-owned request serves concurrent callers; each
+caller can cancel its own wait independently. Each attempt has a 500-millisecond
+deadline, with one transient-failure retry after 25 milliseconds. This leaves
+time for one failed attempt and a healthy retry within the unchanged two-second
+lease. Sustained failures retain the regular refresh interval between bounded
+attempt pairs. The leases fail closed if the core is unreachable. The core
+re-resolves current account, profile, library, content and operation permissions
+before extending authority. A durable recipe or a still-valid client token does
+not override a disabled account, deleted profile, disabled folder or stopped execution.
 Prepared jobs additionally pin the current durable attempt and lease owner;
 reusing the same owner string cannot authorize a previous retry.
 

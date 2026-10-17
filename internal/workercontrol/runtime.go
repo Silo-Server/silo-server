@@ -55,7 +55,10 @@ type Runtime struct {
 	tracker       *reportTracker
 	bootID        string
 	sequence      uint64
-	reconcileMu   sync.Mutex
+	refreshMu     sync.Mutex
+	refreshFlight *authorityRefresh
+	refreshNext   time.Time
+	refreshWake   chan struct{}
 	mu            sync.Mutex
 	generations   map[string]uint64
 	handles       map[string]map[string]*workerinput.Handle
@@ -196,20 +199,7 @@ func (r *Runtime) Run() {
 	r.server.StartCapabilitySnapshots(r.ctx, ready)
 	r.observations.registry.Start(r.ctx)
 	go r.renewals.loop()
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			ctx, cancel := context.WithTimeout(r.ctx, 1500*time.Millisecond)
-			_ = r.refresh(ctx)
-			cancel()
-			select {
-			case <-r.ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
+	go r.refreshLoop()
 	go r.reportLoop()
 	r.server.StartOrphanSweeper(r.ctx)
 }
@@ -221,49 +211,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 	r.client.CloseIdleConnections()
 	shutdownErr := r.server.Shutdown(ctx)
 	return errors.Join(shutdownErr, r.observations.registry.Stop(ctx))
-}
-
-func (r *Runtime) refresh(ctx context.Context) error {
-	r.reconcileMu.Lock()
-	var notify func()
-	defer func() {
-		r.reconcileMu.Unlock()
-		if notify != nil {
-			notify()
-		}
-	}()
-	n := nonce()
-	if err := r.authority.SetNonce(n); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	sequence := r.sequence
-	r.mu.Unlock()
-	sent := time.Now()
-	var snapshot workerwire.Snapshot
-	if err := r.callGrant(ctx, http.MethodPost, "/snapshot", map[string]any{"boot_id": r.bootID, "nonce": n, "sequence": sequence}, workeridentity.DomainSnapshotGrant, &snapshot); err != nil {
-		return err
-	}
-	if snapshot.ExecutionConfig != nil {
-		if err := r.config.check(*snapshot.ExecutionConfig); err != nil {
-			return err
-		}
-	}
-	if err := r.authority.Apply(snapshot, sent); err != nil {
-		return err
-	}
-	r.renewals.reconcile(snapshot)
-	if snapshot.ExecutionConfig != nil {
-		var err error
-		notify, err = r.config.install(*snapshot.ExecutionConfig)
-		if err != nil {
-			return err
-		}
-	}
-	r.mu.Lock()
-	r.sequence = snapshot.Sequence
-	r.mu.Unlock()
-	return nil
 }
 
 //nolint:gosec // Requests use the validated enrollment core origin and signed worker-control paths; redirects are disabled.
