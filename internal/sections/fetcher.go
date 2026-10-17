@@ -4195,31 +4195,16 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 
 	conditions = append(conditions,
 		"mi.type = 'series'",
-		// The profile has watched at least one episode of this series...
-		`EXISTS (
-			SELECT 1
-			FROM episodes we
-			JOIN user_watch_history uwh ON uwh.media_item_id = we.content_id
-			WHERE we.series_id = mi.content_id
-			  AND uwh.user_id = $1
-			  AND uwh.profile_id = $2
-		)`,
-		// ...and a season newer than any they've watched arrived recently
-		// with at least one playable file in an in-scope library.
+		// A season newer than any the profile has watched (joined from
+		// `watched` below) arrived recently with at least one playable file
+		// in an in-scope library.
 		fmt.Sprintf(`EXISTS (
 			SELECT 1
 			FROM episodes ne
 			WHERE ne.series_id = mi.content_id
 			  AND ne.season_number > 0
 			  AND ne.created_at > NOW() - make_interval(days => $3)
-			  AND ne.season_number > COALESCE((
-				SELECT MAX(we2.season_number)
-				FROM episodes we2
-				JOIN user_watch_history uwh2 ON uwh2.media_item_id = we2.content_id
-				WHERE we2.series_id = mi.content_id
-				  AND uwh2.user_id = $1
-				  AND uwh2.profile_id = $2
-			  ), 0)
+			  AND ne.season_number > COALESCE(w.max_season, 0)
 			  AND EXISTS (
 				SELECT 1 FROM media_files mf
 				WHERE mf.episode_id = ne.content_id
@@ -4239,8 +4224,21 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 		limit = 20
 	}
 
+	// `watched` reads the profile's history once: the series it has watched
+	// and the highest season watched in each. Correlating that lookup per
+	// series let Postgres's cached generic plan (which can't see how much
+	// history $1/$2 select) rescan the whole history once per watched series,
+	// turning a ~0.5s query into 10-40s for long-history profiles.
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s WHERE %s
+		`WITH watched AS MATERIALIZED (
+			SELECT we.series_id, MAX(we.season_number) AS max_season
+			FROM user_watch_history uwh
+			JOIN episodes we ON we.content_id = uwh.media_item_id
+			WHERE uwh.user_id = $1
+			  AND uwh.profile_id = $2
+			GROUP BY we.series_id
+		)
+		SELECT %s FROM %s JOIN watched w ON w.series_id = mi.content_id WHERE %s
 		ORDER BY (
 			SELECT MAX(ord.created_at)
 			FROM episodes ord
