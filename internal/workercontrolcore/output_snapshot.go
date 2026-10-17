@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
+	"github.com/Silo-Server/silo-server/internal/workerwire"
 )
 
 // MaxOutputVerificationTokens matches the bounded private authority registry.
 const MaxOutputVerificationTokens = maxOutputAuthorities
 
 type outputSnapshot struct {
+	checkContext    context.Context
 	records         []OutputAuthorityRecord
 	assignments     AuthoritySnapshot
 	active, pending map[string]uint64
@@ -20,7 +22,14 @@ type outputSnapshot struct {
 // Capture viewer records first. A later assignment publication can otherwise
 // look definitively missing against an assignment snapshot taken too early.
 func (s *Service) readOutputSnapshot(ctx context.Context, node Node) (outputSnapshot, error) {
+	if s.options.SnapshotContext != nil {
+		ctx = s.options.SnapshotContext(ctx)
+		if ctx == nil {
+			return outputSnapshot{}, ErrUnavailable
+		}
+	}
 	state := outputSnapshot{active: map[string]uint64{}, pending: map[string]uint64{}}
+	state.checkContext = ctx
 	var err error
 	if s.options.OutputAuthorities != nil {
 		state.records, err = s.options.OutputAuthorities.List(ctx, node.ID)
@@ -35,24 +44,38 @@ func (s *Service) readOutputSnapshot(ctx context.Context, node Node) (outputSnap
 	if err != nil {
 		return outputSnapshot{}, err
 	}
+	active := make([]workerwire.Assignment, 0, len(state.assignments.Active))
 	for work, a := range state.assignments.Active {
 		if a.NodeID != node.ID || a.WorkID != work || a.Generation == 0 {
 			return outputSnapshot{}, ErrUnavailable
 		}
-		if err = ctx.Err(); err != nil {
-			return outputSnapshot{}, err
-		}
-		var allowed bool
-		if s.options.ExecutionStatus != nil {
-			allowed, err = s.options.ExecutionStatus(ctx, node, a)
-		} else {
-			allowed = s.executionActive(ctx, node, a)
-		}
+		active = append(active, a)
+	}
+	if s.options.ExecutionStatuses != nil && len(active) > 0 {
+		allowed, err := s.options.ExecutionStatuses(ctx, node, active)
 		if err != nil {
 			return outputSnapshot{}, err
 		}
-		if allowed {
-			state.active[work] = a.Generation
+		if len(allowed) != len(active) {
+			return outputSnapshot{}, ErrUnavailable
+		}
+		for i, a := range active {
+			if allowed[i] {
+				state.active[a.WorkID] = a.Generation
+			}
+		}
+	} else {
+		for _, a := range active {
+			if err = ctx.Err(); err != nil {
+				return outputSnapshot{}, err
+			}
+			allowed, err := s.executionStatus(ctx, node, a)
+			if err != nil {
+				return outputSnapshot{}, err
+			}
+			if allowed {
+				state.active[a.WorkID] = a.Generation
+			}
 		}
 	}
 	for work, a := range state.assignments.Pending {
@@ -139,6 +162,9 @@ func (s *Service) verifyOutputTokens(ctx context.Context, tokens []string) ([]To
 }
 
 func (s *Service) outputsForSnapshot(ctx context.Context, node Node, state outputSnapshot) (map[string]bool, error) {
+	if state.checkContext != nil {
+		ctx = state.checkContext
+	}
 	out := make(map[string]bool)
 	var eligible, retired []OutputAuthorityRecord
 	var tokens []string

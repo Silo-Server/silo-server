@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
-	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
 )
 
@@ -76,124 +74,12 @@ func (a *workerContentAuthority) checkClaims(ctx context.Context, claims *stream
 	return a.checkRecipe(ctx, &card, nil)
 }
 
-//nolint:funlen,gocyclo // Keep the ordered account, scope, catalog and media checks together so every definitive denial remains visible.
 func (a *workerContentAuthority) checkRecipe(ctx context.Context, card *playback.RecipeCard, preparedClaims *streamtoken.Claims) (bool, error) {
-	if err := ctx.Err(); err != nil {
+	allowed, err := a.checkRecipes(ctx, []*playback.RecipeCard{card}, []*streamtoken.Claims{preparedClaims})
+	if err != nil {
 		return false, err
 	}
-	if card == nil || card.UserID <= 0 {
-		return false, nil
-	}
-	if a == nil {
-		return false, workercontrolcore.ErrUnavailable
-	}
-	s := a.state.Load()
-	if s == nil || s.resolver == nil {
-		return false, workercontrolcore.ErrUnavailable
-	}
-	prepared := preparedClaims != nil
-	user, err := s.users.GetByID(ctx, card.UserID)
-	if err != nil {
-		return workerContentReadError(err)
-	}
-	if user == nil || !user.Enabled {
-		return false, nil
-	}
-	policy, err := access.EffectivePolicyForUser(ctx, user, s.groups)
-	if err != nil {
-		return workerContentReadError(err)
-	}
-	if prepared && !policy.DownloadAllowed {
-		return false, nil
-	}
-	if !prepared {
-		method := string(card.PlayMethod)
-		videoEncode := (method == "" || strings.HasPrefix(method, "transcode")) && !card.AudioOnly && card.TargetCodecVideo != "copy"
-		if videoEncode && !policy.TranscodeAllowed || (card.TranscodeAudio || method == streamtoken.PlayMethodThemeAAC) && !policy.AudioTranscodeAllowed {
-			return false, nil
-		}
-	}
-	scope, err := s.resolver.Resolve(ctx, access.ResolveInput{UserID: card.UserID, ProfileID: card.ProfileID, SkipPINVerification: true})
-	if err != nil {
-		return workerContentReadError(err)
-	}
-	if scope.PreferencesDegraded {
-		return false, workercontrolcore.ErrUnavailable
-	}
-	if !scope.ProfileVerified {
-		return false, nil
-	}
-	filter := catalog.AccessFilter{AllowedLibraryIDs: scope.AllowedLibraryIDs, DisabledLibraryIDs: scope.DisabledLibraryIDs, MaturityLimits: scope.MaturityLimits, MaxPlaybackQuality: scope.MaxPlaybackQuality, UserID: card.UserID, ProfileID: card.ProfileID}
-	if card.MediaFileID == 0 {
-		var id int64
-		if err := s.pool.QueryRow(ctx, "SELECT id FROM item_theme_songs WHERE file_path=$1", card.InputPath).Scan(&id); err != nil {
-			return workerContentReadError(err)
-		}
-		file, err := s.themes.Find(ctx, strconv.FormatInt(id, 10), filter)
-		if err != nil {
-			return workerContentReadError(err)
-		}
-		return file.Path == card.InputPath, nil
-	}
-	file, err := s.files.GetByID(ctx, card.MediaFileID)
-	if err != nil {
-		return workerContentReadError(err)
-	}
-	if file == nil || !prepared && file.MissingSince != nil {
-		return false, nil
-	}
-	if prepared {
-		artifact, err := s.artifacts.GetByID(ctx, preparedClaims.DownloadArtifactRowID)
-		if err != nil {
-			return workerContentReadError(err)
-		}
-		if !workerPreparedArtifactMatches(artifact, preparedClaims) {
-			return false, nil
-		}
-		served := *file
-		if artifact.Resolution != "" {
-			served.Resolution = artifact.Resolution
-		}
-		file = &served
-	}
-	if !catalog.FileAllowedByAccess(file, filter) {
-		return false, nil
-	}
-	var enabled bool
-	if err := s.pool.QueryRow(ctx, "SELECT enabled FROM media_folders WHERE id=$1", file.MediaFolderID).Scan(&enabled); err != nil {
-		return workerContentReadError(err)
-	}
-	if !enabled {
-		return false, nil
-	}
-	owner := file.ContentID
-	if file.EpisodeID != "" {
-		episode, err := s.episodes.GetByID(ctx, file.EpisodeID)
-		if err != nil {
-			return workerContentReadError(err)
-		}
-		if episode == nil {
-			return false, nil
-		}
-		owner = episode.SeriesID
-	}
-	if file.ExtraID != "" {
-		extra, err := s.extras.GetByID(ctx, file.ExtraID)
-		if err != nil {
-			return workerContentReadError(err)
-		}
-		if extra == nil {
-			return false, nil
-		}
-		owner = extra.ParentID
-	}
-	if owner == "" {
-		return false, nil
-	}
-	if err := s.items.EnsureAccessible(ctx, owner, filter); err != nil {
-		return workerContentReadError(err)
-	}
-	return true, ctx.Err()
+	return allowed[0], nil
 }
 
 // Missing or out-of-scope rows are authoritative denials. Dependency errors

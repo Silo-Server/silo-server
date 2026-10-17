@@ -179,6 +179,23 @@ func (s *Service) executionActive(ctx context.Context, node Node, a workerwire.A
 	return s.options.ExecutionActive == nil || s.options.ExecutionActive(ctx, node, a)
 }
 
+func (s *Service) executionStatus(ctx context.Context, node Node, a workerwire.Assignment) (bool, error) {
+	if s.options.ExecutionStatus != nil {
+		return s.options.ExecutionStatus(ctx, node, a)
+	}
+	if s.options.ExecutionStatuses != nil {
+		allowed, err := s.options.ExecutionStatuses(ctx, node, []workerwire.Assignment{a})
+		if err != nil {
+			return false, err
+		}
+		if len(allowed) != 1 {
+			return false, ErrUnavailable
+		}
+		return allowed[0], ctx.Err()
+	}
+	return s.executionActive(ctx, node, a), ctx.Err()
+}
+
 // WorkActive caches shared-store/registry checks for 250ms per authority.
 // Begin/Stop invalidate this core's cache immediately; other core changes are
 // observed within 250ms, below the two-second worker authority horizon.
@@ -304,8 +321,5 @@ func (s *Service) lookupWorkActiveStatus(ctx context.Context, nodeID int, work s
 	if err != nil || !ready || a.Generation != generation {
 		return false, err
 	}
-	if s.options.ExecutionStatus != nil {
-		return s.options.ExecutionStatus(ctx, node, a)
-	}
-	return s.executionActive(ctx, node, a), ctx.Err()
+	return s.executionStatus(ctx, node, a)
 }

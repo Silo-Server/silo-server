@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/workercontrolcore"
 )
@@ -19,11 +20,6 @@ type viewerCredentialProbe struct {
 	user           int
 	profile        string
 	remotePlayback bool
-}
-
-type viewerContentDecision struct {
-	allowed bool
-	err     error
 }
 
 // The cache belongs to one verification call. Retain every content-sensitive
@@ -77,7 +73,10 @@ func verifyWorkerOutputTokens(ctx context.Context, pool *pgxpool.Pool, content *
 	if err := verifyViewerKeyProbes(ctx, pool, keys); err != nil {
 		return nil, err
 	}
-	decisions := make(map[string]viewerContentDecision)
+	decisions := make(map[string]int)
+	resultKeys := make([]int, len(results))
+	var cards []*playback.RecipeCard
+	var prepared []*streamtoken.Claims
 	for i := range results {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -99,15 +98,26 @@ func verifyWorkerOutputTokens(ctx context.Context, pool *pgxpool.Pool, content *
 		if err != nil {
 			return nil, err
 		}
-		decision, found := decisions[key]
+		index, found := decisions[key]
 		if !found {
-			decision.allowed, decision.err = content.checkClaims(ctx, results[i].Claims)
-			decisions[key] = decision
+			index = len(cards)
+			decisions[key] = index
+			card := playback.RecipeCardFromClaims(results[i].Claims)
+			cards = append(cards, &card)
+			var artifactClaims *streamtoken.Claims
+			if results[i].Claims.DownloadArtifactID != "" {
+				artifactClaims = results[i].Claims
+			}
+			prepared = append(prepared, artifactClaims)
 		}
-		if decision.err != nil {
-			return nil, decision.err
-		}
-		if !decision.allowed {
+		resultKeys[i] = index
+	}
+	allowed, err := content.checkRecipes(ctx, cards, prepared)
+	if err != nil {
+		return nil, err
+	}
+	for i := range results {
+		if results[i].Err == nil && !allowed[resultKeys[i]] {
 			results[i].Claims = nil
 			results[i].Err = workercontrolcore.ErrDenied
 		}

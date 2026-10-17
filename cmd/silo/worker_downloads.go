@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -57,4 +58,59 @@ func workerDownloadStatus(ctx context.Context, pool *pgxpool.Pool, node int, a w
 		(a.origin_node_id=$1 AND a.origin_artifact_id=$2 AND a.attempts=p.attempt
 		AND a.status IN ('ready','tone_map_ready','audio_v2_ready','tracks_v1_ready'))))`, node, a.WorkID, a.Generation).Scan(&active)
 	return active, err
+}
+
+// Keep the exact attempt, lease and ready-artifact fences from the single-work
+// reader while checking prepared assignments in bounded SQL batches.
+func workerDownloadStatuses(ctx context.Context, pool *pgxpool.Pool, node int, assignments []workerwire.Assignment) ([]bool, error) {
+	out := make([]bool, len(assignments))
+	var indices []int
+	for i, assignment := range assignments {
+		if assignment.Path == workerPreparePath {
+			indices = append(indices, i)
+		}
+	}
+	for batch := range slices.Chunk(indices, workerContentBatchSize) {
+		works, generations := make([]string, 0, len(batch)), make([]int64, 0, len(batch))
+		for _, index := range batch {
+			works = append(works, assignments[index].WorkID)
+			generations = append(generations, int64(assignments[index].Generation)) // Store generations are signed bigint values.
+		}
+		rows, err := pool.Query(ctx, `SELECT request.ordinality, EXISTS(SELECT 1 FROM worker_http_download_attempts p JOIN download_artifacts a ON a.id=p.artifact_id
+		WHERE p.node_id=$1 AND p.work_id=request.work AND p.generation=request.generation AND (
+		(a.worker_node_id=$1 AND a.attempts=p.attempt AND a.lease_owner=p.lease_owner AND a.lease_expires_at>now()
+		AND a.status IN ('running','tone_map_running','audio_v2_running','tracks_v1_running')) OR
+		(a.origin_node_id=$1 AND a.origin_artifact_id=request.work AND a.attempts=p.attempt
+		AND a.status IN ('ready','tone_map_ready','audio_v2_ready','tracks_v1_ready'))))
+		FROM unnest($2::text[],$3::bigint[]) WITH ORDINALITY request(work,generation,ordinality)`, node, works, generations)
+		if err != nil {
+			return nil, err
+		}
+		seen := make([]bool, len(batch))
+		for rows.Next() {
+			var ordinal int64
+			var active bool
+			if err := rows.Scan(&ordinal, &active); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if ordinal <= 0 || ordinal > int64(len(batch)) || seen[ordinal-1] {
+				rows.Close()
+				return nil, workercontrolcore.ErrUnavailable
+			}
+			seen[ordinal-1] = true
+			out[batch[ordinal-1]] = active
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		for _, found := range seen {
+			if !found {
+				return nil, workercontrolcore.ErrUnavailable
+			}
+		}
+	}
+	return out, ctx.Err()
 }

@@ -18,6 +18,11 @@
 ./cmd/silo TestWorkerRegistryLegacyLookupsUseSnapshot
 ./cmd/silo TestWorkerRegistryWarmLegacyHTTPUsesSnapshot
 
+# Real production composition bounds snapshot SQL by access scopes and batches,
+# including execution authority and distinct retained viewer media/artifacts.
+./cmd/silo TestWorkerProductionSnapshotQueryBudget
+./cmd/silo TestWorkerProductionPreparedSnapshotQueryBudget
+
 # Seek preview jobs preserve bigint IDs, fence attempts, and protect issued URLs.
 ./internal/trickplay TestTrickplayQueuesBigintMediaFileIDsDB
 ./internal/trickplay TestExpiredLeaseRejectsCompletionBeforeReconcileDB

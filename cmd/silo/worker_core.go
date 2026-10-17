@@ -146,33 +146,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 	context.AfterFunc(ctx, sources.Close)
 	reportSink := &workerReportSink{rdb: rdb, nodes: registry, recipes: recipes, assignments: store, plans: planstore.NewPostgres(pool), service: func() *workercontrolcore.Service { return service }}
 	outputAuthorities := workercontrolcore.NewRedisOutputAuthorities(rdb, "")
-	executionStatus := func(ctx context.Context, node workercontrolcore.Node, assignment workerwire.Assignment) (bool, error) {
-		if assignment.Path == workerPreparePath {
-			return workerDownloadStatus(ctx, pool, node.ID, assignment)
-		}
-		denied, err := deny.DeniedStatus(ctx, assignment.WorkID)
-		if err != nil || denied {
-			return false, err
-		}
-		card, found, err := recipes.GetStatus(ctx, assignment.WorkID)
-		if err != nil {
-			return false, err
-		}
-		if found && card != nil {
-			if !workeridentity.SameOrigin(card.TranscodeNodeURL, node.URL, node.AllowHTTP) {
-				return false, nil
-			}
-			denied, err = deny.DeniedStatus(ctx, card.SessionID)
-			if err != nil || denied {
-				return false, err
-			}
-			return contentAuthority.checkRecipe(ctx, card, nil)
-		}
-		if service == nil {
-			return false, workercontrolcore.ErrUnavailable
-		}
-		return service.HasInFlightStatus(ctx, node.ID, assignment.WorkID)
-	}
+	execution := workerExecutionAuthority{pool: pool, deny: deny, recipes: recipes, content: contentAuthority, service: func() *workercontrolcore.Service { return service }}
 	service, err = workercontrolcore.New(workercontrolcore.Options{Origin: origin, AllowHTTP: allowHTTP, PrivateKey: key, Nodes: registry, Store: store, OutputAuthorities: outputAuthorities, Sources: coreSourceAdapter{sources}, SourceHandler: sources.Handler(), RecipeStore: recipes, VerifyToken: func(ctx context.Context, token string) (*streamtoken.Claims, error) {
 		return verifyWorkerOutputToken(ctx, pool, contentAuthority, token, liveConfig().Auth.JWTSecret)
 	}, VerifyTokens: func(ctx context.Context, tokens []string) ([]workercontrolcore.TokenVerification, error) {
@@ -192,7 +166,7 @@ func initializeHTTPWorkers(ctx context.Context, pool *pgxpool.Pool, cipher *secr
 		digest := sha256.Sum256(encoded)
 		settings.Revision = hex.EncodeToString(digest[:])
 		return settings, settings.Validate()
-	}, ExecutionStatus: executionStatus, ExecutionActive: func(ctx context.Context, node workercontrolcore.Node, assignment workerwire.Assignment) bool {
+	}, SnapshotContext: newWorkerSnapshotContext, ExecutionStatuses: execution.statuses, ExecutionStatus: execution.status, ExecutionActive: func(ctx context.Context, node workercontrolcore.Node, assignment workerwire.Assignment) bool {
 		if assignment.Path == workerPreparePath {
 			return workerDownloadActive(ctx, pool, node.ID, assignment)
 		}

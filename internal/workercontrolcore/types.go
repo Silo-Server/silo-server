@@ -70,9 +70,15 @@ type Options struct {
 	Report            func(context.Context, int, json.RawMessage) error
 	ExecutionActive   func(context.Context, Node, workerwire.Assignment) bool
 	ExecutionStatus   func(context.Context, Node, workerwire.Assignment) (bool, error)
-	ExecutionConfig   func(context.Context, int) (workerwire.ExecutionConfig, error)
-	SourceHandler     http.Handler
-	Admit             func(context.Context, Node, workerwire.Assignment) error
+	// ExecutionStatuses checks one immutable assignment snapshot in a batch.
+	// Results must correspond exactly to the supplied assignment order.
+	ExecutionStatuses func(context.Context, Node, []workerwire.Assignment) ([]bool, error)
+	// SnapshotContext installs facts scoped to this one snapshot request so
+	// execution and viewer checks can share reads without another allow TTL.
+	SnapshotContext func(context.Context) context.Context
+	ExecutionConfig func(context.Context, int) (workerwire.ExecutionConfig, error)
+	SourceHandler   http.Handler
+	Admit           func(context.Context, Node, workerwire.Assignment) error
 }
 
 // TokenVerification keeps definite revocation, content denial and unknown
