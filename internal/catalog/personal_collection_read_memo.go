@@ -74,11 +74,13 @@ func (m *personalCollectionReadMemo[V]) put(key personalCollectionReadKey, revis
 		}
 		// Every entry is live: forget an arbitrary tenth (map order is
 		// random) rather than grow, so most stay and the next sweeps are rare.
-		for k := range m.entries {
-			if len(m.entries) < personalCollectionReadMemoMaxEntries*9/10 {
-				break
+		if len(m.entries) >= personalCollectionReadMemoMaxEntries {
+			for k := range m.entries {
+				if len(m.entries) < personalCollectionReadMemoMaxEntries*9/10 {
+					break
+				}
+				delete(m.entries, k)
 			}
-			delete(m.entries, k)
 		}
 	}
 	m.entries[key] = personalCollectionReadEntry[V]{revision: revision, expires: now.Add(personalCollectionReadMemoTTL), value: value}
