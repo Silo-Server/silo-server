@@ -3,6 +3,8 @@ package autoscan
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
@@ -217,5 +219,77 @@ func TestPollOnceSkipsWebhookSources(t *testing.T) {
 	if len(store.createdEvents) != 0 || len(q.enqueued) != 0 {
 		t.Fatalf("webhook sources must be skipped by polling entirely (events=%d, enqueued=%d)",
 			len(store.createdEvents), len(q.enqueued))
+	}
+}
+
+type recordingRemovals struct {
+	paths []string
+	err   error
+}
+
+func (r *recordingRemovals) ConfirmFilesRemoved(_ context.Context, paths []string) (int, error) {
+	r.paths = append(r.paths, paths...)
+	return len(paths), r.err
+}
+
+// Only files arr reported deleting that are gone from a directory that still
+// exists are confirmed. A file or symlink still at the path, or a path whose
+// directory is gone too (possibly a lost mount), keeps the removal grace.
+func TestIngestChangesConfirmsArrRemovedFiles(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "present.mkv")
+	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(dir, "gone.mkv")
+	goneDir := filepath.Join(dir, "missing-season", "gone.mkv")
+	// A dangling symlink is still something at the path.
+	dangling := filepath.Join(dir, "dangling.mkv")
+	if err := os.Symlink(filepath.Join(dir, "target-removed.mkv"), dangling); err != nil {
+		t.Fatal(err)
+	}
+
+	removals := &recordingRemovals{}
+	svc := newService(webhookTestStore(), &fakeProvider{}, &recordingQueuer{}, allowSuppressor{})
+	svc.SetRemovalConfirmer(removals)
+
+	if _, err := svc.IngestChanges(context.Background(), ChangeIngest{
+		SourceID:          "s1",
+		ProviderEventType: "Download",
+		Changes: []Change{
+			{SourcePath: filepath.Join(dir, "new.mkv"), Scope: ChangeScopeFile},
+			{SourcePath: gone, Scope: ChangeScopeFile, Removed: true},
+			{SourcePath: present, Scope: ChangeScopeFile, Removed: true},
+			{SourcePath: goneDir, Scope: ChangeScopeFile, Removed: true},
+			{SourcePath: dangling, Scope: ChangeScopeFile, Removed: true},
+			{SourcePath: filepath.Join(dir, "unreported.mkv"), Scope: ChangeScopeFile},
+		},
+	}); err != nil {
+		t.Fatalf("IngestChanges: %v", err)
+	}
+	if len(removals.paths) != 1 || removals.paths[0] != gone {
+		t.Fatalf("confirmed = %v, want only %s", removals.paths, gone)
+	}
+}
+
+// Confirming is a shortcut: when it fails, the delivery still completes, and
+// the files wait out the grace as before.
+func TestIngestChangesSurvivesConfirmFailure(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "gone.mkv")
+	store := webhookTestStore()
+	removals := &recordingRemovals{err: errors.New("db down")}
+	svc := newService(store, &fakeProvider{}, &recordingQueuer{}, allowSuppressor{})
+	svc.SetRemovalConfirmer(removals)
+
+	result, err := svc.IngestChanges(context.Background(), ChangeIngest{
+		SourceID:          "s1",
+		ProviderEventType: "EpisodeFileDelete",
+		Changes:           []Change{{SourcePath: gone, Scope: ChangeScopeFile, Removed: true}},
+	})
+	if err != nil || result.Pending {
+		t.Fatalf("result = %+v, err = %v, want a completed delivery", result, err)
+	}
+	if len(removals.paths) != 1 || len(store.completed) != 1 {
+		t.Fatalf("confirm attempts=%v completed=%v, want one attempt and the delivery completed", removals.paths, store.completed)
 	}
 }

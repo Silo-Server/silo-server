@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -101,6 +103,24 @@ type Service struct {
 	// that only exercise PollOnce need not supply them.
 	rootFolders RootFolderClient
 	folders     FolderLister
+
+	// removals records files arr deleted itself; nil leaves them to the
+	// scanner's removal grace like any other missing file.
+	removals RemovalConfirmer
+	// statPath lstats a reported path; tests substitute a fake filesystem.
+	statPath func(path string) (os.FileInfo, error)
+}
+
+// RemovalConfirmer records that files the provider deleted itself are gone,
+// so the scanner removes their rows on its next sweep instead of waiting out
+// the file-removal grace period.
+type RemovalConfirmer interface {
+	ConfirmFilesRemoved(ctx context.Context, paths []string) (int, error)
+}
+
+// SetRemovalConfirmer wires the store for provider-confirmed file removals.
+func (s *Service) SetRemovalConfirmer(c RemovalConfirmer) {
+	s.removals = c
 }
 
 // SetSuggesterDeps wires the dependencies the rewrite-suggester and
@@ -135,6 +155,7 @@ func NewService(
 		suppress: suppress,
 		lister:   lister,
 		observe:  observePathState,
+		statPath: os.Lstat,
 	}
 }
 
@@ -378,6 +399,9 @@ type consumeResult struct {
 func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes []Change, opts consumeOptions) (consumeResult, error) {
 	rewritten := rewriteChanges(changes, src.PathRewrites)
 	records := newChangeRecords(changes, rewritten)
+	// Before the scans are enqueued, so the scan a removal triggers already
+	// sweeps its row.
+	s.confirmRemovals(ctx, src, rewritten)
 	targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, records, opts.TTL)
 	result := consumeResult{Stats: stats, ResolvedAny: resolvedAny}
 	// finish stamps the bounded change log onto every terminal event update.
@@ -814,9 +838,53 @@ func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
 	rewritten := make([]Change, 0, len(changes))
 	for _, change := range changes {
 		path := applyRewrites(change.SourcePath, rewrites)
-		rewritten = append(rewritten, Change{SourcePath: path, Scope: change.Scope})
+		rewritten = append(rewritten, Change{SourcePath: path, Scope: change.Scope, Removed: change.Removed})
 	}
 	return rewritten
+}
+
+// confirmRemovals records the files arr reported deleting that are verifiably
+// gone: nothing, not even a dangling symlink, is at the path while its
+// directory still exists. A missing directory may be a lost mount, so those
+// paths keep the removal grace. A failure only costs the shortcut; the scan
+// still marks the files missing.
+func (s *Service) confirmRemovals(ctx context.Context, src Source, changes []Change) {
+	if s.removals == nil {
+		return
+	}
+	var paths []string
+	dirExists := make(map[string]bool)
+	for _, change := range changes {
+		if !change.Removed || change.SourcePath == "" {
+			continue
+		}
+		path := filepath.Clean(change.SourcePath)
+		if _, err := s.statPath(path); !errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		dir := filepath.Dir(path)
+		exists, checked := dirExists[dir]
+		if !checked {
+			info, err := s.statPath(dir)
+			exists = err == nil && info.IsDir()
+			dirExists[dir] = exists
+		}
+		if !exists {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	if len(paths) == 0 {
+		return
+	}
+	confirmed, err := s.removals.ConfirmFilesRemoved(ctx, paths)
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan: confirm removed files failed", "component", "autoscan", "source_id", src.ID, "err", err)
+		return
+	}
+	if confirmed > 0 {
+		slog.InfoContext(ctx, "autoscan: confirmed removed files", "component", "autoscan", "source_id", src.ID, "files", confirmed)
+	}
 }
 
 // resolveAndClaim resolves changes to scan targets and atomically claims them

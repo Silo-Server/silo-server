@@ -138,7 +138,64 @@ func TestParseUpgradeIncludesReplacedFiles(t *testing.T) {
 					t.Fatalf("upgrade change = %+v, want file scope", change)
 				}
 			}
+			if parsed.Changes[0].Removed || !parsed.Changes[1].Removed {
+				t.Fatalf("upgrade changes = %+v, want only the replaced file marked removed", parsed.Changes)
+			}
 		})
+	}
+}
+
+// An upgrade that keeps the file name replaces the file in place: the path
+// holds the new file, so it must not be reported as removed.
+func TestParseUpgradeInPlaceIsNotRemoved(t *testing.T) {
+	body := []byte(`{
+		"eventType": "Download",
+		"series": {"path": "/data/tv/Show"},
+		"episodeFile": {"path": "/data/tv/Show/same.mkv"},
+		"deletedFiles": [{"path": "/data/tv/Show/same.mkv"}],
+		"isUpgrade": true
+	}`)
+	parsed, err := Parse(ProviderAuto, body)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(parsed.Changes) != 1 || parsed.Changes[0].Removed {
+		t.Fatalf("changes = %+v, want one change not marked removed", parsed.Changes)
+	}
+}
+
+// Only reasons where arr deleted the file itself mark it removed.
+// MissingFromDisk means arr found it already gone, which a lost mount also
+// produces.
+func TestParseFileDeleteReasons(t *testing.T) {
+	for reason, want := range map[string]bool{
+		"upgrade":         true,
+		"Upgrade":         true,
+		"manual":          true,
+		"manualOverride":  true,
+		"missingFromDisk": false,
+		"MissingFromDisk": false,
+		"":                false,
+		"somethingNew":    false,
+	} {
+		for _, event := range []string{
+			`{"eventType":"EpisodeFileDelete","series":{"path":"/tv/x"},"episodeFile":{"path":"/tv/x/a.mkv"},"deleteReason":"` + reason + `"}`,
+			`{"eventType":"MovieFileDelete","movie":{"folderPath":"/movies/x"},"movieFile":{"path":"/movies/x/a.mkv"},"deleteReason":"` + reason + `"}`,
+		} {
+			parsed, err := Parse(ProviderAuto, []byte(event))
+			if err != nil {
+				t.Fatalf("Parse(%s): %v", event, err)
+			}
+			if len(parsed.Changes) != 1 || parsed.Changes[0].Removed != want {
+				t.Fatalf("reason %q: changes = %+v, want removed=%v", reason, parsed.Changes, want)
+			}
+		}
+	}
+	// A reason that is not a string loses only the removed mark; the path is
+	// still scanned.
+	parsed, err := Parse(ProviderAuto, []byte(`{"eventType":"EpisodeFileDelete","series":{"path":"/tv/x"},"episodeFile":{"path":"/tv/x/a.mkv"},"deleteReason":2}`))
+	if err != nil || len(parsed.Changes) != 1 || parsed.Changes[0].Removed {
+		t.Fatalf("numeric reason: parsed = %+v, err = %v; want one change not marked removed", parsed, err)
 	}
 }
 

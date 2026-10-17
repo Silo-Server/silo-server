@@ -43,3 +43,18 @@ an unreachable root, and its next orphan check needs those rows to find it.
 Arr webhooks report an upgrade as a delete followed by an import, in either
 order and possibly in separate deliveries. Neither order changes the outcome;
 the title is only hidden between the two.
+
+A file arr deleted itself skips the grace once a scan has found it gone. The
+webhook parser marks a change `Removed` for an import's `deletedFiles` (unless
+the import reused that path) and for a file-delete event whose reason is
+`Upgrade`, `Manual` or `ManualOverride`. `MissingFromDisk` means arr found the
+file already gone, as a lost mount would look, so it keeps the grace. Autoscan
+confirms a removed path only when nothing is at the path and its directory
+still exists; `FileRepository.ConfirmFilesRemoved` sets
+`removal_confirmed_at` and leaves `missing_since` to the scanner. The scan that
+finds the file gone marks it missing and reconciles memberships as usual, and
+the trash sweep then deletes the row whatever its age, except under a
+protected root or while it holds first-seen data. A held row waits for the
+replacement to claim the date, so in practice the shortcut applies to
+upgrades; deleting a title's only file still takes the full grace. A scan
+that finds a confirmed file on disk clears the confirmation.

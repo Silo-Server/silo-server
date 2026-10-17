@@ -1045,6 +1045,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		END,
 		match_suppressed_at = NULL,
 		missing_since = NULL,
+		removal_confirmed_at = NULL,
 		updated_at = NOW()
 	RETURNING ` + fileColumns
 
@@ -3044,7 +3045,10 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // marked missing for longer than the grace period. Missing files are already
 // hidden from clients; the grace only delays deleting the row so a file that
 // reappears within the window restores without re-probing or re-matching.
-// A zero grace deletes all missing-marked rows immediately.
+// A zero grace deletes all missing-marked rows immediately. Rows whose
+// removal arr confirmed (ConfirmFilesRemoved) skip the grace unless they hold
+// a removed membership's first-seen data: that waits for the replacement
+// file to claim it, or for the grace to end.
 //
 // Rows of an item that still exists without any library membership are kept
 // whatever their age: membership reconciliation runs first and deletes every
@@ -3062,7 +3066,11 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 	query := `DELETE FROM media_files mf
 		WHERE mf.media_folder_id = $1
 		  AND mf.missing_since IS NOT NULL
-		  AND mf.missing_since < $2
+		  AND (mf.missing_since < $2 OR (
+			mf.removal_confirmed_at IS NOT NULL
+			AND mf.held_item_first_seen_at IS NULL
+			AND mf.held_episode_first_seen_at IS NULL
+		  ))
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_items mi
 			WHERE mi.content_id = mf.content_id
@@ -3078,6 +3086,41 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 		return 0, fmt.Errorf("deleting missing files for folder %d: %w", folderID, err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+// ConfirmFilesRemoved records that the arr managing the files at paths
+// deleted them. It does not mark them missing: the scan that next finds them
+// gone does, reconciles their memberships, and its trash sweep then deletes
+// them without waiting out the removal grace. A scan that still finds a file
+// clears the confirmation (ClearRemovalConfirmed, and the upsert).
+func (r *FileRepository) ConfirmFilesRemoved(ctx context.Context, paths []string) (int, error) {
+	if len(paths) == 0 {
+		return 0, nil
+	}
+	// The application clock, like the scans' seenAt in ClearRemovalConfirmed.
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_files
+		SET removal_confirmed_at = $2,
+		    updated_at = NOW()
+		WHERE file_path = ANY($1)
+	`, paths, time.Now().UTC())
+	if err != nil {
+		return 0, fmt.Errorf("confirming removed files: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// ClearRemovalConfirmed drops a removal confirmation for a file a scan found
+// on disk, so a later outage cannot reuse it to skip the grace. Only a
+// confirmation recorded at or before seenAt is dropped: one written after the
+// scan looked describes a deletion the scan did not see.
+func (r *FileRepository) ClearRemovalConfirmed(ctx context.Context, id int, seenAt time.Time) error {
+	if _, err := r.pool.Exec(ctx,
+		"UPDATE media_files SET removal_confirmed_at = NULL WHERE id = $1 AND removal_confirmed_at <= $2", id, seenAt,
+	); err != nil {
+		return fmt.Errorf("clearing removal confirmation: %w", err)
+	}
+	return nil
 }
 
 // ListRootsWithCatalogedFiles returns the subset of roots (in input order)
