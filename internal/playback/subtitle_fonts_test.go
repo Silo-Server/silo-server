@@ -29,9 +29,9 @@ done
 
 // TestDumpFontAttachmentsArgvOrder pins the ffmpeg argument contract: every
 // -dump_attachment flag must precede -i (they are per-input options for the
-// following input), and the -map 0:t? / -c copy stream-copy flags must be
-// present (without them ffmpeg decodes the whole video). A fake ffmpeg records
-// its argv so a malformed invocation can't pass silently.
+// following input), and output mapping must follow -i with stream copy to
+// avoid decoding media. A fake ffmpeg records its argv so a malformed
+// invocation can't pass silently.
 func TestDumpFontAttachmentsArgvOrder(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script test helper is unix-only")
@@ -66,7 +66,9 @@ done
 	for i, a := range argv {
 		switch {
 		case a == "-i":
-			inputIdx = i
+			if inputIdx < 0 {
+				inputIdx = i
+			}
 		case a == "-map":
 			mapIdx = i
 		case strings.HasPrefix(a, "-dump_attachment:"):
@@ -79,11 +81,17 @@ done
 	if lastDumpIdx < 0 || lastDumpIdx > inputIdx {
 		t.Fatalf("dump_attachment flags must precede -i; argv=%v", argv)
 	}
-	if mapIdx < 0 || argv[mapIdx+1] != "0:t?" {
-		t.Fatalf("argv missing -map 0:t?: %v", argv)
+	if !containsSeq(argv, "-f", "lavfi") || !containsSeq(argv, "-i", "anullsrc=r=8000:cl=mono") {
+		t.Fatalf("argv missing synthetic input: %v", argv)
+	}
+	if mapIdx < inputIdx || !containsSeq(argv, "-map", "1:a:0") {
+		t.Fatalf("synthetic output mapping must follow -i: %v", argv)
 	}
 	if !containsSeq(argv, "-c", "copy") {
 		t.Fatalf("argv missing -c copy: %v", argv)
+	}
+	if !containsSeq(argv, "-t", "0") || !containsSeq(argv, "-f", "null") {
+		t.Fatalf("argv missing zero-duration null output: %v", argv)
 	}
 }
 
