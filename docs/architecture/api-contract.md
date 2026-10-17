@@ -1237,6 +1237,11 @@ tombstone. The retained contract is:
   `Content-Type: application/json` on every branch. Revision (2026-09-15, with local artwork
   storage): storage outages no longer remove a node from rotation, because the API keeps
   answering and artwork routes fail on their own; `degraded` is additive to the frozen shape.
+  Dependency checks run concurrently with a shared one-second request budget, leaving time to
+  deliver the answer to a monitor with a two-second timeout. A Postgres timeout returns `503`;
+  a storage timeout reports `degraded` when Postgres is healthy. Artwork probes remain shared
+  and cached for 30 seconds; a request stops waiting at its deadline without canceling the
+  shared probe or starting another while it is still running.
   Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
   answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
   while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the

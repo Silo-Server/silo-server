@@ -50,6 +50,9 @@ const (
 	readyStatusShuttingDown = "shutting_down"
 )
 
+// Leave time to deliver an answer to monitors with a two-second timeout.
+const readyProbeTimeout = time.Second
+
 // readyStatus represents the JSON response for the readiness endpoint.
 type readyStatus struct {
 	Status   string `json:"status"`
@@ -98,6 +101,7 @@ type ReadyHandler struct {
 	artworkMu      sync.Mutex
 	artworkChecked time.Time
 	artworkOK      bool
+	artworkPending chan struct{}
 	// shuttingDown reports whether the process has begun shutting down; nil
 	// means it never does as far as readiness is concerned.
 	shuttingDown func() bool
@@ -187,13 +191,17 @@ func (h *ReadyHandler) isShuttingDown() bool {
 	return h.shuttingDown != nil && h.shuttingDown()
 }
 
-// probe checks every dependency and remembers the results.
+// probe checks dependencies concurrently within one shared deadline, so a
+// dependency outage cannot turn readiness into a monitor timeout.
 func (h *ReadyHandler) probe(ctx context.Context) *readyProbes {
-	probes := &readyProbes{
-		postgres: h.checkPostgres(ctx),
-		s3:       h.checkS3(ctx),
-		artwork:  h.checkArtwork(ctx),
-	}
+	ctx, cancel := context.WithTimeout(ctx, readyProbeTimeout)
+	defer cancel()
+	probes := &readyProbes{}
+	var wg sync.WaitGroup
+	wg.Go(func() { probes.postgres = h.checkPostgres(ctx) })
+	wg.Go(func() { probes.s3 = h.checkS3(ctx) })
+	probes.artwork = h.checkArtwork(ctx)
+	wg.Wait()
 	h.lastProbes.Store(probes)
 	return probes
 }
@@ -203,15 +211,39 @@ func (h *ReadyHandler) checkArtwork(ctx context.Context) bool {
 		return true
 	}
 	h.artworkMu.Lock()
-	defer h.artworkMu.Unlock()
 	if !h.artworkChecked.IsZero() && time.Since(h.artworkChecked) < 30*time.Second {
-		return h.artworkOK
+		ok := h.artworkOK
+		h.artworkMu.Unlock()
+		return ok
 	}
-	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	h.artworkOK = h.artwork.Probe(probeCtx) == nil
-	h.artworkChecked = time.Now()
-	return h.artworkOK
+	pending := h.artworkPending
+	if pending == nil {
+		pending = make(chan struct{})
+		h.artworkPending = pending
+		// The shared result outlives any one monitor's request. Keep only one
+		// probe in flight: a blocked filesystem syscall may ignore its context.
+		probeCtx := context.WithoutCancel(ctx)
+		go func() {
+			probeCtx, cancel := context.WithTimeout(probeCtx, 5*time.Second)
+			defer cancel()
+			ok := h.artwork.Probe(probeCtx) == nil
+			h.artworkMu.Lock()
+			defer h.artworkMu.Unlock()
+			h.artworkOK = ok
+			h.artworkChecked = time.Now()
+			h.artworkPending = nil
+			close(pending)
+		}()
+	}
+	h.artworkMu.Unlock()
+	select {
+	case <-pending:
+		h.artworkMu.Lock()
+		defer h.artworkMu.Unlock()
+		return h.artworkOK
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // checkPostgres pings the PG pool. Returns false if the pool is nil or
