@@ -253,7 +253,18 @@ func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []me
 	castLookupIDs := make([]string, 0, limit)
 	castLookupSeen := make(map[string]struct{}, limit)
 	more := false
-	artwork := h.featuredCardArtwork(ctx, enriched.items, art)
+	// Artwork is resolved only for the cards this page returns; the rest of
+	// the hydration window only decides whether more remain.
+	shown := make(map[string]*models.MediaItem, limit)
+	for _, m := range candidates {
+		if len(shown) == limit {
+			break
+		}
+		if mi := enriched.items[m.scored.MediaItemID]; mi != nil {
+			shown[mi.ContentID] = mi
+		}
+	}
+	artwork := h.featuredCardArtwork(ctx, shown, art)
 
 	for _, m := range candidates {
 		mi, ok := enriched.items[m.scored.MediaItemID]

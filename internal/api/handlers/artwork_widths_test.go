@@ -228,3 +228,24 @@ func TestWatchTonightCastPhotosResolveOnProfileLadder(t *testing.T) {
 		t.Errorf("plugin hint at 200px = %q, want %q", resolver.variant, imagesize.PluginVariantLarge)
 	}
 }
+
+// A Watch Tonight page resolves artwork for the cards it returns, not for the
+// rest of the hydration window, which only decides whether more remain.
+func TestSwipeCardsResolveArtworkOnlyForReturnedCards(t *testing.T) {
+	resolver := &countingSectionImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	h := &RecommendationsHandler{DetailSvc: detailSvc, CastFetcher: castByID{}}
+	items := map[string]*models.MediaItem{}
+	for _, id := range []string{"a", "b", "c"} {
+		items[id] = &models.MediaItem{ContentID: id, PosterPath: "tmdb/movies/" + id + "/poster/original.r1.webp"}
+	}
+
+	cards, more := h.swipeCards(t.Context(), recommendationCandidates("a", "b", "c"), watchTonightEnrichment{items: items}, 1, imagesize.Request{})
+	if len(cards) != 1 || !more {
+		t.Fatalf("cards = %d, more = %v; want one card and more", len(cards), more)
+	}
+	if !slices.Equal(resolver.paths, []string{"tmdb/movies/a/poster/w500.r1.webp"}) {
+		t.Fatalf("resolved %v, want only the returned card's poster", resolver.paths)
+	}
+}
