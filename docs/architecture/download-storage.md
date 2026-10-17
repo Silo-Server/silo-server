@@ -32,7 +32,13 @@ request cannot both win: once the touch commits, the file was used too recently 
 expire, and a request that loses gets `prepared_file_expired`.
 
 A missing file found by recovery, or a node requeue, expires the row instead of
-deleting it, and only in-flight rows are reset to `preparing`. An expired row is not a
+deleting it, and only in-flight rows are reset to `preparing`. The reset keeps the
+revision, so a device that fetched the whole file before it can still report
+`completed`. That report applies to the `preparing` row, and when no in-flight
+download is left and the job is still waiting in the queue, the job returns to
+`expired` in the same transaction. A job a worker already claimed finishes into the
+cache: an expired row keeps its id and output path, so stopping a live encode could
+race a later prepare-again. An expired row is not a
 preparation: the admin preparation list, queue positions, and cancel skip it. Neither
 the failed sweep nor a revoke's cancel of abandoned preparations deletes a row that a
 live download refers to, in flight or finished, because finished downloads read its
