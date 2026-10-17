@@ -7,7 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -66,13 +69,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				continue
 			}
 			attempted++
-			if paths, err := listPodcastShowAudioFiles(subPath, rootIgnoreRules); err == nil {
-				for _, path := range paths {
-					seenPaths[path] = true
-				}
-			}
-			episodePaths, err := s.reconcilePodcastShow(ctx, folder, subPath, rootIgnoreRules)
-			if err != nil {
+			if err := s.indexPodcastShow(ctx, folder, subPath, rootIgnoreRules, seenPaths); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
@@ -85,17 +82,140 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				// Continue with siblings — one bad show should not stop the scan.
 				continue
 			}
-			for _, path := range episodePaths {
-				seenPaths[path] = true
-			}
 			succeeded++
 		}
 	}
 	if attempted > 0 && succeeded == 0 && failures.len() > 0 {
 		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, failures.join())
 	}
-	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths); err != nil {
+	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths, true, nil); err != nil {
 		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
+	}
+	return nil
+}
+
+// scanPodcastSubtree scans the part of a podcast library under subtreePath
+// with the podcast pipeline. A library root scans the whole library, as the
+// scan resolver already does for a root path. Any other path stands for the
+// show folder that holds it: that show is indexed the way a full scan indexes
+// it, and missing-file reconciliation is limited to the show folder.
+//
+// For a show folder the result counts new, restored and newly missing episode
+// files and the cleanup that followed; the ingest publishes its catalog event
+// only when a scan reports a change. A scan that indexes nothing, because the
+// show folder is unavailable or not a directory, also leaves the folder-wide
+// membership state alone.
+func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*ScanResult, error) {
+	if s == nil || folder == nil || s.fileRepo == nil {
+		return nil, fmt.Errorf("scanPodcastSubtree: scanner, folder or file repository not configured")
+	}
+	result := &ScanResult{}
+	showPath := podcastShowFolder(subtreePath, folder.Paths)
+	if showPath == "" {
+		if scopeLibraryRoot(subtreePath, folder.Paths) == "" {
+			return nil, fmt.Errorf("podcast scan: %s is not inside a library root of folder_id=%d", subtreePath, folder.ID)
+		}
+		if err := s.ScanPodcastFolder(ctx, folder); err != nil {
+			return nil, err
+		}
+		if err := s.syncFolderScopedAudioLibraryState(ctx, folder.ID); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	// Lstat, like the full scan's directory listing: a full scan only treats
+	// real directories under the root as shows, so a subtree scan must not
+	// index a symlink or a loose file that the next full scan would retire.
+	info, err := os.Lstat(showPath)
+	if err != nil {
+		// Like the other subtree scans, a scope that cannot be inspected is
+		// left alone rather than reconciled; a vanished show is retired by the
+		// next full library scan.
+		slog.WarnContext(ctx, "podcast scan: show folder unavailable; leaving it to a full library scan", "component", "scanner",
+			"folder_id", folder.ID,
+			"path", showPath,
+			"error", err,
+		)
+		return result, nil
+	}
+	if !info.IsDir() {
+		return result, nil
+	}
+	rootIgnoreRules, ignored, err := scanRootIgnoreRules(showPath, folder.Paths)
+	if err != nil {
+		return nil, fmt.Errorf("podcast scan: %w", err)
+	}
+	before, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, showPath)
+	if err != nil {
+		return nil, fmt.Errorf("podcast scan: listing cataloged files for %s: %w", showPath, err)
+	}
+	wasMissing := make(map[string]bool, len(before))
+	for _, mf := range before {
+		if mf != nil {
+			wasMissing[mf.FilePath] = mf.MissingSince != nil
+		}
+	}
+	seenPaths := make(map[string]bool)
+	if !ignored {
+		if err := s.indexPodcastShow(ctx, folder, showPath, rootIgnoreRules, seenPaths); err != nil {
+			return nil, fmt.Errorf("podcast scan: show %s: %w", showPath, err)
+		}
+	}
+	for path := range seenPaths {
+		missing, cataloged := wasMissing[path]
+		switch {
+		case !cataloged:
+			result.New++
+		case missing:
+			result.Updated++
+		default:
+			result.Unchanged++
+		}
+	}
+	if err := s.reconcilePodcastMissingFiles(ctx, folder, []string{showPath}, seenPaths, false, result); err != nil {
+		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
+	}
+	if err := s.syncFolderScopedAudioLibraryState(ctx, folder.ID); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// podcastShowFolder returns the show folder that holds path in a podcast
+// library: the first directory below the most specific library root that
+// contains path. It returns "" for a library root itself and for a path
+// outside every root.
+func podcastShowFolder(path string, libraryRoots []string) string {
+	cleanPath := filepath.Clean(path)
+	root := scopeLibraryRoot(cleanPath, libraryRoots)
+	if root == "" || root == cleanPath {
+		return ""
+	}
+	rel, err := filepath.Rel(root, cleanPath)
+	if err != nil {
+		return ""
+	}
+	show, _, _ := strings.Cut(rel, string(filepath.Separator))
+	return filepath.Join(root, show)
+}
+
+// indexPodcastShow reconciles one show folder and records its episode files
+// in seenPaths. The files are recorded before the show is parsed, so a show
+// that fails to parse keeps its catalog rows instead of having them marked
+// missing.
+func (s *Scanner) indexPodcastShow(ctx context.Context, folder *models.MediaFolder, showPath string, rootIgnoreRules []ignoreRules, seenPaths map[string]bool) error {
+	if paths, err := listPodcastShowAudioFiles(showPath, rootIgnoreRules); err == nil {
+		for _, path := range paths {
+			seenPaths[path] = true
+		}
+	}
+	episodePaths, err := s.reconcilePodcastShow(ctx, folder, showPath, rootIgnoreRules)
+	if err != nil {
+		return err
+	}
+	for _, path := range episodePaths {
+		seenPaths[path] = true
 	}
 	return nil
 }
@@ -109,19 +229,37 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 		return nil, fmt.Errorf("parse podcast show %s: %w", folderPath, err)
 	}
 
+	if s.fileRepo == nil {
+		return nil, fmt.Errorf("fileRepo not configured on Scanner")
+	}
+	// Scans of one library run side by side, on this node or another: a
+	// show folder scan next to a full scan, or scans of two folders inside
+	// one show. Each finds the show by its folder and creates it when none is
+	// found, so a scan holds this show's lock from that lookup until its files
+	// and membership commit. A second scan of the show waits, then finds the
+	// show the first one wrote instead of creating another.
+	tx, err := s.fileRepo.Pool().Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin podcast show transaction: %w", err)
+	}
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelCleanup()
+	defer func() { _ = tx.Rollback(cleanupCtx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		fmt.Sprintf("podcast-show:%d:%s", folder.ID, folderPath),
+	); err != nil {
+		return nil, fmt.Errorf("lock podcast show %s: %w", folderPath, err)
+	}
+
 	showContentID, err := s.upsertPodcastMediaItem(ctx, folder.ID, folderPath, parsed)
 	if err != nil {
 		return nil, fmt.Errorf("upsert podcast item: %w", err)
 	}
-	if err := s.upsertPodcastEpisodesAndFiles(ctx, folder, showContentID, folderPath, parsed); err != nil {
+	if err := s.upsertPodcastEpisodesAndFiles(ctx, tx, folder, showContentID, folderPath, parsed); err != nil {
 		return nil, fmt.Errorf("upsert podcast episodes+files: %w", err)
 	}
-	if _, err := s.fileRepo.Pool().Exec(ctx, `
-		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (content_id, media_folder_id) DO NOTHING
-	`, showContentID, folder.ID); err != nil {
-		return nil, fmt.Errorf("upsert podcast library membership: %w", err)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit podcast show transaction: %w", err)
 	}
 
 	slog.InfoContext(ctx, "podcast scan: indexed", "component", "scanner",
@@ -227,13 +365,19 @@ func applyPodcastShowMetadata(item *models.MediaItem, show *parsedPodcastShow) b
 	return changed
 }
 
-func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool) error {
+// reconcilePodcastMissingFiles marks the cataloged files under roots that the
+// scan did not see as missing, then reconciles memberships. fullScan is false
+// for a show-folder scan, which never consumes the folder's empty-cleanup
+// confirmation: a show folder that walked empty keeps its rows until a full
+// library scan decides. A non-nil result receives the files newly marked
+// missing and the cleanup counts.
+func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, fullScan bool, result *ScanResult) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
 
 	confirmedCleanup, blockAll, err := s.emptyCleanupDecision(
-		ctx, folder, roots, seenPaths, true, "podcast",
+		ctx, folder, roots, seenPaths, fullScan, "podcast",
 	)
 	if err != nil {
 		return err
@@ -244,6 +388,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 
 	now := time.Now().UTC()
 	missing := 0
+	newlyMissing := 0
 	for _, root := range roots {
 		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
 		if err != nil {
@@ -259,12 +404,19 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue
 				}
+				newlyMissing++
 			}
 			missing++
 		}
 	}
 
 	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)
+	if result != nil {
+		result.Missing += newlyMissing
+		result.FilesDeleted += trashed
+		result.MembershipsRemoved += removedMemberships
+		result.ItemsDeleted += deletedItems
+	}
 	if trashed > 0 {
 		slog.InfoContext(ctx, "podcast scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}
@@ -280,14 +432,20 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 }
 
 // upsertPodcastEpisodesAndFiles writes one episodes row and one media_files
-// row per episode in the parsed show. The episode's content_id is linked back
-// through media_files.episode_id so playback and library queries can resolve
-// it.
+// row per episode in the parsed show, plus the show's library membership. The
+// episode's content_id is linked back through media_files.episode_id so
+// playback and library queries can resolve it.
+//
+// The files and the membership go in the caller's transaction so they commit
+// together. Every scan of a library ends with a membership sweep that deletes
+// any item whose files have no membership, so a show committed file by file
+// could be deleted by another scan's sweep mid-write.
 //
 // Podcast episodes use season_number=0 (no season concept) and
 // episode_number=track.
 func (s *Scanner) upsertPodcastEpisodesAndFiles(
 	ctx context.Context,
+	tx pgx.Tx,
 	folder *models.MediaFolder,
 	showContentID string,
 	folderPath string,
@@ -297,6 +455,7 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 		return fmt.Errorf("episodeRepo not configured on Scanner")
 	}
 
+	files := make([]models.MediaFile, 0, len(show.Episodes))
 	for _, ep := range show.Episodes {
 		episodeID, err := idgen.NextID()
 		if err != nil {
@@ -332,9 +491,26 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 			FilePath:           ep.Path,
 			ProbeSource:        "local",
 		}
-		if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
-			return fmt.Errorf("upsert media file %s: %w", ep.Path, err)
+		// The upsert replaces every technical column, so record what the
+		// show parse probed rather than clearing duration and tracks.
+		if ep.Probe != nil {
+			applyProbeData(&mf, ep.Probe, "local")
+			mf.FileSize = ep.Size
+			modTime := ep.ModTime
+			mf.FileModifiedAt = &modTime
 		}
+		files = append(files, mf)
+	}
+
+	if err := s.fileRepo.UpsertBatchTx(ctx, tx, files); err != nil {
+		return fmt.Errorf("upsert media files for %s: %w", folderPath, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (content_id, media_folder_id) DO NOTHING
+	`, showContentID, folder.ID); err != nil {
+		return fmt.Errorf("upsert podcast library membership: %w", err)
 	}
 	return nil
 }

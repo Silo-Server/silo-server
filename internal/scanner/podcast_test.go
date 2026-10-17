@@ -98,6 +98,102 @@ func TestScanPodcastFolderReturnsCanceledContext(t *testing.T) {
 	}
 }
 
+// podcastProbeFixture writes a one-episode show whose file holds the ffprobe
+// output for a probed duration, and returns the show folder and episode path.
+func podcastProbeFixture(t *testing.T, dir, duration string) (string, string) {
+	t.Helper()
+	showDir := filepath.Join(dir, "Show")
+	if err := os.Mkdir(showDir, 0o755); err != nil {
+		t.Fatalf("mkdir show: %v", err)
+	}
+	path := filepath.Join(showDir, "01.mp3")
+	if err := os.WriteFile(path, []byte(podcastProbeJSON(duration)), 0o644); err != nil {
+		t.Fatalf("write episode: %v", err)
+	}
+	return showDir, path
+}
+
+func podcastProbeJSON(duration string) string {
+	return `{"format":{"format_name":"mp3","duration":"` + duration + `","tags":{"album":"Show","title":"One","track":"1"}},` +
+		`"streams":[{"index":0,"codec_type":"audio","codec_name":"mp3"}]}`
+}
+
+func TestParsePodcastShowReprobesAFileReplacedDuringTheProbe(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	// Prints the probe stored in the file. The first time, it then renames a
+	// waiting replacement over the file with the same size and mtime, as an
+	// atomic replacement written while ffprobe reads the file would.
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"+
+		"if [ -e \"$last.next\" ]; then touch -r \"$last\" \"$last.next\"; mv \"$last.next\" \"$last\"; fi\n")
+	showDir, path := podcastProbeFixture(t, dir, "61")
+	if err := os.WriteFile(path+".next", []byte(podcastProbeJSON("62")), 0o644); err != nil {
+		t.Fatalf("write replacement: %v", err)
+	}
+
+	got, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
+	if err != nil {
+		t.Fatalf("parsePodcastShow: %v", err)
+	}
+	if len(got.Episodes) != 1 {
+		t.Fatalf("got %d episodes, want 1", len(got.Episodes))
+	}
+	ep := got.Episodes[0]
+	if ep.Probe == nil || ep.Probe.Duration != 62 {
+		t.Fatalf("probe = %+v, want the replacement's 62-second probe", ep.Probe)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat episode: %v", err)
+	}
+	if ep.Size != after.Size() || !ep.ModTime.Equal(normalizeFileModifiedAt(after.ModTime())) {
+		t.Fatalf("recorded size %d mtime %v, want the replacement's %d %v",
+			ep.Size, ep.ModTime, after.Size(), normalizeFileModifiedAt(after.ModTime()))
+	}
+}
+
+func TestParsePodcastShowRejectsAFileStillChanging(t *testing.T) {
+	dir := t.TempDir()
+	ffprobePath := filepath.Join(dir, "ffprobe")
+	// Prints the probe stored in the file, then grows the file, as a download
+	// still being written would.
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\nprintf ' ' >> \"$last\"\n")
+	showDir, _ := podcastProbeFixture(t, dir, "61")
+
+	_, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
+	if err == nil || !strings.Contains(err.Error(), "changed while it was probed") {
+		t.Fatalf("parsePodcastShow error = %v, want a file that changed while it was probed", err)
+	}
+}
+
+func TestPodcastShowFolder(t *testing.T) {
+	roots := []string{"/media/podcasts", "/media/more-podcasts", "/media/more-podcasts/nested"}
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "show folder", path: "/media/podcasts/Show A", want: "/media/podcasts/Show A"},
+		{name: "episode file", path: "/media/podcasts/Show A/Episode 2.mp3", want: "/media/podcasts/Show A"},
+		{name: "folder inside a show", path: "/media/podcasts/Show A/extras/bonus", want: "/media/podcasts/Show A"},
+		{name: "unclean path", path: "/media/podcasts//Show A/./extras/", want: "/media/podcasts/Show A"},
+		{name: "second root", path: "/media/more-podcasts/Show B/Episode 1.mp3", want: "/media/more-podcasts/Show B"},
+		{name: "most specific nested root", path: "/media/more-podcasts/nested/Show C", want: "/media/more-podcasts/nested/Show C"},
+		{name: "nested library root", path: "/media/more-podcasts/nested", want: ""},
+		{name: "library root", path: "/media/podcasts", want: ""},
+		{name: "library root with trailing slash", path: "/media/podcasts/", want: ""},
+		{name: "sibling with a root's name as prefix", path: "/media/podcasts-old/Show A", want: ""},
+		{name: "outside every root", path: "/srv/Show A", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := podcastShowFolder(tt.path, roots); got != tt.want {
+				t.Fatalf("podcastShowFolder(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestListPodcastShowAudioFilesReturnsSortedAudioPaths(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "02.mp3"), []byte("audio"), 0o644); err != nil {
