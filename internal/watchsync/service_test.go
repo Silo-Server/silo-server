@@ -198,6 +198,13 @@ func (r *serviceFakeRepo) DeferConnectionsForAccount(
 	return deferred, nil
 }
 
+// withConnection stores conn the way a connected profile's row exists before
+// a sync, and returns it.
+func (r *serviceFakeRepo) withConnection(conn Connection) Connection {
+	r.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	return conn
+}
+
 func (r *serviceFakeRepo) GetConnectionByID(_ context.Context, id string) (Connection, bool, error) {
 	for _, conn := range r.connections {
 		if conn.ID == id {
@@ -2576,12 +2583,12 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
 		store: userdb.NewSQLiteUserStore(db),
 	})
-	result, err := service.ExportWatched(context.Background(), Connection{
+	result, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{
 		ID:        "conn-1",
 		Provider:  "simkl",
 		UserID:    7,
 		ProfileID: "profile-1",
-	}, ServerConfig{}, watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl})
+	}), ServerConfig{}, watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl})
 	if err != nil {
 		t.Fatalf("ExportWatched: %v", err)
 	}
@@ -2647,12 +2654,12 @@ func TestServiceExportWatchedMatchesRemotePlaysAtProviderPrecision(t *testing.T)
 			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
 				store: userdb.NewSQLiteUserStore(db),
 			})
-			result, err := service.ExportWatched(context.Background(), Connection{
+			result, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{
 				ID:        "conn-1",
 				Provider:  "trakt",
 				UserID:    7,
 				ProfileID: "profile-1",
-			}, ServerConfig{}, provider)
+			}), ServerConfig{}, provider)
 			if err != nil {
 				t.Fatalf("ExportWatched: %v", err)
 			}
@@ -2953,7 +2960,7 @@ func TestServiceExportWatchedSendsCatalogTitles(t *testing.T) {
 	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
 	var exported []LocalPlay
 	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, nil}
-	if _, err := service.ExportWatched(context.Background(), Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+	if _, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}), ServerConfig{}, exporter); err != nil {
 		t.Fatal(err)
 	}
 	if len(exported) != 1 || exported[0].Title != "17 Again" || exported[0].Year != 2009 {
@@ -3683,7 +3690,7 @@ func TestServiceExportWatchedKeepsDeadlineForProviderWhenTitlesStall(t *testing.
 	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, &ctxErrs}
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
-	if _, err := service.ExportWatched(ctx, Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+	if _, err := service.ExportWatched(ctx, repo.withConnection(Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}), ServerConfig{}, exporter); err != nil {
 		t.Fatal(err)
 	}
 	if len(ctxErrs) != 1 || ctxErrs[0] != nil || len(exported) != 1 || exported[0].Title != "" {

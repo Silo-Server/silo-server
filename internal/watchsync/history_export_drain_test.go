@@ -18,14 +18,18 @@ type drainExporterStub struct {
 	watchedExporterStub
 	batchSize int
 	calls     *[][]LocalPlay
+	tokens    *[]string // the access token each call received, when set
 	respond   func(call int, plays []LocalPlay) (ExportResult, error)
 }
 
 func (p drainExporterStub) ExportBatchSize() int { return p.batchSize }
 
-func (p drainExporterStub) ExportHistory(_ context.Context, _ ServerConfig, _ Connection, plays []LocalPlay) (ExportResult, error) {
+func (p drainExporterStub) ExportHistory(_ context.Context, _ ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error) {
 	call := len(*p.calls)
 	*p.calls = append(*p.calls, plays)
+	if p.tokens != nil {
+		*p.tokens = append(*p.tokens, conn.AccessToken)
+	}
 	return p.respond(call, plays)
 }
 
@@ -39,7 +43,7 @@ func sendAllPlays(_ int, plays []LocalPlay) (ExportResult, error) {
 
 // newDrainService returns a service over count completed movie plays, one
 // minute apart.
-func newDrainService(t *testing.T, count int) (*Service, *serviceFakeRepo) {
+func newDrainService(t *testing.T, count int) (*Service, *serviceFakeRepo, userstore.UserStore) {
 	t.Helper()
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -68,10 +72,10 @@ func newDrainService(t *testing.T, count int) (*Service, *serviceFakeRepo) {
 		}
 	}
 	repo := newServiceFakeRepo()
-	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
-		store: userdb.NewSQLiteUserStore(db),
-	})
-	return service, repo
+	repo.withConnection(drainConn)
+	store := userdb.NewSQLiteUserStore(db)
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: store})
+	return service, repo, store
 }
 
 var drainConn = Connection{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1"}
@@ -85,7 +89,7 @@ func exportStatusCounts(repo *serviceFakeRepo) map[string]int {
 }
 
 func TestServiceExportWatchedDrainsBacklogInProviderBatches(t *testing.T) {
-	service, repo := newDrainService(t, 25)
+	service, repo, _ := newDrainService(t, 25)
 	var calls [][]LocalPlay
 	exporter := drainExporterStub{batchSize: 10, calls: &calls, respond: sendAllPlays}
 
@@ -117,7 +121,7 @@ func TestServiceExportWatchedDrainsBacklogInProviderBatches(t *testing.T) {
 }
 
 func TestServiceExportWatchedTriesEachExportOncePerRun(t *testing.T) {
-	service, repo := newDrainService(t, 7)
+	service, repo, _ := newDrainService(t, 7)
 	var calls [][]LocalPlay
 	exporter := drainExporterStub{batchSize: 3, calls: &calls, respond: func(_ int, plays []LocalPlay) (ExportResult, error) {
 		result := ExportResult{Failed: map[string]string{}}
@@ -151,7 +155,7 @@ func TestServiceExportWatchedTriesEachExportOncePerRun(t *testing.T) {
 }
 
 func TestServiceExportWatchedStopsDrainAtRateLimit(t *testing.T) {
-	service, repo := newDrainService(t, 25)
+	service, repo, _ := newDrainService(t, 25)
 	var calls [][]LocalPlay
 	exporter := drainExporterStub{batchSize: 10, calls: &calls, respond: func(call int, plays []LocalPlay) (ExportResult, error) {
 		if call == 1 {
@@ -174,7 +178,7 @@ func TestServiceExportWatchedStopsDrainAtRateLimit(t *testing.T) {
 }
 
 func TestServiceExportWatchedStopsDrainWhenContextEnds(t *testing.T) {
-	service, repo := newDrainService(t, 25)
+	service, repo, _ := newDrainService(t, 25)
 	ctx, cancel := context.WithCancel(t.Context())
 	var calls [][]LocalPlay
 	exporter := drainExporterStub{batchSize: 10, calls: &calls, respond: func(call int, plays []LocalPlay) (ExportResult, error) {
@@ -197,7 +201,7 @@ func TestServiceExportWatchedStopsDrainWhenContextEnds(t *testing.T) {
 // not hold. It stays pending for the next run; an export whose history entry
 // is really gone is still retired.
 func TestServiceExportWatchedLeavesExportsNewerThanItsHistoryReadPending(t *testing.T) {
-	service, repo := newDrainService(t, 3)
+	service, repo, _ := newDrainService(t, 3)
 	now := time.Now().UTC()
 	repo.historyExports = append(repo.historyExports,
 		HistoryExport{ID: "export-live", ConnectionID: drainConn.ID, HistoryID: "history-live", MediaItemID: testMovieMediaID,
@@ -226,7 +230,7 @@ func TestServiceExportWatchedLeavesExportsNewerThanItsHistoryReadPending(t *test
 // A run with a deadline sends at least one batch, then stops starting calls
 // once the deadline is within exportDrainReserve.
 func TestServiceExportWatchedStopsDrainNearTheRunDeadline(t *testing.T) {
-	service, repo := newDrainService(t, 25)
+	service, repo, _ := newDrainService(t, 25)
 	ctx, cancel := context.WithTimeout(t.Context(), exportDrainReserve/2)
 	defer cancel()
 	var calls [][]LocalPlay
@@ -240,5 +244,57 @@ func TestServiceExportWatchedStopsDrainNearTheRunDeadline(t *testing.T) {
 	}
 	if counts := exportStatusCounts(repo); counts[historyExportStatusSent] != 10 || counts[historyExportStatusPending] != 15 {
 		t.Fatalf("export statuses = %v, want 10 sent and 15 pending", counts)
+	}
+}
+
+// A play the user marks unwatched while the backlog drains is not sent as
+// watched by a later batch; its export waits for the next run.
+func TestServiceExportWatchedSkipsPlaysUnwatchedDuringTheDrain(t *testing.T) {
+	service, repo, store := newDrainService(t, 25)
+	var calls [][]LocalPlay
+	exporter := drainExporterStub{batchSize: 10, calls: &calls, respond: func(call int, plays []LocalPlay) (ExportResult, error) {
+		if call == 0 {
+			if err := store.RemoveHistoryItems(t.Context(), drainConn.ProfileID, []string{testMovieMediaID}, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return sendAllPlays(call, plays)
+	}}
+
+	if _, err := service.ExportWatched(t.Context(), drainConn, ServerConfig{}, exporter); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want only the batch sent before the unwatch", len(calls))
+	}
+	if counts := exportStatusCounts(repo); counts[historyExportStatusSent] != 10 || counts[historyExportStatusPending] != 15 {
+		t.Fatalf("export statuses = %v, want 10 sent and 15 pending", counts)
+	}
+}
+
+// Credentials a plugin rotates during one call reach the next call and are
+// not overwritten by the final connection save.
+func TestServiceExportWatchedUsesCredentialsRotatedDuringTheDrain(t *testing.T) {
+	service, repo, _ := newDrainService(t, 15)
+	var calls [][]LocalPlay
+	var tokens []string
+	exporter := drainExporterStub{batchSize: 10, calls: &calls, tokens: &tokens, respond: func(call int, plays []LocalPlay) (ExportResult, error) {
+		if call == 0 {
+			rotated := drainConn
+			rotated.AccessToken = "rotated"
+			repo.withConnection(rotated)
+		}
+		return sendAllPlays(call, plays)
+	}}
+
+	if _, err := service.ExportWatched(t.Context(), drainConn, ServerConfig{}, exporter); err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 2 || tokens[1] != "rotated" {
+		t.Fatalf("tokens per call = %q, want the second call to use the rotated token", tokens)
+	}
+	saved, ok, err := repo.GetConnectionByID(t.Context(), drainConn.ID)
+	if err != nil || !ok || saved.AccessToken != "rotated" {
+		t.Fatalf("saved connection token = %q (ok=%v, err=%v), want rotated", saved.AccessToken, ok, err)
 	}
 }

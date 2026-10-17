@@ -1446,6 +1446,33 @@ func listAllCompletedHistory(ctx context.Context, store completedHistoryLister, 
 	}
 }
 
+// visiblePlays keeps the plays whose history entries are still visible.
+func visiblePlays(ctx context.Context, store completedHistoryLister, query userstore.CompletedHistoryQuery, plays []LocalPlay) ([]LocalPlay, error) {
+	query.MediaItemIDs = make([]string, 0, len(plays))
+	seen := make(map[string]bool, len(plays))
+	for _, play := range plays {
+		if !seen[play.MediaItemID] {
+			seen[play.MediaItemID] = true
+			query.MediaItemIDs = append(query.MediaItemIDs, play.MediaItemID)
+		}
+	}
+	rows, err := listAllCompletedHistory(ctx, store, query)
+	if err != nil {
+		return nil, err
+	}
+	visible := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		visible[row.ID] = true
+	}
+	kept := make([]LocalPlay, 0, len(plays))
+	for _, play := range plays {
+		if visible[play.HistoryID] {
+			kept = append(kept, play)
+		}
+	}
+	return kept, nil
+}
+
 func hasVisibleCompletedHistoryAtOrAfter(ctx context.Context, store completedHistoryLister, profileID, mediaItemID string, at time.Time) (bool, error) {
 	for offset := 0; ; offset += completedHistoryPageSize {
 		rows, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
@@ -1607,11 +1634,12 @@ func (s *Service) ExportWatched(
 	}
 	result := ExportWatchedResult{RemoteFound: len(remote)}
 
-	historyReadAt := s.now()
-	historyRows, err := listAllCompletedHistory(ctx, store, userstore.CompletedHistoryQuery{
+	historyQuery := userstore.CompletedHistoryQuery{
 		ProfileID:      conn.ProfileID,
 		ExcludeSources: []userstore.WatchHistorySource{historySourceForProvider(exporter)},
-	})
+	}
+	historyReadAt := s.now()
+	historyRows, err := listAllCompletedHistory(ctx, store, historyQuery)
 	if err != nil {
 		return result, err
 	}
@@ -1683,6 +1711,13 @@ func (s *Service) ExportWatched(
 			pendingPlays = append(pendingPlays, play)
 			exportByHistoryID[export.HistoryID] = export
 		}
+		// Local history can change while the backlog drains. A play the user
+		// marked unwatched after the run read history must not go out as
+		// watched; its export waits for the next run, whose read retires it.
+		pendingPlays, err = visiblePlays(ctx, store, historyQuery, pendingPlays)
+		if err != nil {
+			return result, err
+		}
 		if len(pendingPlays) == 0 {
 			continue
 		}
@@ -1743,6 +1778,11 @@ func (s *Service) ExportWatched(
 		}
 		if limited || retryable {
 			// Leave unmentioned events pending for a later retry.
+			return result, err
+		}
+		// A plugin call can rotate the connection's credentials. Read them
+		// back so later calls and the final save use the current ones.
+		if conn, err = s.reloadConnection(ctx, conn); err != nil {
 			return result, err
 		}
 		if !progressed {
