@@ -51,6 +51,7 @@ type serviceFakeRepo struct {
 	historyExports         []HistoryExport
 	historyLookupIDs       []string
 	historyLookupLimit     int
+	historyPageSizes       []int
 	listItemStates         []ListItemState
 	ratingStates           []RatingSyncState
 	droppedStates          []DroppedSyncState
@@ -374,16 +375,25 @@ func (r *serviceFakeRepo) UpsertHistoryExports(_ context.Context, exports []Hist
 	return nil
 }
 
-func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, limit int) ([]HistoryExport, error) {
+func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, after HistoryExportCursor, limit int) ([]HistoryExport, error) {
+	r.historyPageSizes = append(r.historyPageSizes, limit)
 	var exports []HistoryExport
 	for _, export := range r.historyExports {
 		if export.ConnectionID == connectionID &&
-			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 {
+			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 &&
+			(after.ID == "" || export.WatchedAt.After(after.WatchedAt) ||
+				(export.WatchedAt.Equal(after.WatchedAt) && export.ID > after.ID)) {
 			exports = append(exports, export)
-			if limit > 0 && len(exports) >= limit {
-				break
-			}
 		}
+	}
+	slices.SortStableFunc(exports, func(a, b HistoryExport) int {
+		if c := a.WatchedAt.Compare(b.WatchedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if limit > 0 && len(exports) > limit {
+		exports = exports[:limit]
 	}
 	return exports, nil
 }
@@ -1129,12 +1139,12 @@ type watchedExporterStub struct {
 	source       userstore.WatchHistorySource
 }
 
-type singleBatchWatchedExporterStub struct {
+type batchedWatchedExporterStub struct {
 	watchedExporterStub
 	batchSize int
 }
 
-func (p singleBatchWatchedExporterStub) ExportBatchSize() int {
+func (p batchedWatchedExporterStub) ExportBatchSize() int {
 	return p.batchSize
 }
 
@@ -4157,7 +4167,7 @@ func TestServiceLocalWatchEventBoundsHistoryLookupToProviderBatch(t *testing.T) 
 		context.Background(),
 		Connection{ID: "conn-1"},
 		ServerConfig{},
-		singleBatchWatchedExporterStub{
+		batchedWatchedExporterStub{
 			watchedExporterStub: watchedExporterStub{exported: &exported},
 			batchSize:           1,
 		},

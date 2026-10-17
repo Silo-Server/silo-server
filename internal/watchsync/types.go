@@ -129,9 +129,10 @@ type WatchedExporter interface {
 	ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
 
-// singleBatchWatchedExporter bounds one synchronization run to one provider
-// batch. This is used for plugin RPCs with independent per-call deadlines.
-type singleBatchWatchedExporter interface {
+// batchedWatchedExporter caps how many plays one ExportHistory call takes.
+// Plugin providers declare it, since each call is one RPC with its own
+// deadline.
+type batchedWatchedExporter interface {
 	ExportBatchSize() int
 }
 
@@ -703,6 +704,30 @@ type HistoryExport struct {
 	LastError       string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// maxHistoryExportPage bounds one read of a connection's pending history
+// exports: the largest batch a plugin may declare.
+const maxHistoryExportPage = 1000
+
+// exportDrainReserve is how much of a run's deadline the history export
+// leaves unused: room for one plugin call that has already started and for
+// the flows that run after the export. A manual sync has a deadline; a
+// scheduled one does not, so it drains the whole backlog.
+const exportDrainReserve = 3 * time.Minute
+
+// exportSnapshotSkew allows for clock difference between the server, which
+// stamps when a run read local history, and the database, which stamps when
+// an export row was created.
+const exportSnapshotSkew = time.Minute
+
+// HistoryExportCursor is the last export one pass over the backlog listed, in
+// the backlog's (watched_at, id) order. Listing after it continues the pass, so
+// an export the pass already tried is not tried again before the next sync.
+// The zero value starts at the oldest export.
+type HistoryExportCursor struct {
+	WatchedAt time.Time
+	ID        string
 }
 
 // ListItemState is the per-connection, per-list shadow record tracking whether
