@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -93,15 +94,14 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 			writeForbidden(w, "Metadata curation permission required")
 			return
 		}
-		hasPermission := auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
-		if claims.Role == "admin" {
-			// Reached only when the admin bypass was refused (non-primary
-			// profile declared, or no profile on a household that requires
-			// one): the role-derived grant does not apply, only an explicitly
-			// assigned permission does.
-			hasPermission = auth.HasAssignedPermission(user, auth.PermissionMetadataCuration)
-		}
-		if !hasPermission {
+		// Resolve through the inherit/override policy so the access group's
+		// permission mask and inherited library list apply. A failed lookup
+		// fails closed, matching the PDP-backed gate. An admin reaching this
+		// point was refused the acting-admin bypass (non-primary profile
+		// declared, or no profile on a household that requires one), so only
+		// an explicitly assigned permission counts (groups never mask admins).
+		effective, err := access.EffectivePolicyForUser(r.Context(), user, m.groups)
+		if err != nil || !slices.Contains(auth.PolicyPermissions(effective), string(auth.PermissionMetadataCuration)) {
 			writeForbidden(w, "Metadata curation permission required")
 			return
 		}
@@ -115,14 +115,6 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 			writePermissionError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
 		}
-		// Resolve through the inherit/override policy so an account that
-		// inherits its group's library list is held to that list. A failed
-		// lookup fails closed, matching the PDP-backed gate.
-		effective, err := access.EffectivePolicyForUser(r.Context(), user, m.groups)
-		if err != nil {
-			writeForbidden(w, "Metadata curation permission required")
-			return
-		}
 		if !metadataTargetWithinUserLibraries(effective.LibraryIDs, targetLibraries) {
 			writeForbidden(w, "Item is outside your assigned libraries")
 			return
@@ -132,9 +124,8 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 	})
 }
 
-// RequireMarkerEdit is the legacy marker-write gate: admins pass by role,
-// everyone else needs the marker_edit permission on their account. Proxy/test
-// wiring only — production takes the PDP-backed gate.
+// RequireMarkerEdit allows an acting admin or an enabled account with an
+// explicit, group-allowed marker_edit grant. Production uses the PDP gate.
 func (m *PermissionMiddleware) RequireMarkerEdit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())
@@ -142,16 +133,28 @@ func (m *PermissionMiddleware) RequireMarkerEdit(next http.Handler) http.Handler
 			writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
 			return
 		}
-		if claims.Role == "admin" {
-			next.ServeHTTP(w, r)
-			return
-		}
 		if m == nil || m.users == nil {
 			writeForbidden(w, "Marker editing permission required")
 			return
 		}
 		user, err := m.users.GetByID(r.Context(), claims.UserID)
-		if err != nil || user == nil || !auth.HasEffectivePermission(user, auth.PermissionMarkerEdit) {
+		if err != nil || user == nil || !user.Enabled {
+			writeForbidden(w, "Marker editing permission required")
+			return
+		}
+		if claims.Role == "admin" {
+			actingAdmin, err := actingAdminAllowed(r, claims, m.checkPrimary, m.household)
+			if err != nil {
+				writePermissionError(w, http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
+				return
+			}
+			if actingAdmin {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		effective, err := access.EffectivePolicyForUser(r.Context(), user, m.groups)
+		if err != nil || !slices.Contains(auth.PolicyPermissions(effective), string(auth.PermissionMarkerEdit)) {
 			writeForbidden(w, "Marker editing permission required")
 			return
 		}

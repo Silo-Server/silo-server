@@ -54,6 +54,12 @@ Manual writes require a Movie or Series library, including their mixed-library
 variants. Unsupported library kinds return `422 validation_failed` without
 changing markers, contributing them, or emitting a playback update.
 
+An enabled administrator bypasses the `marker_edit` grant only while acting as
+administrator: on the primary profile, or with no profile declared on a
+household that does not require one. Otherwise the admin needs an explicitly
+assigned grant. Non-admin accounts require the effective grant, including the
+access group mask.
+
 Local detection finds episode intros and end credits, and movie end credits on
 a best-effort basis: from chapters and the picture near the end, never intros.
 Some movies get no local credits, or credits that start late. It never replaces
