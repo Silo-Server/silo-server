@@ -63,6 +63,10 @@ type LibraryCollectionHandler struct {
 	// PersonalCollages serves the collages of the personal collections opted
 	// into a library tab; nil when artwork storage is not configured.
 	PersonalCollages *catalog.PersonalCollectionCollages
+	// ArtworkSigner signs the artwork URLs local storage serves; collages
+	// read those posters from ArtworkStore. Nil when storage serves its own
+	// URLs.
+	ArtworkSigner *artworkurl.Signer
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse
@@ -191,7 +195,7 @@ func (h *LibraryCollectionHandler) CollectionCollagePath(collectionID, key strin
 }
 
 func (h *LibraryCollectionHandler) collageComposer() collectionCollageComposer {
-	return collectionCollageComposer{prefix: adminCollectionImagePrefix, store: h.ArtworkStore, posters: h.detailSvc, httpClient: h.httpClient}
+	return collectionCollageComposer{prefix: adminCollectionImagePrefix, store: h.ArtworkStore, posters: h.detailSvc, signer: h.ArtworkSigner, httpClient: h.httpClient}
 }
 
 type libraryCollectionResponse struct {
