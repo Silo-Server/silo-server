@@ -148,9 +148,15 @@ func TestDownloadStatusEventsPostgres(t *testing.T) {
 	if _, err := repo.pool.Exec(t.Context(), `UPDATE downloads SET status='preparing' WHERE id='entry'`); err != nil {
 		t.Fatal(err)
 	}
+	// A preparing row takes only a completion: the device may have fetched the
+	// file before recovery reset the row. A transfer start cannot apply.
 	event.UpdatedAt = event.UpdatedAt.Add(time.Minute)
-	if _, err := service.ReportStatus(t.Context(), 1, "one", "device", "entry", event); !errors.Is(err, ErrNotFound) {
+	if _, err := service.ReportStatus(t.Context(), 1, "one", "device", "entry", StatusEvent{Status: StatusDownloading, UpdatedAt: event.UpdatedAt, Revision: 2}); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
+	}
+	got, err = service.ReportStatus(t.Context(), 1, "one", "device", "entry", event)
+	if err != nil || got.Status != StatusCompleted {
+		t.Fatalf("completion of a preparing row: %+v %v", got, err)
 	}
 }
 
