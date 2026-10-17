@@ -2,9 +2,9 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,7 +30,7 @@ func TestWorkerDownloadBatchChecksGenerationBoundsBeforeSQL(t *testing.T) {
 	}
 	defer pool.Close()
 	for _, generation := range []uint64{0, uint64(math.MaxInt64) + 1, math.MaxUint64} {
-		t.Run(fmt.Sprint(generation), func(t *testing.T) {
+		t.Run(strconv.FormatUint(generation, 10), func(t *testing.T) {
 			// A bad generation in a later chunk must abort before even the
 			// first valid chunk queries SQL or produces a partial decision.
 			assignments := make([]workerwire.Assignment, workerContentBatchSize+1)

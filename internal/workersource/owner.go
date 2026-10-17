@@ -262,11 +262,7 @@ func (a *Authority) serveOwnerRenew(w http.ResponseWriter, r *http.Request, node
 		sourceError(w, r, 503)
 		return
 	}
-	encoded, err := json.Marshal(token)
-	if err != nil {
-		sourceError(w, r, 503)
-		return
-	}
+	encoded, _ := json.Marshal(token) // Encoding a signed string cannot fail.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(append(encoded, '\n'))
