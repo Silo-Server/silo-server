@@ -11,7 +11,9 @@ import (
 	"strings"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
@@ -26,6 +28,8 @@ type swipeCardCastMember struct {
 	Name      string `json:"name"`
 	Character string `json:"character,omitempty"`
 	PhotoURL  string `json:"photo_url,omitempty"`
+	// photoPath is the stored headshot WatchTonightCards resolves into PhotoURL.
+	photoPath string
 }
 
 // swipeCardResponse extends sectionItemResponse with cast and runtime for the card back.
@@ -116,8 +120,58 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 // excludeIDs is already bounded, and limit is within 1..swipeMaxLimit. A
 // candidate source that fails degrades to a shorter page; a failed item
 // lookup is an error, since the page would look empty.
+//
+// Cast members carry their headshot, which the frozen v1 route never has.
 func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) (WatchTonightCardsView, error) {
-	return h.watchTonightCards(ctx, userID, profileID, filter, mode, genres, excludeIDs, limit, false)
+	view, err := h.watchTonightCards(ctx, userID, profileID, filter, mode, genres, excludeIDs, limit, false)
+	if err == nil {
+		h.resolveCastPhotos(ctx, view.Cards, filter.ImageSizeFor(imagesize.SlotPhoto))
+	}
+	return view, err
+}
+
+// resolveCastPhotos fills every card's cast headshots in one batch on the
+// profile ladder at size: unsized, the w500 item detail serves for the same
+// people. A photo stored as an http(s) URL passes through.
+func (h *RecommendationsHandler) resolveCastPhotos(ctx context.Context, cards []swipeCardResponse, size imagesize.Size) {
+	if h.DetailSvc == nil {
+		return
+	}
+	sizedPath := func(path string) string {
+		if strings.Contains(path, "://") {
+			return path // plugin-hosted: its hint picks the size
+		}
+		medium := artworkkey.Variant(path, imagesize.Variant(artworkkey.ImageProfile, imagesize.Medium))
+		return sizedImagePath(path, artworkkey.ImageProfile, size, medium)
+	}
+	var paths []string
+	seen := make(map[string]struct{})
+	for _, card := range cards {
+		for _, member := range card.Cast {
+			if member.photoPath == "" || member.photoPath == "-" || isHTTPImageURL(member.photoPath) {
+				continue
+			}
+			path := sizedPath(member.photoPath)
+			if _, ok := seen[path]; !ok {
+				seen[path] = struct{}{}
+				paths = append(paths, path)
+			}
+		}
+	}
+	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, imagesize.PhotoPluginVariant(size))
+	for _, card := range cards {
+		cast := card.Cast
+		for j := range cast {
+			member := &cast[j]
+			switch {
+			case member.photoPath == "" || member.photoPath == "-":
+			case isHTTPImageURL(member.photoPath):
+				member.PhotoURL = member.photoPath
+			default:
+				member.PhotoURL = resolved[sizedPath(member.photoPath)].URL
+			}
+		}
+	}
 }
 
 // watchTonightCards is WatchTonightCards. With emptyOnFetchError, a failed
@@ -173,7 +227,7 @@ func (h *RecommendationsHandler) watchTonightCards(ctx context.Context, userID i
 	}
 
 	var moreHydrated bool
-	resp.Cards, moreHydrated = h.swipeCards(ctx, window, enriched, limit)
+	resp.Cards, moreHydrated = h.swipeCards(ctx, window, enriched, limit, filter.Artwork())
 	// More cards exist when a hydrated candidate was left over, or when this
 	// page showed cards and candidates past the enrichment window remain: the
 	// client excludes the cards it was shown, so the next page moves on. A
@@ -185,7 +239,7 @@ func (h *RecommendationsHandler) watchTonightCards(ctx context.Context, userID i
 // swipeCards builds up to limit cards, in order, from the candidates whose
 // items were hydrated, and reports whether a further hydrated candidate was
 // left over.
-func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []mergedItem, enriched watchTonightEnrichment, limit int) ([]swipeCardResponse, bool) {
+func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []mergedItem, enriched watchTonightEnrichment, limit int, art imagesize.Request) ([]swipeCardResponse, bool) {
 	// First pass: build enriched items and collect cast lookup IDs.
 	type enrichedCard struct {
 		item    sectionItemResponse
@@ -199,6 +253,18 @@ func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []me
 	castLookupIDs := make([]string, 0, limit)
 	castLookupSeen := make(map[string]struct{}, limit)
 	more := false
+	// Artwork is resolved only for the cards this page returns; the rest of
+	// the hydration window only decides whether more remain.
+	shown := make(map[string]*models.MediaItem, limit)
+	for _, m := range candidates {
+		if len(shown) == limit {
+			break
+		}
+		if mi := enriched.items[m.scored.MediaItemID]; mi != nil {
+			shown[mi.ContentID] = mi
+		}
+	}
+	artwork := h.featuredCardArtwork(ctx, shown, art)
 
 	for _, m := range candidates {
 		mi, ok := enriched.items[m.scored.MediaItemID]
@@ -210,7 +276,7 @@ func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []me
 			break
 		}
 
-		item := h.buildSectionItem(ctx, mi, enriched.overlays, enriched.states)
+		item := h.buildSectionItem(mi, enriched.overlays, enriched.states, artwork[mi.ContentID])
 		item.ItemSource = m.source
 
 		// Apply CW/Next-Up metadata.
@@ -537,6 +603,7 @@ func buildCastSlice(castMap map[string][]models.ItemPerson, lookupID string) []s
 		cast = append(cast, swipeCardCastMember{
 			Name:      p.Name,
 			Character: p.Character,
+			photoPath: p.PhotoPath,
 		})
 		if len(cast) >= maxCastPerCard {
 			break
@@ -630,4 +697,8 @@ func (c swipeCardResponse) Card() SectionItemView {
 // the embedded section item.
 func NewWatchTonightCardView(card SectionItemView, source string, runtime int, cast []WatchTonightCastMemberView) WatchTonightCardView {
 	return swipeCardResponse{sectionItemResponse: card, WatchTonightSource: source, Runtime: runtime, Cast: cast}
+}
+
+func isHTTPImageURL(path string) bool {
+	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")
 }

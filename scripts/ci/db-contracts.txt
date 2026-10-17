@@ -116,8 +116,18 @@
 # source, and items whose stored art has none are queued for a refresh.
 ./internal/metadata TestStoredArtworkReleaseDB
 
+# The artwork ladder backfill finds cached artwork that predates the current
+# ladder, on every surface its image type is cached for.
+./internal/metadata TestLadderBackfillCandidatesDB
+# The database fence reopens a finished backfill only for artwork published
+# without the current ladder's new rung, on every surface it regenerates.
+./internal/metadata TestImageLadderBackfillLateOldArtworkReopensCompletedVersion
+./internal/metadata TestImageLadderBackfillCurrentArtworkKeepsCompletedVersion
+./internal/metadata TestImageLadderBackfillLateOldBackdropReopensCompletedVersion
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
+./internal/metadata TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking
 ./internal/metadata TestArtworkRevisionGCExpandsTriggerManifestFromImageType
 ./internal/metadata TestArtworkRevisionGCBatchRechecksClaimedState

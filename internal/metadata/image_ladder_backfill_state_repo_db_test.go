@@ -48,8 +48,8 @@ func seedLadderFenceFixture(t *testing.T, pool *pgxpool.Pool) ladderFenceFixture
 		) VALUES
 			($1, 'poster', ARRAY[$1, $2], NOW() + interval '1 day', NULL),
 			($3, 'poster', ARRAY[$3, $4], NOW() + interval '1 day', NULL)
-	`, fixture.widePath, fmt.Sprintf("tmdb/movies/ladder-fence-%d/poster/w780.wide.webp", suffix),
-		fixture.oldPath, fmt.Sprintf("tmdb/movies/ladder-fence-%d/poster/w500.old.webp", suffix)); err != nil {
+	`, fixture.widePath, fmt.Sprintf("tmdb/movies/ladder-fence-%d/poster/w1000.wide.webp", suffix),
+		fixture.oldPath, fmt.Sprintf("tmdb/movies/ladder-fence-%d/poster/w780.old.webp", suffix)); err != nil {
 		t.Fatalf("seed ladder fence manifests: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -80,12 +80,12 @@ func TestImageLadderBackfillFinalConfirmationRejectsLateOldArtwork(t *testing.T)
 	if _, err := pool.Exec(ctx, `UPDATE media_items SET poster_path = $1 WHERE content_id = $2`, fixture.oldPath, fixture.contentID); err != nil {
 		t.Fatalf("publish old-ladder artwork: %v", err)
 	}
-	confirmed, err := NewImageLadderBackfillStateRepository(pool).ConfirmBackfilled(ctx, 2)
+	confirmed, err := NewImageLadderBackfillStateRepository(pool).ConfirmBackfilled(ctx, 3)
 	if err != nil {
 		t.Fatalf("ConfirmBackfilled: %v", err)
 	}
 	if confirmed {
-		t.Fatal("confirmed ladder v2 while the published artwork lacks its new rung")
+		t.Fatal("confirmed ladder v3 while the published artwork lacks its new rung")
 	}
 
 	state, err := NewImageLadderBackfillStateRepository(pool).Get(ctx)
@@ -108,7 +108,7 @@ func TestImageLadderBackfillLateOldArtworkReopensCompletedVersion(t *testing.T) 
 	// to block this test before it reaches the behavior under test.
 	if _, err := pool.Exec(ctx, `
 		UPDATE image_ladder_backfill_state
-		SET backfilled_version = 2, updated_at = NOW()
+		SET backfilled_version = 3, updated_at = NOW()
 		WHERE id = 1
 	`); err != nil {
 		t.Fatalf("establish completed ladder state: %v", err)
@@ -121,10 +121,91 @@ func TestImageLadderBackfillLateOldArtworkReopensCompletedVersion(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if state.BackfilledVersion != 1 {
-		t.Fatalf("backfilled version = %d, want reopened v1", state.BackfilledVersion)
+	if state.BackfilledVersion != 2 {
+		t.Fatalf("backfilled version = %d, want reopened v2", state.BackfilledVersion)
 	}
 	if !state.LastAttemptAt.IsZero() {
 		t.Fatalf("last attempt = %v, want late publication to clear pacing", state.LastAttemptAt)
+	}
+}
+
+// Artwork published on the current ladder must leave a finished backfill
+// alone; a fence still checking an older ladder's rung would reopen it on
+// every newly cached image.
+func TestImageLadderBackfillCurrentArtworkKeepsCompletedVersion(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	fixture := seedLadderFenceFixture(t, pool)
+	ctx := context.Background()
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE image_ladder_backfill_state
+		SET backfilled_version = 3, updated_at = NOW()
+		WHERE id = 1
+	`); err != nil {
+		t.Fatalf("establish completed ladder state: %v", err)
+	}
+	// Republish the current-ladder poster under a fresh path so the trigger
+	// sees a changed cached path.
+	fresh := fixture.widePath + ".fresh"
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO artwork_revision_gc_candidates (original_path, image_type, object_keys, not_before, next_attempt_at)
+		SELECT $1, image_type, array_append(object_keys, $1), not_before, next_attempt_at
+		FROM artwork_revision_gc_candidates WHERE original_path = $2
+	`, fresh, fixture.widePath); err != nil {
+		t.Fatalf("seed fresh manifest: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, fresh)
+	})
+	if _, err := pool.Exec(ctx, `UPDATE media_items SET poster_path = $1 WHERE content_id = $2`, fresh, fixture.contentID); err != nil {
+		t.Fatalf("publish current-ladder artwork: %v", err)
+	}
+
+	state, err := NewImageLadderBackfillStateRepository(pool).Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if state.BackfilledVersion != 3 {
+		t.Fatalf("backfilled version = %d, want v3 kept", state.BackfilledVersion)
+	}
+}
+
+// Extra backdrops are cached on the backdrop ladder too, so one published
+// without the rung the current ladder added reopens a finished backfill.
+func TestImageLadderBackfillLateOldBackdropReopensCompletedVersion(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	fixture := seedLadderFenceFixture(t, pool)
+	ctx := context.Background()
+
+	oldBackdrop := fmt.Sprintf("tmdb/movies/%s/backdrop/original.old.webp", fixture.contentID)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO artwork_revision_gc_candidates (original_path, image_type, object_keys, not_before, next_attempt_at)
+		VALUES ($1, 'backdrop', ARRAY[$1, $2], NOW() + interval '1 day', NULL)
+	`, oldBackdrop, fmt.Sprintf("tmdb/movies/%s/backdrop/w1920.old.webp", fixture.contentID)); err != nil {
+		t.Fatalf("seed old backdrop manifest: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, oldBackdrop)
+	})
+	if _, err := pool.Exec(ctx, `
+		UPDATE image_ladder_backfill_state
+		SET backfilled_version = 3, updated_at = NOW()
+		WHERE id = 1
+	`); err != nil {
+		t.Fatalf("establish completed ladder state: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_item_backdrops (content_id, ordinal, path, source_path)
+		VALUES ($1, 1, $2, 'https://example.invalid/backdrop.jpg')
+	`, fixture.contentID, oldBackdrop); err != nil {
+		t.Fatalf("publish late old-ladder backdrop: %v", err)
+	}
+
+	state, err := NewImageLadderBackfillStateRepository(pool).Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if state.BackfilledVersion != 2 {
+		t.Fatalf("backfilled version = %d, want reopened v2", state.BackfilledVersion)
 	}
 }

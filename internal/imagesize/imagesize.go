@@ -80,10 +80,16 @@ func FromRequest(r *http.Request) (Size, error) {
 // must keep resolving to the same key even if the ladder grows, so that an
 // absent parameter and an explicit medium agree.
 //
+// A Width size resolves to the narrowest rung at least that wide on the
+// image's own ladder, or the original.
+//
 // size must not be Unset — the caller decides what "no preference" means. Unset
 // is treated as Medium here so a missed check degrades to today's behavior
 // rather than to an empty key.
 func Variant(imageType string, size Size) string {
+	if px, ok := size.TargetWidth(); ok {
+		return variantForWidth(imageType, px)
+	}
 	widths := artworkkey.VariantWidths(imageType)
 	switch size {
 	case Original:
@@ -146,6 +152,9 @@ const (
 // failing — which is what lets the vocabulary grow additively instead of being
 // gated on a capability handshake.
 func PluginVariant(size Size) string {
+	if px, ok := size.TargetWidth(); ok {
+		return pluginVariantForWidth(px)
+	}
 	switch size {
 	case Small:
 		return PluginVariantCard

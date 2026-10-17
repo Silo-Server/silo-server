@@ -255,6 +255,7 @@ func (h *RecommendationsHandler) renderDiscoverRows(ctx context.Context, userID 
 		slog.WarnContext(ctx, "recommendation cards: item details failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch item details")
 	}
+	artwork := h.featuredCardArtwork(ctx, enrichment.items, filter.Artwork())
 	out := make([]discoverRowResponse, 0, len(discoverRows))
 	for _, row := range discoverRows {
 		kind, key := discoverRowSectionKey(row.Type, row.Label, row.ClusterIndex)
@@ -263,7 +264,7 @@ func (h *RecommendationsHandler) renderDiscoverRows(ctx context.Context, userID 
 			Label:       row.Label,
 			SectionKind: kind,
 			SectionKey:  key,
-			Items:       h.buildSectionItems(ctx, row.Items, enrichment, row.UpcomingEvents),
+			Items:       h.buildSectionItems(ctx, row.Items, enrichment, row.UpcomingEvents, artwork),
 		}
 		if len(respRow.Items) > 0 {
 			out = append(out, respRow)
@@ -507,13 +508,14 @@ func (h *RecommendationsHandler) TasteSeedItems(ctx context.Context, userID int,
 		itemMap[mi.ContentID] = mi
 	}
 	stateMap := h.resolveTasteSeedUserStates(ctx, userID, profileID, mediaItems)
+	posters := h.tasteSeedPosterURLs(ctx, mediaItems, filter.Artwork())
 	items = make([]SectionItemView, 0, len(candidateIDs))
 	for _, id := range candidateIDs {
 		mi, ok := itemMap[id]
 		if !ok || mi == nil {
 			continue
 		}
-		items = append(items, h.tasteSeedSectionItem(ctx, mi, stateMap))
+		items = append(items, tasteSeedSectionItem(mi, stateMap, posters[mi.ContentID]))
 	}
 	return items, len(candidateIDs), nil
 }
