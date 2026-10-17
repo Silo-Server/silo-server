@@ -60,7 +60,6 @@ func awaitScopeWaiter(t *testing.T, waiting <-chan struct{}) {
 	}
 }
 
-//nolint:funlen // Correlate a signed proof with the snapshot captured before or after that viewer's registration.
 func TestOutputRefreshCoversViewerRegisteredAfterCapturedSnapshot(t *testing.T) {
 	for _, mode := range []string{"proxy-proof", "prepared-token"} {
 		for _, scenario := range []struct {

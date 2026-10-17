@@ -192,7 +192,6 @@ func (a recipeAdapter) RevokeNode(ctx context.Context, _ string) error {
 }
 func (a recipeAdapter) RevokeNodeID(ctx context.Context, _ int) error { return a.RevokeNode(ctx, "") }
 
-//nolint:nestif // Playback recipes and prepared artifacts retain distinct source and live-generation checks before caching a verified token.
 func (r *Runtime) verifyToken(ctx context.Context, token string) (*streamtoken.Claims, error) {
 	if strings.Count(token, ".") != 1 {
 		return nil, errors.New("worker output requires a scoped core grant")

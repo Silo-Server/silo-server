@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/workeridentity"
@@ -15,7 +15,7 @@ func workerSourceOwnerURL(raw, publicOrigin string) (string, error) {
 	}
 	origin, err := workeridentity.ValidateOrigin(strings.TrimRight(raw, "/"), true)
 	if err != nil || origin == publicOrigin {
-		return "", fmt.Errorf("SILO_WORKER_SOURCE_URL must be a direct core origin distinct from its public origin")
+		return "", errors.New("SILO_WORKER_SOURCE_URL must be a direct core origin distinct from its public origin")
 	}
 	return origin, nil
 }
