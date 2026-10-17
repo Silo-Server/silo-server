@@ -3,7 +3,13 @@
  * limits. Kept apart from the requester hooks so the launch bundle, which
  * loads those for search and title pages, carries none of this.
  */
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { V2ProblemError } from "@/api/v2/request";
@@ -741,6 +747,33 @@ export function useRequestGroupLimit(groupId?: number | null, authority?: AdminA
     staleTime: REQUESTS_STALE_TIME,
     retry: false,
   });
+}
+
+/**
+ * Several access groups' request approval and limit, sharing
+ * useRequestGroupLimit's cache. Loading until every one has loaded; failed
+ * when any could not be read.
+ */
+export function useRequestGroupLimits(groupIds: number[], authority?: AdminAuthority) {
+  const context = authority ?? captureProfileRequestContext();
+  const results = useQueries({
+    queries: groupIds.map((groupId) => ({
+      queryKey: adminKeys.requestGroupLimit(groupId, adminAuthorityScope(context)),
+      queryFn: () => getAdminRequestGroupLimitV2(groupId, context ?? undefined),
+      enabled: groupId > 0,
+      staleTime: REQUESTS_STALE_TIME,
+      retry: false,
+    })),
+  });
+  const limits = new Map<number, RequestGroupLimit>();
+  results.forEach((result, index) => {
+    if (result.data) limits.set(groupIds[index]!, result.data);
+  });
+  return {
+    limits,
+    isLoading: results.some((result) => result.isPending && result.fetchStatus !== "idle"),
+    isError: results.some((result) => result.isError),
+  };
 }
 
 /**
