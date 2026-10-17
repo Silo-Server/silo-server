@@ -226,9 +226,9 @@ func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
 // This is a check-then-write guard with no store-level uniqueness constraint
 // (the userstore's dual Postgres/SQLite backends carry no unique index on
 // name), so two concurrent requests can both pass and insert duplicates —
-// the same window the profile_limit_reached check accepts. Good enough for
-// interactive profile management; a functional unique index is the fix if
-// that ever stops being true.
+// unlike the profile limit, which is re-counted inside the creating
+// transaction. Good enough for interactive profile management; a functional
+// unique index is the fix if that ever stops being true.
 func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
 	trimmed := strings.TrimSpace(name)
 	for _, p := range profiles {
@@ -240,6 +240,12 @@ func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) 
 		}
 	}
 	return false
+}
+
+// profileLimitReached is the 409 for a household already at its limit.
+func profileLimitReached(limit int) *APIError {
+	return apiError(http.StatusConflict, "profile_limit_reached",
+		fmt.Sprintf("This account has reached its profile limit (%d)", limit))
 }
 
 // invalidAdvisoryAgeLimit is the field error for an advisory-age limit outside
@@ -409,6 +415,11 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
 	}
+	// profileLimit is the account's household limit (0 = unlimited). This
+	// early check answers a full household before the name check, as it always
+	// has; the guarantee under concurrency is the re-count inside the creating
+	// transaction (createProfileWithSettingsSync).
+	profileLimit := 0
 	if h.UserRepo != nil {
 		user, err := h.UserRepo.GetByID(ctx, userID)
 		if err != nil {
@@ -419,9 +430,11 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			if err != nil {
 				return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
 			}
-			if limit := effective.MaxProfiles; limit >= 1 && len(existingProfiles) >= limit {
-				return none, apiError(http.StatusConflict, "profile_limit_reached",
-					fmt.Sprintf("This account has reached its profile limit (%d)", limit))
+			if effective.MaxProfiles >= 1 {
+				profileLimit = effective.MaxProfiles
+			}
+			if profileLimit >= 1 && len(existingProfiles) >= profileLimit {
+				return none, profileLimitReached(profileLimit)
 			}
 		}
 	}
@@ -461,7 +474,10 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync); err != nil {
+	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, profileLimit, settingsSync); err != nil {
+		if errors.Is(err, errProfileLimitReached) {
+			return none, profileLimitReached(profileLimit)
+		}
 		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
