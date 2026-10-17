@@ -76,6 +76,10 @@ func TestSelectPublishedVariant(t *testing.T) {
 		{"legacy", ArtworkAvailability{}, false, medium},
 		{"published", ArtworkAvailability{Published: []string{key, original}}, true, key},
 		{"missing large", ArtworkAvailability{Published: []string{small, original}}, true, small},
+		// A revision cached under an earlier ladder serves its own widest rung
+		// that fits, not just the current ladder's.
+		{"previous ladder's rung", ArtworkAvailability{Published: []string{variantKey(key, "w780"), medium, small, original}}, true, variantKey(key, "w780")},
+		{"previous ladder's rung too wide", ArtworkAvailability{Published: []string{variantKey(key, "w1280"), medium, original}}, true, medium},
 		{"original only", ArtworkAvailability{Published: []string{original}}, true, original},
 		{"delivery verified", ArtworkAvailability{Published: []string{key, medium, original}, External: true, Verified: true, Deliverable: []string{key}}, true, key},
 		{"delivery missing", ArtworkAvailability{Published: []string{key, medium, original}, External: true, Verified: true, Deliverable: []string{medium}}, true, medium},

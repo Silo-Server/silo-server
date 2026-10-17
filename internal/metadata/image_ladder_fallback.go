@@ -157,15 +157,8 @@ func selectPublishedVariant(key string, state ArtworkAvailability, known bool) s
 	if keyVariant(key) == artworkkey.OriginalVariant && !slices.Contains(keys, key) {
 		candidate = variantKey(key, imagesize.Variant(imageType, imagesize.Large))
 	}
-	for {
-		if slices.Contains(keys, candidate) {
-			return candidate
-		}
-		lower, ok := imagesize.NextLower(imageType, keyVariant(candidate))
-		if !ok {
-			break
-		}
-		candidate = variantKey(key, lower)
+	if published := widestPublishedWithin(key, candidate, keys); published != "" {
+		return published
 	}
 	original := variantKey(key, artworkkey.OriginalVariant)
 	if slices.Contains(keys, original) {
@@ -173,6 +166,27 @@ func selectPublishedVariant(key string, state ArtworkAvailability, known bool) s
 	}
 	// A known empty manifest or failed delivery is a placeholder, not a guess.
 	return ""
+}
+
+// widestPublishedWithin is the widest width rung of key's revision in keys that
+// is no wider than candidate's. It can be a rung an earlier ladder version
+// generated, such as a w780 poster the backfill has not regenerated at w1000
+// yet. It is empty when keys hold no such rung.
+func widestPublishedWithin(key, candidate string, keys []string) string {
+	limit, ok := imagesize.VariantWidthPx(keyVariant(candidate))
+	if !ok {
+		return ""
+	}
+	best, bestWidth := "", 0
+	for _, published := range keys {
+		variant := keyVariant(published)
+		width, ok := imagesize.VariantWidthPx(variant)
+		if !ok || width > limit || width <= bestWidth || variantKey(key, variant) != published {
+			continue
+		}
+		best, bestWidth = published, width
+	}
+	return best
 }
 
 // clampToEstablishedRung rewrites a width rung wider than the type's medium

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -904,6 +906,9 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 	}
 
+	// Card images resolve together once every card is built, in one batch per
+	// hint, rather than one lookup each.
+	var images listCardImages
 	for _, mi := range accessibleItems {
 		resp := itemListResponse{
 			ContentID:         mi.ContentID,
@@ -920,8 +925,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 			BackdropThumbhash: mi.BackdropThumbhash,
 			UserState:         userStates[mi.ContentID],
 		}
-		resp.PosterURL = h.presignURL(ctx, sizedPosterPath(mi.PosterPath, size), posterHint)
-		resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
+		images.add(&resp.PosterURL, sizedPosterPath(mi.PosterPath, size), posterHint)
+		images.add(&resp.BackdropURL, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 	logoPaths := localizedLogoPaths(ctx, h.detailSvc, accessibleItems, filter)
@@ -964,14 +969,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(ctx, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
+						images.add(&resp.BackdropURL, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
+						images.add(&resp.BackdropURL, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {
-						resp.PosterURL = h.presignURL(ctx, sizedPosterPath(parent.PosterPath, size), posterHint)
+						images.add(&resp.PosterURL, sizedPosterPath(parent.PosterPath, size), posterHint)
 						resp.PosterThumbhash = parent.PosterThumbhash
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
@@ -986,6 +991,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 	}
 
+	images.resolve(ctx, h.detailSvc)
 	for contentID, url := range signListingLogos(ctx, h.detailSvc, logoPaths, size) {
 		if item, ok := byID[contentID]; ok {
 			item.LogoURL = url
@@ -1128,14 +1134,48 @@ func (h *PersonalDataHandler) ensureAccessibleItem(ctx context.Context, itemID s
 	return err
 }
 
-// presignURL resolves an image path to a usable URL, delegating to the
-// DetailService which handles plugin-prefixed paths, HTTP pass-through,
-// and legacy S3 presigning.
-func (h *PersonalDataHandler) presignURL(ctx context.Context, path string, variant string) string {
-	if h.detailSvc != nil {
-		return h.detailSvc.PresignURL(ctx, path, variant)
+// listCardImages collects a listing's card image fields for batch resolution.
+type listCardImages struct {
+	pending []listCardImage
+}
+
+type listCardImage struct {
+	dst        *string
+	path, hint string
+}
+
+// add queues path to fill *dst, resolved at hint. Empty paths and the "-"
+// placeholder leave *dst empty.
+func (l *listCardImages) add(dst *string, path, hint string) {
+	if path == "" || path == "-" {
+		return
 	}
-	return ""
+	l.pending = append(l.pending, listCardImage{dst: dst, path: path, hint: hint})
+}
+
+// resolve fills every queued field, one batch per hint.
+func (l *listCardImages) resolve(ctx context.Context, svc *catalog.DetailService) {
+	if svc == nil || len(l.pending) == 0 {
+		return
+	}
+	byHint := make(map[string][]string)
+	type pathAtHint struct{ path, hint string }
+	seen := make(map[pathAtHint]struct{}, len(l.pending))
+	for _, image := range l.pending {
+		key := pathAtHint{path: image.path, hint: image.hint}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		byHint[image.hint] = append(byHint[image.hint], image.path)
+	}
+	resolved := make(map[string]map[string]catalog.ResolvedImageURL, len(byHint))
+	for _, hint := range slices.Sorted(maps.Keys(byHint)) {
+		resolved[hint] = svc.PresignURLsWithExpiry(ctx, byHint[hint], hint)
+	}
+	for _, image := range l.pending {
+		*image.dst = resolved[image.hint][image.path].URL
+	}
 }
 
 // parsePagination extracts limit and offset from query parameters with defaults.
