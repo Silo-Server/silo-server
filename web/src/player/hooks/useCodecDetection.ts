@@ -92,28 +92,67 @@ const CONTAINER_MAP: Record<string, string[]> = {
 /** The `max_resolution` reported until, or without, a Media Capabilities answer. */
 const UNPROBED_MAX_RESOLUTION = "2160p";
 
-// High profile at level 5.1, the lowest level that covers 2160p30.
-const H264_2160P_CONFIGURATION = {
-  type: "file",
-  video: {
-    contentType: 'video/mp4; codecs="avc1.640033"',
-    width: 3840,
-    height: 2160,
-    bitrate: 40_000_000,
-    framerate: 30,
-  },
-} satisfies MediaDecodingConfiguration;
+/**
+ * How long a playback start waits for the decoder size probe. Starts already
+ * wait for the HDR10 probe; a slow size answer must not add more than this.
+ */
+const MAX_DECODE_RESOLUTION_WAIT_MS = 2_000;
 
-const H264_1080P_CONFIGURATION = {
-  type: "file",
-  video: {
-    contentType: `video/mp4; codecs="${VIDEO_CODEC_MAP.h264}"`,
-    width: 1920,
-    height: 1080,
-    bitrate: 10_000_000,
-    framerate: 30,
-  },
-} satisfies MediaDecodingConfiguration;
+function mp4VideoConfiguration(
+  codec: string,
+  width: number,
+  height: number,
+  bitrate: number,
+): MediaDecodingConfiguration {
+  return {
+    type: "file",
+    video: { contentType: `video/mp4; codecs="${codec}"`, width, height, bitrate, framerate: 30 },
+  };
+}
+
+/**
+ * A 2160p30 query for each codec the server may direct play, each paired with
+ * a 720p30 stream of the same codec for the power-efficient exception in
+ * decodesInRealTime.
+ */
+const UHD_DECODE_PROBES = [
+  // H.264 High, levels 5.1 and 3.1.
+  { uhd: "avc1.640033", reference: "avc1.64001F" },
+  // HEVC Main, levels 5.0 and 3.1.
+  { uhd: "hvc1.1.6.L150.B0", reference: "hvc1.1.6.L93.B0" },
+  // VP9 profile 0, levels 5.1 and 3.1.
+  { uhd: "vp09.00.51.08", reference: "vp09.00.31.08" },
+  // AV1 Main, levels 5.0 and 3.1.
+  { uhd: "av01.0.12M.08", reference: "av01.0.05M.08" },
+].map(({ uhd, reference }) => ({
+  uhd: mp4VideoConfiguration(uhd, 3840, 2160, 20_000_000),
+  reference: mp4VideoConfiguration(reference, 1280, 720, 2_000_000),
+}));
+
+const H264_1080P_CONFIGURATION = mp4VideoConfiguration("avc1.640028", 1920, 1080, 10_000_000);
+
+/**
+ * Whether the browser decodes a configuration in real time.
+ *
+ * The answer has to be smooth, with one exception. iOS Safari answers
+ * `smooth: false` for every HEVC configuration, even a small SDR stream that
+ * any hardware decoder plays in real time, while `powerEfficient: true` shows
+ * its hardware decoder. Where the browser answers that way for the small
+ * same-codec reference stream too, its smooth flag says nothing, and a
+ * power-efficient decoder is trusted. Elsewhere `smooth: false` stands:
+ * Chromium, for one, derives it from frames dropped in earlier playback.
+ */
+async function decodesInRealTime(
+  configuration: MediaDecodingConfiguration,
+  reference: MediaDecodingConfiguration,
+): Promise<boolean> {
+  const result = await navigator.mediaCapabilities.decodingInfo(configuration);
+  if (!result.supported) return false;
+  if (result.smooth) return true;
+  if (!result.powerEfficient) return false;
+  const referenceResult = await navigator.mediaCapabilities.decodingInfo(reference);
+  return referenceResult.supported && !referenceResult.smooth && referenceResult.powerEfficient;
+}
 
 /**
  * Finds the largest video size this browser decodes, for `max_resolution`.
@@ -123,16 +162,15 @@ const H264_1080P_CONFIGURATION = {
  * scales a 1080p picture into a 720p window itself. Web evidence is `declared`
  * with flat codec lists, so this is the only size bound the web sends.
  *
- * H.264 stands in for every codec as the one nearly every browser decodes,
- * and the `file` type matches the media element loading a direct-play
- * original. A 4K stream that is supported and either smooth or power
- * efficient earns 2160p: a hardware decoder is enough, because Safari has
- * answered `smooth: false` for streams its hardware decoder plays in real
- * time (see probeHDR10PlaybackSupport). Otherwise a browser that decodes
- * 1080p H.264 is capped there. With no usable answer (the API is missing,
- * the query throws, or the browser rejects H.264 at both sizes, which says
- * nothing about size) it reports 2160p: the codec lists still gate decoding,
- * and the server's failure recovery replans a stream that will not play.
+ * One value bounds every codec, so the 4K queries cover H.264, HEVC, VP9 and
+ * AV1 in parallel, and a browser that decodes any of them in real time
+ * (decodesInRealTime) reports 2160p. The `file` type matches the media element
+ * loading a direct-play original. Only when all four fail does a browser that
+ * decodes 1080p H.264 get a 1080p cap. With no usable answer (the API is
+ * missing, a query throws, or the browser rejects H.264 even at 1080p, which
+ * says nothing about size) it reports 2160p: the codec lists still gate
+ * decoding, and the server's failure recovery replans a stream that will not
+ * play.
  */
 export async function probeMaxDecodeResolution(): Promise<string> {
   if (typeof navigator === "undefined" || !navigator.mediaCapabilities) {
@@ -140,8 +178,10 @@ export async function probeMaxDecodeResolution(): Promise<string> {
   }
 
   try {
-    const uhd = await navigator.mediaCapabilities.decodingInfo(H264_2160P_CONFIGURATION);
-    if (uhd.supported && (uhd.smooth || uhd.powerEfficient)) return "2160p";
+    const decodes4K = await Promise.all(
+      UHD_DECODE_PROBES.map((probe) => decodesInRealTime(probe.uhd, probe.reference)),
+    );
+    if (decodes4K.some(Boolean)) return "2160p";
     const fhd = await navigator.mediaCapabilities.decodingInfo(H264_1080P_CONFIGURATION);
     return fhd.supported ? "1080p" : UNPROBED_MAX_RESOLUTION;
   } catch {
@@ -168,26 +208,14 @@ export function detectHDRFromMatchMedia(matchMediaFn: typeof matchMedia | undefi
  * Probes the exact HDR10 progressive shape produced by Silo's remux path.
  * Deliberately independent of the `dynamic-range` media query: that query
  * describes the active output, not the decoder, and browsers tone-map HDR
- * content onto SDR outputs.
- *
- * The configuration has to be smooth, with one exception. iOS Safari answers
- * `smooth: false` for every HEVC configuration, even a small SDR stream that
- * any hardware decoder plays in real time, while `powerEfficient: true` shows
- * its hardware decoder. Where the browser answers that way for the reference
- * stream too, its smooth flag says nothing, and a power-efficient decoder is
- * trusted. Elsewhere `smooth: false` stands: Chromium, for one, derives it
- * from frames dropped in earlier playback.
+ * content onto SDR outputs. The shape has to decode in real time
+ * (decodesInRealTime), checked against a small SDR HEVC reference stream.
  */
 export async function probeHDR10PlaybackSupport(): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.mediaCapabilities) return false;
 
   try {
-    const result = await navigator.mediaCapabilities.decodingInfo(HDR10_PROGRESSIVE_CONFIGURATION);
-    if (!result.supported) return false;
-    if (result.smooth) return true;
-    if (!result.powerEfficient) return false;
-    const reference = await navigator.mediaCapabilities.decodingInfo(HEVC_REFERENCE_CONFIGURATION);
-    return reference.supported && !reference.smooth && reference.powerEfficient;
+    return await decodesInRealTime(HDR10_PROGRESSIVE_CONFIGURATION, HEVC_REFERENCE_CONFIGURATION);
   } catch {
     return false;
   }
@@ -195,14 +223,39 @@ export async function probeHDR10PlaybackSupport(): Promise<boolean> {
 
 let initialHDR10Probe: Promise<boolean> | null = null;
 let maxDecodeResolutionProbe: Promise<string> | null = null;
+let maxDecodeResolutionAnswer: string | null = null;
 
 /**
  * The decoder's size limit does not change with the output route, so unlike
  * the HDR10 probe it runs once for the lifetime of the app.
  */
-function maxDecodeResolution(): Promise<string> {
-  maxDecodeResolutionProbe ??= probeMaxDecodeResolution();
+function startMaxDecodeResolutionProbe(): Promise<string> {
+  maxDecodeResolutionProbe ??= probeMaxDecodeResolution().then((resolution) => {
+    maxDecodeResolutionAnswer = resolution;
+    return resolution;
+  });
   return maxDecodeResolutionProbe;
+}
+
+/**
+ * The size probe's answer, or 2160p if it has not answered within
+ * MAX_DECODE_RESOLUTION_WAIT_MS. Once the probe has answered, even late, its
+ * answer is used without waiting, so an output-change refresh settles as
+ * soon as its HDR10 re-probe does.
+ */
+function maxDecodeResolutionWithDeadline(): Promise<string> {
+  const probe = startMaxDecodeResolutionProbe();
+  if (maxDecodeResolutionAnswer !== null) return Promise.resolve(maxDecodeResolutionAnswer);
+  return new Promise((resolve) => {
+    const deadline = setTimeout(
+      () => resolve(UNPROBED_MAX_RESOLUTION),
+      MAX_DECODE_RESOLUTION_WAIT_MS,
+    );
+    void probe.then((resolution) => {
+      clearTimeout(deadline);
+      resolve(resolution);
+    });
+  });
 }
 
 /**
@@ -211,7 +264,7 @@ function maxDecodeResolution(): Promise<string> {
  * does not have to wait several seconds for the browser's first decoder probe.
  */
 export function prewarmCodecDetection(): Promise<boolean> {
-  void maxDecodeResolution();
+  void startMaxDecodeResolutionProbe();
   initialHDR10Probe ??= probeHDR10PlaybackSupport();
   return initialHDR10Probe;
 }
@@ -219,6 +272,7 @@ export function prewarmCodecDetection(): Promise<boolean> {
 export function resetCodecDetectionForTests(): void {
   initialHDR10Probe = null;
   maxDecodeResolutionProbe = null;
+  maxDecodeResolutionAnswer = null;
 }
 
 function testMediaType(mime: string): boolean {
@@ -388,7 +442,8 @@ export function useCodecDetection(): SettledWebCapabilityProbe {
       const next = probeWebCapabilities();
       setCapabilities({ ...next, settled: false });
 
-      void Promise.all([hdr10Probe, maxDecodeResolution()]).then(([hdr10, maxResolution]) => {
+      const probes = Promise.all([hdr10Probe, maxDecodeResolutionWithDeadline()]);
+      void probes.then(([hdr10, maxResolution]) => {
         if (disposed || generation !== probeGeneration) return;
         setCapabilities((current) => ({
           ...current,
