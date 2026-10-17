@@ -3,12 +3,15 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/opslog"
 )
 
 type contribTestProgress struct{ data json.RawMessage }
@@ -21,6 +24,7 @@ type fakeContribRunner struct {
 	segments [][]markers.MarkerKind
 	autoSeen bool
 	outcomes []markers.ContributionOutcome
+	errs     map[int]error
 	// sequence, when set, returns one entry per call before falling back to
 	// outcomes.
 	sequence [][]markers.ContributionOutcome
@@ -30,6 +34,9 @@ func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.Media
 	f.calls = append(f.calls, file.ID)
 	f.segments = append(f.segments, opts.Segments)
 	f.autoSeen = opts.Auto
+	if err := f.errs[file.ID]; err != nil {
+		return nil, err
+	}
 	if len(f.sequence) > 0 {
 		next := f.sequence[0]
 		f.sequence = f.sequence[1:]
@@ -265,6 +272,43 @@ func TestContributeMarkersTaskCountsInvalidSeparately(t *testing.T) {
 	}
 }
 
+func TestContributeMarkersTaskFailsWhenAllSubmissionsError(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{
+		Status: markers.OutcomeStatusError, Provider: "introdb", Reason: "AccessDenied",
+	}}}
+	cands := &fakeCandidates{ids: []int{10, 11}}
+	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
+	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+
+	prog := &contribTestProgress{}
+	err := task.Execute(context.Background(), prog)
+	if err == nil {
+		t.Fatal("expected Execute to return an error when every submission fails")
+	}
+
+	var data map[string]int
+	if jsonErr := json.Unmarshal(prog.data, &data); jsonErr != nil {
+		t.Fatalf("decode result data: %v", jsonErr)
+	}
+	if data["submitted"] != 0 || data["failed"] != 2 {
+		t.Fatalf("result = %v, want submitted=0 failed=2", data)
+	}
+}
+
+func TestContributeMarkersTaskSucceedsWhenFailuresMixWithSkips(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{
+		{Status: markers.OutcomeStatusSkipped, Provider: "introdb", Segment: markers.MarkerKindIntro},
+		{Status: markers.OutcomeStatusError, Provider: "introdb", Segment: markers.MarkerKindCredits, Reason: "AccessDenied"},
+	}}
+	cands := &fakeCandidates{ids: []int{10}}
+	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
+	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+
+	if err := task.Execute(context.Background(), &contribTestProgress{}); err != nil {
+		t.Fatalf("a run with skipped outcomes reported total failure: %v", err)
+	}
+}
+
 func TestContributeMarkersTaskCountsConflictAsSkipped(t *testing.T) {
 	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{Status: markers.OutcomeStatusConflict}}}
 	cands := &fakeCandidates{ids: []int{10}}
@@ -348,5 +392,39 @@ func TestContributeMarkersTaskCountsRetriedFailureByItsRetry(t *testing.T) {
 	}
 	if data["submitted"] != 2 || data["failed"] != 0 {
 		t.Fatalf("result = %v, want two submissions and no failures", data)
+	}
+}
+
+type contributionLogWriter struct{ entries []opslog.Entry }
+
+func (w *contributionLogWriter) Write(entry opslog.Entry) { w.entries = append(w.entries, entry) }
+func (*contributionLogWriter) Close() error               { return nil }
+
+func TestContributeMarkersTaskLogsResolverErrorText(t *testing.T) {
+	writer := &contributionLogWriter{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(opslog.NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "test")))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	runner := &fakeContribRunner{
+		errs:     map[int]error{10: fmt.Errorf("resolve movie external ids: %w", errors.New("database unavailable"))},
+		outcomes: []markers.ContributionOutcome{{Status: markers.SubmissionStatusPending, Provider: "introdb", Segment: markers.MarkerKindIntro}},
+	}
+	task := NewContributeMarkersTask(runner, fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}, &fakeCandidates{ids: []int{10, 11}}, fakeFileLoader{})
+	progress := &contribTestProgress{}
+	if err := task.Execute(t.Context(), progress); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.entries) != 1 {
+		t.Fatalf("got %d logs, want one resolver warning", len(writer.entries))
+	}
+	if got := writer.entries[0].Attrs["error"]; got != "resolve movie external ids: database unavailable" {
+		t.Fatalf("error attribute = %v", got)
+	}
+	var counts map[string]int
+	if err := json.Unmarshal(progress.data, &counts); err != nil {
+		t.Fatal(err)
+	}
+	if counts["submitted"] != 1 || counts["failed"] != 1 {
+		t.Fatalf("counts = %v", counts)
 	}
 }
