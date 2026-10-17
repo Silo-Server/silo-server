@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func packageErrorTestManifest(pluginID, version string) *pluginv1.PluginManifest {
@@ -329,6 +331,43 @@ func TestCatalogInvalidDownloadAddressIsPackageError(t *testing.T) {
 	}
 	_, err := service.installTargetFromPackage(context.Background(), &Repository{ID: 1, URL: "https://example.test/catalog.json"}, pkg)
 	requirePackageError(t, err, "invalid download address")
+}
+
+// A plugin built on a newer SDK prints manifest fields this server doesn't
+// know. They are dropped, as for an archive's manifest, and the plugin
+// installs; output that isn't a manifest at all is still refused.
+func TestLoadManifestFromBinaryIgnoresUnknownFields(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses shell scripts")
+	}
+	known, err := protojson.Marshal(packageErrorTestManifest("test.plugin", "1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(known, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["fieldFromANewerSdk"] = true
+	fields["capabilities"].([]any)[0].(map[string]any)["descriptorFromANewerSdk"] = map[string]any{"flag": true}
+	newer, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := func(output string) []byte {
+		return []byte("#!/bin/sh\ncat <<'MANIFEST'\n" + output + "\nMANIFEST\n")
+	}
+
+	manifest, err := loadManifestFromBinary(context.Background(), script(string(newer)))
+	if err != nil {
+		t.Fatalf("loadManifestFromBinary() error = %v, want the unknown fields ignored", err)
+	}
+	if manifest.GetPluginId() != "test.plugin" || len(manifest.GetCapabilities()) != 1 {
+		t.Fatalf("manifest = %v, want the known fields kept", manifest)
+	}
+
+	_, err = loadManifestFromBinary(context.Background(), script("not a manifest"))
+	requirePackageError(t, err, "manifest couldn't be read")
 }
 
 // Only a binary that runs and fails, or isn't an executable at all, is
