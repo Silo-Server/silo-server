@@ -123,6 +123,12 @@ func NewRouter(deps Dependencies) chi.Router {
 	itemsHandler.presignTTL = deps.PresignTTL
 	itemsHandler.realtimeMonitoring = deps.RealtimeMonitoringEnabled
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
+	if files, ok := deps.FileResolver.(itemRefreshFileLister); ok {
+		autoscanHandler.files = files
+	}
+	if deps.SeasonRepo != nil {
+		autoscanHandler.seasons = deps.SeasonRepo
+	}
 	autoscanHandler.realtimeMonitoring = deps.RealtimeMonitoringEnabled
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
 	// Rate limiting mirrors the native API: credential endpoints spend their
@@ -137,6 +143,8 @@ func NewRouter(deps Dependencies) chi.Router {
 			Get("/Library/VirtualFolders", autoscanHandler.HandleVirtualFolders)
 		r.With(adminAPIKeyAuth.RequireAdminAPIKey, rateLimit).
 			Post("/Library/Media/Updated", autoscanHandler.HandleMediaUpdated)
+		r.With(adminAPIKeyAuth.RequireAdminAPIKey).
+			Post("/Items/{id}/Refresh", autoscanHandler.HandleItemRefresh)
 		autoscanVirtualFoldersRegistered = true
 	}
 	userDataHandler := NewUserDataHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config)

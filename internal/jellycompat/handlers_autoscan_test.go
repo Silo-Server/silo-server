@@ -18,7 +18,8 @@ import (
 )
 
 type fakeAutoscanFolders struct {
-	folders []*models.MediaFolder
+	folders   []*models.MediaFolder
+	listCalls int
 }
 
 func (f *fakeAutoscanFolders) GetByID(_ context.Context, id int) (*models.MediaFolder, error) {
@@ -31,6 +32,7 @@ func (f *fakeAutoscanFolders) GetByID(_ context.Context, id int) (*models.MediaF
 }
 
 func (f *fakeAutoscanFolders) List(context.Context) ([]*models.MediaFolder, error) {
+	f.listCalls++
 	return f.folders, nil
 }
 
