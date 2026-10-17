@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -417,5 +419,73 @@ func TestControlSocketTicketStoreBoundsAndValidation(t *testing.T) {
 	}
 	if _, err := store.Consume(ctx, value); !errors.Is(err, evt.ErrSocketTicket) {
 		t.Fatal("credential consumed twice")
+	}
+}
+
+// Web, Apple and Android connect through the v2 control socket, so a player
+// that reconnects there must also receive the stored markers after its hello.
+func TestControlSocketV2SendsStoredMarkersOnHelloAndReconnect(t *testing.T) {
+	f := newControlSocketFixture(t)
+	start, end := 4.0, 58.0
+	f.pb.fileResolver = mapPlaybackFileResolver{files: map[int]*models.MediaFile{
+		100: {ID: 100, IntroStart: &start, IntroEnd: &end},
+	}}
+	f.pb.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(f.manager, f.hub)
+	for connection := range 2 {
+		conn, _, err := f.dial(t, f.mint(t, controlInstallation), nil) //nolint:bodyclose // dial registers response cleanup
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.hello(t, conn)
+		if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		var event playback.EventEnvelope
+		if err := conn.ReadJSON(&event); err != nil {
+			t.Fatalf("connection %d marker snapshot: %v", connection, err)
+		}
+		var payload playback.MarkersUpdatedPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if event.Name != playback.RealtimeEventMarkersUpdated || payload.Intro == nil || payload.Intro.Start != start || payload.Intro.End != end {
+			t.Fatalf("connection %d snapshot = %+v intro %+v", connection, event, payload.Intro)
+		}
+		if err := conn.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// The socket's authority ends at its access-token expiry. When that deadline
+// passes the server must close the socket, not leave it readable for frames
+// (such as a late hello) handled under an expired context.
+func TestControlSocketV2ClosesWhenAuthorityDeadlinePasses(t *testing.T) {
+	f := newControlSocketFixture(t)
+	identity := f.identity(7, "profile-7")
+	identity.AccessExpiresAt = time.Now().Add(300 * time.Millisecond)
+	ticket, _, err := f.handler.Mint(t.Context(), identity, f.session.ID, controlInstallation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, _, err := f.dial(t, ticket, nil) //nolint:bodyclose // dial registers response cleanup
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	for {
+		_, _, err := conn.ReadMessage()
+		if err == nil {
+			continue
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			t.Fatalf("socket stayed open %v past its authority deadline", time.Since(started))
+		}
+		return
 	}
 }
