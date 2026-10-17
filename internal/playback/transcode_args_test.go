@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -569,6 +570,33 @@ func TestPrepareSubtitleFilterInputCreatesParserSafeAlias(t *testing.T) {
 	}
 	if !strings.Contains(joined, "subtitles=filename='"+wantAlias+"':si=2") {
 		t.Fatalf("subtitle filter should use the parser-safe alias: %s", joined)
+	}
+}
+
+// The alias for an fspath-encoded input must point at the real file name, and
+// a restart that finds the alias already in place must accept it.
+func TestPrepareSubtitleFilterInputLinksDecodedNonUTF8Path(t *testing.T) {
+	outputDir := t.TempDir()
+	rawInput := "/media/B\xe5rd.mkv"
+	opts := TranscodeOpts{
+		InputPath:          fspath.Encode(rawInput),
+		OutputDir:          outputDir,
+		SubtitleBurnIn:     true,
+		SubtitleTrackIndex: 0,
+		SubtitleCodec:      "subrip",
+	}
+
+	for attempt := range 2 {
+		if err := prepareSubtitleFilterInput(&opts); err != nil {
+			t.Fatalf("prepareSubtitleFilterInput() attempt %d error = %v", attempt, err)
+		}
+	}
+	target, err := os.Readlink(filepath.Join(outputDir, subtitleFilterAliasName))
+	if err != nil {
+		t.Fatalf("read subtitle filter alias: %v", err)
+	}
+	if target != rawInput {
+		t.Fatalf("subtitle filter alias target = %q, want %q", target, rawInput)
 	}
 }
 

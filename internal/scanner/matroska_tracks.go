@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 )
 
@@ -232,7 +233,7 @@ func readMatroskaTracks(ctx context.Context, path string) ([]mediaprobe.Matroska
 }
 
 func readMatroskaTracksFile(path string) ([]mediaprobe.MatroskaTrack, os.FileInfo, error) {
-	f, err := os.Open(path)
+	f, err := fspath.Open(path)
 	if err != nil {
 		return nil, nil, err
 	}

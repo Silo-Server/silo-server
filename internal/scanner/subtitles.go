@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/naming"
 )
 
@@ -51,7 +52,7 @@ func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubti
 	listing, ok := c.dirs[dir]
 	c.mu.Unlock()
 	if !ok {
-		entries, err := os.ReadDir(dir)
+		entries, err := fspath.ReadDir(dir)
 		listing = externalSubtitleDirListing{candidates: externalSubtitleCandidates(entries), err: err}
 		c.mu.Lock()
 		if existing, found := c.dirs[dir]; found {
@@ -84,7 +85,7 @@ func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubti
 func DetectExternalSubtitles(mediaFilePath string) ([]ExternalSubtitleInfo, error) {
 	dir := filepath.Dir(mediaFilePath)
 
-	entries, err := os.ReadDir(dir)
+	entries, err := fspath.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("subtitles: read dir %s: %w", dir, err)
 	}

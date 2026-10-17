@@ -2,13 +2,14 @@ package librarymonitor
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // mountEntry is one line of /proc/self/mountinfo.
@@ -175,7 +176,8 @@ func unsupportedMountPoints() map[string]bool {
 	if err == nil {
 		for _, e := range mounts {
 			// A later mount on the same point hides the earlier one.
-			skips[e.point] = unsupportedMountTypes[e.fsType] != ""
+			// Paths compared against it are fspath-encoded.
+			skips[fspath.Encode(e.point)] = unsupportedMountTypes[e.fsType] != ""
 		}
 	}
 	walkMounts.skips = skips
@@ -202,7 +204,7 @@ func onUnsupportedMount(mounts map[string]bool, physical string) bool {
 // A target reached through further links is not caught here; callers check
 // again after resolving.
 func linkOntoUnsupportedMount(mounts map[string]bool, path, physicalParent string) bool {
-	target, err := os.Readlink(path)
+	target, err := fspath.Readlink(path)
 	if err != nil {
 		return false
 	}

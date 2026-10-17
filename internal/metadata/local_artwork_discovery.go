@@ -3,11 +3,11 @@ package metadata
 import (
 	"context"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
@@ -96,7 +96,7 @@ func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput
 		if folder := probes[folderOf[i]]; !folder.Reachable && folder.ErrorCode != rootcheck.ErrCodePermissionDenied {
 			continue
 		}
-		_, err := os.Lstat(path)
+		_, err := fspath.Lstat(path)
 		visible[i] = err == nil
 	}
 	return visible

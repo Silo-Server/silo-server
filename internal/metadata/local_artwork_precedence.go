@@ -5,10 +5,10 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
@@ -253,7 +253,7 @@ func (r *localArtworkRetention) extraFanartSidecarGone(path string) bool {
 		if folder.ErrorCode != rootcheck.ErrCodeNotFound {
 			return false
 		}
-		if link, err := os.Lstat(dir); err == nil && link.Mode()&fs.ModeSymlink != 0 {
+		if link, err := fspath.Lstat(dir); err == nil && link.Mode()&fs.ModeSymlink != 0 {
 			return false
 		}
 	}
@@ -264,7 +264,7 @@ func (r *localArtworkRetention) extraFanartSidecarGone(path string) bool {
 // missing, or still on disk but passed over by discovery. Any other error
 // proves nothing.
 func sidecarFileGone(path string) bool {
-	_, err := os.Lstat(path)
+	_, err := fspath.Lstat(path)
 	return err == nil || errors.Is(err, fs.ErrNotExist)
 }
 

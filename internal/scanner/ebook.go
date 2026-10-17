@@ -23,6 +23,8 @@ import (
 	"golang.org/x/net/html/charset"
 	"golang.org/x/text/encoding/charmap"
 	textunicode "golang.org/x/text/encoding/unicode"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 const maxEPUBMetadataEntrySize = 8 * 1024 * 1024
@@ -109,7 +111,7 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 
 func ebookOPFSidecarPath(ebookPath string) string {
 	candidate := filepath.Join(filepath.Dir(ebookPath), ebookTitleFromPath(ebookPath)+".opf")
-	info, err := os.Lstat(candidate)
+	info, err := fspath.Lstat(candidate)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return ""
 	}
@@ -118,14 +120,14 @@ func ebookOPFSidecarPath(ebookPath string) string {
 
 func parseEbookOPFSidecar(sidecarPath string) (parsedEbook, error) {
 	var book parsedEbook
-	leafInfo, err := os.Lstat(sidecarPath)
+	leafInfo, err := fspath.Lstat(sidecarPath)
 	if err != nil {
 		return book, fmt.Errorf("stat ebook OPF sidecar %s: %w", sidecarPath, err)
 	}
 	if !leafInfo.Mode().IsRegular() {
 		return book, fmt.Errorf("ebook OPF sidecar is not a regular file: %s", sidecarPath)
 	}
-	file, err := os.Open(sidecarPath)
+	file, err := fspath.Open(sidecarPath)
 	if err != nil {
 		return book, fmt.Errorf("open ebook OPF sidecar %s: %w", sidecarPath, err)
 	}
@@ -139,7 +141,7 @@ func parseEbookOPFSidecar(sidecarPath string) (parsedEbook, error) {
 	// to a symlink between the Lstat above and this Open would be followed to its
 	// target. Reject unless the opened handle is the exact file Lstat inspected,
 	// so metadata can never be ingested from outside the library root.
-	if !os.SameFile(leafInfo, info) {
+	if !fspath.SameFile(leafInfo, info) {
 		return book, fmt.Errorf("ebook OPF sidecar is not a regular file: %s", sidecarPath)
 	}
 	if info.Size() > maxEPUBMetadataEntrySize {
@@ -203,7 +205,7 @@ func applyEbookSidecarMetadata(book *parsedEbook, sidecar parsedEbook) {
 
 func parseEbookPDF(path string) (parsedEbook, error) {
 	book := parsedEbook{Format: "pdf"}
-	file, err := os.Open(path)
+	file, err := fspath.Open(path)
 	if err != nil {
 		return book, err
 	}
@@ -491,7 +493,7 @@ func validISBN13(candidate string) bool {
 
 func parseEbookEPUB(path string) (parsedEbook, error) {
 	book := parsedEbook{Format: "epub"}
-	reader, err := zip.OpenReader(path)
+	reader, err := zip.OpenReader(fspath.Decode(path))
 	if err != nil {
 		return book, err
 	}
@@ -520,7 +522,7 @@ func parseEbookEPUB(path string) (parsedEbook, error) {
 
 func parseEbookFB2(path string) (parsedEbook, error) {
 	book := parsedEbook{Format: "fb2"}
-	file, err := os.Open(path)
+	file, err := fspath.Open(path)
 	if err != nil {
 		return book, err
 	}
@@ -539,7 +541,7 @@ func parseEbookFB2(path string) (parsedEbook, error) {
 
 func parseEbookFBZ(path string) (parsedEbook, error) {
 	book := parsedEbook{Format: "fbz"}
-	reader, err := zip.OpenReader(path)
+	reader, err := zip.OpenReader(fspath.Decode(path))
 	if err != nil {
 		return book, err
 	}
@@ -564,7 +566,7 @@ func parseEbookFBZ(path string) (parsedEbook, error) {
 
 func parseEbookCBZ(path string) (parsedEbook, error) {
 	book := parsedEbook{Format: "cbz"}
-	reader, err := zip.OpenReader(path)
+	reader, err := zip.OpenReader(fspath.Decode(path))
 	if err != nil {
 		return book, err
 	}
@@ -603,7 +605,7 @@ const maxMOBIHeaderScanSize = 256 * 1024
 // formats no longer fall back to the filename with no author or identifier.
 func parseEbookMOBI(path string) (parsedEbook, error) {
 	book := parsedEbook{Format: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")}
-	file, err := os.Open(path)
+	file, err := fspath.Open(path)
 	if err != nil {
 		return book, err
 	}

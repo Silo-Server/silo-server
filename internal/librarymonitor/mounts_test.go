@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 func TestParseMountInfo(t *testing.T) {
@@ -131,6 +133,20 @@ func TestWalkTreeDoesNotFollowSymlinksOntoNetworkMounts(t *testing.T) {
 	}
 	if got, want := firstList(skipped.lists()), []string{filepath.Join(root, "Linked Movie")}; !slices.Equal(got, want) {
 		t.Fatalf("reported network links %v, want %v", got, want)
+	}
+}
+
+// A link whose own name is not UTF-8 reaches the check fspath-encoded; its
+// text must still be read without touching the target.
+func TestLinkOntoUnsupportedMountReadsNonUTF8LinkName(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "Linked B\xe5rd")
+	if err := os.Symlink("/srv/nas/Movie", link); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	mounts := map[string]bool{"/": false, "/srv/nas": true}
+	if !linkOntoUnsupportedMount(mounts, fspath.Encode(link), root) {
+		t.Fatal("link onto a network mount was not detected for an encoded link name")
 	}
 }
 

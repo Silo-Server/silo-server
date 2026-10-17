@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
@@ -58,7 +59,7 @@ const waitDelay = 5 * time.Second
 // never started). Background processes start at lowered priority where the
 // platform supports it (see startBackground).
 func execFFmpeg(ctx context.Context, background bool, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := fspath.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

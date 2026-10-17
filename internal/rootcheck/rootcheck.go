@@ -11,6 +11,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // Error codes reported by Probe. They are part of the admin mount-check API
@@ -47,10 +49,11 @@ type Result struct {
 	ErrorMessage string // empty when Reachable
 }
 
-// Probe checks that path exists, is a directory, and can be listed.
+// Probe checks that path exists, is a directory, and can be listed. path is
+// fspath-encoded.
 func Probe(path string) Result {
 	res := Result{Reachable: true}
-	info, err := os.Stat(path)
+	info, err := fspath.Stat(path)
 	switch {
 	case err != nil:
 		res.Reachable = false
@@ -59,7 +62,7 @@ func Probe(path string) Result {
 		res.Reachable = false
 		res.ErrorCode, res.ErrorMessage = ErrCodeNotDirectory, "Path is not a directory"
 	default:
-		dir, err := os.Open(path)
+		dir, err := fspath.Open(path)
 		if err == nil {
 			_, err = dir.Readdirnames(1)
 			_ = dir.Close()

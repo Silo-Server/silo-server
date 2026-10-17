@@ -19,6 +19,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -479,7 +480,7 @@ func (m walkMode) collectWalkFile(ctx context.Context, path string, filePaths *[
 }
 
 func canonicalWalkPath(path string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := fspath.EvalSymlinks(path)
 	if err != nil {
 		return "", err
 	}
@@ -559,7 +560,7 @@ func walkLogicalTree(
 		}
 	}
 
-	info, err := os.Lstat(physicalPath)
+	info, err := fspath.Lstat(physicalPath)
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: walk lstat failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 		recordWalkFailure(walkFailures, logicalPath)
@@ -567,13 +568,13 @@ func walkLogicalTree(
 	}
 
 	if info.Mode()&os.ModeSymlink != 0 {
-		resolved, err := filepath.EvalSymlinks(physicalPath)
+		resolved, err := fspath.EvalSymlinks(physicalPath)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 			recordWalkFailure(walkFailures, logicalPath)
 			return nil
 		}
-		targetInfo, err := os.Stat(resolved)
+		targetInfo, err := fspath.Stat(resolved)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalPath, "resolved_path", resolved, "error", err)
 			recordWalkFailure(walkFailures, logicalPath)
@@ -646,13 +647,13 @@ func walkLogicalTree(
 		}
 
 		if entry.Type()&os.ModeSymlink != 0 {
-			resolved, err := filepath.EvalSymlinks(physicalChild)
+			resolved, err := fspath.EvalSymlinks(physicalChild)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalChild, "physical_path", physicalChild, "error", err)
 				recordWalkFailure(walkFailures, logicalChild)
 				continue
 			}
-			targetInfo, err := os.Stat(resolved)
+			targetInfo, err := fspath.Stat(resolved)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalChild, "resolved_path", resolved, "error", err)
 				recordWalkFailure(walkFailures, logicalChild)
@@ -743,7 +744,7 @@ func collectLogicalFilePathsAndSidecars(ctx context.Context, walkRoots []string,
 		if ignored {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, sidecars, os.ReadDir); err != nil {
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, sidecars, fspath.ReadDir); err != nil {
 			return nil, nil, nil, err
 		}
 	}
@@ -2664,7 +2665,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			if err != nil {
 				return err
 			}
-			if info, statErr := os.Stat(scanRoot); statErr == nil && info.IsDir() {
+			if info, statErr := fspath.Stat(scanRoot); statErr == nil && info.IsDir() {
 				if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, false); err != nil {
 					return err
 				}
@@ -2826,7 +2827,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 }
 
 func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *models.MediaFolder, filePath string) (bool, error) {
-	if _, err := os.Stat(filePath); err == nil {
+	if _, err := fspath.Stat(filePath); err == nil {
 		return false, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return true, fmt.Errorf("stat media file %s: %w", filePath, err)
@@ -2988,7 +2989,7 @@ func (s *Scanner) processFile(
 ) (resultAction fileAction, resultWarnings []string, resultErr error) {
 	defer func() { observeFile(resultAction, resultErr) }()
 	// Stat the file.
-	info, err := os.Stat(filePath)
+	info, err := fspath.Stat(filePath)
 	if err != nil {
 		return 0, nil, fmt.Errorf("stat %s: %w", filePath, err)
 	}
@@ -3416,7 +3417,7 @@ func hasMissingExternalSubtitlePath(paths []string) bool {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if _, err := fspath.Stat(path); errors.Is(err, os.ErrNotExist) {
 			return true
 		}
 	}

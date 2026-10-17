@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -61,6 +62,37 @@ func TestResolverThemeFileEvents(t *testing.T) {
 		if !errors.As(err, &requestErr) || requestErr.Reason != ReasonUnsupportedExtension {
 			t.Fatalf("ordinary audio accepted: %s: %v", name, err)
 		}
+	}
+}
+
+// Library-monitor events and scan requests carry fspath-encoded paths; a
+// non-UTF-8 file that exists must classify as present, not as missing or
+// vanished.
+func TestResolverStatsEncodedNonUTF8Path(t *testing.T) {
+	root := t.TempDir()
+	raw := filepath.Join(root, "B\xe5rd", "B\xe5rd.mkv")
+	if err := os.MkdirAll(filepath.Dir(raw), 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	if err := os.WriteFile(raw, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encoded := fspath.Encode(raw)
+	resolver := NewResolver(&fakeFolderRepo{folders: []*models.MediaFolder{{ID: 7, Type: "movies", Enabled: true, Paths: []string{root}}}})
+
+	// A movie file resolves to its folder's subtree.
+	target, err := resolver.Resolve(t.Context(), Request{Path: encoded})
+	if err != nil || target.Mode != ModeSubtree || target.Path != filepath.Dir(encoded) {
+		t.Fatalf("Resolve file: target=%+v err=%v", target, err)
+	}
+	target, err = resolver.Resolve(t.Context(), Request{Path: filepath.Dir(encoded)})
+	if err != nil || target.Mode != ModeSubtree {
+		t.Fatalf("Resolve dir: target=%+v err=%v", target, err)
+	}
+	_, err = resolver.ResolveVanishedPath(t.Context(), encoded, "autoscan")
+	var requestErr *RequestError
+	if !errors.As(err, &requestErr) || requestErr.Reason != ReasonPathStillExists {
+		t.Fatalf("ResolveVanishedPath on existing file: %v", err)
 	}
 }
 

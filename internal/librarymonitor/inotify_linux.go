@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // inotifyMask is the per-directory watch mask. There is deliberately no
@@ -135,7 +137,9 @@ func newInotifyBackend(opts BackendOptions, hooks inotifyHooks) (Backend, error)
 		return nil, fmt.Errorf("inotify_init1: %w", err)
 	}
 	if hooks.addWatch == nil {
-		hooks.addWatch = unix.InotifyAddWatch
+		hooks.addWatch = func(fd int, path string, mask uint32) (int, error) {
+			return unix.InotifyAddWatch(fd, fspath.Decode(path), mask)
+		}
 	}
 	if hooks.maxUserWatches == nil {
 		hooks.maxUserWatches = readMaxUserWatches

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
@@ -407,7 +408,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 	// probe when the filter would actually run.
 	dropLeadingPictures = dropLeadingPictures && seekSeconds > 0 && !audioOnly && supportsLeadingPictureDropFilter(bin)
 	args := buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, dropLeadingPictures)
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := fspath.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -550,7 +551,7 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 	// Check file exists before starting ffmpeg to return a proper 404.
 	// Headers must be written before streaming begins, so we can't detect
 	// ffmpeg errors after WriteHeader(200) has been sent.
-	if _, err := os.Stat(filePath); err != nil {
+	if _, err := fspath.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, "file not found", http.StatusNotFound)
 			return err

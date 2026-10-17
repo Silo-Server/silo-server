@@ -22,6 +22,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -1530,7 +1532,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			}
 			// Serve ASS/SSA as raw data when requested.
 			if requestedFormat == "ass" && playback.IsASS(sub.Format) {
-				data, readErr := os.ReadFile(sub.Path)
+				data, readErr := fspath.ReadFile(sub.Path)
 				if readErr != nil {
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return
@@ -1539,7 +1541,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				return
 			}
 			if requestedFormat == "srt" && subtitleCanServeSRT(sub.Format) {
-				data, readErr := os.ReadFile(sub.Path)
+				data, readErr := fspath.ReadFile(sub.Path)
 				if readErr != nil {
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return

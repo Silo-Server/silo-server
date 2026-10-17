@@ -6,6 +6,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // A Samples request reads the input through ffmpeg's concat demuxer: an
@@ -108,8 +110,11 @@ func buildConcatListSpan(input string, entries []listEntry, span float64) ([]byt
 // single quotes ffconcat takes every character literally, backslashes
 // included, so a single quote is written by closing the quotes, escaping it,
 // and reopening them. A list is read line by line and ffmpeg URLs end at a
-// NUL, so paths holding a line break or NUL are rejected.
+// NUL, so paths holding a line break or NUL are rejected. The list reaches
+// ffmpeg on stdin, not as an argument, so an fspath-encoded input is decoded
+// here to name the real file.
 func concatPath(input string) (string, error) {
+	input = fspath.Decode(input)
 	if strings.ContainsAny(input, "\n\r\x00") {
 		return "", errors.New("sampled input path must not contain a line break or NUL")
 	}
