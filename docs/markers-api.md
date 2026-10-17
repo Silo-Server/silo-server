@@ -47,12 +47,11 @@ Both paths honor provider priority, manual edits and deletions, and provider quo
 
 Providers address an episode by its series' TMDB, TVDB, and IMDb IDs and the
 catalog's season and episode numbers; season 0 holds specials. When the catalog
-has them, lookups and contributions also carry the episode's own provider IDs
-and title. Episode rows match each metadata provider's episodes by number, so
-those IDs show which providers numbered the episode, and two of them can name
-different episodes where the providers number a series differently. The
-TheIntroDB plugin addresses an episode only TVDB supplied by its TVDB IDs and
-any other episode by TMDB. Automatic sharing skips specials; sharing a manually
+has them, lookups and contributions also carry the episode's own provider IDs,
+its title, and whose numbering it follows. Episode rows merge metadata
+providers' episodes by number in the order of the library's episode chain, so
+the numbering is that of the first TVDB or TMDB provider in the chain whose ID
+the episode carries. Automatic sharing skips specials; sharing a manually
 edited special's markers is allowed.
 
 A manual deletion removes every occurrence of that kind for the selected file.

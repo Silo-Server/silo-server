@@ -71,6 +71,7 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 		SeasonNumber:       1,
 		EpisodeNumber:      2,
 		EpisodeExternalIDs: map[string]string{ExternalIDKeyTVDB: "9001", ExternalIDKeyTMDB: "63"},
+		EpisodeNumbering:   "tvdb",
 		EpisodeTitle:       "Second Episode",
 		Duration:           1800 * time.Second,
 	})
@@ -81,7 +82,7 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 		t.Fatalf("fetch request = %+v", client.fetchReq)
 	}
 	if episode := client.fetchReq.GetEpisodeExternalIds(); episode.GetTvdbId() != "9001" || episode.GetTmdbId() != "63" ||
-		client.fetchReq.GetEpisodeTitle() != "Second Episode" {
+		client.fetchReq.GetEpisodeTitle() != "Second Episode" || client.fetchReq.GetEpisodeNumbering() != "tvdb" {
 		t.Fatalf("fetch episode identity = %+v %q", episode, client.fetchReq.GetEpisodeTitle())
 	}
 	if res.SourceClass != models.MarkerSourcePlugin || res.ProviderID != "plugin:12:markers" {

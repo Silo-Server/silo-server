@@ -250,6 +250,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		SeasonNumber:       ids.SeasonNumber,
 		EpisodeNumber:      ids.EpisodeNumber,
 		EpisodeExternalIDs: ids.Episode.AsRequestMap(),
+		EpisodeNumbering:   ids.EpisodeNumbering,
 		EpisodeTitle:       ids.EpisodeTitle,
 		Duration:           time.Duration(file.Duration) * time.Second,
 	}

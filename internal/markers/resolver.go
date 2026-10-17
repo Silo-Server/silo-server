@@ -28,6 +28,11 @@ type ExternalIDs struct {
 	// it can change which provider record a lookup addresses; it is omitted
 	// when empty, so a movie's identity predates the field.
 	Episode EpisodeIDs `json:",omitzero"`
+	// EpisodeNumbering is the external ID key ("tvdb" or "tmdb") of the
+	// provider whose numbering SeasonNumber/EpisodeNumber follow: the first in
+	// the library's episode chain that supplied this episode. Empty when no
+	// such provider supplied it.
+	EpisodeNumbering string `json:",omitempty"`
 	// EpisodeTitle is a hint providers may use to corroborate the episode.
 	// A retitled episode is still the same record, so it is not part of the
 	// lookup identity.
@@ -112,9 +117,15 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 		// refine it: they cannot substitute for an unmatched show. The episode
 		// row's season/episode numbers are authoritative; the media_files copy
 		// can drift during multi-version moves.
+		//
+		// Episode rows merge metadata providers' episodes by number, in the
+		// order of the library's episode chain, so the first provider in that
+		// chain whose ID the row carries is the one whose numbering it
+		// follows. The legacy flat chain applies when the library has no
+		// per-level chain, as metadata.ChainRepository.GetChain does.
 		var showTmdb, showImdb, showTvdb string
 		var episodeIDs EpisodeIDs
-		var title string
+		var title, numbering string
 		var season, episode int
 		var aired *time.Time
 		err := r.pool.QueryRow(ctx, `
@@ -127,14 +138,30 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 			       COALESCE(BTRIM(e.imdb_id), ''),
 			       COALESCE(BTRIM(e.tvdb_id), ''),
 			       COALESCE(BTRIM(e.title), ''),
-			       e.air_date
+			       e.air_date,
+			       COALESCE((
+			           SELECT c.capability_id
+			           FROM library_provider_chains c
+			           JOIN plugin_installations pi ON pi.id = c.plugin_installation_id
+			           WHERE c.media_folder_id = (SELECT media_folder_id FROM media_files WHERE id = $2)
+			             AND c.capability_type = 'metadata_provider.v1'
+			             AND c.enabled AND pi.enabled
+			             AND c.content_level = CASE WHEN EXISTS (
+			                     SELECT 1 FROM library_provider_chains l
+			                     WHERE l.media_folder_id = c.media_folder_id AND l.content_level = 'episode'
+			                 ) THEN 'episode' ELSE '' END
+			             AND ((c.capability_id = 'tvdb' AND BTRIM(e.tvdb_id) <> '')
+			               OR (c.capability_id = 'tmdb' AND BTRIM(e.tmdb_id) <> ''))
+			           ORDER BY c.priority
+			           LIMIT 1
+			       ), '')
 			FROM episodes e
 			LEFT JOIN media_items mi ON mi.content_id = e.series_id
-			WHERE e.content_id = $1`, episodeID).Scan(
+			WHERE e.content_id = $1`, episodeID, file.ID).Scan(
 			&season, &episode,
 			&showTmdb, &showImdb, &showTvdb,
 			&episodeIDs.TmdbID, &episodeIDs.ImdbID, &episodeIDs.TvdbID, &title,
-			&aired,
+			&aired, &numbering,
 		)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -149,15 +176,16 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 			episode = file.EpisodeNumber
 		}
 		return ExternalIDs{
-			Kind:          ItemKindEpisode,
-			TmdbID:        showTmdb,
-			ImdbID:        showImdb,
-			TvdbID:        showTvdb,
-			SeasonNumber:  season,
-			EpisodeNumber: episode,
-			Episode:       episodeIDs,
-			EpisodeTitle:  title,
-			Released:      dateOrZero(aired),
+			Kind:             ItemKindEpisode,
+			TmdbID:           showTmdb,
+			ImdbID:           showImdb,
+			TvdbID:           showTvdb,
+			SeasonNumber:     season,
+			EpisodeNumber:    episode,
+			Episode:          episodeIDs,
+			EpisodeNumbering: numbering,
+			EpisodeTitle:     title,
+			Released:         dateOrZero(aired),
 		}, nil
 	}
 

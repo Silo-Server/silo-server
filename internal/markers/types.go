@@ -110,9 +110,11 @@ type Request struct {
 	ExternalIDs   map[string]string
 	SeasonNumber  int
 	EpisodeNumber int
-	// EpisodeExternalIDs and EpisodeTitle describe the episode itself; for an
-	// episode, ExternalIDs names its series. Both are empty for movies.
+	// EpisodeExternalIDs, EpisodeNumbering, and EpisodeTitle describe the
+	// episode itself (see ExternalIDs); for an episode, ExternalIDs names its
+	// series. They are empty for movies.
 	EpisodeExternalIDs map[string]string
+	EpisodeNumbering   string
 	EpisodeTitle       string
 	Duration           time.Duration
 }
@@ -152,6 +154,7 @@ type SubmissionRequest struct {
 	SeasonNumber       int
 	EpisodeNumber      int
 	EpisodeExternalIDs map[string]string
+	EpisodeNumbering   string
 	EpisodeTitle       string
 	Segment            MarkerKind
 	Start              *time.Duration

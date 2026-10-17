@@ -267,6 +267,7 @@ func (s *ContributionService) contributeSegment(
 		SeasonNumber:       ids.SeasonNumber,
 		EpisodeNumber:      ids.EpisodeNumber,
 		EpisodeExternalIDs: ids.Episode.AsRequestMap(),
+		EpisodeNumbering:   ids.EpisodeNumbering,
 		EpisodeTitle:       ids.EpisodeTitle,
 		Segment:            seg.kind,
 		Start:              &startDur,
@@ -346,8 +347,9 @@ func contributionTargetParts(ids ExternalIDs) []string {
 //
 // The item is identified by the first external ID the provider keys
 // submissions by, or else by TMDB, TVDB, then IMDb. The migration that
-// introduced the column, and the candidate query, derive the preference form
-// in SQL; the providers in use key by TMDB, where the two agree.
+// introduced the column, and the candidate query, derive the second form in
+// SQL, so the two agree for providers that declare no keyed IDs or key by
+// TMDB.
 func contributionTargetKey(ids ExternalIDs, keyedBy []string) string {
 	id := ""
 	values := ids.AsRequestMap()

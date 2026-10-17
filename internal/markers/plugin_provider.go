@@ -170,6 +170,7 @@ func (p *PluginProvider) FetchMarkers(ctx context.Context, req Request) (Result,
 		EpisodeNumber:      int32(req.EpisodeNumber), //nolint:gosec // integer columns in the catalog
 		DurationSeconds:    req.Duration.Seconds(),
 		EpisodeExternalIds: episodeExternalIDsProto(req.EpisodeExternalIDs),
+		EpisodeNumbering:   req.EpisodeNumbering,
 		EpisodeTitle:       req.EpisodeTitle,
 	})
 	if err != nil {
@@ -215,6 +216,7 @@ func (p *PluginProvider) SubmitMarker(ctx context.Context, req SubmissionRequest
 		Segment:            markerKindName(req.Segment),
 		DurationSeconds:    req.Duration.Seconds(),
 		EpisodeExternalIds: episodeExternalIDsProto(req.EpisodeExternalIDs),
+		EpisodeNumbering:   req.EpisodeNumbering,
 		EpisodeTitle:       req.EpisodeTitle,
 	}
 	if req.Start != nil {
