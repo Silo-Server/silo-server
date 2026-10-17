@@ -1446,6 +1446,12 @@ func listAllCompletedHistory(ctx context.Context, store completedHistoryLister, 
 	}
 }
 
+// nearRunDeadline reports whether ctx's deadline is within exportDrainReserve.
+func (s *Service) nearRunDeadline(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	return ok && deadline.Sub(s.now()) < exportDrainReserve
+}
+
 // visiblePlays keeps the plays whose history entries are still visible.
 func visiblePlays(ctx context.Context, store completedHistoryLister, query userstore.CompletedHistoryQuery, plays []LocalPlay) ([]LocalPlay, error) {
 	if len(plays) == 0 {
@@ -1682,9 +1688,15 @@ func (s *Service) ExportWatched(
 	// the rest for the next sync.
 	pageSize := min(watchedExportBatchSize(exporter, 100), maxHistoryExportPage)
 	var cursor HistoryExportCursor
+	calledProvider := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return result, err
+		}
+		// Checked on every page, including pages that end up with nothing to
+		// send, once at least one batch has gone out.
+		if calledProvider && s.nearRunDeadline(ctx) {
+			break
 		}
 		pending, err := s.repo.ListPendingHistoryExports(ctx, conn.ID, cursor, pageSize)
 		if err != nil {
@@ -1727,6 +1739,7 @@ func (s *Service) ExportWatched(
 		}
 		pendingPlays = s.withPlayTitles(ctx, pendingPlays)
 		exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
+		calledProvider = true
 		_, limited := AsRateLimited(err)
 		retryable := isRetryableProviderError(err)
 		if err != nil && isWatchSyncInvalidCredentialError(err) {
@@ -1790,9 +1803,6 @@ func (s *Service) ExportWatched(
 			return result, err
 		}
 		if !progressed {
-			break
-		}
-		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < exportDrainReserve {
 			break
 		}
 	}
