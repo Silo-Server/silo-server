@@ -145,6 +145,9 @@ func (s *AdminConfigurationStore) Update(ctx context.Context, id int, input Upda
 		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err = LockConfiguration(ctx, tx); err != nil {
+		return nil, nil, err
+	}
 	revision, err := readConfigurationRevision(ctx, tx, id)
 	if err != nil {
 		return nil, nil, err
@@ -180,6 +183,9 @@ func (s *AdminConfigurationStore) Delete(ctx context.Context, id int, guard func
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err = LockConfiguration(ctx, tx); err != nil {
+		return err
+	}
 	revision, err := readConfigurationRevision(ctx, tx, id)
 	if err != nil {
 		return err

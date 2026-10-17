@@ -670,6 +670,7 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 		playMethod = streamtoken.PlayMethodToneMapDownload
 	}
 	token, err := streamtoken.Sign(streamtoken.Claims{
+		OriginCredential:             streamOriginCredential(r.Context()),
 		SessionID:                    sessionID,
 		MediaPath:                    mediaPath,
 		PlayMethod:                   playMethod,

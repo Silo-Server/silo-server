@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workerinput"
+
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
@@ -58,7 +60,7 @@ const waitDelay = 5 * time.Second
 // never started). Background processes start at lowered priority where the
 // platform supports it (see startBackground).
 func execFFmpeg(ctx context.Context, background bool, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := workerinput.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -123,6 +125,11 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	for _, attempt := range req.attempts() {
 		result, attemptErr := r.runAttempt(ctx, req, attempt, toneMap, keyframes)
 		if attemptErr == nil {
+			// Repairs may keep the initial frames after a decode failure, but
+			// they must not publish those frames after source authority is lost.
+			if err := workerinput.Validate(ctx, req.Input); err != nil {
+				return Result{}, &Error{Reason: ReasonArgs, Attempts: []AttemptError{{Decoder: result.Decoder, Reason: ReasonArgs, Err: err}}}
+			}
 			return result, nil
 		}
 		failure.Attempts = append(failure.Attempts, *attemptErr)
@@ -537,6 +544,11 @@ func (a attemptRun) readSheets(req Request, times []float64, plan listPlan, onDi
 // when that is not nil, writing its stdout to stdout when that is not nil,
 // and routing its log to handlers.
 func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, stdoutWriter io.Writer, handlers ...func(string)) *AttemptError {
+	var sourceErr error
+	args, stdinBytes, sourceErr = prepareSourceInput(a.attemptCtx, req.Input, args, stdinBytes)
+	if sourceErr != nil {
+		return &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: sourceErr}
+	}
 	var stdin io.Reader
 	if stdinBytes != nil {
 		stdin = bytes.NewReader(stdinBytes)

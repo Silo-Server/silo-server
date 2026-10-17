@@ -769,6 +769,10 @@ func TestHWProbeCacheSeparatesBackendsAndDevices(t *testing.T) {
 
 func TestFFmpegSupportsNVENCCoalescesConcurrentColdProbes(t *testing.T) {
 	env := setupHWAccelTest(t)
+	// This positive coalescing test checks sharing and exact command count,
+	// not timeout behavior. Use the production budget for host scheduling;
+	// the hanging-probe tests retain the helper's short 200 ms budget.
+	hwProbeCommandTimeout = 3 * time.Second
 	env.addRenderDevice(t, "renderD128", "0x10de")
 	probe := successfulNVENCProbe()
 	probe.delay = 30 * time.Millisecond
@@ -790,7 +794,9 @@ func TestFFmpegSupportsNVENCCoalescesConcurrentColdProbes(t *testing.T) {
 	close(results)
 	for result := range results {
 		if result != "nvenc" {
-			t.Fatalf("concurrent resolution = %q, want nvenc", result)
+			ok, reason := ffmpegSupportsBackend(transcodeHWNVENC, ffmpeg.path, "")
+			logData, _ := os.ReadFile(ffmpeg.logPath)
+			t.Fatalf("concurrent resolution = %q, want nvenc; cached_ok=%v reason=%q command_timeout=%s command_log=%q", result, ok, reason, hwProbeCommandTimeout, logData)
 		}
 	}
 

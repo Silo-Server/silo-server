@@ -9,10 +9,15 @@ import "github.com/Silo-Server/silo-server/internal/tonemap"
 // reverse-engineering execution details from presentation fields or mutable
 // planner inputs.
 type ExecutableRecipeV3 struct {
-	Version        int        `json:"version"`
-	PlanID         string     `json:"plan_id"`
-	PlayMethod     PlayMethod `json:"play_method"`
-	TranscodeAudio bool       `json:"transcode_audio"`
+	// These internal fields identify the committed executor transport. They
+	// persist with the attempt so reports on other API replicas can distinguish
+	// the live transport from a prepared or retiring replacement.
+	TranscodeNodeURL     string     `json:"transcode_node_url,omitempty"`
+	TranscodeTransportID string     `json:"transcode_transport_id,omitempty"`
+	Version              int        `json:"version"`
+	PlanID               string     `json:"plan_id"`
+	PlayMethod           PlayMethod `json:"play_method"`
+	TranscodeAudio       bool       `json:"transcode_audio"`
 	// RemuxResumeLeadingPictureDrop is best effort, so a binary that predates
 	// it may ignore it without a recipe version change.
 	RemuxResumeLeadingPictureDrop bool                   `json:"remux_resume_leading_picture_drop,omitempty"`

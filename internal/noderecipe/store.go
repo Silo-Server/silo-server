@@ -110,21 +110,6 @@ type audioRecipeEnvelope struct {
 	Recipe  playback.RecipeCard `json:"audio_recipe"`
 }
 
-// putNodeRecipeScript reads the node generation and writes the legacy-readable
-// recipe plus generation and digest sidecars in one Redis operation. It
-// therefore orders a concurrent Put and RevokeNode: a recipe written before
-// the increment is stale, while one written after it carries the new generation.
-var putNodeRecipeScript = redis.NewScript(`
-local generation = redis.call("GET", KEYS[3])
-if not generation then
-  generation = "0"
-end
-redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
-redis.call("SET", KEYS[2], generation, "PX", ARGV[2])
-redis.call("SET", KEYS[4], ARGV[3], "PX", ARGV[2])
-return generation
-`)
-
 // validateLegacyNodeRecipeScript accepts a record with missing or mismatched
 // sidecars only when its Redis expiry proves that an older writer issued it
 // after the latest reload. The exact recipe comparison makes the decision
@@ -271,14 +256,9 @@ func (s *Store) PutTTL(ctx context.Context, sessionID string, card playback.Reci
 	if err != nil {
 		return err
 	}
-	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
-		ttlMillis := max(ttl.Milliseconds(), 1)
-		return putNodeRecipeScript.Run(ctx, s.rdb, []string{
-			s.key(sessionID),
-			nodeAuthorityRecordGenerationKey(sessionID),
-			authorityKey,
-			nodeAuthorityRecordDigestKey(sessionID),
-		}, data, ttlMillis, nodeAuthorityRecordDigest(data)).Err()
+	if s.prefix == KeyPrefix {
+		_, err = s.publish(ctx, sessionID, card, data, ttl, false)
+		return err
 	}
 	return s.rdb.Set(ctx, s.key(sessionID), data, ttl).Err()
 }
@@ -287,36 +267,59 @@ func (s *Store) PutTTL(ctx context.Context, sessionID string, card playback.Reci
 // error yields (nil, false) — because an absent recipe legitimately means the
 // node cannot reconstruct and should 404, never rebuild from a bad recipe.
 func (s *Store) Get(ctx context.Context, sessionID string) (*playback.RecipeCard, bool) {
-	card, ok, _ := s.Lookup(ctx, sessionID)
-	return card, ok
+	card, found, err := s.GetStatus(ctx, sessionID)
+	if err != nil {
+		prefix := ""
+		if s != nil {
+			prefix = s.prefix
+		}
+		slog.WarnContext(ctx, "load node recipe failed", "component", "noderecipe", "key_prefix", prefix, "error", err, "playback_session_id", sessionID)
+		return nil, false
+	}
+	return card, found
 }
 
-// Lookup is Get with the read failure kept. A genuine miss, a card that no
-// longer decodes, and one whose node authority was revoked are all (nil, false,
-// nil); an error means Redis could not be read, which a caller that must not
-// mistake an outage for a missing session can answer as retryable.
+var errInvalidStoredRecipe = errors.New("invalid stored node recipe")
+
+// Lookup keeps storage failures distinct from a miss for session recovery.
+// Disabled stores and undecodable cards cannot reconstruct a session. Exact
+// publication recovery uses GetStatus to retain uncertainty for those cases.
 func (s *Store) Lookup(ctx context.Context, sessionID string) (*playback.RecipeCard, bool, error) {
 	if s == nil || s.rdb == nil || sessionID == "" {
 		return nil, false, nil
+	}
+	card, found, err := s.GetStatus(ctx, sessionID)
+	if errors.Is(err, errInvalidStoredRecipe) {
+		slog.WarnContext(ctx, "decode node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "playback_session_id", sessionID)
+		return nil, false, nil
+	}
+	return card, found, err
+}
+
+// GetStatus distinguishes a missing or revoked recipe from unavailable storage.
+func (s *Store) GetStatus(ctx context.Context, sessionID string) (*playback.RecipeCard, bool, error) {
+	if sessionID == "" {
+		return nil, false, nil
+	}
+	if s == nil || s.rdb == nil {
+		return nil, false, errors.New("node recipe storage unavailable")
 	}
 	data, generation, stamped, err := s.loadStoredCard(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return nil, false, nil
 		}
-		slog.WarnContext(ctx, "load node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "error", err, "playback_session_id", sessionID)
 		return nil, false, err
 	}
+
 	card, ok := unmarshalCard(data)
 	if !ok {
-		slog.WarnContext(ctx, "decode node recipe failed", "component", "noderecipe", "key_prefix", s.prefix, "playback_session_id", sessionID)
-		return nil, false, nil
+		return nil, false, errInvalidStoredRecipe
 	}
 	if authorityKey := nodeAuthorityGenerationKeyForCard(card); s.prefix == KeyPrefix && authorityKey != "" {
 		if stamped {
 			currentGeneration, generationErr := s.currentNodeAuthorityGeneration(ctx, authorityKey)
 			if generationErr != nil {
-				slog.WarnContext(ctx, "load node authority generation failed", "component", "noderecipe", "error", generationErr, "playback_session_id", sessionID)
 				return nil, false, generationErr
 			}
 			if generation != currentGeneration {
@@ -325,7 +328,6 @@ func (s *Store) Lookup(ctx context.Context, sessionID string) (*playback.RecipeC
 		} else {
 			valid, validationErr := s.legacyRecipeIssuedAfterRevocation(ctx, sessionID, data, authorityKey)
 			if validationErr != nil {
-				slog.WarnContext(ctx, "validate legacy node recipe authority failed", "component", "noderecipe", "error", validationErr, "playback_session_id", sessionID)
 				return nil, false, validationErr
 			}
 			if !valid {
@@ -457,7 +459,7 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 	}
 	keys := []string{s.key(sessionID)}
 	if s.prefix == KeyPrefix {
-		keys = append(keys, nodeAuthorityRecordGenerationKey(sessionID), nodeAuthorityRecordDigestKey(sessionID))
+		keys = append(keys, nodeAuthorityRecordGenerationKey(sessionID), nodeAuthorityRecordDigestKey(sessionID), publicationVersionKey(sessionID))
 	}
 	return s.rdb.Del(ctx, keys...).Err()
 }

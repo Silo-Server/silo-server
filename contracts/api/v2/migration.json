@@ -10,9 +10,409 @@
   "consumer_method": "Client call sites were extracted by scripts/apiv2-ledger/extract_consumers.py from web/src (this repo) and the origin/main trees of silo-apple and silo-android at the commits pinned in source_trees (re-resolve a sibling site with git show <sha>:<file> in that repo, never against a moving branch): path literals and templates passed to HTTP/WebSocket calls, plus paths built by helper functions that return a template, templates rooted at the API base URL, Kotlin buildString/const val builders, and Swift let/static let path bindings, with interpolations normalized to a wildcard and matched against inventory paths by method (scripts/apiv2-ledger/match_consumers.py). scripts/apiv2-ledger/sweep_uncredited.py then greps the last two static segments of every inventory path across all three trees and every hit not within four lines of a credited site was resolved by hand. Server-internal and compat consumers are Go URL builders and callers in this repo. Sites marked match=manual were resolved by hand where the path is assembled from variables the scripts cannot follow. Call-site files are repository-root-relative for their repo (web: src/... under web/; apple: iosApp/...; android: shared/, android-shared/, androidApp/, androidTvApp/; server: this repository root). Absence of a first-party consumer is not proof of disuse.",
   "field_reference": "internal/contractledger validates this file against migration.schema.json and reconciles it against the route inventory: listener, namespace, method, path, registration_index, handler, handler_kind, source_file, route_group, middleware_chain, auth_class, auth_traits, conditional, conditions, delegates_to (inventory empty string is null here), request_kind, response_media_kind, streams, and upgrades_websocket are copied from the inventory row and must match it, except that dynamic_plugin_proxy rows record both media kinds as dynamic_proxy; profile_required and admin_required are derived from auth_traits. Every other field is curated by hand and preserved when scripts/apiv2-ledger/build_ledger.py merges a regenerated inventory into this file.",
   "totals": {
-    "entries": 783
+    "entries": 804
   },
   "entries": [
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "DELETE",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "handler": "(*internal/workercontrolcore.Service).closeWork",
+      "handler_kind": "method",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditional": false,
+      "conditions": [],
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "handler": "(*internal/workercontrolcore.Service).recipe",
+      "handler_kind": "method",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditional": false,
+      "conditions": [],
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "handler": "(*internal/workercontrolcore.Service).recipe",
+      "handler_kind": "method",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditional": false,
+      "conditions": [],
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/report",
+      "handler": "(*internal/workercontrolcore.Service).report",
+      "handler_kind": "method",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditional": false,
+      "conditions": [],
+      "request_kind": "binary",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/revoke",
+      "handler": "(*internal/workercontrolcore.Service).closeNode",
+      "handler_kind": "method",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditional": false,
+      "conditions": [],
+      "request_kind": "unknown",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/snapshot",
+      "handler": "(*internal/workercontrolcore.Service).snapshot",
+      "handler_kind": "method",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditional": false,
+      "conditions": [],
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/workers/{node}/sources/{grant}",
+      "handler": "s.options.SourceHandler",
+      "handler_kind": "expression",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "s.options.SourceHandler != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/workers/{node}/sources/{grant}",
+      "handler": "s.options.SourceHandler",
+      "handler_kind": "expression",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "s.options.SourceHandler != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/sources/{grant}/renew",
+      "handler": "(*internal/workercontrolcore.Service).renew",
+      "handler_kind": "method",
+      "source_file": "internal/workercontrolcore/http.go",
+      "route_group": "/",
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditional": false,
+      "conditions": [],
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-worker-control",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on worker_control_core listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
     {
       "listener": "root",
       "namespace": "legacy_unversioned",
@@ -1164,6 +1564,512 @@
         "operation_id": null
       },
       "notes": "No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/enroll",
+      "handler": "(internal/api.workerGateway).enroll",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/output-grant",
+      "handler": "(internal/api.workerGateway).outputGrant",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "DELETE",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "handler": "(internal/api.workerGateway).closeWork",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "handler": "(internal/api.workerGateway).recipe",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "handler": "(internal/api.workerGateway).recipe",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/report",
+      "handler": "(internal/api.workerGateway).report",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/revoke",
+      "handler": "(internal/api.workerGateway).revoke",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/snapshot",
+      "handler": "(internal/api.workerGateway).snapshot",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/workers/{node}/sources/{grant}",
+      "handler": "(internal/api.workerGateway).source",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/workers/{node}/sources/{grant}",
+      "handler": "(internal/api.workerGateway).source",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/sources/{grant}/renew",
+      "handler": "(internal/api.workerGateway).renew",
+      "handler_kind": "method",
+      "source_file": "internal/api/router.go",
+      "route_group": "/",
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditional": true,
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "operational",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on api listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
     },
     {
       "listener": "api",
@@ -48382,6 +49288,52 @@
         "operation_id": null
       },
       "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node POST /trickplay/extract. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/worker/execute",
+      "handler": "(*internal/transcodenode.Server).handleWorkerExecute",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditional": true,
+      "conditions": [
+        "s.executeHandler != nil"
+      ],
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "streams": false,
+      "upgrades_websocket": false,
+      "registration_index": 0,
+      "delegates_to": null,
+      "profile_required": false,
+      "admin_required": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [],
+      "section": "node-transcode",
+      "release_flow": "operational",
+      "tier": 2,
+      "disposition": "documented_exclusion",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Scoped internal standalone-worker protocol, inventoried and described in x-silo-worker-protocols; no native /api/v2 alias.",
+      "owner": null,
+      "review_state": "proposed",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener as an explicitly registered HTTP-only worker operation. Authentication is enforced by the owning scoped handler; maintainer ratification remains pending."
     }
   ]
 }

@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/executionlease"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -140,6 +141,12 @@ func LoadCapabilities(ctx context.Context, ffmpegPath string) (Capabilities, err
 	}
 	list := capsCache.list
 	capsCache.Unlock()
+	// Retain before DoChan schedules the flight: its bounded listings may
+	// outlive a disconnected caller, but must remain admitted local work.
+	releaseLease, err := executionlease.Retain(ctx)
+	if err != nil {
+		return Capabilities{}, err
+	}
 
 	resultCh := capsCache.group.DoChan(key, func() (any, error) {
 		capsCache.Lock()
@@ -148,7 +155,7 @@ func LoadCapabilities(ctx context.Context, ffmpegPath string) (Capabilities, err
 		if ok {
 			return cached, nil
 		}
-		caps, err := loadCapabilities(ffmpegPath, list)
+		caps, err := loadCapabilities(context.WithoutCancel(ctx), ffmpegPath, list)
 		if err != nil {
 			return nil, err
 		}
@@ -159,8 +166,10 @@ func LoadCapabilities(ctx context.Context, ffmpegPath string) (Capabilities, err
 	})
 	select {
 	case <-ctx.Done():
+		go func() { <-resultCh; releaseLease() }()
 		return Capabilities{}, ctx.Err()
 	case result := <-resultCh:
+		releaseLease()
 		if result.Err != nil {
 			return Capabilities{}, result.Err
 		}
@@ -190,9 +199,9 @@ func capabilitiesKey(generation uint64, ffmpegPath string) string {
 	return strconv.FormatUint(generation, 10) + "\x00" + identity
 }
 
-func loadCapabilities(ffmpegPath string, list listFunc) (Capabilities, error) {
+func loadCapabilities(ctx context.Context, ffmpegPath string, list listFunc) (Capabilities, error) {
 	runWith := func(stdin []byte, args ...string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), listingTimeout)
+		ctx, cancel := context.WithTimeout(ctx, listingTimeout)
 		defer cancel()
 		return list(ctx, ffmpegPath, stdin, args...)
 	}

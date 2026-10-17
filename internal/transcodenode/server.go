@@ -207,8 +207,9 @@ func ValidateThrottleAttestation(req TranscodeStartRequest, response TranscodeSt
 
 // HealthResponse is the JSON response for GET /api/v1/health.
 type HealthResponse struct {
-	Status     string `json:"status"`
-	ActiveJobs int32  `json:"active_jobs"`
+	Status         string `json:"status"`
+	ActiveJobs     int32  `json:"active_jobs"`
+	WorkerProtocol string `json:"worker_protocol,omitempty"`
 	// CapabilitiesHash identifies this node's last computed hardware capability
 	// snapshot. It is read from the stored snapshot only — health must stay a
 	// cheap liveness answer, so it never triggers a probe — and is empty until
@@ -277,6 +278,8 @@ type sessionTracker interface {
 }
 
 type progressiveRemuxRequest struct {
+	tracking          SessionTracking
+	inputPath         string
 	id                uint64
 	playbackSessionID string
 	cancel            context.CancelFunc
@@ -286,6 +289,12 @@ type progressiveRemuxRequest struct {
 // Server is the HTTP handler for transcode mode.
 type Server struct {
 	watcher           *nodeconfig.Watcher
+	runtime           RuntimeConfig
+	verifyCommand     func(*http.Request) error
+	executeHandler    http.Handler
+	workerProtocol    string
+	verifyToken       func(context.Context, string) (*streamtoken.Claims, error)
+	executionDenied   func(context.Context, string) bool
 	streamDeny        *playback.StreamDeny
 	nodeRowID         func() (int, bool)
 	registeredNodeURL func() (string, bool)
@@ -327,6 +336,7 @@ type Server struct {
 	// retry must revisit them even if the watcher has already adopted a new URL.
 	pendingAuthorityRevocations []string
 	activeJobs                  atomic.Int32
+	jobs                        jobCeiling
 	// inFlight counts requests for work activeJobs does not count; see
 	// trackInFlight.
 	inFlight atomic.Int32
@@ -408,7 +418,8 @@ type Server struct {
 	// snapshot (or an authenticated /hw-capabilities request) run its smoke
 	// matrix beside the operator's, which on session-limited hardware is
 	// exactly the collision that publishes a false regression.
-	capabilityBuildMu sync.Mutex
+	capabilityBuildMu          capabilityBuildLock
+	completeCapabilitySnapshot *completeCapabilitySnapshot
 }
 
 // storedCapabilityHash returns the last published capability hash, or empty
@@ -510,7 +521,7 @@ func (s *Server) restartSessionLocked(ctx context.Context, sessionID string, ses
 	if !ok || live != session {
 		return playback.ErrSessionSuperseded
 	}
-	return session.Restart(ctx, seekSeconds, startSegment)
+	return session.Restart(s.sessionJobContext(ctx, session), seekSeconds, startSegment)
 }
 
 // restartSegmentLocked resolves and applies missing-segment recovery while the
@@ -529,7 +540,7 @@ func (s *Server) restartSegmentLocked(
 	if !ok || live != session {
 		return playback.SegmentRecoveryTarget{}, false, playback.ErrSessionSuperseded
 	}
-	return session.RestartSegment(ctx, segNum)
+	return session.RestartSegment(s.sessionJobContext(ctx, session), segNum)
 }
 
 // NewServer creates a new transcode server.
@@ -538,6 +549,12 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 	if tracker != nil {
 		trackerImpl = tracker
 	}
+	s := newServer(watcher, trackerImpl)
+	s.watcher = watcher
+	return s
+}
+
+func newServer(watcher RuntimeConfig, trackerImpl sessionTracker) *Server {
 	transcodeDir := config.DefaultTranscodeDir
 	artifactDir := ""
 	if watcher != nil {
@@ -553,7 +570,6 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		artifactRoot = config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir)
 	}
 	s := &Server{
-		watcher:                   watcher,
 		tracker:                   trackerImpl,
 		transcodeDir:              transcodeDir,
 		artifactRoot:              artifactRoot,
@@ -611,16 +627,21 @@ func (s *Server) StartOrphanSweeper(ctx context.Context) {
 // snapshot — can wait for it instead of racing it.
 func (s *Server) StartHardwareEncoderWarmup(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
-	if s == nil || s.watcher == nil || ctx == nil {
+	if s == nil || s.runtimeConfig() == nil || ctx == nil {
 		close(done)
 		return done
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		close(done)
 		return done
 	}
 	playbackCfg := cfg.Playback
+	ctx, releaseJob, ok := s.acquireJobContext(ctx, "")
+	if !ok {
+		close(done)
+		return done
+	}
 	// Claimed here, before the goroutine exists. Warmup is a real smoke encode
 	// and the listener opens while it may still be running, so an admin re-probe
 	// arriving in a node's first seconds must not see an idle gate — and a claim
@@ -630,6 +651,7 @@ func (s *Server) StartHardwareEncoderWarmup(ctx context.Context) <-chan struct{}
 	s.gpu.holdWork()
 	go func() {
 		defer close(done)
+		defer releaseJob()
 		defer s.gpu.endWork()
 		if err := playback.WarmHardwareEncoder(ctx, playbackCfg.FFmpegPath, playbackCfg.HWAccel, playbackCfg.HWDevice); err != nil {
 			slog.DebugContext(ctx, "transcode node hardware encoder warmup failed", "component", "transcodenode", "error", err)
@@ -782,7 +804,7 @@ func (s *Server) reapSession(sessionID string, session *playback.TranscodeSessio
 		slog.Error("close idle transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 	}
 	if s.tracker != nil {
-		s.tracker.Remove(context.Background(), sessionID)
+		s.removeLegacyTracking(context.Background(), sessionID)
 	}
 	slog.Info("transcode node reaped idle session", "component", "transcodenode",
 		"session", sessionID, "playback_session_id", sessionID, "idle_ms", time.Since(last).Milliseconds())
@@ -799,6 +821,7 @@ func (s *Server) reapSession(sessionID string, session *playback.TranscodeSessio
 // encoder is counted by nothing and a re-probe admitted in the gap smoke-encodes
 // beside it.
 func (s *Server) closeSessionOffGPU(session *playback.TranscodeSession) error {
+	defer s.releaseSessionJob(session)
 	return s.retireGPUSession(session.Close)
 }
 
@@ -878,6 +901,9 @@ func (s *Server) SetStreamDeny(deny *playback.StreamDeny) {
 // session is still cut. A missing or invalid token only removes the second
 // lookup; the token was never this route's authorization.
 func (s *Server) sessionDenied(r *http.Request, transportID string) bool {
+	if s.executionDenied != nil && s.executionDenied(r.Context(), transportID) {
+		return true
+	}
 	if s.streamDeny == nil {
 		return false
 	}
@@ -892,6 +918,9 @@ func (s *Server) sessionDenied(r *http.Request, transportID string) bool {
 
 // claimsDenied is sessionDenied for a path that has already verified its token.
 func (s *Server) claimsDenied(ctx context.Context, claims *streamtoken.Claims, transportID string) bool {
+	if s.executionDenied != nil && s.executionDenied(ctx, transportID) {
+		return true
+	}
 	if s.streamDeny == nil {
 		return false
 	}
@@ -944,6 +973,9 @@ func (s *Server) router() chi.Router {
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireBearer)
+		if s.executeHandler != nil {
+			r.Post("/worker/execute", s.handleWorkerExecute)
+		}
 		r.Get("/hw-capabilities", s.handleHWCapabilities)
 		r.Post("/chapter-thumbnails/extract", s.handleChapterThumbnailExtract)
 		r.Post("/trickplay/extract", s.handleTrickplayExtract)
@@ -994,7 +1026,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
@@ -1026,6 +1058,13 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	// recipe resolution just below runs ffmpeg probes on it too. Serving an
 	// artifact that already exists touches neither, so a re-probe must not
 	// refuse it.
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), "download-artifact-"+req.ArtifactID)
+	if !admitted {
+		http.Error(w, errJobCeiling, http.StatusServiceUnavailable)
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 	if !s.gpu.beginWork() {
 		http.Error(w, "node is re-probing its hardware; retry shortly", http.StatusServiceUnavailable)
 		return
@@ -1223,7 +1262,7 @@ func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) 
 		http.NotFound(w, r)
 		return
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
@@ -1265,13 +1304,22 @@ func (s *Server) handleDeleteDownloadArtifact(w http.ResponseWriter, r *http.Req
 		http.NotFound(w, r)
 		return
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
 	unlock := s.lockSessionLifecycle("download-artifact-" + artifactID)
 	defer unlock()
+	allowed, err := artifactDeleteAllowed(r.Context(), artifactID)
+	if err != nil {
+		http.Error(w, "artifact delete authority unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !allowed {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	path := filepath.Join(s.artifactRoot, artifactID+".mp4")
 	if err := invalidateDownloadArtifactReceipt(path); err != nil {
 		http.Error(w, "failed to remove artifact receipt", http.StatusInternalServerError)
@@ -1294,14 +1342,15 @@ func (s *Server) trackDownloadPrepare(ctx context.Context, info nodesessions.Ses
 	finished := make(chan struct{})
 	var finishOnce sync.Once
 	baseCtx := context.WithoutCancel(ctx)
+	tracking := s.prepareTracking(ctx, info)
 	go func() {
 		trackCtx, cancelTrack := context.WithTimeout(baseCtx, sessionTrackingOperationTimeout)
-		s.tracker.Track(trackCtx, info)
+		s.trackPrepared(trackCtx, info, tracking)
 		cancelTrack()
 
 		<-finished
 		removeCtx, cancelRemove := context.WithTimeout(baseCtx, sessionTrackingOperationTimeout)
-		s.tracker.Remove(removeCtx, info.SessionID)
+		s.removePrepared(removeCtx, info.SessionID, tracking)
 		cancelRemove()
 	}()
 	return func() {
@@ -1320,6 +1369,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(HealthResponse{
 		Status:           s.healthStatus(),
 		ActiveJobs:       s.activeJobs.Load(),
+		WorkerProtocol:   s.workerProtocol,
 		CapabilitiesHash: s.storedCapabilityHash(),
 		System:           snapshot.System,
 		GPU:              snapshot.GPU,
@@ -1377,16 +1427,11 @@ func (s *Server) StartMetricsSampler(ctx context.Context) {
 var ErrCapabilityBuildBusy = errors.New("capability build refused while the node is re-probing")
 
 func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelInfo, error) {
-	// A snapshot runs ffmpeg on the GPU whenever the probe caches are cold, so
-	// it registers as GPU work. That is what stops a manual re-probe from
-	// claiming an apparently idle encoder and running its own smoke matrix
-	// beside this one.
-	//
-	// It deliberately does *not* refuse while transcodes are running. A node
-	// under sustained load would then never refresh its inventory, and its
-	// advertised hash would go stale indefinitely — a worse failure than the
-	// cold-start contention this would avoid, which a positive probe result
-	// caches away after the first success and which the next snapshot corrects.
+	if err := ctx.Err(); err != nil {
+		return playback.HWAccelInfo{}, err
+	}
+	// Waiting readers participate in re-probe exclusion, but reserve no
+	// encoding identity until they own the assembly lock.
 	if !s.gpu.beginWork() {
 		return playback.HWAccelInfo{}, ErrCapabilityBuildBusy
 	}
@@ -1394,9 +1439,17 @@ func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelI
 	if s.capabilityBuildAdmitted != nil {
 		s.capabilityBuildAdmitted()
 	}
-	s.capabilityBuildMu.Lock()
+	if err := s.capabilityBuildMu.LockContext(ctx); err != nil {
+		return playback.HWAccelInfo{}, err
+	}
 	defer s.capabilityBuildMu.Unlock()
-	return s.buildCapabilitySnapshotLocked(ctx)
+	inputs := s.capabilityInputs()
+	jobContext, releaseJob, admitted := s.acquireJobContext(ctx, "")
+	if !admitted {
+		return s.cachedCapabilitySnapshotLocked(ctx, inputs)
+	}
+	defer releaseJob()
+	return s.buildCapabilitySnapshotForInputsLocked(jobContext, inputs)
 }
 
 // buildCapabilitySnapshotLocked is buildCapabilitySnapshot's body. Callers must
@@ -1404,14 +1457,11 @@ func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelI
 // invalidation and its rebuild are one step no other builder can interleave
 // with.
 func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HWAccelInfo, error) {
-	ffmpegPath := ""
-	configuredHWAccel := playback.HWAccelNone
-	hwDevice := ""
-	if cfg := s.watcher.Config(); cfg != nil {
-		ffmpegPath = cfg.Playback.FFmpegPath
-		configuredHWAccel = cfg.Playback.HWAccel
-		hwDevice = cfg.Playback.HWDevice
-	}
+	return s.buildCapabilitySnapshotForInputsLocked(ctx, s.capabilityInputs())
+}
+
+func (s *Server) buildCapabilitySnapshotForInputsLocked(ctx context.Context, inputs capabilityInputs) (playback.HWAccelInfo, error) {
+	ffmpegPath, configuredHWAccel, hwDevice := inputs.ffmpeg, inputs.backend, inputs.device
 	resolveCtx, cancel := context.WithTimeout(ctx, toneMapCapabilityResolveTimeout(configuredHWAccel, hwDevice))
 	defer cancel()
 	// One detection walk answers both questions: Resolved honors the configured
@@ -1436,22 +1486,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	// Progressive remux tokens bind execution to the stable stream_nodes row.
-	// Do not let central commit work to this node until the watcher can resolve
-	// that identity; otherwise every committed GET would fail closed at serve
-	// time with no different route for a replan to choose.
-	if s.nodeRowID != nil {
-		if nodeID, ok := s.nodeRowID(); ok && nodeID > 0 {
-			info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxExecutionV1}
-			if s.themeInputs != nil {
-				info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeatureThemeAudioExecutionV1)
-			}
-		}
-	}
-	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
-		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2)
-	info.CapabilityHash = playback.ComputeCapabilityHash(info)
-	return info, nil
+	return s.publishCapabilitySnapshotLocked(ctx, inputs, info)
 }
 
 // handleHWCapabilities reports live smoke-tested node capabilities.
@@ -1461,9 +1496,6 @@ func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "capability probe unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	// A served report is as authoritative as a scheduled snapshot, so health
-	// starts advertising this hash immediately rather than at the next tick.
-	s.storeCapabilityHash(info.CapabilityHash)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }
@@ -1505,6 +1537,7 @@ func (s *Server) StartCapabilitySnapshots(ctx context.Context, ready <-chan stru
 }
 
 func (s *Server) refreshCapabilitySnapshot(ctx context.Context) {
+	previous := s.storedCapabilityHash()
 	info, err := s.buildCapabilitySnapshot(ctx)
 	if err != nil {
 		// Keep the previous hash: a failed probe is not evidence the hardware
@@ -1512,11 +1545,10 @@ func (s *Server) refreshCapabilitySnapshot(ctx context.Context) {
 		slog.DebugContext(ctx, "transcode node capability snapshot failed", "component", "transcodenode", "error", err)
 		return
 	}
-	if previous := s.storedCapabilityHash(); previous != "" && previous != info.CapabilityHash {
+	if previous != "" && previous != info.CapabilityHash {
 		slog.InfoContext(ctx, "transcode node capabilities changed", "component", "transcodenode",
 			"previous_hash", previous, "hash", info.CapabilityHash, "resolved", info.Resolved)
 	}
-	s.storeCapabilityHash(info.CapabilityHash)
 }
 
 func toneMapCapabilityResolveTimeout(hardwareBackend, hardwareDevice string) time.Duration {
@@ -1542,7 +1574,7 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		writeChapterThumbnailError(w, http.StatusServiceUnavailable, "node_unavailable", "node not configured")
 		return
@@ -1551,6 +1583,13 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 	// so it takes the same exclusion a transcode does. Without this the route
 	// leaves the gate looking idle — it never touches activeJobs either — and a
 	// re-probe could smoke-encode beside a live extraction.
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), "")
+	if !admitted {
+		writeChapterThumbnailError(w, http.StatusServiceUnavailable, "node_unavailable", errJobCeiling)
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 	if !s.gpu.beginWork() {
 		writeChapterThumbnailError(w, http.StatusServiceUnavailable, "node_unavailable",
 			"node is re-probing its hardware; retry shortly")
@@ -1591,12 +1630,17 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg := s.watcher.Config()
+		cfg := s.runtimeConfig().Config()
 		if cfg == nil {
 			http.Error(w, "node not configured", http.StatusServiceUnavailable)
 			return
 		}
-		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
+		if s.verifyCommand != nil {
+			if s.verifyCommand(r) != nil {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		} else if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -1641,11 +1685,22 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), req.SessionID)
+	if !admitted {
+		http.Error(w, errJobCeiling, http.StatusServiceUnavailable)
+		return
+	}
+	defer func() {
+		if releaseJob != nil {
+			releaseJob()
+		}
+	}()
+	r = r.WithContext(jobContext)
 	// Held from here until the handler returns, by which point activeJobs
 	// covers the session. Without the overlap a re-probe could start in the gap
 	// between admitting this transcode and it becoming visible as an active
@@ -1724,7 +1779,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node is shutting down", http.StatusServiceUnavailable)
 		return
 	}
-	if s.watcher.Config() != cfg {
+	if s.runtimeConfig().Config() != cfg {
 		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)
 		return
 	}
@@ -1818,6 +1873,21 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	trackingInfo := nodesessions.SessionInfo{
+		SessionID:   req.SessionID,
+		NodeURL:     s.tracker.NodeURL(),
+		NodeName:    s.tracker.NodeName(),
+		Type:        "transcode",
+		CodecVideo:  req.TargetCodecVideo,
+		CodecAudio:  req.TargetCodecAudio,
+		Resolution:  req.TargetResolution,
+		HWAccel:     session.Opts().EffectiveEncoderHWAccel(),
+		ToneMapMode: string(session.Opts().ToneMapMode),
+		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+	tracking := s.prepareTracking(r.Context(), trackingInfo)
+	s.holdSessionJob(session, jobContext, releaseJob, tracking)
+	releaseJob = nil
 	s.sessions[req.SessionID] = session
 	published = true
 	s.noteSessionAccessLocked(req.SessionID)
@@ -1832,18 +1902,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	effectiveHWAccel := session.Opts().HWAccel
 	encoderHWAccel := session.Opts().EffectiveEncoderHWAccel()
 	trackCtx := context.WithoutCancel(r.Context())
-	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
-		SessionID:   req.SessionID,
-		NodeURL:     s.tracker.NodeURL(),
-		NodeName:    s.tracker.NodeName(),
-		Type:        "transcode",
-		CodecVideo:  req.TargetCodecVideo,
-		CodecAudio:  req.TargetCodecAudio,
-		Resolution:  req.TargetResolution,
-		HWAccel:     encoderHWAccel,
-		ToneMapMode: string(session.Opts().ToneMapMode),
-		StartedAt:   time.Now().UTC().Format(time.RFC3339),
-	})
+	go s.trackPrepared(trackCtx, trackingInfo, tracking)
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(TranscodeStartResponse{
@@ -1905,11 +1964,11 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	var card playback.RecipeCard
 	tokenComplete := false
 	if tokenStr := r.Header.Get("X-Silo-Stream-Token"); tokenStr != "" {
-		cfg := s.watcher.Config()
+		cfg := s.runtimeConfig().Config()
 		if cfg == nil {
 			return nil, nil
 		}
-		claims, err := streamtoken.Verify(tokenStr, cfg.Auth.JWTSecret)
+		claims, err := s.verifyStreamToken(r.Context(), tokenStr)
 		if err != nil {
 			slog.WarnContext(r.Context(), "transcode node reconstruct: invalid stream token", "component", "transcodenode", "error", err,
 				"session", sessionID, "playback_session_id", sessionID)
@@ -1923,7 +1982,7 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 		if !recipeServesTransport(card, sessionID) {
 			return nil, nil
 		}
-		tokenComplete = recipeIsComplete(card)
+		tokenComplete = s.runtime == nil && recipeIsComplete(card)
 	}
 	// Without a complete token recipe the store is the only remaining source; with
 	// no store wired there is nothing to rebuild from, so 404.
@@ -2007,10 +2066,20 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	if ok {
 		return existing, nil
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		return nil, nil
 	}
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), sessionID)
+	if !admitted {
+		return nil, nil
+	}
+	defer func() {
+		if releaseJob != nil {
+			releaseJob()
+		}
+	}()
+	r = r.WithContext(jobContext)
 	// A reconstruct spawns ffmpeg on the GPU exactly as a fresh start does, so
 	// it takes the same exclusion against a running capability re-probe. Held
 	// until this call returns, by which point activeJobs covers the session.
@@ -2052,7 +2121,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	if s.shuttingDown || s.reportedDrained() {
 		return nil, nil
 	}
-	if s.watcher.Config() != cfg {
+	if s.runtimeConfig().Config() != cfg {
 		return nil, nil
 	}
 
@@ -2158,14 +2227,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		_ = session.CloseProcess()
 		return existing, nil
 	}
-	s.sessions[sessionID] = session
-	s.noteSessionAccessLocked(sessionID)
-	s.mu.Unlock()
-	s.activeJobs.Add(1)
-	s.armSessionThrottler(session, card.ThrottleSeconds)
-
-	trackCtx := context.WithoutCancel(r.Context())
-	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
+	trackingInfo := nodesessions.SessionInfo{
 		SessionID:   sessionID,
 		NodeURL:     s.tracker.NodeURL(),
 		NodeName:    s.tracker.NodeName(),
@@ -2179,7 +2241,18 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		AuthUserID:  card.UserID,
 		ProfileID:   card.ProfileID,
 		MediaFileID: card.MediaFileID,
-	})
+	}
+	tracking := s.prepareTracking(r.Context(), trackingInfo)
+	s.holdSessionJob(session, jobContext, releaseJob, tracking)
+	releaseJob = nil
+	s.sessions[sessionID] = session
+	s.noteSessionAccessLocked(sessionID)
+	s.mu.Unlock()
+	s.activeJobs.Add(1)
+	s.armSessionThrottler(session, card.ThrottleSeconds)
+
+	trackCtx := context.WithoutCancel(r.Context())
+	go s.trackPrepared(trackCtx, trackingInfo, tracking)
 
 	slog.InfoContext(r.Context(), "transcode node session reconstructed from token", "component", "transcodenode",
 		"session", sessionID, "playback_session_id", sessionID,
@@ -2224,7 +2297,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("close session %s: %w", victim.id, err))
 		}
 		if s.tracker != nil {
-			s.tracker.Remove(ctx, victim.id)
+			s.removeLegacyTracking(ctx, victim.id)
 		}
 	}
 	waitCtx, cancelWait := context.WithTimeout(ctx, progressiveRemuxShutdownTimeout)
@@ -2261,13 +2334,13 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 // binds the media recipe and the exact transcode-execution/proxy-egress route.
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	defer s.trackInFlight()()
-	cfg := s.watcher.Config()
-	if cfg == nil || cfg.Auth.JWTSecret == "" {
+	cfg := s.runtimeConfig().Config()
+	if cfg == nil || s.verifyToken == nil && cfg.Auth.JWTSecret == "" {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
 	token := strings.TrimSpace(r.Header.Get("X-Silo-Stream-Token"))
-	claims, err := streamtoken.Verify(token, cfg.Auth.JWTSecret)
+	claims, err := s.verifyStreamToken(r.Context(), token)
 	if err != nil {
 		http.Error(w, "invalid stream token", http.StatusUnauthorized)
 		return
@@ -2338,7 +2411,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errNodeDraining, http.StatusServiceUnavailable)
 		return
 	}
-	if s.watcher.Config() != cfg {
+	if s.runtimeConfig().Config() != cfg {
 		s.reloadMu.RUnlock()
 		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)
 		return
@@ -2359,6 +2432,14 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), transportID)
+	if !admitted {
+		s.reloadMu.RUnlock()
+		http.Error(w, errJobCeiling, http.StatusServiceUnavailable)
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	requestID := s.progressiveRemuxSequence.Add(1)
@@ -2392,8 +2473,26 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session already active", http.StatusConflict)
 		return
 	}
+	var tracking SessionTracking
+	var trackingInfo nodesessions.SessionInfo
+	if s.tracker != nil {
+		startedAt, source := claims.StartedAt()
+		if source == streamtoken.StartedAtSourceNone {
+			startedAt = time.Now().UTC()
+		}
+		trackerType := string(playback.PlayRemux)
+		if theme {
+			trackerType = "theme_audio"
+		}
+		trackingInfo = nodesessions.SessionInfo{
+			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: trackerType,
+			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
+			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
+		}
+		tracking = s.prepareTracking(ctx, trackingInfo)
+	}
 	s.progressiveRemuxes[transportID] = progressiveRemuxRequest{
-		id: requestID, playbackSessionID: playbackSessionID, cancel: stop, done: done,
+		id: requestID, playbackSessionID: playbackSessionID, cancel: stop, done: done, inputPath: claims.MediaPath, tracking: tracking,
 	}
 	s.mu.Unlock()
 	unlock()
@@ -2411,20 +2510,8 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	s.activeJobs.Add(1)
 	defer s.activeJobs.Add(-1)
 	if s.tracker != nil {
-		startedAt, source := claims.StartedAt()
-		if source == streamtoken.StartedAtSourceNone {
-			startedAt = time.Now().UTC()
-		}
-		trackerType := "remux"
-		if theme {
-			trackerType = "theme_audio"
-		}
-		s.tracker.Track(ctx, nodesessions.SessionInfo{
-			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: trackerType,
-			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
-			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
-		})
-		defer s.tracker.Remove(context.WithoutCancel(ctx), playbackSessionID)
+		s.trackPrepared(ctx, trackingInfo, tracking)
+		defer s.removePrepared(context.WithoutCancel(ctx), playbackSessionID, tracking)
 	}
 
 	request := r.WithContext(ctx)
@@ -2530,6 +2617,10 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// miss into a normal teardown.
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
+	if !s.stopInputScopeMatches(r.Context(), sessionID) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 
 	durableProgressive := false
 	authorityFound := false
@@ -2593,7 +2684,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.tracker != nil {
-		s.tracker.Remove(r.Context(), playbackSessionID)
+		s.removeLegacyTracking(r.Context(), playbackSessionID)
 	}
 	var shutdownErr error
 	if progressiveFound {
@@ -2867,7 +2958,7 @@ func (s *Server) handleReloadConfig(w http.ResponseWriter, r *http.Request) {
 	// against a config this reload is in the middle of replacing.
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	if err := s.watcher.ForceReload(r.Context()); err != nil {
+	if err := s.runtimeConfig().ForceReload(r.Context()); err != nil {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -2886,7 +2977,7 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	if s.nodeRowID != nil {
 		previousNodeID, _ = s.nodeRowID()
 	}
-	if err := s.watcher.ForceReload(r.Context()); err != nil {
+	if err := s.runtimeConfig().ForceReload(r.Context()); err != nil {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -3004,7 +3095,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 		// also wipe unrelated tracker-only work, such as an active download
 		// preparation, even though force reload does not stop that job.
 		if s.tracker != nil {
-			s.tracker.Remove(ctx, victim.id)
+			s.removeLegacyTracking(ctx, victim.id)
 		}
 		unlock()
 	}
@@ -3034,7 +3125,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 			if trackerSessionID == "" {
 				trackerSessionID = id
 			}
-			s.tracker.Remove(ctx, trackerSessionID)
+			s.removePrepared(ctx, trackerSessionID, request.tracking)
 		}
 	}
 

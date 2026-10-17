@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/executionlease"
+
 	"golang.org/x/sync/singleflight"
 )
 
@@ -85,7 +87,7 @@ func ValidateSourceWithRunner(ctx context.Context, request SourcePreflightReques
 	if request.Kind == "" || request.Mode == "" || strings.TrimSpace(request.InputPath) == "" {
 		return fmt.Errorf("%w: incomplete tone-map source preflight", ErrSourcePreflightRejected)
 	}
-	if err := request.SourceRevision.ValidatePath(request.InputPath); err != nil {
+	if err := request.SourceRevision.ValidatePathContext(ctx, request.InputPath); err != nil {
 		return err
 	}
 	if strings.TrimSpace(request.FFmpegPath) == "" {
@@ -106,12 +108,16 @@ func ValidateSourceWithRunner(ctx context.Context, request SourcePreflightReques
 		if ok {
 			return cachedPreflightError(entry)
 		}
+		releaseLease, leaseErr := executionlease.Retain(ctx)
+		if leaseErr != nil {
+			return leaseErr
+		}
 		resultCh := sourcePreflightCache.group.DoChan(key, func() (any, error) {
 			entry, ok := sourcePreflightCacheLookup(key, time.Now())
 			if ok {
 				return entry, nil
 			}
-			sharedCtx, sharedCancel := context.WithTimeout(context.Background(), sourcePreflightExecutionTimeout(request.DurationSeconds))
+			sharedCtx, sharedCancel := context.WithTimeout(context.WithoutCancel(ctx), sourcePreflightExecutionTimeout(request.DurationSeconds))
 			defer sharedCancel()
 			preflightErr := runSourcePreflight(sharedCtx, request, run)
 			if err := sharedCtx.Err(); err != nil {
@@ -130,8 +136,10 @@ func ValidateSourceWithRunner(ctx context.Context, request SourcePreflightReques
 		})
 		select {
 		case <-preflightCtx.Done():
+			go func() { <-resultCh; releaseLease() }()
 			return fmt.Errorf("%w: %w", ErrSourcePreflightUnavailable, preflightCtx.Err())
 		case result := <-resultCh:
+			releaseLease()
 			if result.Err != nil {
 				return result.Err
 			}
@@ -251,6 +259,10 @@ func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run Comma
 		return result, nil
 	}
 	ffmpegVersionCache.Unlock()
+	releaseLease, leaseErr := executionlease.Retain(ctx)
+	if leaseErr != nil {
+		return nil, leaseErr
+	}
 	resultCh := ffmpegVersionCache.group.DoChan(cacheKey, func() (any, error) {
 		ffmpegVersionCache.Lock()
 		cached, ok := ffmpegVersionCache.entries[cacheKey]
@@ -258,7 +270,7 @@ func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run Comma
 		if ok {
 			return append([]byte(nil), cached...), nil
 		}
-		sharedCtx, sharedCancel := context.WithTimeout(context.Background(), probeCommandTimeout)
+		sharedCtx, sharedCancel := context.WithTimeout(context.WithoutCancel(ctx), probeCommandTimeout)
 		defer sharedCancel()
 		output, runErr := runBounded(sharedCtx, run, resolved, "-version")
 		if sharedErr := sharedCtx.Err(); sharedErr != nil {
@@ -274,8 +286,10 @@ func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run Comma
 	})
 	select {
 	case <-ctx.Done():
+		go func() { <-resultCh; releaseLease() }()
 		return nil, ctx.Err()
 	case result := <-resultCh:
+		releaseLease()
 		if result.Err != nil {
 			return nil, result.Err
 		}

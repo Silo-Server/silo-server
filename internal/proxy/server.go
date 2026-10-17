@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
+	"github.com/Silo-Server/silo-server/internal/workerproxy"
 )
 
 // proxyRangeHeader is the HTTP Range header the media routes accept.
@@ -823,6 +824,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) {
+	r = r.WithContext(workerproxy.WithToken(r.Context(), chi.URLParam(r, "token")))
 	if !downloadprepare.ValidArtifactID(claims.DownloadArtifactID) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -1142,6 +1144,7 @@ func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 // (never to the client): the client's own token on a token route, a
 // proxy-minted one on a grant route.
 func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, path, forwardToken string) {
+	r = r.WithContext(workerproxy.WithToken(r.Context(), forwardToken))
 	cfg := s.watcher.Config()
 	if claims.TranscodeNode == "" {
 		http.Error(w, "no transcode node in token", http.StatusBadRequest)

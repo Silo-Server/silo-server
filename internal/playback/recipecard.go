@@ -20,6 +20,7 @@ import (
 // context, channels, log sink). Those are re-wired on reconstruct from the
 // live config and request.
 type RecipeCard struct {
+	streamtoken.OriginCredential
 	SessionID            string    `json:"session_id"`
 	UserID               int       `json:"user_id"`
 	ProfileID            string    `json:"profile_id"`
@@ -384,6 +385,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		playMethod = streamtoken.PlayMethodToneMapTranscode
 	}
 	return streamtoken.Claims{
+		OriginCredential:              c.OriginCredential,
 		SessionID:                     c.SessionID,
 		MediaPath:                     c.InputPath,
 		OutputSubdir:                  c.OutputSubdir,
@@ -480,6 +482,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		sourceRevision = tonemap.SourceRevision{MediaFileID: -1}
 	}
 	card := RecipeCard{
+		OriginCredential:              c.OriginCredential,
 		SessionID:                     c.SessionID,
 		UserID:                        c.UserID,
 		ProfileID:                     c.ProfileID,

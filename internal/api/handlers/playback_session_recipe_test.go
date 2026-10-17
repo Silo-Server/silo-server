@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -73,7 +72,7 @@ func newHeaderAuthRestartFixtureV3(t *testing.T, startOpts ...func(*playback.Sta
 		attempts: playback.NewMemoryPlanStoreV3(),
 		recipes:  &recordingRecipeCardStoreV3{},
 	}
-	nodeRecipes := &lockedRecipeCardStoreV3{}
+	nodeRecipes := &sharedRecipeStore{cards: make(map[string]playback.RecipeCard)}
 	f.configure = func(handler *PlaybackHandler) {
 		handler.fileResolver = testPlaybackFileResolver{file: file}
 		handler.JWTSecret = "test-secret"
@@ -328,19 +327,6 @@ func TestHeaderAuthenticatedDirectStreamRecoversAfterAnAPIRestart(t *testing.T) 
 	}
 }
 
-// lockedRecipeCardStoreV3 is a recipe store safe for the goroutine that writes
-// a moved transport's node recipe after the move has returned.
-type lockedRecipeCardStoreV3 struct {
-	mu    sync.Mutex
-	inner recordingRecipeCardStoreV3
-}
-
-func (s *lockedRecipeCardStoreV3) Enabled() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inner.Enabled()
-}
-
 // unavailableAttemptStoreV3 is an attempt store whose reads fail the way a
 // saturated or failing-over Postgres does.
 type unavailableAttemptStoreV3 struct {
@@ -349,24 +335,6 @@ type unavailableAttemptStoreV3 struct {
 
 func (unavailableAttemptStoreV3) GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error) {
 	return nil, errors.New("connection reset by peer")
-}
-
-func (s *lockedRecipeCardStoreV3) Get(ctx context.Context, key string) (*playback.RecipeCard, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inner.Get(ctx, key)
-}
-
-func (s *lockedRecipeCardStoreV3) Put(ctx context.Context, key string, card playback.RecipeCard) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inner.Put(ctx, key, card)
-}
-
-func (s *lockedRecipeCardStoreV3) Delete(ctx context.Context, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.inner.Delete(ctx, key)
 }
 
 // An FFmpeg exit or a copy-safety stop tears the session down without ending

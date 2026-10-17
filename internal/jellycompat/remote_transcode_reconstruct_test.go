@@ -17,7 +17,9 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -53,6 +55,33 @@ func (s *stubRecipeNodeStore) Put(_ context.Context, sessionID string, card play
 	return nil
 }
 
+type stubRecipePublication struct {
+	undo   func(context.Context) error
+	retire func(context.Context) error
+	id     string
+}
+
+func (p stubRecipePublication) ID() string                       { return p.id }
+func (p stubRecipePublication) Undo(ctx context.Context) error   { return p.undo(ctx) }
+func (p stubRecipePublication) Commit(context.Context) error     { return nil }
+func (p stubRecipePublication) Retire(ctx context.Context) error { return p.retire(ctx) }
+func (s *stubRecipeNodeStore) PublishWithUndo(ctx context.Context, work string, card playback.RecipeCard, _ ...*noderecipe.AcceptedPublication) (noderecipe.Publication, error) {
+	previous, exists := s.Get(work)
+	if err := s.Put(ctx, work, card); err != nil {
+		return nil, err
+	}
+	return stubRecipePublication{id: uuidNewString(), retire: func(ctx context.Context) error { return s.Delete(ctx, work) }, undo: func(ctx context.Context) error {
+		if exists {
+			return s.Put(ctx, work, previous)
+		}
+		return s.Delete(ctx, work)
+	}}, nil
+}
+
+func (s *stubRecipeNodeStore) ReconcileAccepted(context.Context, string, *noderecipe.AcceptedPublication) error {
+	return nil
+}
+
 func TestStartRemoteTranscodeRequiresDurableNodeRecipe(t *testing.T) {
 	recipeStore := &stubRecipeNodeStore{putErr: context.DeadlineExceeded}
 	node := fakeTranscodeNode(t, nil)
@@ -73,6 +102,15 @@ func TestStartRemoteTranscodeRequiresDurableNodeRecipe(t *testing.T) {
 }
 
 func TestStartRemoteTranscodeCarriesThrottlePolicyIntoReconstructionRecipe(t *testing.T) {
+	var playbackJob string
+	nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
+		return playbackJobRoundTripper{base: base, observe: func(r *http.Request) {
+			if r.Method == http.MethodPost && r.URL.Path == "/transcode/start" {
+				playbackJob = nodehttp.PlaybackJob(r.Context())
+			}
+		}}
+	})
+	t.Cleanup(func() { nodehttp.Configure(nil) })
 	var received transcodenode.TranscodeStartRequest
 	recipeStore := &stubRecipeNodeStore{}
 	node := fakeTranscodeNode(t, &received)
@@ -88,6 +126,9 @@ func TestStartRemoteTranscodeCarriesThrottlePolicyIntoReconstructionRecipe(t *te
 	}
 	if received.ThrottleSeconds != 180 {
 		t.Fatalf("remote throttle seconds = %d, want 180", received.ThrottleSeconds)
+	}
+	if playbackJob != "upstream-1" {
+		t.Fatalf("compat remote start lost server-owned playback job: %q", playbackJob)
 	}
 	card, ok := recipeStore.Get("upstream-1")
 	if !ok {

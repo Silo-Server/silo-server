@@ -30,6 +30,9 @@ var excludedPrefixes = []string{
 	"/api/v1/ready",
 	"/api/v1/admin/logs",
 	"/api/v2/admin/logs",
+	// Standalone workers poll authority every second and read sources in
+	// ranges; this internal traffic is not user activity.
+	"/api/internal/workers/",
 }
 
 // streamPrefixes are paths logged only at session-start (not per-chunk).

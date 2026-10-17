@@ -44,6 +44,7 @@ const (
 	ListenerTranscodeNode = "transcode_node"
 	ListenerDebug         = "operational_debug"
 	ListenerMetrics       = "operational_metrics"
+	ListenerWorkerControl = "worker_control_core"
 )
 
 // Listener kinds select the router model the walk applies to an entry point.
@@ -284,6 +285,7 @@ func (a *Analyzer) build() (*Inventory, error) {
 		// and can be wrong. They are listed so a later stage knows which fields
 		// still have to be confirmed against the handlers themselves.
 		HeuristicFields: []string{
+			"auth_class/auth_traits: middleware markers normally determine authority; worker proof checks are inferred from typed VerifyRequest calls on the incoming request, and named worker gateways/injected source handlers delegate admission",
 			"request_kind: inferred from decode/parse calls in the handler body, matched by callee name and by the " +
 				"substring \"body\" in the decoded argument",
 			"response_media_kind: inferred from Content-Type string literals and from writer-call names " +
@@ -629,6 +631,9 @@ func (a *Analyzer) emitMux(call *ast.CallExpr, env *walkEnv, pattern string, han
 			route.Conditions = []string{}
 		}
 		route.AuthClass, route.AuthTraits = classifyAuth(route.chain)
+		if info.authClass != "" {
+			route.AuthClass, route.AuthTraits = info.authClass, []string{info.authClass}
+		}
 		if delegate != "" {
 			// The delegated surface's own rows carry its auth; claiming this
 			// row is public would be a claim about routes it does not own.
@@ -1364,6 +1369,9 @@ func (a *Analyzer) emit(call *ast.CallExpr, env *walkEnv, scope *routerScope, me
 			route.Conditions = []string{}
 		}
 		route.AuthClass, route.AuthTraits = classifyAuth(route.chain)
+		if info.authClass != "" {
+			route.AuthClass, route.AuthTraits = info.authClass, []string{info.authClass}
+		}
 		if delegate != "" {
 			// The delegated listener's own surface carries its auth; the row
 			// records the hand-off, not a claim about the operations behind it.

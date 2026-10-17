@@ -6,11 +6,13 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/executionlease"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 )
 
 // Retain one bounded observed window, carrying its origin forward using actual
@@ -30,6 +32,7 @@ func (s *TranscodeSession) copyManifestOrigin(opts TranscodeOpts, generation uin
 	defer s.copyTimelineMu.Unlock()
 	s.mu.Lock()
 	outputDir := s.outputDir
+	probeContext := s.workerExecutionContext
 	changed := generation != s.segmentGeneration || s.restarting != nil
 	s.mu.Unlock()
 	if changed {
@@ -56,7 +59,10 @@ func (s *TranscodeSession) copyManifestOrigin(opts TranscodeOpts, generation uin
 		if !copyVideoUsesFMP4(opts) {
 			return 0, fmt.Errorf("copy manifest lost its observed timeline; MPEG-TS timestamp epoch is ambiguous")
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if probeContext == nil {
+			probeContext = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(probeContext, 5*time.Second)
 		defer cancel()
 		var err error
 		origin, err = probeCopyFragmentOrigin(ctx, opts, outputDir, first)
@@ -94,17 +100,31 @@ func (s *TranscodeSession) copyManifestOrigin(opts TranscodeOpts, generation uin
 // Feed only the generated init and requested fragment, so a live playlist cannot
 // advance between observation and probing. No source file or remote URI opens.
 func probeCopyFragmentOrigin(ctx context.Context, opts TranscodeOpts, outputDir string, number int) (float64, error) {
-	init, err := os.Open(filepath.Join(outputDir, "init.mp4"))
+	initPath := filepath.Join(outputDir, "init.mp4")
+	fragmentPath := filepath.Join(outputDir, fmt.Sprintf("seg_%05d.m4s", number))
+	for _, path := range []string{initPath, fragmentPath} {
+		if err := workerinput.ValidateOutput(ctx, path); err != nil {
+			return 0, err
+		}
+	}
+	release, err := executionlease.Retain(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	//nolint:gosec // These paths come from the owned transcode output directory and its validated playlist entry. G304
+	init, err := os.Open(initPath)
 	if err != nil {
 		return 0, fmt.Errorf("open copy init: %w", err)
 	}
 	defer func() { _ = init.Close() }()
-	fragment, err := os.Open(filepath.Join(outputDir, fmt.Sprintf("seg_%05d.m4s", number)))
+	//nolint:gosec // These paths come from the owned transcode output directory and its validated playlist entry. G304
+	fragment, err := os.Open(fragmentPath)
 	if err != nil {
 		return 0, fmt.Errorf("open copy fragment: %w", err)
 	}
 	defer func() { _ = fragment.Close() }()
-	cmd := exec.CommandContext(ctx, ffprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath)),
+	cmd := workerinput.CommandContext(ctx, ffprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath)),
 		"-v", "error", "-probesize", "5000000", "-analyzeduration", "3000000",
 		"-select_streams", "v:0", "-read_intervals", "%+#1", "-show_entries", "packet=pts_time",
 		"-of", "csv=p=0", "-i", "pipe:0")

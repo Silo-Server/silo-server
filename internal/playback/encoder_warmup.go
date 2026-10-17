@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/executionlease"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 const (
@@ -77,6 +79,11 @@ func warmHardwareEncoderCached(
 		return entry.err
 	}
 
+	releaseLease, leaseErr := executionlease.Retain(ctx)
+	if leaseErr != nil {
+		return leaseErr
+	}
+	defer releaseLease()
 	value, err, _ := state.group.Do(cacheKey, func() (any, error) {
 		state.Lock()
 		cached, found := state.entries[cacheKey]

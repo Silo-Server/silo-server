@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
+
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -74,6 +76,10 @@ var (
 // transcode node supplies its own FFmpeg path, hardware mode, device list, and
 // output path. ArtifactID is an opaque handle, never a caller-selected path.
 type Request struct {
+	// SourceIdentity is the core-admitted stable source and revision in the
+	// negotiated HTTP worker protocol. A loopback handle is never an artifact
+	// fingerprint. Legacy local/shared-path requests leave this field empty.
+	SourceIdentity             string                 `json:"source_identity,omitempty"`
 	ArtifactID                 string                 `json:"artifact_id"`
 	InputPath                  string                 `json:"input_path"`
 	SourceVideoCodec           string                 `json:"source_video_codec,omitempty"`
@@ -235,7 +241,7 @@ func (r Request) ValidPreparedTracks() bool {
 // receipt from a node that understood all newly transported recipe fields.
 // Explicit audio output settings affect bytes even when the v2 boost does not.
 func (r Request) ExecutionAttestationRequested() bool {
-	return r.ToneMapRequested() || r.AudioRecipeRequested() || r.PreparedTracksRequested() ||
+	return r.SourceIdentity != "" || r.ToneMapRequested() || r.AudioRecipeRequested() || r.PreparedTracksRequested() ||
 		r.TargetAudioChannels != 0 || r.TargetAudioBitrateKbps != 0
 }
 
@@ -251,6 +257,10 @@ func (r Request) ValidToneMapAttestation() bool {
 // ExecutionFingerprint identifies every transported byte-affecting field while
 // deliberately excluding the idempotency handle.
 func (r Request) ExecutionFingerprint() string {
+	if r.SourceIdentity != "" {
+		r.InputPath = r.SourceIdentity
+		r.SourceIdentity = ""
+	}
 	r.ArtifactID = ""
 	r.LogSessionID = ""
 	data, err := json.Marshal(r)
@@ -394,7 +404,7 @@ func (p HTTPPreparer) Stat(ctx context.Context, nodeURL, jwtSecret, artifactID s
 	if !ValidArtifactID(artifactID) {
 		return Result{}, fmt.Errorf("remote download artifact stat: invalid artifact id")
 	}
-	httpReq, err := p.request(ctx, http.MethodHead, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	httpReq, err := p.request(nodehttp.WithArtifactStat(ctx), http.MethodHead, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
 	if err != nil {
 		return Result{}, fmt.Errorf("remote download artifact stat: %w", err)
 	}
@@ -674,16 +684,16 @@ func (p HTTPPreparer) request(ctx context.Context, method, nodeURL, jwtSecret, p
 
 func (p HTTPPreparer) client() *http.Client {
 	if p.Client != nil {
-		return p.Client
+		return nodehttp.Client(p.Client)
 	}
-	return defaultHTTPClient
+	return nodehttp.Client(defaultHTTPClient)
 }
 
 func (p HTTPPreparer) prepareClient() *http.Client {
 	if p.Client != nil {
-		return p.Client
+		return nodehttp.Client(p.Client)
 	}
-	return defaultPrepareHTTPClient
+	return nodehttp.Client(defaultPrepareHTTPClient)
 }
 
 func (p HTTPPreparer) readIdleTimeout() time.Duration {

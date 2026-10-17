@@ -3784,7 +3784,14 @@ func TestHandleStartPreservesVideoSampleEntry(t *testing.T) {
 }
 
 func TestShutdownDrainsProgressiveRemuxAndRejectsLateRequests(t *testing.T) {
+	testShutdownDrainsProgressiveRemux(t, nil)
+}
+func testShutdownDrainsProgressiveRemux(t *testing.T, tracker sessionTracker) {
+	t.Helper()
 	server := newTestServer(t)
+	if tracker != nil {
+		server.tracker = tracker
+	}
 	server.nodeRowID = func() (int, bool) { return 11, true }
 	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")

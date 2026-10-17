@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -221,12 +222,11 @@ type PlaybackHandler struct {
 	// session from. Optional: without it (or without Redis behind it) an attempt
 	// that negotiated authorized_media_origins_v1 simply stays on the API origin.
 	ProxyGrantStore recipeCardStoreV3
-	// NodeRecipeStore hands a transcode node the recipe it rebuilds a
-	// header-authenticated remote transcode from after its own restart, keyed by
-	// the transport id the node serves it under. It is also the active authority
-	// for transcode-executed progressive remuxes, whose signed tokens otherwise
-	// outlive a node's in-memory stop fence. Without a usable store those remuxes
-	// use another legal route; tokenless HLS sessions replan instead of recovering.
+	// NodeRecipeStore holds reconstruction recipes keyed by the node's transport
+	// id. Enrolled standalone HLS workers and remote progressive remuxes require
+	// this active authority regardless of client authentication; a standalone
+	// worker never receives the client's token-carried recipe. Legacy tokenless
+	// HLS also uses it for restart recovery on a best-effort basis.
 	NodeRecipeStore recipeCardStoreV3
 	// SessionRecipeStore keeps the committed recipe of a header-authenticated
 	// session, keyed by playback session id, so this server (after a restart, or
@@ -310,8 +310,7 @@ type PlaybackHandler struct {
 	v3StartEffectsMu        sync.Mutex
 	v3StartEffectsPending   map[string]*playbackStartSideEffectsStateV3
 	v3AudioPreferenceMu     sync.Mutex
-	v3ReplanMu              sync.Mutex
-	v3ReplanLocks           map[string]*v3ReplanLock
+	v3ReplanLocks           playback.SessionLocksV3
 	v3ReplanSlotsOnce       sync.Once
 	v3ReplanSlots           chan struct{}
 	v3EventRateMu           sync.Mutex
@@ -811,6 +810,22 @@ func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 	return appendStreamToken(streamURL, h.signSessionToken(card, s.RequireMediaAuthorization))
 }
 
+// streamOriginCredential reads the authenticated source identity, never the
+// playback session ID or a credential supplied in the request body.
+func streamOriginCredential(ctx context.Context) streamtoken.OriginCredential {
+	claims := apimw.GetClaims(ctx)
+	if claims == nil {
+		return streamtoken.OriginCredential{}
+	}
+	if claims.TokenType == auth.TokenTypeAPIKey {
+		return streamtoken.OriginCredential{OriginAPIKeyID: claims.APIKeyID}
+	}
+	if claims.TokenType == auth.TokenTypeAccess || claims.TokenType == auth.TokenTypeDirectDownloadLink {
+		return streamtoken.OriginCredential{OriginLoginSessionID: claims.SessionID}
+	}
+	return streamtoken.OriginCredential{}
+}
+
 // identityRecipeCard builds the identity-only recipe for a direct-play or remux
 // session: reconstruction needs only ownership plus the audio selection, since
 // the bytes are served by HTTP Range / a re-spawned remux pipe at the
@@ -830,6 +845,7 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	default:
 		card = playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)
 	}
+	card.OriginCredential = s.OriginCredential
 	card.OriginalStartedAt = s.StartedAt
 	card.RoutingNetworkProvider = s.RoutingNetworkProvider
 	card.StreamLocation = s.StreamLocation
@@ -1222,8 +1238,9 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	deleteRecipe := h.captureNodeRecipeDeletionV3(ctx, session.TranscodeTransportID, session.TranscodeNodeURL)
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
-	h.cleanupStoppedSessionTransport(ctx, session)
+	h.cleanupStoppedSessionTransport(ctx, session, deleteRecipe)
 	if userInitiated || session.TranscodeNodeURL != "" {
 		// A system teardown (an FFmpeg exit, a copy-safety stop) leaves the
 		// attempt live for the client's next request to rebuild, as a stream
@@ -1265,7 +1282,15 @@ func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *pla
 	}
 }
 
-func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, session *playback.Session) {
+// Ordinary stops capture recipe ownership before waiting for start effects.
+// Realtime stops enter directly and capture here before closing the producer.
+func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, session *playback.Session, capturedDeletion ...func()) {
+	var deleteRecipe func()
+	if len(capturedDeletion) > 0 {
+		deleteRecipe = capturedDeletion[0]
+	} else {
+		deleteRecipe = h.captureNodeRecipeDeletionV3(ctx, session.TranscodeTransportID, session.TranscodeNodeURL)
+	}
 	h.closeTranscodeForSession(session)
 	// A session that ends must stop egressing everywhere, not just here: the
 	// grant is a proxy's whole authority to serve these bytes, and unlike the
@@ -1275,7 +1300,7 @@ func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, se
 	// The teardown above stopped the remote job, so its stored recipe must not
 	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
 	// the node for a transport that no longer exists.
-	h.deleteNodeRecipeV3(ctx, session.TranscodeTransportID)
+	deleteRecipe()
 }
 
 // recordStopHistory writes a stopped session to watch history and the admin
@@ -1323,6 +1348,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	deleteRecipe := h.captureNodeRecipeDeletionV3(ctx, session.TranscodeTransportID, session.TranscodeNodeURL)
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 
 	if h.WatchScrobbler != nil && h.fileResolver != nil {
@@ -1354,7 +1380,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 	// The teardown above stopped the remote job, so its stored recipe must not
 	// outlive it: a buffered or retrying request would otherwise rebuild ffmpeg on
 	// the node for a transport that no longer exists.
-	h.deleteNodeRecipeV3(ctx, session.TranscodeTransportID)
+	deleteRecipe()
 	// Every caller ends the attempt too, which refuses the card on any replica;
 	// drop it here like the node recipe rather than leave it to lapse.
 	h.deleteSessionRecipeV3(ctx, session.ID)
@@ -1791,6 +1817,14 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 	attachPlaybackSession(r.Context(), session, claims)
 
 	transcodeSession := h.tm.GetTranscodeSession(sessionID)
+	if transcodeSession != nil {
+		var err error
+		session, transcodeSession, err = h.readyLocalRehomeRuntimeV3(r.Context(), session, transcodeSession)
+		if err != nil {
+			writeRehomeUnavailableV3(w)
+			return
+		}
+	}
 	if transcodeSession == nil && session.TranscodeNodeURL != "" {
 		// No local session — relay to the remote transcode node, moving the
 		// transcode to another executor if that node cannot be reached.
@@ -1909,6 +1943,14 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	attachPlaybackSession(r.Context(), session, claims)
 
 	transcodeSession := h.tm.GetTranscodeSession(sessionID)
+	if transcodeSession != nil {
+		var err error
+		session, transcodeSession, err = h.readyLocalRehomeRuntimeV3(r.Context(), session, transcodeSession)
+		if err != nil {
+			writeRehomeUnavailableV3(w)
+			return
+		}
+	}
 	if transcodeSession == nil && session.TranscodeNodeURL != "" {
 		h.touchSessionActivity(sessionID)
 		var served bool

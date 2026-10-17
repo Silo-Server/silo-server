@@ -537,6 +537,8 @@ jobs:
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-integration"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     env:
       SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/silo_test?sslmode=disable
+      SILO_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      SILO_WORKER_TEST_REDIS: 127.0.0.1:6379
     steps:
       - *libvips-cache-key
       - *libvips-restore
@@ -550,6 +552,9 @@ jobs:
 
       - name: Start pgvector Postgres
         run: docker run -d --rm --cidfile "$RUNNER_TEMP/pgvector" -p 5433:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pgvector.log" 2>&1 &
+
+      - name: Start Redis for HTTP worker contracts
+        run: docker run -d --rm --cidfile "$RUNNER_TEMP/worker-redis" -p 127.0.0.1:6379:6379 redis:8.2-alpine > "$RUNNER_TEMP/worker-redis.log" 2>&1 &
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -566,6 +571,14 @@ jobs:
         with:
           cache-name: integration
 
+      - name: Ensure FFmpeg for source recovery contracts
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version
+
       - *libvips-save
 
       - name: Wait for Postgres
@@ -574,6 +587,11 @@ jobs:
           timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pg")" pg_isready -h 127.0.0.1 -U postgres -d watch_party; do sleep 1; done' || { cat "$RUNNER_TEMP/pg.log"; exit 1; }
           # shellcheck disable=SC2016
           timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pgvector")" pg_isready -h 127.0.0.1 -U postgres -d silo_test; do sleep 1; done' || { cat "$RUNNER_TEMP/pgvector.log"; exit 1; }
+
+      - name: Wait for HTTP worker Redis
+        run: |
+          # shellcheck disable=SC2016
+          timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/worker-redis")" redis-cli ping; do sleep 1; done' || { cat "$RUNNER_TEMP/worker-redis.log"; exit 1; }
 
       - name: Migrate the test database
         run: DATABASE_URL="$SILO_TEST_DATABASE_URL" go run ./scripts/ci/migrate/ --migrate-only
@@ -624,6 +642,16 @@ jobs:
       - name: Test Jellyfin detail preferences against Postgres
         run: cd cmd/silo && "$RUNNER_TEMP/race/silo.test" -test.run='^TestCompatDetailServiceResolvesViewerSubtitleDefaultsPostgres$' -test.count=1 -test.timeout=10m
 
+      - name: Test HTTP worker contracts without missing or skipped cases
+        run: GOFLAGS="${GOFLAGS:-} -race" go run ./scripts/ci/dbpins -list scripts/ci/http-worker-contracts.txt
+
+      - name: Stop HTTP worker Redis
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/worker-redis" ]; then
+            docker stop "$(cat "$RUNNER_TEMP/worker-redis")"
+          fi
+
       - name: Save the Go cache
         if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
         uses: ./.github/actions/save-go-cache
@@ -647,6 +675,8 @@ jobs:
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-pins"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     env:
       SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
+      SILO_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      SILO_WORKER_TEST_REDIS: 127.0.0.1:6379
     steps:
       - *libvips-cache-key
       - *libvips-restore
@@ -655,6 +685,9 @@ jobs:
       # The image docker-compose.yml runs: the schema needs pgvector.
       - name: Start Postgres
         run: docker run -d --rm --cidfile "$RUNNER_TEMP/pg" -p 5432:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pg.log" 2>&1 &
+
+      - name: Start Redis for worker query budgets
+        run: docker run -d --rm --cidfile "$RUNNER_TEMP/worker-redis" -p 127.0.0.1:6379:6379 redis:8.2-alpine > "$RUNNER_TEMP/worker-redis.log" 2>&1 &
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -676,8 +709,20 @@ jobs:
       - name: Migrate the test database
         run: DATABASE_URL="$SILO_TEST_DATABASE_URL" go run ./scripts/ci/migrate/ --migrate-only
 
+      - name: Wait for worker query-budget Redis
+        run: |
+          # shellcheck disable=SC2016
+          timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/worker-redis")" redis-cli ping; do sleep 1; done' || { cat "$RUNNER_TEMP/worker-redis.log"; exit 1; }
+
       - name: Run the query-budget pins
         run: make test-db-pins
+
+      - name: Stop worker query-budget Redis
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/worker-redis" ]; then
+            docker stop "$(cat "$RUNNER_TEMP/worker-redis")"
+          fi
 
       - name: Save the Go cache
         if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'

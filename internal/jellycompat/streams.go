@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -885,6 +886,13 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 				remoteNodeURL = tcNode.URL
 			}
 		}
+		if recipePublicationUncertain(startErr) {
+			// The existing executor may already be accepted. Preserve it while
+			// a later request reconciles the authoritative publication.
+			w.Header().Set("Retry-After", "1")
+			writeCompatTranscodeError(w, startErr)
+			return
+		}
 		if startErr != nil {
 			lastPreparationErr = startErr
 			h.releaseCompatSessionReservation(playSession.UpstreamSessionID)
@@ -980,6 +988,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 
 func writeCompatTranscodeError(w http.ResponseWriter, err error) {
 	switch {
+	case recipePublicationUncertain(err):
+		writeError(w, http.StatusServiceUnavailable, "TranscodeUnavailable", "Transcode publication is temporarily unavailable")
 	case errors.Is(err, errToneMapCapabilityUnavailable),
 		errors.Is(err, errAudioDownmixCapabilityUnavailable),
 		errors.Is(err, errCompatRecipeSourceMismatch),
@@ -1925,6 +1935,7 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	upstreamSession *playback.Session,
 	transcodeNodeURL string,
 ) {
+	deleteRecipe := h.captureNodeRecipeDeletion(ctx, playSession.UpstreamSessionID, transcodeNodeURL)
 	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
 	if h.sessionMgr != nil {
 		// The play is over, so finish rather than stop the native session: its
@@ -1939,14 +1950,7 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	// Deliberate stop: drop the node recipe so a buffered/retrying request after
 	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
 	// Best effort and bounded — never fail teardown on a recipe-store hiccup.
-	if h.RecipeNodeStore != nil {
-		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-		defer cancel()
-		if err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID); err != nil {
-			slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
-				"playback_session_id", playSession.UpstreamSessionID)
-		}
-	}
+	deleteRecipe()
 	// Clients often drop the connection right after reporting a stop, so detach
 	// the sync from request cancellation to keep the admin view accurate.
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
@@ -2479,6 +2483,13 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 // session. A transcode carries its full recipe in the compat store
 // (PlaybackSession.Recipe); direct/remux need only identity, rebuilt here from
 // the compat session and the negotiated source.
+func compatStreamOrigin(session *Session) streamtoken.OriginCredential {
+	if session == nil {
+		return streamtoken.OriginCredential{}
+	}
+	return streamtoken.OriginCredential{OriginLoginSessionID: session.LoginSessionID, OriginAPIKeyID: session.OriginAPIKeyID}
+}
+
 func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, source PlaybackMediaSource, method string) playback.RecipeCard {
 	var card playback.RecipeCard
 	if ps != nil && ps.Recipe != nil {
@@ -2491,6 +2502,7 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 	} else {
 		card = playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
 	}
+	card.OriginCredential = compatStreamOrigin(cs)
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
 	}
@@ -2665,23 +2677,18 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			transcodeNodeURL = current.TranscodeNodeURL
 			h.dispatchCompatScrobble(ctx, compatScrobbleStop, playSession, current, nil)
 		}
+		deleteRecipe := h.captureNodeRecipeDeletion(ctx, oldUpstreamSessionID, transcodeNodeURL)
 		_ = h.sessionMgr.StopSession(oldUpstreamSessionID)
 		h.tm.CloseTranscodeSession(oldUpstreamSessionID, transcodeNodeURL)
 		// Method switch discards the old upstream session: drop its node recipe so
 		// the abandoned id cannot reconstruct ffmpeg after a node restart. Best
 		// effort and bounded — never block the new method's start on a store hiccup.
-		if h.RecipeNodeStore != nil {
-			delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-			if err := h.RecipeNodeStore.Delete(delCtx, oldUpstreamSessionID); err != nil {
-				slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
-					"playback_session_id", oldUpstreamSessionID)
-			}
-			cancel()
-		}
+		deleteRecipe()
 	}
 
 	var session *playback.Session
 	var err error
+	ctx = playback.WithOriginCredential(ctx, compatStreamOrigin(compatSession))
 	if starter, ok := h.sessionMgr.(sessionStarterContext); ok {
 		session, err = starter.StartSessionWithContext(ctx, compatSession.StreamAppUserID, compatSession.ProfileID, source.FileID, playMethod, transcodeAudio)
 	} else {
@@ -3353,6 +3360,9 @@ func (h *PlaybackHandler) applyCompatAudioSelection(
 		return restored, nil, false, errors.Join(err, rollbackErr)
 	}
 	restarted, err := h.restartCompatTranscodeForAudioSelection(ctx, updatedPlaySession, *updatedSource, positionSeconds)
+	if recipePublicationUncertain(err) {
+		return updatedPlaySession, updatedSource, false, err
+	}
 	if err != nil {
 		restored, rollbackErr := h.rollbackCompatAudioSelection(updatedPlaySession.ID, mediaSourceID, *originalSource, *candidateSource)
 		return restored, nil, false, errors.Join(err, rollbackErr)

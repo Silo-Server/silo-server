@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workerinput"
+
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
@@ -40,6 +42,8 @@ type TranscodeOpts struct {
 	// subtitleFilterInputPath is a parser-safe local alias used only by the
 	// libass subtitles filter. FFmpeg still opens InputPath as the media input.
 	subtitleFilterInputPath string
+	subtitleFilterFontsDir  string
+	subtitleFilterStaged    bool
 	// OutputSubdir is the signed, root-relative reconstruction directory. Empty
 	// retains the legacy flat {session_id} layout.
 	OutputSubdir         string
@@ -227,6 +231,7 @@ type TranscodeSession struct {
 	waitErr              error
 	stderr               *boundedTailBuffer
 	mu                   sync.Mutex
+	pendingRouteMove     *RouteMoveIdentityV3
 	done                 chan struct{} // closed when the monitor goroutine finishes
 	stdinPipe            io.WriteCloser
 	lastRequestedSegment int
@@ -268,6 +273,11 @@ type TranscodeSession struct {
 	// copyPlan is the planned segment list served instead of FFmpeg's
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
+	// workerExecutionContext retains local probe configuration and admission
+	// for bounded probes of generated fragments. It follows the producer's
+	// lifetime and is replaced together with each successful restart.
+	//nolint:containedctx // The admitted execution lifetime spans FFmpeg generations; its cancellation and source authority must survive a request.
+	workerExecutionContext context.Context
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -420,11 +430,15 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
-	if err := prepareSubtitleFilterInput(&opts); err != nil {
+	if err := prepareSubtitleFilterInputContext(ctx, &opts); err != nil {
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(ctx, opts)
+	copyPlan, planErr := resolveCopyPlanResult(ctx, opts, loadCopyKeyframeIndex)
+	if planErr != nil {
+		releaseHWDevice()
+		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", planErr)
+	}
 	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
 		// Rebuilding without the plan would serve FFmpeg's playlist to a
 		// player that may hold the planned one; a later request rebuilds.
@@ -454,6 +468,10 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		hwWorkloadDevice:     hwWorkloadDevice,
 		copyPlan:             copyPlan,
 	}
+	if workerinput.IsStandalone(ctx) {
+		//nolint:fatcontext // The admitted execution lifetime spans FFmpeg generations; its cancellation and source authority must survive a request.
+		s.workerExecutionContext = ctx
+	}
 
 	args := buildFFmpegArgs(opts)
 	bin := opts.FFmpegPath
@@ -464,7 +482,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := workerinput.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -720,7 +738,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 	if opts.ToneMapMode == "" {
 		return nil
 	}
-	if err := opts.ToneMapSourceRevision.ValidatePath(opts.InputPath); err != nil {
+	if err := opts.ToneMapSourceRevision.ValidatePathContext(ctx, opts.InputPath); err != nil {
 		if errors.Is(err, tonemap.ErrSourceRevisionChanged) {
 			return err
 		}
@@ -1469,11 +1487,7 @@ func toneMapScaleFilter(opts TranscodeOpts) string {
 // toneMappedTextSubtitleFilter places CPU subtitle rendering after conversion
 // and downloads or uploads frames only where the selected backend requires it.
 func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
-	subtitleInputPath := opts.InputPath
-	if opts.subtitleFilterInputPath != "" {
-		subtitleInputPath = opts.subtitleFilterInputPath
-	}
-	subFilter := fmt.Sprintf("subtitles='%s':si=%d", escapeFilterPath(subtitleInputPath), opts.SubtitleTrackIndex)
+	subFilter := workerSubtitleFilter(opts, false)
 	scale := resolutionToScale(opts.TargetResolution)
 	cpuTail := subFilter
 	if scale != "" {
@@ -1831,12 +1845,7 @@ func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv b
 // [scale,] subtitles → hwupload → hwmap.
 func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 	scale := resolutionToScale(opts.TargetResolution)
-	subtitleInputPath := opts.InputPath
-	if opts.subtitleFilterInputPath != "" {
-		subtitleInputPath = opts.subtitleFilterInputPath
-	}
-	subFilter := fmt.Sprintf("subtitles=filename='%s':si=%d",
-		escapeFilterPath(subtitleInputPath), opts.SubtitleTrackIndex)
+	subFilter := workerSubtitleFilter(opts, true)
 
 	// Build the CPU filter portion: scale (if any) then subtitle overlay.
 	// Scale must come before subtitles so text is rendered at target resolution.
@@ -2997,6 +3006,17 @@ func (s *TranscodeSession) CloseProcess() error {
 	return s.shutdown(false)
 }
 
+// CancelProcess requests process cancellation without changing directory or
+// job ownership. Lifecycle owners subsequently close and reap the session.
+func (s *TranscodeSession) CancelProcess() {
+	s.mu.Lock()
+	cancel := s.cancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 // shutdown kills the ffmpeg process and, when removeOutput is true, removes the
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
@@ -3329,7 +3349,7 @@ func (s *TranscodeSession) restart(
 	// As on initial start, the caller bounds synchronous validation; the new
 	// FFmpeg process keeps running after the segment request completes.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := workerinput.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -3377,6 +3397,10 @@ func (s *TranscodeSession) restart(
 	s.cmd = cmd
 	s.cancel = cancel
 	s.opts = opts
+	if workerinput.IsStandalone(ctx) {
+		//nolint:fatcontext // The admitted execution lifetime spans FFmpeg generations; its cancellation and source authority must survive a request.
+		s.workerExecutionContext = ctx
+	}
 	s.running = true
 	s.restarting = nil
 	s.stdinPipe = stdinPipe

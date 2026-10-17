@@ -124,8 +124,7 @@ func (tr *Tracker) Track(ctx context.Context, info SessionInfo) {
 		slog.DebugContext(ctx, "session track marshal failed", "component", "nodesessions", "error", err)
 		return
 	}
-	key := tr.redisKey(info.SessionID)
-	if err := tr.rdb.Set(ctx, key, data, sessionTTL).Err(); err != nil {
+	if err := tr.writeSession(ctx, info.SessionID, data); err != nil {
 		slog.DebugContext(ctx, "session track set failed", "component", "nodesessions", "error", err, "session", info.SessionID)
 		return
 	}
@@ -156,7 +155,7 @@ func (tr *Tracker) Touch(ctx context.Context, info SessionInfo) {
 		slog.DebugContext(ctx, "session touch marshal failed", "component", "nodesessions", "error", err)
 		return
 	}
-	if err := tr.rdb.Set(ctx, tr.redisKey(info.SessionID), data, sessionTTL).Err(); err != nil {
+	if err := tr.writeSession(ctx, info.SessionID, data); err != nil {
 		slog.DebugContext(ctx, "session touch set failed", "component", "nodesessions", "error", err, "session", info.SessionID)
 	}
 }

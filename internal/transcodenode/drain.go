@@ -25,7 +25,7 @@ const drainPollInterval = 250 * time.Millisecond
 // an administrator asked to drain it. A draining node still serves the
 // sessions it runs, including restarting their FFmpeg on a seek.
 func (s *Server) draining() bool {
-	return s.shutdownDrain.Load() || s.watcher.NodeDrainRequested()
+	return s.shutdownDrain.Load() || s.runtimeConfig().NodeDrainRequested()
 }
 
 // drained reports whether a draining node has finished all its work: no
@@ -79,8 +79,8 @@ func (s *Server) reportedDrained() bool {
 // first config load read) is announced at once.
 func (s *Server) SetDrainAnnouncer(fn func()) {
 	s.drainAnnouncer.Store(&fn)
-	if s.watcher != nil {
-		s.watcher.OnNodeDrainChange(func(bool) { s.announceDrain() })
+	if s.runtimeConfig() != nil {
+		s.runtimeConfig().OnNodeDrainChange(func(bool) { s.announceDrain() })
 	}
 	if s.draining() {
 		s.announceDrain()

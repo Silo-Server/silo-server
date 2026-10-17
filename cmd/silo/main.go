@@ -698,6 +698,24 @@ func addRedisBootstrapSettings(redisURL string, configured map[string]bool, valu
 
 // main starts the Silo server or a requested maintenance command.
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == standaloneWorkerCommand {
+		if err := runStandaloneWorker(context.Background(), os.Args[2:]); err != nil {
+			log.Fatalf("worker: %v", err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "worker-enrollment" {
+		if err := runWorkerEnrollment(context.Background(), os.Args[2:]); err != nil {
+			log.Fatalf("worker enrollment: %v", err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "worker-enroll" {
+		if err := runWorkerEnroll(context.Background(), os.Args[2:]); err != nil {
+			log.Fatalf("worker enrollment: %v", err)
+		}
+		return
+	}
 	var storageAdmission *pglock.NodeAdmission
 	// The admission session is detached from the pool and lives until process
 	// exit. Worker Stop methods do not all wait for in-flight writes, so closing
@@ -1123,6 +1141,10 @@ func main() {
 		var shutdownStandalone func(context.Context) error
 		var standaloneHooks standaloneServerHooks
 		if mode == "proxy" {
+			if err := initializeHTTPWorkerProxy(appCtx, pool, dataCipher, watcher.Config(), watcher.Config); err != nil {
+				slog.Error("HTTP worker proxy startup failed", "error", err)
+				os.Exit(1)
+			}
 			srv := proxy.NewServer(watcher, tracker)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
 			if resolverErr != nil {
@@ -1255,6 +1277,11 @@ func main() {
 	} else if apiRedisClient != nil {
 		defer func() { _ = cache.CloseRedisClient(apiRedisClient) }()
 	}
+	workerContentGate := &workerContentAuthority{}
+	workerHTTP, workerHTTPError := initializeHTTPWorkers(appCtx, pool, dataCipher, apiRedisClient, cfg, workerContentGate, configWatcher.Config)
+	if workerHTTPError != nil {
+		log.Fatalf("HTTP worker control: %v", workerHTTPError)
+	}
 
 	if mode == "" || mode == "integrated" || mode == "api" {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
@@ -1281,6 +1308,7 @@ func main() {
 	// Set when shutdown begins; /api/v1/ready fails from then on.
 	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
+		WorkerHTTP:                   workerHTTP,
 		ShuttingDown:                 shuttingDown.Load,
 		SubtitlePlaySync:             subtitlePlaySync,
 		Config:                       cfg,
@@ -2403,6 +2431,7 @@ func main() {
 			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		}
+		workerContentGate.configure(deps.DB, notificationScopes)
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
 			settingsRepo,

@@ -153,7 +153,8 @@ func (h *ItemsHandler) HandleThemeAudio(w http.ResponseWriter, r *http.Request) 
 	if h.themeRouter != nil {
 		expires, _ := themesongs.Expiry(time.Now(), time.Time{})
 		result, err := h.themeRouter.Resolve(r.Context(), themedelivery.Request{
-			File: file, Delivery: delivery, Conversion: conversion, SeekSeconds: seekSeconds,
+			OriginCredential: compatStreamOrigin(session),
+			File:             file, Delivery: delivery, Conversion: conversion, SeekSeconds: seekSeconds,
 			UserID: session.StreamAppUserID, ProfileID: session.ProfileID,
 			AccessPath: netaccess.PathFromContext(r.Context()), ExpiresAt: expires,
 		})

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -45,7 +46,8 @@ func TestRouteInventoryCoversRuntimeRouter(t *testing.T) {
 	// NewRouter seals the router so no production caller can register on it;
 	// a test walks the tree through the unexported constructor instead.
 	fixtures := map[string]chi.Routes{
-		"minimal": newChiRouter(Dependencies{Config: cfg}),
+		"http-worker-gateway": newChiRouter(Dependencies{Config: cfg, WorkerHTTP: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}),
+		"minimal":             newChiRouter(Dependencies{Config: cfg}),
 		"maximal": newChiRouter(Dependencies{
 			DB:         pool,
 			Config:     cfg,

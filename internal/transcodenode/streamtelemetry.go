@@ -13,15 +13,15 @@ import (
 // verify twice.
 func (s *Server) canonicalSessionID(r *http.Request, transportID string) (string, *streamtoken.Claims) {
 	fallback := "node-transport:" + transportID
-	if r == nil || s.watcher == nil {
+	if r == nil || s.runtimeConfig() == nil {
 		return fallback, nil
 	}
 	tokenStr := r.Header.Get("X-Silo-Stream-Token")
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if tokenStr == "" || cfg == nil {
 		return fallback, nil
 	}
-	claims, err := streamtoken.Verify(tokenStr, cfg.Auth.JWTSecret)
+	claims, err := s.verifyStreamToken(r.Context(), tokenStr)
 	if err != nil {
 		return fallback, nil
 	}

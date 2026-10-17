@@ -310,9 +310,25 @@ deadlines and stream accounting remain unchanged; a later read failure can
 truncate committed bytes without a new status. No transfer receipt, worker
 reconstruction or new native route is introduced.
 
+## Standalone HTTP-only workers
+
+An enrolled `worker` process uses the same execution and output paths with
+independent Ed25519 identities, opaque source handles and signed authority
+snapshots. It adds `POST /worker/execute` for admitted commands and reports
+`worker_protocol: http_only_v1` in health. Core control and source routes live
+under `/api/internal/workers/`; they are internal authority operations, outside
+the native client API.
+
+The shared-secret authentication described below applies to the existing
+transcode/proxy modes. Standalone workers receive no customer shared secret.
+Their commands and output requests require separately scoped signatures, and
+their FFmpeg inputs must be admitted HTTP sources or owned scratch files. See
+[standalone transcode workers](standalone-transcode-workers.md) for enrollment,
+source renewal, generation fencing, output grants and current access checks.
+
 ## Authentication
 
-API servers and proxies sign every call to a worker's node bearer routes;
+In existing transcode/proxy modes, API servers and proxies sign every call to a worker's node bearer routes;
 `internal/nodeauth` implements both sides. Senders call `nodeauth.Sign` just
 before sending, and the transcode node and proxy middleware call
 `nodeauth.Verify`. There is no worker-to-API call.

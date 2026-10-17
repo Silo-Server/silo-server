@@ -28,9 +28,10 @@ const (
 )
 
 type cacheKey struct {
-	path    string
-	size    int64
-	modTime time.Time
+	sourceIdentity string
+	path           string
+	size           int64
+	modTime        time.Time
 }
 
 type cacheEntry struct {
@@ -234,4 +235,142 @@ func storeLocked(key cacheKey, idx Index, err error) {
 			delete(indexCache.entries, entry.key)
 		}
 	}
+}
+
+// Source is an immutable admitted representation. OpenReader is bound to the
+// same live source handle, never a URL or filesystem path that this package
+// can reopen independently. Context bounds its lifetime; Validate checks the
+// current caller's authority even when an index is already cached.
+type Source struct {
+	Identity string
+	Size     int64
+	//nolint:containedctx // The admitted range reader retains its owning context for the source lifetime.
+	Context    context.Context
+	Validate   func(context.Context) error
+	OpenReader func(context.Context) (io.ReaderAt, io.Closer, error)
+}
+
+func LoadSource(ctx context.Context, source Source) (Index, error) {
+	return loadSource(ctx, source, false)
+}
+func LoadSourceVerified(ctx context.Context, source Source) (Index, error) {
+	return loadSource(ctx, source, true)
+}
+func validateSource(ctx context.Context, source Source) error {
+	if err := ctx.Err(); err != nil {
+		return sourceFailure(err)
+	}
+	if source.Identity == "" || len(source.Identity) > 1024 || source.Size <= 0 || source.Context == nil || source.Validate == nil || source.OpenReader == nil {
+		return sourceFailure(errors.New("invalid admitted source"))
+	}
+	if err := source.Context.Err(); err != nil {
+		return sourceFailure(err)
+	}
+	if err := source.Validate(ctx); err != nil {
+		return sourceFailure(err)
+	}
+	return nil
+}
+func sourceFailure(err error) error {
+	return &fs.PathError{Op: "index", Path: "admitted source", Err: err}
+}
+func loadSource(ctx context.Context, source Source, wait bool) (Index, error) {
+	if err := validateSource(ctx, source); err != nil {
+		return Index{}, err
+	}
+	key := cacheKey{sourceIdentity: source.Identity, size: source.Size}
+	if idx, err, ok := cached(key); ok && (!wait || !errors.Is(err, ErrUnverified)) {
+		if current := validateSource(ctx, source); current != nil {
+			return Index{}, current
+		}
+		return idx, err
+	}
+	reader, closer, err := source.OpenReader(ctx)
+	if err != nil {
+		return Index{}, sourceFailure(err)
+	}
+	if reader == nil || closer == nil {
+		return Index{}, sourceFailure(errors.New("source reader unavailable"))
+	}
+	defer func() { _ = closer.Close() }()
+	if wait {
+		idx, err := VerifyMatroska(contextReaderAt{ctx: ctx, r: reader}, source.Size)
+		if current := validateSource(ctx, source); current != nil {
+			return Index{}, current
+		}
+		if err != nil && transient(err) {
+			return Index{}, err
+		}
+		idx, err = settle(idx, err)
+		store(key, idx, err)
+		return idx, err
+	}
+	if _, err := ReadMatroska(contextReaderAt{ctx: ctx, r: reader}, source.Size); err != nil {
+		if current := validateSource(ctx, source); current != nil {
+			return Index{}, current
+		}
+		if transient(err) {
+			return Index{}, err
+		}
+		idx, err := settle(Index{}, err)
+		store(key, idx, err)
+		return idx, err
+	}
+	if err := validateSource(ctx, source); err != nil {
+		return Index{}, err
+	}
+	if startCheck(key) {
+		go verifySourceInBackground(key, source)
+		return Index{}, ErrUnverified
+	}
+	if idx, err, ok := cached(key); ok {
+		if current := validateSource(ctx, source); current != nil {
+			return Index{}, current
+		}
+		return idx, err
+	}
+	return Index{}, ErrUnverified
+}
+
+func verifySourceInBackground(key cacheKey, source Source) {
+	// Queue time counts toward the deadline. The source lifetime cancels both
+	// queued and active work; it is never detached from the admitted handle.
+	ctx, cancel := context.WithTimeout(source.Context, 2*time.Minute)
+	defer cancel()
+	select {
+	case verifySlots <- struct{}{}:
+		defer func() { <-verifySlots }()
+	case <-ctx.Done():
+		finishSourceCheck(key, Index{}, sourceFailure(ctx.Err()))
+		return
+	}
+	idx, err := func() (Index, error) {
+		if err := validateSource(ctx, source); err != nil {
+			return Index{}, err
+		}
+		reader, closer, err := source.OpenReader(ctx)
+		if err != nil {
+			return Index{}, sourceFailure(err)
+		}
+		if reader == nil || closer == nil {
+			return Index{}, sourceFailure(errors.New("source reader unavailable"))
+		}
+		defer func() { _ = closer.Close() }()
+		idx, err := VerifyMatroska(contextReaderAt{ctx: ctx, r: reader}, source.Size)
+		if current := validateSource(ctx, source); current != nil {
+			return Index{}, current
+		}
+		return idx, err
+	}()
+	finishSourceCheck(key, idx, err)
+}
+func finishSourceCheck(key cacheKey, idx Index, err error) {
+	indexCache.Lock()
+	defer indexCache.Unlock()
+	defer delete(indexCache.inFlight, key)
+	if err != nil && transient(err) {
+		return
+	}
+	idx, err = settle(idx, err)
+	storeLocked(key, idx, err)
 }

@@ -7,13 +7,15 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/executionlease"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 
 	"golang.org/x/sync/singleflight"
 )
@@ -108,6 +110,10 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 	// reached its first line — and this probe runs real smoke encodes on the
 	// GPU. Anything that needs the encoder to itself has to see them; see
 	// ProbesInFlight.
+	releaseLease, leaseErr := executionlease.Retain(ctx)
+	if leaseErr != nil {
+		return nil, leaseErr
+	}
 	probesInFlight.Add(1)
 	resultCh := probeCache.group.DoChan(key, func() (any, error) {
 		probeCache.Lock()
@@ -116,7 +122,7 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 		if ok && probeCacheEntryCurrent(cached, now()) {
 			return append(Capabilities(nil), cached.capabilities...), nil
 		}
-		probeCtx, cancel := context.WithTimeout(context.Background(), ProbeTotalTimeout(hardwareBackend, hardwareDevice))
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ProbeTotalTimeout(hardwareBackend, hardwareDevice))
 		defer cancel()
 		result, dolbyVisionUnsettled, err := probeWithRunner(probeCtx, ffmpegPath, hardwareBackend, hardwareDevice, run)
 		if err != nil {
@@ -137,15 +143,17 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 	select {
 	case <-ctx.Done():
 		// The flight outlives this caller by design — its probe context is
-		// rooted at Background so a canceled request cannot kill work another
+		// detached from cancellation so a canceled request cannot kill work another
 		// request is waiting on — so the claim goes with the flight, not with us.
 		go func() {
 			<-resultCh
 			probesInFlight.Add(-1)
+			releaseLease()
 		}()
 		return nil, ctx.Err()
 	case result := <-resultCh:
 		probesInFlight.Add(-1)
+		releaseLease()
 		if result.Err != nil {
 			return nil, result.Err
 		}
@@ -521,7 +529,7 @@ func hardwareFilter(backend string) string {
 // runCommand executes a probe command and retains stderr alongside stdout for
 // capability detection and bounded diagnostics.
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return workerinput.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 // runBounded applies the per-command probe deadline within the caller's total

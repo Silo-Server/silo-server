@@ -214717,6 +214717,99 @@
           "content": {
             "application/json": {
               "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workerwire_Assignment"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Available only on an enrolled HTTP-only worker. An Ed25519 core-command proof binds method, exact escaped path/query, origin, body and replay nonce. Version 1 assignment binds node/work/generation and opaque source references. The worker requires current signed core settings and a short active or pending execution lease, applies local compute admission, and forwards the assigned engine response. Body limit 1 MiB; unknown assignment fields are refused. Uncertain execution requires reconciliation before another candidate.",
+        "retry_safety": "non_retryable",
+        "listener": "transcode_node",
+        "method": "POST",
+        "path": "/worker/execute",
+        "handler": "(*internal/transcodenode.Server).handleWorkerExecute",
+        "auth_class": "node_bearer",
+        "responses": {
+          "2XX": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Assigned engine success; shape and media depend on assignment path"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Invalid assignment or source"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Missing, invalid or replayed core proof"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Superseded generation"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Authority, worker or local admission unavailable"
+          }
+        }
+      },
+      {
+        "description": "Path-free liveness, stored hardware capability digest and resource snapshots. Enrolled HTTP-only workers advertise worker_protocol=http_only_v1; legacy workers omit it. Health never probes hardware or renews execution authority.",
+        "listener": "transcode_node",
+        "method": "GET",
+        "path": "/api/v1/health",
+        "handler": "(*internal/transcodenode.Server).handleHealth",
+        "auth_class": "public",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/transcodenode_HealthResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
                 "$ref": "#/x-silo-worker-protocols/schemas/chapterthumbs_RemoteExtractRequest"
               }
             }
@@ -220407,9 +220500,1885 @@
             "description": "Service Unavailable"
           }
         }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_SnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Signed two-second authority snapshot. The nonce, boot ID and increasing sequence bind the response; active/pending generations and allowlisted execution settings are validated locally. Freshness ages from request send, including network delay.",
+        "retry_safety": "non_retryable",
+        "listener": "worker_control_core",
+        "method": "POST",
+        "path": "/api/internal/workers/{node}/snapshot",
+        "handler": "(*internal/workercontrolcore.Service).snapshot",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workerwire_Report"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Signed coalesced progress, sessions and bounded observations, generation-fenced on the core. Report JSON limit 512 KiB. The core persists operational state; workers have no Redis or database connection.",
+        "retry_safety": "non_retryable",
+        "listener": "worker_control_core",
+        "method": "POST",
+        "path": "/api/internal/workers/{node}/report",
+        "handler": "(*internal/workercontrolcore.Service).report",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Fresh signed recipe and assignment for this node's active work; stopped or superseded generations cannot reconstruct. Source aliases contain opaque identities and scoped source descriptors, never catalog paths.",
+        "retry_safety": "non_retryable",
+        "listener": "worker_control_core",
+        "method": "GET",
+        "path": "/api/internal/workers/{node}/recipes/{work}",
+        "handler": "(*internal/workercontrolcore.Service).recipe",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "The same proof and active-work admission as GET; no response body.",
+        "retry_safety": "non_retryable",
+        "listener": "worker_control_core",
+        "method": "HEAD",
+        "path": "/api/internal/workers/{node}/recipes/{work}",
+        "handler": "(*internal/workercontrolcore.Service).recipe",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "description": "Admitted recipe; no body"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_CloseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Generation-fenced stop and source release. An uncertain response requires a fresh signed snapshot, rather than assuming the work stopped.",
+        "retry_safety": "non_retryable",
+        "listener": "worker_control_core",
+        "method": "DELETE",
+        "path": "/api/internal/workers/{node}/recipes/{work}",
+        "handler": "(*internal/workercontrolcore.Service).closeWork",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "Revoke this node's active and pending work. Admission is checked before durable generation fencing and source release.",
+        "retry_safety": "non_retryable",
+        "listener": "worker_control_core",
+        "method": "POST",
+        "path": "/api/internal/workers/{node}/revoke",
+        "handler": "(*internal/workercontrolcore.Service).closeNode",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Source-Grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_RenewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Renew the exact scoped immutable source for an admitted work generation. X-Silo-Source-Grant must match the route grant. The signed Source retains ID, revision, size, ETag, URL and scope. Source TTL is 120 seconds; workers renew after 45 seconds while execution authority remains current.",
+        "retry_safety": "non_retryable",
+        "listener": "worker_control_core",
+        "method": "POST",
+        "path": "/api/internal/workers/{node}/sources/{grant}/renew",
+        "handler": "(*internal/workercontrolcore.Service).renew",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Source-Grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Delegated core source authority verifies node proof, exact X-Silo-Source-Grant and active work on every request and bounded streaming chunks. GET requires exact If-Match. Single, open and suffix byte ranges are supported; malformed or multiple ranges return 400; unsatisfiable ranges return 416. Pinned regular-file identity and revision are rechecked before, throughout and after reads; mutation revokes the source. Identity encoding, no redirects and Cache-Control no-store. Core-only paths never appear on the wire.",
+        "listener": "worker_control_core",
+        "method": "GET",
+        "path": "/api/internal/workers/{node}/sources/{grant}",
+        "handler": "s.options.SourceHandler",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Scoped source response"
+          },
+          "206": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Scoped source response"
+          },
+          "400": {
+            "description": "Scoped source response"
+          },
+          "401": {
+            "description": "Scoped source response"
+          },
+          "403": {
+            "description": "Scoped source response"
+          },
+          "404": {
+            "description": "Scoped source response"
+          },
+          "408": {
+            "description": "Scoped source response"
+          },
+          "410": {
+            "description": "Scoped source response"
+          },
+          "412": {
+            "description": "Scoped source response"
+          },
+          "416": {
+            "description": "Scoped source response"
+          },
+          "429": {
+            "description": "Scoped source response"
+          },
+          "503": {
+            "description": "Scoped source response"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Source-Grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Delegated core source authority verifies node proof, exact X-Silo-Source-Grant and active work on every request and bounded streaming chunks. GET requires exact If-Match. Single, open and suffix byte ranges are supported; malformed or multiple ranges return 400; unsatisfiable ranges return 416. Pinned regular-file identity and revision are rechecked before, throughout and after reads; mutation revokes the source. Identity encoding, no redirects and Cache-Control no-store. Core-only paths never appear on the wire.",
+        "listener": "worker_control_core",
+        "method": "HEAD",
+        "path": "/api/internal/workers/{node}/sources/{grant}",
+        "handler": "s.options.SourceHandler",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "description": "Scoped source response"
+          },
+          "206": {
+            "description": "Scoped source response"
+          },
+          "400": {
+            "description": "Scoped source response"
+          },
+          "401": {
+            "description": "Scoped source response"
+          },
+          "403": {
+            "description": "Scoped source response"
+          },
+          "404": {
+            "description": "Scoped source response"
+          },
+          "408": {
+            "description": "Scoped source response"
+          },
+          "410": {
+            "description": "Scoped source response"
+          },
+          "412": {
+            "description": "Scoped source response"
+          },
+          "416": {
+            "description": "Scoped source response"
+          },
+          "429": {
+            "description": "Scoped source response"
+          },
+          "503": {
+            "description": "Scoped source response"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_SnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Signed two-second authority snapshot. The nonce, boot ID and increasing sequence bind the response; active/pending generations and allowlisted execution settings are validated locally. Freshness ages from request send, including network delay.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/workers/{node}/snapshot",
+        "handler": "(internal/api.workerGateway).snapshot",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workerwire_Report"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Signed coalesced progress, sessions and bounded observations, generation-fenced on the core. Report JSON limit 512 KiB. The core persists operational state; workers have no Redis or database connection.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/workers/{node}/report",
+        "handler": "(internal/api.workerGateway).report",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Fresh signed recipe and assignment for this node's active work; stopped or superseded generations cannot reconstruct. Source aliases contain opaque identities and scoped source descriptors, never catalog paths.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "GET",
+        "path": "/api/internal/workers/{node}/recipes/{work}",
+        "handler": "(internal/api.workerGateway).recipe",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "The same proof and active-work admission as GET; no response body.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "HEAD",
+        "path": "/api/internal/workers/{node}/recipes/{work}",
+        "handler": "(internal/api.workerGateway).recipe",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "description": "Admitted recipe; no body"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_CloseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Generation-fenced stop and source release. An uncertain response requires a fresh signed snapshot, rather than assuming the work stopped.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "DELETE",
+        "path": "/api/internal/workers/{node}/recipes/{work}",
+        "handler": "(internal/api.workerGateway).closeWork",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "Revoke this node's active and pending work. Admission is checked before durable generation fencing and source release.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/workers/{node}/revoke",
+        "handler": "(internal/api.workerGateway).revoke",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Source-Grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_RenewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Renew the exact scoped immutable source for an admitted work generation. X-Silo-Source-Grant must match the route grant. The signed Source retains ID, revision, size, ETag, URL and scope. Source TTL is 120 seconds; workers renew after 45 seconds while execution authority remains current.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/workers/{node}/sources/{grant}/renew",
+        "handler": "(internal/api.workerGateway).renew",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Source-Grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Delegated core source authority verifies node proof, exact X-Silo-Source-Grant and active work on every request and bounded streaming chunks. GET requires exact If-Match. Single, open and suffix byte ranges are supported; malformed or multiple ranges return 400; unsatisfiable ranges return 416. Pinned regular-file identity and revision are rechecked before, throughout and after reads; mutation revokes the source. Identity encoding, no redirects and Cache-Control no-store. Core-only paths never appear on the wire.",
+        "listener": "api",
+        "method": "GET",
+        "path": "/api/internal/workers/{node}/sources/{grant}",
+        "handler": "(internal/api.workerGateway).source",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Scoped source response"
+          },
+          "206": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Scoped source response"
+          },
+          "400": {
+            "description": "Scoped source response"
+          },
+          "401": {
+            "description": "Scoped source response"
+          },
+          "403": {
+            "description": "Scoped source response"
+          },
+          "404": {
+            "description": "Scoped source response"
+          },
+          "408": {
+            "description": "Scoped source response"
+          },
+          "410": {
+            "description": "Scoped source response"
+          },
+          "412": {
+            "description": "Scoped source response"
+          },
+          "416": {
+            "description": "Scoped source response"
+          },
+          "429": {
+            "description": "Scoped source response"
+          },
+          "503": {
+            "description": "Scoped source response"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Source-Grant",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Delegated core source authority verifies node proof, exact X-Silo-Source-Grant and active work on every request and bounded streaming chunks. GET requires exact If-Match. Single, open and suffix byte ranges are supported; malformed or multiple ranges return 400; unsatisfiable ranges return 416. Pinned regular-file identity and revision are rechecked before, throughout and after reads; mutation revokes the source. Identity encoding, no redirects and Cache-Control no-store. Core-only paths never appear on the wire.",
+        "listener": "api",
+        "method": "HEAD",
+        "path": "/api/internal/workers/{node}/sources/{grant}",
+        "handler": "(internal/api.workerGateway).source",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "description": "Scoped source response"
+          },
+          "206": {
+            "description": "Scoped source response"
+          },
+          "400": {
+            "description": "Scoped source response"
+          },
+          "401": {
+            "description": "Scoped source response"
+          },
+          "403": {
+            "description": "Scoped source response"
+          },
+          "404": {
+            "description": "Scoped source response"
+          },
+          "408": {
+            "description": "Scoped source response"
+          },
+          "410": {
+            "description": "Scoped source response"
+          },
+          "412": {
+            "description": "Scoped source response"
+          },
+          "416": {
+            "description": "Scoped source response"
+          },
+          "429": {
+            "description": "Scoped source response"
+          },
+          "503": {
+            "description": "Scoped source response"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_OutputProtocolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Trusted core/proxy request proof admits delegation of an existing customer token to its exact active standalone node/work/generation/output scope. This gateway uses the existing trusted proxy proof; standalone workers use node-specific asymmetric grants and do not receive that proxy signing secret. Body limit128 KiB and token limit64 KiB.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/workers/output-grant",
+        "handler": "(internal/api.workerGateway).outputGrant",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/workerregistration_EnrollmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Operator-issued one-shot enrollment ticket plus proof of possession of a newly generated node Ed25519 key. Ticket digest binds the node, core public key, origins and explicit local HTTP policy. Successful response contains a signed public binding, never customer infrastructure credentials. Lost or consumed ticket requires a fresh operator ticket.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/workers/enroll",
+        "handler": "(internal/api.workerGateway).enroll",
+        "auth_class": "delegated",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/workercontrolcore_GrantReply"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
       }
     ],
     "schemas": {
+      "buildinfo_Info": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "build_number": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "built_at": {
+            "type": "string"
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "display": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "vcs_time": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "display",
+          "revision",
+          "dirty",
+          "vcs_time",
+          "build_number",
+          "built_at",
+          "available"
+        ],
+        "type": "object"
+      },
       "chapterthumbs_RemoteExtractErrorResponse": {
         "additionalProperties": false,
         "properties": {
@@ -220510,6 +222479,9 @@
           "source_audio_channels": {
             "format": "int64",
             "type": "integer"
+          },
+          "source_identity": {
+            "type": "string"
           },
           "source_video_bit_depth": {
             "format": "int64",
@@ -221741,6 +223713,76 @@
         ],
         "type": "object"
       },
+      "nodesessions_SessionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "codec_audio": {
+            "type": "string"
+          },
+          "codec_video": {
+            "type": "string"
+          },
+          "hw_accel": {
+            "type": "string"
+          },
+          "media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_id": {
+            "type": "string"
+          },
+          "media_title": {
+            "type": "string"
+          },
+          "node_name": {
+            "type": "string"
+          },
+          "node_url": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "started_at_source": {
+            "type": "string"
+          },
+          "started_at_unix_nano": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tone_map_mode": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_url",
+          "node_name",
+          "type",
+          "started_at"
+        ],
+        "type": "object"
+      },
       "playback_DetectedBackend": {
         "additionalProperties": false,
         "properties": {
@@ -221928,6 +223970,267 @@
         ],
         "type": "object"
       },
+      "playback_RecipeCard": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_only": {
+            "type": "boolean"
+          },
+          "audio_track_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "client_build": {
+            "type": "string"
+          },
+          "client_channel": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "client_user_agent": {
+            "type": "string"
+          },
+          "client_version": {
+            "type": "string"
+          },
+          "copy_fmp4_recipe_version": {
+            "type": "string"
+          },
+          "copy_seek_anchor_resolved": {
+            "type": "boolean"
+          },
+          "copy_video_mpegts": {
+            "type": "boolean"
+          },
+          "disable_progress_persistence": {
+            "type": "boolean"
+          },
+          "dv_profile": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "encoder_hw_accel": {
+            "type": "string"
+          },
+          "fast_start": {
+            "type": "boolean"
+          },
+          "hw_accel": {
+            "type": "string"
+          },
+          "hw_device": {
+            "type": "string"
+          },
+          "input_path": {
+            "type": "string"
+          },
+          "is_jellyfin_compat": {
+            "type": "boolean"
+          },
+          "keyframe_playlist": {
+            "type": "boolean"
+          },
+          "media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "original_started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "output_subdir": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "play_method": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "remux_dv_mode": {
+            "type": "string"
+          },
+          "remux_resume_leading_picture_drop": {
+            "type": "boolean"
+          },
+          "requested_media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "require_media_authorization": {
+            "type": "boolean"
+          },
+          "routing_egress": {
+            "type": "string"
+          },
+          "routing_egress_node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "routing_execution": {
+            "type": "string"
+          },
+          "routing_execution_node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "routing_network_provider": {
+            "type": "string"
+          },
+          "routing_workload": {
+            "type": "string"
+          },
+          "seek_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "segment_duration": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "software_video_decode": {
+            "type": "boolean"
+          },
+          "source_audio_channels": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source_video_bit_depth": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source_video_codec": {
+            "type": "string"
+          },
+          "source_video_profile": {
+            "type": "string"
+          },
+          "start_segment_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "stream_location": {
+            "type": "string"
+          },
+          "stream_origin_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "subtitle_burn_in": {
+            "type": "boolean"
+          },
+          "subtitle_codec": {
+            "type": "string"
+          },
+          "subtitle_track_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_audio_bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_audio_channels": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_codec_audio": {
+            "type": "string"
+          },
+          "target_codec_video": {
+            "type": "string"
+          },
+          "target_resolution": {
+            "type": "string"
+          },
+          "throttle_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tone_map_dv_bl_compat_id_present": {
+            "type": "boolean"
+          },
+          "tone_map_dv_bl_present": {
+            "type": "boolean"
+          },
+          "tone_map_dv_config_present": {
+            "type": "boolean"
+          },
+          "tone_map_dv_rpu_present": {
+            "type": "boolean"
+          },
+          "tone_map_filter": {
+            "type": "string"
+          },
+          "tone_map_mode": {
+            "type": "string"
+          },
+          "tone_map_policy": {
+            "type": "string"
+          },
+          "tone_map_preflight_required": {
+            "type": "boolean"
+          },
+          "tone_map_recipe_version": {
+            "type": "string"
+          },
+          "tone_map_source_kind": {
+            "type": "string"
+          },
+          "tone_map_source_revision": {
+            "$ref": "#/x-silo-worker-protocols/schemas/tonemap_SourceRevision"
+          },
+          "total_duration": {
+            "format": "double",
+            "type": "number"
+          },
+          "transcode_audio": {
+            "type": "boolean"
+          },
+          "transcode_node_url": {
+            "type": "string"
+          },
+          "transcode_transport_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "video_bitstream_filter": {
+            "type": "string"
+          },
+          "video_sample_entry": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "user_id",
+          "profile_id",
+          "media_file_id",
+          "input_path",
+          "seek_seconds",
+          "segment_duration",
+          "start_segment_number",
+          "subtitle_track_index",
+          "audio_track_index",
+          "total_duration"
+        ],
+        "type": "object"
+      },
       "playback_RenderDeviceInfo": {
         "additionalProperties": false,
         "properties": {
@@ -222038,6 +224341,745 @@
         ],
         "type": "object"
       },
+      "streamtelemetry_ClientVariant": {
+        "additionalProperties": false,
+        "properties": {
+          "Build": {
+            "type": "string"
+          },
+          "Channel": {
+            "type": "string"
+          },
+          "Name": {
+            "type": "string"
+          },
+          "Version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "Name",
+          "Version",
+          "Build",
+          "Channel"
+        ],
+        "type": "object"
+      },
+      "streamtelemetry_IdentityConflict": {
+        "additionalProperties": false,
+        "properties": {
+          "Existing": {
+            "type": "string"
+          },
+          "Field": {
+            "type": "string"
+          },
+          "ObservedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "Offered": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "Field",
+          "Existing",
+          "Offered",
+          "ObservedAt"
+        ],
+        "type": "object"
+      },
+      "streamtelemetry_RouteActivityView": {
+        "additionalProperties": false,
+        "properties": {
+          "BytesAccepted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "CapRelevant": {
+            "type": "boolean"
+          },
+          "Class": {
+            "type": "string"
+          },
+          "LastByteAccepted": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "LastObservationEnd": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "Method": {
+            "type": "string"
+          },
+          "Open": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "Pattern": {
+            "type": "string"
+          },
+          "Requests": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "Role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "Method",
+          "Pattern",
+          "Role",
+          "Class",
+          "CapRelevant",
+          "Open",
+          "Requests",
+          "BytesAccepted",
+          "LastByteAccepted",
+          "LastObservationEnd"
+        ],
+        "type": "object"
+      },
+      "streamtelemetry_SessionView": {
+        "additionalProperties": false,
+        "properties": {
+          "BytesAccepted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ClientVariants": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_ClientVariant"
+            },
+            "type": "array"
+          },
+          "ClientVariantsOverflowed": {
+            "type": "boolean"
+          },
+          "DeviceIDs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "DeviceIDsOverflowed": {
+            "type": "boolean"
+          },
+          "HasIdentityConflict": {
+            "type": "boolean"
+          },
+          "IdentityConflicts": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_IdentityConflict"
+            },
+            "type": "array"
+          },
+          "IdentityConflictsOverflowed": {
+            "type": "boolean"
+          },
+          "LastByteAccepted": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "LastObservationEnd": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "MediaFileID": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "MediaFileIDs": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "MediaFileIDsOverflowed": {
+            "type": "boolean"
+          },
+          "OpenObservations": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "Outcomes": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "PlayMethod": {
+            "type": "string"
+          },
+          "PlayMethods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "PlayMethodsOverflowed": {
+            "type": "boolean"
+          },
+          "ProfileID": {
+            "type": "string"
+          },
+          "RealtimeConnectionAlive": {
+            "type": "boolean"
+          },
+          "RequestCount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "Routes": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_RouteActivityView"
+            },
+            "type": "array"
+          },
+          "RoutesOverflowed": {
+            "type": "boolean"
+          },
+          "SessionID": {
+            "type": "string"
+          },
+          "StartedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "StartedAtDegraded": {
+            "type": "boolean"
+          },
+          "StartedAtSource": {
+            "type": "string"
+          },
+          "Subject": {
+            "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_Subject"
+          },
+          "TokenIssuedAtSources": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "TokenIssuedAts": {
+            "items": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "TokenIssuedAtsOverflowed": {
+            "type": "boolean"
+          },
+          "UserAgents": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "UserAgentsOverflowed": {
+            "type": "boolean"
+          },
+          "ViewerIPs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ViewerIPsOverflowed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "Subject",
+          "ProfileID",
+          "SessionID",
+          "MediaFileID",
+          "PlayMethod",
+          "MediaFileIDs",
+          "MediaFileIDsOverflowed",
+          "PlayMethods",
+          "PlayMethodsOverflowed",
+          "StartedAt",
+          "StartedAtSource",
+          "StartedAtDegraded",
+          "BytesAccepted",
+          "LastByteAccepted",
+          "LastObservationEnd",
+          "OpenObservations",
+          "RealtimeConnectionAlive",
+          "RequestCount",
+          "Routes",
+          "RoutesOverflowed",
+          "ViewerIPs",
+          "ViewerIPsOverflowed",
+          "DeviceIDs",
+          "DeviceIDsOverflowed",
+          "ClientVariants",
+          "ClientVariantsOverflowed",
+          "UserAgents",
+          "UserAgentsOverflowed",
+          "TokenIssuedAts",
+          "TokenIssuedAtsOverflowed",
+          "TokenIssuedAtSources",
+          "Outcomes",
+          "HasIdentityConflict",
+          "IdentityConflicts",
+          "IdentityConflictsOverflowed"
+        ],
+        "type": "object"
+      },
+      "streamtelemetry_Snapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "CapturedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "DroppedBytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "DroppedObservations": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "NodeID": {
+            "type": "string"
+          },
+          "PublisherEpoch": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "PublisherID": {
+            "type": "string"
+          },
+          "Sequence": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "Sessions": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_SessionView"
+            },
+            "type": "array"
+          },
+          "Transfers": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_TransferView"
+            },
+            "type": "array"
+          },
+          "Truncated": {
+            "type": "boolean"
+          },
+          "UnattributedBytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "UnattributedObservations": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "PublisherID",
+          "NodeID",
+          "PublisherEpoch",
+          "Sequence",
+          "CapturedAt",
+          "Sessions",
+          "Transfers",
+          "Truncated",
+          "DroppedObservations",
+          "DroppedBytes",
+          "UnattributedObservations",
+          "UnattributedBytes"
+        ],
+        "type": "object"
+      },
+      "streamtelemetry_Subject": {
+        "additionalProperties": false,
+        "properties": {
+          "ID": {
+            "type": "string"
+          },
+          "Kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "Kind",
+          "ID"
+        ],
+        "type": "object"
+      },
+      "streamtelemetry_TransferView": {
+        "additionalProperties": false,
+        "properties": {
+          "BytesAccepted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "Client": {
+            "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_ClientVariant"
+          },
+          "DeviceID": {
+            "type": "string"
+          },
+          "ID": {
+            "type": "string"
+          },
+          "LastByteAccepted": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "LastObservationEnd": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "MediaFileID": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "Method": {
+            "type": "string"
+          },
+          "OpenObservations": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "Outcomes": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "Pattern": {
+            "type": "string"
+          },
+          "ProfileID": {
+            "type": "string"
+          },
+          "RequestCount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "Role": {
+            "type": "string"
+          },
+          "Subject": {
+            "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_Subject"
+          },
+          "UserAgent": {
+            "type": "string"
+          },
+          "ViewerIP": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ID",
+          "Subject",
+          "ProfileID",
+          "MediaFileID",
+          "Method",
+          "Pattern",
+          "Role",
+          "BytesAccepted",
+          "LastByteAccepted",
+          "LastObservationEnd",
+          "OpenObservations",
+          "RequestCount",
+          "ViewerIP",
+          "DeviceID",
+          "Client",
+          "UserAgent",
+          "Outcomes"
+        ],
+        "type": "object"
+      },
+      "streamtoken_Claims": {
+        "additionalProperties": false,
+        "properties": {
+          "ac": {
+            "type": "string"
+          },
+          "ach": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ao": {
+            "type": "boolean"
+          },
+          "ati": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "aud": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "cfv": {
+            "type": "string"
+          },
+          "cvts": {
+            "type": "boolean"
+          },
+          "daef": {
+            "type": "string"
+          },
+          "daid": {
+            "type": "string"
+          },
+          "darid": {
+            "type": "string"
+          },
+          "dasz": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dfn": {
+            "type": "string"
+          },
+          "dur": {
+            "format": "double",
+            "type": "number"
+          },
+          "dvm": {
+            "type": "string"
+          },
+          "dvp": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "exp": {
+            "type": "string"
+          },
+          "fs": {
+            "type": "boolean"
+          },
+          "iat": {
+            "type": "string"
+          },
+          "iss": {
+            "type": "string"
+          },
+          "jti": {
+            "type": "string"
+          },
+          "kfp": {
+            "type": "boolean"
+          },
+          "method": {
+            "type": "string"
+          },
+          "mfid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "nbf": {
+            "type": "string"
+          },
+          "origin": {
+            "format": "double",
+            "type": "number"
+          },
+          "origin_ok": {
+            "type": "boolean"
+          },
+          "osd": {
+            "type": "string"
+          },
+          "ostn": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "string"
+          },
+          "reg": {
+            "type": "string"
+          },
+          "renid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rex": {
+            "type": "string"
+          },
+          "rlpd": {
+            "type": "boolean"
+          },
+          "rnp": {
+            "type": "string"
+          },
+          "rwl": {
+            "type": "string"
+          },
+          "rxnid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sach": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sbc": {
+            "type": "string"
+          },
+          "sbi": {
+            "type": "boolean"
+          },
+          "seek": {
+            "format": "double",
+            "type": "number"
+          },
+          "segd": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sid": {
+            "type": "string"
+          },
+          "sl": {
+            "type": "string"
+          },
+          "ssn": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sti": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sub": {
+            "type": "string"
+          },
+          "svb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "svc": {
+            "type": "string"
+          },
+          "svd": {
+            "type": "boolean"
+          },
+          "svp": {
+            "type": "string"
+          },
+          "ta": {
+            "type": "boolean"
+          },
+          "tabr": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tac": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tbr": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tc": {
+            "type": "string"
+          },
+          "tca": {
+            "type": "string"
+          },
+          "thid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "thmt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ths": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "thsz": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tid": {
+            "type": "string"
+          },
+          "tmdb": {
+            "type": "boolean"
+          },
+          "tmdbci": {
+            "type": "boolean"
+          },
+          "tmdc": {
+            "type": "boolean"
+          },
+          "tmdr": {
+            "type": "boolean"
+          },
+          "tmm": {
+            "type": "string"
+          },
+          "tmp": {
+            "type": "string"
+          },
+          "tmpf": {
+            "type": "boolean"
+          },
+          "tms": {
+            "type": "string"
+          },
+          "tmsr": {
+            "type": "string"
+          },
+          "tmv": {
+            "type": "string"
+          },
+          "tnode": {
+            "type": "string"
+          },
+          "tres": {
+            "type": "string"
+          },
+          "uid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "vbsf": {
+            "type": "string"
+          },
+          "ver": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "vse": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sid",
+          "path",
+          "method"
+        ],
+        "type": "object"
+      },
       "tonemap_Capability": {
         "additionalProperties": false,
         "properties": {
@@ -222100,6 +225142,52 @@
           "file_size",
           "video_stream_index",
           "stream_signature"
+        ],
+        "type": "object"
+      },
+      "transcodenode_HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_jobs": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "artifacts": {
+            "$ref": "#/x-silo-worker-protocols/schemas/downloadstorage_Usage"
+          },
+          "attribution": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_ResourceAttribution"
+          },
+          "build": {
+            "$ref": "#/x-silo-worker-protocols/schemas/buildinfo_Info"
+          },
+          "capabilities_hash": {
+            "type": "string"
+          },
+          "gpu": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_GPUStats"
+            },
+            "type": "array"
+          },
+          "sampled_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "system": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodemetrics_SystemStats"
+          },
+          "worker_protocol": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "active_jobs",
+          "build"
         ],
         "type": "object"
       },
@@ -222370,6 +225458,586 @@
         },
         "required": [
           "reason"
+        ],
+        "type": "object"
+      },
+      "workercontrolcore_CloseRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generation"
+        ],
+        "type": "object"
+      },
+      "workercontrolcore_GrantReply": {
+        "additionalProperties": false,
+        "properties": {
+          "grant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant"
+        ],
+        "type": "object"
+      },
+      "workercontrolcore_OutputProtocolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "node_url": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "node_url"
+        ],
+        "type": "object"
+      },
+      "workercontrolcore_RecipeReply": {
+        "additionalProperties": false,
+        "properties": {
+          "assignment": {
+            "$ref": "#/x-silo-worker-protocols/schemas/workerwire_Assignment"
+          },
+          "recipe": {
+            "$ref": "#/x-silo-worker-protocols/schemas/playback_RecipeCard"
+          }
+        },
+        "required": [
+          "assignment",
+          "recipe"
+        ],
+        "type": "object"
+      },
+      "workercontrolcore_RenewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "workercontrolcore_SnapshotRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "sequence": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "boot_id",
+          "nonce",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "workerregistration_Enrollment": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_http": {
+            "type": "boolean"
+          },
+          "core_public_key": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "core_url": {
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "node_url": {
+            "type": "string"
+          },
+          "ticket": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "node_id",
+          "core_url",
+          "core_public_key",
+          "node_url",
+          "allow_http",
+          "ticket",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "workerregistration_EnrollmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enrollment": {
+            "$ref": "#/x-silo-worker-protocols/schemas/workerregistration_Enrollment"
+          },
+          "node_public_key": {
+            "contentEncoding": "base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enrollment",
+          "node_public_key"
+        ],
+        "type": "object"
+      },
+      "workerregistration_PublicBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_http": {
+            "type": "boolean"
+          },
+          "core_public_key": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "core_url": {
+            "type": "string"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "node_public_key": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "node_url": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "node_id",
+          "core_url",
+          "core_public_key",
+          "node_url",
+          "node_public_key",
+          "allow_http"
+        ],
+        "type": "object"
+      },
+      "workerwire_Assignment": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {},
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sources": {
+            "additionalProperties": {
+              "$ref": "#/x-silo-worker-protocols/schemas/workerwire_Source"
+            },
+            "type": "object"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "node_id",
+          "work_id",
+          "generation",
+          "method",
+          "path",
+          "body",
+          "sources"
+        ],
+        "type": "object"
+      },
+      "workerwire_ExecutionConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "drain": {
+            "type": "boolean"
+          },
+          "output_authorization_epoch": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "segment_retention_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "subtitle_sync_capacity": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "segment_retention_seconds",
+          "subtitle_sync_capacity",
+          "drain",
+          "output_authorization_epoch"
+        ],
+        "type": "object"
+      },
+      "workerwire_FFmpegObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "dropped_lines": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "event": {
+            "type": "boolean"
+          },
+          "execution_mode": {
+            "type": "string"
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "hw_accel": {
+            "type": "string"
+          },
+          "line_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "restart_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "seek_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "start_segment_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_audio_codec": {
+            "type": "string"
+          },
+          "target_video_codec": {
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "generation",
+          "at",
+          "event",
+          "message",
+          "seek_seconds",
+          "start_segment_number",
+          "restart_count",
+          "line_index",
+          "dropped_lines"
+        ],
+        "type": "object"
+      },
+      "workerwire_ObservationReport": {
+        "additionalProperties": false,
+        "properties": {
+          "dropped_logs": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "logs": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/workerwire_FFmpegObservation"
+            },
+            "type": "array"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/workerwire_ObservationScope"
+            },
+            "type": "array"
+          },
+          "snapshot": {
+            "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_Snapshot"
+          }
+        },
+        "required": [
+          "snapshot",
+          "scopes",
+          "logs",
+          "dropped_logs"
+        ],
+        "type": "object"
+      },
+      "workerwire_ObservationScope": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "generation",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "workerwire_Report": {
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "type": "string"
+          },
+          "observations": {
+            "$ref": "#/x-silo-worker-protocols/schemas/workerwire_ObservationReport"
+          },
+          "sequence": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/workerwire_SessionReport"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "boot_id",
+          "sequence",
+          "sessions"
+        ],
+        "type": "object"
+      },
+      "workerwire_SessionReport": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "info": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodesessions_SessionInfo"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "generation",
+          "info"
+        ],
+        "type": "object"
+      },
+      "workerwire_Snapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "additionalProperties": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "boot_id": {
+            "type": "string"
+          },
+          "execution_config": {
+            "$ref": "#/x-silo-worker-protocols/schemas/workerwire_ExecutionConfig"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "outputs": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object"
+          },
+          "pending": {
+            "additionalProperties": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "sequence": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "valid_for_millis": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "node_id",
+          "boot_id",
+          "nonce",
+          "sequence",
+          "active",
+          "valid_for_millis"
+        ],
+        "type": "object"
+      },
+      "workerwire_Source": {
+        "additionalProperties": false,
+        "properties": {
+          "etag": {
+            "type": "string"
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "grant": {
+            "type": "string"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "ref": {
+            "$ref": "#/x-silo-worker-protocols/schemas/workerwire_SourceRef"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "origin",
+          "url",
+          "grant",
+          "etag",
+          "size",
+          "node_id",
+          "work_id",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "workerwire_SourceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "revision"
         ],
         "type": "object"
       }

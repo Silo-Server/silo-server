@@ -5,11 +5,13 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"syscall"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
+	"github.com/Silo-Server/silo-server/internal/workerinput"
 )
 
 // A list entry that starts at its sample's time makes the concat demuxer seek
@@ -101,11 +103,31 @@ func sheetKeyframes(ctx context.Context, req Request) []float64 {
 	}
 }
 
-// matroskaKeyframes reads the keyframe times of the Matroska file at path
-// from its Cues and a few clusters' block headers (keyframes.ReadMatroska),
-// or returns nil. The file opens without blocking, so a FIFO in its place
-// cannot hold the lookup, and only a regular file is read.
+// matroskaKeyframes reads Cues and a few clusters' block headers through the
+// admitted source reader or a local regular file. A registered input never
+// falls back to the filesystem. Local files open without blocking so a FIFO
+// cannot hold the lookup.
 func matroskaKeyframes(ctx context.Context, path string) []float64 {
+	if err := workerinput.Validate(ctx, path); err != nil {
+		return nil
+	}
+	if handle, ok := workerinput.Lookup(ctx, path); ok {
+		reader, err := handle.ReaderAt(ctx, workerinput.ReaderLimits{})
+		if err != nil {
+			return nil
+		}
+		defer func() { _ = reader.Close() }()
+		index, err := keyframes.ReadMatroska(reader, handle.Size())
+		if err != nil || handle.Validate(ctx) != nil {
+			return nil
+		}
+		return index.Keyframes
+	}
+	// Authority can disappear between validation and lookup. An opaque HTTP
+	// URL must never be interpreted as a relative local filename in that gap.
+	if workerinput.IsStandalone(ctx) && !filepath.IsAbs(path) {
+		return nil
+	}
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil

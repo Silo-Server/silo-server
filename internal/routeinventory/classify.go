@@ -95,6 +95,7 @@ type handlerInfo struct {
 	responseKind string
 	streams      bool
 	websocket    bool
+	authClass    string
 }
 
 type classifier struct{ set *sourceSet }
@@ -161,6 +162,15 @@ func (c *classifier) describe(handler ast.Expr, method, fullPath string, env *wa
 	}
 	info.requestKind, info.responseKind, info.websocket = resolveKinds(evidence, method)
 	info.identity = c.short(info.identity)
+	if evidence != nil && evidence.workerProof {
+		info.authClass = authNodeBearer
+	}
+	if evidence != nil && evidence.forwardsHandler && strings.Contains(info.identity, "internal/api.workerGateway)") {
+		info.authClass = authDelegated
+	}
+	if env.listener.ID == ListenerWorkerControl && info.expr == "s.options.SourceHandler" {
+		info.authClass = authDelegated
+	}
 	return info
 }
 
@@ -219,6 +229,8 @@ type bodyEvidence struct {
 	responseBinary   bool
 	websocket        bool
 	contentTypes     []string
+	workerProof      bool
+	forwardsHandler  bool
 }
 
 // Only values descended from the registered handler's request/writer prove
@@ -552,6 +564,12 @@ func (c *classifier) evidenceForBody(body *ast.BlockStmt, pkg *pkgSource, origin
 		// only the actual arguments: an io.Reader helper may read either an inbound
 		// upload or an upstream response depending on this call site.
 		if fn := calleeFunc(call, info); fn != nil && args != 0 {
+			if fn.Pkg() != nil && fn.Pkg().Path() == c.set.modulePath+"/internal/workercontrolcore" && fn.Name() == "VerifyRequest" && first&incomingRequest != 0 {
+				evidence.workerProof = true
+			}
+			if fn.Pkg() != nil && fn.Pkg().Path() == httpImportPath && fn.Name() == "ServeHTTP" && len(call.Args) == 2 && first&outgoingWriter != 0 && origins.expression(call.Args[1], info)&incomingRequest != 0 {
+				evidence.forwardsHandler = true
+			}
 			if inner := c.set.funcDecls[fn]; inner != nil {
 				bound := newBodyOrigins()
 				offset := 0
@@ -669,6 +687,8 @@ func merge(into, from *bodyEvidence) {
 	into.responseRedirect = into.responseRedirect || from.responseRedirect
 	into.responseBinary = into.responseBinary || from.responseBinary
 	into.websocket = into.websocket || from.websocket
+	into.workerProof = into.workerProof || from.workerProof
+	into.forwardsHandler = into.forwardsHandler || from.forwardsHandler
 	into.contentTypes = append(into.contentTypes, from.contentTypes...)
 }
 

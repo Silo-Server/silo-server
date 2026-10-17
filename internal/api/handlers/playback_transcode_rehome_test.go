@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -30,6 +32,7 @@ const rehomeTestTransport = "rehome-transport"
 type fakeRehomeNode struct {
 	server  *httptest.Server
 	starts  atomic.Int32
+	stops   atomic.Int32
 	release chan struct{} // when non-nil, a start waits for it to close
 
 	mu       sync.Mutex
@@ -63,6 +66,7 @@ func newFakeRehomeNode(t *testing.T, gated bool) *fakeRehomeNode {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"):
 			_, _ = io.WriteString(w, "moved:"+strings.TrimPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"))
 		case r.Method == http.MethodDelete:
+			node.stops.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -155,6 +159,209 @@ func (f *rehomeFixture) segment(name string) *httptest.ResponseRecorder {
 
 func pooledNode(id int, url string) *nodepool.Node {
 	return &nodepool.Node{ID: id, Name: "node", Type: "transcode", URL: url, Enabled: true, Healthy: true}
+}
+
+type rehomeRestoreTransportFunc func(*http.Request) (*http.Response, error)
+
+func (f rehomeRestoreTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestFailedRehomeStartUndispatchedCandidateUsesHealthyNode(t *testing.T) {
+	refusedURL := unreachableNodeURL(t)
+	var attempts, deletes atomic.Int32
+	nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
+		return rehomeRestoreTransportFunc(func(r *http.Request) (*http.Response, error) {
+			if strings.HasPrefix(r.URL.String(), refusedURL+"/") {
+				if r.Method == http.MethodPost {
+					attempts.Add(1)
+				}
+				if r.Method == http.MethodDelete {
+					deletes.Add(1)
+				}
+			}
+			return base.RoundTrip(r)
+		})
+	})
+	t.Cleanup(func() { nodehttp.Configure(nil) })
+	healthy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, unreachableNodeURL(t)), pooledNode(2, refusedURL), pooledNode(3, healthy.server.URL)}, "ffmpeg")
+	cfg := f.handler.playbackConfig()
+	cfg.Routing.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+	f.handler.PlaybackConfig = func() config.PlaybackConfig { return cfg }
+	card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+	recipes := newSharedRecipeStore(*card)
+	f.handler.NodeRecipeStore = recipes
+	f.handler.PlanStoreV3 = rehomeDurableStore(t, f)
+	if err := f.handler.moveTranscodeOffNodeV3(t.Context(), f.session.ID, playback.TranscodeRoute{NodeURL: f.deadURL, TransportID: rehomeTestTransport}, nil, 3); err != nil {
+		t.Fatal("undispatched candidate prevented healthy fallback", err)
+	}
+	if attempts.Load() != 1 || deletes.Load() != 0 || healthy.starts.Load() != 1 {
+		t.Fatalf("refused POST=%d DELETE=%d healthyPOST=%d want=1/0/1", attempts.Load(), deletes.Load(), healthy.starts.Load())
+	}
+	waitForStoredRecipeNode(t, recipes, healthy.server.URL, 3)
+}
+
+//nolint:nestif // Keep this ordered failure-injection scenario and its exact authority assertions in one scope.
+func TestFailedRehomeStartUndispatchedLegacyRouteMustRemainCurrent(t *testing.T) {
+	for _, mode := range []string{"stopped", "changed", "busy"} {
+		t.Run(mode, func(t *testing.T) {
+			refusedURL := unreachableNodeURL(t)
+			healthy := newFakeRehomeNode(t, false)
+			f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, unreachableNodeURL(t)), pooledNode(2, refusedURL), pooledNode(3, healthy.server.URL)}, "ffmpeg")
+			cfg := f.handler.playbackConfig()
+			cfg.Routing.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+			f.handler.PlaybackConfig = func() config.PlaybackConfig { return cfg }
+			card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+			recipes := &rehomeStopAckStore{sharedRecipeStore: newSharedRecipeStore(*card)}
+			f.handler.NodeRecipeStore = recipes
+			var attempts, deletes atomic.Int32
+			var unlock func()
+			t.Cleanup(func() {
+				if unlock != nil {
+					unlock()
+				}
+			})
+			nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
+				return rehomeRestoreTransportFunc(func(r *http.Request) (*http.Response, error) {
+					response, err := base.RoundTrip(r)
+					if strings.HasPrefix(r.URL.String(), refusedURL+"/") {
+						if r.Method == http.MethodDelete {
+							deletes.Add(1)
+						}
+						if r.Method == http.MethodPost && attempts.Add(1) == 1 {
+							switch mode {
+							case "stopped":
+								if stopErr := f.sessions.StopSession(f.session.ID); stopErr != nil {
+									t.Error(stopErr)
+								}
+								_ = recipes.Delete(t.Context(), rehomeTestTransport)
+							case "changed":
+								if moveErr := f.sessions.SetTranscodeRoute(f.session.ID, playback.TranscodeRoute{NodeURL: "https://successor.example", TransportID: rehomeTestTransport}); moveErr != nil {
+									t.Error(moveErr)
+								}
+							case "busy":
+								unlock = f.handler.tm.LockSessionLifecycle(f.session.ID)
+							}
+						}
+					}
+					return response, err
+				})
+			})
+			t.Cleanup(func() { nodehttp.Configure(nil) })
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			err := f.handler.moveTranscodeOffNodeV3(ctx, f.session.ID, playback.TranscodeRoute{NodeURL: f.deadURL, TransportID: rehomeTestTransport}, nil, 3)
+			if err == nil || attempts.Load() != 1 || deletes.Load() != 0 || healthy.starts.Load() != 0 || recipes.puts.Load() != 0 {
+				t.Fatalf("mode=%s err=%v refusedPOST=%d DELETE=%d healthyPOST=%d restores=%d", mode, err, attempts.Load(), deletes.Load(), healthy.starts.Load(), recipes.puts.Load())
+			}
+			if mode == "busy" {
+				if !errors.Is(err, errRehomeOutcomeUnknown) {
+					t.Fatal("busy local lifecycle did not retain uncertainty", err)
+				}
+			} else if !errors.Is(err, playback.ErrReplanSupersededV3) {
+				t.Fatal("legacy route change did not end candidate iteration", err)
+			}
+		})
+	}
+}
+
+type partialRehomeStartConn struct{ net.Conn }
+
+func (c partialRehomeStartConn) Write(p []byte) (int, error) {
+	if strings.HasPrefix(string(p), "POST ") {
+		n, err := c.Conn.Write(p[:len(p)-1])
+		if err != nil {
+			return n, err
+		}
+		return n, &net.OpError{Op: "write", Net: "tcp", Err: syscall.ETIMEDOUT}
+	}
+	return c.Conn.Write(p)
+}
+
+func TestFailedRehomeStartPreservesDispatchEvidence(t *testing.T) {
+	for _, mode := range []string{"lost-response", "connected-then-dial-error", "partial-write"} {
+		t.Run(mode, func(t *testing.T) {
+			var starts, deletes atomic.Int32
+			partial := make(chan int, 1)
+			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					deletes.Add(1)
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				if r.Method != http.MethodPost {
+					http.NotFound(w, r)
+					return
+				}
+				body, err := io.ReadAll(r.Body)
+				starts.Add(1)
+				if mode == "partial-write" {
+					if err == nil {
+						t.Error("partial fixture delivered complete body")
+					}
+					partial <- len(body)
+					return
+				}
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_ = conn.Close()
+			}))
+			t.Cleanup(node.Close)
+			switch mode {
+			case "connected-then-dial-error":
+				nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
+					return rehomeRestoreTransportFunc(func(r *http.Request) (*http.Response, error) {
+						response, err := base.RoundTrip(r)
+						if err != nil && r.Method == http.MethodPost {
+							return response, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+						}
+						return response, err
+					})
+				})
+			case "partial-write":
+				nodehttp.Configure(func(base http.RoundTripper) http.RoundTripper {
+					transport := base.(*http.Transport).Clone()
+					dial := transport.DialContext
+					transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+						conn, err := dial(ctx, network, addr)
+						if err != nil {
+							return nil, err
+						}
+						return partialRehomeStartConn{conn}, nil
+					}
+					t.Cleanup(transport.CloseIdleConnections)
+					return transport
+				})
+			}
+			t.Cleanup(func() { nodehttp.Configure(nil) })
+			f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, unreachableNodeURL(t)), pooledNode(2, node.URL)}, "ffmpeg")
+			cfg := f.handler.playbackConfig()
+			cfg.Routing.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+			f.handler.PlaybackConfig = func() config.PlaybackConfig { return cfg }
+			card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+			recipes := &rehomeStopAckStore{sharedRecipeStore: newSharedRecipeStore(*card)}
+			f.handler.NodeRecipeStore = recipes
+			f.handler.PlanStoreV3 = rehomeDurableStore(t, f)
+			err := f.handler.moveTranscodeOffNodeV3(t.Context(), f.session.ID, playback.TranscodeRoute{NodeURL: f.deadURL, TransportID: rehomeTestTransport}, nil, 3)
+			if mode == "partial-write" {
+				select {
+				case n := <-partial:
+					if n == 0 {
+						t.Fatal("worker observed no partial body bytes")
+					}
+				case <-time.After(time.Second):
+					t.Fatal("worker did not observe partial request")
+				}
+			}
+			if !errors.Is(err, errRehomeOutcomeUnknown) || starts.Load() != 1 || deletes.Load() != 1 || recipes.puts.Load() != 0 {
+				t.Fatalf("mode=%s err=%v POST=%d DELETE=%d restores=%d want=unknown/1/1/0", mode, err, starts.Load(), deletes.Load(), recipes.puts.Load())
+			}
+		})
+	}
 }
 
 // TestRelayMovesTranscodeOffUnreachableNodeToAnotherNode covers the reported
@@ -425,7 +632,8 @@ func TestRelayMoveKeepsTheSessionsRecipeVersions(t *testing.T) {
 	}, "ffmpeg")
 	store := playback.NewMemoryPlanStoreV3()
 	if err := store.SaveAttempt(context.Background(), playback.AttemptRecordV3{
-		PlaybackAttemptID: "attempt-1", SessionID: f.session.ID, UserID: 1, CurrentPlanID: "plan-1",
+		PlaybackAttemptID: "attempt-1", SessionID: f.session.ID, UserID: 1, ProfileID: "profile-1", EffectiveMediaFileID: 42, CurrentPlanID: "plan-1",
+		FrozenRecipe: playback.ExecutableRecipeV3{TranscodeNodeURL: f.deadURL, TranscodeTransportID: rehomeTestTransport},
 		CurrentPlan: playback.PlanV3{PlanID: "plan-1", Transformations: []playback.TransformationV3{
 			{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: "2"},
 		}},
@@ -433,7 +641,7 @@ func TestRelayMoveKeepsTheSessionsRecipeVersions(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f.handler.PlanStoreV3 = store
+	f.handler.PlanStoreV3 = &ownedRehomePlanStore{MemoryPlanStoreV3: store}
 	seedNodeTransformations(f.handler, older.server.URL, "1")
 	seedNodeTransformations(f.handler, current.server.URL, "2")
 
@@ -517,7 +725,17 @@ func TestRelayMoveRestoresLegacySessionsStoredRecipe(t *testing.T) {
 	store = &sharedRecipeStore{cards: map[string]playback.RecipeCard{f.session.ID: *stored}}
 	f.handler.NodeRecipeStore = store
 
-	f.handler.rollBackMovedStartV3(context.Background(), f.session.ID, f.deadURL, f.session.ID, refusing.URL, *stored, true)
+	restoration, err := store.CaptureRestore(t.Context(), f.session.ID, *stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := f.sessions.GetSession(f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.handler.rollBackMovedStartV3(context.Background(), &rehomeRouteV3{}, nil, current, playback.TranscodeRoute{NodeURL: f.deadURL}, refusing.URL, restoration, true); err != nil {
+		t.Fatal(err)
+	}
 	if card, ok := store.Get(context.Background(), f.session.ID); !ok || card.TranscodeNodeURL != f.deadURL {
 		t.Fatalf("stored recipe = %+v (present %v), want the original card restored under the session id", card, ok)
 	}

@@ -7,6 +7,7 @@
     "error_codes: not statically derivable from registration source; resolved in a later inventory stage"
   ],
   "heuristic_fields": [
+    "auth_class/auth_traits: middleware markers normally determine authority; worker proof checks are inferred from typed VerifyRequest calls on the incoming request, and named worker gateways/injected source handlers delegate admission",
     "request_kind: inferred from decode/parse calls in the handler body, matched by callee name and by the substring \"body\" in the decoded argument",
     "response_media_kind: inferred from Content-Type string literals and from writer-call names (json.NewEncoder, writeJSON, respondJSON, writeError, ServeContent, ServeFile)",
     "upgrades_websocket: inferred from an Upgrade/Accept call whose callee names a websocket package or contains the substring \"grade\""
@@ -21,6 +22,12 @@
       "entrypoint": "internal/debugserver.newHandler",
       "description": "Optional literal-loopback operational profiling listener, separate from every client-facing port.",
       "route_count": 81
+    },
+    {
+      "id": "worker_control_core",
+      "entrypoint": "internal/workercontrolcore.(*Service).Handler",
+      "description": "Sealed core worker-control service behind the API listener's exact internal gateway routes; node identity, execution and source authority stay on core.",
+      "route_count": 9
     },
     {
       "id": "operational_metrics",
@@ -38,7 +45,7 @@
       "id": "api",
       "entrypoint": "internal/api.NewRouter",
       "description": "Main Silo API listener: the /api/v1 namespace and the routes mounted beside it.",
-      "route_count": 702
+      "route_count": 713
     },
     {
       "id": "api_v2",
@@ -56,12 +63,12 @@
       "id": "transcode_node",
       "entrypoint": "internal/transcodenode.(*Server).Handler",
       "description": "Transcode node listener: transcode/remux session control, artifacts, and probes.",
-      "route_count": 23
+      "route_count": 24
     }
   ],
   "totals": {
-    "routes": 873,
-    "conditional_routes": 691,
+    "routes": 894,
+    "conditional_routes": 705,
     "streaming_routes": 44,
     "websocket_routes": 4
   },
@@ -508,6 +515,12 @@
       "id": 29,
       "middleware": [
         "s.requireBearer"
+      ]
+    },
+    {
+      "id": 30,
+      "middleware": [
+        "workerPathValues"
       ]
     }
   ],
@@ -2538,6 +2551,253 @@
       "source_file": "internal/debugserver/handlers.go"
     },
     {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "DELETE",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "route_group": "/",
+      "handler": "(*internal/workercontrolcore.Service).closeWork",
+      "handler_expr": "s.closeWork",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "route_group": "/",
+      "handler": "(*internal/workercontrolcore.Service).recipe",
+      "handler_expr": "s.recipe",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "route_group": "/",
+      "handler": "(*internal/workercontrolcore.Service).recipe",
+      "handler_expr": "s.recipe",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/report",
+      "route_group": "/",
+      "handler": "(*internal/workercontrolcore.Service).report",
+      "handler_expr": "s.report",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "binary",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/revoke",
+      "route_group": "/",
+      "handler": "(*internal/workercontrolcore.Service).closeNode",
+      "handler_expr": "s.closeNode",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "unknown",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/snapshot",
+      "route_group": "/",
+      "handler": "(*internal/workercontrolcore.Service).snapshot",
+      "handler_expr": "s.snapshot",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/workers/{node}/sources/{grant}",
+      "route_group": "/",
+      "handler": "s.options.SourceHandler",
+      "handler_expr": "s.options.SourceHandler",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 30,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "s.options.SourceHandler != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/workers/{node}/sources/{grant}",
+      "route_group": "/",
+      "handler": "s.options.SourceHandler",
+      "handler_expr": "s.options.SourceHandler",
+      "handler_kind": "expression",
+      "handler_resolved": false,
+      "middleware_chain": 30,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "s.options.SourceHandler != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
+      "listener": "worker_control_core",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/sources/{grant}/renew",
+      "route_group": "/",
+      "handler": "(*internal/workercontrolcore.Service).renew",
+      "handler_expr": "s.renew",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 30,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/workercontrolcore/http.go"
+    },
+    {
       "listener": "operational_metrics",
       "namespace": "operational",
       "method": "CONNECT",
@@ -3454,6 +3714,325 @@
       "success_statuses": null,
       "error_codes": null,
       "source_file": "cmd/silo/root_handler.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/enroll",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).enroll",
+      "handler_expr": "workers.enroll",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/output-grant",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).outputGrant",
+      "handler_expr": "workers.outputGrant",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "DELETE",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).closeWork",
+      "handler_expr": "workers.closeWork",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).recipe",
+      "handler_expr": "workers.recipe",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/workers/{node}/recipes/{work}",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).recipe",
+      "handler_expr": "workers.recipe",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/report",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).report",
+      "handler_expr": "workers.report",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/revoke",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).revoke",
+      "handler_expr": "workers.revoke",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/snapshot",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).snapshot",
+      "handler_expr": "workers.snapshot",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/api/internal/workers/{node}/sources/{grant}",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).source",
+      "handler_expr": "workers.source",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/api/internal/workers/{node}/sources/{grant}",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).source",
+      "handler_expr": "workers.source",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/workers/{node}/sources/{grant}/renew",
+      "route_group": "/",
+      "handler": "(internal/api.workerGateway).renew",
+      "handler_expr": "workers.renew",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 1,
+      "auth_class": "delegated",
+      "auth_traits": [
+        "delegated"
+      ],
+      "conditions": [
+        "deps.WorkerHTTP != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
     },
     {
       "listener": "api",
@@ -28544,6 +29123,35 @@
       "conditional": false,
       "request_kind": "json",
       "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/transcodenode/server.go"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/worker/execute",
+      "route_group": "/",
+      "handler": "(*internal/transcodenode.Server).handleWorkerExecute",
+      "handler_expr": "s.handleWorkerExecute",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [
+        "s.executeHandler != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "binary",
       "delegates_to": "",
       "streams": false,
       "upgrades_websocket": false,

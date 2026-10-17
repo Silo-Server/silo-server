@@ -10,8 +10,9 @@ import (
 func nodeRetained(t *testing.T, doc map[string]any, listener string) map[string]any {
 	t.Helper()
 	e := entryWhere(t, doc, func(e map[string]any) bool {
-		return e["listener"] == listener && e["disposition"] == DispositionPorted
+		return e["listener"] == listener && (e["disposition"] == DispositionPorted || listener == ListenerWorkerControl)
 	})
+	e["disposition"] = DispositionPorted
 	e["review_state"] = ReviewRatified
 	e["disposition_rule"] = ruleListenerDelegation
 	e["v2"] = map[string]any{"method": nil, "path": nil, "operation_id": nil}
@@ -20,10 +21,10 @@ func nodeRetained(t *testing.T, doc map[string]any, listener string) map[string]
 }
 
 // TestNodeListenerRetainedRowIsRatifiable proves the listener-scoped
-// exception: a proxy or transcode_node ported row may be ratified with v2
+// exception: a ported worker-listener row may be ratified with v2
 // unset when it carries the listener_delegation rule and the retention note.
 func TestNodeListenerRetainedRowIsRatifiable(t *testing.T) {
-	for _, listener := range []string{ListenerProxy, ListenerTranscodeNode} {
+	for _, listener := range []string{ListenerProxy, ListenerTranscodeNode, ListenerWorkerControl} {
 		t.Run(listener, func(t *testing.T) {
 			fsys := mutatedFS(t, func(doc map[string]any) { nodeRetained(t, doc, listener) })
 			if err := verify(fsys); err != nil {

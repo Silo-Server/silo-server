@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodehttp"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -255,11 +256,6 @@ func subtitleArtifactErrorV3(message string, cause error) *transportErrorV3 {
 
 func wrapSubtitleStoreErrorV3(err error) error {
 	return fmt.Errorf("%w: %w", errSubtitleStoreUnavailableV3, err)
-}
-
-type v3ReplanLock struct {
-	mu   sync.Mutex
-	refs int
 }
 
 type v3EventRate struct {
@@ -2028,6 +2024,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	}
 	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
+	ctx = playback.WithOriginCredential(ctx, streamOriginCredential(r.Context()))
 	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
 		return playback.DecisionResponseV3{}, sessionStartErrorV3(err)
@@ -2098,6 +2095,8 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to prepare the selected subtitle artifact.", err)
 	}
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: serverFeaturesForRequestV3(r.Context()), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
+	frozenRecipe.TranscodeNodeURL = transport.nodeURL
+	frozenRecipe.TranscodeTransportID = transport.transportID
 	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, FrozenRecipe: frozenRecipe, NormalizedRequest: req, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), StartResponse: response, RequestDigest: requestDigests.current, ExpiresAt: time.Now().Add(playback.MaxTokenTTL)}
 	if err := h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport, mode); err != nil {
 		transport.rollback()
@@ -2844,10 +2843,11 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		nodeURL = transcodeNode.URL
 	}
 	adoptSuccessor := func() {
+		deletePreviousRecipe := h.capturePredecessorRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 		h.tm.CloseTranscodeSession(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
-			h.deleteNodeRecipeV3(r.Context(), previousTransportID)
+			deletePreviousRecipe()
 		}
 		h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
 		h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
@@ -2856,6 +2856,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		if committed {
 			return nil
 		}
+		deleteTransportRecipe := h.captureNodeRecipeDeletionV3(r.Context(), transportID, nodeURL)
 		if requireCancellation && nodeURL != "" && transportID != "" {
 			if err := h.tm.CancelRemoteTranscode(r.Context(), transportID, nodeURL); err != nil {
 				// applySession has already made this the live route. Keep its
@@ -2879,7 +2880,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			releaseReservation()
 			h.restoreProxyGrantV3(r.Context(), session.ID, priorGrant)
 		}
-		h.deleteNodeRecipeV3(r.Context(), transportID)
+		deleteTransportRecipe()
 		releaseLifecycle()
 		return nil
 	}
@@ -3057,11 +3058,10 @@ func (h *PlaybackHandler) putNodeRecipeV3(ctx context.Context, transportID strin
 	}
 }
 
-// putRequiredNodeRecipeV3 persists the active authority for a progressive
-// remux executed by a transcode node. Unlike the reconstruction-only write
-// above, this one is part of route admission: the node checks the record before
-// every new remux request, and stop deletes it, so a still-valid stream token
-// cannot resurrect FFmpeg after a node replacement.
+// putRequiredNodeRecipeV3 persists active authority for a remote progressive
+// remux or an enrolled standalone HLS worker. This write is part of admission:
+// standalone workers never receive a client's token-carried recipe, and stop
+// deletes the current authority before an old token can rebuild the job.
 func (h *PlaybackHandler) putRequiredNodeRecipeV3(ctx context.Context, transportID string, card playback.RecipeCard) error {
 	if h == nil || h.NodeRecipeStore == nil || !h.NodeRecipeStore.Enabled() || transportID == "" {
 		return errors.New("node recipe store unavailable")
@@ -3076,13 +3076,7 @@ func (h *PlaybackHandler) putRequiredNodeRecipeV3(ctx context.Context, transport
 // store's TTL is only the backstop for the paths that never run (a crashed API
 // process); every deliberate teardown deletes here.
 func (h *PlaybackHandler) deleteNodeRecipeV3(ctx context.Context, transportID string) {
-	if h == nil || h.NodeRecipeStore == nil || transportID == "" {
-		return
-	}
-	if err := h.NodeRecipeStore.Delete(context.WithoutCancel(ctx), transportID); err != nil {
-		slog.WarnContext(ctx, "failed to drop the node transcode recipe",
-			"component", "api", "transport", transportID, "error", err)
-	}
+	h.captureNodeRecipeDeletionV3(ctx, transportID, "")()
 }
 
 // deleteRequiredProgressiveRemuxAuthorityV3 makes a user-visible stop durable
@@ -3099,7 +3093,11 @@ func (h *PlaybackHandler) deleteRequiredProgressiveRemuxAuthorityV3(ctx context.
 	}
 	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeRecipeWriteTimeoutV3)
 	defer cancel()
-	return h.NodeRecipeStore.Delete(deleteCtx, session.TranscodeTransportID)
+	deleteRecipe, err := playback.CaptureNodeRecipeDeletion(deleteCtx, h.NodeRecipeStore, session.TranscodeTransportID, session.TranscodeNodeURL)
+	if err != nil {
+		return err
+	}
+	return deleteRecipe(deleteCtx)
 }
 
 func requiresProgressiveRemuxAuthorityV3(session *playback.Session) bool {
@@ -3916,6 +3914,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	}
 	url := fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID)
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
+	card.OriginCredential = session.OriginCredential
 	card.OriginalStartedAt = session.StartedAt
 	card.StreamLocation = session.StreamLocation
 	card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
@@ -3942,6 +3941,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			if committed {
 				return nil
 			}
+			deletePreviousRecipe := h.capturePredecessorRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 			committed = true
 			previous, accepted := h.tm.SwapTranscodeSession(session.ID, ts)
 			if !accepted {
@@ -3962,7 +3962,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			}
 			if previousNodeURL != "" {
 				h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
-				h.deleteNodeRecipeV3(r.Context(), previousTransportID)
+				deletePreviousRecipe()
 			}
 			ts.SetRestartHook(func(ctx context.Context) {
 				h.maybeStartThrottler(ctx, ts)
@@ -4016,6 +4016,12 @@ func combineTransportErrorsV3(first, second *transportErrorV3) *transportErrorV3
 // prepareRemoteTransportV3 starts an HLS generation on the selected transcode node.
 func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, nodePlan nodepool.Plan, timeline preparedTimelineV3, mode mediaAuthModeV3) (preparedTransportV3, *transportErrorV3) {
 	node := nodePlan.TranscodeNode
+	classifyCtx, cancelClassify := context.WithTimeout(r.Context(), nodeRecipeWriteTimeoutV3)
+	requiresRecipe, err := nodehttp.RequiresRecipe(classifyCtx, node.URL)
+	cancelClassify()
+	if err != nil {
+		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_unavailable", message: "The selected transcode node is unavailable.", retryable: true, cause: err}
+	}
 	transportID := transportGenerationV3(session.ID, result.Plan.PlanID)
 	videoCodec := result.TargetVideoCodec
 	if result.Plan.Delivery == playback.DeliveryRemuxHLSV3 {
@@ -4062,7 +4068,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		req.ToneMapDVRPUPresent = sourceMetadata.ToneMapDVRPUPresent
 	}
 	remoteStartAt := time.Now()
-	nodeResp, status, err := h.startRemotePlaybackTransport(r.Context(), node.URL, req)
+	nodeResp, status, err := h.startRemotePlaybackTransport(nodehttp.WithPlaybackJob(r.Context(), session.ID), node.URL, req)
 	remoteOutcome := transportStartupReadyV3
 	if err != nil || status != http.StatusAccepted {
 		remoteOutcome = playbackRemoteOutcomeFailedV3
@@ -4129,6 +4135,14 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		card.RoutingEgressNodeID = nodePlan.ProxyNode.ID
 	}
 	confirmedHWAccel := card.EffectiveEncoderHWAccel()
+	if requiresRecipe {
+		if err := h.putRequiredNodeRecipeV3(r.Context(), transportID, card); err != nil {
+			deleteRecipe := h.captureNodeRecipeDeletionV3(r.Context(), transportID, node.URL)
+			h.tm.StopRemoteTranscode(transportID, node.URL)
+			deleteRecipe()
+			return preparedTransportV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "The selected transcode node's playback authority could not be stored.", retryable: true, cause: err}
+		}
+	}
 	url := fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID)
 	// Either URL builder only returns an absolute proxy URL when a proxy was
 	// planned and its authority (a signed token, or a stored grant) could
@@ -4146,7 +4160,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	case mode.proxyEgress:
 		url, servedByProxy, priorGrant = h.grantManifestURLV3(r.Context(), card, nodePlan.ProxyNode, accessPath)
 	}
-	if mode.headerAuth {
+	if mode.headerAuth && !requiresRecipe {
 		// No client-visible URL carries a stream token in this mode, so neither the
 		// client nor the API relay can hand the node its recipe back after the node
 		// restarts. Store it for the node to fetch. Both sub-modes need it: the
@@ -4176,10 +4190,11 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		egressNodeURL = nodePlan.ProxyNode.URL
 	}
 	adoptSuccessor := func() {
+		deletePreviousRecipe := h.capturePredecessorRecipeDeletionV3(r.Context(), previousTransportID, previousNodeURL)
 		h.tm.CloseTranscodeSession(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
-			h.deleteNodeRecipeV3(r.Context(), previousTransportID)
+			deletePreviousRecipe()
 		}
 		h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, servedByProxy)
 		h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
@@ -4188,6 +4203,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		if committed {
 			return nil
 		}
+		deleteTransportRecipe := h.captureNodeRecipeDeletionV3(r.Context(), transportID, node.URL)
 		if requireCancellation {
 			if err := h.tm.CancelRemoteTranscode(r.Context(), transportID, node.URL); err != nil {
 				// Preserve the admitted successor route for a retryable stop. Its
@@ -4202,7 +4218,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		}
 		committed = true
 		// The node job this recipe rebuilds is gone, so the recipe must go too.
-		h.deleteNodeRecipeV3(r.Context(), transportID)
+		deleteTransportRecipe()
 		// The accepted node job is gone; drop the planner reservation too so
 		// repeated failed starts cannot pin the node's max-job or bandwidth
 		// budget until the reservation ages out.
@@ -4265,6 +4281,7 @@ func (h *PlaybackHandler) liveTranscodeRouteV3(session *playback.Session) (nodeU
 func remoteTranscodeRecipeCardV3(session *playback.Session, file *models.MediaFile, nodeURL, transportID string, req transcodenode.TranscodeStartRequest, nodeResp transcodenode.TranscodeStartResponse, toneMapFilter string) playback.RecipeCard {
 	hw := firstNonEmptyHandlerV3(strings.TrimSpace(nodeResp.HWAccel), strings.TrimSpace(req.HWAccel))
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, nodeURL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SourceAudioChannels: req.SourceAudioChannels, SoftwareVideoDecode: req.SoftwareVideoDecode || nodeResp.SoftwareVideoDecode, ToneMapPolicy: req.ToneMapPolicy, ToneMapMode: req.ToneMapMode, ToneMapSourceKind: req.ToneMapSourceKind, ToneMapFilter: toneMapFilter, ToneMapRecipeVersion: req.ToneMapRecipeVersion, ToneMapPreflightRequired: req.ToneMapPreflightRequired, ToneMapSourceRevision: req.ToneMapSourceRevision, VideoBitstreamFilter: req.VideoBitstreamFilter, VideoSampleEntry: req.VideoSampleEntry, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, KeyframePlaylist: req.KeyframePlaylist, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, TotalDuration: req.TotalDuration, ThrottleSeconds: req.ThrottleSeconds})
+	card.OriginCredential = session.OriginCredential
 	card.ToneMapDVConfigPresent = req.ToneMapDVConfigPresent
 	if encoderHWAccel := strings.TrimSpace(nodeResp.EncoderHWAccel); encoderHWAccel != "" {
 		card.EncoderHWAccel = encoderHWAccel
@@ -4686,7 +4703,10 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusServiceUnavailable, "replan_capacity_exhausted", "The server is replanning too many sessions; retry shortly")
 	}
 	defer releaseSlot()
-	unlockReplan := h.lockReplanV3(sessionID)
+	unlockReplan, err := h.lockReplanV3(r.Context(), sessionID)
+	if err != nil {
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusServiceUnavailable, "replan_capacity_exhausted", "The replan request was canceled while waiting for the session")
+	}
 	defer unlockReplan()
 	unlockStore, err := h.PlanStoreV3.AcquireSessionLock(r.Context(), sessionID)
 	if err != nil {
@@ -5493,6 +5513,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	if !seekReanchor {
 		updated.FrozenRecipe = artifactRecipe
 	}
+	updated.FrozenRecipe.TranscodeNodeURL = transport.nodeURL
+	updated.FrozenRecipe.TranscodeTransportID = transport.transportID
 	updated.NormalizedRequest = start
 	updated.EffectiveMediaFileID = effectiveFile.ID
 	updated.ExpiresAt = time.Now().Add(playback.MaxTokenTTL)
@@ -6224,28 +6246,8 @@ func (h *PlaybackHandler) clarifyOriginalQuality4KTerminalV3(ctx context.Context
 	}
 }
 
-func (h *PlaybackHandler) lockReplanV3(sessionID string) func() {
-	h.v3ReplanMu.Lock()
-	if h.v3ReplanLocks == nil {
-		h.v3ReplanLocks = make(map[string]*v3ReplanLock)
-	}
-	entry := h.v3ReplanLocks[sessionID]
-	if entry == nil {
-		entry = &v3ReplanLock{}
-		h.v3ReplanLocks[sessionID] = entry
-	}
-	entry.refs++
-	h.v3ReplanMu.Unlock()
-	entry.mu.Lock()
-	return func() {
-		entry.mu.Unlock()
-		h.v3ReplanMu.Lock()
-		entry.refs--
-		if entry.refs == 0 {
-			delete(h.v3ReplanLocks, sessionID)
-		}
-		h.v3ReplanMu.Unlock()
-	}
+func (h *PlaybackHandler) lockReplanV3(ctx context.Context, sessionID string) (func(), error) {
+	return h.v3ReplanLocks.Acquire(ctx, sessionID)
 }
 
 // maxConcurrentReplansV3 bounds simultaneous replan executions. Each replan
@@ -6264,7 +6266,7 @@ type sessionLockCapacityAdvisorV3 interface {
 }
 
 // acquireReplanSlotV3 blocks until a replan slot frees or the request context
-// is cancelled; excess replans queue here holding no DB resources at all.
+// is canceled; excess replans queue here holding no DB resources at all.
 func (h *PlaybackHandler) acquireReplanSlotV3(ctx context.Context) (func(), error) {
 	h.v3ReplanSlotsOnce.Do(func() {
 		capacity := maxConcurrentReplansV3

@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 // handleMediaSample runs one media sampling request with this node's ffmpeg,
@@ -35,7 +36,7 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	cfg := s.watcher.Config()
+	cfg := s.runtimeConfig().Config()
 	if cfg == nil {
 		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, "node not configured")
 		return
@@ -47,6 +48,13 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, errNodeDraining)
 		return
 	}
+	jobContext, releaseJob, admitted := s.acquireJobContext(r.Context(), "")
+	if !admitted {
+		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, errJobCeiling)
+		return
+	}
+	defer releaseJob()
+	r = r.WithContext(jobContext)
 	// API servers each reserve nodes on their own, so the node enforces the
 	// capacity itself. A request over it waits for a slot, separately from
 	// its run's timeouts, and is refused as unavailable when none frees up.

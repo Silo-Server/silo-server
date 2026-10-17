@@ -229,6 +229,8 @@ type memoryReplanV3 struct {
 }
 
 type MemoryPlanStoreV3 struct {
+	sessionLocks SessionLocksV3
+	routeRows    SessionLocksV3
 	mu           sync.Mutex
 	attempts     map[string]AttemptRecordV3
 	replans      map[string]memoryReplanV3
@@ -240,18 +242,18 @@ func NewMemoryPlanStoreV3() *MemoryPlanStoreV3 {
 	return &MemoryPlanStoreV3{attempts: make(map[string]AttemptRecordV3), replans: make(map[string]memoryReplanV3)}
 }
 
-// AcquireSessionLock is deliberately a no-op. The store lock exists to
-// serialize replans across processes sharing one PostgreSQL database; the
-// memory store only ever backs a single-process, DB-less deployment, where
-// the handler's own per-session replan mutex already provides the same
-// serialization before this lock is taken.
-func (s *MemoryPlanStoreV3) AcquireSessionLock(context.Context, string) (func(), error) {
-	return func() {}, nil
+// Multiple handlers can share one memory store. Moves and replans must use
+// this same store-owned boundary even when their local handler locks differ.
+func (s *MemoryPlanStoreV3) AcquireSessionLock(ctx context.Context, sessionID string) (func(), error) {
+	return s.sessionLocks.Acquire(ctx, sessionID)
 }
 
-func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV3) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *MemoryPlanStoreV3) SaveAttempt(ctx context.Context, record AttemptRecordV3) error {
+	release, err := s.lockAttemptRows(ctx, record)
+	if err != nil {
+		return err
+	}
+	defer release()
 	now := time.Now()
 	// Expired rows are replaceable, mirroring the Postgres pre-delete: they
 	// linger until the hourly cleanup and must not wedge a legitimate retry.
@@ -281,9 +283,12 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 // ReplaceAttempt overwrites a session's attempt record unconditionally. It is
 // not part of PlanStoreV3: durable stores treat attempts as insert-once and
 // replan-updated, so only in-memory test setups may rewrite one in place.
-func (s *MemoryPlanStoreV3) ReplaceAttempt(_ context.Context, record AttemptRecordV3) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *MemoryPlanStoreV3) ReplaceAttempt(ctx context.Context, record AttemptRecordV3) {
+	release, err := s.lockAttemptRows(ctx, record)
+	if err != nil {
+		return
+	}
+	defer release()
 	for attemptID, existing := range s.attempts {
 		if existing.PlaybackAttemptID == record.PlaybackAttemptID || (record.SessionID != "" && existing.SessionID == record.SessionID) {
 			// ReplaceAttempt simulates a mixed-version writer in tests. Preserve
@@ -370,7 +375,12 @@ func (s *MemoryPlanStoreV3) ReleaseReplan(_ context.Context, sessionID, requestI
 	return nil
 }
 
-func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error {
+func (s *MemoryPlanStoreV3) CompleteReplan(ctx context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error {
+	release, err := s.routeRows.Acquire(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var attemptID string
@@ -436,15 +446,28 @@ func (s *MemoryPlanStoreV3) RecordRouteEvent(_ context.Context, record RouteEven
 	return true, nil
 }
 
-func (s *MemoryPlanStoreV3) CleanupExpired(_ context.Context, now time.Time) (int64, error) {
+func (s *MemoryPlanStoreV3) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	var count int64
+	expired := make(map[string]string)
 	for attemptID, record := range s.attempts {
 		if !record.ExpiresAt.After(now) {
+			expired[attemptID] = record.SessionID
+		}
+	}
+	s.mu.Unlock()
+	var count int64
+	for attemptID, sessionID := range expired {
+		release, err := s.routeRows.Acquire(ctx, sessionID)
+		if err != nil {
+			return count, err
+		}
+		s.mu.Lock()
+		if current, ok := s.attempts[attemptID]; ok && current.SessionID == sessionID && !current.ExpiresAt.After(now) {
 			s.deleteAttemptLocked(attemptID)
 			count++
 		}
+		s.mu.Unlock()
+		release()
 	}
 	return count, nil
 }
@@ -460,7 +483,12 @@ func (s *MemoryPlanStoreV3) findAttemptLocked(sessionID string) (string, *Attemp
 	return "", nil
 }
 
-func (s *MemoryPlanStoreV3) ApplyProgress(_ context.Context, sessionID string, sample ProgressSampleV3) (ProgressReceiptV3, error) {
+func (s *MemoryPlanStoreV3) ApplyProgress(ctx context.Context, sessionID string, sample ProgressSampleV3) (ProgressReceiptV3, error) {
+	release, err := s.routeRows.Acquire(ctx, sessionID)
+	if err != nil {
+		return ProgressReceiptV3{}, err
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	attemptID, record := s.findAttemptLocked(sessionID)
@@ -497,7 +525,12 @@ func ResolveUnappliedProgressV3(lastSequence int64, last *ProgressSampleV3, samp
 	return ProgressReceiptV3{Outcome: ProgressStaleSampleV3, Accepted: accepted}, nil
 }
 
-func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID string, final *ProgressSampleV3) (StopReceiptV3, bool, error) {
+func (s *MemoryPlanStoreV3) StopAttempt(ctx context.Context, sessionID, stopID string, final *ProgressSampleV3) (StopReceiptV3, bool, error) {
+	release, err := s.routeRows.Acquire(ctx, sessionID)
+	if err != nil {
+		return StopReceiptV3{}, false, err
+	}
+	defer release()
 	if _, err := uuid.Parse(stopID); err != nil {
 		return StopReceiptV3{}, false, ErrInvalidStopIDV3
 	}
@@ -535,7 +568,12 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	return receipt, true, nil
 }
 
-func (s *MemoryPlanStoreV3) RecordStopReceipt(_ context.Context, sessionID string, receipt StopReceiptV3) error {
+func (s *MemoryPlanStoreV3) RecordStopReceipt(ctx context.Context, sessionID string, receipt StopReceiptV3) error {
+	release, err := s.routeRows.Acquire(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, record := s.findAttemptLocked(sessionID)
@@ -552,7 +590,12 @@ func (s *MemoryPlanStoreV3) RecordStopReceipt(_ context.Context, sessionID strin
 	return nil
 }
 
-func (s *MemoryPlanStoreV3) ClaimStopFinalization(_ context.Context, sessionID string, leaseUntil time.Time) (bool, error) {
+func (s *MemoryPlanStoreV3) ClaimStopFinalization(ctx context.Context, sessionID string, leaseUntil time.Time) (bool, error) {
+	release, err := s.routeRows.Acquire(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, record := s.findAttemptLocked(sessionID)
