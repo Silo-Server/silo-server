@@ -7,11 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 const maxAudiobookSidecarCoverSize = 8 * 1024 * 1024
@@ -63,7 +63,7 @@ func ExtractAndUploadAudiobookCover(
 	if ffmpegPath == "" || cacher == nil || audioFilePath == "" || contentID == "" {
 		return "", ""
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := procgroup.CommandContext(ctx, ffmpegPath,
 		"-loglevel", "error",
 		"-i", audioFilePath,
 		"-an", "-map", "0:v?", "-c:v", "mjpeg",

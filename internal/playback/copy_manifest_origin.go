@@ -6,11 +6,12 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // Retain one bounded observed window, carrying its origin forward using actual
@@ -104,7 +105,7 @@ func probeCopyFragmentOrigin(ctx context.Context, opts TranscodeOpts, outputDir 
 		return 0, fmt.Errorf("open copy fragment: %w", err)
 	}
 	defer func() { _ = fragment.Close() }()
-	cmd := exec.CommandContext(ctx, ffprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath)),
+	cmd := procgroup.CommandContext(ctx, ffprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath)),
 		"-v", "error", "-probesize", "5000000", "-analyzeduration", "3000000",
 		"-select_streams", "v:0", "-read_intervals", "%+#1", "-show_entries", "packet=pts_time",
 		"-of", "csv=p=0", "-i", "pipe:0")
@@ -118,7 +119,7 @@ func probeCopyFragmentOrigin(ctx context.Context, opts TranscodeOpts, outputDir 
 	}
 	data, readErr := io.ReadAll(io.LimitReader(stdout, 4097))
 	if readErr != nil || len(data) > 4096 {
-		_ = cmd.Process.Kill()
+		_ = procgroup.Kill(cmd)
 	}
 	waitErr := cmd.Wait()
 	if readErr != nil {

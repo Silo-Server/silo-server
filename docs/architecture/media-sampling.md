@@ -636,6 +636,12 @@ priority and the first failure is logged. Deadlines and the limiter still
 bound background work. If the idle I/O class is seen to starve it on a disk
 that is never idle, switch to the lowest best-effort level (7) instead.
 
+Every ffmpeg run, background or not, starts in a process group of its own
+through `internal/procgroup`, which every other ffmpeg and ffprobe run in
+Silo uses too. A timeout or cancellation kills the whole group, so when the
+ffmpeg path is a wrapper script that runs the real ffmpeg as a child, the
+child dies with the wrapper instead of running on outside the limiter.
+
 ## Artifact storage
 
 Per-file analysis results are stored in `media_intro_fingerprints`, one row

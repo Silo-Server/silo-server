@@ -4,11 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // Some Dolby Vision sources carry an RPU that ffmpeg's dovi_rpu bitstream
@@ -209,7 +210,7 @@ func runDVRPUProbe(ctx context.Context, bin, inputPath string) dvRPUVerdict {
 	probeCtx, cancel := context.WithTimeout(ctx, dvRPUProbeTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(
+	cmd := procgroup.CommandContext(
 		probeCtx,
 		bin,
 		"-hide_banner",

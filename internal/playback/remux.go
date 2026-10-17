@@ -18,6 +18,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 const (
@@ -137,7 +138,7 @@ func supportsLeadingPictureDropFilter(bin string) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "-hide_banner", "-h", "bsf=noise").CombinedOutput()
+	out, err := procgroup.CommandContext(ctx, bin, "-hide_banner", "-h", "bsf=noise").CombinedOutput()
 	available := err == nil && slices.Contains(strings.Fields(string(out)), "-drop")
 	if !available {
 		slog.Warn("ffmpeg's noise bitstream filter has no drop expression; HEVC resume remuxes keep their leading pictures", "ffmpeg", bin)
@@ -407,7 +408,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 	// probe when the filter would actually run.
 	dropLeadingPictures = dropLeadingPictures && seekSeconds > 0 && !audioOnly && supportsLeadingPictureDropFilter(bin)
 	args := buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, dropLeadingPictures)
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := procgroup.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
