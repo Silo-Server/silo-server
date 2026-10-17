@@ -67,12 +67,14 @@ export function optionsFor(definition: SettingDisplay): SettingOption[] {
   if (definition.type === "language_tag") {
     return languageOptionsFor(definition.key);
   }
-  const members = (definition.values ?? []).filter((member) => !member.deprecated).map((member) => ({
-    value: String(member.value),
-    // The manifest leaves a label empty when the member is its own label
-    // (the date formats spell themselves).
-    label: member.label || String(member.value),
-  }));
+  const members = (definition.values ?? [])
+    .filter((member) => !member.deprecated)
+    .map((member) => ({
+      value: String(member.value),
+      // The manifest leaves a label empty when the member is its own label
+      // (the date formats spell themselves).
+      label: member.label || String(member.value),
+    }));
   if (definition.nullable) {
     return [{ value: "", label: "Unset" }, ...members];
   }
