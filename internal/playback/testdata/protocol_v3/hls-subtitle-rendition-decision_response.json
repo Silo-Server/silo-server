@@ -18,6 +18,8 @@
     "software_video_decode_v1",
     "plan_invalidated_v1",
     "plan_source_duration_v1",
+    "buffering_quality_v1",
+    "playback_plan_summary_v1",
     "subrip_sidecar_v1",
     "marker_thumbnails_v1",
     "hls_subtitle_renditions_v1"

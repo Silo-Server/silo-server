@@ -141,6 +141,21 @@ Its mode comes from `playback.buffering_quality_mode`:
 A quality the viewer picked always gets a prompt first, because lowering it
 silently would override an explicit choice.
 
+Trigger evaluation follows the media event clock:
+
+- Evaluate when a stall ends (`playing`) and when an in-progress stall reaches
+  the long-stall threshold. Starting a wait does not evaluate old stall history.
+- Once a long-stall timer has fired, keep watching the stall. Re-evaluate when a
+  time-based suppression expires if a stall is still in progress; expiry while
+  playing does not itself trigger an offer.
+- A suppressed trigger (answered, cooldown, rearm, or re-offer) leaves stall
+  history intact. A prompt timeout or rearm clears history, with startup grace
+  already over, and times any in-progress stall again from that instant.
+- Back on an undo pill only hides it. It does not answer the title.
+- The no-lower-rung notice is once per title. A lowering whose adopted plan is
+  no lower shows the failure notice on each such adoption, then starts its
+  cooldown.
+
 The controller acts only when the trigger fires and the title is not answered
 at this quality. If there is no lower rung, the client instead shows the
 display-only notice **"Can't lower quality for this video"**, once per title.
@@ -386,11 +401,11 @@ in parallel:
 
 | Item | Contract |
 | --- | --- |
-| Feature | The server advertises `buffering_quality_v1` in the `/api/v2` capability `features`. A client that sees it adds `buffering_quality_v1` to `client_features` on start and replan, and only then sends the fields below, because the server rejects unknown fields. The server records and applies learned limits only on requests that carry the feature. Against a server without it, clients still run the controller and send the same replans without the new fields; nothing is learned, and the limit row in Settings stays hidden. |
+| Feature | The server advertises `buffering_quality_v1` in the `/api/v2` capability `features` and native v2 start/replan response `server_features`. A client that sees it adds `buffering_quality_v1` to `client_features` on start and replan, and only then sends the fields below, because the server rejects unknown fields. The server records and applies learned limits only on requests that carry the feature. Against a server without it, clients still run the controller and send the same replans without the new fields; nothing is learned, and the limit row in Settings stays hidden. |
 | `bandwidth_estimate_source` | Start and replan, optional: `probe` or `observed_rebuffer`. Valid only alongside `bandwidth_estimate_kbps`; otherwise the request is a `400`. |
 | `learned_limit` | Start and replan, optional: `ignore` or `clear`. |
 | `playback_plan.bandwidth_limit` | Optional object: `kbps` (integer), `source` (`"observed_rebuffer"`), `expires_at` (RFC 3339). Present only when the learned limit lowered the plan. |
-| Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. |
+| Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. They use normal authenticated profile-scoped headers and `X-Silo-Device-Id`; no installation ID or body is required. |
 | Setting | `playback.buffering_quality_mode`, introduced in the next manifest revision (21 at the time of writing). |
 | Telemetry | Feature `playback_plan_summary_v1`, route event `plan_summary`, and the allowlist keys under *Telemetry*. |
 | Phase 2 | The server advertises `connection_speed_v1` and adds `bandwidth_probe_url` to the capability response: the probe on the path this client's media takes. With it, clients probe that URL, report to `POST /api/v2/playback/bandwidth-probe/results`, and read `probe` and `auto_budget_kbps` from the connection endpoint. |
@@ -440,6 +455,11 @@ stall" is a wait from 125000 that reaches 6000 ms.
 | `timeout` | mode `ask`, long stall, no answer, then long stalls triggering at 191000 and 261000 | prompts at 131000 and 261000; 191000 is too soon after the first offer |
 | `no_lower_result` | long stall, then `p2` adopted at 63000 with `quality_reduction_unavailable`, another long stall | the replan, `notice cant_lower`, then nothing during the cooldown |
 | `unadopted_replan` | long stall, replan_failed, a long stall at 150000, another at 200000 | replans at 131000 and 206000 |
+
+Additional conformance cases cover `suppressed_history_retained` (a later
+`playing` event can evaluate retained history), `repeated_no_lower_result`
+(each unsuccessful adoption shows its notice), `back_hides_undo_without_answering`,
+and `cooldown_expires_during_stall` (an active long stall is evaluated at expiry).
 
 ## Phases
 

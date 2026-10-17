@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 20,
+  "revision": 21,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -157,6 +157,42 @@
     }
   },
   "definitions": [
+    {
+      "key": "playback.buffering_quality_mode",
+      "introduced_in": 21,
+      "persistence": "remote",
+      "allowed_scopes": [
+        "profile",
+        "profile_device"
+      ],
+      "resolution_order": [
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          {
+            "value": "never",
+            "label": "Never"
+          },
+          {
+            "value": "ask",
+            "label": "Ask first"
+          },
+          {
+            "value": "always",
+            "label": "Automatically"
+          }
+        ]
+      },
+      "default_value": "always",
+      "category": "playback",
+      "label": "Lower quality when buffering",
+      "description": "What Silo does on Auto when playback keeps buffering. Silo always asks before lowering a quality you picked.",
+      "recommended_control": "select"
+    },
     {
       "key": "player.video_skip_back_seconds",
       "introduced_in": 9,

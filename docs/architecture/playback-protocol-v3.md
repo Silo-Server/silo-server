@@ -1354,7 +1354,7 @@ it right now and is always retryable.
 
 `plan_selected`, `plan_invalidated`, `plan_failed`, `first_frame`, `terminal`,
 `stopped`, `runtime_correction_applied`, `runtime_correction_succeeded`,
-`runtime_correction_failed`, `seek_reanchor_requested`, `seek_reanchored`.
+`runtime_correction_failed`, `seek_reanchor_requested`, `seek_reanchored`, `plan_summary`.
 
 ### 7.5 Diagnostics allowlist
 
@@ -1961,3 +1961,38 @@ Three artifacts, in decreasing order of authority:
 
 A client that decodes the golden fixtures, echoes attempt keys byte-for-byte,
 and round-trips a replan without computing an identity is conforming.
+
+
+## Buffering quality (native v2)
+
+`buffering_quality_v1` gates two optional start/replan fields. Clients echo the
+feature in `client_features` before sending `bandwidth_estimate_source` (`probe`
+or `observed_rebuffer`, requiring `bandwidth_estimate_kbps`) or `learned_limit`
+(`ignore` or `clear`). Requests without the feature neither record nor apply
+learned limits. The frozen v1 bridge does not negotiate this feature.
+
+Auto uses the lower of the request estimate and the seven-day learned estimate
+for the authenticated account, `X-Silo-Device-Id`, and trusted connection.
+Missing device identity disables learning. Fixed qualities ignore learned
+limits. `ignore` leaves the stored limit intact; `clear` removes it before
+planning. The existing 80% margin and administrator/client caps still apply.
+An observed budget tries playable versions of the same edition without video
+encoding before transcoding; an unchanged source carries
+`quality_reduction_unavailable`. A plan actually reduced by the stored limit
+adds `bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`.
+
+`GET /api/v2/playback/connection` returns `connection` and nullable
+`learned_limit: {kbps, observed_at, expires_at}`. `DELETE
+/api/v2/playback/connection/learned-limit` clears the calling device's current
+connection limit and returns 204. Connection keys use the trusted network
+provider, local classification, or an HMAC of the public IPv4 address / IPv6
+/64. Raw public addresses are never stored in this table. Rows are removed
+30 days after their last update and when the last device registration is deleted.
+
+`playback_plan_summary_v1` advertises the `plan_summary` route event. Its added
+diagnostics allowlist keys are `played_ms`, `stall_count`, `stall_total_ms`,
+`stall_longest_ms`, `delivered_kbps`, `buffering_mode`, and `buffering_action`.
+The existing `bandwidth_estimate_kbps` key reports the requested estimate.
+Clients send a summary when a plan stops playing, including replacement,
+stop, and failure. See the buffering-quality design for controller semantics
+and the shared conformance vectors.
