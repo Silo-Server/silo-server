@@ -85186,7 +85186,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained.",
+        "summary": "Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained.",
         "tags": [
           "admin-tasks"
         ],
