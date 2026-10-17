@@ -828,8 +828,9 @@ func (r *PersonRepository) update(ctx context.Context, p models.Person, guard *P
 // missedPersonUpdate explains a person write that matched no row: the person
 // is gone (pgx.ErrNoRows), or, under a guard, their provider ids changed.
 // The guard itself is in the write's WHERE clause, so it is checked
-// atomically with the write and takes no lock ahead of the conflict
-// resolver's ordered ones.
+// atomically with the write. The write locks the person's row even when the
+// guard misses, but a miss only ends the transaction and nothing locks after
+// it, so that lock never sits ahead of the conflict resolver's ordered ones.
 func missedPersonUpdate(ctx context.Context, tx pgx.Tx, id int64, guard *PersonIdentity) error {
 	if guard == nil {
 		return pgx.ErrNoRows
