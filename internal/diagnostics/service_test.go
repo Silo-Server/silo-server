@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -778,5 +779,22 @@ func testReadyDiagnosticReport(id string, userID int) Report {
 		BlobBytes:         &bytes,
 		UncompressedBytes: &uncompressed,
 		BlobSHA256:        &sha,
+	}
+}
+
+func TestServiceStatusAdvertisesAcceptedCrashSources(t *testing.T) {
+	svc := newTestDiagnosticsService(&fakeDiagnosticReportStore{}, &fakeDiagnosticObjectStore{bucket: "private"})
+
+	status, err := svc.Status(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	want := []string{"ueh", "exit_info", "metrickit", "exit_sentinel", "watchdog"}
+	if !slices.Equal(status.AcceptedCrashSources, want) {
+		t.Fatalf("AcceptedCrashSources = %v, want %v", status.AcceptedCrashSources, want)
+	}
+	status.AcceptedCrashSources[0] = "changed"
+	if contract.CrashSources()[0] != "ueh" {
+		t.Fatal("status shares the contract's crash source list")
 	}
 }

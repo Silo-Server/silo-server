@@ -21,6 +21,9 @@ const (
 	// 2048, tag/run 128, plus registered attrs) so it never rejects a valid
 	// line, while keeping per-line memory bounded when validating.
 	MaxLogLineBytes = 64 * 1024
+	// MaxOccurrenceCount bounds manifest.report.occurrence_count, the number of
+	// times a client grouped repeats of one issue into a single report.
+	MaxOccurrenceCount = 1_000_000
 )
 
 var (
@@ -52,7 +55,7 @@ var (
 
 	reportTypes       = []string{"crash", "anr", "native_crash", "hang", "abnormal_exit", "manual"}
 	platforms         = []string{"android", "android-tv", "ios", "tvos"}
-	crashSources      = []string{"ueh", "exit_info", "metrickit", "exit_sentinel"}
+	crashSources      = []string{"ueh", "exit_info", "metrickit", "exit_sentinel", "watchdog"}
 	crashProvenances  = []string{"pre_failure", "post_restart", "metric_reporting_period"}
 	consentModes      = []string{"prompt", "always", "manual"}
 	logLevels         = []string{"V", "D", "I", "W", "E"}
@@ -98,6 +101,9 @@ type Report struct {
 	Platform         string
 	OSVersion        string
 	ProfileID        string
+	// OccurrenceCount is how many times the client saw this issue before
+	// sending the report; 0 when the manifest omits it (a single occurrence).
+	OccurrenceCount int
 }
 
 type Destination struct {
@@ -188,6 +194,9 @@ type reportWire struct {
 	Platform         *string `json:"platform"`
 	OSVersion        *string `json:"os_version"`
 	ProfileID        *string `json:"profile_id"`
+	// OccurrenceCount stays raw so an explicit null can be told apart from an
+	// omitted field.
+	OccurrenceCount json.RawMessage `json:"occurrence_count"`
 }
 
 type destinationWire struct {
@@ -263,6 +272,19 @@ var attrRegistry = map[string]map[string]attrValueType{
 		"play_method":     attrString,
 		"reason":          attrString,
 		"position_ms":     attrInteger,
+		// Playback session summary. Android already emits the
+		// first_frame_ms, rebuffer_* and failure_code names.
+		"first_frame_ms":       attrInteger,
+		"stall_count":          attrInteger,
+		"stall_total_ms":       attrInteger,
+		"rebuffer_count":       attrInteger,
+		"rebuffer_total_ms":    attrInteger,
+		"rebuffer_max_ms":      attrInteger,
+		"bitrate_change_count": attrInteger,
+		"plan_change_count":    attrInteger,
+		"error_count":          attrInteger,
+		"failure_code":         attrString,
+		"session_ms":           attrInteger,
 	},
 	"focus": {
 		"target": attrString,
@@ -284,6 +306,7 @@ var attrRegistry = map[string]map[string]attrValueType{
 		"outcome":     attrString,
 		"reason":      attrString,
 		"launch_type": attrString,
+		"resident_mb": attrInteger,
 	},
 	"crash": {
 		"fingerprint": attrString,
@@ -496,6 +519,12 @@ func ValidateLogLine(data []byte) (LogLine, error) {
 	}, nil
 }
 
+// CrashSources lists the crash.source values this contract accepts, so a
+// client can tell whether a server predates a source before sending it.
+func CrashSources() []string {
+	return slices.Clone(crashSources)
+}
+
 func ArchiveEntryAllowed(name string) bool {
 	return slices.Contains(ArchiveEntryAllowlist, name)
 }
@@ -539,6 +568,10 @@ func validateReport(w reportWire) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	occurrenceCount, err := validateOccurrenceCount(w.OccurrenceCount)
+	if err != nil {
+		return Report{}, err
+	}
 
 	return Report{
 		Type:             reportType,
@@ -549,7 +582,28 @@ func validateReport(w reportWire) (Report, error) {
 		Platform:         platform,
 		OSVersion:        osVersion,
 		ProfileID:        profileID,
+		OccurrenceCount:  occurrenceCount,
 	}, nil
+}
+
+// validateOccurrenceCount returns 0 when the field is omitted (a single
+// occurrence). The schema types the field as integer, so null is rejected.
+func validateOccurrenceCount(raw json.RawMessage) (int, error) {
+	const path = "manifest.report.occurrence_count"
+	if raw == nil {
+		return 0, nil
+	}
+	if isRawNull(raw) {
+		return 0, fieldError(path, "must not be null")
+	}
+	var count int
+	if err := json.Unmarshal(raw, &count); err != nil {
+		return 0, fieldError(path, "must be an integer")
+	}
+	if count < 1 || count > MaxOccurrenceCount {
+		return 0, fieldError(path, "must be between 1 and %d", MaxOccurrenceCount)
+	}
+	return count, nil
 }
 
 func validateDestination(w destinationWire) (Destination, error) {

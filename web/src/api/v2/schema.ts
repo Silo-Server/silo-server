@@ -22462,6 +22462,7 @@ export interface components {
       custom_name?: string | null;
     };
     DiagnosticsCapabilities: {
+      accepted_crash_sources: string[];
       accepted_schema_versions: number[];
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
