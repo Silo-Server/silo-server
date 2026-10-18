@@ -92,11 +92,16 @@ export function holidayDatesProblem(dates: HolidayDates): string | null {
 
 function isMDBListList(value: string): boolean {
   try {
-    const url = new URL(value.trim());
+    const raw = value.trim();
+    const url = new URL(raw);
     const host = url.hostname.toLowerCase().replace(/\.$/, "");
-    // The same rules as the server's ValidateMDBListURL.
+    // The same rules as the server's ValidateMDBListURL. The server refuses
+    // any userinfo, even an empty "https://@host", which URL reports as no
+    // username, so look for "@" in the authority as typed.
+    const authority = /^[a-z][a-z\d+.-]*:\/\/([^/?#]*)/i.exec(raw)?.[1] ?? "";
     return (
       (url.protocol === "https:" || url.protocol === "http:") &&
+      !authority.includes("@") &&
       url.username === "" &&
       url.password === "" &&
       (url.port === "" || url.port === "80" || url.port === "443") &&

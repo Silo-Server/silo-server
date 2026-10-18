@@ -13,6 +13,9 @@ describe("customHolidayProblem", () => {
     for (const link of [
       "https://example.com/lists/a/b",
       "https://user:secret@mdblist.com/lists/a/b",
+      "https://@mdblist.com/lists/a/b",
+      "https://:@mdblist.com/lists/a/b",
+      "https:\\\\user@mdblist.com\\lists\\a",
       "https://mdblist.com:8443/lists/a/b",
       "https://mdblist.com/toplists/",
     ]) {
