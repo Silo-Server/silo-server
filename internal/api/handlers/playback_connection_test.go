@@ -279,9 +279,10 @@ func TestV1StartIgnoresBufferingQualityFields(t *testing.T) {
 
 // TestBufferedReplansGoLowerToAVersion: an HDR source without a tone-map route
 // cannot be transcoded, so Auto under a buffering budget must play a lower
-// version instead of returning the source. An output change returns to the
-// requested edition first, and must not carry the stalled source back while
-// the learned limit (here sent as the observed estimate it becomes) applies.
+// version instead of returning the source. An output change, in either form,
+// returns to the requested edition first, and must not carry the stalled
+// source back while the learned limit (here sent as the observed estimate it
+// becomes) applies.
 func TestBufferedReplansGoLowerToAVersion(t *testing.T) {
 	handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 	handler.InstallationID = serviceInstallation
@@ -297,15 +298,28 @@ func TestBufferedReplansGoLowerToAVersion(t *testing.T) {
 	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
 
 	plan := started.PlaybackPlan
-	for i, operation := range []playback.ReplanOperationV3{playback.ReplanOperationQualityChangeV3, playback.ReplanOperationOutputChangeV3} {
+	// Android reports an output move as a failure recovery classified
+	// output_route_changed, with the new output context.
+	movedOutput := startRequest.ClientPlaybackContext
+	movedOutput.Output.OutputContextID = "output-after-route-change"
+	for i, step := range []struct {
+		operation playback.ReplanOperationV3
+		failure   playback.FailureV3
+		context   playback.ClientPlaybackContextV3
+	}{
+		{playback.ReplanOperationQualityChangeV3, playback.FailureV3{}, startRequest.ClientPlaybackContext},
+		{playback.ReplanOperationOutputChangeV3, playback.FailureV3{}, startRequest.ClientPlaybackContext},
+		{playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "output_route_changed"}, movedOutput},
+	} {
+		operation := step.operation
 		replan := playback.ReplanRequestV3{
-			ProtocolVersion: playback.ProtocolV3, Operation: operation,
+			ProtocolVersion: playback.ProtocolV3, Operation: operation, Failure: step.failure,
 			PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: fmt.Sprintf("buffered-replan-%04d", i),
 			FailedPlanID: plan.PlanID, PlanAttemptID: fmt.Sprintf("buffered-attempt-%04d", i),
 			PlanAttemptKey: plan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
 			QualityPreference: playback.QualityAutoV3, SelectedTracks: plan.SelectedTracks,
 			BandwidthEstimateKbps: new(44100), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3,
-			ClientFeatures: startRequest.ClientFeatures, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+			ClientFeatures: startRequest.ClientFeatures, Capabilities: startRequest.Capabilities, ClientPlaybackContext: step.context,
 		}
 		response, err := handler.ReplanPlaybackV2(ctx, caller, started.SessionID, PlaybackReplanCommand{Request: replan, Digest: fmt.Sprintf("buffered-digest-%d", i)})
 		if err != nil || response.PlaybackPlan == nil {
@@ -314,6 +328,69 @@ func TestBufferedReplansGoLowerToAVersion(t *testing.T) {
 		plan = response.PlaybackPlan
 		if plan.EffectiveMediaFileID != alternate.ID || plan.Delivery == playback.DeliveryTranscodeHLSV3 {
 			t.Fatalf("%s played file %d by %s with warnings %v, want the lower version %d without encoding", operation, plan.EffectiveMediaFileID, plan.Delivery, plan.DegradationWarnings, alternate.ID)
+		}
+	}
+}
+
+// TestLearnedLimitCarriesThroughReplansDB: a lowering records the limit, and a
+// later output change that sends no estimate still plans under it from the
+// store, stays on the lower version and reports bandwidth_limit.
+func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	var user int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-replans-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM users WHERE id = $1`, user) })
+
+	handler, _, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
+	handler.InstallationID = serviceInstallation
+	handler.JWTSecret = "learned-limit-replans-secret"
+	handler.Connections = &connectionstore.Store{Pool: pool}
+	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+	startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, v3HandlerStartRequest().Capabilities.VideoDecode[0])
+	caller := PlaybackCaller{UserID: user, ProfileID: "profile-1", InstallationID: serviceInstallation, ConnectionDeviceID: "tv-1"}
+	ctx := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "profile-1")
+	ctx = clientip.SetContext(ctx, "203.0.113.7")
+	started, err := handler.StartPlaybackV2(ctx, caller, startRequest)
+	if err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start: err=%v response=%#v", err, started)
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+
+	plan := started.PlaybackPlan
+	for i, step := range []struct {
+		operation playback.ReplanOperationV3
+		estimate  *int
+		source    string
+	}{
+		{playback.ReplanOperationQualityChangeV3, new(44100), playback.BandwidthEstimateObservedRebufferV3},
+		{playback.ReplanOperationOutputChangeV3, nil, ""},
+	} {
+		replan := playback.ReplanRequestV3{
+			ProtocolVersion: playback.ProtocolV3, Operation: step.operation,
+			PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: fmt.Sprintf("limit-replan-%04d", i),
+			FailedPlanID: plan.PlanID, PlanAttemptID: fmt.Sprintf("limit-attempt-%04d", i),
+			PlanAttemptKey: plan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
+			QualityPreference: playback.QualityAutoV3, SelectedTracks: plan.SelectedTracks,
+			BandwidthEstimateKbps: step.estimate, BandwidthEstimateSource: step.source,
+			ClientFeatures: startRequest.ClientFeatures, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+		}
+		response, err := handler.ReplanPlaybackV2(ctx, caller, started.SessionID, PlaybackReplanCommand{Request: replan, Digest: fmt.Sprintf("limit-digest-%d", i)})
+		if err != nil || response.PlaybackPlan == nil {
+			t.Fatalf("%s: err=%v response=%#v", step.operation, err, response)
+		}
+		plan = response.PlaybackPlan
+		if plan.EffectiveMediaFileID != alternate.ID || plan.BandwidthLimit == nil || plan.BandwidthLimit.Kbps != 44100 {
+			t.Fatalf("%s played file %d with bandwidth_limit %+v, want the lower version %d limited to 44100", step.operation, plan.EffectiveMediaFileID, plan.BandwidthLimit, alternate.ID)
 		}
 	}
 }
