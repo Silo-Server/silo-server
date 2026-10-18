@@ -769,7 +769,7 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
 	record := playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]}
 	if event.Event == playback.RouteEventPlanSummaryV3 {
-		record.ConnectionDeviceID = clampHeaderValue(caller.ConnectionDeviceID, 128)
+		record.ConnectionDeviceID = connectionDeviceV3(caller.ConnectionDeviceID)
 		record.ConnectionKey, _ = connectionstore.Key(ctx, h.JWTSecret)
 		record.ReceivedAt = time.Now().UTC()
 		if lookup, ok := h.PlanStoreV3.(interface {

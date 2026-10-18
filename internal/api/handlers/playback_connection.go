@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -12,8 +13,19 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
+// connectionDeviceV3 is the X-Silo-Device-Id a connection observation is kept
+// under. A value that is not valid UTF-8 cannot be stored, so it is no device
+// identity: the request neither records nor applies a limit.
+func connectionDeviceV3(header string) string {
+	device := clampHeaderValue(header, 128)
+	if !utf8.ValidString(device) {
+		return ""
+	}
+	return device
+}
+
 func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string, reset bool) (connectionstore.State, error) {
-	device = clampHeaderValue(device, 128)
+	device = connectionDeviceV3(device)
 	key, label := connectionstore.Key(ctx, h.JWTSecret)
 	state := connectionstore.State{Connection: label}
 	if reset {
@@ -43,7 +55,7 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 	key, _ := connectionstore.Key(r.Context(), h.JWTSecret)
 	user := apimw.GetUserID(r.Context())
 	device, _ := r.Context().Value(playbackConnectionDeviceContextKey{}).(string)
-	device = clampHeaderValue(device, 128)
+	device = connectionDeviceV3(device)
 	if req.LearnedLimit == playback.LearnedLimitClearV3 {
 		if !clientSent {
 			return nil, nil
@@ -146,7 +158,7 @@ func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.Sta
 
 func (h *PlaybackHandler) ReportPlaybackProbe(ctx context.Context, device string, result connectionstore.ProbeResult) error {
 	key, _ := connectionstore.Key(ctx, h.JWTSecret)
-	return h.Connections.ReportProbe(ctx, apimw.GetUserID(ctx), clampHeaderValue(device, 128), key, result)
+	return h.Connections.ReportProbe(ctx, apimw.GetUserID(ctx), connectionDeviceV3(device), key, result)
 }
 func (h *PlaybackHandler) AdminPlaybackConnections(ctx context.Context, user int, device string) ([]connectionstore.AdminConnection, error) {
 	return h.Connections.List(ctx, user, device)

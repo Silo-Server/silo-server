@@ -156,6 +156,13 @@ func TestConnectionBudgetAppliesAdminCapDB(t *testing.T) {
 			t.Fatalf("%s: budget=%v err=%v, want %d", tc.name, state.AutoBudgetKbps, err, tc.want)
 		}
 	}
+	// A device ID Postgres cannot store is no identity, not a failed request.
+	if err := h.ReportPlaybackProbe(remote, "tv-\xff", connectionstore.ProbeResult{Kbps: 1000, Bytes: 250_000, DurationMS: 2000, Transport: "wifi"}); err != nil {
+		t.Fatalf("invalid device ID report: %v", err)
+	}
+	if state, err := h.PlaybackConnection(remote, "tv-\xff", false); err != nil || state.Probe != nil {
+		t.Fatalf("invalid device ID read: probe=%+v err=%v", state.Probe, err)
+	}
 }
 
 func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
