@@ -1,5 +1,7 @@
 import {
   BufferingQualityController,
+  type BufferingAnswer,
+  type BufferingEvent,
   type BufferingMode,
   type BufferingPlan,
   type BufferingReplan,
@@ -113,7 +115,7 @@ export function useAutoQualityDownshift(options: Options) {
         c.event({ type: next ? "transport_error_start" : "transport_error_end" }, Date.now());
       trouble = next;
     };
-    const send = (type: string, cause?: string) => {
+    const send = (type: BufferingEvent["type"], cause?: BufferingEvent["cause"]) => {
       syncTrouble();
       c.event({ type, cause }, Date.now());
       refresh();
@@ -162,7 +164,7 @@ export function useAutoQualityDownshift(options: Options) {
         video.removeEventListener(name, handler);
     };
   }, [options.videoRef, options.enabled, options.sessionId]);
-  const answer = (type: string) => {
+  const answer = (type: BufferingAnswer | "quality_changed") => {
     controller.current?.event({ type }, Date.now());
     refresh();
   };

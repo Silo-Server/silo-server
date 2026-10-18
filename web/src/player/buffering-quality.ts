@@ -1,14 +1,28 @@
-/** Shared buffering policy. The adapter owns media events and the wall clock. */
+/**
+ * The buffering-quality controller (docs/design/2026-10-17-buffering-quality.md).
+ *
+ * It watches the plans of one title for repeated rebuffering and decides what
+ * happens next: lower Auto at once and offer an undo, ask first, or only
+ * report. It owns no timers and no media element; the adapter
+ * (useAutoQualityDownshift) feeds it media events and the wall clock and
+ * carries out the replans and pills it emits. That keeps it replayable against
+ * the shared conformance vectors, which every client runs unchanged.
+ */
 export type BufferingMode = "never" | "ask" | "always";
+
+/** The plan as the controller sees it: one adoption of a server plan. */
 export interface BufferingPlan {
   plan_id: string;
   /** Local adoption identity; server plan IDs can repeat across replans. */
   adoption_id?: string;
+  /** `effective_recipe.bitrate_kbps`, else `source.bitrate_kbps`; 0 when unknown. */
   delivered_kbps: number;
+  /** The active quality preference: "auto" or a rung label. */
   quality: string;
   available_qualities: { label: string; bitrate_kbps?: number; preserves_source?: boolean }[];
   degradation_warnings?: string[];
 }
+
 export interface BufferingReplan {
   operation: "quality_change";
   quality_preference: string;
@@ -16,16 +30,52 @@ export interface BufferingReplan {
   bandwidth_estimate_source?: "observed_rebuffer";
   learned_limit?: "clear";
 }
+
+export type BufferingPill = "prompt" | "undo";
+export type BufferingNotice = "lowered" | "cant_lower";
+
 export type BufferingOutput =
   | { type: "replan"; body: BufferingReplan }
   | { type: "prompt_shown" | "undo_shown" }
-  | { type: "notice"; key: "lowered" | "cant_lower" };
+  | { type: "notice"; key: BufferingNotice };
+
+/** What the viewer answered on a pill. */
+export type BufferingAnswer = "select_lower" | "select_keep" | "select_restore" | "back";
+
 export interface BufferingEvent {
-  type: string;
+  type:
+    | BufferingAnswer
+    | "plan_adopted"
+    | "play"
+    | "playing"
+    | "waiting"
+    | "pause"
+    | "seek"
+    | "reload"
+    | "transport_error_start"
+    | "transport_error_end"
+    | "replan_failed"
+    | "quality_changed"
+    | "pill_obscured"
+    | "pill_unobscured";
   plan?: BufferingPlan;
-  cause?: string;
+  /** Why a `waiting` began, when the player itself caused it. */
+  cause?: "seek" | "pause" | "reload";
+  /** Whether a `plan_adopted` answers this controller's own replan. */
   controllerInitiated?: boolean;
 }
+
+/** The last action on a plan, as `plan_summary` reports it. */
+export type BufferingAction =
+  | "none"
+  | "ignored"
+  | "lowered"
+  | "restored"
+  | "accepted"
+  | "kept"
+  | "timed_out"
+  | "cant_lower";
+
 export interface BufferingSummary {
   played_ms: number;
   stall_count: number;
@@ -33,29 +83,80 @@ export interface BufferingSummary {
   stall_longest_ms: number;
   delivered_kbps: number;
   buffering_mode: BufferingMode;
-  buffering_action: string;
+  buffering_action: BufferingAction;
+}
+
+/** Stall time this early in a plan is startup, not a slow link. */
+const STARTUP_GRACE_MS = 10_000;
+/** A stall shorter than this is ordinary segment-boundary buffering. */
+const STALL_MIN_MS = 1_000;
+/** This many counted stalls within the window means the link cannot keep up. */
+const STALLS_BEFORE_TRIGGER = 2;
+const STALL_WINDOW_MS = 120_000;
+/** One stall this long is enough on its own. */
+const LONG_STALL_MS = 6_000;
+/** How long the prompt and the undo pill stay up, in wall-clock time. */
+export const BUFFERING_PILL_MS = 15_000;
+/** A prompt that timed out is offered again no sooner than this after it. */
+const REOFFER_MIN_MS = 120_000;
+/** How long a plan that could not go lower is left alone. */
+const NO_LOWER_COOLDOWN_MS = 300_000;
+/** A lowering whose plan was never adopted is watched again after this. */
+const REARM_AFTER_UNADOPTED_MS = 60_000;
+/** The contract's floor for `bandwidth_estimate_kbps`. */
+const MIN_ESTIMATE_KBPS = 100;
+
+/**
+ * The estimate Auto replans with after `deliveredKbps` stalled, or undefined
+ * when it would fall below the contract's floor. Auto plans for 80% of an
+ * estimate, so the next stream targets about 56% of the one that stalled. The
+ * integer arithmetic is exact: multiplying by 0.7 can land one kbps low.
+ */
+function stepDownEstimateKbps(deliveredKbps: number): number | undefined {
+  if (!Number.isFinite(deliveredKbps)) return undefined;
+  const estimate = Math.floor((deliveredKbps * 7) / 10);
+  return estimate >= MIN_ESTIMATE_KBPS ? estimate : undefined;
+}
+
+function adoptionOf(plan: BufferingPlan | undefined) {
+  return plan && (plan.adoption_id ?? plan.plan_id);
 }
 
 export class BufferingQualityController {
-  pill: "prompt" | "undo" | null = null;
-  remainingMs = 15_000;
-  readonly summaries = new Map<string, BufferingSummary>();
+  /** The pill on screen, if any. */
+  pill: BufferingPill | null = null;
+  /** What is left of the pill's timer; frozen while paused or obscured. */
+  remainingMs = BUFFERING_PILL_MS;
   private plan?: BufferingPlan;
-  private grace?: number;
+  private summary?: BufferingSummary;
+  /** When the plan's startup grace ends; set by its first frame or first wait. */
+  private graceEndsAt?: number;
+  /**
+   * When the stall in progress started counting toward a trigger. A prompt
+   * timeout or a rearm restarts it, so it can be later than `stallBegan`.
+   */
   private stall?: number;
+  /** When the stall in progress began, for `plan_summary`. */
+  private stallBegan?: number;
   private waiting = false;
   private playing = false;
   private paused = false;
+  /** Media requests are failing or the device is offline: the reconnect path's stall. */
   private outage = false;
+  /** When each counted stall in the window ended. */
   private stalls: number[] = [];
-  private longEnded?: number;
+  /** When the last long stall ended; it qualifies on its own for a window. */
+  private longStallEnded?: number;
+  /** The viewer kept or restored this title's quality; cleared by a quality change. */
   private answered = false;
-  private cantNotified = false;
+  private cantLowerShown = false;
   private blockedUntil = 0;
   private offeredAt = -Infinity;
+  /** The replan this controller sent, until its plan is adopted or it rearms. */
   private pending?: { at: number; bitrate: number; undo: boolean; restore?: boolean };
   private lastTick: number;
-  private deferredPill: "prompt" | "undo" | null = null;
+  /** A pill waiting behind a higher-priority one, with its timer frozen. */
+  private deferredPill: BufferingPill | null = null;
   private obscured = false;
 
   constructor(
@@ -67,6 +168,15 @@ export class BufferingQualityController {
     this.lastTick = now;
   }
 
+  /**
+   * When the visible pill's timer runs out, or null while it is frozen. It
+   * stays fixed while the timer runs, so a view can count down on its own.
+   */
+  get pillDeadline(): number | null {
+    return this.pill && !this.paused ? this.lastTick + this.remainingMs : null;
+  }
+
+  /** A higher-priority pill (intro, segment skip, Next Up) appeared or went away. */
   setObscured(value: boolean, now: number) {
     this.tick(now);
     this.obscured = value;
@@ -75,51 +185,13 @@ export class BufferingQualityController {
       this.pill = null;
     } else if (!value && this.deferredPill) this.show(this.deferredPill, now, false);
   }
-  private show(pill: "prompt" | "undo", now: number, resetTimer = true) {
-    if (resetTimer) this.remainingMs = 15_000;
-    if (this.obscured) {
-      this.deferredPill = pill;
-      return;
-    }
-    this.deferredPill = null;
-    this.pill = pill;
-    this.emit({ type: pill === "prompt" ? "prompt_shown" : "undo_shown" }, now);
-  }
-  private summary() {
-    return this.plan && this.summaries.get(this.plan.adoption_id ?? this.plan.plan_id);
-  }
-  private action(value: string) {
-    const s = this.summary();
-    if (s) s.buffering_action = value;
-  }
-  private resetHistory(now: number) {
-    this.finishStall(now);
-    this.stalls = [];
-    this.longEnded = undefined;
-    this.stall = this.waiting && !this.outage ? Math.max(now, this.grace ?? now) : undefined;
-  }
-  private finishStall(now: number) {
-    if (this.stall === undefined) return;
-    const duration = Math.max(0, now - this.stall);
-    const summary = this.summary();
-    if (summary) {
-      summary.stall_total_ms += duration;
-      summary.stall_longest_ms = Math.max(summary.stall_longest_ms, duration);
-      if (duration >= 1_000) summary.stall_count++;
-    }
-    if (duration >= 1_000) this.stalls.push(now);
-    if (duration >= 6_000) this.longEnded = now;
-    this.stall = undefined;
-  }
-  private flush(now: number) {
-    this.finishStall(now);
-    const summary = this.summary();
-    if (this.plan && summary) this.onSummary?.(this.plan, { ...summary });
-  }
+
+  /** The player stops: report the plan that was playing. */
   stop(now: number) {
     this.tick(now, false);
     this.flush(now);
     this.plan = undefined;
+    this.summary = undefined;
   }
 
   event(event: BufferingEvent, now: number) {
@@ -131,89 +203,57 @@ export class BufferingQualityController {
       case "pill_unobscured":
         this.setObscured(false, now);
         break;
-      case "plan_adopted": {
-        if (
-          !event.plan ||
-          (event.plan.adoption_id ?? event.plan.plan_id) ===
-            (this.plan?.adoption_id ?? this.plan?.plan_id)
-        )
-          return;
-        const previousQuality = this.plan?.quality;
-        this.flush(now);
-        const pending = event.controllerInitiated === false ? undefined : this.pending;
-        this.pending = undefined;
-        this.plan = event.plan;
-        if (previousQuality !== this.plan.quality && !pending) this.answered = false;
-        this.summaries.set(this.plan.adoption_id ?? this.plan.plan_id, {
-          played_ms: 0,
-          stall_count: 0,
-          stall_total_ms: 0,
-          stall_longest_ms: 0,
-          delivered_kbps: this.plan.delivered_kbps,
-          buffering_mode: this.mode,
-          buffering_action: "none",
-        });
-        this.pill = null;
-        this.deferredPill = null;
-        this.waiting = false;
-        this.playing = false;
-        this.grace = undefined;
-        this.stall = undefined;
-        this.stalls = [];
-        this.longEnded = undefined;
-        this.blockedUntil = 0;
-        if (pending && !pending.restore) {
-          if (
-            this.plan.delivered_kbps >= pending.bitrate ||
-            this.plan.degradation_warnings?.includes("quality_reduction_unavailable")
-          ) {
-            this.noticeCant(now, false);
-            this.blockedUntil = now + 300_000;
-          } else if (pending.undo) this.show("undo", now);
-          else this.emit({ type: "notice", key: "lowered" }, now);
-        }
+      case "plan_adopted":
+        if (event.plan) this.adopt(event.plan, event.controllerInitiated, now);
         break;
-      }
       case "play":
         this.paused = false;
         break;
       case "playing":
         this.paused = false;
         this.playing = true;
-        this.grace ??= now + 10_000;
+        this.graceEndsAt ??= now + STARTUP_GRACE_MS;
         this.finishStall(now);
         this.waiting = false;
+        this.check(now);
         break;
       case "waiting":
         this.playing = false;
         if (event.cause || this.paused) {
-          this.stall = undefined;
+          this.clearStall();
           this.waiting = false;
           break;
         }
         this.waiting = true;
-        this.grace ??= now + 10_000;
-        if (!this.outage) this.stall ??= Math.max(now, this.grace);
+        this.graceEndsAt ??= now + STARTUP_GRACE_MS;
+        // A stall that begins in the grace counts from its end.
+        if (!this.outage && this.stall === undefined) this.beginStall(now);
         break;
       case "pause":
         this.paused = true;
         this.playing = false;
-        this.stall = undefined;
+        this.clearStall();
         this.waiting = false;
         break;
       case "seek":
+        // A seek within the buffer keeps playing; one that runs out of data
+        // reports a `waiting` with its cause.
+        this.clearStall();
+        this.waiting = false;
+        break;
       case "reload":
-        this.stall = undefined;
+        this.clearStall();
         this.waiting = false;
         this.playing = false;
         break;
       case "transport_error_start":
+        // A stall that overlaps an outage is the outage's.
         this.outage = true;
-        this.stall = undefined;
+        this.clearStall();
         break;
       case "transport_error_end":
         this.outage = false;
-        if (this.waiting) this.stall = Math.max(now, this.grace ?? now);
+        if (this.waiting) this.beginStall(now);
         break;
       case "quality_changed":
         this.answered = false;
@@ -232,13 +272,14 @@ export class BufferingQualityController {
         if (this.pill === "prompt") {
           this.answered = true;
           this.pill = null;
-          this.action("kept");
+          this.setAction("kept");
         }
         break;
       case "back":
+        // Back answers a prompt but only hides an undo pill.
         if (this.pill === "prompt") {
           this.answered = true;
-          this.action("kept");
+          this.setAction("kept");
         }
         this.pill = null;
         break;
@@ -246,7 +287,7 @@ export class BufferingQualityController {
         if (this.pill === "undo" && this.plan) {
           this.pill = null;
           this.answered = true;
-          this.action("restored");
+          this.setAction("restored");
           this.pending = { at: now, bitrate: this.plan.delivered_kbps, undo: false, restore: true };
           this.emit(
             {
@@ -262,60 +303,181 @@ export class BufferingQualityController {
         }
         break;
       case "replan_failed":
-        break; // Rearm is timed from the request, even on failure.
+        // The rearm is timed from the request, whether it failed or was never adopted.
+        break;
     }
-    if (event.type === "playing") this.check(now);
   }
+
+  /** Advances the clock: runs the pill timer, the rearm and long-stall checks. */
   tick(now: number, evaluate = true) {
     const previousTick = this.lastTick;
     const elapsed = Math.max(0, now - this.lastTick);
     this.lastTick = now;
-    const summary = this.summary();
-    if (summary) summary.buffering_mode = this.mode;
-    if (summary && this.playing && !this.paused && !this.waiting) summary.played_ms += elapsed;
+    if (this.summary) {
+      this.summary.buffering_mode = this.mode;
+      if (this.playing && !this.paused && !this.waiting) this.summary.played_ms += elapsed;
+    }
     if (this.pill && !this.paused) {
       this.remainingMs -= elapsed;
       if (this.remainingMs <= 0) {
+        // An undo pill that runs out leaves the lower plan playing; a prompt
+        // that runs out is not an answer, so it starts the history over.
         if (this.pill === "prompt") {
-          this.action("timed_out");
+          this.setAction("timed_out");
           this.resetHistory(now);
         }
         this.pill = null;
       }
     }
-    if (this.pending && now - this.pending.at >= 60_000) {
+    if (this.pending && now - this.pending.at >= REARM_AFTER_UNADOPTED_MS) {
       this.pending = undefined;
       this.resetHistory(now);
     }
-    const suppressionEnded =
-      (previousTick < this.blockedUntil && now >= this.blockedUntil) ||
-      (previousTick < this.offeredAt + 120_000 && now >= this.offeredAt + 120_000);
+    // A suppression that ends mid-stall re-evaluates it; one that ends while
+    // playing waits for the next stall.
+    const crossed = (until: number) => previousTick < until && now >= until;
+    const suppressionEnded = crossed(this.blockedUntil) || crossed(this.offeredAt + REOFFER_MIN_MS);
     if (
       evaluate &&
       this.waiting &&
-      ((this.stall !== undefined && now - this.stall >= 6_000) || suppressionEnded)
+      ((this.stall !== undefined && now - this.stall >= LONG_STALL_MS) || suppressionEnded)
     )
       this.check(now);
   }
-  private lowerRung() {
-    if (!this.plan) return undefined;
-    const active =
-      this.plan.quality === "auto"
-        ? this.plan.delivered_kbps
-        : (this.plan.available_qualities.find((q) => q.label === this.plan?.quality)
-            ?.bitrate_kbps ?? this.plan.delivered_kbps);
-    return this.plan.available_qualities
-      .filter((q) => (q.bitrate_kbps ?? 0) > 0 && q.bitrate_kbps! < active)
-      .sort((a, b) => b.bitrate_kbps! - a.bitrate_kbps!)[0];
+
+  private adopt(plan: BufferingPlan, controllerInitiated: boolean | undefined, now: number) {
+    // An in-place update of the same adoption keeps its history.
+    if (adoptionOf(plan) === adoptionOf(this.plan)) return;
+    const previousQuality = this.plan?.quality;
+    this.flush(now);
+    const pending = controllerInitiated === false ? undefined : this.pending;
+    this.pending = undefined;
+    this.plan = plan;
+    // A quality change the controller did not make clears the answer.
+    if (previousQuality !== plan.quality && !pending) this.answered = false;
+    this.summary = {
+      played_ms: 0,
+      stall_count: 0,
+      stall_total_ms: 0,
+      stall_longest_ms: 0,
+      delivered_kbps: plan.delivered_kbps,
+      buffering_mode: this.mode,
+      buffering_action: "none",
+    };
+    this.pill = null;
+    this.deferredPill = null;
+    this.waiting = false;
+    this.playing = false;
+    this.graceEndsAt = undefined;
+    this.clearStall();
+    this.stalls = [];
+    this.longStallEnded = undefined;
+    this.blockedUntil = 0;
+    if (!pending || pending.restore) return;
+    if (
+      plan.delivered_kbps >= pending.bitrate ||
+      plan.degradation_warnings?.includes("quality_reduction_unavailable")
+    ) {
+      this.showCantLower(now, false);
+      this.blockedUntil = now + NO_LOWER_COOLDOWN_MS;
+    } else if (pending.undo) this.show("undo", now);
+    else this.emit({ type: "notice", key: "lowered" }, now);
   }
-  private noticeCant(now: number, once = true) {
-    this.action("cant_lower");
-    if (!once || !this.cantNotified) {
-      this.cantNotified = true;
-      this.emit({ type: "notice", key: "cant_lower" }, now);
+
+  private show(pill: BufferingPill, now: number, resetTimer = true) {
+    if (resetTimer) this.remainingMs = BUFFERING_PILL_MS;
+    if (this.obscured) {
+      this.deferredPill = pill;
+      return;
     }
+    this.deferredPill = null;
+    this.pill = pill;
+    this.emit({ type: pill === "prompt" ? "prompt_shown" : "undo_shown" }, now);
   }
+
+  private setAction(action: BufferingAction) {
+    if (this.summary) this.summary.buffering_action = action;
+  }
+
+  private beginStall(now: number) {
+    this.stall = Math.max(now, this.graceEndsAt ?? now);
+    this.stallBegan = this.stall;
+  }
+
+  private clearStall() {
+    this.stall = undefined;
+    this.stallBegan = undefined;
+  }
+
+  /** Starts the stall history over; a stall in progress is timed again from now. */
+  private resetHistory(now: number) {
+    this.stalls = [];
+    this.longStallEnded = undefined;
+    this.stall = this.waiting && !this.outage ? Math.max(now, this.graceEndsAt ?? now) : undefined;
+  }
+
+  private finishStall(now: number) {
+    if (this.stall !== undefined) {
+      const counted = Math.max(0, now - this.stall);
+      if (counted >= STALL_MIN_MS) this.stalls.push(now);
+      if (counted >= LONG_STALL_MS) this.longStallEnded = now;
+    }
+    if (this.stallBegan !== undefined && this.summary) {
+      const duration = Math.max(0, now - this.stallBegan);
+      this.summary.stall_total_ms += duration;
+      this.summary.stall_longest_ms = Math.max(this.summary.stall_longest_ms, duration);
+      if (duration >= STALL_MIN_MS) this.summary.stall_count++;
+    }
+    this.clearStall();
+  }
+
+  private flush(now: number) {
+    this.finishStall(now);
+    if (this.plan && this.summary) this.onSummary?.(this.plan, { ...this.summary });
+  }
+
+  /** The web's lowerQualityOption over the plan's own menu. */
+  private lowerRung() {
+    const plan = this.plan;
+    if (!plan) return undefined;
+    const active =
+      plan.quality === "auto"
+        ? plan.delivered_kbps
+        : (plan.available_qualities.find((q) => q.label === plan.quality)?.bitrate_kbps ??
+          plan.delivered_kbps);
+    let best: BufferingPlan["available_qualities"][number] | undefined;
+    for (const rung of plan.available_qualities) {
+      const kbps = rung.bitrate_kbps ?? 0;
+      if (kbps > 0 && kbps < active && kbps > (best?.bitrate_kbps ?? 0)) best = rung;
+    }
+    return best;
+  }
+
+  /** Whether this plan has a lower rung and, on Auto, a usable step-down estimate. */
+  private canLower() {
+    const plan = this.plan;
+    if (!plan || !this.lowerRung()) return false;
+    return plan.quality !== "auto" || stepDownEstimateKbps(plan.delivered_kbps) !== undefined;
+  }
+
+  private showCantLower(now: number, oncePerTitle = true) {
+    this.setAction("cant_lower");
+    if (oncePerTitle && this.cantLowerShown) return;
+    this.cantLowerShown = true;
+    this.emit({ type: "notice", key: "cant_lower" }, now);
+  }
+
+  private triggered(now: number) {
+    this.stalls = this.stalls.filter((at) => now - at < STALL_WINDOW_MS);
+    return (
+      this.stalls.length >= STALLS_BEFORE_TRIGGER ||
+      (this.stall !== undefined && now - this.stall >= LONG_STALL_MS) ||
+      (this.longStallEnded !== undefined && now - this.longStallEnded < STALL_WINDOW_MS)
+    );
+  }
+
   private check(now: number) {
+    // Suppressions leave the history in place for a later evaluation.
     if (
       !this.plan ||
       this.paused ||
@@ -327,58 +489,44 @@ export class BufferingQualityController {
       now < this.blockedUntil
     )
       return;
-    this.stalls = this.stalls.filter((at) => now - at < 120_000);
-    if (
-      !(
-        this.stalls.length >= 2 ||
-        (this.stall !== undefined && now - this.stall >= 6_000) ||
-        (this.longEnded !== undefined && now - this.longEnded < 120_000)
-      )
-    )
-      return;
+    if (!this.triggered(now)) return;
     if (this.mode === "never") {
-      this.action("ignored");
+      this.setAction("ignored");
       return;
     }
-    const estimate = Math.floor((this.plan.delivered_kbps * 7) / 10);
-    if (
-      !this.lowerRung() ||
-      (this.plan.quality === "auto" && (!Number.isFinite(estimate) || estimate < 100))
-    ) {
-      this.noticeCant(now);
-      this.blockedUntil = now + 300_000;
+    if (!this.canLower()) {
+      this.showCantLower(now);
+      this.blockedUntil = now + NO_LOWER_COOLDOWN_MS;
       return;
     }
     if (this.mode === "always" && this.plan.quality === "auto") this.lower(now, true);
-    else if (now - this.offeredAt >= 120_000) {
+    else if (now - this.offeredAt >= REOFFER_MIN_MS) {
       this.offeredAt = now;
       this.show("prompt", now);
     }
   }
+
   private lower(now: number, undo: boolean) {
-    if (!this.plan) return;
+    const plan = this.plan;
     const rung = this.lowerRung();
-    const estimate = Math.floor((this.plan.delivered_kbps * 7) / 10);
-    if (!rung || (this.plan.quality === "auto" && (!Number.isFinite(estimate) || estimate < 100))) {
-      this.noticeCant(now);
+    const estimate = plan && stepDownEstimateKbps(plan.delivered_kbps);
+    if (!plan || !rung || (plan.quality === "auto" && estimate === undefined)) {
+      this.showCantLower(now);
       return;
     }
-    this.pending = { at: now, bitrate: this.plan.delivered_kbps, undo };
-    this.action(undo ? "lowered" : "accepted");
-    this.emit(
-      {
-        type: "replan",
-        body:
-          this.plan.quality === "auto"
-            ? {
-                operation: "quality_change",
-                quality_preference: "auto",
-                bandwidth_estimate_kbps: estimate,
-                bandwidth_estimate_source: "observed_rebuffer",
-              }
-            : { operation: "quality_change", quality_preference: rung.label },
-      },
-      now,
-    );
+    this.pending = { at: now, bitrate: plan.delivered_kbps, undo };
+    this.setAction(undo ? "lowered" : "accepted");
+    // A lowered Auto teaches the server a limit; a picked quality steps down
+    // one rung for this playback only.
+    const body: BufferingReplan =
+      plan.quality === "auto"
+        ? {
+            operation: "quality_change",
+            quality_preference: "auto",
+            bandwidth_estimate_kbps: estimate,
+            bandwidth_estimate_source: "observed_rebuffer",
+          }
+        : { operation: "quality_change", quality_preference: rung.label };
+    this.emit({ type: "replan", body }, now);
   }
 }

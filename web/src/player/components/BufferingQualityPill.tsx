@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { BufferingAnswer } from "../buffering-quality";
 
 export function BufferingQualityPill({
   kind,
@@ -9,7 +10,7 @@ export function BufferingQualityPill({
   kind: "prompt" | "undo";
   remainingMs: number;
   keyboard: boolean;
-  answer: (event: string) => void;
+  answer: (event: BufferingAnswer) => void;
 }) {
   const primary = useRef<HTMLButtonElement>(null);
   useEffect(() => {
