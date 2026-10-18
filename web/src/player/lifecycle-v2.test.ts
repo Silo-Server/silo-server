@@ -114,3 +114,27 @@ it("refuses a session that was not started on v2", async () => {
   await expect(replanV2(config, "other", replan)).rejects.toThrow("not started on API v2");
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+it("negotiates with the session's server features, without a capabilities request", async () => {
+  const fetcher = vi.fn().mockResolvedValue(reply(wireDecision));
+  vi.stubGlobal("fetch", fetcher);
+  await replanV2(config, sessionId, { ...replan, learned_limit: "clear" }, [
+    "buffering_quality_v1",
+  ]);
+  expect(fetcher).toHaveBeenCalledOnce();
+  const body = JSON.parse(String((fetcher.mock.calls[0] as [string, RequestInit])[1].body));
+  expect(body.learned_limit).toBe("clear");
+  expect(body.client_features).toContain("buffering_quality_v1");
+});
+
+it("replans without the negotiated fields when capabilities cannot be read", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(reply(null, 503))
+    .mockResolvedValueOnce(reply(wireDecision));
+  vi.stubGlobal("fetch", fetcher);
+  await replanV2(config, sessionId, { ...replan, learned_limit: "clear" });
+  const body = JSON.parse(String((fetcher.mock.calls[1] as [string, RequestInit])[1].body));
+  expect(body).not.toHaveProperty("learned_limit");
+  expect(body.client_features).not.toContain("buffering_quality_v1");
+});

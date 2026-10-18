@@ -1301,7 +1301,7 @@ export function usePlaybackSession(
       }));
 
       try {
-        const decision = await replanV2(config, sessionId, body);
+        const decision = await replanV2(config, sessionId, body, serverFeaturesRef.current);
 
         // A version switch or a fresh start that landed while this was in
         // flight owns the session now; this plan is already superseded.

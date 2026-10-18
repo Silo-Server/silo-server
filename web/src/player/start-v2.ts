@@ -19,7 +19,7 @@ import {
   PlayerFetchError,
 } from "./player-fetch";
 import { playerV2Origin } from "./player-v2";
-import type { DecisionResponseV3, StartRequestV3 } from "./protocol-v3";
+import type { DecisionResponseV3, ReplanRequestV3, StartRequestV3 } from "./protocol-v3";
 import { registerSessionMutations } from "./session-mutations";
 
 export type PlaybackCapabilitiesV2 = components["schemas"]["PlaybackCapabilities"];
@@ -185,10 +185,16 @@ export async function startPlaybackV2(
   }
 }
 
-/** New optional fields are sent only after capability negotiation. */
-export function bufferingQualityWire<
-  T extends StartRequestV3 | import("./protocol-v3").ReplanRequestV3,
->(body: T, features: string[]): T {
+/**
+ * Adds what the server's `features` allow: `buffering_quality_v1` with the
+ * estimate's source and `learned_limit`, and `playback_plan_summary_v1`. A
+ * server without the feature rejects those fields, so they are dropped. An
+ * estimate without a named source is a probe result.
+ */
+export function bufferingQualityWire<T extends StartRequestV3 | ReplanRequestV3>(
+  body: T,
+  features: readonly string[],
+): T {
   const result = { ...body, client_features: [...(body.client_features ?? [])] };
   if (features.includes("buffering_quality_v1")) {
     if (!result.client_features.includes("buffering_quality_v1"))
