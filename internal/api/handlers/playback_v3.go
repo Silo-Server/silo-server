@@ -1823,7 +1823,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if effectiveFile.PresentationPartTotal > 1 && effectiveFile.PresentationPartIndex > 0 {
 		alternateBase = effectiveFile
 	}
-	learnedLimit, limitErr := h.applyLearnedLimit(r, &req)
+	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, true)
 	if limitErr != nil {
 		return playback.DecisionResponseV3{}, playbackStoreOperationError()
 	}
@@ -5282,7 +5282,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	var learnedLimit *playback.BandwidthLimitV3
 	if !seekReanchor {
 		var limitErr error
-		learnedLimit, limitErr = h.applyLearnedLimit(r, &start)
+		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
 		if limitErr != nil {
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "connection_store_unavailable", message: "Connection observations are temporarily unavailable", retryable: true}
 		}

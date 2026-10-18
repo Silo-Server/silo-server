@@ -1,12 +1,102 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
+
+// TestSeekReplayKeepsLearnedLimitDB: a seek-scoped replan replays the stored
+// start request, which applyLearnedLimit has already rewritten to the limit or
+// marked observed_rebuffer over a lower probe. Only the client's own request
+// may record or clear the limit, so a replay neither renews it nor stores the
+// probe estimate as a new limit.
+func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	var user int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-replay-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
+
+	h := &PlaybackHandler{Connections: &connectionstore.Store{Pool: pool}}
+	requestCtx := apimw.SetClaims(WithNativeAPIV2(ctx), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess})
+	requestCtx = context.WithValue(clientip.SetContext(requestCtx, "192.168.1.10"), playbackConnectionDeviceContextKey{}, "tv-1")
+	r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(requestCtx)
+	request := func(source string, estimate *int, control string) playback.StartRequestV3 {
+		return playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1},
+			BandwidthEstimateKbps: estimate, BandwidthEstimateSource: source, LearnedLimit: control}
+	}
+	stored := func() (int, time.Time, bool) {
+		var kbps *int
+		var observed *time.Time
+		if err := pool.QueryRow(ctx, `SELECT limit_kbps, observed_at FROM playback_connections WHERE user_id = $1`, user).Scan(&kbps, &observed); err != nil {
+			t.Fatal(err)
+		}
+		if kbps == nil || observed == nil {
+			return 0, time.Time{}, false
+		}
+		return *kbps, *observed, true
+	}
+
+	lowered := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
+	if limit, err := h.applyLearnedLimit(r, &lowered, true); err != nil || limit == nil || limit.Kbps != 44100 {
+		t.Fatalf("client lowering: limit=%+v err=%v", limit, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 day' WHERE user_id = $1`, user); err != nil {
+		t.Fatal(err)
+	}
+	_, before, _ := stored()
+	probed := request(playback.BandwidthEstimateProbeV3, new(20000), "")
+	if limit, err := h.applyLearnedLimit(r, &probed, true); err != nil || limit != nil || probed.BandwidthEstimateSource != playback.BandwidthEstimateObservedRebufferV3 {
+		t.Fatalf("lower probe: limit=%+v source=%q err=%v", limit, probed.BandwidthEstimateSource, err)
+	}
+	for _, replay := range []playback.StartRequestV3{lowered, probed} {
+		if _, err := h.applyLearnedLimit(r, &replay, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if kbps, observed, ok := stored(); !ok || kbps != 44100 || !observed.Equal(before) {
+		t.Fatalf("replay changed the limit: kbps=%d observed=%v want 44100 at %v", kbps, observed, before)
+	}
+
+	cleared := request("", nil, playback.LearnedLimitClearV3)
+	replayedClear := cleared
+	if _, err := h.applyLearnedLimit(r, &replayedClear, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := stored(); !ok {
+		t.Fatal("a replayed clear removed the limit")
+	}
+	if _, err := h.applyLearnedLimit(r, &cleared, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := stored(); ok {
+		t.Fatal("the client's clear kept the limit")
+	}
+}
 
 func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
 	source := v3HandlerFixtureFile(t)

@@ -29,7 +29,14 @@ func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string,
 	return state, err
 }
 
-func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3) (*playback.BandwidthLimitV3, error) {
+// applyLearnedLimit plans Auto under the device's learned limit and returns the
+// limit when it replaced the request's estimate. clientSent says whether req is
+// the request the client just sent; only then are its clear and its
+// observed_rebuffer estimate written to the store. A seek-scoped replan replays
+// the stored start request instead, and this function may have rewritten that
+// request's estimate to the limit, or marked a lower probe estimate as
+// observed, so recording it would renew the limit or turn a probe into one.
+func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool) (*playback.BandwidthLimitV3, error) {
 	if !isNativeAPIV2(r.Context()) || !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) {
 		return nil, nil
 	}
@@ -38,12 +45,15 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 	device, _ := r.Context().Value(playbackConnectionDeviceContextKey{}).(string)
 	device = clampHeaderValue(device, 128)
 	if req.LearnedLimit == playback.LearnedLimitClearV3 {
+		if !clientSent {
+			return nil, nil
+		}
 		return nil, h.Connections.Clear(r.Context(), user, device, key)
 	}
 	if req.LearnedLimit == playback.LearnedLimitIgnoreV3 {
 		return nil, nil
 	}
-	if req.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 && req.BandwidthEstimateKbps != nil && req.QualityPreference == playback.QualityAutoV3 {
+	if clientSent && req.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 && req.BandwidthEstimateKbps != nil && req.QualityPreference == playback.QualityAutoV3 {
 		if err := h.Connections.Observe(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
 			return nil, err
 		}
