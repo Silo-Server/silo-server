@@ -23,7 +23,7 @@ import {
   buildClientPlaybackContextV3,
   detectBandwidthEstimateKbpsV3,
 } from "../client-context-v3";
-import { buildRouteEventV3 } from "../route-events-v3";
+import { buildRouteEventV3, type RouteEventInput } from "../route-events-v3";
 import { reportSessionRouteEventV2 } from "../route-events-v2";
 import { replanV2 } from "../lifecycle-v2";
 import { takePlaybackIntent } from "../first-frame";
@@ -232,7 +232,7 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     extra?: {
       failureClassification?: string;
       fallbackReason?: string;
-      planId?: string;
+      /** For `plan_summary`: the adoption it summarizes. */
       adoptionId?: string;
       diagnostics?: Record<string, string | number | boolean | undefined | null>;
     },
@@ -452,19 +452,24 @@ export function usePlaybackSession(
 
   const sessionIdRef = useRef<string | null>(null);
   const planRef = useRef<PlanV3 | null>(null);
+  // What a `plan_summary` reports against, by adoption: the plan may have been
+  // replaced, and its session ended, by the time the summary is sent.
   const summaryIdentitiesRef = useRef(
     new Map<
       string,
       {
-        playbackAttemptId: string;
-        sessionId: string | null;
-        planId: string;
-        adoptionId: string;
-        planAttemptId: string;
-        planAttemptKey: string;
+        route: Pick<
+          RouteEventInput,
+          "playbackAttemptId" | "sessionId" | "planId" | "planAttemptId" | "planAttemptKey"
+        >;
+        /** The estimate the plan was requested with. */
+        bandwidthEstimateKbps: number | null | undefined;
       }
     >(),
   );
+  // The estimate on the start or replan in flight; requests are serialized,
+  // so the next adoption answers it.
+  const requestedEstimateRef = useRef<number | null | undefined>(undefined);
   const planRevisionRef = useRef(0);
   const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
@@ -635,36 +640,43 @@ export function usePlaybackSession(
       extra?: {
         failureClassification?: string;
         fallbackReason?: string;
-        planId?: string;
+        /** For `plan_summary`: the adoption it summarizes. */
         adoptionId?: string;
         diagnostics?: Record<string, string | number | boolean | undefined | null>;
       },
     ) => {
-      if (
-        event === "plan_summary" &&
-        !serverFeaturesRef.current.includes("playback_plan_summary_v1")
-      )
-        return;
       const attemptId = playbackAttemptIdRef.current;
       if (!attemptId) return;
-      const plan = planRef.current;
-      const summaryIdentity =
-        event === "plan_summary"
-          ? extra?.adoptionId
-            ? summaryIdentitiesRef.current.get(extra.adoptionId)
-            : [...summaryIdentitiesRef.current.values()].find(
-                (identity) => identity.planId === extra?.planId,
-              )
+      let input: RouteEventInput;
+      if (event === "plan_summary") {
+        if (!serverFeaturesRef.current.includes("playback_plan_summary_v1")) return;
+        // Each adoption is summarized once, against its own plan and session.
+        const identity = extra?.adoptionId
+          ? summaryIdentitiesRef.current.get(extra.adoptionId)
           : undefined;
-      const input = {
-        event,
-        playbackAttemptId: attemptId,
-        ...routeEventPlanIdentityV3(plan, sessionIdRef.current, planAttemptIdRef.current),
-        ...extra,
-        ...summaryIdentity,
-      };
-      const sessionId = summaryIdentity?.sessionId ?? sessionIdRef.current;
-      if (summaryIdentity) summaryIdentitiesRef.current.delete(summaryIdentity.adoptionId);
+        if (!identity || !extra?.adoptionId) return;
+        summaryIdentitiesRef.current.delete(extra.adoptionId);
+        input = {
+          event,
+          ...identity.route,
+          diagnostics: {
+            ...extra.diagnostics,
+            bandwidth_estimate_kbps: identity.bandwidthEstimateKbps,
+          },
+        };
+      } else {
+        input = {
+          event,
+          playbackAttemptId: attemptId,
+          ...routeEventPlanIdentityV3(
+            planRef.current,
+            sessionIdRef.current,
+            planAttemptIdRef.current,
+          ),
+          ...extra,
+        };
+      }
+      const sessionId = input.sessionId;
       if (sessionId && hasSequencedProgress(sessionId)) {
         void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input));
       }
@@ -719,13 +731,16 @@ export function usePlaybackSession(
       sessionIdRef.current = sessionId ?? null;
       planRevisionRef.current += 1;
       summaryIdentitiesRef.current.set(String(planRevisionRef.current), {
-        adoptionId: String(planRevisionRef.current),
-        playbackAttemptId: playbackAttemptIdRef.current ?? "",
-        sessionId: sessionId ?? null,
-        planId: plan.plan_id,
-        planAttemptId: planAttemptIdRef.current,
-        planAttemptKey: plan.plan_attempt_key,
+        route: {
+          playbackAttemptId: playbackAttemptIdRef.current ?? "",
+          sessionId: sessionId ?? null,
+          planId: plan.plan_id,
+          planAttemptId: planAttemptIdRef.current,
+          planAttemptKey: plan.plan_attempt_key,
+        },
+        bandwidthEstimateKbps: requestedEstimateRef.current,
       });
+      // A summary arrives as its plan is replaced; only a few stay unsent.
       if (summaryIdentitiesRef.current.size > 100) {
         const oldest = summaryIdentitiesRef.current.keys().next().value;
         if (oldest) summaryIdentitiesRef.current.delete(oldest);
@@ -776,6 +791,8 @@ export function usePlaybackSession(
       subtitleTrackIndex: number | undefined,
       audioTrackIndex: number | null | undefined = explicitAudioTrackIndex,
     ): Promise<DecisionResponseV3> => {
+      const bandwidthEstimateKbps = detectBandwidthEstimateKbpsV3();
+      requestedEstimateRef.current = bandwidthEstimateKbps;
       const body = buildStartRequestV3({
         extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
         fileId: targetFileId,
@@ -787,7 +804,7 @@ export function usePlaybackSession(
         forceStartPosition,
         explicitAudioTrackIndex: audioTrackIndex,
         subtitleTrackIndex,
-        bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+        bandwidthEstimateKbps,
         bandwidthCapKbps: maxBitrateKbps,
         learnedLimit: bufferingMode === "never" ? "ignore" : undefined,
         clientCapabilities,
@@ -1263,6 +1280,11 @@ export function usePlaybackSession(
         : [];
       const attemptCount = isFailureRecovery ? attemptCountRef.current : 1;
 
+      const bandwidthEstimateKbps =
+        options.bandwidthEstimateKbps === undefined
+          ? detectBandwidthEstimateKbpsV3()
+          : options.bandwidthEstimateKbps;
+      requestedEstimateRef.current = bandwidthEstimateKbps;
       const body = buildReplanRequestV3({
         ...options,
         extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
@@ -1273,10 +1295,7 @@ export function usePlaybackSession(
         qualityPreference: qualityRef.current,
         attemptedPlanKeys,
         attemptCount,
-        bandwidthEstimateKbps:
-          options.bandwidthEstimateKbps === undefined
-            ? detectBandwidthEstimateKbpsV3()
-            : options.bandwidthEstimateKbps,
+        bandwidthEstimateKbps,
         bandwidthEstimateSource: options.bandwidthEstimateSource,
         bandwidthCapKbps: maxBitrateKbps,
         learnedLimit: options.learnedLimit ?? (bufferingMode === "never" ? "ignore" : undefined),

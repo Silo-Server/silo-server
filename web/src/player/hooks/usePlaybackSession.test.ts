@@ -506,8 +506,7 @@ describe("usePlaybackSession quality changes", () => {
     expect(bodiesTo("/playback/start")[0]).not.toHaveProperty("bandwidth_estimate_kbps");
     expect(bodiesTo("/playback/start")[0]?.bandwidth_cap_kbps).toBe(8_000);
 
-    // What VideoPlayer does when Auto keeps stalling: record the lower
-    // estimate, then replan Auto.
+    // What the buffering controller sends when Auto keeps stalling.
     act(() =>
       result.current.changeQuality("auto", 120, {
         operation: "quality_change",
@@ -3066,7 +3065,7 @@ describe("usePlaybackSession mid-stream reconnect", () => {
   });
 });
 
-it("keeps summary identities separate when adopted server plan IDs repeat", async () => {
+it("reports each adoption's summary once, with the estimate it was requested with", async () => {
   const plan = fixturePlanV3({ session_id: "session-1" });
   const summaries: Record<string, unknown>[] = [];
   vi.stubGlobal(
@@ -3097,23 +3096,100 @@ it("keeps summary identities separate when adopted server plan IDs repeat", asyn
   );
   await waitFor(() => expect(result.current.planRevision).toBe(1));
   const adopted = vi.fn();
-  act(() => result.current.changeQuality("auto", 120, undefined, adopted));
+  act(() =>
+    result.current.changeQuality(
+      "auto",
+      120,
+      {
+        operation: "quality_change",
+        quality_preference: "auto",
+        bandwidth_estimate_kbps: 44100,
+        bandwidth_estimate_source: "observed_rebuffer",
+      },
+      adopted,
+    ),
+  );
+  // The server plan ID repeats; the adoptions stay apart.
   await waitFor(() => expect(adopted).toHaveBeenCalledWith(plan.plan_id, 2));
   act(() => {
     result.current.reportEvent("plan_summary", {
-      planId: plan.plan_id,
       adoptionId: "1",
       diagnostics: { buffering_action: "lowered" },
     });
     result.current.reportEvent("plan_summary", {
-      planId: plan.plan_id,
       adoptionId: "2",
       diagnostics: { buffering_action: "cant_lower" },
     });
+    // A second summary for an adoption is dropped, not sent as the live plan's.
+    result.current.reportEvent("plan_summary", {
+      adoptionId: "1",
+      diagnostics: { buffering_action: "none" },
+    });
   });
   await waitFor(() => expect(summaries).toHaveLength(2));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(summaries).toHaveLength(2);
   expect(summaries.map((s) => s.plan_id)).toEqual([plan.plan_id, plan.plan_id]);
   expect(summaries[0]?.plan_attempt_id).not.toBe(summaries[1]?.plan_attempt_id);
+  expect(summaries.map((s) => s.diagnostics)).toEqual([
+    { buffering_action: "lowered" },
+    { buffering_action: "cant_lower", bandwidth_estimate_kbps: "44100" },
+  ]);
   expect(summaries[0]).not.toHaveProperty("adoptionId");
+  unmount();
+});
+
+it.each([
+  ["never", "ignore"],
+  ["always", undefined],
+  // Unknown is not `never`: the start must not shut a learned limit out.
+  [null, undefined],
+] as const)("in %s mode sends learned_limit %s", async (mode, expected) => {
+  const plan = fixturePlanV3({ session_id: "session-1" });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/playback/start") || url.endsWith("/replan")) {
+      return jsonResponse({
+        protocol_version: 3,
+        server_features: ["playback_plan_v3", "buffering_quality_v1"],
+        outcome: "playable",
+        session_id: "session-1",
+        playback_plan: plan,
+      });
+    }
+    if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+    if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const bodiesTo = (suffix: string) =>
+    fetchMock.mock.calls
+      .filter(([url]) => String(url).endsWith(suffix))
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  const { result, unmount } = renderHook(
+    () =>
+      usePlaybackSession(
+        "request-1",
+        [],
+        [],
+        7,
+        0,
+        false,
+        "auto",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+        mode,
+      ),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  act(() => result.current.changeQuality("auto", 120));
+  await waitFor(() => expect(bodiesTo("/replan")).toHaveLength(1));
+  expect(bodiesTo("/playback/start")[0]?.learned_limit).toBe(expected);
+  expect(bodiesTo("/replan")[0]?.learned_limit).toBe(expected);
   unmount();
 });

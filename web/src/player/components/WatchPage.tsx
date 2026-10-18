@@ -716,7 +716,6 @@ function WatchPagePlayer({
       bufferingTitleId={contentId}
       onBufferingSummary={(plan, summary) =>
         session.reportEvent("plan_summary", {
-          planId: plan.plan_id,
           adoptionId: plan.adoption_id,
           diagnostics: { ...summary },
         })
