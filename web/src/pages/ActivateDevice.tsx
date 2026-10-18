@@ -144,8 +144,18 @@ function ActivateDeviceRequest() {
   // Every Quick Connect lookup spends the account's code budget, so a Quick
   // Connect approval is not watched.
   const isQuickConnect = details?.client_purpose === "jellyfin_quick_connect";
+  // This page approves a TV sign-in or a Quick Connect code. A remote-playback
+  // request comes from a Silo app sending playback to the TV, and that app
+  // approves it for its own profile, so a pending one is followed too.
+  const remotePlayback =
+    details !== null &&
+    !isQuickConnect &&
+    (details.client_purpose !== "device_login" || details.temporary);
+  const watching =
+    !isQuickConnect &&
+    ((approvedHere && status === "approved") || (remotePlayback && status === "pending"));
   useEffect(() => {
-    if (!approvedHere || status !== "approved" || isQuickConnect) {
+    if (!watching) {
       return;
     }
     watchStarted.current ??= Date.now();
@@ -157,7 +167,7 @@ function ActivateDeviceRequest() {
       void loadDetails(true).finally(() => setWatchTick((tick) => tick + 1));
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [approvedHere, status, isQuickConnect, details, watchTick, loadDetails]);
+  }, [watching, details, watchTick, loadDetails]);
 
   // After a decision the focused button is gone; move focus to the result.
   useEffect(() => {
@@ -272,13 +282,6 @@ function ActivateDeviceRequest() {
       : null;
   const serverHost = window.location.host;
   const deviceName = details?.device_name || "this device";
-  // This page approves a TV sign-in or a Quick Connect code. A remote-playback
-  // request comes from a Silo app sending playback to the TV, and that app
-  // approves it for its own profile.
-  const remotePlayback =
-    details !== null &&
-    !isQuickConnect &&
-    (details.client_purpose !== "device_login" || details.temporary);
   const shownCode = displayDeviceCode(details?.user_code || code);
   const screen = isQuickConnect ? "app" : "TV";
   const requestedAgo = formatRelativeTime(details?.requested_at);

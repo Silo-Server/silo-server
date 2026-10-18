@@ -544,6 +544,19 @@ it("sends a remote-playback request back to the app and can decline it", async (
   expect(decisions).toEqual([{ op: "POST /api/v2/auth/device/deny", body: { code: "48217730" } }]);
 });
 
+it("follows a pending remote-playback request until the app approves it", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  lookups = [remotePlayback, { ...remotePlayback, status: "approved" }];
+  mount("/activate?code=48217730");
+  await screen.findByText("Play on Living room TV?");
+  expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  await screen.findByText("This request was approved in the Silo app.");
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+});
+
 it("doesn't ask a signed-out approver to sign in for a remote-playback request", async () => {
   auth.user = null;
   lookups = [remotePlayback];
