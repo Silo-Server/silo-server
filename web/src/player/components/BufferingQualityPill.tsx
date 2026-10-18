@@ -1,57 +1,90 @@
-import { useEffect, useRef } from "react";
-import type { BufferingAnswer } from "../buffering-quality";
+import { useEffect, useId, useRef, useState } from "react";
+import { BUFFERING_PILL_MS, type BufferingAnswer, type BufferingPill } from "../buffering-quality";
 
+interface BufferingQualityPillProps {
+  kind: BufferingPill;
+  remainingMs: number;
+  /** When the timer runs out, or null while it is frozen. */
+  deadlineMs: number | null;
+  /** Whether the primary action takes focus as the pill appears. */
+  focusOnMount: boolean;
+  onAnswer: (answer: BufferingAnswer) => void;
+}
+
+/** The intro pill's capsule, so every timed player action reads the same way. */
+const ACTION_CLASS =
+  "relative min-h-11 overflow-hidden rounded-full border border-white/20 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-2xl hover:border-white/35 hover:bg-black/85 focus-visible:border-white/55 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none active:bg-white/25";
+
+/**
+ * The buffering prompt, "Playback keeps buffering" with Lower quality and Keep
+ * quality, or the undo, "Quality lowered to stop buffering" over Restore
+ * quality. It is a notice card in the player's notice slot, and the primary
+ * action fills as the wall-clock timer runs, as the intro pill does. The
+ * caption and the actions are separate elements, never one phrase.
+ */
 export function BufferingQualityPill({
   kind,
   remainingMs,
-  keyboard,
-  answer,
-}: {
-  kind: "prompt" | "undo";
-  remainingMs: number;
-  keyboard: boolean;
-  answer: (event: BufferingAnswer) => void;
-}) {
-  const primary = useRef<HTMLButtonElement>(null);
+  deadlineMs,
+  focusOnMount,
+  onAnswer,
+}: BufferingQualityPillProps) {
+  const titleId = useId();
+  const primaryRef = useRef<HTMLButtonElement>(null);
+  const [now, setNow] = useState(() => Date.now());
+  // Decided once as the pill appears; later keyboard input must not pull
+  // focus onto it.
+  const [takeFocus] = useState(focusOnMount);
+
   useEffect(() => {
-    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (
-      keyboard &&
-      !active?.closest(
-        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
-      )
-    )
-      primary.current?.focus();
-  }, [kind, keyboard]);
+    if (takeFocus) primaryRef.current?.focus({ preventScroll: true });
+  }, [takeFocus]);
+
+  useEffect(() => {
+    if (deadlineMs === null) return;
+    const interval = window.setInterval(() => setNow(Date.now()), 50);
+    return () => window.clearInterval(interval);
+  }, [deadlineMs]);
+
+  const left = deadlineMs === null ? remainingMs : Math.max(0, deadlineMs - now);
+  const progress = Math.min(1, Math.max(0, 1 - left / BUFFERING_PILL_MS));
+  const prompt = kind === "prompt";
+
   return (
     <div
-      role="status"
+      role="group"
+      aria-labelledby={titleId}
       data-buffering-prompt="true"
-      className="absolute bottom-28 left-1/2 z-50 w-max max-w-[90%] -translate-x-1/2 rounded-xl bg-black/90 p-4 text-white"
+      className="animate-in fade-in pointer-events-auto max-w-xl rounded-2xl border border-sky-400/50 bg-sky-500/15 px-5 py-4 text-white shadow-2xl backdrop-blur duration-150"
     >
-      <p>{kind === "undo" ? "Quality lowered to stop buffering" : "Playback keeps buffering"}</p>
-      <button
-        ref={primary}
-        className="mt-2 rounded bg-white px-3 py-2 text-black"
-        onClick={() => answer(kind === "undo" ? "select_restore" : "select_lower")}
-      >
-        {kind === "undo" ? "Restore quality" : "Lower quality"}
-      </button>
-      {kind === "prompt" && (
+      <div id={titleId} role="status" className="text-sm font-semibold tracking-wide text-white">
+        {prompt ? "Playback keeps buffering" : "Quality lowered to stop buffering"}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
         <button
-          data-buffering-keep="true"
-          className="ml-3 px-3 py-2"
-          onClick={() => answer("select_keep")}
+          ref={primaryRef}
+          type="button"
+          className={ACTION_CLASS}
+          onClick={() => onAnswer(prompt ? "select_lower" : "select_restore")}
         >
-          Keep quality
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 left-0 bg-white/15"
+            style={{ width: `${progress * 100}%` }}
+          />
+          <span className="relative">{prompt ? "Lower quality" : "Restore quality"}</span>
         </button>
-      )}
-      <progress
-        aria-label="Time remaining"
-        className="mt-2 block h-1 w-full"
-        max={15000}
-        value={remainingMs}
-      />
+        {prompt ? (
+          <button
+            type="button"
+            data-buffering-keep="true"
+            className={ACTION_CLASS}
+            onClick={() => onAnswer("select_keep")}
+          >
+            Keep quality
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

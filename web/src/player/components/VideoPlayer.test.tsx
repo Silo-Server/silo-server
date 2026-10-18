@@ -5510,3 +5510,57 @@ describe("VideoPlayer when the server ended the session", () => {
     expect(screen.queryByText("Retry")).toBeNull();
   });
 });
+
+describe("VideoPlayer buffering pill", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("waits behind a segment skip and shows once it ends", async () => {
+    const rendered = renderPlayer({
+      bufferingMode: "ask",
+      qualityPreference: "auto",
+      recap: { start: 25, end: 60 },
+      plan: fixturePlanV3({
+        ...directPlan,
+        available_qualities: [
+          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
+          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
+        ],
+        source: { ...directPlan.source, bitrate_kbps: 20_000 },
+      }),
+    });
+    const video = rendered.container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireEvent.loadedMetadata(video);
+    markPlaying(video);
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    video.currentTime = 30;
+    fireFrameTimeUpdate(video);
+    await act(async () => Promise.resolve());
+    expect(screen.getByRole("button", { name: "Skip Recap" })).toBeInTheDocument();
+
+    // A long stall during the recap: the prompt waits behind its skip.
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+
+    video.currentTime = 61;
+    fireFrameTimeUpdate(video);
+    await act(async () => Promise.resolve());
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.queryByRole("button", { name: "Skip Recap" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keep quality" })).toBeInTheDocument();
+  });
+});

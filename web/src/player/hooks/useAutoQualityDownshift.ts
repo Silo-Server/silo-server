@@ -3,27 +3,67 @@ import {
   type BufferingAnswer,
   type BufferingEvent,
   type BufferingMode,
+  type BufferingNotice,
+  type BufferingPill,
   type BufferingPlan,
   type BufferingReplan,
   type BufferingSummary,
 } from "../buffering-quality";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+
+/**
+ * Feeds the buffering-quality controller from the video element and the wall
+ * clock, and carries out what it decides: replans through the session, notices
+ * and the prompt and undo pills. One controller lives for one title, so its
+ * answers and its once-per-title notice survive replans and new sessions.
+ */
+
+/** How often the controller's timers are advanced. */
+const TICK_MS = 100;
 
 interface Options {
   videoRef: RefObject<HTMLVideoElement | null>;
+  /** Off inside a Watch Party room, which has its own lower-quality offer. */
   enabled: boolean;
+  /** The title; a new one starts a new controller. */
   sessionId: string;
   plan: BufferingPlan;
+  /** Changes whenever a plan is adopted; an in-place update keeps it. */
   planRevision: number;
   mode: BufferingMode;
+  /** A higher-priority pill (intro, segment skip, Next Up) is on screen. */
   obscured: boolean;
+  /**
+   * Whether the transport is failing rather than slow: requests erroring or
+   * the browser offline. Buffering then is an outage, which the reconnect
+   * path owns, so it never counts as a stall.
+   */
   transportTrouble?: () => boolean;
+  /** Sends the replan; `onAdopt` names the revision it adopted, if any. */
   onReplan: (
     request: BufferingReplan,
     onAdopt: (planId?: string, planRevision?: number) => void,
   ) => void;
-  onNotice: (key: "lowered" | "cant_lower") => void;
+  onNotice: (key: BufferingNotice) => void;
   onSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
+}
+
+export interface BufferingPillState {
+  planRevision: number;
+  kind: BufferingPill;
+  remainingMs: number;
+  /** When the timer runs out, or null while it is frozen. */
+  deadlineMs: number | null;
+}
+
+function samePill(a: BufferingPillState | null, b: BufferingPillState | null) {
+  if (!a || !b) return a === b;
+  return (
+    a.planRevision === b.planRevision &&
+    a.kind === b.kind &&
+    a.deadlineMs === b.deadlineMs &&
+    (a.deadlineMs !== null || a.remainingMs === b.remainingMs)
+  );
 }
 
 export function useAutoQualityDownshift(options: Options) {
@@ -32,21 +72,25 @@ export function useAutoQualityDownshift(options: Options) {
     latest.current = options;
   });
   const controller = useRef<BufferingQualityController | null>(null);
+  // The revision the controller's own replan adopted, so that adoption is not
+  // mistaken for one the viewer or the server made.
   const requestedPlan = useRef<number | undefined>(undefined);
   const adoptedPlan = useRef<number | undefined>(undefined);
-  const [pill, setPill] = useState<{
-    planRevision: number;
-    kind: "prompt" | "undo";
-    remainingMs: number;
-  } | null>(null);
-  const refresh = () => {
+  const [pill, setPill] = useState<BufferingPillState | null>(null);
+  // The pill state changes only when it shows, hides, freezes or resumes; the
+  // pill counts down from its deadline itself.
+  const refresh = useCallback(() => {
     const c = controller.current;
-    setPill(
-      c?.pill
-        ? { planRevision: latest.current.planRevision, kind: c.pill, remainingMs: c.remainingMs }
-        : null,
-    );
-  };
+    const next = c?.pill
+      ? {
+          planRevision: latest.current.planRevision,
+          kind: c.pill,
+          remainingMs: c.remainingMs,
+          deadlineMs: c.pillDeadline,
+        }
+      : null;
+    setPill((current) => (samePill(current, next) ? current : next));
+  }, []);
   useEffect(() => {
     if (!options.enabled) return;
     const c = new BufferingQualityController(
@@ -86,6 +130,7 @@ export function useAutoQualityDownshift(options: Options) {
       Date.now(),
     );
     if (isNewPlan) requestedPlan.current = undefined;
+    // A plan adopted while the element is already playing fires no `playing`.
     const video = options.videoRef.current;
     if (
       isNewPlan &&
@@ -108,6 +153,9 @@ export function useAutoQualityDownshift(options: Options) {
     const c = controller.current;
     if (!video || !c) return;
     let trouble = false;
+    // Where playback stood when the current stall began. A stall can end
+    // without a `playing` event (the player clears buffering on `timeupdate`),
+    // so advancing time also ends it.
     let stalledAt: number | undefined;
     const syncTrouble = () => {
       const next = latest.current.transportTrouble?.() ?? false;
@@ -157,22 +205,23 @@ export function useAutoQualityDownshift(options: Options) {
       syncTrouble();
       c.tick(Date.now());
       refresh();
-    }, 100);
+    }, TICK_MS);
     return () => {
       clearInterval(timer);
       for (const [name, handler] of Object.entries(events))
         video.removeEventListener(name, handler);
     };
-  }, [options.videoRef, options.enabled, options.sessionId]);
-  const answer = (type: BufferingAnswer | "quality_changed") => {
-    controller.current?.event({ type }, Date.now());
-    refresh();
-  };
-  return {
-    pill:
-      options.enabled && !options.obscured && pill?.planRevision === options.planRevision
-        ? pill
-        : null,
-    answer,
-  };
+  }, [options.videoRef, options.enabled, options.sessionId, refresh]);
+  const answer = useCallback(
+    (type: BufferingAnswer | "quality_changed") => {
+      controller.current?.event({ type }, Date.now());
+      refresh();
+    },
+    [refresh],
+  );
+  const visiblePill =
+    options.enabled && !options.obscured && pill?.planRevision === options.planRevision
+      ? pill
+      : null;
+  return useMemo(() => ({ pill: visiblePill, answer }), [visiblePill, answer]);
 }

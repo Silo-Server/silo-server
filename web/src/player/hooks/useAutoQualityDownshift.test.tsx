@@ -144,9 +144,10 @@ it("does not treat an in-place update as a new adoption", () => {
   };
   h.rerender(next);
   h.advance(1000);
-  const remaining = h.result.current.pill?.remainingMs;
+  const deadline = h.result.current.pill?.deadlineMs;
+  expect(deadline).toBe(Date.now() + 14_000);
   h.rerender({ ...next, plan: { ...next.plan } });
   h.advance(100);
-  expect(h.result.current.pill?.remainingMs).toBe(remaining! - 100);
+  expect(h.result.current.pill?.deadlineMs).toBe(deadline);
   expect(h.options.onSummary).toHaveBeenCalledTimes(1);
 });

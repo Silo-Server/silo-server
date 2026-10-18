@@ -1,11 +1,11 @@
-import { BufferingQualityPill } from "./BufferingQualityPill";
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import { useAutoQualityDownshift } from "../hooks/useAutoQualityDownshift";
 import type {
+  BufferingAnswer,
   BufferingMode,
+  BufferingPlan,
   BufferingReplan,
   BufferingSummary,
-  BufferingPlan,
 } from "../buffering-quality";
 import { skipTarget } from "../utils/skipTarget";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -14,8 +14,9 @@ import { resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
 import { PlayerControls } from "./PlayerControls";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
-import { PlaybackNoticeOverlay } from "./PlaybackNoticeOverlay";
+import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
+import { BufferingQualityPill } from "./BufferingQualityPill";
 import { MarkerEditPanel } from "./MarkerEditPanel";
 import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
@@ -3072,8 +3073,10 @@ export function VideoPlayer({
     return () => document.removeEventListener("keydown", handlePromptKeyDown, true);
   }, [dismissIntroPrompt, displayMode, introPromptVisible, selectIntroPrompt]);
 
-  const focusIntroPromptOnMount = (() => {
-    if (!activeIntroPrompt || !lastInputWasKeyboardRef.current) return false;
+  // A pill takes focus only after keyboard input, and never from a scrub, an
+  // open menu or a text field.
+  const pillMayTakeFocus = () => {
+    if (!lastInputWasKeyboardRef.current) return false;
     const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const interactionInProgress =
       active?.closest(
@@ -3082,7 +3085,8 @@ export function VideoPlayer({
       containerRef.current?.querySelector('[role="dialog"], [role="menu"], [role="listbox"]') !=
         null;
     return !interactionInProgress;
-  })();
+  };
+  const focusIntroPromptOnMount = activeIntroPrompt !== null && pillMayTakeFocus();
 
   // -- Marker editing --
   const currentMarkers = useMemo<MarkerDraft>(
@@ -4137,27 +4141,30 @@ export function VideoPlayer({
     lastTransportErrorAtRef.current = 0;
   }, [planRevision]);
 
-  // Auto plays the source unless a measured estimate says the link cannot
-  // carry it. When the link proves slower, record what it could not sustain
-  // and replan Auto, which reads that lower estimate. Rooms have their own
-  // lower-quality offer.
+  // When playback keeps buffering, lower quality, ask first, or only report,
+  // as the viewer's setting says. Rooms have their own lower-quality offer.
+  const bufferingPlan = useMemo<BufferingPlan>(
+    () => ({
+      plan_id: plan.plan_id,
+      delivered_kbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps ?? 0,
+      quality: activeQualityId,
+      available_qualities: plan.available_qualities,
+      degradation_warnings: plan.degradation_warnings.map((w) => w.code),
+    }),
+    [plan, activeQualityId],
+  );
+  // Intro skip, the other segment skips and Next Up take priority; a
+  // buffering pill waits behind them with its timer frozen.
+  const higherPriorityPillActive =
+    activeIntroPrompt !== null || nextEpisode.showCountdown || activeSkipMarker !== undefined;
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
     planRevision,
     enabled: !watchTogetherRoomActive,
     sessionId: bufferingTitleId ?? sessionId,
     mode: bufferingMode,
-    plan: useMemo(
-      () => ({
-        plan_id: plan.plan_id,
-        delivered_kbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps ?? 0,
-        quality: activeQualityId,
-        available_qualities: plan.available_qualities,
-        degradation_warnings: plan.degradation_warnings.map((w) => w.code),
-      }),
-      [plan, activeQualityId],
-    ),
-    obscured: !!activeIntroPrompt || nextEpisode.showCountdown,
+    plan: bufferingPlan,
+    obscured: higherPriorityPillActive,
     transportTrouble: () =>
       connectionStatus !== "connected" ||
       (typeof navigator !== "undefined" && navigator.onLine === false) ||
@@ -4166,53 +4173,62 @@ export function VideoPlayer({
       onQualitySelect?.(request.quality_preference, currentTime, request, onAdopt),
     onNotice: (key) =>
       setNotice({
-        title:
+        message:
           key === "lowered"
             ? "Quality lowered to stop buffering"
             : "Can't lower quality for this video",
-        message: "",
         tone: "info",
       }),
     onSummary: onBufferingSummary,
   });
+  const bufferingPill = isDetached ? null : bufferingQuality.pill;
+  const { answer: answerBufferingPill } = bufferingQuality;
+  // An answer removes the pill; focus that was on it moves to the transport.
+  const answerBuffering = useCallback(
+    (answer: BufferingAnswer) => {
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const pillHadFocus = active?.closest('[data-buffering-prompt="true"]') != null;
+      answerBufferingPill(answer);
+      if (pillHadFocus) focusTransportAfterIntroPrompt();
+    },
+    [answerBufferingPill, focusTransportAfterIntroPrompt],
+  );
+  // Select and Back reach the pill from the player root, as for intro skip.
+  const bufferingPillKind = bufferingPill?.kind;
   useEffect(() => {
-    if (
-      !bufferingQuality.pill ||
-      activeIntroPrompt ||
-      nextEpisode.showCountdown ||
-      displayMode !== "foreground"
-    )
-      return;
+    if (!bufferingPillKind || displayMode !== "foreground") return;
+    const promptSelector = '[data-buffering-prompt="true"]';
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const targetInPill = target?.closest(promptSelector) != null;
+      const isEditingOrInMenu =
+        !targetInPill &&
+        target?.closest(
+          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
+        ) != null;
+      if (isEditingOrInMenu) return;
+      const isSelect = event.key === "Enter" || event.key === " ";
+      const isBack = event.key === "Escape" || event.key === "BrowserBack";
+      if (!isSelect && !isBack) return;
+      // Select belongs to the focused control unless that is the pill or
+      // nothing; Back stays global, like the intro pill's.
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      const inPill = active?.closest('[data-buffering-prompt="true"]') != null;
-      if (
-        !inPill &&
-        active?.closest(
-          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
-        )
-      )
-        return;
-      const select = event.key === "Enter" || event.key === " ";
-      const back = event.key === "Escape" || event.key === "BrowserBack";
-      if (!select && !back) return;
-      if (select && !inPill && active !== document.body && active !== containerRef.current) return;
-      // Let the secondary button keep its own Select action.
-      if (select && inPill && active?.dataset.bufferingKeep === "true") return;
+      const pillHasFocus = targetInPill || active?.closest(promptSelector) != null;
+      const focusIsUnclaimed =
+        active === null || active === document.body || active === containerRef.current;
+      if (isSelect && !pillHasFocus && !focusIsUnclaimed) return;
+      // Keep quality answers through its own click.
+      if (isSelect && active?.dataset.bufferingKeep === "true") return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      bufferingQuality.answer(
-        event.key === "Escape" || event.key === "BrowserBack"
-          ? "back"
-          : bufferingQuality.pill?.kind === "undo"
-            ? "select_restore"
-            : "select_lower",
+      answerBuffering(
+        isBack ? "back" : bufferingPillKind === "undo" ? "select_restore" : "select_lower",
       );
     };
     document.addEventListener("keydown", keydown, true);
     return () => document.removeEventListener("keydown", keydown, true);
-  }, [bufferingQuality, activeIntroPrompt, nextEpisode.showCountdown, displayMode]);
+  }, [answerBuffering, bufferingPillKind, displayMode]);
 
   // Rebuild pacing belongs to one stream in one room.
   useEffect(() => {
@@ -4738,14 +4754,28 @@ export function VideoPlayer({
         </div>
       )}
 
-      {!isDetached && notice ? (
-        <PlaybackNoticeOverlay
-          title={notice.title}
-          message={notice.message}
-          tone={notice.tone}
-          actionLabel={notice.actionLabel}
-          onAction={notice.onAction}
-        />
+      {!isDetached && (notice || bufferingPill) ? (
+        <PlaybackNoticeStack>
+          {notice ? (
+            <PlaybackNoticeOverlay
+              title={notice.title}
+              message={notice.message}
+              tone={notice.tone}
+              actionLabel={notice.actionLabel}
+              onAction={notice.onAction}
+            />
+          ) : null}
+          {bufferingPill ? (
+            <BufferingQualityPill
+              key={`${bufferingPill.planRevision}:${bufferingPill.kind}`}
+              kind={bufferingPill.kind}
+              remainingMs={bufferingPill.remainingMs}
+              deadlineMs={bufferingPill.deadlineMs}
+              focusOnMount={pillMayTakeFocus()}
+              onAnswer={answerBuffering}
+            />
+          ) : null}
+        </PlaybackNoticeStack>
       ) : null}
 
       {/* Mid-stream connection loss: retrying, or given up */}
@@ -4903,14 +4933,6 @@ export function VideoPlayer({
         </div>
       )}
 
-      {bufferingQuality.pill && !activeIntroPrompt && !nextEpisode.showCountdown && (
-        <BufferingQualityPill
-          kind={bufferingQuality.pill.kind}
-          remainingMs={bufferingQuality.pill.remainingMs}
-          keyboard={lastInputWasKeyboardRef.current}
-          answer={bufferingQuality.answer}
-        />
-      )}
       {/* Intro skip / undo prompt */}
       {!isDetached && activeIntroPrompt && (
         <IntroSkipButton
@@ -5004,7 +5026,7 @@ export function VideoPlayer({
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={(id) => {
-            bufferingQuality.answer("quality_changed");
+            answerBufferingPill("quality_changed");
             handleQualitySelect(id);
           }}
           versionLocked={!!watchTogetherRoomId}
