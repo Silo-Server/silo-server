@@ -42,7 +42,7 @@ type bandwidthProbeAccount struct {
 	windowBytes int
 }
 
-// acquire reserves a probe slot and size bytes of the account's window. It
+// Acquire reserves a probe slot and size bytes of the account's window. It
 // returns the window the reservation belongs to, for release, or how long to
 // wait before retrying when the account is over either limit.
 func (l *Limiter) Acquire(userID, size int, now time.Time) (bool, time.Time, time.Duration) {
@@ -79,7 +79,7 @@ func (l *Limiter) Acquire(userID, size int, now time.Time) (bool, time.Time, tim
 	return true, account.windowStart, 0
 }
 
-// release frees the slot and refunds the bytes a probe reserved but did not
+// Release frees the slot and refunds the bytes a probe reserved but did not
 // send, as when the client closed the connection once it had timed enough.
 // The refund only goes back to the window that granted it; a later window
 // never held the reservation.
@@ -100,4 +100,6 @@ func (l *Limiter) Release(userID, unsent int, granted, now time.Time) {
 	}
 }
 
+// NewLimiter returns an empty Limiter. The API and each proxy keep their own,
+// because the sockets and egress it protects belong to one process.
 func NewLimiter() *Limiter { return &Limiter{accounts: map[int]*bandwidthProbeAccount{}} }
