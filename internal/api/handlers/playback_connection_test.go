@@ -230,3 +230,44 @@ func TestV1StartIgnoresBufferingQualityFields(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestBufferedReplansGoLowerToAVersion: an HDR source without a tone-map route
+// cannot be transcoded, so Auto under a buffering budget must play a lower
+// version instead of returning the source. An output change returns to the
+// requested edition first, and must not carry the stalled source back while
+// the learned limit (here sent as the observed estimate it becomes) applies.
+func TestBufferedReplansGoLowerToAVersion(t *testing.T) {
+	handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
+	handler.InstallationID = serviceInstallation
+	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+	// The device decodes the 1080p H.264 version as it is.
+	startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, v3HandlerStartRequest().Capabilities.VideoDecode[0])
+	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
+	ctx := newAuthorizedPlaybackContext()
+	started, err := handler.StartPlaybackV2(ctx, caller, startRequest)
+	if err != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != source.ID {
+		t.Fatalf("start: err=%v response=%#v", err, started)
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+
+	plan := started.PlaybackPlan
+	for i, operation := range []playback.ReplanOperationV3{playback.ReplanOperationQualityChangeV3, playback.ReplanOperationOutputChangeV3} {
+		replan := playback.ReplanRequestV3{
+			ProtocolVersion: playback.ProtocolV3, Operation: operation,
+			PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: fmt.Sprintf("buffered-replan-%04d", i),
+			FailedPlanID: plan.PlanID, PlanAttemptID: fmt.Sprintf("buffered-attempt-%04d", i),
+			PlanAttemptKey: plan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
+			QualityPreference: playback.QualityAutoV3, SelectedTracks: plan.SelectedTracks,
+			BandwidthEstimateKbps: new(44100), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3,
+			ClientFeatures: startRequest.ClientFeatures, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+		}
+		response, err := handler.ReplanPlaybackV2(ctx, caller, started.SessionID, PlaybackReplanCommand{Request: replan, Digest: fmt.Sprintf("buffered-digest-%d", i)})
+		if err != nil || response.PlaybackPlan == nil {
+			t.Fatalf("%s: err=%v response=%#v", operation, err, response)
+		}
+		plan = response.PlaybackPlan
+		if plan.EffectiveMediaFileID != alternate.ID || plan.Delivery == playback.DeliveryTranscodeHLSV3 {
+			t.Fatalf("%s played file %d by %s with warnings %v, want the lower version %d without encoding", operation, plan.EffectiveMediaFileID, plan.Delivery, plan.DegradationWarnings, alternate.ID)
+		}
+	}
+}

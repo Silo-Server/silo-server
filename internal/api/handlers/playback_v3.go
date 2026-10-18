@@ -5294,7 +5294,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: limitErr}
 		}
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
-		if qualityChange {
+		// A quality change, and an output change that went back to the
+		// requested edition, choose a version again. Under a buffering budget
+		// that must not be the source that stalled. A track change stays on
+		// the mounted version.
+		if qualityChange || (intentChange && !trackChange) {
 			effectiveFile, start, audioIndex = h.lowerBufferedVersion(r, start, effectiveFile, audioIndex, plannerSettings)
 		}
 		if requestedEditionResolved {

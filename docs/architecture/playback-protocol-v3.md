@@ -1991,12 +1991,14 @@ Auto plans with the lower of the request estimate and the unexpired limit, or
 the limit alone when the request has none. Fixed qualities ignore the limit.
 `ignore` plans without the limit, records nothing and leaves the limit
 stored; `clear` deletes it before planning. The 80% margin and the
-administrator and client caps still apply. On a start or `quality_change`
-replan that allows alternate versions, when an observed estimate or the limit
-puts the source over budget, Auto first tries versions of the same edition that
-fit and play without video encoding, then a transcode; an unchanged source
-carries `quality_reduction_unavailable`. A plan that the stored limit actually
-lowered adds `bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`.
+administrator and client caps still apply. On a start, a `quality_change`
+replan or an `output_change` replan that allows alternate versions, when an
+observed estimate or the limit puts the source over budget, Auto first tries
+versions of the same edition that fit and play without video encoding, then a
+transcode; an unchanged source carries `quality_reduction_unavailable`. Track
+changes, recoveries and seeks do not search for a lower version. A plan that
+the stored limit actually lowered adds
+`bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`.
 
 `playback_plan_summary_v1` advertises the `plan_summary` route event. It adds
 `played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,
