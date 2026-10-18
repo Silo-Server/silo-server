@@ -108,6 +108,12 @@ measured and where it came from, and never do Auto's arithmetic.
     reload;
   - buffering while media requests are failing, or while the device is offline.
     That is an outage, and the reconnect path owns it.
+  - a renderer wait: one that begins with more than
+    `RENDERER_WAIT_BUFFER_MS = 1000` of media buffered past the playhead. The
+    decoder or renderer is behind, as when a weak device drops frames to the
+    next keyframe, and the network is not. If the media buffered past the
+    playhead falls to `RENDERER_WAIT_BUFFER_MS` or less before playback
+    resumes, the stall begins at that moment.
   - stall time inside the startup grace: the first `STARTUP_GRACE_MS = 10000` of
     a plan, counted from its first frame, or from its first wait if no frame has
     appeared yet. A stall that begins in the grace counts from the end of the
@@ -483,9 +489,10 @@ events are:
 - `plan_adopted`, carrying the plan's delivered bitrate, quality, menu and
   warnings. A missing delivered bitrate is `delivered_kbps: 0`. An adoption with
   `controllerInitiated: false` answers a replan the controller did not send.
-- `playing`, `waiting` (optionally with a `seek`, `pause` or `reload` cause),
-  `pause`, `seek`, `transport_error_start`, `transport_error_end` and
-  `replan_failed`.
+- `playing`, `waiting` (optionally with a `seek`, `pause`, `reload` or
+  `renderer` cause), `pause`, `seek`, `transport_error_start`,
+  `transport_error_end` and `replan_failed`. A plain `waiting` during a
+  renderer wait means its buffer fell to the threshold.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
 - `pill_obscured` and `pill_unobscured`: a higher-priority actionable pill
   appears, or the last one disappears. The player leaving and regaining the
@@ -563,6 +570,8 @@ The remaining cases pin the rules added since:
 | `restore_discards_kept_estimate` | After **Restore quality**, a track change carries no estimate. |
 | `quality_change_discards_kept_estimate` | After the viewer picks a rung and then Auto again, a track change carries no estimate. |
 | `new_attempt_discards_kept_estimate` | After a new start, a track change carries no estimate. |
+| `renderer_waits_do_not_count` | Waits that begin with media buffered never trigger, however long. |
+| `renderer_wait_drains_into_stall` | A renderer wait whose buffer falls to the threshold becomes a stall from that moment. |
 
 ## Phases
 

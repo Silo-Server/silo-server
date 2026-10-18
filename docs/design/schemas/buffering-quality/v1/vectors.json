@@ -1,10 +1,11 @@
 {
   "version": 1,
   "spec": "docs/design/2026-10-17-buffering-quality.md",
-  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10. A plan_adopted with controllerInitiated false answers a replan the controller did not send. client_replan has an operation (track_change, seek_reanchor, seek_failure_recovery, failure_recovery or output_change): the client sends a replan for its own reasons, and the output is a replan whose body holds that operation, the adopted plan's quality as quality_preference and, on Auto with a kept step-down estimate, bandwidth_estimate_kbps without bandwidth_estimate_source; the client's other request fields are outside these vectors. quality_changed is a quality change the controller did not send, such as the viewer's pick; it has no fields, and the new quality arrives with the next plan_adopted. new_attempt is a new playback attempt of the title; it has no fields, and the cases rely only on its discarding the kept estimate.",
+  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10. A plan_adopted with controllerInitiated false answers a replan the controller did not send. client_replan has an operation (track_change, seek_reanchor, seek_failure_recovery, failure_recovery or output_change): the client sends a replan for its own reasons, and the output is a replan whose body holds that operation, the adopted plan's quality as quality_preference and, on Auto with a kept step-down estimate, bandwidth_estimate_kbps without bandwidth_estimate_source; the client's other request fields are outside these vectors. quality_changed is a quality change the controller did not send, such as the viewer's pick; it has no fields, and the new quality arrives with the next plan_adopted. new_attempt is a new playback attempt of the title; it has no fields, and the cases rely only on its discarding the kept estimate. A waiting with cause renderer began with more than RENDERER_WAIT_BUFFER_MS of media buffered past the playhead: the decoder or renderer is behind, so it is not a stall. A plain waiting during a renderer wait means the media buffered past the playhead fell to RENDERER_WAIT_BUFFER_MS or less, and the stall begins then.",
   "constants": {
     "STARTUP_GRACE_MS": 10000,
     "STALL_MIN_MS": 1000,
+    "RENDERER_WAIT_BUFFER_MS": 1000,
     "STALLS_BEFORE_TRIGGER": 2,
     "STALL_WINDOW_MS": 120000,
     "LONG_STALL_MS": 6000,
@@ -496,6 +497,143 @@
       ],
       "until": 60000,
       "expect": []
+    },
+    {
+      "name": "renderer_waits_do_not_count",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 30000,
+          "type": "waiting",
+          "cause": "renderer"
+        },
+        {
+          "t": 31500,
+          "type": "playing"
+        },
+        {
+          "t": 90000,
+          "type": "waiting",
+          "cause": "renderer"
+        },
+        {
+          "t": 91200,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting",
+          "cause": "renderer"
+        },
+        {
+          "t": 133000,
+          "type": "playing"
+        }
+      ],
+      "until": 140000,
+      "expect": []
+    },
+    {
+      "name": "renderer_wait_drains_into_stall",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting",
+          "cause": "renderer"
+        },
+        {
+          "t": 128000,
+          "type": "waiting"
+        }
+      ],
+      "until": 140000,
+      "expect": [
+        {
+          "t": 134000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ]
     },
     {
       "name": "outage",
