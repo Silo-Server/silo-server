@@ -97,7 +97,10 @@ it("says when a speed test fails rather than blaming playback", async () => {
           },
         },
   );
-  speedTest.mockRejectedValueOnce(new Error("no measurement")).mockResolvedValueOnce(null);
+  speedTest
+    .mockRejectedValueOnce(new Error("no measurement"))
+    .mockResolvedValueOnce("playing")
+    .mockResolvedValueOnce("busy");
   mount();
   expect(await screen.findByText("48 Mbps · measured 3 hours ago on Ethernet")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Test speed"));
@@ -107,5 +110,9 @@ it("says when a speed test fails rather than blaming playback", async () => {
   fireEvent.click(await screen.findByText("Test speed"));
   expect(
     await screen.findByText("Stop playback before testing, then try again."),
+  ).toBeInTheDocument();
+  fireEvent.click(await screen.findByText("Test speed"));
+  expect(
+    await screen.findByText("A speed test is already running. Try again in a moment."),
   ).toBeInTheDocument();
 });

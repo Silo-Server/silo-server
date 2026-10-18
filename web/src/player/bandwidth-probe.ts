@@ -247,30 +247,36 @@ async function collectProbe(signal: AbortSignal): Promise<number | undefined> {
   }
   return result.kbps;
 }
+/** Why Test speed did not run: media is playing or starting, or another probe is measuring. */
+export type SpeedTestSkipped = "playing" | "busy";
+
 /**
  * Settings → Test speed: probes now, under the same playback and cross-tab
- * guards as the schedule. Resolves to the measured kbps, or null when the
- * probe could not run beside playback or another probe. Rejects when it ran
- * and measured nothing, with ProbeRateLimited for a 429.
+ * guards as the schedule. Resolves to the measured kbps, or to why the probe
+ * could not run. Rejects when it ran and measured nothing, with
+ * ProbeRateLimited for a 429.
  */
-export async function testConnectionSpeed(): Promise<number | null> {
-  if (!probeAllowed() || activeProbe) return null;
+export async function testConnectionSpeed(): Promise<number | SpeedTestSkipped> {
+  if (!probeAllowed()) return "playing";
+  if (activeProbe) return "busy";
   const controller = new AbortController();
   activeProbe = controller;
-  const run = async () => {
-    if (controller.signal.aborted || !probeAllowed()) return null;
+  const run = async (): Promise<number | SpeedTestSkipped> => {
+    if (controller.signal.aborted || !probeAllowed()) return "playing";
     const locks = lockManager();
-    if (locks && (await mediaActiveInAnyTab(locks))) return null;
+    if (locks && (await mediaActiveInAnyTab(locks))) return "playing";
     const kbps = await collectProbe(controller.signal);
     if (kbps !== undefined) return kbps;
     // Playback that starts mid-probe aborts it; that is not a failed measurement.
-    if (controller.signal.aborted || !probeAllowed()) return null;
+    if (controller.signal.aborted || !probeAllowed()) return "playing";
     throw new Error("The connection speed could not be measured");
   };
   try {
     const locks = lockManager();
     return locks
-      ? await locks.request(PROBE_LOCK_NAME, { ifAvailable: true }, (lock) => (lock ? run() : null))
+      ? await locks.request(PROBE_LOCK_NAME, { ifAvailable: true }, (lock) =>
+          lock ? run() : "busy",
+        )
       : await run();
   } finally {
     if (activeProbe === controller) activeProbe = undefined;

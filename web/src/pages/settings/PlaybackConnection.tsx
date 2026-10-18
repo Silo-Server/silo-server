@@ -129,7 +129,10 @@ export function PlaybackConnection() {
               setMessage(undefined);
               void testConnectionSpeed()
                 .then(async (kbps) => {
-                  if (kbps === null) setMessage("Stop playback before testing, then try again.");
+                  if (kbps === "playing")
+                    setMessage("Stop playback before testing, then try again.");
+                  else if (kbps === "busy")
+                    setMessage("A speed test is already running. Try again in a moment.");
                   else await connection.refetch();
                 })
                 .catch((error: unknown) =>
