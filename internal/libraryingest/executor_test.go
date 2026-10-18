@@ -2,6 +2,7 @@ package libraryingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -636,7 +637,7 @@ func TestIngestGuardedScanOnlyAddsUnsupportedFiles(t *testing.T) {
 }
 
 func TestIngestSucceedsWhenUnsupportedFilesCannotBeRecorded(t *testing.T) {
-	repo := &recordingUnsupportedFileRepo{err: fmt.Errorf("database unavailable")}
+	repo := &recordingUnsupportedFileRepo{err: errors.New("database unavailable")}
 	exec := &Executor{scanner: &settleStubScanner{result: &scanner.ScanResult{New: 1}}, matcher: &retryRecordingMatcher{}, now: time.Now}
 	exec.SetUnsupportedFileRepository(repo)
 	folder := &models.MediaFolder{ID: 7, Type: "movies", Paths: []string{"/movies"}}

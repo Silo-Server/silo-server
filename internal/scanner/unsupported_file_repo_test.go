@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -67,28 +69,9 @@ func TestUnsupportedFileRepositoryReplace(t *testing.T) {
 	group := func(folder int, dir, reason string, count int) models.UnsupportedMediaFileGroup {
 		return models.UnsupportedMediaFileGroup{MediaFolderID: folder, DirectoryPath: base + dir, Reason: reason, FileCount: count, FileNames: []string{"sample"}}
 	}
-	rows := func(folder int) []string {
-		t.Helper()
-		result, err := pool.Query(ctx, `SELECT directory_path, reason, file_count FROM unsupported_media_files WHERE media_folder_id = $1`, folder)
-		if err != nil {
-			t.Fatalf("query rows: %v", err)
-		}
-		defer result.Close()
-		out := []string{}
-		for result.Next() {
-			var dir, reason string
-			var count int
-			if err := result.Scan(&dir, &reason, &count); err != nil {
-				t.Fatalf("scan row: %v", err)
-			}
-			out = append(out, fmt.Sprintf("%s %s %d", strings.TrimPrefix(dir, base), reason, count))
-		}
-		sort.Strings(out)
-		return out
-	}
 	expect := func(step string, folder int, want ...string) {
 		t.Helper()
-		if got := rows(folder); strings.Join(got, "|") != strings.Join(want, "|") {
+		if got := unsupportedRowsUnder(t, pool, folder, base); strings.Join(got, "|") != strings.Join(want, "|") {
 			t.Fatalf("%s: rows = %v, want %v", step, got, want)
 		}
 	}
@@ -211,6 +194,9 @@ func TestUnsupportedFileRepositoryReplaceKeepsTheFolderOfAnUnreadableFile(t *tes
 				t.Fatalf("scan row: %v", err)
 			}
 			got = append(got, fmt.Sprintf("%s %s %d %s", strings.TrimPrefix(dir, base), reason, count, strings.Join(names, ",")))
+		}
+		if err := result.Err(); err != nil {
+			t.Fatalf("read rows: %v", err)
 		}
 		sort.Strings(got)
 		if strings.Join(got, "|") != strings.Join(want, "|") {
@@ -569,20 +555,7 @@ func TestUnsupportedFileRepositoryAddNew(t *testing.T) {
 		t.Fatalf("add new: %v", err)
 	}
 
-	rows, err := pool.Query(ctx, `SELECT directory_path, reason, file_count FROM unsupported_media_files WHERE media_folder_id = $1 ORDER BY directory_path`, folderID)
-	if err != nil {
-		t.Fatalf("query rows: %v", err)
-	}
-	defer rows.Close()
-	got := []string{}
-	for rows.Next() {
-		var dir, reason string
-		var count int
-		if err := rows.Scan(&dir, &reason, &count); err != nil {
-			t.Fatalf("scan row: %v", err)
-		}
-		got = append(got, fmt.Sprintf("%s %s %d", strings.TrimPrefix(dir, base), reason, count))
-	}
+	got := unsupportedRowsUnder(t, pool, folderID, base)
 	want := []string{
 		"/Manhunter (1986) realmedia 1",
 		"/Ronin (1998)/VIDEO_TS dvd_vob 6",
@@ -591,4 +564,29 @@ func TestUnsupportedFileRepositoryAddNew(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
+}
+
+// unsupportedRowsUnder lists a library's stored groups as "dir reason count",
+// with base trimmed from each directory, in order.
+func unsupportedRowsUnder(t *testing.T, pool *pgxpool.Pool, folderID int, base string) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `SELECT directory_path, reason, file_count FROM unsupported_media_files WHERE media_folder_id = $1`, folderID)
+	if err != nil {
+		t.Fatalf("query rows: %v", err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var dir, reason string
+		var count int
+		if err := rows.Scan(&dir, &reason, &count); err != nil {
+			t.Fatalf("scan row: %v", err)
+		}
+		out = append(out, fmt.Sprintf("%s %s %d", strings.TrimPrefix(dir, base), reason, count))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	sort.Strings(out)
+	return out
 }
