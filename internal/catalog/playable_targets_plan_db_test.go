@@ -50,8 +50,8 @@ func (p playableTargetPlan) work() (joinComparisons, progressLookupLoops float64
 }
 
 // Statistics can briefly describe an empty profile after a bulk history import.
-// Ensure completed membership remains a unique-key lookup instead of comparing
-// every requested episode with every materialized profile progress row.
+// Ensure the profile's progress is still joined to episodes in linear work
+// instead of comparing every requested episode with every progress row.
 func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -133,9 +133,9 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 		t.Fatalf("expected one query plan, got %d", len(documents))
 	}
 	comparisons, lookups := documents[0].Plan.work()
-	if comparisons > episodeCount*2 || lookups < episodeCount {
-		t.Fatalf("stale profile caused %.0f join comparisons and %.0f unique progress lookups; want linear comparisons and at least %d unique lookups\n%s",
-			comparisons, lookups, episodeCount, raw)
+	if comparisons > episodeCount*2 {
+		t.Fatalf("stale profile caused %.0f join comparisons for %d episodes; want linear comparisons\n%s",
+			comparisons, episodeCount, raw)
 	}
 	t.Logf("stale completed profile: %.0f join comparisons, %.0f unique progress lookups for %d episodes", comparisons, lookups, episodeCount)
 
@@ -159,7 +159,7 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 		t.Fatalf("expected one unseen query plan, got %d", len(documents))
 	}
 	comparisons, lookups = documents[0].Plan.work()
-	if comparisons > episodeCount*2 || lookups < 1 || lookups >= episodeCount/2 {
+	if comparisons > episodeCount*2 || lookups >= episodeCount/2 {
 		t.Fatalf("unseen profile caused %.0f join comparisons and %.0f unique progress lookups; want an early indexed winner\n%s", comparisons, lookups, raw)
 	}
 	t.Logf("unseen profile: %.0f unique progress lookups for %d episodes", lookups, episodeCount)

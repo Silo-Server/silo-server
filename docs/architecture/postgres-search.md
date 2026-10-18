@@ -158,16 +158,19 @@ every available file, ignoring library access and quality limits, and a newly
 scanned better file appears once the entry expires.
 
 For a PostgreSQL progress store sharing the catalog pool and account, series
-and season play targets select the validated anchor, newest visible resumable
-episode, first unwatched episode, or first available episode in SQL. The store
-supplies the visible-progress relation, so profile history hiding and the
-second-precision `updated_at` used for resume ties stay defined in `pgstore`.
+and season play targets select the validated anchor, else play from the
+available episode with the latest visible progress: that episode while
+unfinished, else the next available episode, else the first available episode.
+Ties in `updated_at`, as a bulk mark-watched leaves, go to the later episode in
+play order. The store supplies the visible-progress relation, so profile
+history hiding and the second-precision `updated_at` stay defined in `pgstore`.
 Availability, history hiding, library access, and quality limits apply to every
-branch. First-episode selection compares indexed winners from each
-scope, with regular seasons before specials. Completed-progress checks keep
-their unique-key lookup when statistics lag a bulk import, avoiding repeated
-scans of a materialized profile history. Other stores retain their own progress
-reads, and leaf-only cards retain the existing query.
+branch. The profile's progress is read once per request and joined to episodes
+by key, and only each card's latest episode has its file checked, so the cost
+follows the profile's progress size rather than how far each series has been
+watched. Next- and first-episode selection compare indexed winners from each
+scope, with regular seasons before specials. Other stores apply the same rule
+to their own progress reads, and leaf-only cards retain the existing query.
 
 Database tests in `scripts/ci/db-pins.txt` enforce document and ordering parity,
 cursor behavior, winner accuracy, and query/row/function-call budgets. Timing

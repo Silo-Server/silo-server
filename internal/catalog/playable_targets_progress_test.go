@@ -72,3 +72,38 @@ func TestListPlayableTargetProgressBatchesAndMerges(t *testing.T) {
 		}
 	}
 }
+
+// A series plays from its latest progress: that episode while unfinished, else
+// the next one, else the first.
+func TestPreferredPlayableTargetPlaysFromLatestProgress(t *testing.T) {
+	episodes := []string{"e1", "e2", "e3", "e4", "e5"}
+	done := func(at string) userstore.WatchProgress {
+		return userstore.WatchProgress{Completed: true, UpdatedAt: at}
+	}
+	started := func(at string) userstore.WatchProgress {
+		return userstore.WatchProgress{PositionSeconds: 300, UpdatedAt: at}
+	}
+	for _, tc := range []struct {
+		name     string
+		progress map[string]userstore.WatchProgress
+		want     string
+	}{
+		{"no progress", nil, "e1"},
+		{"latest completed plays the next", map[string]userstore.WatchProgress{
+			"e1": done("2026-10-01T00:00:00Z"), "e3": done("2026-10-02T00:00:00Z")}, "e4"},
+		{"latest unfinished resumes", map[string]userstore.WatchProgress{
+			"e2": done("2026-10-01T00:00:00Z"), "e3": started("2026-10-02T00:00:00Z")}, "e3"},
+		{"an older unfinished episode does not win", map[string]userstore.WatchProgress{
+			"e1": started("2026-09-01T00:00:00Z"), "e3": done("2026-10-02T00:00:00Z")}, "e4"},
+		{"finished series starts over", map[string]userstore.WatchProgress{
+			"e5": done("2026-10-02T00:00:00Z")}, "e1"},
+		{"a bulk mark-watched tie anchors on the last episode", map[string]userstore.WatchProgress{
+			"e1": done("2026-10-02T00:00:00Z"), "e2": done("2026-10-02T00:00:00Z"), "e3": done("2026-10-02T00:00:00Z")}, "e4"},
+		{"a zero-position unfinished row is not progress", map[string]userstore.WatchProgress{
+			"e4": {UpdatedAt: "2026-10-03T00:00:00Z"}, "e1": done("2026-10-01T00:00:00Z")}, "e2"},
+	} {
+		if got := preferredPlayableTarget(episodes, tc.progress); got != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}

@@ -113,8 +113,9 @@ func NewPlayableTargetResolverForItems(repo *ItemRepository) *PlayableTargetReso
 // playable movie/TV card, keyed by PlayableTargetInput.Key so that two cards
 // displaying the same item resolve independently. A card's PreferredContentID
 // hint wins when it still satisfies this profile's file conditions; otherwise
-// series and seasons prefer the newest in-progress episode, then the first
-// unwatched episode, then the first available episode.
+// series and seasons play from the available episode with the latest
+// progress: that episode while unfinished, else the next available episode,
+// else the first available episode.
 // MaxContentRating and AllowedContentIDs are intentionally not reapplied to
 // candidate episodes: the displayed item has already passed those content
 // access filters, and episodes inherit the parent series rating. File-library
@@ -426,28 +427,32 @@ func listPlayableTargetProgress(
 	return progress, nil
 }
 
+// preferredPlayableTarget plays from the candidate with the latest progress:
+// that episode while it is unfinished, else the next candidate, else the first
+// candidate. Candidates arrive in play order, so a tie in update time goes to
+// the later episode, as a bulk mark-watched leaves every row with one time.
 func preferredPlayableTarget(candidates []string, progress map[string]userstore.WatchProgress) string {
-	best := candidates[0]
-	bestRank := playableProgressRank(progress, best)
-	for _, candidate := range candidates[1:] {
-		rank := playableProgressRank(progress, candidate)
-		if rank < bestRank || (rank == 0 && bestRank == 0 && progressUpdatedAfter(progress[candidate].UpdatedAt, progress[best].UpdatedAt)) {
-			best = candidate
-			bestRank = rank
+	anchor := -1
+	var anchorProgress userstore.WatchProgress
+	for i, candidate := range candidates {
+		entry, ok := progress[candidate]
+		if !ok || (entry.PositionSeconds <= 0 && !entry.Completed) {
+			continue
+		}
+		if anchor < 0 || !progressUpdatedAfter(anchorProgress.UpdatedAt, entry.UpdatedAt) {
+			anchor, anchorProgress = i, entry
 		}
 	}
-	return best
-}
-
-func playableProgressRank(progress map[string]userstore.WatchProgress, contentID string) int {
-	entry, ok := progress[contentID]
-	if ok && entry.PositionSeconds > 0 && !entry.Completed {
-		return 0
+	switch {
+	case anchor < 0:
+		return candidates[0]
+	case !anchorProgress.Completed:
+		return candidates[anchor]
+	case anchor+1 < len(candidates):
+		return candidates[anchor+1]
+	default:
+		return candidates[0]
 	}
-	if !ok || !entry.Completed {
-		return 1
-	}
-	return 2
 }
 
 func progressUpdatedAfter(candidate, current string) bool {

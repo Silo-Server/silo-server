@@ -401,7 +401,7 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 				t.Fatalf("target = %#v, err %v; want %s", got, err, want)
 			}
 		}
-		check(episode1) // Both serialized timestamps tie at the same second.
+		check(episode2) // Both tie at the same second; the later episode wins.
 		for _, hidden := range []struct{ id, want string }{{episode1, episode2}, {episode2, episode1}} {
 			if _, err := pool.Exec(t.Context(), `INSERT INTO user_history_hidden_items
 				(user_id, profile_id, media_item_id, hidden_before, updated_at)
