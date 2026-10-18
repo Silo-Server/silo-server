@@ -93,12 +93,12 @@ measured and where it came from, and never do Auto's arithmetic.
 ## Terms
 
 - **Plan**: one adoption of a playback plan. Every adopted replan starts a new
-  plan, even when its server `plan_id` repeats: that ID is deterministic from
-  the attempt, files, delivery and recipe, not unique per adoption. Clients use
-  a local adoption counter/identity for controller state and request correlation,
-  and keep the server `plan_id` for `plan_summary` route events. The vectors'
-  `plan_id` labels stand for adoption identities. An in-place update, such as a
-  subtitle that became ready, does not start a new adoption.
+  plan, even when the server returns the same `plan_id`: that ID is derived
+  from the attempt, files, delivery and recipe, so it can repeat. Clients key
+  controller state and request correlation on a local adoption identity, and
+  send the server `plan_id` in `plan_summary` route events. In the vectors,
+  `plan_id` labels are adoption identities. An in-place update, such as a
+  subtitle that became ready, is not a new adoption.
 - **Delivered bitrate**: `effective_recipe.bitrate_kbps`, else
   `source.bitrate_kbps`.
 - **Stall**: the player has run out of data while it should be playing. These
@@ -122,14 +122,13 @@ measured and where it came from, and never do Auto's arithmetic.
   the bitrate of the active rung. When the active quality is Auto, the
   comparison is against the delivered bitrate. This is the web's
   `lowerQualityOption`.
-- **Step-down estimate**: `floor(delivered bitrate × 7 / 10)`. It counts only when
-  it is at least 100 kbps. Compute the integer floor exactly (for example,
-  22120 gives 15484); multiplying by floating-point `0.7` can round one kbps
-  too low. Auto plans for 80% of an estimate, so the next stream
-  targets about 56% of the one that stalled. If Auto has no known delivered
-  bitrate, or the estimate is below 100 kbps, treat it as no lower rung: show
-  `cant_lower` once per title, report `cant_lower`, and send no prompt or replan.
-  In `never` mode, continue detecting/reporting only (`ignored`).
+- **Step-down estimate**: `floor(delivered bitrate × 7 / 10)`, in exact integer
+  arithmetic: 22120 gives 15484, while multiplying by the floating-point `0.7`
+  gives 15483. Auto plans for 80% of an estimate, so the next stream targets
+  about 56% of the one that stalled. On Auto, a missing delivered bitrate or an
+  estimate below 100 kbps means there is no lower rung: show `cant_lower` once
+  per title, report `cant_lower`, and send no prompt or replan. In `never` mode
+  the client only detects and reports (`ignored`).
 - **Answered**: the viewer has decided about buffering for this title at this
   quality, by **Keep quality** or **Restore quality**. An answered title is not
   lowered or prompted again until the viewer changes quality.
@@ -152,18 +151,20 @@ silently would override an explicit choice.
 
 Trigger evaluation follows the media event clock:
 
-- Evaluate when a stall ends (`playing`) and when an in-progress stall reaches
-  the long-stall threshold. Starting a wait does not evaluate old stall history.
-- Once a long-stall timer has fired, keep watching the stall. Re-evaluate when a
-  time-based suppression expires if a stall is still in progress; expiry while
-  playing does not itself trigger an offer.
-- A suppressed trigger (answered, cooldown, rearm, re-offer, or a buffering
-  prompt/undo pill already visible or waiting behind a higher-priority pill)
-  leaves stall history intact. A prompt timeout or rearm clears history, with startup grace
-  already over, and times any in-progress stall again from that instant.
-- Back on an undo pill only hides it. It does not answer the title.
-- The no-lower-rung notice is once per title. A lowering whose adopted plan is
-  no lower shows the failure notice on each such adoption, then starts its
+- Evaluate when a stall ends (`playing`) and when a stall in progress reaches
+  `LONG_STALL_MS`. A new wait does not re-evaluate old stall history.
+- After the long-stall timer fires, keep watching the stall. If a time-based
+  suppression expires while the stall is still in progress, evaluate again. An
+  expiry while playing triggers nothing by itself.
+- A suppressed trigger leaves stall history intact. A trigger is suppressed
+  while the title is answered, during a cooldown, before a rearm or re-offer is
+  due, and while a buffering prompt or undo pill is visible or waiting behind a
+  higher-priority pill. A prompt timeout or a rearm clears history, with the
+  startup grace already over, and times a stall in progress again from that
+  moment.
+- Back on an undo pill only hides it; it does not answer the title.
+- The no-lower-rung notice shows once per title. A lowering whose adopted plan
+  is no lower shows the failure notice on every such adoption, then starts its
   cooldown.
 
 The controller acts only when the trigger fires and the title is not answered
@@ -213,7 +214,7 @@ Presentation rules:
   arrives while a buffering pill is visible, hide the buffering pill and freeze
   its remaining timer. When the other pill hides, show the buffering pill and
   resume that remaining timer, only if the plan has not changed. A plan change
-  or manual quality change discards the waiting/hidden pill. An automatic
+  or a manual quality change discards the waiting or hidden pill. An automatic
   lowering does not wait; only its undo pill does.
 - Select and Back are handled at the player root, as for intro skip.
 - The pills use the platform's notice position. A caption and its action, or
@@ -312,12 +313,12 @@ route. The server should serve the probe wherever it serves this client's
 media, and the capability response should name that URL. On a single-host
 server, it stays the API host.
 
-The advertised URL is stable and authenticated. A download can redirect to a
-short-lived, purpose-bound proxy URL; clients follow redirects. Discovery has
-no media item, so the server selects the reachable egress using the direct-play
-routing policy for the calling network/provider path. The endpoint returns an
-unavailable error when a proxy-only policy has no capable proxy, rather than
-measuring the API path instead.
+The advertised URL is stable and uses normal authentication. Fetching it can
+redirect to a short-lived proxy URL that is valid only for probes; clients
+follow the redirect. There is no media item yet, so the server picks the egress
+that the direct-play routing policy would use for the caller's network or
+provider path. When a proxy-only policy has no proxy that serves probes, the
+endpoint returns an unavailable error instead of measuring the API path.
 
 ## Reporting and display
 
@@ -444,18 +445,23 @@ in parallel:
 The tables above are the test oracle, and
 [`schemas/buffering-quality/v1/vectors.json`](schemas/buffering-quality/v1/vectors.json)
 encodes them. Each case is a list of timed events on one clock, with the
-complete list of outputs it must produce. Events are `plan_adopted` (carrying
-the plan's delivered bitrate, quality, menu and warnings), `playing`, `waiting`
-(optionally with a `seek`, `pause` or `reload` cause), `pause`, `seek`,
-`transport_error_start`/`end`, `replan_failed`, and the pill answers
-`select_lower`, `select_keep`, `select_restore` and `back`. Presentation events
-`pill_obscured` and `pill_unobscured` mean a higher-priority actionable pill
-appears or the last such pill disappears. A resumed pill emits its corresponding
-`prompt_shown` or `undo_shown` output again. Missing delivered bitrate is encoded
-as `delivered_kbps: 0`. Timeouts come from
-the clock. Outputs are `replan` with its body, `prompt_shown`, `undo_shown`, and
-`notice` with its copy key. Some cases also give the `buffering_action` each
-plan's `plan_summary` must report.
+complete list of outputs it must produce. Timeouts come from the clock. The
+events are:
+
+- `plan_adopted`, carrying the plan's delivered bitrate, quality, menu and
+  warnings. A missing delivered bitrate is `delivered_kbps: 0`. An adoption with
+  `controllerInitiated: false` answers a replan the controller did not send.
+- `playing`, `waiting` (optionally with a `seek`, `pause` or `reload` cause),
+  `pause`, `seek`, `transport_error_start`, `transport_error_end` and
+  `replan_failed`.
+- The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
+- `pill_obscured` and `pill_unobscured`: a higher-priority actionable pill
+  appears, or the last one disappears. A pill that comes back emits its
+  `prompt_shown` or `undo_shown` output again.
+
+Outputs are `replan` with its body, `prompt_shown`, `undo_shown`, and `notice`
+with its copy key. Some cases also give the `buffering_action` each plan's
+`plan_summary` must report.
 
 The same file's `connection_budget_cases` is a server-only oracle for the
 connection endpoint's 80% margin and administrator cap. It does not add events
@@ -493,13 +499,21 @@ stall" is a wait from 125000 that reaches 6000 ms.
 | `no_lower_result` | long stall, then `p2` adopted at 63000 with `quality_reduction_unavailable`, another long stall | the replan, `notice cant_lower`, then nothing during the cooldown |
 | `unadopted_replan` | long stall, replan_failed, a long stall at 150000, another at 200000 | replans at 131000 and 206000 |
 
-Additional conformance cases cover `suppressed_history_retained` (a later
-`playing` event can evaluate retained history), `suppressed_ended_long_stall_retained`
-(a single long stall that ended during suppression still qualifies within the
-120-second window at the next `playing`, even if the new stall is under one
-second), `repeated_no_lower_result`
-(each unsuccessful adoption shows its notice), `back_hides_undo_without_answering`,
-and `cooldown_expires_during_stall` (an active long stall is evaluated at expiry).
+The remaining cases pin the rules added since:
+
+| Case | Pins |
+| --- | --- |
+| `suppressed_history_retained` | A trigger suppressed by the re-offer wait keeps its history, and a later `playing` evaluates it. |
+| `suppressed_ended_long_stall_retained` | A long stall that ended during suppression still qualifies at the next `playing` within the 120-second window, even when the new stall is under one second. |
+| `repeated_no_lower_result` | Every adoption that is no lower shows its own notice. |
+| `back_hides_undo_without_answering` | Back hides the undo pill without answering, so a later long stall lowers again. |
+| `cooldown_expires_during_stall` | A cooldown that expires during a long stall evaluates it at once. |
+| `auto_missing_bitrate` | Auto with no delivered bitrate has no lower rung: `cant_lower` once. |
+| `auto_estimate_below_floor`, `ask_auto_estimate_below_floor` | A step-down estimate under 100 kbps has no lower rung, in `always` and in `ask`. |
+| `obscured_prompt_preserves_remaining_timer`, `obscured_undo_preserves_remaining_timer` | A pill hidden behind a higher-priority pill comes back with the rest of its timer. |
+| `obscured_prompt_discarded_on_plan_change` | A plan change discards a hidden prompt. |
+| `visible_undo_retains_stall_history` | Stalls while the undo pill shows still count once it hides. |
+| `step_down_uses_exact_integer_floor` | 22120 steps down to 15484. |
 
 ## Phases
 
