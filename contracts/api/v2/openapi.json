@@ -7515,6 +7515,15 @@
             "format": "int64",
             "type": "integer"
           },
+          "max_lookback_hours": {
+            "description": "Largest accepted lookback_hours.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "played_lookback": {
+            "description": "Run and bulk-run accept lookback_hours for Jellyfin sources.",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -7535,6 +7544,8 @@
           "guarded_configuration",
           "durable_runs",
           "max_bulk_mappings",
+          "played_lookback",
+          "max_lookback_hours",
           "revision",
           "state",
           "allowed"
@@ -7770,6 +7781,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "played_since": {
+            "description": "The lookback cutoff: the run imports only items last played at or after it. Absent for a full import.",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
           "profile_id": {
             "description": "The profile the history is written to",
             "examples": [
@@ -7875,6 +7893,25 @@
           "unmatched_samples",
           "created_at"
         ],
+        "type": "object"
+      },
+      "AdminHistoryImportRunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "lookback_hours": {
+            "description": "Import only items last played within this many hours before the run is queued. Resume positions and favorites are still read in full. Jellyfin sources only. Write it as a plain JSON integer; 72.0 and 1e2 are refused. Omit it or send null for a full import.",
+            "examples": [
+              72
+            ],
+            "format": "int64",
+            "maximum": 8760,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "AdminHistoryImportSource": {
@@ -76620,6 +76657,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminHistoryImportRunCreate",
+                "description": "Absent, empty, or whitespace-only runs a full import, whatever the Content-Type; any other body must be application/json."
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {
@@ -76697,6 +76744,36 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
           },
           "422": {
             "content": {
@@ -77564,6 +77641,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminHistoryImportRunCreate",
+                "description": "Absent, empty, or whitespace-only runs a full import, whatever the Content-Type; any other body must be application/json."
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -77624,6 +77711,36 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
           },
           "422": {
             "content": {

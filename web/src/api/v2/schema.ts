@@ -15188,6 +15188,13 @@ export interface components {
       guarded_configuration: boolean;
       /** Format: int64 */
       max_bulk_mappings: number;
+      /**
+       * Format: int64
+       * @description Largest accepted lookback_hours.
+       */
+      max_lookback_hours: number;
+      /** @description Run and bulk-run accept lookback_hours for Jellyfin sources. */
+      played_lookback: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -15310,6 +15317,11 @@ export interface components {
        */
       matched: number;
       /**
+       * Format: date-time
+       * @description The lookback cutoff: the run imports only items last played at or after it. Absent for a full import.
+       */
+      played_since?: string;
+      /**
        * @description The profile the history is written to
        * @example p-owner
        */
@@ -15360,6 +15372,14 @@ export interface components {
        * @example 0
        */
       watchlist_added: number;
+    };
+    AdminHistoryImportRunCreate: {
+      /**
+       * Format: int64
+       * @description Import only items last played within this many hours before the run is queued. Resume positions and favorites are still read in full. Jellyfin sources only. Write it as a plain JSON integer; 72.0 and 1e2 are refused. Omit it or send null for a full import.
+       * @example 72
+       */
+      lookback_hours?: number | null;
     };
     AdminHistoryImportSource: {
       base_url: string;
@@ -49545,7 +49565,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["AdminHistoryImportRunCreate"];
+      };
+    };
     responses: {
       /** @description Accepted */
       202: {
@@ -49597,6 +49621,33 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };
@@ -50163,7 +50214,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["AdminHistoryImportRunCreate"];
+      };
+    };
     responses: {
       /** @description OK */
       200: {
@@ -50212,6 +50267,33 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };
