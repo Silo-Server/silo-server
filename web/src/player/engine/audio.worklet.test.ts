@@ -258,6 +258,46 @@ describe("EngineAudioProcessor", () => {
       ).toBe(true);
     });
 
+    it("keeps the audio it plays near the clock", () => {
+      const { page, worker, render } = setup(1);
+      // Each sample holds its own frame index, so the output shows which input plays.
+      const ramp = new Float32Array(4 * RATE);
+      for (let i = 0; i < ramp.length; i++) ramp[i] = i / 1e6;
+      worker({ type: "pcm", generation: 1, timestamp: 0, samples: ramp });
+      page({ type: "rate", rate: 3 });
+      const [out] = render(300);
+      let total = 0;
+      let worst = 0;
+      for (let k = 4_800; k < out!.length; k++) {
+        const lag = Math.abs(out![k]! * 1e6 - k * 3) / RATE;
+        total += lag;
+        worst = Math.max(worst, lag);
+      }
+      // Without centring the audio trails the clock by up to 64 ms at 3x.
+      expect(total / (out!.length - 4_800)).toBeLessThan(0.02);
+      expect(worst).toBeLessThan(0.05);
+    });
+
+    it("reports running dry again after a speed change ends a starved spell", () => {
+      const { processor, page, worker, render } = setup(1);
+      page({ type: "rate", rate: 2 });
+      worker({
+        type: "pcm",
+        generation: 1,
+        timestamp: 0,
+        samples: new Float32Array(1_000).fill(0.5),
+      });
+      render(1);
+      const underruns = () =>
+        (processor.port.posted as Array<{ type: string }>).filter((m) => m.type === "underrun")
+          .length;
+      expect(underruns()).toBe(1);
+      // At 1x what is queued plays, then the queue runs dry for real.
+      page({ type: "rate", rate: 1 });
+      render(12);
+      expect(underruns()).toBe(2);
+    });
+
     it("returns to 1x without a jump in the waveform", () => {
       const { page, worker, render } = setup(1);
       worker({ type: "pcm", generation: 1, timestamp: 0, samples: sine(440, 4, 1) });

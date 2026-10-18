@@ -11,6 +11,11 @@
  * do not cancel or smear. Playing faster skips the input between sequences,
  * playing slower repeats some of it.
  *
+ * Within a sequence the audio advances at 1x while the head, and the clock
+ * the video follows, advance at the playback rate. Above 1x each sequence
+ * after the first therefore starts half a sequence's skip past the head, so
+ * the audio is centred on the clock rather than trailing it.
+ *
  * Every buffer is allocated up front: the audio thread must not collect
  * garbage mid-quantum.
  */
@@ -29,6 +34,8 @@ const SLOW_SEQUENCE_SECONDS = 0.06;
 const FAST_SEQUENCE_SECONDS = 0.04;
 const SLOW_RATE = 0.5;
 const FAST_RATE = 1.5;
+/** The fastest rate the input buffers are sized for; faster rates centre as this one. */
+const MAX_RATE = 4;
 /**
  * Bounds the offset search on any channel count and sample rate. Candidates
  * are first tried on a coarse grid, then one by one around the best of them,
@@ -68,7 +75,12 @@ export class TimeStretcher {
 
   /** Input frames past the read head that the next sequence at `rate` reads. */
   inputFrames(rate: number): number {
-    return this.search + this.sequenceFrames(rate);
+    return this.lead(rate) + this.search + this.sequenceFrames(rate);
+  }
+
+  /** The most input any sequence reads, for sizing the caller's buffer. */
+  get maxInputFrames(): number {
+    return Math.max(this.inputFrames(0), this.inputFrames(MAX_RATE));
   }
 
   /** Frames of the current sequence not yet played. */
@@ -92,7 +104,9 @@ export class TimeStretcher {
     const channels = this.channels;
     const overlap = this.overlap;
     const frames = this.sequenceFrames(rate);
-    const start = this.hasTail ? this.bestOffset(input) * channels : 0;
+    // The first sequence continues from the head exactly, as unstretched
+    // playback left off; later ones are matched to the one before.
+    const start = this.hasTail ? this.bestOffset(input, this.lead(rate)) * channels : 0;
     const out = this.out;
     const tail = this.tail;
     const fade = overlap * channels;
@@ -152,26 +166,37 @@ export class TimeStretcher {
     }
   }
 
+  /** Frames past the head where a sequence's search starts, centring it on the clock. */
+  private lead(rate: number): number {
+    if (rate <= 1) return 0;
+    const skip = this.sequenceFrames(rate) - this.overlap;
+    return Math.round((skip * (Math.min(rate, MAX_RATE) - 1)) / 2);
+  }
+
   private sequenceFrames(rate: number): number {
     const t = Math.min(1, Math.max(0, (rate - SLOW_RATE) / (FAST_RATE - SLOW_RATE)));
     const seconds = SLOW_SEQUENCE_SECONDS + (FAST_SEQUENCE_SECONDS - SLOW_SEQUENCE_SECONDS) * t;
     return Math.max(2 * this.overlap + 1, Math.round(seconds * this.sampleRate));
   }
 
-  /** The start offset, in frames past the read head, that best continues the tail. */
-  private bestOffset(input: Float32Array): number {
-    let best = 0;
+  /**
+   * The start offset, in frames past the read head and within the search
+   * window from `from`, that best continues the tail.
+   */
+  private bestOffset(input: Float32Array, from: number): number {
+    const last = from + this.search - 1;
+    let best = from;
     let bestScore = -Infinity;
-    for (let offset = 0; offset < this.search; offset += this.coarseStep) {
+    for (let offset = from; offset <= last; offset += this.coarseStep) {
       const score = this.similarity(input, offset);
       if (score > bestScore) {
         bestScore = score;
         best = offset;
       }
     }
-    const from = Math.max(0, best - this.coarseStep + 1);
-    const to = Math.min(this.search - 1, best + this.coarseStep - 1);
-    for (let offset = from; offset <= to; offset++) {
+    const low = Math.max(from, best - this.coarseStep + 1);
+    const high = Math.min(last, best + this.coarseStep - 1);
+    for (let offset = low; offset <= high; offset++) {
       if (offset === best) continue;
       const score = this.similarity(input, offset);
       if (score > bestScore) {

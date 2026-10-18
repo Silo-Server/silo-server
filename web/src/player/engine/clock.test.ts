@@ -33,6 +33,21 @@ describe("EngineClock with audio", () => {
     expect(clock.now()).toBe(6.2);
   });
 
+  it("keeps enough history for output latency at high sample rates", () => {
+    // 192 kHz: an anchor every 4 quanta is every 2.67 ms.
+    const step = (4 * 128) / 192_000;
+    let audible = 0;
+    const clock = new EngineClock(() => audible, 0);
+    let t = 0;
+    for (; t < 1; t += step) {
+      clock.onAnchor({ contextTime: t, mediaTime: t * 3, advancing: true, rate: 3 });
+    }
+    clock.onAnchor({ contextTime: t, mediaTime: t * 3, advancing: true, rate: 0.5 });
+    // 300 ms of output latency: what plays now was rendered at 3x.
+    audible = t - 0.3;
+    expect(clock.now()).toBeCloseTo(audible * 3, 6);
+  });
+
   it("scales by the playback rate", () => {
     let audible = 0;
     const clock = new EngineClock(() => audible, 0);

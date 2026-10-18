@@ -58,6 +58,8 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
   private consumedFrames = 0;
   private quanta = 0;
   private lastAdvancing = false;
+  /** The rate in the last clock report; a change is reported at once. */
+  private reportedRate = 1;
   /**
    * Media time just past the last sample rendered in this generation, or the
    * generation's start position before anything has played.
@@ -72,7 +74,7 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     super(options);
     this.channels = options.processorOptions.channels;
     this.stretcher = new TimeStretcher(this.channels, sampleRate);
-    this.stretchInput = new Float32Array(this.stretcher.inputFrames(0) * this.channels);
+    this.stretchInput = new Float32Array(this.stretcher.maxInputFrames * this.channels);
     this.port.onmessage = (event: MessageEvent<PageToWorkletMessage>) => this.onPage(event.data);
   }
 
@@ -228,8 +230,11 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     if (
       !ranDry &&
       mediaTime !== null &&
-      (advancing !== this.lastAdvancing || this.quanta % CLOCK_REPORT_QUANTA === 0)
+      (advancing !== this.lastAdvancing ||
+        this.rate !== this.reportedRate ||
+        this.quanta % CLOCK_REPORT_QUANTA === 0)
     ) {
+      this.reportedRate = this.rate;
       this.postPage({
         type: "clock",
         generation: this.generation,
@@ -240,6 +245,9 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
       });
     }
     this.lastAdvancing = advancing;
+    // Audio flowing again ends a dry spell even without new PCM, as when a
+    // speed change lets the stretcher build from what is already queued.
+    if (advancing) this.underrunReported = false;
     if (this.worker && this.quanta % CONSUMED_REPORT_QUANTA === 0) {
       const report: WorkletToWorkerMessage = {
         type: "consumed",

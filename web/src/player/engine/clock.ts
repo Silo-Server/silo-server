@@ -14,10 +14,10 @@ export interface AudioAnchor {
 }
 
 /**
- * Anchors kept from the current run, newest last: about 0.7 s of audio at
- * 48 kHz, more than any output device's latency.
+ * Context seconds of anchors kept from the current run, more than any output
+ * device's latency.
  */
-const ANCHOR_HISTORY = 64;
+const ANCHOR_HISTORY_SECONDS = 1;
 
 export class EngineClock {
   /** Null while running from wall time: no audio, or audio that has ended. */
@@ -74,7 +74,11 @@ export class EngineClock {
       return;
     }
     this.history.push(anchor);
-    if (this.history.length > ANCHOR_HISTORY) this.history.shift();
+    // Keep the newest anchor at or before the oldest time still worth reading.
+    const oldest = anchor.contextTime - ANCHOR_HISTORY_SECONDS;
+    let drop = 0;
+    while (drop + 1 < this.history.length && this.history[drop + 1]!.contextTime <= oldest) drop++;
+    if (drop > 0) this.history.splice(0, drop);
   }
 
   /**

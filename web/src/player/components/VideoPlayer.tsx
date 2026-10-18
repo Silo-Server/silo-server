@@ -922,9 +922,9 @@ export function VideoPlayer({
   // Read by timers that must use the newest clock estimate without restarting.
   const serverTimeOffsetRef = useRef(watchTogether.serverTimeOffsetMs);
   serverTimeOffsetRef.current = watchTogether.serverTimeOffsetMs;
-  // Room sync corrects the browser decode engine by seeking instead of
-  // nudging its rate: the engine's clock has not been tuned for the small,
-  // frequent rate changes a nudge makes.
+  // Room sync corrects the browser decode engine by seeking. Its audio keeps
+  // pitch at other rates too, but rate nudges have not been checked against
+  // room drift on it, so it keeps the seek path it had when they could not.
   const roomRateCapableRef = useRef(!browserEngineActive);
   roomRateCapableRef.current = !browserEngineActive;
   // The viewer's speed for this player session. A room plays everyone at 1x
@@ -3948,8 +3948,8 @@ export function VideoPlayer({
   // Continuous drift loop: while the room and this viewer both play, absorb
   // drift from the room reference with a rate nudge. It never seeks a player
   // that can nudge; drift too large for a nudge is the server's to correct,
-  // and that correction arrives as a command. A player without pitch-kept
-  // rate changes seeks within reach instead. Around a command (scheduled,
+  // and that correction arrives as a command. A player room sync does not
+  // nudge seeks within reach instead. Around a command (scheduled,
   // just executed, or loading media) the loop only waits, before looking at
   // the room state: the snapshot that announces a command can arrive before
   // it executes, and a received command must not change the rate. Otherwise,
