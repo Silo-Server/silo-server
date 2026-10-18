@@ -116,9 +116,10 @@ scope resolvers. Before another server path resolves a key that declares
 
 `config.AdminDefaults` is a per-node snapshot of every `defaults.<key>`, read in
 one query, because the viewer scope resolves on nearly every authenticated
-request. A fresh snapshot is read without a lock; at most one refresh runs at a
-time, and once a snapshot exists an expired one is refreshed in the background
-while callers keep it. A failed refresh keeps the last good snapshot and retries
+request. A fresh snapshot is read without a lock. `cmd/silo` runs its refresh
+loop, which reloads it every half TTL whether or not anything reads it; at most
+one refresh runs at a time, and a caller that still finds it expired keeps it
+while one refreshes in the background. A failed refresh keeps the last good snapshot and retries
 after a short delay. An admin write reloads the writing node's snapshot before
 the client event is published, and a read that began before the write can no
 longer publish over it. Every other node reloads on the admin-channel

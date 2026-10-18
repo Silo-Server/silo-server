@@ -282,3 +282,25 @@ func TestAdminDefaultsChangedRefreshesImmediately(t *testing.T) {
 		t.Fatalf("after Changed = %q, want true", got)
 	}
 }
+
+// A node that missed another node's change event and serves no requests still
+// picks up the new default within the TTL, so a client's delayed re-read finds
+// it instead of starting a refresh and getting the old snapshot back.
+func TestAdminDefaultsRunRefreshesWithoutReads(t *testing.T) {
+	reader := newFakeManyReader(map[string]string{nextUpModeDefault: `"combined"`})
+	a := NewAdminDefaults(reader)
+	a.ttl = 40 * time.Millisecond
+	get(t, a, nextUpModeDefault)
+	reader.waitDone(t, 1)
+
+	// Another node wrote the default; this node never heard about it.
+	reader.set(nextUpModeDefault, `"separate"`, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx)
+	reader.waitDone(t, 2)
+
+	if got := get(t, a, nextUpModeDefault); got != `"separate"` {
+		t.Fatalf("after a background refresh with no reads = %q, want separate", got)
+	}
+}

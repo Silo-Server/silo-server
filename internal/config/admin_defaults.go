@@ -50,6 +50,9 @@ type adminDefaultsSnapshot struct {
 //   - a failed refresh keeps the last snapshot (or none, which means the
 //     contract defaults) and is retried after adminDefaultsRetryDelay.
 //
+// Run keeps the snapshot fresh in the background, so in production a read
+// rarely finds it expired; the on-demand refresh covers callers without it.
+//
 // It satisfies settingsresolve.ServerSettings. One instance is shared by every
 // resolver on the node so the settings pages, Home, and Jellyfin clients agree.
 type AdminDefaults struct {
@@ -155,6 +158,34 @@ func (a *AdminDefaults) Changed(ctx context.Context, serverSettingKey string) {
 	a.retryAt = time.Time{}
 	a.mu.Unlock()
 	a.read(context.WithoutCancel(ctx), generation)
+}
+
+// Run refreshes the snapshot every half TTL until ctx ends, so it never
+// depends on a request to notice it expired. A node that missed another
+// node's change event then serves the new default within the TTL even while
+// idle, which is what the web client's delayed re-read relies on. A tick is
+// skipped while another refresh runs.
+func (a *AdminDefaults) Run(ctx context.Context) {
+	if a == nil || a.settings == nil || len(a.keys) == 0 {
+		return
+	}
+	ticker := time.NewTicker(a.ttl / 2)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		a.mu.Lock()
+		if a.inflight != nil {
+			a.mu.Unlock()
+			continue
+		}
+		generation := a.beginLocked()
+		a.mu.Unlock()
+		a.read(ctx, generation)
+	}
 }
 
 // beginLocked numbers a new read and, when no refresh is running, marks this

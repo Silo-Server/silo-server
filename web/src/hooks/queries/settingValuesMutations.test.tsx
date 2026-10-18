@@ -76,6 +76,26 @@ describe("typed setting mutations", () => {
     },
   );
 
+  // Next up episodes decides which rows Home has, so a mounted Home refetches
+  // its layout; a preference that only changes the rows' cards does not.
+  it.each([
+    [SETTING_KEYS.UI_NEXT_UP_MODE, "separate", 2],
+    [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS, true, 1],
+  ])("reads Home's layout again after %s changes: %d read(s)", async (key, value, reads) => {
+    v2Mock.mockResolvedValueOnce({});
+    const { wrapper } = createHarness();
+    const layoutFn = vi.fn().mockResolvedValue({ sections: [] });
+    renderHook(() => useQuery({ queryKey: sectionKeys.homeLayout(), queryFn: layoutFn }), {
+      wrapper,
+    });
+    await waitFor(() => expect(layoutFn).toHaveBeenCalledTimes(1));
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ key, value, identity: { scope: "profile" } });
+    });
+    expect(layoutFn).toHaveBeenCalledTimes(reads);
+  });
+
   // The server adds the Next Up row and orders Continue Watching on Home and
   // on library pages alike, so both sets of rows refetch.
   it.each([

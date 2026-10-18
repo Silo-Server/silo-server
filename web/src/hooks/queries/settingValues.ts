@@ -450,6 +450,14 @@ function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, k
   // resetting the load queue, including when the settings screen has unmounted.
   const home = queryClient
     .invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" })
+    // Next up episodes decides which rows Home has (the server adds the Next
+    // Up row), so a mounted Home refetches its layout before its rows reload;
+    // the reload alone only refreshes the rows the old layout listed.
+    .then(() =>
+      key === SETTING_KEYS.UI_NEXT_UP_MODE
+        ? queryClient.refetchQueries({ queryKey: sectionKeys.homeLayout(), type: "active" })
+        : undefined,
+    )
     .then(() => bumpHomeRefreshSignal(queryClient));
   if (!LIBRARY_SECTION_REFRESH_KEYS.has(key)) return home;
   return Promise.all([

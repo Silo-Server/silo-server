@@ -1009,6 +1009,8 @@ func main() {
 
 	appCtx, appCancel := context.WithCancel(ctx)
 	defer appCancel()
+	// Keep the administrator defaults fresh without waiting for a request.
+	go adminDefaults.Run(appCtx)
 	stopDebugOnCancel := context.AfterFunc(appCtx, stopDebugListener)
 	defer stopDebugOnCancel()
 	var streamTelemetryRegistry *streamtelemetry.Registry
