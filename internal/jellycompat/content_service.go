@@ -15,8 +15,10 @@ type ContentService interface {
 	// content IDs. The returned map is keyed by content ID; ids that cannot be
 	// resolved to a detail (excluded media type, access-filtered, not found) are
 	// absent so callers fall back to list-level rendering, exactly as they do on
-	// a per-item GetItemDetail error.
-	GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error)
+	// a per-item GetItemDetail error. fields is the request's Fields (nil means
+	// all): an implementation may leave out detail members that no list mapping
+	// of those fields reads.
+	GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int, fields map[string]bool) (map[string]*upstreamItemDetail, error)
 	ListSeasons(ctx context.Context, session *Session, seriesID string, libraryID *int) ([]upstreamSeason, error)
 	GetSeason(ctx context.Context, session *Session, seriesID string, seasonNumber int, libraryID *int) (*upstreamSeason, error)
 	ListEpisodes(ctx context.Context, session *Session, seriesID string, seasonNumber int, libraryID *int) ([]upstreamEpisode, error)
