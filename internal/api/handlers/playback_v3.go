@@ -101,6 +101,17 @@ func serverBitrateCapV3(ctx context.Context) int {
 	return cap
 }
 
+// requestBitrateCapV3 is the administrator's stream bitrate ceiling for the
+// caller's network location, or 0 when none applies. A start persists it with
+// the attempt; the connection endpoint reports Auto's budget under it.
+func requestBitrateCapV3(ctx context.Context) int {
+	scope, ok := access.GetScope(ctx)
+	if !ok {
+		return 0
+	}
+	return streamlocation.BitrateCap(ctx, scope.MaxLocalStreamBitrateKbps, scope.MaxRemoteStreamBitrateKbps)
+}
+
 var errSubtitleStoreUnavailableV3 = errors.New("subtitle store unavailable")
 
 type v3NodeCapabilityCache struct {
@@ -1754,10 +1765,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to check playback attempt idempotency")
 	}
 	timings.mark("idempotency")
-	if scope, ok := access.GetScope(r.Context()); ok {
-		capKbps := streamlocation.BitrateCap(r.Context(), scope.MaxLocalStreamBitrateKbps, scope.MaxRemoteStreamBitrateKbps)
-		r = r.WithContext(withServerBitrateCapV3(r.Context(), capKbps))
-	}
+	r = r.WithContext(withServerBitrateCapV3(r.Context(), requestBitrateCapV3(r.Context())))
 	requestedFile, err := h.loadAuthorizedFile(r, req.FileID)
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackFileOperationError(err)

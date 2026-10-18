@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -109,6 +110,51 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	}
 	if _, _, ok := stored(); ok {
 		t.Fatal("the client's clear kept the limit")
+	}
+}
+
+// TestConnectionBudgetAppliesAdminCapDB: the connection endpoint reports
+// Auto's budget under the administrator's bitrate cap for the caller's
+// network, the cap a start would plan under.
+func TestConnectionBudgetAppliesAdminCapDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	var user int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("connection-budget-cap-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
+
+	h := &PlaybackHandler{Connections: &connectionstore.Store{Pool: pool}, JWTSecret: "connection-budget-secret"}
+	remote := clientip.SetContext(apimw.SetClaims(ctx, &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "203.0.113.7")
+	if err := h.ReportPlaybackProbe(remote, "tv-1", connectionstore.ProbeResult{Kbps: 48000, Bytes: 12_000_000, DurationMS: 2000, Transport: "wifi"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		scope *access.Scope
+		want  int
+	}{
+		{"no cap", nil, 38400},
+		{"remote cap", &access.Scope{MaxRemoteStreamBitrateKbps: 12000, MaxLocalStreamBitrateKbps: 100000}, 12000},
+		{"local cap only", &access.Scope{MaxLocalStreamBitrateKbps: 8000}, 38400},
+	} {
+		request := remote
+		if tc.scope != nil {
+			request = access.SetScope(remote, *tc.scope)
+		}
+		state, err := h.PlaybackConnection(request, "tv-1", false)
+		if err != nil || state.AutoBudgetKbps == nil || *state.AutoBudgetKbps != tc.want {
+			t.Fatalf("%s: budget=%v err=%v, want %d", tc.name, state.AutoBudgetKbps, err, tc.want)
+		}
 	}
 }
 

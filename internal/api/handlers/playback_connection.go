@@ -25,7 +25,7 @@ func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string,
 		return state, err
 	}
 	state.Probe, err = h.Connections.Probe(ctx, apimw.GetUserID(ctx), device, key)
-	state.AutoBudgetKbps = connectionstore.Budget(state.Probe, limit, serverBitrateCapV3(ctx))
+	state.AutoBudgetKbps = connectionstore.Budget(state.Probe, limit, requestBitrateCapV3(ctx))
 	return state, err
 }
 

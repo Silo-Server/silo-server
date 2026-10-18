@@ -401,8 +401,10 @@
 
 # Buffering quality: a learned limit expires after seven days, a reset keeps the
 # probe and plan summary, rows go with the device's last registration and after
-# 30 days without an update, a seek replay never records a limit, and a plan
-# summary keeps the delivery of the plan it reports after a replan replaced it.
+# 30 days without an update, a seek replay never records a limit, the
+# connection budget honours the administrator cap, and a plan summary keeps the
+# delivery of the plan it reports after a replan replaced it.
 ./internal/playback/connectionstore TestStoreLifecycle
 ./internal/api/handlers TestSeekReplayKeepsLearnedLimitDB
+./internal/api/handlers TestConnectionBudgetAppliesAdminCapDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
