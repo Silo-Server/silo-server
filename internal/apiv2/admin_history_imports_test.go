@@ -25,6 +25,11 @@ type fakeAdminHistoryImports struct {
 	users    []historyimport.ExternalUser
 	usersErr error
 	plexErr  error
+
+	// runOpts records the options each run and bulk-run call received;
+	// runErr, when set, is what both answer with.
+	runOpts []historyimport.AdminRunOptions
+	runErr  error
 }
 
 func fixtureAdminHistoryImports() *fakeAdminHistoryImports {
@@ -67,7 +72,11 @@ func (f *fakeAdminHistoryImports) ClearSourceAdminTokenConditional(ctx context.C
 func (f *fakeAdminHistoryImports) ListAdminSources(context.Context) ([]historyimport.Source, error) {
 	return []historyimport.Source{f.source, {ID: 4, Name: "Second", Revision: 3}}, nil
 }
-func (f *fakeAdminHistoryImports) CreateAdminRun(context.Context, int) (*historyimport.Run, error) {
+func (f *fakeAdminHistoryImports) CreateAdminRun(_ context.Context, _ int, opts historyimport.AdminRunOptions) (*historyimport.Run, error) {
+	f.runOpts = append(f.runOpts, opts)
+	if f.runErr != nil {
+		return nil, f.runErr
+	}
 	f.writes++
 	r := f.run
 	return &r, nil
@@ -76,7 +85,11 @@ func (f *fakeAdminHistoryImports) GetAdminRun(context.Context, string) (*history
 	r := f.run
 	return &r, nil
 }
-func (f *fakeAdminHistoryImports) BulkCreateAdminRuns(context.Context, int) (*historyimport.BulkRunResult, error) {
+func (f *fakeAdminHistoryImports) BulkCreateAdminRuns(_ context.Context, _ int, opts historyimport.AdminRunOptions) (*historyimport.BulkRunResult, error) {
+	f.runOpts = append(f.runOpts, opts)
+	if f.runErr != nil {
+		return nil, f.runErr
+	}
 	return &historyimport.BulkRunResult{Outcomes: []historyimport.BulkRunOutcome{{MappingID: 2, Status: "accepted", Run: &f.run}, {MappingID: 3, Status: "active", Run: &f.run}, {MappingID: 4, Status: historyimport.RunStatusFailed, Error: "secret-token"}}}, nil
 }
 func adminHistoryHandler(f *fakeAdminHistoryImports) http.Handler {
