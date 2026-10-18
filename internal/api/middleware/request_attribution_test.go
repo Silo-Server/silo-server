@@ -68,13 +68,13 @@ func TestRequestLoggerNoQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"db_slowest_site", "db_slowest_shape", "db_top_site", "db_top_shape"} {
-		if record[key] != "none" {
-			t.Errorf("%s = %v, want none", key, record[key])
+		if value, present := record[key]; present {
+			t.Errorf("%s = %v, want field absent", key, value)
 		}
 	}
 	for _, key := range []string{"db_queries", "db_query_ns", "db_acquire_wait_ns", "db_slowest_ns", "db_top_count"} {
-		if record[key] != float64(0) {
-			t.Errorf("%s = %v, want 0", key, record[key])
+		if value, present := record[key]; present {
+			t.Errorf("%s = %v, want field absent", key, value)
 		}
 	}
 }

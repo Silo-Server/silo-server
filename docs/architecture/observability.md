@@ -529,7 +529,8 @@ The `api request`, `apiv2 request` and `jellycompat request` lines add, in order
 Times are nanoseconds; summed operation time is not wall time. One traced query (`Query`, `QueryRow`, `Exec`), batch
 or copy counts as one operation, regardless of statement count. `Query` ends at `Rows.Close`, including row processing;
 a no-row `QueryRow` is a success. Acquires add only wait time. Rankings use (site, shape) pairs; ties choose the smaller pair.
-An idle request gives four `none` strings and zero numbers. The first `LogAttrs` closes and caches the snapshot;
+A request with no operation and no acquire wait adds none of these fields; an acquire-only request gives four `none`
+strings and zero operation numbers. The first `LogAttrs` closes and caches the snapshot;
 later completions count only in site totals. `queryattr.Detach` hides the request, preserving cancellation, deadlines
 and other values. It applies at `workmetrics.Start`, sections trending refresh, both asynchronous subtitle-sync launches,
 and metadata auto-translation. Shared cache and singleflight fills keep the waiting request's attribution.

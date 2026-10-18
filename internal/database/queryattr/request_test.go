@@ -72,9 +72,21 @@ func TestRequestTotals(t *testing.T) {
 		})
 	}
 }
-func TestRequestNoQueryValues(t *testing.T) {
+func TestRequestNoQueryAttrs(t *testing.T) {
 	setup(t)
 	_, r := StartRequest(context.Background())
+	if attrs := r.LogAttrs(); attrs != nil {
+		t.Errorf("LogAttrs = %v, want nil for idle request", attrs)
+	}
+	if attrs := r.LogAttrs(); attrs != nil {
+		t.Errorf("second LogAttrs = %v, want nil for idle request", attrs)
+	}
+}
+func TestRequestAcquireOnlyValues(t *testing.T) {
+	setup(t)
+	ctx, r := StartRequest(context.Background())
+	acquire := Begin(ctx, KindAcquire, "", nil, 0)
+	acquire.end(ctx, nil, 3, time.Time{})
 	attrs := r.LogAttrs()
 	keys := []string{"db_queries", "db_query_ns", "db_acquire_wait_ns", "db_slowest_site", "db_slowest_shape", "db_slowest_ns", "db_top_site", "db_top_shape", "db_top_count"}
 	if len(attrs) != len(keys) {
@@ -88,6 +100,9 @@ func TestRequestNoQueryValues(t *testing.T) {
 		var want any = uint64(0)
 		if k == "db_slowest_site" || k == "db_slowest_shape" || k == "db_top_site" || k == "db_top_shape" {
 			want = "none"
+		}
+		if k == "db_acquire_wait_ns" {
+			want = uint64(3)
 		}
 		requireAttr(t, m, k, want)
 	}

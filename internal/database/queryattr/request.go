@@ -72,7 +72,8 @@ func (r *Request) add(entry *row, ns uint64) bool {
 }
 
 // LogAttrs closes the request and returns nine slog.Attr values in the log contract's
-// order. It caches the first snapshot, releases per-row counts, and is nil-safe.
+// order, or nil if no operation and no acquire wait were recorded. It caches the
+// first snapshot, releases per-row counts, and is nil-safe.
 func (r *Request) LogAttrs() []any {
 	if r == nil {
 		return nil
@@ -83,6 +84,9 @@ func (r *Request) LogAttrs() []any {
 		return r.attrs
 	}
 	r.closed = true
+	if r.queries == 0 && r.acquireWait == 0 {
+		return nil
+	}
 	slowSite, slowShape, topSite, topShape := noQuery, noQuery, noQuery, noQuery
 	if r.slowest != nil {
 		slowSite = r.slowest.site.name

@@ -15,7 +15,9 @@ func TestDetachHidesRequest(t *testing.T) {
 	detached := Detach(ctx)
 	op := namedOp(detached, "a", "x")
 	op.end(detached, nil, 1, time.Time{})
-	requireAttr(t, attrsMap(r.LogAttrs()), "db_queries", uint64(0))
+	if attrs := r.LogAttrs(); len(attrs) != 0 {
+		t.Errorf("LogAttrs = %v, want no attributes after detached work", attrs)
+	}
 	if op.row.calls.Load() != 1 {
 		t.Errorf("row calls = %d, want 1", op.row.calls.Load())
 	}

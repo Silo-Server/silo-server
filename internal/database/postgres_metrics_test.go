@@ -144,8 +144,12 @@ func TestPostgresTracerDuplicateBatchEndCountsOnce(t *testing.T) {
 			if enabled {
 				want = 1
 			}
-			if got := postgresRequestAttrs(request)["db_queries"]; got != want {
-				t.Errorf("db_queries = %v, want %d", got, want)
+			if got, present := postgresRequestAttrs(request)["db_queries"]; enabled {
+				if got != want {
+					t.Errorf("db_queries = %v, want %d", got, want)
+				}
+			} else if present {
+				t.Errorf("db_queries = %v, want field absent", got)
 			}
 			flushPostgresSummary()
 			if calls := postgresSummaryRowCalls(t, logs.Bytes(), "batch"); calls != want {

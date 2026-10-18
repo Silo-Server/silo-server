@@ -29,19 +29,12 @@ func TestStartDetachesRequestAttribution(t *testing.T) {
 	op.End(workCtx, nil)
 	var record slog.Record
 	record.Add(request.LogAttrs()...)
-	found := false
 	record.Attrs(func(attr slog.Attr) bool {
 		if attr.Key == "db_queries" {
-			found = true
-			if got := attr.Value.Uint64(); got != 0 {
-				t.Errorf("request db_queries = %d, want 0 after detached work", got)
-			}
+			t.Errorf("request db_queries = %v, want field absent after detached work", attr.Value)
 		}
 		return true
 	})
-	if !found {
-		t.Fatal("request db_queries field is missing")
-	}
 }
 
 func TestAttemptLifecycleAndBoundedLabels(t *testing.T) {
