@@ -261,23 +261,30 @@ async function collectProbe(signal: AbortSignal): Promise<number | undefined> {
   }
   return result.kbps;
 }
-/** A foreground test uses the same playback and cross-tab guards as the schedule. */
-export async function testConnectionSpeed(): Promise<number | undefined> {
-  if (!probeAllowed() || activeProbe) return undefined;
+/**
+ * Settings → Test speed: probes now, under the same playback and cross-tab
+ * guards as the schedule. Resolves to the measured kbps, or null when the
+ * probe could not run beside playback or another probe. Rejects when it ran
+ * and measured nothing, with ProbeRateLimited for a 429.
+ */
+export async function testConnectionSpeed(): Promise<number | null> {
+  if (!probeAllowed() || activeProbe) return null;
   const controller = new AbortController();
   activeProbe = controller;
   const run = async () => {
-    if (controller.signal.aborted || !probeAllowed()) return undefined;
+    if (controller.signal.aborted || !probeAllowed()) return null;
     const locks = lockManager();
-    if (locks && (await mediaActiveInAnyTab(locks))) return undefined;
-    return collectProbe(controller.signal);
+    if (locks && (await mediaActiveInAnyTab(locks))) return null;
+    const kbps = await collectProbe(controller.signal);
+    if (kbps !== undefined) return kbps;
+    // Playback that starts mid-probe aborts it; that is not a failed measurement.
+    if (controller.signal.aborted || !probeAllowed()) return null;
+    throw new Error("The connection speed could not be measured");
   };
   try {
     const locks = lockManager();
     return locks
-      ? await locks.request(PROBE_LOCK_NAME, { ifAvailable: true }, (lock) =>
-          lock ? run() : undefined,
-        )
+      ? await locks.request(PROBE_LOCK_NAME, { ifAvailable: true }, (lock) => (lock ? run() : null))
       : await run();
   } finally {
     if (activeProbe === controller) activeProbe = undefined;

@@ -404,6 +404,11 @@ describe("reported connection speed", () => {
     });
     clock.mockRestore();
   });
+  it("rejects a test that ran and measured nothing", async () => {
+    fetchWithSession.mockResolvedValue({ res: { ok: false, status: 503, body: null } });
+    vi.mocked(v2).mockResolvedValueOnce({ features: [] } as never);
+    await expect(testConnectionSpeed()).rejects.toThrow("could not be measured");
+  });
   it("preserves Retry-After for a foreground rate-limit message", async () => {
     fetchWithSession.mockResolvedValue({
       res: { status: 429, headers: new Headers({ "Retry-After": "19" }) },

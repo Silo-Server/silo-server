@@ -1,4 +1,3 @@
-import { PlaybackConnection } from "./PlaybackConnection";
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
@@ -27,6 +26,7 @@ import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { isBrowserDecodingEnabled, setBrowserDecodingEnabled } from "@/player/engine/settings";
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
+import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
@@ -502,6 +502,7 @@ export default function PlaybackSettings() {
             )}
           />
         )}
+        {supportsBuffering && <LearnedLimitRow />}
       </SettingsGroup>
       {supportsBuffering && <PlaybackConnection />}
 
