@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -435,6 +435,26 @@ describe("ActionBar Manage menu", () => {
       expect(manage).toHaveAttribute("aria-expanded", "false");
     },
   );
+
+  it("keeps Manage beside its trigger when the main menu scrolls", async () => {
+    renderAdmin();
+    await userEvent.click(screen.getByTitle("More"));
+    const manage = screen.getByRole("menuitem", { name: "Manage" });
+    let triggerTop = 200;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this === manage ? new DOMRect(0, triggerTop, 120, 30) : new DOMRect(0, 0, 120, 100);
+    });
+    await userEvent.click(manage);
+    const submenu = screen.getByRole("menu", { name: "Manage" });
+    await waitFor(() => expect(submenu.style.top).toBe("195px"));
+
+    triggerTop = 100;
+    const mainMenu = screen.getAllByRole("menu").find((menu) => menu !== submenu)!;
+    fireEvent.scroll(mainMenu);
+    await waitFor(() => expect(submenu.style.top).toBe("95px"));
+  });
 
   it("shows a lone management action in the main menu", async () => {
     render(

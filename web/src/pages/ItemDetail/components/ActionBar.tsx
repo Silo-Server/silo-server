@@ -604,7 +604,12 @@ export default function ActionBar({
     // dismissing on every wheel nudge. One measurement per frame at most.
     const handleScroll = (event: Event) => {
       const target = event.target;
-      if (target instanceof Node && isInsideMenus(target)) return;
+      if (target instanceof Node && isInsideMenus(target)) {
+        // Scrolling the main menu moves Manage's trigger. Placing the main menu
+        // again places Manage after it.
+        const movesManageTrigger = manageOpen && overflowMenuRef.current?.contains(target);
+        if (!movesManageTrigger) return;
+      }
       if (scrollFrameRef.current !== null) return;
       scrollFrameRef.current = requestAnimationFrame(() => {
         scrollFrameRef.current = null;
