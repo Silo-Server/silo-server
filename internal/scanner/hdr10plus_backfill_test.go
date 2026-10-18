@@ -123,27 +123,7 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 	ctx := context.Background()
 	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("hdr10plus-backfill-%d", time.Now().UnixNano()))
 
-	hdr10PlusFrame := []ffprobeSideData{
-		{SideDataType: "Mastering display metadata"},
-		{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"},
-	}
-	staticFrame := hdr10PlusFrame[:1]
-	const (
-		hdr10Track = `{"codec":"hevc","color_transfer":"smpte2084","video_range":"HDR","video_range_type":"HDR10","future_field":"kept"}`
-		dv81Track  = `{"codec":"hevc","color_transfer":"smpte2084","video_range":"DolbyVision","video_range_type":"DOVIWithHDR10","dv_profile":8,"dv_bl_compat_id":1,"dv_config_present":true,"dv_bl_compat_id_present":true}`
-		sdrTrack   = `{"codec":"h264","color_transfer":"bt709","video_range_type":"SDR"}`
-	)
-	rows := []hdr10PlusBackfillRow{
-		{name: "hdr10plus", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
-		{name: "dv81-hdr10plus", tracks: "[" + dv81Track + "]", sideData: hdr10PlusFrame},
-		{name: "plain-hdr10", tracks: `[{"codec":"hevc","color_transfer":"smpte2084"}]`, sideData: staticFrame},
-		{name: "undecodable", tracks: "[" + hdr10Track + "]", readErr: commandError(t, "echo 'Invalid data found when processing input' >&2; exit 1")},
-		{name: "storage-error", tracks: "[" + hdr10Track + "]", readErr: commandError(t, "echo 'movie.mkv: Input/output error' >&2; exit 1")},
-		{name: "timed-out", tracks: "[" + hdr10Track + "]", readErr: fmt.Errorf("%w after 30s", errFrameSideDataTimeout)},
-		{name: "sdr", tracks: "[" + sdrTrack + "]", sideData: hdr10PlusFrame},
-		{name: "already-checked", tracks: `[{"codec":"hevc","color_transfer":"smpte2084","hdr10_plus":false}]`, sideData: hdr10PlusFrame},
-		{name: "changed-on-disk", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
-	}
+	rows := hdr10PlusBackfillTestRows(t)
 	byPath := make(map[string]hdr10PlusBackfillRow, len(rows))
 	ids := make(map[string]int, len(rows))
 	var probedAt time.Time
@@ -182,41 +162,9 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 	}
 	track := func(name string) map[string]any {
 		t.Helper()
-		var raw []byte
-		if err := pool.QueryRow(ctx, `SELECT video_tracks->0 FROM media_files WHERE id = $1`, ids[name]).Scan(&raw); err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		var fields map[string]any
-		if err := json.Unmarshal(raw, &fields); err != nil {
-			t.Fatal(err)
-		}
-		return fields
+		return readHDR10PlusBackfillTrack(t, ctx, pool, ids[name])
 	}
-
-	if got := track("hdr10plus"); got["hdr10_plus"] != true || got["video_range_type"] != "HDR10Plus" || got["future_field"] != "kept" {
-		t.Fatalf("HDR10+ file = %v, want hdr10_plus true, range HDR10Plus and its other fields kept", got)
-	}
-	if got := track("dv81-hdr10plus"); got["hdr10_plus"] != true || got["video_range_type"] != "DOVIWithHDR10Plus" {
-		t.Fatalf("DV 8.1 file = %v, want hdr10_plus true, range DOVIWithHDR10Plus", got)
-	}
-	if got := track("plain-hdr10"); got["hdr10_plus"] != false {
-		t.Fatalf("plain HDR10 file = %v, want hdr10_plus false", got)
-	} else if _, ok := got["video_range_type"]; ok {
-		t.Fatalf("plain HDR10 file = %v, want no video_range_type added", got)
-	}
-	for _, name := range []string{"undecodable", "storage-error", "timed-out", "changed-on-disk"} {
-		if _, ok := track(name)["hdr10_plus"]; ok {
-			t.Fatalf("%s file = %v, want it left unchecked for the next pass", name, track(name))
-		}
-	}
-	if got := track("already-checked"); got["hdr10_plus"] != false {
-		t.Fatalf("already checked file = %v, want it unchanged", got)
-	}
-	for _, name := range []string{"sdr", "already-checked"} {
-		if reads[name] != 0 {
-			t.Fatalf("%s file was read %d times, want it skipped", name, reads[name])
-		}
-	}
+	checkHDR10PlusBackfillFirstPass(t, track, reads)
 
 	// Everything else in the row stays as it was.
 	var chapters string
@@ -241,6 +189,76 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 		}
 		if count != want {
 			t.Fatalf("second pass read %s %d times, want %d", name, count, want)
+		}
+	}
+}
+
+// hdr10PlusBackfillTestRows are the files TestHDR10PlusBackfillRecordsFrameStatusDB
+// seeds: each names its first track and what reading its first frame returns.
+func hdr10PlusBackfillTestRows(t *testing.T) []hdr10PlusBackfillRow {
+	t.Helper()
+	hdr10PlusFrame := []ffprobeSideData{
+		{SideDataType: "Mastering display metadata"},
+		{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"},
+	}
+	staticFrame := hdr10PlusFrame[:1]
+	const (
+		hdr10Track = `{"codec":"hevc","color_transfer":"smpte2084","video_range":"HDR","video_range_type":"HDR10","future_field":"kept"}`
+		dv81Track  = `{"codec":"hevc","color_transfer":"smpte2084","video_range":"DolbyVision","video_range_type":"DOVIWithHDR10","dv_profile":8,"dv_bl_compat_id":1,"dv_config_present":true,"dv_bl_compat_id_present":true}`
+		sdrTrack   = `{"codec":"h264","color_transfer":"bt709","video_range_type":"SDR"}`
+	)
+	return []hdr10PlusBackfillRow{
+		{name: "hdr10plus", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
+		{name: "dv81-hdr10plus", tracks: "[" + dv81Track + "]", sideData: hdr10PlusFrame},
+		{name: "plain-hdr10", tracks: `[{"codec":"hevc","color_transfer":"smpte2084"}]`, sideData: staticFrame},
+		{name: "undecodable", tracks: "[" + hdr10Track + "]", readErr: commandError(t, "echo 'Invalid data found when processing input' >&2; exit 1")},
+		{name: "storage-error", tracks: "[" + hdr10Track + "]", readErr: commandError(t, "echo 'movie.mkv: Input/output error' >&2; exit 1")},
+		{name: "timed-out", tracks: "[" + hdr10Track + "]", readErr: fmt.Errorf("%w after 30s", errFrameSideDataTimeout)},
+		{name: "sdr", tracks: "[" + sdrTrack + "]", sideData: hdr10PlusFrame},
+		{name: "already-checked", tracks: `[{"codec":"hevc","color_transfer":"smpte2084","hdr10_plus":false}]`, sideData: hdr10PlusFrame},
+		{name: "changed-on-disk", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
+	}
+}
+
+func readHDR10PlusBackfillTrack(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fileID int) map[string]any {
+	t.Helper()
+	var raw []byte
+	if err := pool.QueryRow(ctx, `SELECT video_tracks->0 FROM media_files WHERE id = $1`, fileID).Scan(&raw); err != nil {
+		t.Fatalf("read media file %d: %v", fileID, err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	return fields
+}
+
+// checkHDR10PlusBackfillFirstPass checks what the first pass stored for each
+// of hdr10PlusBackfillTestRows, and that it skipped the files it should.
+func checkHDR10PlusBackfillFirstPass(t *testing.T, track func(string) map[string]any, reads map[string]int) {
+	t.Helper()
+	if got := track("hdr10plus"); got["hdr10_plus"] != true || got["video_range_type"] != "HDR10Plus" || got["future_field"] != "kept" {
+		t.Fatalf("HDR10+ file = %v, want hdr10_plus true, range HDR10Plus and its other fields kept", got)
+	}
+	if got := track("dv81-hdr10plus"); got["hdr10_plus"] != true || got["video_range_type"] != "DOVIWithHDR10Plus" {
+		t.Fatalf("DV 8.1 file = %v, want hdr10_plus true, range DOVIWithHDR10Plus", got)
+	}
+	if got := track("plain-hdr10"); got["hdr10_plus"] != false {
+		t.Fatalf("plain HDR10 file = %v, want hdr10_plus false", got)
+	} else if _, ok := got["video_range_type"]; ok {
+		t.Fatalf("plain HDR10 file = %v, want no video_range_type added", got)
+	}
+	for _, name := range []string{"undecodable", "storage-error", "timed-out", "changed-on-disk"} {
+		if _, ok := track(name)["hdr10_plus"]; ok {
+			t.Fatalf("%s file = %v, want it left unchecked for the next pass", name, track(name))
+		}
+	}
+	if got := track("already-checked"); got["hdr10_plus"] != false {
+		t.Fatalf("already checked file = %v, want it unchanged", got)
+	}
+	for _, name := range []string{"sdr", "already-checked"} {
+		if reads[name] != 0 {
+			t.Fatalf("%s file was read %d times, want it skipped", name, reads[name])
 		}
 	}
 }

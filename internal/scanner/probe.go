@@ -804,7 +804,7 @@ const frameSideDataFallbackPackets = 24
 func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int) ([]ffprobeSideData, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, frameSideDataProbeTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(probeCtx, ffprobePath,
+	cmd := exec.CommandContext(probeCtx, ffprobePath, //nolint:gosec // G204: the configured ffprobe, fixed flags, a stream specifier and the scanned file
 		"-v", "error",
 		"-read_intervals", "%+#"+strconv.Itoa(packets),
 		"-select_streams", streamSpecifier,

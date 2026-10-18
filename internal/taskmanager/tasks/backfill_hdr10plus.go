@@ -81,9 +81,8 @@ func (t *BackfillHDR10PlusTask) Execute(ctx context.Context, progress taskmanage
 	result, err := t.backfiller.Run(ctx, func(r scanner.HDR10PlusBackfillResult, percent float64) {
 		progress.Report(percent, hdr10PlusBackfillMessage(r))
 	})
-	if data, marshalErr := json.Marshal(result); marshalErr == nil {
-		progress.SetResultData(data)
-	}
+	data, _ := json.Marshal(result)
+	progress.SetResultData(data)
 	if err != nil {
 		return fmt.Errorf("backfilling HDR10+: %w", err)
 	}
