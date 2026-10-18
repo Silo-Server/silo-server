@@ -24,6 +24,13 @@ func TestLatestFastPathEligible(t *testing.T) {
 	if !latestFastPathEligible(paramsFor(base()), "movie") {
 		t.Fatalf("a plain first-page movies-library Latest should be eligible")
 	}
+	// Latest returns a bare array, so it never asks BrowseItems to count.
+	counted := base()
+	counted.enableTotalRecordCount = true
+	counted.isPlayed = &played
+	if got := paramsFor(counted).Get("include_total"); got != "false" {
+		t.Fatalf("Latest include_total = %q, want false", got)
+	}
 	if !latestFastPathEligible(paramsFor(base()), "series") {
 		t.Fatalf("a plain first-page series-library Latest should be eligible")
 	}
