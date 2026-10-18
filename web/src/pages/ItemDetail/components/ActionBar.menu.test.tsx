@@ -354,7 +354,7 @@ describe("ActionBar collection eligibility", () => {
   });
 });
 
-describe("ActionBar Manage panel", () => {
+describe("ActionBar Manage menu", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -376,43 +376,65 @@ describe("ActionBar Manage panel", () => {
     return { onEditMetadata };
   }
 
-  it("keeps management actions behind Manage and runs them from there", async () => {
+  // jsdom has no layout; the menus only move focus to items that render a box.
+  function mockLayout() {
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+      new DOMRect(0, 0, 100, 30),
+    ] as unknown as DOMRectList);
+  }
+
+  it("opens management actions in a second menu beside the first", async () => {
     const { onEditMetadata } = renderAdmin();
 
     await userEvent.click(screen.getByTitle("More"));
     expect(screen.queryByRole("menuitem", { name: "Edit Metadata" })).toBeNull();
-    expect(screen.queryByRole("menuitem", { name: "View Play History" })).toBeNull();
-    await userEvent.click(screen.getByRole("menuitem", { name: "Manage" }));
+    const manage = screen.getByRole("menuitem", { name: "Manage" });
+    expect(manage).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(manage);
 
-    expect(screen.queryByRole("menuitem", { name: "Add to Watchlist" })).toBeNull();
-    const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
-    expect(labels).toEqual(["Manage", "Edit Metadata", "Match Item", "View Play History"]);
-    await userEvent.click(screen.getByRole("menuitem", { name: "Edit Metadata" }));
+    expect(manage).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menuitem", { name: "Add to Watchlist" })).toBeInTheDocument();
+    const submenu = screen.getByRole("menu", { name: "Manage" });
+    const labels = within(submenu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent);
+    expect(labels).toEqual(["Edit Metadata", "Match Item", "View Play History"]);
+    await userEvent.click(within(submenu).getByRole("menuitem", { name: "Edit Metadata" }));
     expect(onEditMetadata).toHaveBeenCalledOnce();
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it.each([
-    ["Back", (back: HTMLElement) => userEvent.click(back)],
-    ["ArrowLeft", () => userEvent.keyboard("{ArrowLeft}")],
-    ["Escape", () => userEvent.keyboard("{Escape}")],
-  ])("returns to the main menu with %s", async (_, goBack) => {
-    // jsdom has no layout; the menu only moves focus to items that render a box.
-    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
-      new DOMRect(0, 0, 100, 30),
-    ] as unknown as DOMRectList);
+  it("opens on hover and closes when another item is hovered", async () => {
     renderAdmin();
 
     await userEvent.click(screen.getByTitle("More"));
-    screen.getByRole("menuitem", { name: "Manage" }).focus();
-    await userEvent.keyboard("{ArrowRight}");
-    const back = screen.getByRole("menuitem", { name: "Back" });
-    await waitFor(() => expect(back).toHaveFocus());
-
-    await goBack(back);
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Manage" })).toHaveFocus());
+    await userEvent.hover(screen.getByRole("menuitem", { name: "Manage" }));
+    expect(screen.getByRole("menu", { name: "Manage" })).toBeInTheDocument();
+    await userEvent.hover(screen.getByRole("menuitem", { name: "Add to Watchlist" }));
+    expect(screen.queryByRole("menu", { name: "Manage" })).toBeNull();
   });
+
+  it.each(["{ArrowLeft}", "{Escape}"])(
+    "moves into Manage with ArrowRight and back to it with %s",
+    async (key) => {
+      mockLayout();
+      renderAdmin();
+
+      await userEvent.click(screen.getByTitle("More"));
+      const manage = screen.getByRole("menuitem", { name: "Manage" });
+      manage.focus();
+      await userEvent.keyboard("{ArrowRight}");
+      const submenu = screen.getByRole("menu", { name: "Manage" });
+      await waitFor(() =>
+        expect(within(submenu).getByRole("menuitem", { name: "Edit Metadata" })).toHaveFocus(),
+      );
+
+      await userEvent.keyboard(key);
+      expect(screen.queryByRole("menu", { name: "Manage" })).toBeNull();
+      expect(manage).toHaveFocus();
+      expect(manage).toHaveAttribute("aria-expanded", "false");
+    },
+  );
 
   it("shows a lone management action in the main menu", async () => {
     render(

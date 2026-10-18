@@ -1,7 +1,9 @@
 import {
   type ComponentProps,
   Fragment,
+  type FocusEvent as ReactFocusEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -18,7 +20,6 @@ import {
   Heart,
   Plus,
   Check,
-  ChevronLeft,
   ChevronRight,
   Download,
   ExternalLink,
@@ -77,6 +78,8 @@ const responsivePrimaryActionClass =
   "transform-gpu transition-transform duration-150 motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98]";
 const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-primary motion-reduce:hover:bg-primary/90`;
 const staticGlassActionClass = "transition-none";
+const overflowMenuClass =
+  "detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md";
 
 function visibleOverflowItems(menu: HTMLElement | null): HTMLButtonElement[] {
   if (!menu) return [];
@@ -112,7 +115,7 @@ function DetailOverflowMenuItem({
   onAction,
   ...props
 }: Omit<ComponentProps<"button">, "onClick"> & {
-  /** Omitted by items that keep the menu open, such as the Manage drill-in. */
+  /** Omitted by items that keep the menu open, such as Manage. */
   closeMenu?: () => void;
   onAction?: () => void;
 }) {
@@ -346,9 +349,13 @@ export default function ActionBar({
   const playbackController = useWatchPlaybackController();
   const [playChoiceOpen, setPlayChoiceOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
-  // The admin and curation actions live one level down, behind "Manage".
-  const [overflowPanel, setOverflowPanel] = useState<"main" | "manage">("main");
-  const returnToManageTriggerRef = useRef(false);
+  // The admin and curation actions open in a second menu beside this one.
+  const [manageOpen, setManageOpen] = useState(false);
+  const [managePosition, setManagePosition] = useState<{ left: number; top: number } | null>(null);
+  const manageMenuId = useId();
+  const manageTriggerRef = useRef<HTMLButtonElement>(null);
+  const manageMenuRef = useRef<HTMLDivElement>(null);
+  const focusManageOnOpenRef = useRef(false);
   const overflowMenuId = useId();
   const [overflowPosition, setOverflowPosition] = useState<{ left: number; top: number } | null>(
     null,
@@ -455,13 +462,27 @@ export default function ActionBar({
   const closeOverflowMenu = useCallback(() => setOverflowOpen(false), []);
   const toggleOverflowMenu = useCallback(() => {
     setOverflowPosition(null);
-    setOverflowPanel("main");
+    setManageOpen(false);
     setOverflowOpen((open) => !open);
   }, []);
-  const openManagePanel = useCallback(() => setOverflowPanel("manage"), []);
-  const closeManagePanel = useCallback(() => {
-    returnToManageTriggerRef.current = true;
-    setOverflowPanel("main");
+  /** Pointer hover opens Manage in place; the keyboard and clicks also move focus into it. */
+  const openManageMenu = useCallback(
+    (focusFirst: boolean) => {
+      if (manageOpen) {
+        if (focusFirst) {
+          visibleOverflowItems(manageMenuRef.current)[0]?.focus({ preventScroll: true });
+        }
+        return;
+      }
+      focusManageOnOpenRef.current = focusFirst;
+      setManagePosition(null);
+      setManageOpen(true);
+    },
+    [manageOpen],
+  );
+  const closeManageMenu = useCallback((returnFocus: boolean) => {
+    setManageOpen(false);
+    if (returnFocus) manageTriggerRef.current?.focus({ preventScroll: true });
   }, []);
   const positionOverflowMenu = useCallback(() => {
     const trigger = overflowTriggerRef.current;
@@ -482,6 +503,39 @@ export default function ActionBar({
       Math.max(viewportPadding, triggerRect.right - menuRect.width),
     );
     setOverflowPosition({ left, top });
+  }, []);
+  const positionManageMenu = useCallback(() => {
+    const main = overflowMenuRef.current;
+    const trigger = manageTriggerRef.current;
+    const menu = manageMenuRef.current;
+    if (!main || !trigger || !menu) return;
+
+    const viewportPadding = 8;
+    const gap = 4;
+    const mainRect = main.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const clampTop = (top: number) =>
+      Math.min(
+        window.innerHeight - menuRect.height - viewportPadding,
+        Math.max(viewportPadding, top),
+      );
+    // Line the first item up with Manage: the menu's border and padding sit above it.
+    const besideTop = clampTop(triggerRect.top - 5);
+    if (mainRect.right + gap + menuRect.width <= window.innerWidth - viewportPadding) {
+      setManagePosition({ left: mainRect.right + gap, top: besideTop });
+    } else if (mainRect.left - gap - menuRect.width >= viewportPadding) {
+      setManagePosition({ left: mainRect.left - gap - menuRect.width, top: besideTop });
+    } else {
+      // No room beside it on a narrow screen: cascade over the main menu, under Manage.
+      setManagePosition({
+        left: Math.min(
+          window.innerWidth - menuRect.width - viewportPadding,
+          Math.max(viewportPadding, mainRect.left + 24),
+        ),
+        top: clampTop(triggerRect.bottom),
+      });
+    }
   }, []);
 
   useLayoutEffect(() => {
@@ -505,57 +559,52 @@ export default function ActionBar({
   // The portal starts hidden until its position is measured. Focus only once
   // it is painted, and skip actions hidden by the responsive layout.
   const overflowPositioned = overflowPosition !== null;
-  // Switching panels changes the menu's height, so measure again.
-  useLayoutEffect(() => {
-    if (overflowOpen) positionOverflowMenu();
-  }, [overflowOpen, overflowPanel, positionOverflowMenu]);
   useLayoutEffect(() => {
     if (!overflowOpen || !overflowPositioned) return;
-    const items = visibleOverflowItems(overflowMenuRef.current);
-    // Coming back from Manage lands on the item that opened it.
-    const manageTrigger = returnToManageTriggerRef.current
-      ? items.find((item) => item.dataset.submenuTrigger !== undefined)
-      : undefined;
-    returnToManageTriggerRef.current = false;
-    (manageTrigger ?? items[0])?.focus({ preventScroll: true });
-  }, [overflowOpen, overflowPositioned, overflowPanel]);
+    visibleOverflowItems(overflowMenuRef.current)[0]?.focus({ preventScroll: true });
+  }, [overflowOpen, overflowPositioned]);
+
+  // Manage follows the main menu as it is placed, resized, or scrolled.
+  useLayoutEffect(() => {
+    if (overflowOpen && manageOpen) positionManageMenu();
+  }, [manageOpen, overflowOpen, overflowPosition, positionManageMenu]);
+  const managePositioned = managePosition !== null;
+  useLayoutEffect(() => {
+    if (!manageOpen || !managePositioned || !focusManageOnOpenRef.current) return;
+    focusManageOnOpenRef.current = false;
+    visibleOverflowItems(manageMenuRef.current)[0]?.focus({ preventScroll: true });
+  }, [manageOpen, managePositioned]);
 
   useEffect(() => {
     if (!overflowOpen) return;
 
+    const isInsideMenus = (target: Node) =>
+      Boolean(
+        overflowMenuRef.current?.contains(target) ||
+        manageMenuRef.current?.contains(target) ||
+        overflowTriggerRef.current?.contains(target),
+      );
     const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (
-        !overflowMenuRef.current?.contains(target) &&
-        !overflowTriggerRef.current?.contains(target)
-      ) {
-        closeOverflowMenu();
-      }
+      if (!isInsideMenus(event.target as Node)) closeOverflowMenu();
     };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      if (overflowPanel === "manage") {
-        closeManagePanel();
+      if (manageOpen) {
+        closeManageMenu(true);
         return;
       }
       closeOverflowMenu();
       overflowTriggerRef.current?.focus({ preventScroll: true });
     };
     const handleFocusIn = (event: FocusEvent) => {
-      const target = event.target as Node;
-      if (
-        !overflowMenuRef.current?.contains(target) &&
-        !overflowTriggerRef.current?.contains(target)
-      ) {
-        closeOverflowMenu();
-      }
+      if (!isInsideMenus(event.target as Node)) closeOverflowMenu();
     };
     // Stay anchored to the trigger while the page scrolls rather than
     // dismissing on every wheel nudge. One measurement per frame at most.
     const handleScroll = (event: Event) => {
       const target = event.target;
-      if (target instanceof Node && overflowMenuRef.current?.contains(target)) return;
+      if (target instanceof Node && isInsideMenus(target)) return;
       if (scrollFrameRef.current !== null) return;
       scrollFrameRef.current = requestAnimationFrame(() => {
         scrollFrameRef.current = null;
@@ -577,20 +626,16 @@ export default function ActionBar({
         scrollFrameRef.current = null;
       }
     };
-  }, [closeManagePanel, closeOverflowMenu, overflowOpen, overflowPanel, positionOverflowMenu]);
+  }, [closeManageMenu, closeOverflowMenu, manageOpen, overflowOpen, positionOverflowMenu]);
   const handleOverflowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (
-      event.key === "ArrowRight" &&
-      event.target instanceof HTMLElement &&
-      event.target.dataset.submenuTrigger !== undefined
-    ) {
+    if (event.key === "ArrowRight" && event.target === manageTriggerRef.current) {
       event.preventDefault();
-      openManagePanel();
+      openManageMenu(true);
       return;
     }
-    if (event.key === "ArrowLeft" && overflowPanel === "manage") {
+    if (event.key === "ArrowLeft" && event.currentTarget === manageMenuRef.current) {
       event.preventDefault();
-      closeManagePanel();
+      closeManageMenu(true);
       return;
     }
     const isNavigationKey = ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key);
@@ -851,7 +896,15 @@ export default function ActionBar({
     partyItems,
     hasManagePanel
       ? [
-          <DetailOverflowMenuItem key="manage" data-submenu-trigger="" onAction={openManagePanel}>
+          <DetailOverflowMenuItem
+            key="manage"
+            ref={manageTriggerRef}
+            aria-haspopup="menu"
+            aria-expanded={manageOpen}
+            aria-controls={manageOpen ? manageMenuId : undefined}
+            className="aria-expanded:bg-accent aria-expanded:text-accent-foreground"
+            onAction={() => openManageMenu(true)}
+          >
             <Wrench className="size-4" />
             Manage
             <ChevronRight className="ml-auto size-4" />
@@ -862,7 +915,18 @@ export default function ActionBar({
   const hasMainMenuItems = mainGroups.some((group) => group.some(Boolean));
   const hasOverflowMenuItems =
     hasMainMenuItems || (compactMobile && Boolean(onToggleFavorite || onRatingChange));
-  const showManagePanel = overflowPanel === "manage" && hasManagePanel;
+  // Hovering another item, or moving focus to one, closes Manage again.
+  const handleMainMenuPointerOver = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "mouse" || !hasManagePanel) return;
+    const item = (event.target as Element).closest('[role="menuitem"]');
+    if (item === manageTriggerRef.current) openManageMenu(false);
+    else if (item && manageOpen) closeManageMenu(false);
+  };
+  const handleMainMenuFocus = (event: ReactFocusEvent<HTMLDivElement>) => {
+    if (manageOpen && (event.target as Element) !== manageTriggerRef.current) {
+      closeManageMenu(false);
+    }
+  };
 
   const formattedResumeTime = formatPlaybackTime(resumePositionSeconds ?? 0);
   const percentComplete =
@@ -1036,55 +1100,62 @@ export default function ActionBar({
                 top: overflowPosition?.top ?? 0,
                 visibility: overflowPosition ? "visible" : "hidden",
               }}
-              className="detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md"
+              className={overflowMenuClass}
               role="menu"
               onKeyDown={handleOverflowKeyDown}
+              onPointerOver={handleMainMenuPointerOver}
+              onFocus={handleMainMenuFocus}
             >
-              {showManagePanel ? (
-                <>
-                  <DetailOverflowMenuItem
-                    aria-label="Back"
-                    className="font-medium"
-                    onAction={closeManagePanel}
-                  >
-                    <ChevronLeft className="size-4" />
-                    Manage
-                  </DetailOverflowMenuItem>
-                  <DetailOverflowSeparator />
-                  <DetailOverflowGroups groups={manageGroups} />
-                </>
-              ) : (
-                <>
-                  {compactMobile && (
-                    <div className="detail-mobile-menu-actions">
-                      {onToggleFavorite && (
-                        <DetailOverflowMenuItem
-                          closeMenu={closeOverflowMenu}
-                          onAction={onToggleFavorite}
-                        >
-                          <Heart className="size-4" />
-                          {isFavorite ? "Remove from favorites" : "Add to favorites"}
-                        </DetailOverflowMenuItem>
-                      )}
-                      {onRatingChange && (
-                        <div className="px-2 py-2" role="group" aria-label="Your rating">
-                          <span className="mb-2 block text-sm">Your rating</span>
-                          {/* ArrowUp/ArrowDown keep moving through the menu; only
+              {compactMobile && (
+                <div className="detail-mobile-menu-actions">
+                  {onToggleFavorite && (
+                    <DetailOverflowMenuItem
+                      closeMenu={closeOverflowMenu}
+                      onAction={onToggleFavorite}
+                    >
+                      <Heart className="size-4" />
+                      {isFavorite ? "Remove from favorites" : "Add to favorites"}
+                    </DetailOverflowMenuItem>
+                  )}
+                  {onRatingChange && (
+                    <div className="px-2 py-2" role="group" aria-label="Your rating">
+                      <span className="mb-2 block text-sm">Your rating</span>
+                      {/* ArrowUp/ArrowDown keep moving through the menu; only
                               ArrowLeft/ArrowRight change the rating here. */}
-                          <StarRating
-                            value={rating ?? null}
-                            onChange={onRatingChange}
-                            size={18}
-                            verticalArrows={false}
-                          />
-                        </div>
-                      )}
-                      {hasMainMenuItems && <DetailOverflowSeparator />}
+                      <StarRating
+                        value={rating ?? null}
+                        onChange={onRatingChange}
+                        size={18}
+                        verticalArrows={false}
+                      />
                     </div>
                   )}
-                  <DetailOverflowGroups groups={mainGroups} />
-                </>
+                  {hasMainMenuItems && <DetailOverflowSeparator />}
+                </div>
               )}
+              <DetailOverflowGroups groups={mainGroups} />
+            </div>,
+            document.body,
+          )}
+        {hasOverflowMenuItems &&
+          overflowOpen &&
+          hasManagePanel &&
+          manageOpen &&
+          createPortal(
+            <div
+              id={manageMenuId}
+              ref={manageMenuRef}
+              style={{
+                left: managePosition?.left ?? 0,
+                top: managePosition?.top ?? 0,
+                visibility: managePosition ? "visible" : "hidden",
+              }}
+              className={overflowMenuClass}
+              role="menu"
+              aria-label="Manage"
+              onKeyDown={handleOverflowKeyDown}
+            >
+              <DetailOverflowGroups groups={manageGroups} />
             </div>,
             document.body,
           )}
