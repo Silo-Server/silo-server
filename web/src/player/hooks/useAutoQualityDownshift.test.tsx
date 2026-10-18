@@ -164,3 +164,12 @@ it("reports the kept estimate from a lowering until a new attempt", () => {
   // Client replans are the session's to send, never the hook's.
   expect(h.options.onReplan).toHaveBeenCalledTimes(1);
 });
+
+it("drops the kept estimate when the controller stops, as in a Watch Together room", () => {
+  const h = setup();
+  h.send("waiting");
+  h.advance(6000);
+  expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(44100);
+  h.rerender({ ...h.options, enabled: false });
+  expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(undefined);
+});

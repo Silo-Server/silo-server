@@ -121,6 +121,9 @@ export function useAutoQualityDownshift(options: Options) {
     return () => {
       c.stop(Date.now());
       controller.current = null;
+      // The next controller starts without a kept estimate and could never
+      // discard this one, so the session stops repeating it.
+      latest.current.onKeptEstimate?.(undefined);
     };
   }, [options.sessionId, options.enabled]);
   useEffect(() => {
