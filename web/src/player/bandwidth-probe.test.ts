@@ -374,6 +374,27 @@ describe("scheduleBandwidthProbe", () => {
     }
   });
 
+  it("forgets the measurement on a new network, not on a new estimate", async () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi", downlink: 10 });
+    vi.stubGlobal("navigator", { ...navigator, connection });
+    storage.set(
+      storage.KEYS.BANDWIDTH_ESTIMATE,
+      JSON.stringify({ kbps: 250_000, measuredAt: Date.now() }),
+    );
+    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    scheduleBandwidthProbe(0);
+
+    connection.downlink = 1.5;
+    connection.dispatchEvent(new Event("change"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readMeasuredBandwidthKbps()).toBe(250_000);
+    expect(fetchWithSession).not.toHaveBeenCalled();
+
+    connection.type = "cellular";
+    connection.dispatchEvent(new Event("change"));
+    expect(readMeasuredBandwidthKbps()).toBeUndefined();
+  });
+
   it("does nothing after it is stopped", async () => {
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     const stop = scheduleBandwidthProbe(1000);

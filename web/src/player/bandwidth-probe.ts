@@ -474,9 +474,14 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
       .catch(() => schedule(PROBE_RETRY_MS));
   };
   // A new network voids the measurement; a return to the foreground looks
-  // again, as a fresh sign-in does.
+  // again, as a fresh sign-in does. The browser also fires `change` when only
+  // its own downlink or RTT estimate moves, which is not a new network and
+  // must not cost another probe.
   const network = networkInformation() as (NetworkInformationLike & EventTarget) | undefined;
+  let networkType = network?.type;
   const onNetworkChange = () => {
+    if (network?.type === networkType) return;
+    networkType = network?.type;
     cancelEpoch++;
     activeProbe?.abort();
     forgetBandwidthEstimate();
