@@ -37,6 +37,7 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 // Browsers cap their own downlink hint (Chromium reports at most 10 Mbps), so
 // a client that wants Auto quality to pick 4K has to measure.
 func registerPlaybackBandwidthProbe(reg *Registry) {
+	const locationHeader = "Location"
 	params := []*huma.Param{{
 		Name: bandwidthProbeSizeParam, In: playbackParamQuery,
 		Description: "Number of bytes to send. A client may close the connection early once it has timed enough of the transfer.",
@@ -44,7 +45,7 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 	}}
 	headers := map[string]*huma.Param{playbackContentLength: {Schema: &huma.Schema{Type: huma.TypeInteger, Format: playbackIntegerFormat}}, playbackCacheControlHeader: {Schema: &huma.Schema{Type: huma.TypeString}}}
 	responses := map[string]*huma.Response{
-		"307": {Description: "Selected media proxy; follow the short-lived probe URL", Headers: map[string]*huma.Param{"Location": {Schema: &huma.Schema{Type: huma.TypeString}}}},
+		"307": {Description: "Selected media proxy; follow the short-lived probe URL", Headers: map[string]*huma.Param{locationHeader: {Schema: &huma.Schema{Type: huma.TypeString}}}},
 		"200": {Description: "Random bytes", Content: map[string]*huma.MediaType{playbackMediaBinary: {Schema: &huma.Schema{Type: huma.TypeString, Format: playbackBinaryFormat}}}, Headers: headers},
 		"422": {Description: http.StatusText(http.StatusUnprocessableEntity), Content: map[string]*huma.MediaType{problemContentType: {Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[Problem](), true, "")}}},
 	}
