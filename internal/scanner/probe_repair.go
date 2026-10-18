@@ -125,6 +125,7 @@ type copySafetyWriter interface {
 type playbackProbeFileRepository interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
 	Upsert(ctx context.Context, file models.MediaFile) (*models.MediaFile, error)
+	MarkProbeFailed(ctx context.Context, fileID int, probedSize int64, probedMtime *time.Time) error
 }
 
 // PlaybackProbeEnsurer repairs missing playback-critical probe metadata on
@@ -433,6 +434,9 @@ func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *mo
 			probeFile = ProbeFile
 		}
 		probe, err := probeFile(probeCtx, ffprobePath, current.FilePath)
+		if err != nil && IsProbeRejection(probeCtx, current.FilePath, err) {
+			return e.recordProbeRejection(sharedCtx, current, err)
+		}
 		if err != nil || probe == nil {
 			return nil, err
 		}
@@ -453,6 +457,51 @@ func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *mo
 		}
 		return repaired, nil
 	}
+}
+
+// recordProbeRejection persists that ffprobe refused the file and returns the
+// row as stored afterwards, so the planner can answer with a terminal that
+// names the damaged file instead of one that suggests waiting for a scan. It
+// covers rows written before probe failures were recorded, whose next scan
+// would otherwise be the first to notice.
+//
+// The answer always comes from the row, never from the snapshot taken before
+// ffprobe ran: a scan or another replica may have probed a replacement file in
+// the meantime, in which case the conditional mark is skipped and the re-read
+// returns that repaired metadata. When the mark or the re-read fails, the
+// probe error is returned and the caller keeps the unmarked row, so playback
+// answers with the retryable source_metadata_incomplete rather than claiming a
+// damage the server could not confirm.
+func (e *PlaybackProbeEnsurer) recordProbeRejection(ctx context.Context, current *models.MediaFile, probeErr error) (*models.MediaFile, error) {
+	if current.ProbeUpdatedAt != nil {
+		return nil, probeErr
+	}
+	slog.WarnContext(ctx, "playback probe repair: ffprobe rejected the file",
+		"component", "scanner",
+		"file_id", current.ID,
+		"error", probeErr,
+	)
+	lookupTimeout := e.timeout
+	if lookupTimeout <= 0 {
+		lookupTimeout = 5 * time.Second
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	if current.ProbeFailedAt == nil {
+		if err := e.fileRepo.MarkProbeFailed(writeCtx, current.ID, current.FileSize, current.FileModifiedAt); err != nil {
+			slog.WarnContext(ctx, "playback probe repair: recording probe failure failed",
+				"component", "scanner",
+				"file_id", current.ID,
+				"error", err,
+			)
+			return nil, probeErr
+		}
+	}
+	stored, err := e.fileRepo.GetByID(writeCtx, current.ID)
+	if err != nil || stored == nil {
+		return nil, probeErr
+	}
+	return stored, nil
 }
 
 // ensureCopySafety resolves the multi-PPS copy-safety flag for H.264 files at

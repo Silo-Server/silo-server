@@ -142,11 +142,10 @@ func TestManagerAcceptsDuplicateReceivedChunk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	info, err := manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("abcd")), 4)
-	if err != nil {
+	if _, err := manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("abcd")), 4); err != nil {
 		t.Fatalf("PutChunk(0) error = %v", err)
 	}
-	info, err = manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("zzzz")), 4)
+	info, err := manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("zzzz")), 4)
 	if err != nil {
 		t.Fatalf("PutChunk duplicate error = %v", err)
 	}

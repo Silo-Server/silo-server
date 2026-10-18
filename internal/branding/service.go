@@ -68,6 +68,17 @@ func (s *Service) Load(ctx context.Context) Snapshot {
 	return snap
 }
 
+// ServerName resolves the server name as Load does, but reports a failed read
+// instead of falling back to the default, for callers that must not mistake
+// a database blip for a rename.
+func (s *Service) ServerName(ctx context.Context) (string, error) {
+	name, err := s.settings.Get(ctx, KeyServerName)
+	if err != nil {
+		return "", err
+	}
+	return firstNonEmpty(name, DefaultServerName), nil
+}
+
 // readSettings returns every branding setting that has a value.
 func (s *Service) readSettings(ctx context.Context) map[string]string {
 	keys := []string{KeyServerName, KeyLoginSubtitle, KeyAccentColor, KeyDefaultTheme}

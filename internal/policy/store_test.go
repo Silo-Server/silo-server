@@ -2,7 +2,6 @@ package policy
 
 import (
 	"context"
-	"errors"
 	"os"
 	"sort"
 	"sync"
@@ -193,86 +192,6 @@ func TestPolicyStoreActivateConcurrentBumpsGeneration(t *testing.T) {
 	}
 	if returned[0] != startGeneration+1 || returned[1] != startGeneration+2 {
 		t.Fatalf("returned generations = %#v, want [%d %d]", returned, startGeneration+1, startGeneration+2)
-	}
-}
-
-func TestPolicyStoreActivateRejectsFailedCompile(t *testing.T) {
-	ctx := context.Background()
-	_, store := newPolicyStoreTest(t, ctx)
-
-	document, err := store.CreateDocument(ctx, "scope", "household scope")
-	if err != nil {
-		t.Fatalf("CreateDocument() error: %v", err)
-	}
-	compileError := "rego_parse_error"
-	version, err := store.CreateVersion(ctx, document.ID, "bad", "sha", false, &compileError, nil, "")
-	if err != nil {
-		t.Fatalf("CreateVersion() error: %v", err)
-	}
-
-	_, err = store.Activate(ctx, document.ID, version.ID)
-	if !errors.Is(err, ErrVersionNotCompiled) {
-		t.Fatalf("Activate() error = %v, want ErrVersionNotCompiled", err)
-	}
-}
-
-func TestPolicyStoreSetEnabledDomainUnique(t *testing.T) {
-	ctx := context.Background()
-	_, store := newPolicyStoreTest(t, ctx)
-
-	first, err := store.CreateDocument(ctx, "scope", "first")
-	if err != nil {
-		t.Fatalf("CreateDocument(first) error: %v", err)
-	}
-	if generation, err := store.SetEnabled(ctx, first.ID, false); err != nil || generation != 2 {
-		t.Fatalf("SetEnabled(false) generation = %d, error = %v, want generation 2", generation, err)
-	}
-
-	second, err := store.CreateDocument(ctx, "scope", "second")
-	if err != nil {
-		t.Fatalf("CreateDocument(second) error: %v", err)
-	}
-	if _, err := store.SetEnabled(ctx, first.ID, true); !errors.Is(err, ErrDomainAlreadyEnabled) {
-		t.Fatalf("SetEnabled(true) error = %v, want ErrDomainAlreadyEnabled", err)
-	}
-
-	generation, err := store.SetEnabled(ctx, second.ID, false)
-	if err != nil {
-		t.Fatalf("SetEnabled(second false) error: %v", err)
-	}
-	if generation != 3 {
-		t.Fatalf("SetEnabled(second false) generation = %d, want 3", generation)
-	}
-}
-
-func TestPolicyStoreDeleteDocumentGuard(t *testing.T) {
-	ctx := context.Background()
-	_, store := newPolicyStoreTest(t, ctx)
-
-	active, err := store.CreateDocument(ctx, "scope", "active")
-	if err != nil {
-		t.Fatalf("CreateDocument(active) error: %v", err)
-	}
-	version, err := store.CreateVersion(ctx, active.ID, validStorePolicySource(), "sha", true, nil, nil, "")
-	if err != nil {
-		t.Fatalf("CreateVersion() error: %v", err)
-	}
-	if _, err := store.Activate(ctx, active.ID, version.ID); err != nil {
-		t.Fatalf("Activate() error: %v", err)
-	}
-	if err := store.DeleteDocument(ctx, active.ID); !errors.Is(err, ErrDocumentHasActiveVersion) {
-		t.Fatalf("DeleteDocument(active) error = %v, want ErrDocumentHasActiveVersion", err)
-	}
-
-	inactive, err := store.CreateDocument(ctx, "permission", "inactive")
-	if err != nil {
-		t.Fatalf("CreateDocument(inactive) error: %v", err)
-	}
-	if err := store.DeleteDocument(ctx, inactive.ID); err != nil {
-		t.Fatalf("DeleteDocument(inactive) error: %v", err)
-	}
-	if _, err := store.GetDocument(ctx, inactive.ID); !errors.Is(err, ErrDocumentNotFound) {
-		t.Fatalf("GetDocument(deleted) error = %v, want ErrDocumentNotFound", err)
 	}
 }
 

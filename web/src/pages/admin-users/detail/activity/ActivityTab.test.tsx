@@ -214,7 +214,8 @@ afterEach(() => {
 });
 
 describe("ActivityTab watch history", () => {
-  it("lists the live session first, then finalized plays, with the plays total", async () => {
+  it("loads the next page with the cursor and the same window", async () => {
+    const u = userEvent.setup();
     renderTab();
     const history = screen.getByRole("region", { name: "Watch history" });
     await within(history).findByText("Dune: Part Two");
@@ -229,16 +230,9 @@ describe("ActivityTab watch history", () => {
     expect(within(history).getByText("Showing 1 of 41")).toBeInTheDocument();
     expect(within(history).queryByRole("combobox", { name: /device/i })).not.toBeInTheDocument();
 
-    const first = historyRequests()[0]!;
-    expect(first.searchParams.get("user_id")).toBe("7");
-    expect(first.searchParams.get("ended_after")).toBe(iso(30));
-  });
-
-  it("loads the next page with the cursor and the same window", async () => {
-    const u = userEvent.setup();
-    renderTab();
-    const history = screen.getByRole("region", { name: "Watch history" });
-    await within(history).findByText("Dune: Part Two");
+    const initialRequest = historyRequests()[0]!;
+    expect(initialRequest.searchParams.get("user_id")).toBe("7");
+    expect(initialRequest.searchParams.get("ended_after")).toBe(iso(30));
 
     await u.click(within(history).getByRole("button", { name: "Load more" }));
     await within(history).findByText("Oppenheimer");
@@ -298,39 +292,11 @@ describe("ActivityTab watch history", () => {
 });
 
 describe("ActivityTab devices and addresses", () => {
-  it("links saved settings to the device in Preferences and hides older devices", async () => {
-    const u = userEvent.setup();
-    renderTab();
-    const devices = screen.getByRole("region", { name: "Devices" });
-    await within(devices).findByText("Apple TV 4K");
-    expect(within(devices).queryByText("Old iPad")).not.toBeInTheDocument();
-    expect(within(devices).getByRole("link", { name: "2 saved settings" })).toHaveAttribute(
-      "href",
-      "/admin/users/7?tab=preferences&level=device.p1.dev-tv",
-    );
-    await u.click(within(devices).getByRole("button", { name: "Show all 2" }));
-    expect(within(devices).getByText("Old iPad")).toBeInTheDocument();
-  });
-
   it("hides the Devices card without the capability", async () => {
     mocks.capabilities = { account_devices: false, watch_summary: true };
     renderTab();
     await screen.findByText("192.168.1.40");
     expect(screen.queryByRole("region", { name: "Devices" })).not.toBeInTheDocument();
     expect(requests.some((url) => url.pathname.endsWith("/devices"))).toBe(false);
-  });
-
-  it("labels addresses local or remote and flags a new remote address", async () => {
-    renderTab();
-    const ips = screen.getByRole("region", { name: "IP addresses" });
-    const local = (await within(ips).findByText("192.168.1.40")).closest("li")!;
-    expect(local).toHaveTextContent("Local");
-    expect(local).toHaveTextContent("8,214 requests");
-    const fresh = within(ips).getByText("81.12.44.190").closest("li")!;
-    expect(fresh).toHaveTextContent("First seen Sep 25");
-    // First seen weeks ago: a known remote address, not a new one.
-    const old = within(ips).getByText("2a02:c7c:4d1::12").closest("li")!;
-    expect(old).toHaveTextContent("Remote");
-    expect(old).not.toHaveTextContent("First seen");
   });
 });

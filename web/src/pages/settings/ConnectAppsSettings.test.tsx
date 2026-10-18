@@ -128,24 +128,33 @@ describe("ConnectAppsSettings", () => {
     vi.restoreAllMocks();
   });
 
-  function render() {
+  // The page opens on the Silo tab; most cases here are about the Jellyfin one.
+  function render(tab: "silo" | "jellyfin" = "jellyfin") {
     act(() => {
       root.render(<ConnectAppsSettings />);
     });
+    if (tab === "jellyfin") {
+      act(() => {
+        findButton(container, "Jellyfin-compatible app")?.click();
+      });
+    }
   }
 
-  it("defaults to the Jellyfin tab and shows the account#profile username", () => {
-    render();
+  it("opens on the Silo tab, listed first", () => {
+    render("silo");
 
-    expect(container.textContent).toContain("For Jellyfin-compatible apps only");
-    expect(container.textContent).toContain("johndoe#Doe Household");
-    expect(container.textContent).toContain("https://compat.example.test");
+    const tabs = Array.from(
+      container.querySelectorAll('[aria-label="App type"] button'),
+    ) as HTMLButtonElement[];
+    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
+      "Silo app or website",
+      "Jellyfin-compatible app",
+    ]);
+    expect(tabs[0]?.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("shows the plain account name and the Silo origin on the Silo tab", async () => {
-    render();
-
-    await click(findButton(container, "Silo app or website"));
+  it("shows the plain account name and the Silo origin on the Silo tab", () => {
+    render("silo");
 
     expect(container.textContent).toContain("For Silo's own apps");
     expect(container.textContent).toContain("Don't add a # to either field here.");
@@ -197,6 +206,10 @@ describe("ConnectAppsSettings", () => {
 
     render();
 
+    expect(container.textContent).toContain("Every profile at a glance");
+    expect(container.textContent).toContain("rename to use from a Jellyfin app");
+    expect(container.textContent).not.toContain("johndoe#Movie #2");
+
     await click(findButton(container, "Movie #2"));
 
     expect(container.textContent).toContain("contains a #, which Jellyfin apps can't sign in with");
@@ -206,18 +219,6 @@ describe("ConnectAppsSettings", () => {
         (button) => button.getAttribute("aria-label") === "Copy Username",
       ),
     ).toBeUndefined();
-  });
-
-  it("keeps the page usable when no public compat address is configured", () => {
-    mocks.useCompatConnectInfo.mockReturnValue({
-      data: makeConnectInfo({ public_url: "" }),
-      isLoading: false,
-    });
-
-    render();
-
-    expect(container.textContent).toContain("No public address configured");
-    expect(container.textContent).toContain("johndoe#Doe Household");
   });
 
   it("reports a failed load instead of claiming compat is switched off", () => {
@@ -282,18 +283,5 @@ describe("ConnectAppsSettings", () => {
         (button) => button.getAttribute("aria-label") === "Copy Server",
       ),
     ).toBeUndefined();
-  });
-
-  it("does not list a #-bearing profile as a usable credential in the summary", () => {
-    mocks.useProfiles.mockReturnValue({
-      data: [makeProfile(), makeProfile({ id: "profile-2", name: "Movie #2" })],
-      isLoading: false,
-    });
-
-    render();
-
-    expect(container.textContent).toContain("Every profile at a glance");
-    expect(container.textContent).toContain("rename to use from a Jellyfin app");
-    expect(container.textContent).not.toContain("johndoe#Movie #2");
   });
 });

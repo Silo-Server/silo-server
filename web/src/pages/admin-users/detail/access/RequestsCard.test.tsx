@@ -13,6 +13,7 @@ import { policyInheritHints, savedUserPolicyInheritHints } from "@/components/Us
 import { CardEditingProvider } from "../cardEditing";
 import { inheritContextFor } from "./policySources";
 import { RequestsCard } from "./RequestsCard";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 const mocks = vi.hoisted(() => ({
   updateUser: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   getAdminUser: async () => ({ user: mocks.user!, etag: '"account-2"', profileContext: CONTEXT }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: POLICY_DEFAULTS }),
   useAdminUserCapabilities: () => ({ data: { available: true, request_usage: true } }),
   useUpdateUser: () => ({ mutateAsync: mocks.updateUser, isPending: false }),
 }));
@@ -71,7 +73,7 @@ const USER: AdminUser = {
   max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
-  max_profiles: 4,
+  max_profiles: null,
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
@@ -86,6 +88,7 @@ const USER: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 4,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -110,6 +113,7 @@ const KIDS = {
   max_transcodes: 0,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 5,
   allowed_permissions: null,
   requests_allowed: true,
 } as AccessGroup;
@@ -187,7 +191,12 @@ function mount(user: AdminUser = USER) {
             ctx={inheritContextFor(user, groups)}
             hints={savedUserPolicyInheritHints(
               user,
-              policyInheritHints(user.role === "admin" ? null : user.access_group_id, groups),
+              policyInheritHints(
+                user.role,
+                user.role === "admin" ? null : user.access_group_id,
+                groups,
+                POLICY_DEFAULTS,
+              ),
             )}
           />
         </CardEditingProvider>
@@ -477,25 +486,6 @@ describe("RequestsCard", () => {
       body: { requests_allowed: false },
     });
     expect(calls(PUT_USER_LIMIT)).toHaveLength(0);
-  });
-
-  it("names the account's switch and the server switch", async () => {
-    serve({
-      [SETTINGS_OP]: () => ({ body: { ...SETTINGS, requests_enabled: false } }),
-      [GROUP_LIMIT]: () => ({ body: GROUP_INHERITS }),
-      [USER_LIMIT]: () => ({
-        body: { user_id: "7", limit_mode: "inherit", approval_mode: "auto", ...INHERIT },
-      }),
-    });
-    mount({
-      ...USER,
-      requests_allowed: false,
-      effective_policy: { ...USER.effective_policy, requests_allowed: false },
-    });
-    expect(await row("Can request media")).toBe("NoGroup: yesCUSTOM");
-    expect(
-      await screen.findByText("Requests are turned off for the whole server."),
-    ).toBeInTheDocument();
   });
 
   it("offers a retry when the request settings can't load", async () => {

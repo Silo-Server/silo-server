@@ -2,6 +2,7 @@ package requests
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -218,7 +219,8 @@ func anyFold(want, have []string) bool {
 
 // RouteDecision is where one quality tier of a request goes, and which route
 // sent it there. Skip marks a tier a matching route chose not to send at all
-// (skip_uhd): the title gets no copy in that tier, whatever force-dual says.
+// (skip_uhd, or Everything else with no server for the tier): the title gets
+// no copy in that tier, whatever force-dual says.
 type RouteDecision struct {
 	RouteID       string
 	RouteName     string
@@ -280,7 +282,11 @@ type RouteTrace struct {
 //
 // Everything else with no 4K server makes no 4K copy: the tier is skipped,
 // even when every request asks for 4K (force-dual), rather than left
-// undecided and failed.
+// undecided and failed. Everything else with no HD server makes no HD copy
+// when the title's 4K copy goes to a server, so a media type whose servers are
+// all marked 4K gets its 4K version without a failed HD tier. A title whose 4K
+// copy goes nowhere (a requester without 4K) keeps HD undecided, so it fails
+// rather than being sent nowhere.
 func traceRoutes(routes []Route, req Request, qualities []Quality) (map[Quality]RouteDecision, []RouteTrace) {
 	var ordered []Route
 	for _, route := range orderRoutes(routes) {
@@ -329,6 +335,17 @@ func traceRoutes(routes []Route, req Request, qualities []Quality) (map[Quality]
 			trace.Steps[q] = RouteStepSends
 		}
 	}
+	if uhd, ok := decisions[Quality2160p]; ok && !uhd.Skip {
+		for i := range traces {
+			// The fallback passes HD only when it matched, has no HD server,
+			// and no route before it decided HD.
+			if traces[i].Route.IsFallback && traces[i].Steps[Quality1080p] == RouteStepPasses {
+				decisions[Quality1080p] = RouteDecision{RouteID: traces[i].Route.ID, RouteName: traces[i].Route.Name, Skip: true}
+				traces[i].Steps[Quality1080p] = RouteStepSkips
+				break
+			}
+		}
+	}
 	return decisions, traces
 }
 
@@ -337,7 +354,7 @@ func traceRoutes(routes []Route, req Request, qualities []Quality) (map[Quality]
 // Radarr plugin's own terms: it is the tier's default, and the plugin's anime
 // overlay is off because the route's overrides replace it. A plugin without
 // those keys ignores them.
-func routedConnection(fc *fulfillContext, d RouteDecision, mediaType MediaType, q Quality) (ResolvedRouterConnection, int, string, error) {
+func (s *Service) routedConnection(ctx context.Context, fc *fulfillContext, d RouteDecision, mediaType MediaType, q Quality) (ResolvedRouterConnection, int, string, error) {
 	var in *Integration
 	for i := range fc.integrations {
 		if fc.integrations[i].ID == d.IntegrationID {
@@ -352,7 +369,12 @@ func routedConnection(fc *fulfillContext, d RouteDecision, mediaType MediaType, 
 		return ResolvedRouterConnection{}, 0, "", fmt.Errorf("route %q sends to %q, which is disabled", d.RouteName, in.Name)
 	case in.InstallationID == nil || in.CapabilityID == "":
 		return ResolvedRouterConnection{}, 0, "", fmt.Errorf("%s (route %q)", msgRouterUnbound, d.RouteName)
-	case strings.TrimSpace(in.APIKeyRef) == "":
+	}
+	missing, err := s.missingAPIKey(ctx, fc, *in)
+	switch {
+	case err != nil:
+		return ResolvedRouterConnection{}, 0, "", err
+	case missing:
 		return ResolvedRouterConnection{}, 0, "", fmt.Errorf("%s (route %q)", msgRouterNoKey, d.RouteName)
 	case !integrationSupportsMediaType(*in, mediaType):
 		// The server's media types can change after a route points at it.

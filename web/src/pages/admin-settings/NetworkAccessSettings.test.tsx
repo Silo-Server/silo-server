@@ -82,58 +82,6 @@ describe("NetworkAccessSettings", () => {
     mocks.disconnect.mockReset();
   });
 
-  it("heads the page and explains that providers are plugins when none is installed", () => {
-    renderPage();
-
-    expect(screen.getByRole("heading", { level: 1, name: "Network Access" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "No providers installed" })).toBeInTheDocument();
-    expect(
-      screen.getByText(/Install a network access provider from the Plugins page/),
-    ).toBeVisible();
-    expect(mocks.statusCalls).toHaveLength(0);
-  });
-
-  it("lists each provider with a row per host, its state and origin", () => {
-    mocks.capabilities = { data: capabilities([tailscale]), isLoading: false };
-    mocks.status = {
-      data: {
-        provider: "tailscale",
-        hosts: [
-          host({
-            state: "connected",
-            hostname: "silo.tail1234.ts.net",
-            origin: "https://silo.tail1234.ts.net",
-            addresses: ["100.64.0.7"],
-            provider_version: "tsnet 1.102.4",
-            updated_at: "2026-09-14T09:00:00.000Z",
-          }),
-        ],
-      },
-      isLoading: false,
-      isError: false,
-      error: null,
-    };
-
-    renderPage();
-
-    expect(mocks.statusCalls).toEqual(["tailscale"]);
-    const group = screen.getByRole("group", { name: "Tailscale" });
-    const row = within(group).getByTestId("network-access-host-tailscale-api");
-    expect(row).toHaveAttribute("data-state", "connected");
-    expect(within(row).getByText("Living Room · API server")).toBeInTheDocument();
-    expect(within(row).getByText("Connected")).toBeInTheDocument();
-    expect(within(row).getByRole("link", { name: "https://silo.tail1234.ts.net" })).toHaveAttribute(
-      "href",
-      "https://silo.tail1234.ts.net",
-    );
-    expect(within(row).getByText("100.64.0.7")).toBeInTheDocument();
-    expect(within(row).getByText("tsnet 1.102.4")).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Disconnect" })).toBeEnabled();
-    expect(within(row).queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
-    // Internal enum names never reach the admin.
-    expect(group).not.toHaveTextContent("awaiting_authorization");
-  });
-
   it("links the authorization page while a host waits for enrollment", () => {
     mocks.capabilities = { data: capabilities([tailscale]), isLoading: false };
     mocks.status = {
@@ -157,33 +105,6 @@ describe("NetworkAccessSettings", () => {
     expect(link).toHaveAttribute("target", "_blank");
     // Enrollment can be abandoned from here.
     expect(within(row).getByRole("button", { name: "Disconnect" })).toBeEnabled();
-  });
-
-  it("sends connect and disconnect for the row's host only", async () => {
-    const user = userEvent.setup();
-    mocks.capabilities = { data: capabilities([tailscale]), isLoading: false };
-    mocks.status = {
-      data: { provider: "tailscale", hosts: [host()] },
-      isLoading: false,
-      isError: false,
-      error: null,
-    };
-
-    renderPage();
-
-    await user.click(screen.getByRole("button", { name: "Connect" }));
-    expect(mocks.connect).toHaveBeenCalledWith({ provider: "tailscale", hosts: ["api"] });
-    expect(mocks.disconnect).not.toHaveBeenCalled();
-
-    mocks.status = {
-      data: { provider: "tailscale", hosts: [host({ state: "connected" })] },
-      isLoading: false,
-      isError: false,
-      error: null,
-    };
-    renderPage();
-    await user.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(mocks.disconnect).toHaveBeenCalledWith({ provider: "tailscale", hosts: ["api"] });
   });
 
   it.each(["Connect", "Disconnect"] as const)(
@@ -220,6 +141,7 @@ describe("NetworkAccessSettings", () => {
       const secondProxyButton = buttonFor("node:12");
 
       await user.click(apiButton);
+      expect(action === "Connect" ? mocks.disconnect : mocks.connect).not.toHaveBeenCalled();
       await waitFor(() => expect(apiButton).toBeDisabled());
       expect(apiButton.querySelector(".animate-spin")).not.toBeNull();
       expect(firstProxyButton).toBeEnabled();

@@ -80,6 +80,21 @@ const LDAP = {
   presentation: { display_name: "LDAP Sign-in" },
   auth_bindings: [{ capability_id: "ldap", enabled: false }],
 } as unknown as PluginInstallation;
+const TAILSCALE = {
+  id: 7,
+  plugin_id: "silo.network.tailscale",
+  enabled: true,
+  capabilities: [
+    {
+      type: "auth_provider.v1",
+      id: "tailscale",
+      display_name: "Tailscale",
+      sign_in_mode: "network",
+    },
+  ],
+  presentation: { display_name: "Tailscale" },
+  auth_bindings: [{ capability_id: "tailscale", enabled: true }],
+} as unknown as PluginInstallation;
 
 let capabilities: Record<string, unknown>;
 let identities: Array<typeof IDENTITY>;
@@ -180,6 +195,7 @@ describe("AdminUserSignIn identities", () => {
     mount();
     const list = await screen.findByRole("list", { name: "Connected identities" });
     const row = within(list).getByRole("listitem");
+    expect(screen.queryByRole("switch", { name: "Break-glass account" })).toBeNull();
     expect(row).toHaveTextContent("Company SSO · alice · alice@idp.example.test");
     expect(row).toHaveTextContent("Subject: https://id.example.test/realms/silo|8f14e45f");
     expect(row).toHaveTextContent("Last provider check: Active at the provider");
@@ -282,6 +298,28 @@ describe("AdminUserSignIn identities", () => {
 });
 
 describe("AdminUserSignIn linking by subject", () => {
+  it("says a network sign-in keeps the account's password", async () => {
+    const user = userEvent.setup();
+    identities = [];
+    state.installations = [TAILSCALE];
+    mount({ ...USER, password_login: true });
+    await user.click(await screen.findByRole("button", { name: "Connect identity" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connect a sign-in identity" });
+    expect(dialog).toHaveTextContent("It keeps its Silo password too.");
+    expect(dialog).not.toHaveTextContent("Connecting turns off password sign-in");
+  });
+
+  it("promises no password to an account without one when linking a network sign-in", async () => {
+    const user = userEvent.setup();
+    identities = [];
+    state.installations = [TAILSCALE];
+    mount({ ...USER, password_login: false });
+    await user.click(await screen.findByRole("button", { name: "Connect identity" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connect a sign-in identity" });
+    expect(dialog).not.toHaveTextContent("Silo password");
+    expect(dialog).not.toHaveTextContent("turns off password sign-in");
+  });
+
   it("links an identity to the enabled provider by its exact subject", async () => {
     const user = userEvent.setup();
     identities = [];
@@ -461,11 +499,6 @@ describe("AdminUserSignIn password and break-glass", () => {
     expect(
       await screen.findByText(/once password sign-in is on for the server/),
     ).toBeInTheDocument();
-  });
-
-  it("shows no break-glass control for a regular account", () => {
-    mount();
-    expect(screen.queryByRole("switch", { name: "Break-glass account" })).toBeNull();
   });
 
   it("lets the owner make an admin break-glass", async () => {

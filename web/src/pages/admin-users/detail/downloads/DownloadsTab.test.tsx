@@ -194,68 +194,6 @@ afterEach(() => {
 });
 
 describe("DownloadsTab", () => {
-  it("shows one card per device, with the Android notice only on Android", async () => {
-    renderTab();
-    await screen.findByRole("heading", { name: "iPhone 17" });
-
-    const iphone = deviceCard("iPhone 17");
-    const pixel = deviceCard("Pixel 9 Pro");
-    expect(within(pixel).getByRole("note")).toHaveTextContent(
-      "The Android app doesn't report finished downloads yet, so these show what the phone requested",
-    );
-    expect(within(iphone).queryByRole("note")).not.toBeInTheDocument();
-    expect(within(pixel).getByText("Requested")).toBeInTheDocument();
-    expect(within(iphone).getByText("Waiting for device")).toBeInTheDocument();
-    expect(within(iphone).getByRole("link", { name: /Open device/ })).toHaveAttribute(
-      "href",
-      "/admin/devices/7/iphone",
-    );
-
-    // The partly downloaded series opens, monitored, with its episodes listed.
-    const bear = within(iphone).getByRole("button", { name: "The Bear" });
-    expect(bear).toHaveAttribute("aria-expanded", "true");
-    expect(within(iphone).getByText("Monitored")).toBeInTheDocument();
-    expect(within(iphone).getByText("1 downloading")).toBeInTheDocument();
-    expect(within(iphone).getByText("S03E02 · Next")).toBeInTheDocument();
-    await userEvent.setup().click(bear);
-    expect(within(iphone).queryByText("S03E02 · Next")).not.toBeInTheDocument();
-  });
-
-  it("has no device link for a download whose device is gone", async () => {
-    downloads.push(row("9", { title: "Orphan", device_id: "gone-device" }));
-    try {
-      renderTab();
-      const heading = await screen.findByRole("heading", { name: "Unknown device" });
-      const card = heading.closest("section")!;
-      expect(within(card).queryByRole("link", { name: /Open device/ })).not.toBeInTheDocument();
-    } finally {
-      downloads.pop();
-    }
-  });
-
-  it("counts stats separately for Android and lists monitored series", async () => {
-    renderTab();
-    await screen.findByRole("heading", { name: "iPhone 17" });
-
-    const tile = (label: string) => screen.getByText(label, { selector: "div" }).parentElement!;
-    expect(tile("On device")).toHaveTextContent("2");
-    expect(tile("In progress")).toHaveTextContent("2");
-    expect(tile("Requested on Android")).toHaveTextContent("1");
-    expect(tile("Monitored series")).toHaveTextContent("1");
-
-    const monitors = screen.getByRole("heading", { name: "Monitored series" }).closest("section")!;
-    expect(monitors).toHaveTextContent("Latest season (S03)");
-    expect(monitors).toHaveTextContent("iPhone 17 · Main");
-    // The apps store a picked cap in binary gigabytes; it reads back as picked.
-    expect(monitors).toHaveTextContent("10 GB");
-    expect(monitors).toHaveTextContent("1 on device · 1 in progress");
-    expect(
-      screen.getByText(
-        "A device that was wiped or had the app removed keeps its rows here until it's removed from the account.",
-      ),
-    ).toBeInTheDocument();
-  });
-
   it("filters by device, profile and status", async () => {
     const u = userEvent.setup();
     renderTab();

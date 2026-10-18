@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -37,7 +39,7 @@ describe("parseRecommendationEmbeddingLock", () => {
       model: "text-embedding-3-large",
       sourceDimensions: 1536,
       storageDimensions: 3072,
-      note: expect.stringContaining("manual reset"),
+      note: expect.stringContaining("resetting embeddings"),
     });
   });
 

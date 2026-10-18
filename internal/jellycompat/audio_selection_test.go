@@ -194,7 +194,7 @@ func writeCompatTestFFmpeg(t *testing.T) string {
 		"case \" $* \" in\n" +
 		"  *\" -f lavfi \"*) exit 0;;\n" +
 		"esac\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}

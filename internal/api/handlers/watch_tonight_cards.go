@@ -11,7 +11,9 @@ import (
 	"strings"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
@@ -26,6 +28,8 @@ type swipeCardCastMember struct {
 	Name      string `json:"name"`
 	Character string `json:"character,omitempty"`
 	PhotoURL  string `json:"photo_url,omitempty"`
+	// photoPath is the stored headshot WatchTonightCards resolves into PhotoURL.
+	photoPath string
 }
 
 // swipeCardResponse extends sectionItemResponse with cast and runtime for the card back.
@@ -65,6 +69,17 @@ const (
 	discoverMaxPoolSize = 500
 )
 
+// discoverCardsRepo is the part of *recommendations.Repo discover-mode
+// cards read.
+type discoverCardsRepo interface {
+	GetTasteProfile(ctx context.Context, userID int, profileID string) ([]float32, error)
+	FindTasteProfileCandidates(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, map[string][]string, error)
+	GetItemAllGenres(ctx context.Context, itemIDs []string) (map[string][]string, error)
+	GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]recommendations.ScoredItem, error)
+	ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]recommendations.ScoredItem, error)
+	FilterRecommendableItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
+}
+
 // knownGenres is the validated set of genre names accepted by the cards endpoint.
 var knownGenres = map[string]struct{}{
 	"Action": {}, "Adventure": {}, "Animation": {}, "Comedy": {},
@@ -92,23 +107,91 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 			limit = n
 		}
 	}
-	resp := h.WatchTonightCards(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), mode, genres, excludeIDs, limit)
+	resp, err := h.watchTonightCards(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), mode, genres, excludeIDs, limit, true)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // WatchTonightCards is the swipe-card seam. mode is "continue" or
 // "discover", genres are already validated against KnownWatchTonightGenres,
-// excludeIDs is already bounded, and limit is within 1..swipeMaxLimit; the
-// seam never fails, every fetch failure degrades to an empty or shorter page
-// as v1 does.
-func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) WatchTonightCardsView {
+// excludeIDs is already bounded, and limit is within 1..swipeMaxLimit. A
+// candidate source that fails degrades to a shorter page; a failed item
+// lookup is an error, since the page would look empty.
+//
+// Cast members carry their headshot, which the frozen v1 route never has.
+func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) (WatchTonightCardsView, error) {
+	view, err := h.watchTonightCards(ctx, userID, profileID, filter, mode, genres, excludeIDs, limit, false)
+	if err == nil {
+		h.resolveCastPhotos(ctx, view.Cards, filter.ImageSizeFor(imagesize.SlotPhoto))
+	}
+	return view, err
+}
+
+// resolveCastPhotos fills every card's cast headshots in one batch on the
+// profile ladder at size: unsized, the w500 item detail serves for the same
+// people. A photo stored as an http(s) URL passes through.
+func (h *RecommendationsHandler) resolveCastPhotos(ctx context.Context, cards []swipeCardResponse, size imagesize.Size) {
+	if h.DetailSvc == nil {
+		return
+	}
+	sizedPath := func(path string) string {
+		if strings.Contains(path, "://") {
+			return path // plugin-hosted: its hint picks the size
+		}
+		medium := artworkkey.Variant(path, imagesize.Variant(artworkkey.ImageProfile, imagesize.Medium))
+		return sizedImagePath(path, artworkkey.ImageProfile, size, medium)
+	}
+	var paths []string
+	seen := make(map[string]struct{})
+	for _, card := range cards {
+		for _, member := range card.Cast {
+			if member.photoPath == "" || member.photoPath == "-" || isHTTPImageURL(member.photoPath) {
+				continue
+			}
+			path := sizedPath(member.photoPath)
+			if _, ok := seen[path]; !ok {
+				seen[path] = struct{}{}
+				paths = append(paths, path)
+			}
+		}
+	}
+	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, imagesize.PhotoPluginVariant(size))
+	for _, card := range cards {
+		cast := card.Cast
+		for j := range cast {
+			member := &cast[j]
+			switch {
+			case member.photoPath == "" || member.photoPath == "-":
+			case isHTTPImageURL(member.photoPath):
+				member.PhotoURL = member.photoPath
+			default:
+				member.PhotoURL = resolved[sizedPath(member.photoPath)].URL
+			}
+		}
+	}
+}
+
+// watchTonightCards is WatchTonightCards. With emptyOnFetchError, a failed
+// lookup answers an empty page instead of an error, as the frozen v1 route
+// always has.
+func (h *RecommendationsHandler) watchTonightCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int, emptyOnFetchError bool) (WatchTonightCardsView, error) {
 	var merged []mergedItem
 	var isCold bool
 
 	if mode == "continue" {
 		merged, isCold = h.buildContinueCards(ctx, userID, profileID, filter, excludeIDs, limit)
 	} else {
-		merged, isCold = h.buildDiscoverCards(ctx, userID, profileID, filter, genres, excludeIDs, limit)
+		var err error
+		merged, isCold, err = h.buildDiscoverCards(ctx, userID, profileID, filter, genres, excludeIDs, limit)
+		if err != nil {
+			if emptyOnFetchError {
+				return swipeCardsPageResponse{Cards: []swipeCardResponse{}, IsCold: isCold}, nil
+			}
+			return WatchTonightCardsView{}, err
+		}
 	}
 
 	resp := swipeCardsPageResponse{
@@ -117,50 +200,83 @@ func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID i
 	}
 
 	if len(merged) == 0 {
-		return resp
+		return resp, nil
 	}
 
 	// Over-fetch for enrichment so we can still fill a full page after item
 	// lookups drop inaccessible or missing entries. Trim to limit+buffer to
 	// control enrichment cost.
-	enrichLimit := limit + 10
-	if len(merged) > enrichLimit {
-		merged = merged[:enrichLimit]
+	window := merged
+	if enrichLimit := limit + 10; len(window) > enrichLimit {
+		window = window[:enrichLimit]
 	}
 
 	// Collect content IDs for enrichment.
-	contentIDs := make([]string, len(merged))
-	for i, m := range merged {
+	contentIDs := make([]string, len(window))
+	for i, m := range window {
 		contentIDs[i] = m.scored.MediaItemID
 	}
 
-	itemMap, overlayMap, stateMap, enrichedEpMeta := h.enrichItems(ctx, userID, profileID, filter, contentIDs)
-
-	// Determine if there are more items beyond what we return.
-	resp.HasMore = len(merged) > limit
-	if len(merged) > limit {
-		merged = merged[:limit]
+	enriched, err := h.enrichItems(ctx, userID, profileID, filter, contentIDs)
+	if err != nil {
+		slog.WarnContext(ctx, "WatchTonightCards: item details failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		if emptyOnFetchError {
+			return resp, nil
+		}
+		return WatchTonightCardsView{}, recommendationsUnavailable("Failed to fetch item details")
 	}
 
+	var moreHydrated bool
+	resp.Cards, moreHydrated = h.swipeCards(ctx, window, enriched, limit, filter.Artwork())
+	// More cards exist when a hydrated candidate was left over, or when this
+	// page showed cards and candidates past the enrichment window remain: the
+	// client excludes the cards it was shown, so the next page moves on. A
+	// page with no card never claims more, since its repeat would be the same.
+	resp.HasMore = moreHydrated || (len(resp.Cards) > 0 && len(merged) > len(window))
+	return resp, nil
+}
+
+// swipeCards builds up to limit cards, in order, from the candidates whose
+// items were hydrated, and reports whether a further hydrated candidate was
+// left over.
+func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []mergedItem, enriched watchTonightEnrichment, limit int, art imagesize.Request) ([]swipeCardResponse, bool) {
 	// First pass: build enriched items and collect cast lookup IDs.
 	type enrichedCard struct {
 		item    sectionItemResponse
 		source  string
 		runtime int
+		// castLookupID is the item whose cast the card shows: the series
+		// for an episode.
+		castLookupID string
 	}
-	enrichedCards := make([]enrichedCard, 0, len(merged))
-	castLookupIDs := make([]string, 0, len(merged))
-	castLookupSeen := make(map[string]struct{}, len(merged))
-	// Map content ID → cast lookup ID for the second pass.
-	contentToCastLookup := make(map[string]string, len(merged))
+	enrichedCards := make([]enrichedCard, 0, limit)
+	castLookupIDs := make([]string, 0, limit)
+	castLookupSeen := make(map[string]struct{}, limit)
+	more := false
+	// Artwork is resolved only for the cards this page returns; the rest of
+	// the hydration window only decides whether more remain.
+	shown := make(map[string]*models.MediaItem, limit)
+	for _, m := range candidates {
+		if len(shown) == limit {
+			break
+		}
+		if mi := enriched.items[m.scored.MediaItemID]; mi != nil {
+			shown[mi.ContentID] = mi
+		}
+	}
+	artwork := h.featuredCardArtwork(ctx, shown, art)
 
-	for _, m := range merged {
-		mi, ok := itemMap[m.scored.MediaItemID]
+	for _, m := range candidates {
+		mi, ok := enriched.items[m.scored.MediaItemID]
 		if !ok || mi == nil {
 			continue
 		}
+		if len(enrichedCards) == limit {
+			more = true
+			break
+		}
 
-		item := h.buildSectionItem(ctx, mi, overlayMap, stateMap)
+		item := h.buildSectionItem(mi, enriched.overlays, enriched.states, artwork[mi.ContentID])
 		item.ItemSource = m.source
 
 		// Apply CW/Next-Up metadata.
@@ -182,7 +298,7 @@ func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID i
 			}
 		}
 
-		if epMeta, ok := enrichedEpMeta[m.scored.MediaItemID]; ok {
+		if epMeta, ok := enriched.episodeMeta[m.scored.MediaItemID]; ok {
 			if epMeta.SeriesID != nil && item.SeriesID == "" {
 				item.SeriesID = *epMeta.SeriesID
 			}
@@ -202,16 +318,16 @@ func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID i
 		if item.SeriesID != "" {
 			castLookupID = item.SeriesID
 		}
-		contentToCastLookup[m.scored.MediaItemID] = castLookupID
 		if _, seen := castLookupSeen[castLookupID]; !seen {
 			castLookupSeen[castLookupID] = struct{}{}
 			castLookupIDs = append(castLookupIDs, castLookupID)
 		}
 
 		enrichedCards = append(enrichedCards, enrichedCard{
-			item:    item,
-			source:  m.source,
-			runtime: mi.Runtime,
+			item:         item,
+			source:       m.source,
+			runtime:      mi.Runtime,
+			castLookupID: castLookupID,
 		})
 	}
 
@@ -219,19 +335,16 @@ func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID i
 	castMap := h.fetchCastByIDs(ctx, castLookupIDs)
 
 	// Second pass: assemble response cards with cast.
-	for i, ec := range enrichedCards {
-		lookupID := contentToCastLookup[merged[i].scored.MediaItemID]
-		cast := buildCastSlice(castMap, lookupID)
-
-		resp.Cards = append(resp.Cards, swipeCardResponse{
+	cards := make([]swipeCardResponse, 0, len(enrichedCards))
+	for _, ec := range enrichedCards {
+		cards = append(cards, swipeCardResponse{
 			sectionItemResponse: ec.item,
 			WatchTonightSource:  ec.source,
 			Runtime:             ec.runtime,
-			Cast:                cast,
+			Cast:                buildCastSlice(castMap, ec.castLookupID),
 		})
 	}
-
-	return resp
+	return cards, more
 }
 
 // buildContinueCards returns CW + Next Up items as swipe cards.
@@ -285,16 +398,27 @@ func (h *RecommendationsHandler) buildContinueCards(ctx context.Context, userID 
 // buildDiscoverCards returns recommendation candidates for discover mode.
 // It searches the user's taste profile against the full embedded library,
 // optionally requiring at least one selected genre match, and falls back to
-// cold-start caches when no taste profile is available.
-func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, genres []string, excludeIDs map[string]struct{}, limit int) ([]mergedItem, bool) {
-	if h.recsRepo == nil {
-		return nil, true
+// the cold-start rows when no taste profile is available or recommendations
+// are disabled, which serve no personal candidates. Every candidate is one
+// the viewer can see, of a type recommendation rows offer.
+func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, genres []string, excludeIDs map[string]struct{}, limit int) ([]mergedItem, bool, error) {
+	repo := h.cardsRepo
+	if repo == nil {
+		return nil, true, nil
 	}
 
 	poolSize := discoverCandidatePoolSize(limit, len(genres))
-	embedding, err := h.recsRepo.GetTasteProfile(ctx, userID, profileID)
-	if err != nil {
-		slog.WarnContext(ctx, "WatchTonightCards: taste profile fetch failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+	// The candidate queries are limited, so the titles the profile's rows
+	// leave out are excluded in them: removed afterwards, they would leave a
+	// short or empty page.
+	excludeIDs = h.withProfileExclusions(ctx, userID, profileID, excludeIDs)
+	var embedding []float32
+	if !h.engineUnavailable() {
+		var err error
+		embedding, err = repo.GetTasteProfile(ctx, userID, profileID)
+		if err != nil {
+			slog.WarnContext(ctx, "WatchTonightCards: taste profile fetch failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		}
 	}
 
 	candidates := []recommendations.ScoredItem{}
@@ -302,7 +426,7 @@ func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID 
 	isCold := embedding == nil
 
 	if embedding != nil {
-		candidateItems, candidateGenres, err := h.recsRepo.FindTasteProfileCandidates(
+		candidateItems, candidateGenres, err := repo.FindTasteProfileCandidates(
 			ctx,
 			embedding,
 			mapKeys(excludeIDs),
@@ -320,20 +444,48 @@ func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID 
 
 	if len(candidates) == 0 {
 		isCold = true
-		candidates = h.buildColdStartDiscoverCandidates(ctx)
+		// The global rows are not viewer-scoped. Inaccessible titles leave
+		// before the page is cut, or a restricted profile would get pages
+		// emptied by hydration, and so do types the rows no longer offer,
+		// such as books cached before they left them.
+		var err error
+		candidates, err = keepRecommendable(ctx, repo, h.buildColdStartDiscoverCandidates(ctx, repo, filter, excludeIDs, poolSize), filter)
+		if err != nil {
+			return nil, true, err
+		}
 		if len(candidates) > 0 {
 			candidateIDs := make([]string, len(candidates))
 			for i, item := range candidates {
 				candidateIDs[i] = item.MediaItemID
 			}
-			genreMap, _ = h.recsRepo.GetItemAllGenres(ctx, candidateIDs)
+			genreMap, _ = repo.GetItemAllGenres(ctx, candidateIDs)
 		}
 	}
 
 	candidates = h.filterRecommendations(ctx, userID, profileID, candidates)
 	candidates = recommendations.FilterAndRankGenreMatches(candidates, genres, genreMap)
 
-	return recommendationCardItems(candidates, excludeIDs), isCold
+	return recommendationCardItems(candidates, excludeIDs), isCold, nil
+}
+
+// withProfileExclusions returns excludeIDs, the titles the client already
+// showed, together with the canonical titles the profile's built rows leave
+// out: watched, favorited, rated and abandoned ones, an episode standing for
+// its series. When that set cannot be read it returns excludeIDs, and
+// filterRecommendations still removes watched and rated titles afterwards.
+func (h *RecommendationsHandler) withProfileExclusions(ctx context.Context, userID int, profileID string, excludeIDs map[string]struct{}) map[string]struct{} {
+	if h.exclusionSet == nil || profileID == "" {
+		return excludeIDs
+	}
+	excluded, err := h.exclusionSet(ctx, userID, profileID)
+	if err != nil {
+		slog.WarnContext(ctx, "WatchTonightCards: exclusion set unavailable", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		return excludeIDs
+	}
+	merged := make(map[string]struct{}, len(excluded)+len(excludeIDs))
+	maps.Copy(merged, excluded)
+	maps.Copy(merged, excludeIDs)
+	return merged
 }
 
 func recommendationCardItems(candidates []recommendations.ScoredItem, excludeIDs map[string]struct{}) []mergedItem {
@@ -350,10 +502,15 @@ func recommendationCardItems(candidates []recommendations.ScoredItem, excludeIDs
 	return merged
 }
 
-func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Context) []recommendations.ScoredItem {
+// buildColdStartDiscoverCandidates returns the cached Popular row and up to
+// limit titles of the live Recently Added row the viewer can see, leaving out
+// excludeIDs. Recently Added is read live, as Watch Tonight's fallback reads
+// it, so the cards still fill on a fresh server or with recommendations
+// disabled, when nothing builds or renews the cached rows.
+func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Context, repo discoverCardsRepo, filter catalog.AccessFilter, excludeIDs map[string]struct{}, limit int) []recommendations.ScoredItem {
 	byID := make(map[string]recommendations.ScoredItem)
 
-	popular, err := h.recsRepo.GetRecommendationCache(
+	popular, err := repo.GetRecommendationCache(
 		ctx,
 		recommendations.GlobalCacheUserID,
 		recommendations.GlobalCacheProfileID,
@@ -367,15 +524,9 @@ func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Co
 		byID[item.MediaItemID] = item
 	}
 
-	recentlyAdded, err := h.recsRepo.GetRecommendationCache(
-		ctx,
-		recommendations.GlobalCacheUserID,
-		recommendations.GlobalCacheProfileID,
-		recommendations.RecTypeRecentlyAdded,
-		"",
-	)
+	recentlyAdded, err := repo.ListDefaultRowItems(ctx, filter, recommendations.RecTypeRecentlyAdded, mapKeys(excludeIDs), limit)
 	if err != nil {
-		slog.WarnContext(ctx, "WatchTonightCards: recently added cache unavailable", "component", "api", "error", err)
+		slog.WarnContext(ctx, "WatchTonightCards: recently added unavailable", "component", "api", "error", err)
 	}
 	for _, item := range recentlyAdded {
 		if existing, exists := byID[item.MediaItemID]; !exists || item.Score > existing.Score {
@@ -395,6 +546,30 @@ func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Co
 	})
 
 	return candidates
+}
+
+// keepRecommendable keeps the items filter admits that are of a type
+// recommendation rows offer, in order.
+func keepRecommendable(ctx context.Context, repo discoverCardsRepo, items []recommendations.ScoredItem, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.MediaItemID
+	}
+	kept, err := repo.FilterRecommendableItemIDs(ctx, ids, filter)
+	if err != nil {
+		slog.WarnContext(ctx, "WatchTonightCards: access check failed", "component", "api", "user_id", filter.UserID, "profile_id", filter.ProfileID, "error", err)
+		return nil, recommendationsUnavailable("Failed to fetch recommendations")
+	}
+	out := make([]recommendations.ScoredItem, 0, len(items))
+	for _, item := range items {
+		if _, ok := kept[item.MediaItemID]; ok {
+			out = append(out, item)
+		}
+	}
+	return out, nil
 }
 
 // fetchCastByIDs fetches cast members for the given pre-resolved lookup IDs.
@@ -428,6 +603,7 @@ func buildCastSlice(castMap map[string][]models.ItemPerson, lookupID string) []s
 		cast = append(cast, swipeCardCastMember{
 			Name:      p.Name,
 			Character: p.Character,
+			photoPath: p.PhotoPath,
 		})
 		if len(cast) >= maxCastPerCard {
 			break
@@ -521,4 +697,8 @@ func (c swipeCardResponse) Card() SectionItemView {
 // the embedded section item.
 func NewWatchTonightCardView(card SectionItemView, source string, runtime int, cast []WatchTonightCastMemberView) WatchTonightCardView {
 	return swipeCardResponse{sectionItemResponse: card, WatchTonightSource: source, Runtime: runtime, Cast: cast}
+}
+
+func isHTTPImageURL(path string) bool {
+	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")
 }

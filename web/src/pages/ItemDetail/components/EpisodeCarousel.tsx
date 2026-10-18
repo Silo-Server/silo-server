@@ -3,6 +3,7 @@ import { Play, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
+import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
@@ -11,6 +12,7 @@ import type { EpisodeNavigationState } from "../itemDetailLayout";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
@@ -30,6 +32,7 @@ export default function EpisodeCarousel({
   );
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
   const { quickActionMode } = useOverlayPrefs();
+  const { hideImages } = useEpisodeSpoilerPrefs();
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla({
       options: {
@@ -66,6 +69,7 @@ export default function EpisodeCarousel({
                 isCurrent={ep.episode_number === currentEpisodeNumber}
                 episodeLinkState={episodeLinkState}
                 quickActionMode={quickActionMode}
+                hideImageIfUnwatched={hideImages}
                 onPrefetch={() => prefetchEpisodeDetail(ep.content_id)}
               />
             ))}
@@ -92,18 +96,24 @@ function EpisodeCarouselCard({
   isCurrent,
   episodeLinkState,
   quickActionMode,
+  hideImageIfUnwatched,
   onPrefetch,
 }: {
   ep: EpisodeListItem;
   isCurrent: boolean;
   episodeLinkState?: EpisodeNavigationState;
   quickActionMode: CardQuickActionMode;
+  hideImageIfUnwatched: boolean;
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
+  const hideImage =
+    hideImageIfUnwatched &&
+    isEpisodeStill(ep.still_is_episode_still) &&
+    isEpisodeUnwatched(ep.user_data);
   const progress =
     !ep.user_data?.played &&
     (ep.user_data?.position_seconds ?? 0) > 0 &&
@@ -139,7 +149,7 @@ function EpisodeCarouselCard({
                   : "border-border/30",
               )}
               style={
-                thumbhashUrl
+                !hideImage && thumbhashUrl
                   ? { backgroundImage: `url(${thumbhashUrl})`, backgroundSize: "cover" }
                   : undefined
               }
@@ -148,7 +158,7 @@ function EpisodeCarouselCard({
                 <img
                   src={ep.still_url}
                   alt={episodeTitle}
-                  className="h-full w-full object-cover"
+                  className={cn("h-full w-full object-cover", hideImage && SPOILER_IMAGE_CLASS)}
                   loading="lazy"
                   decoding="async"
                 />
@@ -158,7 +168,7 @@ function EpisodeCarouselCard({
                 </div>
               )}
               {isCurrent && (
-                <div className="bg-primary text-primary-foreground pointer-events-none absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] leading-none font-semibold tracking-[0.08em] uppercase shadow-[0_2px_8px_rgb(0_0_0/0.28)]">
+                <div className="bg-primary text-primary-foreground pointer-events-none absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.08em] uppercase shadow-[0_2px_8px_rgb(0_0_0/0.28)]">
                   <span className="relative flex size-1.5">
                     <span className="bg-primary-foreground absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" />
                     <span className="bg-primary-foreground relative inline-flex size-1.5 rounded-full" />
@@ -184,6 +194,7 @@ function EpisodeCarouselCard({
             showCollectionActions={false}
             showWatchedShortcut
             hasPartialProgress={progress != null}
+            hasResumePosition={(ep.user_data?.position_seconds ?? 0) > 0}
             quickActionMode={quickActionMode}
             longPressRef={cardRef}
             itemTitle={episodeTitle}

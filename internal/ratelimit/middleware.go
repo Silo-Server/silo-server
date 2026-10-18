@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
@@ -97,8 +98,28 @@ func (mw *Middleware) Reload(ctx context.Context) error {
 	return nil
 }
 
+// RejectBodyWriter writes the status line and body of a rate-limited
+// response. The middleware has already set Retry-After and the X-RateLimit-*
+// headers; retryAfterSeconds is the Retry-After value. A secondary listener
+// whose clients expect a different error envelope supplies its own writer so
+// it can share this middleware's budgets and counters.
+type RejectBodyWriter func(w http.ResponseWriter, retryAfterSeconds int)
+
 // Handler returns the chi-compatible middleware handler.
 func (mw *Middleware) Handler(next http.Handler) http.Handler {
+	return mw.HandlerWithRejectBody(writeRateLimitBody)(next)
+}
+
+// HandlerWithRejectBody is Handler with a caller-supplied 429 body. Budgets,
+// keys, and counters are this middleware's, so requests spend the same
+// allowance whichever writer rejects them.
+func (mw *Middleware) HandlerWithRejectBody(reject RejectBodyWriter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return mw.handler(next, reject)
+	}
+}
+
+func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mw.mu.RLock()
 		cfg := mw.cfg
@@ -109,15 +130,11 @@ func (mw *Middleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check global limiter (per-second only — spec says no per-minute global limit).
-		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
-		// no-op: it never triggers before the per-second limiter does.
-		globalRate := globalRateFor(cfg)
-		globalResult := mw.global.Allow(r.Context(), "global", globalRate)
-		if !globalResult.Allowed {
-			writeRateLimitResponse(w, globalResult)
-			return
-		}
+		// The narrower per-IP and per-key budgets run before the shared
+		// global one, as in AuthEndpointHandler, so a client over its own
+		// limit cannot spend server-wide capacity and get unrelated clients
+		// rejected. A request the global check then rejects keeps the
+		// narrower tokens it spent; that only charges the client that sent it.
 
 		// Check per-IP limiter
 		if clientIP := clientip.FromContext(r.Context()); clientIP != "" {
@@ -129,7 +146,7 @@ func (mw *Middleware) Handler(next http.Handler) http.Handler {
 			ipKey := "ip:" + clientIP
 			ipResult := mw.perKey.Allow(r.Context(), ipKey, ipRate)
 			if !ipResult.Allowed {
-				writeRateLimitResponse(w, ipResult)
+				writeRateLimitResponse(w, ipResult, reject)
 				return
 			}
 		}
@@ -163,9 +180,18 @@ func (mw *Middleware) Handler(next http.Handler) http.Handler {
 			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt.Unix(), 10))
 
 			if !result.Allowed {
-				writeRateLimitResponse(w, result)
+				writeRateLimitResponse(w, result, reject)
 				return
 			}
+		}
+
+		// Check global limiter (per-second only — spec says no per-minute global limit).
+		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
+		// no-op: it never triggers before the per-second limiter does.
+		globalResult := mw.global.Allow(r.Context(), "global", globalRateFor(cfg))
+		if !globalResult.Allowed {
+			writeRateLimitResponse(w, globalResult, reject)
+			return
 		}
 
 		next.ServeHTTP(w, r)
@@ -182,6 +208,12 @@ type rateLimitError struct {
 // applies the shared per-IP and endpoint-specific budgets before consuming the
 // process-wide budget, so one rejected client cannot drain capacity for others.
 func (mw *Middleware) AuthEndpointHandler(endpoint string) func(http.Handler) http.Handler {
+	return mw.AuthEndpointHandlerWithRejectBody(endpoint, writeRateLimitBody)
+}
+
+// AuthEndpointHandlerWithRejectBody is AuthEndpointHandler with a
+// caller-supplied 429 body; the endpoint budget and its counters are shared.
+func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject RejectBodyWriter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			mw.mu.RLock()
@@ -203,7 +235,7 @@ func (mw *Middleware) AuthEndpointHandler(endpoint string) func(http.Handler) ht
 				}
 				ipResult := mw.perKey.Allow(r.Context(), "ip:"+clientIP, ipRate)
 				if !ipResult.Allowed {
-					writeRateLimitResponse(w, ipResult)
+					writeRateLimitResponse(w, ipResult, reject)
 					return
 				}
 
@@ -218,8 +250,23 @@ func (mw *Middleware) AuthEndpointHandler(endpoint string) func(http.Handler) ht
 					epKey := fmt.Sprintf("authip:%s:%s", clientIP, endpoint)
 					epResult := mw.perKey.Allow(r.Context(), epKey, epRate)
 					if !epResult.Allowed {
-						writeRateLimitResponse(w, epResult)
+						writeRateLimitResponse(w, epResult, reject)
 						return
+					}
+
+					// A client IP taken from forwarding headers is a new
+					// budget whenever the sender names a new client, and every
+					// private address is a trusted proxy by default. The
+					// connection's own address also spends a looser budget
+					// that all clients behind it share. Network access ingress
+					// writes the header itself and needs no such cap.
+					if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
+						peerKey := fmt.Sprintf("authpeer:%s:%s", peer, endpoint)
+						peerResult := mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
+						if !peerResult.Allowed {
+							writeRateLimitResponse(w, peerResult, reject)
+							return
+						}
 					}
 				}
 			}
@@ -227,12 +274,26 @@ func (mw *Middleware) AuthEndpointHandler(endpoint string) func(http.Handler) ht
 			globalRate := globalRateFor(cfg)
 			globalResult := mw.global.Allow(r.Context(), "global", globalRate)
 			if !globalResult.Allowed {
-				writeRateLimitResponse(w, globalResult)
+				writeRateLimitResponse(w, globalResult, reject)
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+// authPeerBudgetMultiplier sizes the budget that every forwarded client behind
+// one transport peer shares, relative to one client's endpoint budget. A
+// reverse proxy fronting many users needs more than one client's allowance;
+// a client rotating forwarding headers gets no more than this.
+const authPeerBudgetMultiplier = 10
+
+func authPeerRate(endpointRate Rate) Rate {
+	return Rate{
+		RequestsPerSecond: min(endpointRate.RequestsPerSecond*authPeerBudgetMultiplier, MaxRequestsPerWindow),
+		RequestsPerMinute: min(endpointRate.RequestsPerMinute*authPeerBudgetMultiplier, MaxRequestsPerWindow),
+		Burst:             min(endpointRate.Burst, MaxBurst/authPeerBudgetMultiplier) * authPeerBudgetMultiplier,
 	}
 }
 
@@ -250,12 +311,17 @@ func globalRateFor(cfg Config) Rate {
 	}
 }
 
-func writeRateLimitResponse(w http.ResponseWriter, result AllowResult) {
+func writeRateLimitResponse(w http.ResponseWriter, result AllowResult, reject RejectBodyWriter) {
 	retrySeconds := int(result.RetryAfter.Seconds()) + 1
 	w.Header().Set("Retry-After", strconv.Itoa(retrySeconds))
 	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(result.Limit))
 	w.Header().Set("X-RateLimit-Remaining", "0")
 	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt.Unix(), 10))
+	reject(w, retrySeconds)
+}
+
+// writeRateLimitBody is the native API's 429 body.
+func writeRateLimitBody(w http.ResponseWriter, retrySeconds int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
 	_ = json.NewEncoder(w).Encode(rateLimitError{

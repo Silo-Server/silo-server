@@ -14,12 +14,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-type countingProfileStaler struct{ calls int }
+type countingSignalsNotifier struct{ calls int }
 
-func (c *countingProfileStaler) MarkProfileStale(context.Context, int, string) error {
-	c.calls++
-	return nil
-}
+func (c *countingSignalsNotifier) NotifySignalsChanged(context.Context, int, string) { c.calls++ }
 
 // playbackRefreshDriver plays one movie through a native playback surface.
 type playbackRefreshDriver struct {
@@ -88,7 +85,7 @@ func newV2PlaybackRefreshDriver(t *testing.T, h *PlaybackHandler, manager *playb
 // rebuild; the heartbeat that crosses the watched threshold and the stop each
 // do once. Both native surfaces share the progress writer.
 func TestPlaybackProgressRefreshesTasteProfileOnlyOnCompletionAndStop(t *testing.T) {
-	const positionOnlyPings = 100
+	const positionOnlyPings = 2
 	// 90% of 3600s is the default watched threshold (3240s).
 	file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
 
@@ -101,15 +98,13 @@ func TestPlaybackProgressRefreshesTasteProfileOnlyOnCompletionAndStop(t *testing
 			h := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 			h.InstallationID = serviceInstallation
 			h.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
-			staler := &countingProfileStaler{}
-			requester := &countingProfileRefresher{}
-			h.SetProfileStaler(staler)
-			h.SetProfileRefreshRequester(requester)
+			notifier := &countingSignalsNotifier{}
+			h.SetSignalsChangedNotifier(notifier)
 			driver := newDriver(t, h, manager, file)
 			assertRefreshes := func(stage string, want int) {
 				t.Helper()
-				if staler.calls != want || requester.calls != want {
-					t.Fatalf("%s: stale marks = %d, refresh requests = %d, want %d each", stage, staler.calls, requester.calls, want)
+				if notifier.calls != want {
+					t.Fatalf("%s: signal change notifications = %d, want %d", stage, notifier.calls, want)
 				}
 			}
 

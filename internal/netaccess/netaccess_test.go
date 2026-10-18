@@ -3,6 +3,7 @@ package netaccess
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 )
 
@@ -33,6 +34,92 @@ func TestMiddlewareValidTokenSetsPathAndStripsHeader(t *testing.T) {
 	}
 	if len(gotHeader) != 0 {
 		t.Fatalf("ingress header reached the handler: %v", gotHeader)
+	}
+}
+
+// peerThroughMiddleware sends one request through the middleware, checks
+// that no peer header reached the handler, and answers the path it saw.
+func peerThroughMiddleware(t *testing.T, registry *Registry, token string, peers ...string) Path {
+	t.Helper()
+	var (
+		gotPath  Path
+		gotPeers []string
+	)
+	handler := Middleware(registry)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = PathFromContext(r.Context())
+		gotPeers = r.Header.Values(IngressPeerHeader)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/auth/providers", nil)
+	if token != "" {
+		req.Header.Set(IngressTokenHeader, token)
+	}
+	for _, peer := range peers {
+		req.Header.Add(IngressPeerHeader, peer)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if len(gotPeers) != 0 {
+		t.Fatalf("peer header reached the handler: %v", gotPeers)
+	}
+	return gotPath
+}
+
+func TestMiddlewareRecordsPeerAndInstallationWithValidToken(t *testing.T) {
+	registry := NewRegistry()
+	token, err := registry.Issue(7, "tailscale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := peerThroughMiddleware(t, registry, token, "100.101.102.103")
+	want := Path{Provider: "tailscale", InstallationID: 7, Peer: netip.MustParseAddr("100.101.102.103")}
+	if path != want {
+		t.Fatalf("path = %+v, want %+v", path, want)
+	}
+	path = peerThroughMiddleware(t, registry, token, "fd7a:115c:a1e0::1")
+	if path.Peer != netip.MustParseAddr("fd7a:115c:a1e0::1") {
+		t.Fatalf("IPv6 peer = %v", path.Peer)
+	}
+	path = peerThroughMiddleware(t, registry, token, "::ffff:100.64.0.9")
+	if path.Peer != netip.MustParseAddr("100.64.0.9") {
+		t.Fatalf("IPv4-mapped peer = %v, want the IPv4 form", path.Peer)
+	}
+}
+
+// A client on the LAN or public URL cannot name a peer: without a token the
+// header is dropped unread, so the request carries no identity to look up.
+func TestMiddlewareDropsPeerWithoutToken(t *testing.T) {
+	path := peerThroughMiddleware(t, NewRegistry(), "", "100.101.102.103")
+	if !path.IsDefault() || path.Peer.IsValid() || path.InstallationID != 0 {
+		t.Fatalf("path = %+v, want the default path with no peer", path)
+	}
+}
+
+// A provider that names no single valid IP leaves the request on its overlay
+// path without a peer instead of failing it.
+func TestMiddlewareIgnoresInvalidPeer(t *testing.T) {
+	registry := NewRegistry()
+	token, err := registry.Issue(7, "tailscale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, peers := range map[string][]string{
+		"absent":    nil,
+		"empty":     {""},
+		"hostname":  {"laptop.tailnet.ts.net"},
+		"with port": {"100.64.0.1:443"},
+		"zone":      {"fe80::1%eth0"},
+		"repeated":  {"100.64.0.1", "100.64.0.2"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := peerThroughMiddleware(t, registry, token, peers...)
+			if path.Provider != "tailscale" || path.Peer.IsValid() {
+				t.Fatalf("path = %+v, want the overlay path without a peer", path)
+			}
+		})
 	}
 }
 

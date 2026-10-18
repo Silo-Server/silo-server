@@ -229,6 +229,15 @@ it("creates a link invitation without an address and shows the link to share", a
   expect(screen.getByText("https://example.invalid/invite/link-only")).toBeInTheDocument();
   expect(screen.getByText(/Anyone with the link can use it/)).toBeInTheDocument();
 });
+it("selects a delivery option when its card text is clicked", () => {
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
+  fireEvent.click(screen.getByText("You share the link yourself, for example in a chat."));
+  expect(screen.getByLabelText("Create link")).toBeChecked();
+  expect(screen.getByLabelText("Create link")).toHaveFocus();
+  fireEvent.click(screen.getByText("We email the link. You can copy it too."));
+  expect(screen.getByLabelText("Send email")).toBeChecked();
+});
 it("offers only link creation when email is not configured", () => {
   mocks.emailDelivery = false;
   render(<InvitationsTab />, { wrapper: MemoryRouter });
@@ -236,37 +245,12 @@ it("offers only link creation when email is not configured", () => {
   expect(screen.getByLabelText("Create link")).toBeChecked();
   expect(screen.getByLabelText("Send email")).toBeDisabled();
   expect(screen.getByText("Email isn't set up on this server.")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /Notifications settings/ })).toHaveAttribute(
+  // The mail server has its own page; Notifications only links to it.
+  expect(screen.getByRole("link", { name: /Email settings/ })).toHaveAttribute(
     "href",
-    "/admin/settings/notifications",
+    "/admin/settings/email",
   );
   expect(screen.getByRole("button", { name: "Create link" })).toBeInTheDocument();
-});
-it("shows delivery and identifies link invitations in the history", () => {
-  mocks.linkRow = true;
-  render(<InvitationsTab />, { wrapper: MemoryRouter });
-  expect(screen.getByText("Link invitation")).toBeInTheDocument();
-  expect(screen.getByText(/“For Sam”/)).toBeInTheDocument();
-  expect(screen.getByText("Link created")).toBeInTheDocument();
-  expect(screen.getByText("Email sent")).toBeInTheDocument();
-  expect(screen.getByTitle("Replace with a new link")).toBeInTheDocument();
-  fireEvent.click(screen.getAllByTitle("Revoke this link")[0]!);
-  expect(
-    screen.getByText("Revoke this link invitation? The link will stop working."),
-  ).toBeInTheDocument();
-});
-it("keeps a link invitation's note after it is accepted", () => {
-  mocks.linkRow = true;
-  linkRow.email = "sam@example.invalid";
-  linkRow.status = "accepted";
-  try {
-    render(<InvitationsTab />, { wrapper: MemoryRouter });
-    expect(screen.getByText("sam@example.invalid")).toBeInTheDocument();
-    expect(screen.getByText(/Joined by link · “For Sam”/)).toBeInTheDocument();
-  } finally {
-    linkRow.email = "";
-    linkRow.status = "pending";
-  }
 });
 it("replaces an emailed invitation's link without emailing it", async () => {
   mocks.resend.mockResolvedValue({

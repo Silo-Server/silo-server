@@ -82,9 +82,9 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
         <Play className="ml-0.5 h-4 w-4 fill-current" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="text-foreground block truncate text-[13px] font-medium">{title}</span>
+        <span className="text-foreground block truncate text-[0.8125rem] font-medium">{title}</span>
         {extra.duration_seconds != null && extra.duration_seconds > 0 && (
-          <span className="text-muted-foreground block text-[11px] tabular-nums">
+          <span className="text-muted-foreground block text-[0.6875rem] tabular-nums">
             {formatClock(extra.duration_seconds)}
           </span>
         )}

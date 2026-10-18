@@ -34,6 +34,7 @@ type FanoutWorker struct {
 	deliveries  *DeliveryRepository
 	preferences *PreferencesRepository
 	settings    *Settings
+	scopes      ScopeResolver
 	dispatcher  Dispatcher
 	logger      *slog.Logger
 	nudge       chan struct{}
@@ -67,7 +68,8 @@ func (w *FanoutWorker) SetPushOutbox(pushDevices *PushDeviceRepository) {
 	w.pushDevices = pushDevices
 }
 
-// NewFanoutWorker creates a FanoutWorker.
+// NewFanoutWorker creates a FanoutWorker. scopes resolves each recipient's
+// current access; without it no episode notification is delivered.
 func NewFanoutWorker(
 	pool *pgxpool.Pool,
 	releases *ReleaseRepository,
@@ -75,6 +77,7 @@ func NewFanoutWorker(
 	deliveries *DeliveryRepository,
 	preferences *PreferencesRepository,
 	settings *Settings,
+	scopes ScopeResolver,
 	dispatcher Dispatcher,
 ) *FanoutWorker {
 	return &FanoutWorker{
@@ -84,6 +87,7 @@ func NewFanoutWorker(
 		deliveries:  deliveries,
 		preferences: preferences,
 		settings:    settings,
+		scopes:      scopes,
 		dispatcher:  dispatcher,
 		logger:      slog.Default().With("component", "notifications.fanout"),
 		nudge:       make(chan struct{}, 1),
@@ -207,16 +211,42 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 
 	// Capture the entire batch before acquiring inbox locks. Locking one event
 	// at a time could acquire the same profiles in opposite transaction order.
-	candidatesByEvent := make(map[string]map[string]struct{}, len(fanout))
+	//
+	// An interest row is computed when the profile's relationship to the
+	// series changes, so it can outlive the profile's access: a library
+	// restriction or maturity limit set later leaves the row in place. Only
+	// candidates that can open the episode now are captured, which keeps the
+	// title off every channel for the rest. Eligibility is checked first, so
+	// scopes are resolved only for candidates who would get a delivery;
+	// fanOutEvent evaluates eligibility again under the inbox locks. Access is
+	// checked only here: changing it takes no inbox lock, so a second check
+	// under the locks would not close the gap before commit. A delivery
+	// created in that gap is like one created just before the change.
+	recipients := newRecipientAccess(w.scopes)
+	candidatesByEvent := make(map[string]map[profileKey]struct{}, len(fanout))
 	profiles := make(map[string]struct{})
 	for _, event := range fanout {
 		candidates, err := w.interests.ListActiveBySeries(ctx, tx, event.LibraryID, event.SeriesID)
 		if err != nil {
 			return 0, err
 		}
-		captured := make(map[string]struct{}, len(candidates))
+		prefs, err := w.preferences.GetMany(ctx, tx, candidateProfiles(candidates))
+		if err != nil {
+			return 0, err
+		}
+		captured := make(map[profileKey]struct{}, len(candidates))
 		for _, candidate := range candidates {
-			captured[candidate.ProfileID] = struct{}{}
+			if _, eligible := EvaluateRecipient(candidate, prefs[candidate.key()], event.EpisodeKey); !eligible {
+				continue
+			}
+			allowed, err := recipients.canOpen(ctx, tx, candidate.UserID, candidate.ProfileID, event.EpisodeID, event.LibraryID)
+			if err != nil {
+				return 0, err
+			}
+			if !allowed {
+				continue
+			}
+			captured[candidate.key()] = struct{}{}
 			profiles[candidate.ProfileID] = struct{}{}
 		}
 		candidatesByEvent[event.ID] = captured
@@ -270,7 +300,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 // fanOutEvent resolves recipients for one release event and inserts
 // deliveries. Returns dispatch payloads for the rows actually inserted and
 // the candidate recipient count.
-func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event ReleaseEvent, capturedProfiles map[string]struct{}) ([]DeliveryRow, int, error) {
+func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event ReleaseEvent, capturedProfiles map[profileKey]struct{}) ([]DeliveryRow, int, error) {
 	candidates, err := w.interests.ListActiveBySeries(ctx, tx, event.LibraryID, event.SeriesID)
 	if err != nil {
 		return nil, 0, err
@@ -283,19 +313,15 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		return nil, 0, nil
 	}
 
-	profileIDs := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		profileIDs = append(profileIDs, candidate.ProfileID)
-	}
-	prefs, err := w.preferences.GetMany(ctx, tx, profileIDs)
+	prefs, err := w.preferences.GetMany(ctx, tx, candidateProfiles(candidates))
 	if err != nil {
 		return nil, 0, err
 	}
 
-	pending := make(map[string]pendingDelivery, len(candidates))
+	pending := make(map[profileKey]pendingDelivery, len(candidates))
 	toInsert := make([]Delivery, 0, len(candidates))
 	for _, candidate := range candidates {
-		flags, eligible := EvaluateRecipient(candidate, prefs[candidate.ProfileID], event.EpisodeKey)
+		flags, eligible := EvaluateRecipient(candidate, prefs[candidate.key()], event.EpisodeKey)
 		if !eligible {
 			continue
 		}
@@ -318,7 +344,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 			Type:           DeliveryTypeEpisodeAvailable,
 			ReasonFlags:    flagsJSON,
 		}
-		pending[candidate.ProfileID] = pendingDelivery{delivery: delivery, flags: flags}
+		pending[candidate.key()] = pendingDelivery{delivery: delivery, flags: flags}
 		toInsert = append(toInsert, delivery)
 	}
 	if len(toInsert) == 0 {
@@ -342,9 +368,9 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		return nil, 0, err
 	}
 
-	notifiedProfiles := make([]string, 0, len(inserted))
+	notifiedProfiles := make([]profileKey, 0, len(inserted))
 	for _, row := range inserted {
-		notifiedProfiles = append(notifiedProfiles, row.ProfileID)
+		notifiedProfiles = append(notifiedProfiles, row.key())
 	}
 	if err := w.interests.GuardedSetLastNotified(ctx, tx, event.LibraryID, event.SeriesID, event.EpisodeKey, notifiedProfiles); err != nil {
 		return nil, 0, err
@@ -356,7 +382,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	}
 	dispatchRows := make([]DeliveryRow, 0, len(inserted))
 	for _, row := range inserted {
-		entry, ok := pending[row.ProfileID]
+		entry, ok := pending[row.key()]
 		if !ok {
 			continue
 		}
@@ -386,6 +412,23 @@ type pendingDelivery struct {
 	flags    ReasonFlags
 }
 
+// insertedProfileKeys lists the distinct account/profile pairs of the
+// inserted deliveries. Channel targets are looked up by both: profile IDs
+// repeat across accounts, and one account's delivery must not reach another
+// account's devices or webhooks.
+func insertedProfileKeys(inserted []InsertedDelivery) []profileKey {
+	seen := make(map[profileKey]struct{}, len(inserted))
+	keys := make([]profileKey, 0, len(inserted))
+	for _, row := range inserted {
+		key := row.key()
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
 // enqueuePushOutbox inserts pending push attempt rows for each newly inserted
 // delivery and enabled private-push device on every admin-enabled platform
 // (Apple and Android).
@@ -397,21 +440,13 @@ func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserte
 	if len(platforms) == 0 {
 		return nil
 	}
-	profileSet := make(map[string]struct{}, len(inserted))
-	profileIDs := make([]string, 0, len(inserted))
-	for _, row := range inserted {
-		if _, ok := profileSet[row.ProfileID]; !ok {
-			profileSet[row.ProfileID] = struct{}{}
-			profileIDs = append(profileIDs, row.ProfileID)
-		}
-	}
-	devicesByProfile, err := w.pushDevices.ListEnabledPushByProfiles(ctx, tx, profileIDs, platforms)
+	devicesByProfile, err := w.pushDevices.ListEnabledPushByProfiles(ctx, tx, insertedProfileKeys(inserted), platforms)
 	if err != nil {
 		return err
 	}
 	attempts := make([]PushDeliveryAttempt, 0, len(inserted))
 	for _, row := range inserted {
-		attempts = append(attempts, newPushDeliveryAttempts(row.ID, devicesByProfile[row.ProfileID])...)
+		attempts = append(attempts, newPushDeliveryAttempts(row.ID, devicesByProfile[row.key()])...)
 	}
 	return w.pushDevices.EnqueuePushAttempts(ctx, tx, attempts)
 }
@@ -424,21 +459,13 @@ func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inse
 	if w.webPush == nil || len(inserted) == 0 || !w.settings.WebPushEnabled(ctx) {
 		return nil
 	}
-	profileSet := make(map[string]struct{}, len(inserted))
-	profileIDs := make([]string, 0, len(inserted))
-	for _, row := range inserted {
-		if _, ok := profileSet[row.ProfileID]; !ok {
-			profileSet[row.ProfileID] = struct{}{}
-			profileIDs = append(profileIDs, row.ProfileID)
-		}
-	}
-	subsByProfile, err := w.webPush.ListEnabledByProfiles(ctx, tx, profileIDs)
+	subsByProfile, err := w.webPush.ListEnabledByProfiles(ctx, tx, insertedProfileKeys(inserted))
 	if err != nil {
 		return err
 	}
 	attempts := make([]DeliveryAttempt, 0, len(inserted))
 	for _, row := range inserted {
-		for _, sub := range subsByProfile[row.ProfileID] {
+		for _, sub := range subsByProfile[row.key()] {
 			attempts = append(attempts, DeliveryAttempt{
 				ID:                     ulid.Make().String(),
 				NotificationDeliveryID: row.ID,
@@ -453,19 +480,11 @@ func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inse
 // inserted delivery, inside the fanout transaction. Two filters apply:
 // per-webhook reason flags, and the per-profile delivery rate limit
 // (over-limit notifications stay in the inbox; webhooks just don't fire).
-func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[string]pendingDelivery) error {
+func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
 	if w.webhooks == nil || len(inserted) == 0 || !w.settings.WebhooksEnabled(ctx) {
 		return nil
 	}
-	profileSet := make(map[string]struct{}, len(inserted))
-	profileIDs := make([]string, 0, len(inserted))
-	for _, row := range inserted {
-		if _, ok := profileSet[row.ProfileID]; !ok {
-			profileSet[row.ProfileID] = struct{}{}
-			profileIDs = append(profileIDs, row.ProfileID)
-		}
-	}
-	hooksByProfile, err := w.webhooks.ListEnabledByProfiles(ctx, tx, profileIDs)
+	hooksByProfile, err := w.webhooks.ListEnabledByProfiles(ctx, tx, insertedProfileKeys(inserted))
 	if err != nil {
 		return err
 	}
@@ -474,15 +493,16 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 	attempts := make([]DeliveryAttempt, 0, len(inserted))
 	rateLimited := 0
 	for _, row := range inserted {
-		entry, ok := pending[row.ProfileID]
+		key := row.key()
+		entry, ok := pending[key]
 		if !ok {
 			continue
 		}
-		for _, hook := range hooksByProfile[row.ProfileID] {
+		for _, hook := range hooksByProfile[key] {
 			if !hook.MatchesReasons(entry.flags) {
 				continue
 			}
-			if w.rateLimiter != nil && !w.rateLimiter.Allow(row.ProfileID, rateLimit) {
+			if w.rateLimiter != nil && !w.rateLimiter.Allow(key, rateLimit) {
 				rateLimited++
 				continue
 			}
@@ -538,11 +558,21 @@ func eventIDs(events []ReleaseEvent) []string {
 	return ids
 }
 
+func candidateProfiles(candidates []SeriesInterest) []profileKey {
+	keys := make([]profileKey, 0, len(candidates))
+	for _, candidate := range candidates {
+		keys = append(keys, candidate.key())
+	}
+	return keys
+}
+
 // capturedFanoutCandidates retains refreshed state without admitting profiles
-// whose inbox locks were not included in the transaction-wide acquisition.
-func capturedFanoutCandidates(candidates []SeriesInterest, captured map[string]struct{}) []SeriesInterest {
+// whose inbox locks were not included in the transaction-wide acquisition,
+// which also leaves out every candidate that was ineligible or failed the
+// access check when the batch was captured.
+func capturedFanoutCandidates(candidates []SeriesInterest, captured map[profileKey]struct{}) []SeriesInterest {
 	return slices.DeleteFunc(candidates, func(candidate SeriesInterest) bool {
-		_, ok := captured[candidate.ProfileID]
+		_, ok := captured[candidate.key()]
 		return !ok
 	})
 }

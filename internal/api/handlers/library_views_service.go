@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -25,6 +25,14 @@ import (
 type SectionViewer struct {
 	Access    catalog.AccessFilter
 	ImageSize imagesize.Size
+	// ImageWidths are per-slot target widths overriding ImageSize; only the
+	// native v2 API carries them.
+	ImageWidths imagesize.Widths
+}
+
+// Artwork is the viewer's artwork preference.
+func (v SectionViewer) Artwork() imagesize.Request {
+	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
 }
 
 func sectionViewerFromRequest(r *http.Request) SectionViewer {
@@ -73,12 +81,8 @@ type LibraryCollectionTabUngroupedView = libraryTabUngrouped
 // HomeLayout answers the home page's section layout for the profile on the
 // context.
 func (h *SectionHandler) HomeLayout(ctx context.Context) (SectionLayoutView, error) {
-	resolved, _, _, _, err := h.loadResolvedHomeSections(ctx)
-	if err != nil {
-		return SectionLayoutView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
-	}
-	resolved = h.maybeInjectNextUp(ctx, resolved, apimw.GetUserID(ctx))
-	return sectionLayoutOf(resolved), nil
+	view, err := h.HomeLayoutWithItems(ctx, SectionViewer{}, 0)
+	return view.Layout, err
 }
 
 // requireViewableLibrary is the gate every profile-scoped section read
@@ -97,6 +101,12 @@ func requireViewableLibrary(ctx context.Context, folders *catalog.FolderReposito
 	if !viewerCanAccessLibrary(ctx, libraryID) {
 		return apiError(http.StatusNotFound, "not_found", "Library not found")
 	}
+	return requireEnabledLibrary(ctx, folders, libraryID)
+}
+
+// requireEnabledLibrary is requireViewableLibrary without the viewer's
+// library access: the library must exist and be enabled.
+func requireEnabledLibrary(ctx context.Context, folders *catalog.FolderRepository, libraryID int) error {
 	if folders == nil {
 		return nil
 	}
@@ -156,11 +166,19 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.ImageSize), nil
+	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork()), nil
 }
 
-// LibrarySectionItems answers one section of the library with its items.
+// LibrarySectionItems answers one section of the library with its items, or
+// an error when its items cannot be fetched.
 func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer) (SectionView, error) {
+	return h.librarySectionItems(ctx, libraryID, sectionID, viewer, false)
+}
+
+// librarySectionItems is LibrarySectionItems. With emptyOnFetchError, a
+// section whose items cannot be fetched answers with no items, as the frozen
+// v1 endpoint always has.
+func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer, emptyOnFetchError bool) (SectionView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return SectionView{}, err
 	}
@@ -175,13 +193,15 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 		}
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, s, &libraryID, nil, userID, profileID, accessFilter)
 		if fetchErr != nil {
-			slog.ErrorContext(ctx, "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
-			withItems = sections.SectionWithItems{
-				ResolvedSection: s,
-				Items:           []*models.MediaItem{},
+			sections.LogFetchError(ctx, "api", s, fetchErr)
+			// As on Home, a failed single section answers an error rather
+			// than an empty row; a deleted collection keeps its empty row.
+			if !emptyOnFetchError && !sections.IsMissingCollection(fetchErr) {
+				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 			}
+			withItems = sections.SectionWithItems{ResolvedSection: s, Items: []*models.MediaItem{}}
 		}
-		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.ImageSize)
+		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.Artwork())
 		if len(resp.Sections) == 0 {
 			return resolvedSectionResponse{
 				ID:          withItems.ID,
@@ -210,9 +230,9 @@ func (h *LibraryCollectionHandler) requireViewableLibrary(ctx context.Context, l
 	return requireViewableLibrary(ctx, h.FolderRepo, libraryID)
 }
 
-// LibraryUserCollections answers the viewer's own collections opted into
-// the library's Collections tab. Personal collections are private to their
-// owner; this never reveals other users' rows.
+// LibraryUserCollections answers the personal collections opted into the
+// library's Collections tab that the viewer can see: its own plus other
+// profiles' shared collections on the same login, never another login's.
 func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return nil, err
@@ -227,7 +247,7 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 	if collections == nil {
 		collections = []usercollections.ServerVisibleCollection{}
 	}
-	h.withVisibleItemCounts(ctx, userID, collections)
+	collections = h.withVisibleItemCounts(ctx, userID, profileID, collections)
 	for i := range collections {
 		collections[i].PosterURL = h.presignGPURLCtx(ctx, collections[i].PosterPath)
 	}
@@ -235,18 +255,35 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 }
 
 // withVisibleItemCounts sets each personal collection's item_count to the
-// members the acting profile can see, as the personal collection routes do.
-func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, userID int, collections []usercollections.ServerVisibleCollection) {
-	sources := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
+// members the acting profile can see, as the personal collection routes do:
+// for another profile's collection, only those its owner can access too. On
+// /api/v2 a collection without an uploaded or imported poster takes its
+// collage for that profile, once built. A collection whose owner cannot be
+// resolved is left out of the result.
+func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, userID int, profileID string, collections []usercollections.ServerVisibleCollection) []usercollections.ServerVisibleCollection {
+	sources := make([]ownedCollectionDefinition, 0, len(collections))
 	for _, c := range collections {
-		sources = append(sources, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition})
+		sources = append(sources, ownedCollectionDefinition{
+			PersonalCollectionDefinition: catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition},
+			CreatorProfileID:             c.CreatorProfileID,
+			WantsCollage:                 strings.TrimSpace(c.PosterPath) == "",
+		})
 	}
-	counts := visiblePersonalCollectionCounts(ctx, h.Executor, userID, sources, AccessFilterFromContext(ctx, ""))
-	for i := range collections {
-		if n, ok := counts[collections[i].ID]; ok {
-			collections[i].ItemCount = n
+	reads := ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.PersonalCollages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
+	out := collections[:0]
+	for _, c := range collections {
+		if reads.unavailable[c.ID] {
+			continue
 		}
+		if n, ok := reads.counts[c.ID]; ok {
+			c.ItemCount = n
+		}
+		if collage, ok := reads.posters[c.ID]; ok {
+			c.PosterPath, c.PosterThumbhash, c.PosterIsCollage = collage.Path, collage.Thumbhash, true
+		}
+		out = append(out, c)
 	}
+	return out
 }
 
 // LibraryCollectionsTab answers the library's Collections tab: every
@@ -289,8 +326,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 				if loadErr != nil {
 					return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user collections")
 				}
-				h.withVisibleItemCounts(ctx, userID, loadedUserCollections)
-				userCollections = loadedUserCollections
+				userCollections = h.withVisibleItemCounts(ctx, userID, profileID, loadedUserCollections)
 				userCollectionsLoaded = true
 			}
 			sorted := applyUserCollectionSort(userCollections, g.DefaultSortMode)
@@ -304,20 +340,14 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 					PosterThumbhash:  sorted[i].PosterThumbhash,
 					ItemCount:        sorted[i].ItemCount,
 					CreatorProfileID: &creatorProfileID,
+					PosterIsCollage:  sorted[i].PosterIsCollage,
 				})
 			}
 		default:
 			collections := adminCollectionsByGroup[g.ID]
 			collections = applyCollectionSort(collections, g.DefaultSortMode)
 			for _, c := range collections {
-				colls = append(colls, libraryTabCollection{
-					ID:              c.ID,
-					Title:           c.Title,
-					PosterURL:       h.presignGPURLCtx(ctx, c.PosterURL),
-					PosterThumbhash: c.PosterThumbhash,
-					ItemCount:       c.ItemCount,
-					Featured:        c.Featured,
-				})
+				colls = append(colls, h.libraryTabCardOf(ctx, c))
 			}
 		}
 		if len(colls) == 0 {
@@ -337,14 +367,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 	if len(ungrouped) > 0 {
 		uColls := make([]libraryTabCollection, 0, len(ungrouped))
 		for _, c := range ungrouped {
-			uColls = append(uColls, libraryTabCollection{
-				ID:              c.ID,
-				Title:           c.Title,
-				PosterURL:       h.presignGPURLCtx(ctx, c.PosterURL),
-				PosterThumbhash: c.PosterThumbhash,
-				ItemCount:       c.ItemCount,
-				Featured:        c.Featured,
-			})
+			uColls = append(uColls, h.libraryTabCardOf(ctx, c))
 		}
 		sortOrder, err := h.GroupRepo.GetUngroupedSortOrder(ctx, libraryID)
 		if err != nil {

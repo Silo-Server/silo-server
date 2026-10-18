@@ -10,17 +10,11 @@ import (
 )
 
 type countingCompatProfileRefresh struct {
-	staled    int
-	requested int
+	notified int
 }
 
-func (c *countingCompatProfileRefresh) MarkProfileStale(context.Context, int, string) error {
-	c.staled++
-	return nil
-}
-
-func (c *countingCompatProfileRefresh) RequestProfileRefresh(context.Context, int, string) {
-	c.requested++
+func (c *countingCompatProfileRefresh) NotifySignalsChanged(context.Context, int, string) {
+	c.notified++
 }
 
 // compatProfileRefreshPlay drives one Jellyfin play of the 3600s test source
@@ -40,8 +34,7 @@ func newCompatProfileRefreshPlay(t *testing.T) *compatProfileRefreshPlay {
 	mgr.sessions["upstream-1"].MediaFileID = 42
 	handler.storeProvider = compatTestUserStoreProvider{store: newJellycompatUserStore(t)}
 	refresh := &countingCompatProfileRefresh{}
-	handler.profileStaler = refresh
-	handler.profileRefreshRequester = refresh
+	handler.signalsNotifier = refresh
 	return &compatProfileRefreshPlay{t: t, handler: handler, sourceID: sourceID, refresh: refresh}
 }
 
@@ -74,8 +67,8 @@ func (p *compatProfileRefreshPlay) reportAt(stop bool, seconds int64) {
 
 func (p *compatProfileRefreshPlay) assertRefreshes(stage string, want int) {
 	p.t.Helper()
-	if p.refresh.staled != want || p.refresh.requested != want {
-		p.t.Fatalf("%s: stale marks = %d, refresh requests = %d, want %d each", stage, p.refresh.staled, p.refresh.requested, want)
+	if p.refresh.notified != want {
+		p.t.Fatalf("%s: signal change notifications = %d, want %d", stage, p.refresh.notified, want)
 	}
 }
 

@@ -62,6 +62,9 @@ export const catalogKeys = {
   all: ["catalog"] as const,
   list: (params: CatalogParams) => ["catalog", "list", params] as const,
   filters: (params: Omit<CatalogParams, "limit">) => ["catalog", "filters", params] as const,
+  allLetters: ["catalog", "letters"] as const,
+  letters: (params: Pick<CatalogParams, "library_id" | "type" | "query_fingerprint">) =>
+    ["catalog", "letters", params] as const,
   itemDetail: (id: string, libraryId?: number) =>
     ["catalog", "items", id, "detail", libraryId ?? "default"] as const,
   itemVersions: (id: string) => ["catalog", "items", id, "versions"] as const,
@@ -100,6 +103,11 @@ export const favoriteKeys = {
   check: (itemId: string) => ["favorites", "check", itemId] as const,
 };
 
+export const notInterestedKeys = {
+  all: ["notInterested"] as const,
+  list: () => ["notInterested", "list"] as const,
+};
+
 export const watchlistKeys = {
   all: ["watchlist"] as const,
   list: () => ["watchlist", "list"] as const,
@@ -113,16 +121,22 @@ export const historyKeys = {
   list: () => ["history", "list"] as const,
 };
 
+export const shuffleKeys = {
+  all: ["shuffles"] as const,
+  detail: (shuffleId: string) => ["shuffles", shuffleId] as const,
+};
+
 export const collectionKeys = {
   all: ["collections"] as const,
   list: () => ["collections", "list"] as const,
   server: () => ["collections", "server"] as const,
   items: (collectionId: string) => ["collections", "items", collectionId] as const,
+  /** The list, each own manual collection marked with whether it holds the title. */
+  containing: (contentId: string) => ["collections", "containing", contentId] as const,
   preview: (scope: "user" | "admin", fingerprint: string) =>
     ["collections", "preview", scope, fingerprint] as const,
   templates: () => ["collections", "templates"] as const,
   mdblistSearch: (query: string) => ["collections", "mdblist", "search", query] as const,
-  mdblistTop: () => ["collections", "mdblist", "top"] as const,
 };
 
 export const requestKeys = {
@@ -236,6 +250,7 @@ export const settingsKeys = {
 export const notificationKeys = {
   all: ["notifications"] as const,
   list: (status: "all" | "unread" = "all") => ["notifications", "list", status] as const,
+  series: (status: "active" | "inactive") => ["notifications", "series", status] as const,
   unreadCount: () => ["notifications", "unread-count"] as const,
   preferences: () => ["notifications", "preferences"] as const,
   emailPreferences: () => ["notifications", "email-preferences"] as const,
@@ -248,6 +263,7 @@ export const notificationKeys = {
 export const historyImportKeys = {
   all: ["history-imports"] as const,
   sources: () => ["history-imports", "sources"] as const,
+  capability: () => ["history-imports", "capability"] as const,
   runs: (limit = 10) => ["history-imports", "runs", limit] as const,
   run: (id?: string) => ["history-imports", "run", id] as const,
   plexCheck: (sessionId?: string) => ["history-imports", "plex-check", sessionId] as const,
@@ -286,6 +302,8 @@ export const sectionKeys = {
     ["sections", "library", libraryId, "items", sectionId] as const,
   adminList: (scope: string, libraryId?: number) =>
     ["sections", "admin", scope, libraryId] as const,
+  /** Mutation key on every admin row write, so the Home rows list can wait for them. */
+  adminWrite: () => ["sections", "admin-write"] as const,
   profileOverrides: (scope: string, libraryId?: string) =>
     ["sections", "profile", scope, libraryId] as const,
   profileOverridesRaw: (scope: string, libraryId?: string) =>
@@ -315,14 +333,9 @@ export const recKeys = {
   forYouMain: () => [...recKeys.all, "for-you", "main"] as const,
   forYouRows: () => [...recKeys.all, "for-you", "rows"] as const,
   similar: (itemId: string) => [...recKeys.all, "similar", itemId] as const,
-  becauseWatched: (itemId: string) => [...recKeys.all, "because-watched", itemId] as const,
-  similarUsers: () => [...recKeys.all, "similar-users"] as const,
   tasteProfile: () => [...recKeys.all, "taste-profile"] as const,
   discover: () => [...recKeys.all, "discover"] as const,
   section: (kind: string, key?: string) => [...recKeys.all, "section", kind, key ?? ""] as const,
-  watchTonight: () => [...recKeys.all, "watch-tonight"] as const,
-  watchTonightCards: (mode: string, genres: string[]) =>
-    [...recKeys.all, "watch-tonight-cards", mode, ...genres.sort()] as const,
   tasteSeedItems: () => [...recKeys.all, "taste-seed", "items"] as const,
 };
 
@@ -340,12 +353,13 @@ export const downloadKeys = {
 
 export const themeKeys = {
   all: ["theme"] as const,
-  adminCss: () => ["theme", "admin-css"] as const,
   branding: () => ["theme", "branding"] as const,
 };
 
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
+  // Outside users(): saving an account does not change the server defaults.
+  policyDefaults: () => ["admin", "policyDefaults"] as const,
   accessGroups: () => ["admin", "accessGroups"] as const,
   accessGroup: (id: number) => ["admin", "accessGroups", id] as const,
   serverNotificationChannels: () => ["admin", "notifications", "serverChannels"] as const,
@@ -379,15 +393,23 @@ export const adminKeys = {
   catalogImportSources: () => ["admin", "catalog", "importSources"] as const,
   localImportSources: () => ["admin", "catalog", "localImportSources"] as const,
   collections: (libraryId?: number) => ["admin", "collections", libraryId] as const,
+  /** The admin Home and library page rows that show a server collection. */
+  collectionRows: (collectionId: string) => ["admin", "collections", "rows", collectionId] as const,
   collectionGroups: (libraryId?: number) => ["admin", "collectionGroups", libraryId] as const,
   collectionTemplates: () => ["admin", "collections", "templates"] as const,
   collectionTemplateBundles: () => ["admin", "collections", "templateBundles"] as const,
+  // Outside "collections": refreshing the admin collections after a write
+  // doesn't re-run a dry run; Starter packs checks its pack again itself.
+  starterPackDryRun: (packId: string, body: unknown) =>
+    ["admin", "starterPackDryRun", packId, body] as const,
   libraryProviders: (id: number) => ["admin", "libraries", id, "providers"] as const,
   libraryProviderDefaults: (libraryType: string) =>
     ["admin", "libraries", "provider-defaults", libraryType] as const,
   nodes: () => ["admin", "nodes"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
+  downloadPreparations: () => ["admin", "downloadPreparations"] as const,
+  downloadStorage: () => ["admin", "downloadStorage"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   serverStatus: () => ["admin", "serverStatus"] as const,
   dashboardLayout: () => ["admin", "dashboard", "layout"] as const,
@@ -516,10 +538,16 @@ export const adminKeys = {
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
-  unmatchedItems: (search?: string) =>
-    search !== undefined
-      ? (["admin", "libraries", "unmatchedItems", search] as const)
-      : (["admin", "libraries", "unmatchedItems"] as const),
+  unmatchedItems: (search?: string, ignored = false) =>
+    search === undefined
+      ? (["admin", "libraries", "unmatchedItems"] as const)
+      : ([
+          "admin",
+          "libraries",
+          "unmatchedItems",
+          ignored ? "ignored" : "unmatched",
+          search,
+        ] as const),
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,
   hwAccel: () => ["admin", "system", "hwAccel"] as const,

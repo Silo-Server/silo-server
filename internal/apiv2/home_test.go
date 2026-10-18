@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -20,7 +21,9 @@ type fakeHome struct {
 	lastQuery  handlers.CalendarQuery
 	lastCmd    handlers.HomeDismissalCommand
 	lastViewer handlers.SectionViewer
-	undone     []string
+	// lastInclude is the include_items the layout seam last saw.
+	lastInclude int
+	undone      []string
 }
 
 func (f *fakeHome) Calendar(_ context.Context, q handlers.CalendarQuery, _ catalogpkg.AccessFilter) (handlers.CalendarView, error) {
@@ -76,11 +79,29 @@ func (f *fakeHome) UndismissHomeItem(_ context.Context, userID int, profileID, s
 	return nil
 }
 
-func (f *fakeHome) HomeLayout(_ context.Context) (handlers.SectionLayoutView, error) {
+// HomeLayoutWithItems answers the fake layout and, like the seam, the first
+// includeItems rows as HomeSectionItems answers them.
+func (f *fakeHome) HomeLayoutWithItems(ctx context.Context, viewer handlers.SectionViewer, includeItems int) (handlers.HomeLayoutView, error) {
 	if f.err != nil {
-		return handlers.SectionLayoutView{}, f.err
+		return handlers.HomeLayoutView{}, f.err
 	}
-	return handlers.SectionLayoutView{Sections: []handlers.SectionLayoutEntryView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20}, {ID: "next_up", SectionType: "next_up", Title: "Next Up", ItemLimit: 20, Customized: true}}}, nil
+	f.lastInclude = includeItems
+	f.lastViewer = viewer
+	view := handlers.HomeLayoutView{
+		Layout:           handlers.SectionLayoutView{Sections: []handlers.SectionLayoutEntryView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20}, {ID: "next_up", SectionType: "next_up", Title: "Next Up", ItemLimit: 20, Customized: true}}},
+		IncludedSections: []handlers.SectionView{},
+	}
+	for i, s := range view.Layout.Sections {
+		if i >= includeItems {
+			break
+		}
+		row, err := f.HomeSectionItems(ctx, s.ID, viewer)
+		if err != nil {
+			return handlers.HomeLayoutView{}, err
+		}
+		view.IncludedSections = append(view.IncludedSections, row)
+	}
+	return view, nil
 }
 
 func (f *fakeHome) HomeSections(_ context.Context, viewer handlers.SectionViewer) (handlers.SectionsView, error) {
@@ -96,10 +117,13 @@ func (f *fakeHome) HomeSectionItems(_ context.Context, sectionID string, viewer 
 		return handlers.SectionView{}, f.err
 	}
 	f.lastViewer = viewer
-	if sectionID != "continue_watching" {
-		return handlers.SectionView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Section not found"}
+	switch sectionID {
+	case "continue_watching":
+		return handlers.SectionView{ID: sectionID, SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}, nil
+	case "next_up":
+		return handlers.SectionView{ID: sectionID, SectionType: "next_up", Title: "Next Up", ItemLimit: 20, TotalCount: 1, Customized: true, Items: []handlers.SectionItemView{fakeCard()}}, nil
 	}
-	return handlers.SectionView{ID: sectionID, SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}, nil
+	return handlers.SectionView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Section not found"}
 }
 
 func (f *fakeHome) Recipes() []handlers.RecipeCategoryView {
@@ -231,14 +255,70 @@ func TestGetHomeLayout(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/home/layout", "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
+// TestGetHomeLayoutIncludedSections pins the include_items option: absent
+// or 0 answers the layout with an empty included_sections, N answers the
+// first N rows byte for byte as getHomeSectionItems does, and the bound is
+// a validation failure.
+func TestGetHomeLayoutIncludedSections(t *testing.T) {
+	deps, fake := homeDeps(t)
+	h := newTestHandler(t, deps)
+	type layoutBody struct {
+		Sections         []json.RawMessage `json:"sections"`
+		IncludedSections []json.RawMessage `json:"included_sections"`
+	}
+	decode := func(t *testing.T, path string) layoutBody {
+		t.Helper()
+		rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
+		if rec.Code != 200 {
+			t.Fatal(path, rec.Code, rec.Body.String())
+		}
+		var body layoutBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+
+	plain := do(t, h, http.MethodGet, "/api/v2/home/layout", "", viewerHeaders()).Body.String()
+	if !strings.HasSuffix(plain, `,"included_sections":[]}`+"\n") || fake.lastInclude != 0 {
+		t.Fatalf("include_items absent: %s (seam saw %d)", plain, fake.lastInclude)
+	}
+	if zero := do(t, h, http.MethodGet, "/api/v2/home/layout?include_items=0", "", viewerHeaders()).Body.String(); zero != plain {
+		t.Fatalf("include_items=0 = %s, want %s", zero, plain)
+	}
+
+	body := decode(t, "/api/v2/home/layout?include_items=2&image_size=large")
+	if fake.lastInclude != 2 || fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.Access.ProfileID != "p-owner" {
+		t.Fatalf("seam saw include=%d viewer=%+v", fake.lastInclude, fake.lastViewer)
+	}
+	if len(body.Sections) != 2 || len(body.IncludedSections) != 2 {
+		t.Fatalf("sections=%d included=%d, want 2 and 2", len(body.Sections), len(body.IncludedSections))
+	}
+	for i, id := range []string{"continue_watching", "next_up"} {
+		row := do(t, h, http.MethodGet, "/api/v2/home/sections/"+id+"/items?image_size=large", "", viewerHeaders())
+		if got, want := string(body.IncludedSections[i]), strings.TrimSuffix(row.Body.String(), "\n"); got != want {
+			t.Fatalf("included_sections[%d] = %s, want the getHomeSectionItems body %s", i, got, want)
+		}
+	}
+
+	for _, bad := range []string{"-1", "5", "two"} {
+		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/layout?include_items="+bad, "", viewerHeaders()), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "query.include_items" {
+			t.Fatalf("include_items=%s errors = %+v", bad, p.Errors)
+		}
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/layout?include_items=1&image_size=huge", "", viewerHeaders()), TypeValidationFailed)
+}
+
 func TestListHomeSections(t *testing.T) {
 	deps, fake := homeDeps(t)
 	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=large", "", viewerHeaders())
+	rec := do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=large&backdrop_width=2688", "", viewerHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"continue_watching"`) || !strings.Contains(rec.Body.String(), `"total_count":1`) || !strings.Contains(rec.Body.String(), `"items":[{`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.Access.UserID != 1 || fake.lastViewer.Access.ProfileID != "p-owner" {
+	if fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.ImageWidths != (imagesize.Widths{Backdrop: 2688}) ||
+		fake.lastViewer.Access.UserID != 1 || fake.lastViewer.Access.ProfileID != "p-owner" {
 		t.Fatalf("viewer = %+v", fake.lastViewer)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=huge", "", viewerHeaders()), TypeValidationFailed)
@@ -299,4 +379,73 @@ func TestListSectionRecipeCandidates(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", nil), TypeAuthenticationRequired)
 	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "candidate_error", Message: "boom"}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/sections/recipes/custom_filter/candidates", "", viewerHeaders()), TypeInternalError)
+}
+
+// TestHomeCapabilities pins the home capability document: available with
+// include_items_max where the home sections service is wired, revalidated by
+// its ETag, not_configured without it, and include_items_max equal to the
+// include_items maximum getHomeLayout validates.
+func TestHomeCapabilities(t *testing.T) {
+	path := Prefix + "/home/capabilities"
+	deps, _ := homeDeps(t)
+	h := newTestHandler(t, deps)
+	requireProblem(t, do(t, h, http.MethodGet, path, "", nil), TypeAuthenticationRequired)
+
+	rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
+	var out HomeCapabilities
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || out.State != StateAvailable || out.Allowed == nil || !*out.Allowed || out.Revision == "" ||
+		out.IncludeItemsMax != handlers.MaxHomeLayoutIncludedSections {
+		t.Fatalf("capabilities: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != cachePrivateNoCache {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	tag := rec.Header().Get("ETag")
+	if cached := do(t, h, http.MethodGet, path, "", with(viewerHeaders(), "If-None-Match", tag)); tag == "" || cached.Code != http.StatusNotModified {
+		t.Fatalf("revalidation with %q: %d", tag, cached.Code)
+	}
+
+	deps.HomeSections = nil
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders())
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "include_items_max") {
+		t.Fatalf("unconfigured: %d %s", rec.Code, rec.Body.String())
+	}
+	out = HomeCapabilities{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.State != StateNotConfigured || out.Allowed == nil || *out.Allowed {
+		t.Fatalf("unconfigured: %+v %v", out, err)
+	}
+
+	// The advertised bound is the one the layout enforces.
+	data, err := generatedOpenAPIBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name   string `json:"name"`
+				Schema struct {
+					Maximum *float64 `json:"maximum"`
+				} `json:"schema"`
+			} `json:"parameters"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var maximum *float64
+	for _, p := range doc.Paths[Prefix+"/home/layout"]["get"].Parameters {
+		if p.Name == "include_items" {
+			maximum = p.Schema.Maximum
+		}
+	}
+	if maximum == nil || int(*maximum) != handlers.MaxHomeLayoutIncludedSections {
+		t.Fatalf("getHomeLayout include_items maximum = %v, want %d", maximum, handlers.MaxHomeLayoutIncludedSections)
+	}
+	if rec := do(t, h, http.MethodGet, fmt.Sprintf("%s/home/layout?include_items=%d", Prefix, handlers.MaxHomeLayoutIncludedSections+1), "", viewerHeaders()); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("include_items above the advertised maximum: %d", rec.Code)
+	}
 }

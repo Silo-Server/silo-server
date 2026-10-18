@@ -66,7 +66,7 @@ type SubtitleSearchOutput struct{ Body SubtitleSearchResults }
 
 func registerSubtitleReads(reg *Registry) {
 	op := func(method, path, id string) Operation {
-		return Operation{Operation: humaOp(method, Prefix+path, id, "subtitles", "Read subtitles for an accessible media file."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
+		return Operation{Operation: humaOp(method, Prefix+path, id, "subtitles", "Read subtitles for an accessible media file."), Class: ClassProfileScoped, ProfileOptional: true, HouseholdProfileGate: true, ServiceBacked: true}
 	}
 	Register(reg, op(http.MethodGet, "/subtitles/{media_file_id}", "listStoredSubtitles"), func(ctx context.Context, in *StoredSubtitlesInput) (*StoredSubtitlesOutput, error) {
 		id, p := in.MediaFileID.positive("path.media_file_id")
@@ -123,8 +123,9 @@ func registerSubtitleReads(reg *Registry) {
 			}
 			out.Results = append(out.Results, result)
 		}
-		// Provider errors can contain credential-bearing upstream URLs. The
-		// bridge preserves its old warnings; v2 exposes only a bounded summary.
+		// Provider errors can contain credential-bearing upstream URLs, so the
+		// manager reports each failed provider by name only; v2 goes further and
+		// exposes one bounded summary.
 		if len(view.Warnings) > 0 {
 			out.Warnings = append(out.Warnings, "One or more subtitle providers could not complete the search.")
 		}

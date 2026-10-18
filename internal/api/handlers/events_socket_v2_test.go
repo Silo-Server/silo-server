@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -125,9 +126,24 @@ func TestEventsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
 	}
 }
 
-type socketSessionFixture struct{ valid bool }
+// socketSessionFixture is one session of account: valid or ended, and a
+// remote-playback handoff bound to remoteProfile when that is set. Like the
+// repository, it reports the account's current role.
+type socketSessionFixture struct {
+	valid         bool
+	account       *socketUserFixture
+	remoteProfile string
+}
 
-func (s *socketSessionFixture) IsValid(context.Context, string) (bool, error) { return s.valid, nil }
+func (s *socketSessionFixture) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
+	if !s.valid {
+		return auth.SessionAuthority{}, false, nil
+	}
+	if s.remoteProfile != "" {
+		return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: s.remoteProfile}, true, nil
+	}
+	return auth.SessionAuthority{Role: s.account.user.Role, Purpose: models.SessionPurposeAccount}, true, nil
+}
 
 type socketUserFixture struct{ user models.User }
 
@@ -144,11 +160,11 @@ func (s *socketViewerFixture) Resolve(context.Context, access.ResolveInput) (acc
 
 func TestEventsSocketV2ValidatesCurrentSessionAccountAndProfile(t *testing.T) {
 	events, _ := socketTestHandler()
-	sessions := &socketSessionFixture{valid: true}
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "secondary", ProfileVerified: true, PolicyRevision: 1}}
 	primaryFlag := false
-	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return primaryFlag, true, nil }, "")
+	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, apimw.NewActingAdminDecider(func(context.Context, int, string) (bool, bool, error) { return primaryFlag, true, nil }, nil), "")
 	proof := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", ProfileID: "secondary", AccessExpiresAt: time.Now().Add(time.Minute)}
 	ticket, err := h.Mint(t.Context(), proof)
 	if err != nil {
@@ -308,5 +324,137 @@ func TestEventsSocketV2MalformedHandshakeDoesNotConsumeProof(t *testing.T) {
 				t.Fatal("malformed handshake consumed proof")
 			}
 		})
+	}
+}
+
+// A remote-playback handoff's ticket validates as its bound profile with the
+// account role "user", even on an admin account, and a ticket naming another
+// profile is refused.
+func TestSocketValidatorBindsRemotePlayback(t *testing.T) {
+	events, _ := socketTestHandler()
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users, remoteProfile: "kid"}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}}
+	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, apimw.NewActingAdminDecider(func(context.Context, int, string) (bool, bool, error) { return true, true, nil }, nil), "")
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "kid", AccessExpiresAt: time.Now().Add(time.Minute)}
+	_, claims, err := h.Validate(t.Context(), identity)
+	if err != nil || claims.Role != "user" || !claims.IsRemotePlayback() || claims.IsOwnLoginSession() {
+		t.Fatalf("handoff ticket = %+v, %v", claims, err)
+	}
+	identity.ProfileID = "parent"
+	if _, _, err := h.Validate(t.Context(), identity); !errors.Is(err, errSocketAccessChanged) {
+		t.Fatalf("ticket for another profile: %v", err)
+	}
+	// A ticket an older release minted with the admin role is an access
+	// change: the client fetches a new one.
+	identity.ProfileID, identity.Role = "kid", "admin"
+	if _, _, err := h.Validate(t.Context(), identity); !errors.Is(err, errSocketAccessChanged) {
+		t.Fatalf("admin ticket for a handoff: %v", err)
+	}
+}
+
+// The Watch Together socket refuses a handoff's ticket, at the handshake and
+// on every recheck, even one naming the bound profile that the events socket
+// accepts: one minted before the session was bound, or by an older node.
+func TestWatchTogetherSocketRefusesRemotePlayback(t *testing.T) {
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "user", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users, remoteProfile: "kid"}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}}
+	primary := func(context.Context, int, string) (bool, bool, error) { return false, true, nil }
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "kid", AccessExpiresAt: time.Now().Add(time.Minute)}
+	room := NewWatchTogetherSocketV2(nil, nil, sessions, users, viewer, apimw.NewActingAdminDecider(primary, nil), "")
+	if _, _, err := room.Validate(t.Context(), identity); !errors.Is(err, evt.ErrSocketTicket) {
+		t.Fatalf("handoff room ticket: %v", err)
+	}
+	sessions.remoteProfile = ""
+	if _, claims, err := room.Validate(t.Context(), identity); err != nil || claims.IsRemotePlayback() {
+		t.Fatalf("ordinary room ticket = %+v, %v", claims, err)
+	}
+}
+
+// A profile-less admin session holds the administrator role only while its
+// household does not require a profile, the rule the HTTP admin routes apply:
+// a ticket minted after the household gains a PIN or a limit carries the user
+// role, and one minted before it stops validating.
+func TestSocketValidatorProfileLessAdminFollowsHouseholdRequirement(t *testing.T) {
+	events, _ := socketTestHandler()
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileVerified: true, PolicyRevision: 1}}
+	var requiresProfile atomic.Bool
+	var householdDown atomic.Bool
+	decide := apimw.NewActingAdminDecider(
+		func(context.Context, int, string) (bool, bool, error) { return true, true, nil },
+		func(context.Context, int) (bool, error) {
+			if householdDown.Load() {
+				return false, errors.New("profile store down")
+			}
+			return requiresProfile.Load(), nil
+		})
+	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, decide, "")
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", AccessExpiresAt: time.Now().Add(time.Minute)}
+	mint := func() evt.SocketIdentity {
+		t.Helper()
+		ticket, err := h.Mint(t.Context(), identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := h.Tickets.Consume(t.Context(), ticket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return proof
+	}
+
+	open := mint()
+	if _, claims, err := h.Validate(t.Context(), open); err != nil || claims.Role != "admin" {
+		t.Fatalf("household without a requirement: %+v, %v", claims, err)
+	}
+
+	requiresProfile.Store(true)
+	if _, _, err := h.Validate(t.Context(), open); !errors.Is(err, errSocketAccessChanged) {
+		t.Fatalf("open admin socket after the household gained a PIN: %v, want an access change", err)
+	}
+	demoted := mint()
+	if demoted.EffectiveRole != "user" {
+		t.Fatalf("profile-less ticket effective role = %q, want user", demoted.EffectiveRole)
+	}
+	_, claims, err := h.Validate(t.Context(), demoted)
+	if err != nil || claims.Role != "user" {
+		t.Fatalf("profile-less ticket on a household that requires a profile: %+v, %v", claims, err)
+	}
+	if channels := allowedChannelsForClaims(claims); slices.Contains(channels, evt.ChannelSessions) {
+		t.Fatalf("profile-less session offered the administrator channels: %v", channels)
+	}
+
+	householdDown.Store(true)
+	if _, _, err := h.Validate(t.Context(), demoted); !errors.Is(err, evt.ErrSocketTicket) {
+		t.Fatalf("failed household lookup: %v, want the credential refused", err)
+	}
+}
+
+// The acting-admin decision sees the minting request's device, as the HTTP
+// admin gate does, so a policy keyed on the device answers the same on both.
+func TestSocketValidatorPassesDeviceToActingAdmin(t *testing.T) {
+	events, _ := socketTestHandler()
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "parent", ProfileVerified: true, PolicyRevision: 1}}
+	var devices []string
+	decide := func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
+		devices = append(devices, in.DeviceID)
+		return in.DeviceID != "refused-device", nil
+	}
+	h := NewEventsSocketV2(events.Events, events.Tickets, sessions, users, viewer, decide, "")
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", ProfileID: "parent", DeviceID: "refused-device", AccessExpiresAt: time.Now().Add(time.Minute)}
+	if _, claims, err := h.Validate(t.Context(), identity); err != nil || claims.Role != "user" {
+		t.Fatalf("refused device: %+v, %v", claims, err)
+	}
+	identity.DeviceID = "tv-1"
+	if _, claims, err := h.Validate(t.Context(), identity); err != nil || claims.Role != "admin" {
+		t.Fatalf("allowed device: %+v, %v", claims, err)
+	}
+	if !slices.Equal(devices, []string{"refused-device", "tv-1"}) {
+		t.Fatalf("decider saw devices %v", devices)
 	}
 }

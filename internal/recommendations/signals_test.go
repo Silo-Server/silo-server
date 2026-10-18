@@ -3,10 +3,12 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -14,14 +16,40 @@ type fakeSignalRepo struct {
 	canonical map[string]string
 
 	fallbackWatched         map[string]struct{}
+	watchedReads            int
+	fallbackFavorites       []string
+	fallbackMarks           []NotInterestedMark
 	fallbackProgress        []WatchProgressRow
 	ebookProgress           []WatchProgressRow
 	fallbackRecentCompleted []string
 	fallbackRewatches       []RewatchCount
+
+	// missing lists canonical IDs RecommendableItemIDs reports as deleted from
+	// the catalog; every other ID exists.
+	missing map[string]struct{}
+
+	// signalRows answers HasSignalRows, which records each call's
+	// includeStoreTables argument.
+	signalRows      bool
+	signalRowsCalls []bool
+}
+
+func (r *fakeSignalRepo) HasSignalRows(_ context.Context, _ int, _ string, includeStoreTables bool) (bool, error) {
+	r.signalRowsCalls = append(r.signalRowsCalls, includeStoreTables)
+	return r.signalRows, nil
 }
 
 func (r *fakeSignalRepo) GetWatchedItemIDSet(context.Context, int, string) (map[string]struct{}, error) {
+	r.watchedReads++
 	return r.fallbackWatched, nil
+}
+
+func (r *fakeSignalRepo) GetFavoriteItemIDs(context.Context, int, string) ([]string, error) {
+	return r.fallbackFavorites, nil
+}
+
+func (r *fakeSignalRepo) GetNotInterestedMarks(context.Context, int, string) ([]NotInterestedMark, error) {
+	return r.fallbackMarks, nil
 }
 
 func (r *fakeSignalRepo) GetWatchProgressForUser(context.Context, int, string) ([]WatchProgressRow, error) {
@@ -32,8 +60,8 @@ func (r *fakeSignalRepo) GetEbookReaderProgressForUser(context.Context, int, str
 	return r.ebookProgress, nil
 }
 
-func (r *fakeSignalRepo) GetRecentCompletedItemIDs(context.Context, int, string, int) ([]string, error) {
-	return r.fallbackRecentCompleted, nil
+func (r *fakeSignalRepo) GetRecentCompletedItemIDs(_ context.Context, _ int, _ string, limit int) ([]string, error) {
+	return r.fallbackRecentCompleted[:min(limit, len(r.fallbackRecentCompleted))], nil
 }
 
 func (r *fakeSignalRepo) GetRewatchCounts(context.Context, int, string) ([]RewatchCount, error) {
@@ -64,6 +92,16 @@ func (r *fakeSignalRepo) ResolveCanonicalItemIDSet(ctx context.Context, contentI
 	return set, nil
 }
 
+func (r *fakeSignalRepo) RecommendableItemIDs(_ context.Context, itemIDs []string) (map[string]struct{}, error) {
+	existing := make(map[string]struct{}, len(itemIDs))
+	for _, id := range itemIDs {
+		if _, gone := r.missing[id]; !gone {
+			existing[id] = struct{}{}
+		}
+	}
+	return existing, nil
+}
+
 type fakeSignalProvider struct {
 	store userstore.UserStore
 }
@@ -79,9 +117,74 @@ func (p fakeSignalProvider) Close() error {
 type fakeSignalStore struct {
 	userstore.UserStore
 
-	progress []userstore.WatchProgress
-	history  []userstore.WatchHistoryEntry
-	profile  *userstore.Profile
+	progress  []userstore.WatchProgress
+	history   []userstore.WatchHistoryEntry
+	profile   *userstore.Profile
+	favorites []userstore.Favorite
+	watchlist []userstore.WatchlistEntry
+	marks     []userstore.NotInterestedEntry
+}
+
+// ListNotInterestedPage returns the profile's marks in one page, as stored.
+func (s *fakeSignalStore) ListNotInterestedPage(_ context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.NotInterestedEntry, error) {
+	if after != nil {
+		return nil, nil
+	}
+	var rows []userstore.NotInterestedEntry
+	for _, m := range s.marks {
+		if m.ProfileID == profileID && len(rows) < limit {
+			rows = append(rows, m)
+		}
+	}
+	return rows, nil
+}
+
+func (s *fakeSignalStore) ListFavorites(_ context.Context, profileID string, limit, offset int) ([]userstore.Favorite, error) {
+	var rows []userstore.Favorite
+	for _, f := range s.favorites {
+		if f.ProfileID == profileID {
+			rows = append(rows, f)
+		}
+	}
+	return pageOf(rows, limit, offset), nil
+}
+
+// ListFavoritesPage pages the profile's favorites in stored order, keyed by
+// media item ID; the fake keeps no timestamps to order by.
+func (s *fakeSignalStore) ListFavoritesPage(_ context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.Favorite, error) {
+	var rows []userstore.Favorite
+	started := after == nil
+	for _, f := range s.favorites {
+		if f.ProfileID != profileID {
+			continue
+		}
+		if !started {
+			started = f.MediaItemID == after.MediaItemID
+			continue
+		}
+		rows = append(rows, f)
+		if len(rows) == limit {
+			break
+		}
+	}
+	return rows, nil
+}
+
+func (s *fakeSignalStore) ListWatchlist(_ context.Context, profileID string, limit, offset int) ([]userstore.WatchlistEntry, error) {
+	var rows []userstore.WatchlistEntry
+	for _, w := range s.watchlist {
+		if w.ProfileID == profileID {
+			rows = append(rows, w)
+		}
+	}
+	return pageOf(rows, limit, offset), nil
+}
+
+func pageOf[T any](rows []T, limit, offset int) []T {
+	if offset >= len(rows) {
+		return nil
+	}
+	return rows[offset:min(offset+limit, len(rows))]
 }
 
 func (s *fakeSignalStore) ListProgress(_ context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error) {
@@ -435,7 +538,10 @@ func TestProfileAccessFilterUsesStoredStableProfileRestrictions(t *testing.T) {
 	}}
 	engine := &Engine{storeProvider: fakeSignalProvider{store: store}}
 
-	filter := engine.profileAccessFilter(context.Background(), 7, "p1")
+	filter, err := engine.profileAccessFilter(context.Background(), 7, "p1")
+	if err != nil {
+		t.Fatalf("profileAccessFilter: %v", err)
+	}
 	if filter.UserID != 7 || filter.ProfileID != "p1" {
 		t.Fatalf("unexpected filter identity: %#v", filter)
 	}
@@ -472,5 +578,173 @@ func TestSignalReaderRecentCompletedResolvesTiesAcrossPages(t *testing.T) {
 	}
 	if want := []string{"series-a"}; !slices.Equal(got, want) {
 		t.Fatalf("recent completed = %v, want %v", got, want)
+	}
+}
+
+// On the Postgres user store one query answers; on a store outside Postgres
+// the query covers only ratings and reading progress and the store is asked
+// for the rest.
+func TestSignalReaderHasSignals(t *testing.T) {
+	ctx := t.Context()
+	repo := &fakeSignalRepo{signalRows: true}
+	if has, err := NewSignalReader(repo, fakeSignalProvider{store: &fakeSignalStore{}}).HasSignals(ctx, 7, "p1"); err != nil || !has {
+		t.Fatalf("postgres store with signal rows: has=%v err=%v", has, err)
+	}
+	if len(repo.signalRowsCalls) != 1 || !repo.signalRowsCalls[0] {
+		t.Fatalf("signal row queries = %v, want one including the store tables", repo.signalRowsCalls)
+	}
+
+	for name, tc := range map[string]struct {
+		store *fakeSignalStore
+		want  bool
+	}{
+		"empty":     {&fakeSignalStore{favorites: []userstore.Favorite{{ProfileID: "other", MediaItemID: "m"}}}, false},
+		"favorite":  {&fakeSignalStore{favorites: []userstore.Favorite{{ProfileID: "p1", MediaItemID: "m"}}}, true},
+		"watchlist": {&fakeSignalStore{watchlist: []userstore.WatchlistEntry{{ProfileID: "p1", MediaItemID: "m"}}}, true},
+		"progress":  {&fakeSignalStore{progress: []userstore.WatchProgress{{ProfileID: "p1", MediaItemID: "m", PositionSeconds: 1, DurationSeconds: 100}}}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &fakeSignalRepo{}
+			reader := NewSignalReader(repo, fakeSignalProvider{store: tc.store})
+			reader.storeOutsidePostgres = true
+			has, err := reader.HasSignals(ctx, 7, "p1")
+			if err != nil || has != tc.want {
+				t.Fatalf("has=%v err=%v, want %v", has, err, tc.want)
+			}
+			if len(repo.signalRowsCalls) != 1 || repo.signalRowsCalls[0] {
+				t.Fatalf("signal row queries = %v, want one without the store tables", repo.signalRowsCalls)
+			}
+		})
+	}
+}
+
+// The exclusion set is the watched set plus every favorite of the profile,
+// read across pages, with episodes resolved to their series. Watchlist
+// entries and in-progress titles are not in it.
+func TestSignalReaderRecommendationExclusionSet(t *testing.T) {
+	favorites := []userstore.Favorite{{ProfileID: "p1", MediaItemID: "episode-favorite"}}
+	for i := range signalPageSize {
+		favorites = append(favorites, userstore.Favorite{ProfileID: "p1", MediaItemID: fmt.Sprintf("seed-%04d", i)})
+	}
+	favorites = append(favorites, userstore.Favorite{ProfileID: "other", MediaItemID: "other-favorite"})
+	store := &fakeSignalStore{
+		progress: []userstore.WatchProgress{
+			{ProfileID: "p1", MediaItemID: "episode-watched", Completed: true},
+			{ProfileID: "p1", MediaItemID: "movie-started", PositionSeconds: 10, DurationSeconds: 100},
+		},
+		favorites: favorites,
+		watchlist: []userstore.WatchlistEntry{{ProfileID: "p1", MediaItemID: "movie-watchlist"}},
+	}
+	repo := &fakeSignalRepo{canonical: map[string]string{
+		"episode-watched":  "series-watched",
+		"episode-favorite": "series-favorite",
+	}}
+
+	excluded, err := NewSignalReader(repo, fakeSignalProvider{store: store}).RecommendationExclusionSet(t.Context(), 7, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(excluded) != signalPageSize+2 {
+		t.Fatalf("excluded %d titles, want %d", len(excluded), signalPageSize+2)
+	}
+	for _, id := range []string{"series-watched", "series-favorite", "seed-0000", fmt.Sprintf("seed-%04d", signalPageSize-1)} {
+		if _, ok := excluded[id]; !ok {
+			t.Fatalf("%s missing from the exclusion set", id)
+		}
+	}
+	for _, id := range []string{"episode-watched", "episode-favorite", "movie-started", "movie-watchlist", "other-favorite"} {
+		if _, ok := excluded[id]; ok {
+			t.Fatalf("%s is in the exclusion set", id)
+		}
+	}
+
+	// Without a user store the repo answers both halves.
+	fallback := &fakeSignalRepo{
+		canonical:         map[string]string{"episode-favorite": "series-favorite"},
+		fallbackWatched:   map[string]struct{}{"movie-watched": {}},
+		fallbackFavorites: []string{"episode-favorite", "movie-favorite"},
+	}
+	excluded, err = NewSignalReader(fallback, nil).RecommendationExclusionSet(t.Context(), 7, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]struct{}{"movie-watched": {}, "series-favorite": {}, "movie-favorite": {}}; !maps.Equal(excluded, want) {
+		t.Fatalf("repo exclusion set = %v, want %v", excluded, want)
+	}
+}
+
+// Under WithWatchedSetMemo a profile's watched set is read once however many
+// SignalReaders ask for it; another profile, or a context without the memo,
+// reads again.
+func TestWatchedSetMemoReadsEachProfileOnce(t *testing.T) {
+	repo := &fakeSignalRepo{fallbackWatched: map[string]struct{}{"watched": {}}}
+	rowsReader, blendReader := NewSignalReader(repo, nil), NewSignalReader(repo, nil)
+	read := func(ctx context.Context, reader *SignalReader, profileID string) {
+		t.Helper()
+		set, err := reader.WatchedItemIDSet(ctx, 7, profileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := set["watched"]; !ok || len(set) != 1 {
+			t.Fatalf("watched set = %v", set)
+		}
+	}
+
+	ctx := WithWatchedSetMemo(t.Context())
+	read(ctx, rowsReader, "p1")
+	read(ctx, blendReader, "p1")
+	if repo.watchedReads != 1 {
+		t.Fatalf("reads under the memo = %d, want 1", repo.watchedReads)
+	}
+	read(ctx, blendReader, "p2")
+	read(t.Context(), rowsReader, "p1")
+	if repo.watchedReads != 3 {
+		t.Fatalf("reads = %d, want one more for another profile and one without the memo", repo.watchedReads)
+	}
+}
+
+// fakeRatedItems lists a profile's ratings from memory.
+type fakeRatedItems []string
+
+func (f fakeRatedItems) ListAll(context.Context, int, string) ([]catalog.UserRating, error) {
+	out := make([]catalog.UserRating, len(f))
+	for i, id := range f {
+		out[i] = catalog.UserRating{MediaItemID: id, Rating: 4}
+	}
+	return out, nil
+}
+
+// Rows built for a profile leave out what it watched or favorited, every
+// title it rated, and every title it abandoned: progress under 15% left for
+// 14 days. A title paused early more recently, or one partly watched, stays.
+func TestBuildExclusionSetLeavesOutRatedAndAbandonedTitles(t *testing.T) {
+	now := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+	repo := &fakeSignalRepo{
+		canonical:         map[string]string{"episode-rated": "series-rated", "episode-abandoned": "series-abandoned"},
+		fallbackWatched:   map[string]struct{}{"watched": {}},
+		fallbackFavorites: []string{"favorite"},
+		fallbackProgress: []WatchProgressRow{
+			{MediaItemID: "abandoned", PositionSeconds: 100, DurationSeconds: 6000, UpdatedAt: now.Add(-15 * 24 * time.Hour)},
+			{MediaItemID: "episode-abandoned", PositionSeconds: 60, DurationSeconds: 2400, UpdatedAt: now.Add(-30 * 24 * time.Hour)},
+			{MediaItemID: "paused-recently", PositionSeconds: 100, DurationSeconds: 6000, UpdatedAt: now.Add(-2 * 24 * time.Hour)},
+			{MediaItemID: "half-watched", PositionSeconds: 1800, DurationSeconds: 6000, UpdatedAt: now.Add(-60 * 24 * time.Hour)},
+		},
+	}
+	signals := NewSignalReader(repo, nil)
+	got, err := signals.BuildExclusionSet(t.Context(), fakeRatedItems{"rated", "episode-rated"}, 7, "p1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"abandoned", "favorite", "rated", "series-abandoned", "series-rated", "watched"}
+	if ids := slices.Sorted(maps.Keys(got)); !slices.Equal(ids, want) {
+		t.Fatalf("excluded = %v, want %v", ids, want)
+	}
+
+	got, err = signals.BuildExclusionSet(t.Context(), nil, 7, "p1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["rated"]; ok {
+		t.Fatal("with no ratings lister, rated titles stay")
 	}
 }

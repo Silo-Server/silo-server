@@ -162,6 +162,19 @@ func TestVideoToolboxListingGateRequiresCompletePipeline(t *testing.T) {
 	}
 }
 
+func TestQSVListingGateRequiresOpenCLBitmapSubtitleFilters(t *testing.T) {
+	filters := "tonemap_opencl hwmap scale_vaapi"
+	encoders := []byte("h264_qsv")
+	if !hardwareProbeAvailable(BackendQSV, []byte(filters+" overlay_opencl scale_opencl"), encoders) {
+		t.Fatal("complete QSV pipeline was not accepted")
+	}
+	for _, missing := range []string{" scale_opencl", " overlay_opencl"} {
+		if hardwareProbeAvailable(BackendQSV, []byte(filters+missing), encoders) {
+			t.Fatalf("QSV pipeline with only%s was accepted", missing)
+		}
+	}
+}
+
 // TestProbeTotalTimeoutCoversBoundedCommandMatrix verifies the deadline covers every possible probe command.
 func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 	tests := []struct {
@@ -170,11 +183,11 @@ func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 		device   string
 		expected time.Duration
 	}{
-		{name: "software", backend: BackendSoftware, expected: 36 * time.Second},
-		{name: "one QSV device", backend: BackendQSV, device: "/dev/dri/renderD128", expected: 61 * time.Second},
-		{name: "two VAAPI devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", expected: 86 * time.Second},
-		{name: "one NVENC device", backend: BackendNVENC, device: "0", expected: 186 * time.Second},
-		{name: "VideoToolbox", backend: BackendVideoToolbox, expected: 61 * time.Second},
+		{name: "software", backend: BackendSoftware, expected: 41 * time.Second},
+		{name: "one QSV device", backend: BackendQSV, device: "/dev/dri/renderD128", expected: 71 * time.Second},
+		{name: "two VAAPI devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", expected: 91 * time.Second},
+		{name: "one NVENC device", backend: BackendNVENC, device: "0", expected: 221 * time.Second},
+		{name: "VideoToolbox", backend: BackendVideoToolbox, expected: 66 * time.Second},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -188,19 +201,19 @@ func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 // TestProbeEndpointTimeoutCoversDetectionAndProbeBudgets verifies that endpoint
 // and transport budgets include their complete backend-specific probe matrix.
 func TestProbeEndpointTimeoutCoversDetectionAndProbeBudgets(t *testing.T) {
-	if got, want := ProbeEndpointTimeout(BackendQSV, "/dev/dri/renderD128"), 106*time.Second; got != want {
+	if got, want := ProbeEndpointTimeout(BackendQSV, "/dev/dri/renderD128"), 116*time.Second; got != want {
 		t.Fatalf("ProbeEndpointTimeout() = %s, want %s", got, want)
 	}
-	if got, want := ProbeEndpointTimeout("auto", "/dev/dri/renderD128,/dev/dri/renderD129"), 131*time.Second; got != want {
+	if got, want := ProbeEndpointTimeout("auto", "/dev/dri/renderD128,/dev/dri/renderD129"), 146*time.Second; got != want {
 		t.Fatalf("ProbeEndpointTimeout(auto) = %s, want %s", got, want)
 	}
-	if got, want := ProbeRequestTimeout(BackendQSV, "/dev/dri/renderD128"), 111*time.Second; got != want {
+	if got, want := ProbeRequestTimeout(BackendQSV, "/dev/dri/renderD128"), 121*time.Second; got != want {
 		t.Fatalf("ProbeRequestTimeout() = %s, want %s", got, want)
 	}
-	if got, want := ProbeEndpointTimeout(BackendNVENC, "0"), 231*time.Second; got != want {
+	if got, want := ProbeEndpointTimeout(BackendNVENC, "0"), 266*time.Second; got != want {
 		t.Fatalf("ProbeEndpointTimeout(NVENC) = %s, want %s", got, want)
 	}
-	if got, want := ProbeRequestTimeout(BackendNVENC, "0"), 236*time.Second; got != want {
+	if got, want := ProbeRequestTimeout(BackendNVENC, "0"), 271*time.Second; got != want {
 		t.Fatalf("ProbeRequestTimeout(NVENC) = %s, want %s", got, want)
 	}
 	// The slack has to outlast a full hardware detection walk plus the
@@ -613,5 +626,153 @@ func TestProbeDevicesCapsTheConfiguredSet(t *testing.T) {
 	small := configured[:3]
 	if got := probeDevices(strings.Join(small, ","), BackendQSV); !slices.Equal(got, small) {
 		t.Fatalf("probed %v, want the configured %v unchanged", got, small)
+	}
+}
+
+// TestProbeSmokesDolbyVisionOnlyOnRPUExecutors verifies the Dolby Vision kind
+// is tried and advertised only where the filter can apply an RPU.
+func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
+	tests := []struct {
+		name         string
+		backend      string
+		filters      string
+		encoders     string
+		wantSoftware bool
+		wantHardware bool
+	}{
+		{name: "tonemapx and QSV OpenCL", backend: BackendQSV, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n", encoders: "libx264 h264_qsv", wantSoftware: true, wantHardware: true},
+		{name: "tonemapx and NVENC CUDA", backend: BackendNVENC, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_cuda V->V\n .S. scale_cuda V->V\n", encoders: "libx264 h264_nvenc", wantSoftware: true, wantHardware: true},
+		{name: "Hable and VAAPI", backend: BackendVAAPI, filters: " .S. zscale V->V\n .S. tonemap V->V\n .S. sidedata V->V\n .S. tonemap_vaapi V->V\n .S. scale_vaapi V->V\n", encoders: "libx264 h264_vaapi"},
+		{name: "tonemapx and VideoToolbox", backend: BackendVideoToolbox, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. scale_vt V->V\n .S. hwdownload V->V\n", encoders: "libx264 h264_videotoolbox", wantSoftware: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var dolbyVisionSmokes []string
+			runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				switch {
+				case slices.Contains(args, "-filters"):
+					return []byte(tt.filters), nil
+				case slices.Contains(args, "-encoders"):
+					return []byte(tt.encoders), nil
+				}
+				if joined := strings.Join(args, " "); strings.Contains(joined, "apply_dovi=1") {
+					dolbyVisionSmokes = append(dolbyVisionSmokes, joined)
+				}
+				return nil, nil
+			}
+			got := ProbeWithRunner(context.Background(), "/ffmpeg", tt.backend, "", runner)
+			if got.Supports(ModeSoftware, SourceDolbyVision) != tt.wantSoftware || got.Supports(ModeHardware, SourceDolbyVision) != tt.wantHardware {
+				t.Fatalf("capabilities = %#v, want software %t hardware %t", got, tt.wantSoftware, tt.wantHardware)
+			}
+			for _, kind := range StandardSourceKinds() {
+				if !got.Supports(ModeSoftware, kind) || !got.Supports(ModeHardware, kind) {
+					t.Fatalf("capabilities = %#v, lost standard kind %q", got, kind)
+				}
+			}
+			wantSmokes := 0
+			if tt.wantSoftware {
+				wantSmokes++
+			}
+			if tt.wantHardware {
+				wantSmokes++
+			}
+			if len(dolbyVisionSmokes) != wantSmokes {
+				t.Fatalf("Dolby Vision smokes = %q, want %d", dolbyVisionSmokes, wantSmokes)
+			}
+		})
+	}
+}
+
+// TestProbeRefusedDolbyVisionSmokeStaysCached verifies that an FFmpeg build
+// refusing apply_dovi yields a complete inventory instead of a re-probe every
+// negative-cache interval.
+func TestProbeRefusedDolbyVisionSmokeStaysCached(t *testing.T) {
+	resetProbeCache(t)
+	now := time.Unix(100, 0)
+	calls := 0
+	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls++
+		if len(args) > 0 && args[len(args)-1] == "-filters" {
+			return []byte(" .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n"), nil
+		}
+		if len(args) > 0 && args[len(args)-1] == "-encoders" {
+			return []byte("libx264"), nil
+		}
+		if strings.Contains(strings.Join(args, " "), "apply_dovi") {
+			return []byte("Option 'apply_dovi' not found"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}
+	got, err := probeCached(t.Context(), "/ffmpeg-no-dovi", BackendSoftware, "", runner, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("probe error = %v", err)
+	}
+	if got.Supports(ModeSoftware, SourceDolbyVision) || !got.Supports(ModeSoftware, SourcePQ) {
+		t.Fatalf("capabilities = %#v, want PQ without Dolby Vision", got)
+	}
+	firstCalls := calls
+	now = now.Add(24 * time.Hour)
+	if _, err := probeCached(t.Context(), "/ffmpeg-no-dovi", BackendSoftware, "", runner, func() time.Time { return now }); err != nil {
+		t.Fatalf("cached probe error = %v", err)
+	}
+	if calls != firstCalls {
+		t.Fatalf("probe reran after a refused Dolby Vision smoke: calls = %d, want %d", calls, firstCalls)
+	}
+}
+
+// TestProbeTransientDolbyVisionSmokeFailureRetries verifies that a Dolby
+// Vision smoke failing for any reason other than a refused apply_dovi option,
+// including its own command deadline, keeps the standard kinds and is retried
+// after probeUnsettledDolbyVisionTTL instead of being cached as unsupported.
+func TestProbeTransientDolbyVisionSmokeFailureRetries(t *testing.T) {
+	tests := []struct {
+		name   string
+		output []byte
+		err    error
+	}{
+		{name: "device busy", output: []byte("Device creation failed: -12."), err: errors.New("exit status 1")},
+		{name: "own deadline", err: context.DeadlineExceeded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetProbeCache(t)
+			now := time.Unix(100, 0)
+			calls, dolbyVisionFailures := 0, 1
+			runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				calls++
+				if len(args) > 0 && args[len(args)-1] == "-filters" {
+					return []byte(" .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n"), nil
+				}
+				if len(args) > 0 && args[len(args)-1] == "-encoders" {
+					return []byte("libx264"), nil
+				}
+				if strings.Contains(strings.Join(args, " "), "apply_dovi=1") && dolbyVisionFailures > 0 {
+					dolbyVisionFailures--
+					return tt.output, tt.err
+				}
+				return nil, nil
+			}
+			probe := func() Capabilities {
+				t.Helper()
+				got, err := probeCached(t.Context(), "/ffmpeg-dovi-busy", BackendSoftware, "", runner, func() time.Time { return now })
+				if err != nil {
+					t.Fatalf("probe error = %v", err)
+				}
+				return got
+			}
+			if got := probe(); got.Supports(ModeSoftware, SourceDolbyVision) || !got.Supports(ModeSoftware, SourcePQ) {
+				t.Fatalf("first capabilities = %#v, want PQ without Dolby Vision", got)
+			}
+			firstCalls := calls
+			now = now.Add(probeUnsettledDolbyVisionTTL - time.Second)
+			probe()
+			if calls != firstCalls {
+				t.Fatalf("probe reran before the unsettled Dolby Vision TTL: calls = %d, want %d", calls, firstCalls)
+			}
+			now = now.Add(2 * time.Second)
+			if got := probe(); !got.Supports(ModeSoftware, SourceDolbyVision) {
+				t.Fatalf("retried capabilities = %#v, want Dolby Vision once the smoke passes", got)
+			}
+		})
 	}
 }

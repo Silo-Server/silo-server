@@ -56,6 +56,9 @@ func TestRevisionedArtworkURLChurnOverADay(t *testing.T) {
 					if lifetime := got.ExpiresAt.Sub(now); lifetime < tc.minLifetime {
 						t.Fatalf("URL at %s is valid for %s, want at least %s", now, lifetime, tc.minLifetime)
 					}
+					if lifetime := got.ExpiresAt.Sub(now); tc.name == "local" && lifetime > 28*time.Hour {
+						t.Fatalf("URL at %s is valid for %s, want at most 28h", now, lifetime)
+					}
 					distinct[got.URL] = true
 					time.Sleep(20 * time.Second)
 					if b.ResolveURLs(t.Context(), []string{key})[key].URL != got.URL {

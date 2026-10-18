@@ -50,7 +50,10 @@
         {
           "kind": "intro",
           "start_seconds": 0,
-          "end_seconds": 90
+          "end_seconds": 90,
+          "thumbnail_url": "https://images.example.test/intro.webp",
+          "thumbnail_thumbhash": "AQID",
+          "thumbnail_capture_seconds": 0
         }
       ],
       "trickplay_available": false
@@ -92,5 +95,9 @@
     "played": false,
     "last_file_id": "3"
   },
-  "effective_subtitle_language": "eng"
+  "effective_subtitle_language": "eng",
+  "poster_url": "/api/images/poster/heat.jpg?size=medium",
+  "poster_thumbhash": "poster-hash",
+  "backdrop_url": "/api/images/backdrop/heat.jpg?size=medium",
+  "backdrop_thumbhash": "backdrop-hash"
 }

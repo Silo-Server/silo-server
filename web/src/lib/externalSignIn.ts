@@ -35,6 +35,40 @@ const OAUTH_LINK_FAILURE_TEXT: Record<string, string> = {
 };
 const OAUTH_LINK_FAILURE_FALLBACK = "Connecting the sign-in provider failed. Try again.";
 
+/**
+ * Who a network provider (such as Tailscale) says owns this device, for a
+ * "Continue as" label; empty when it named nobody.
+ */
+export function networkIdentityName(provider: {
+  network_identity?: { display_name: string; username: string };
+}): string {
+  return provider.network_identity?.display_name || provider.network_identity?.username || "";
+}
+
+/**
+ * Readable text for a refused network identity sign-in or link (a provider
+ * such as Tailscale that knows who owns the device); null for a problem the
+ * caller words itself.
+ */
+export function networkSignInRefusalText(problemType: string, providerName: string): string | null {
+  switch (problemType) {
+    case "network_identity_required":
+      return `Open this server at its ${providerName} address to sign in this way.`;
+    case "not_permitted":
+      return `${providerName} doesn't allow this device to sign in to this server.`;
+    case "email_in_use":
+      return `An account with your email already exists. Sign in with your password, then connect ${providerName} under Settings → Sign-in.`;
+    case "permission_denied":
+      return oauthFailureText("account_disabled");
+    case "account_required":
+    case "identity_linked_elsewhere":
+    case "provider_unavailable":
+      return oauthFailureText(problemType);
+    default:
+      return null;
+  }
+}
+
 /** Readable text for a linking flow's failure reason (error=oauth_link_failed). */
 export function oauthLinkFailureText(reason: string | null | undefined): string {
   if (reason && OAUTH_LINK_FAILURE_TEXT[reason]) return OAUTH_LINK_FAILURE_TEXT[reason];
@@ -69,6 +103,28 @@ export function leaveForProvider(url: string): void {
 // them straight back to a provider that still has its own session open;
 // that would sign them in again at once. Cleared by the next sign-in.
 const SIGNED_OUT_KEY = "silo.auth.signedOut";
+const SESSION_END_KEY = "silo.auth.sessionEnd";
+
+// Why the last session ended, for the sign-in page's notice. Only a
+// deliberate sign-out also blocks the provider redirect: a session that
+// expired or was revoked elsewhere goes back through single sign-on as before.
+export function markSessionEnded(reason: "ended" | "signed-out"): void {
+  if (reason === "signed-out") markSignedOut();
+  try {
+    window.sessionStorage.setItem(SESSION_END_KEY, reason);
+  } catch {
+    // The sign-in form remains usable without storage.
+  }
+}
+
+export function sessionEndReason(): "ended" | "signed-out" | null {
+  try {
+    const reason = window.sessionStorage.getItem(SESSION_END_KEY);
+    return reason === "ended" || reason === "signed-out" ? reason : null;
+  } catch {
+    return null;
+  }
+}
 
 export function markSignedOut(): void {
   try {
@@ -81,6 +137,7 @@ export function markSignedOut(): void {
 export function clearSignedOut(): void {
   try {
     window.sessionStorage.removeItem(SIGNED_OUT_KEY);
+    window.sessionStorage.removeItem(SESSION_END_KEY);
   } catch {
     // Nothing to clear.
   }

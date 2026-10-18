@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
@@ -12,7 +12,7 @@ import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
-import CrewList from "@/components/CrewList";
+import { buildCrewGroups } from "@/components/castCrewGroups";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MediaLocations from "@/components/MediaLocations";
@@ -44,6 +44,7 @@ import {
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 export default function MovieContent({
   item,
@@ -55,6 +56,11 @@ export default function MovieContent({
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
+  const { search } = useLocation();
+  // Follow the item to its new content ID, keeping the query string (such as
+  // ?libraryId=) so the page keeps its library scope.
+  const followReplacedItem = (contentID: string) =>
+    navigate({ pathname: `/item/${contentID}`, search }, { replace: true });
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
@@ -85,6 +91,7 @@ export default function MovieContent({
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);
   const [mediaInfoOpen, setMediaInfoOpen] = useState(false);
+  const crewGroups = useMemo(() => buildCrewGroups(item.crew ?? [], "Director"), [item.crew]);
   const [mediaInfoFileId, setMediaInfoFileId] = useState<number | null>(null);
 
   // Version selection state — drives the Play button and inline stream popovers.
@@ -266,6 +273,11 @@ export default function MovieContent({
           overview={item.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
+          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+          taglineMachineTranslated={hasMachineTranslation(
+            item.machine_translated_fields,
+            "tagline",
+          )}
           crewLine={<HeroCrewLine crew={item.crew ?? []} genres={item.genres} />}
           actions={
             <MediaUserActionBar
@@ -300,8 +312,7 @@ export default function MovieContent({
                       refreshMetadataMutation.mutate({
                         item,
                         mode,
-                        onReplaced: (contentID) =>
-                          navigate(`/item/${contentID}`, { replace: true }),
+                        onReplaced: followReplacedItem,
                       })
                   : undefined
               }
@@ -367,6 +378,7 @@ export default function MovieContent({
               item={item}
               open={matchOpen}
               onOpenChange={setMatchOpen}
+              onReplaced={followReplacedItem}
             />
           )}
           {canCurateMetadata && (
@@ -414,13 +426,11 @@ export default function MovieContent({
 
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
-      {item.cast && item.cast.length > 0 && (
-        <DetailSection title="Cast">
-          <CastCarousel cast={item.cast} prefetchPeople />
+      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
+        <DetailSection title="Cast & Crew">
+          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
         </DetailSection>
       )}
-
-      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
 
       {/* More Like This */}
       {similarLoading ? (

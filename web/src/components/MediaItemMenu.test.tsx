@@ -2,10 +2,9 @@ import { act, useRef } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import type { ItemDetail } from "@/api/types";
+import type { ItemDetail, MediaItemUserState } from "@/api/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MediaItemMenu, { buildMediaItemMenuModel, MetadataActionDialogHost } from "./MediaItemMenu";
-import { mediaItemMenuTriggerClassName } from "./mediaItemMenuTrigger";
 
 const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
@@ -13,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   matchItem: vi.fn(),
   toggleFavorite: vi.fn(),
   toggleWatched: vi.fn(),
+  clearResumePosition: vi.fn(),
   posterSize: "standard" as "compact" | "standard" | "large",
   authState: undefined as { user: { role: "admin" | "user" } } | undefined,
 }));
@@ -46,11 +46,23 @@ vi.mock("@/hooks/queries/watchlist", () => ({
   useToggleWatchlist: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
 
+vi.mock("@/hooks/queries/notInterested", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/notInterested")>()),
+  useToggleNotInterested: () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
+}));
+
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: () => ({ isPending: false, mutate: vi.fn() }),
   useWatchedStateMutation: () => ({
     isPending: false,
     mutateAsync: (...args: unknown[]) => mocks.toggleWatched(...args),
+  }),
+}));
+
+vi.mock("@/hooks/queries/progress", () => ({
+  useClearResumePosition: () => ({
+    isPending: false,
+    mutate: (...args: unknown[]) => mocks.clearResumePosition(...args),
   }),
 }));
 
@@ -91,6 +103,7 @@ beforeEach(() => {
   mocks.toggleFavorite.mockResolvedValue(undefined);
   mocks.toggleWatched.mockReset();
   mocks.toggleWatched.mockResolvedValue(undefined);
+  mocks.clearResumePosition.mockReset();
   mocks.posterSize = "standard";
   mocks.authState = undefined;
 });
@@ -112,10 +125,11 @@ describe("buildMediaItemMenuModel", () => {
     expect(actions[1]?.label).toBe("Mark Unwatched");
     expect(actions[2]?.label).toBe("Remove from Favorites");
     expect(actions[3]?.label).toBe("Remove from Watchlist");
-    expect(actions[4]?.label).toBe("View Play History");
-    expect(actions[5]?.label).toBe("Refresh Metadata");
-    expect(actions[6]?.label).toBe("Edit Metadata");
-    expect(actions[7]?.label).toBe("Match Item");
+    expect(actions[4]?.label).toBe("Not Interested");
+    expect(actions[5]?.label).toBe("View Play History");
+    expect(actions[6]?.label).toBe("Refresh Metadata");
+    expect(actions[7]?.label).toBe("Edit Metadata");
+    expect(actions[8]?.label).toBe("Match Item");
     expect(model.some((item) => item.kind === "action" && item.label === "View Play History")).toBe(
       true,
     );
@@ -124,9 +138,33 @@ describe("buildMediaItemMenuModel", () => {
     );
   });
 
+  it("offers Not Interested on movies and series only, and its undo once marked", () => {
+    const labels = (
+      mediaType: "movie" | "series" | "episode" | "audiobook",
+      notInterested = false,
+    ) =>
+      buildMediaItemMenuModel({
+        mediaType,
+        userState: {
+          played: false,
+          is_favorite: false,
+          in_watchlist: false,
+          not_interested: notInterested,
+        },
+        isAdmin: false,
+      })
+        .filter((item) => item.kind === "action")
+        .map((item) => item.label);
+
+    expect(labels("movie")).toContain("Not Interested");
+    expect(labels("series", true)).toContain("Show in Recommendations");
+    expect(labels("episode")).not.toContain("Not Interested");
+    expect(labels("audiobook")).not.toContain("Not Interested");
+  });
+
   it("omits favorites and watchlist when showCollectionActions is false", () => {
     const model = buildMediaItemMenuModel({
-      mediaType: "episode",
+      mediaType: "movie",
       userState: {
         played: false,
         is_favorite: false,
@@ -139,6 +177,36 @@ describe("buildMediaItemMenuModel", () => {
 
     expect(actions).toHaveLength(1);
     expect(actions[0]?.label).toBe("Mark Watched");
+  });
+
+  it.each(["episode", "season"] as const)(
+    "does not offer adding %s items to favorites or the watchlist",
+    (mediaType) => {
+      const model = buildMediaItemMenuModel({
+        mediaType,
+        userState: { played: false, is_favorite: false, in_watchlist: false },
+        isAdmin: false,
+      });
+      const keys = model.flatMap((item) => (item.kind === "action" ? [item.key] : []));
+
+      expect(keys).toEqual(["toggleWatched"]);
+    },
+  );
+
+  it("keeps Remove for an episode that is already on a list", () => {
+    const labelsFor = (userState: MediaItemUserState) =>
+      buildMediaItemMenuModel({ mediaType: "episode", userState, isAdmin: false }).flatMap(
+        (item) => (item.kind === "action" ? [item.label] : []),
+      );
+
+    expect(labelsFor({ played: false, is_favorite: true, in_watchlist: false })).toEqual([
+      "Mark Watched",
+      "Remove from Favorites",
+    ]);
+    expect(labelsFor({ played: false, is_favorite: false, in_watchlist: true })).toEqual([
+      "Mark Watched",
+      "Remove from Watchlist",
+    ]);
   });
 
   it("shows watched toggle and admin actions when showCollectionActions is false for admins", () => {
@@ -165,7 +233,7 @@ describe("buildMediaItemMenuModel", () => {
 
   it("omits admin actions for non-admin users", () => {
     const model = buildMediaItemMenuModel({
-      mediaType: "episode",
+      mediaType: "movie",
       userState: {
         played: false,
         is_favorite: false,
@@ -210,42 +278,6 @@ describe("buildMediaItemMenuModel", () => {
     expect(labels).not.toContain("Match Item");
   });
 
-  it("shows a continue watching dismissal action when provided", () => {
-    const model = buildMediaItemMenuModel({
-      mediaType: "episode",
-      userState: {
-        played: false,
-        is_favorite: false,
-        in_watchlist: false,
-      },
-      isAdmin: false,
-      dismissLabel: "Remove from Continue Watching",
-    });
-
-    expect(
-      model.some(
-        (item) => item.kind === "action" && item.label === "Remove from Continue Watching",
-      ),
-    ).toBe(true);
-  });
-
-  it("shows a next up dismissal action when provided", () => {
-    const model = buildMediaItemMenuModel({
-      mediaType: "episode",
-      userState: {
-        played: false,
-        is_favorite: false,
-        in_watchlist: false,
-      },
-      isAdmin: false,
-      dismissLabel: "Remove from Next Up",
-    });
-
-    expect(
-      model.some((item) => item.kind === "action" && item.label === "Remove from Next Up"),
-    ).toBe(true);
-  });
-
   it("shows play from beginning for partially watched leaf items", () => {
     const model = buildMediaItemMenuModel({
       mediaType: "episode",
@@ -262,6 +294,73 @@ describe("buildMediaItemMenuModel", () => {
     expect(
       model.some((item) => item.kind === "action" && item.label === "Play from Beginning"),
     ).toBe(true);
+  });
+
+  it("offers reset progress after the watched toggle for a partly watched movie or episode", () => {
+    for (const mediaType of ["movie", "episode"] as const) {
+      const labels = buildMediaItemMenuModel({
+        mediaType,
+        hasPartialProgress: true,
+        userState: { played: false, is_favorite: false, in_watchlist: false },
+        isAdmin: false,
+        showCollectionActions: false,
+        dismissLabel: "Remove from Continue Watching",
+      }).flatMap((item) => (item.kind === "action" ? [item.label] : []));
+
+      expect(labels).toEqual([
+        "Play from Beginning",
+        "Mark Watched",
+        "Reset Progress",
+        "Remove from Continue Watching",
+      ]);
+    }
+  });
+
+  it("offers reset progress during a rewatch, which keeps the item watched", () => {
+    const labels = buildMediaItemMenuModel({
+      mediaType: "movie",
+      hasPartialProgress: true,
+      userState: { played: true, is_favorite: false, in_watchlist: false },
+      isAdmin: false,
+      showCollectionActions: false,
+    }).flatMap((item) => (item.kind === "action" ? [item.label] : []));
+
+    expect(labels).toEqual(["Play from Beginning", "Mark Unwatched", "Reset Progress"]);
+  });
+
+  it("offers reset progress for a rewatched episode in a list that hides its progress bar", () => {
+    const model = buildMediaItemMenuModel({
+      mediaType: "episode",
+      hasPartialProgress: false,
+      hasResumePosition: true,
+      userState: { played: true, is_favorite: false, in_watchlist: false },
+      isAdmin: false,
+      showCollectionActions: false,
+    });
+
+    expect(model.some((item) => item.kind === "action" && item.key === "resetProgress")).toBe(true);
+  });
+
+  it("offers reset progress only when a movie or episode has a resume position", () => {
+    const cases = [
+      { mediaType: "movie", hasPartialProgress: false, played: true },
+      { mediaType: "episode", hasPartialProgress: false, played: false },
+      { mediaType: "audiobook", hasPartialProgress: true, played: false },
+      { mediaType: "series", hasPartialProgress: true, played: false },
+    ] as const;
+    for (const { mediaType, hasPartialProgress, played } of cases) {
+      const model = buildMediaItemMenuModel({
+        mediaType,
+        hasPartialProgress,
+        userState: { played, is_favorite: false, in_watchlist: false },
+        isAdmin: false,
+      });
+
+      expect(
+        model.some((item) => item.kind === "action" && item.key === "resetProgress"),
+        mediaType,
+      ).toBe(false);
+    }
   });
 
   it("uses listening labels for audiobook state actions", () => {
@@ -381,20 +480,6 @@ describe("MediaItemMenu metadata dialogs", () => {
 });
 
 describe("MediaItemMenu trigger visibility", () => {
-  it("leaves reveal rules to the media-card CSS instead of utility classes", () => {
-    const className = mediaItemMenuTriggerClassName();
-
-    expect(className).toContain("media-card-action-trigger");
-    expect(className).not.toContain("pointer-fine:");
-    expect(className).not.toContain("opacity-");
-    expect(className).not.toContain("group-hover");
-    expect(className).not.toContain("group-focus-within");
-    expect(className).not.toContain("backdrop-blur");
-    expect(className).toContain("focus-visible:ring-2");
-    expect(className).toContain("size-6");
-    expect(className).toContain("sm:size-8");
-  });
-
   it("drops pointer focus when the trigger closes the menu so hover exit can hide it", async () => {
     render(
       <MemoryRouter>
@@ -409,6 +494,16 @@ describe("MediaItemMenu trigger visibility", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "More actions" });
+    const className = trigger.className;
+    expect(className).toContain("media-card-action-trigger");
+    expect(className).not.toContain("pointer-fine:");
+    expect(className).not.toContain("opacity-");
+    expect(className).not.toContain("group-hover");
+    expect(className).not.toContain("group-focus-within");
+    expect(className).not.toContain("backdrop-blur");
+    expect(className).toContain("focus-visible:ring-2");
+    expect(className).toContain("size-6");
+    expect(className).toContain("sm:size-8");
     await userEvent.click(trigger);
     expect(screen.getByRole("menu")).toBeTruthy();
 
@@ -445,6 +540,72 @@ describe("MediaItemMenu trigger visibility", () => {
     });
   });
 
+  function renderTriggerMenu() {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+    return screen.getByRole("button", { name: "More actions" });
+  }
+
+  it("opens on a lone click from assistive technology before the menu mounts", async () => {
+    const trigger = renderTriggerMenu();
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    // The trigger's wrapper cancels the click so the card link never sees it.
+    expect(fireEvent.click(trigger)).toBe(false);
+
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens on element.click() and closes on the next one", async () => {
+    const trigger = renderTriggerMenu();
+
+    act(() => trigger.click());
+    expect(await screen.findByRole("menu")).toBeTruthy();
+
+    act(() => trigger.click());
+    await waitFor(() => expect(trigger.getAttribute("data-state")).toBe("closed"));
+  });
+
+  it("opens once for a pointer press followed by its click", async () => {
+    const trigger = renderTriggerMenu();
+
+    fireEvent.pointerDown(trigger, { pointerId: 4, button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger, { detail: 1 });
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+
+    // Some assistive technology pairs a pointerdown with a detail-0 click.
+    fireEvent.pointerDown(trigger, { pointerId: 5, button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger.getAttribute("data-state")).toBe("closed"));
+  });
+
+  it("opens once for Space and Enter", async () => {
+    const trigger = renderTriggerMenu();
+
+    trigger.focus();
+    await userEvent.keyboard(" ");
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    expect(trigger.getAttribute("data-state")).toBe("open");
+  });
+
   it("still returns keyboard focus after a cancelled pointer press inside the menu", async () => {
     render(
       <MemoryRouter>
@@ -469,27 +630,6 @@ describe("MediaItemMenu trigger visibility", () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(trigger);
     });
-  });
-
-  it("renders a matching bottom-left favorite control for poster cards", () => {
-    render(
-      <MemoryRouter>
-        <MediaItemMenu
-          contentId="movie-1"
-          mediaType="movie"
-          userState={{ played: false, is_favorite: false, in_watchlist: false }}
-          variant="poster"
-          quickActionMode="both"
-        />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: "Add to favorites" });
-    expect(button.getAttribute("aria-pressed")).toBe("false");
-    expect(button.className).toContain("media-card-action-trigger");
-    expect(button.className).toContain("cursor-pointer");
-    expect(button.className).not.toContain("cursor-wait");
-    expect(button.parentElement?.className).toContain("left-2.5");
   });
 
   it("shows matching eye state in the hover control and three-dot menu", async () => {
@@ -559,6 +699,26 @@ describe("MediaItemMenu trigger visibility", () => {
         "false",
       );
     });
+  });
+
+  it("resets a partly watched item's progress from the menu", async () => {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          hasPartialProgress
+          variant="wide"
+        />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Reset Progress" }));
+
+    expect(mocks.clearResumePosition).toHaveBeenCalledWith({ contentId: "movie-1" });
+    expect(mocks.toggleWatched).not.toHaveBeenCalled();
   });
 
   it("rolls the watched eye back when the request fails", async () => {
@@ -790,7 +950,13 @@ describe("MediaItemMenu trigger visibility", () => {
       </MemoryRouter>,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Add to favorites" }));
+    const button = screen.getByRole("button", { name: "Add to favorites" });
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.className).toContain("media-card-action-trigger");
+    expect(button.className).toContain("cursor-pointer");
+    expect(button.className).not.toContain("cursor-wait");
+    expect(button.parentElement?.className).toContain("left-2.5");
+    await userEvent.click(button);
 
     expect(mocks.toggleFavorite).toHaveBeenCalledTimes(1);
     expect(mocks.toggleFavorite).toHaveBeenCalledWith(false);
@@ -802,6 +968,46 @@ describe("MediaItemMenu trigger visibility", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.getByRole("menuitem", { name: "Remove from Favorites" })).toBeTruthy();
+  });
+
+  it("shows no favorite heart or Add entries on an episode card", async () => {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="episode-1"
+          mediaType="episode"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Add to favorites" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Mark Watched" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Add to Favorites" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Add to Watchlist" })).toBeNull();
+  });
+
+  it("removes an episode that is already a favorite from its menu, not a heart", async () => {
+    render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="episode-1"
+          mediaType="episode"
+          userState={{ played: false, is_favorite: true, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Remove from favorites" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Remove from Favorites" }));
+
+    expect(mocks.toggleFavorite).toHaveBeenCalledWith(true);
   });
 
   it("toggles on a short pointer release even when a carousel consumes the click", async () => {
@@ -818,6 +1024,11 @@ describe("MediaItemMenu trigger visibility", () => {
     );
 
     const button = screen.getByRole("button", { name: "Add to favorites" });
+    fireEvent.pointerDown(button, { pointerId: 9, button: 0, clientX: 120, clientY: 240 });
+    fireEvent.pointerMove(button, { pointerId: 9, clientX: 144, clientY: 240 });
+    fireEvent.pointerUp(button, { pointerId: 9, button: 0, clientX: 124, clientY: 240 });
+    expect(mocks.toggleFavorite).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Add to favorites" })).toBeTruthy();
     fireEvent.pointerDown(button, { pointerId: 7, button: 0, clientX: 120, clientY: 240 });
     fireEvent.pointerUp(button, { pointerId: 7, button: 0, clientX: 128, clientY: 248 });
 
@@ -914,28 +1125,6 @@ describe("MediaItemMenu trigger visibility", () => {
     fireEvent.pointerUp(button, { pointerId: 8, button: 0, clientX: 128, clientY: 240 });
 
     expect(mocks.toggleFavorite).not.toHaveBeenCalled();
-  });
-
-  it("does not favorite when a swipe returns near its starting point", () => {
-    render(
-      <MemoryRouter>
-        <MediaItemMenu
-          contentId="movie-1"
-          mediaType="movie"
-          userState={{ played: false, is_favorite: false, in_watchlist: false }}
-          variant="poster"
-          quickActionMode="both"
-        />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: "Add to favorites" });
-    fireEvent.pointerDown(button, { pointerId: 9, button: 0, clientX: 120, clientY: 240 });
-    fireEvent.pointerMove(button, { pointerId: 9, clientX: 144, clientY: 240 });
-    fireEvent.pointerUp(button, { pointerId: 9, button: 0, clientX: 124, clientY: 240 });
-
-    expect(mocks.toggleFavorite).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Add to favorites" })).toBeTruthy();
   });
 
   it("keeps the poster heart in sync when favorite state changes through the menu", async () => {
@@ -1129,19 +1318,6 @@ describe("MediaItemMenu long-press action sheet", () => {
     document.documentElement.removeAttribute("data-fine-pointer");
   });
 
-  it("opens the sheet with the full action set after a touch hold", () => {
-    render(<LongPressCard />);
-
-    pressCard();
-    holdPastLongPress();
-
-    const sheet = screen.getByRole("dialog");
-    expect(within(sheet).getByText("Apex")).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Mark Watched" })).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Add to Favorites" })).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Add to Watchlist" })).toBeTruthy();
-  });
-
   it("ignores mouse presses so precise pointers keep the hover controls", () => {
     render(<LongPressCard />);
 
@@ -1197,9 +1373,12 @@ describe("MediaItemMenu long-press action sheet", () => {
 
     pressCard();
     holdPastLongPress();
-    fireEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Watched" }),
-    );
+    const sheet = screen.getByRole("dialog");
+    expect(within(sheet).getByText("Apex")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Mark Watched" })).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Add to Favorites" })).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Add to Watchlist" })).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Mark Watched" }));
 
     expect(mocks.toggleWatched).toHaveBeenCalledWith(true);
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -1223,5 +1402,74 @@ describe("MediaItemMenu long-press action sheet", () => {
     expect(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Watched" }),
     ).toBeTruthy();
+  });
+});
+
+describe("MediaItemMenu lazy machinery", () => {
+  function renderMenu() {
+    return render(
+      <MemoryRouter>
+        <MediaItemMenu
+          contentId="movie-1"
+          mediaType="movie"
+          userState={{ played: false, is_favorite: false, in_watchlist: false }}
+          variant="poster"
+          quickActionMode="both"
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  const radixRoot = () => document.querySelector('[data-slot="dropdown-menu-trigger"]');
+
+  it("mounts no menu root until the card is used, then opens on the first press", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+    expect(radixRoot()).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("data-state", "closed");
+
+    await userEvent.click(trigger);
+
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(radixRoot()).not.toBeNull();
+    // The visible trigger kept its element and reports the open menu.
+    expect(screen.getByRole("button", { name: "More actions" })).toBe(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("data-state", "open");
+    expect(trigger.getAttribute("aria-controls")).toBe(screen.getByRole("menu").id);
+  });
+
+  it("mounts the menu when the trigger takes focus and opens to the first item by keyboard", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+
+    act(() => trigger.focus());
+    expect(radixRoot()).not.toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    await userEvent.keyboard("{Enter}");
+
+    const items = screen.getAllByRole("menuitem");
+    await waitFor(() => expect(document.activeElement).toBe(items[0]));
+  });
+
+  it("runs a quick action pressed before the machinery mounted", () => {
+    renderMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to favorites" }));
+
+    expect(mocks.toggleFavorite).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("button", { name: "Remove from favorites" })).toBeTruthy();
+  });
+
+  it("warms the machinery on mouse hover without opening the menu", async () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+
+    fireEvent.pointerOver(trigger, { pointerType: "mouse" });
+
+    await waitFor(() => expect(radixRoot()).not.toBeNull());
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

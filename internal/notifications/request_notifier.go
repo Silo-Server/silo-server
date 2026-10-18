@@ -81,19 +81,23 @@ type RequestFulfillmentNotifier struct {
 // unexported methods keep *System its only production implementation.
 type fulfillmentBackend interface {
 	PostServerChannelRequestEvent(ctx context.Context, event string, info RequestEventInfo)
-	notificationsEnabled(ctx context.Context, profileID string) (bool, error)
+	notificationsEnabled(ctx context.Context, userID int, profileID string) (bool, error)
+	fulfilledDelivered(ctx context.Context, recipient requests.Follower, requestID string) (bool, error)
 	dispatchFulfilled(ctx context.Context, delivery Delivery) error
 }
 
-// notificationsEnabled reads the profile's master toggle. Notification
-// preferences are keyed by profile id alone, so two accounts' legacy
-// "default" profiles share one row, as they do for every notification type.
-func (s *System) notificationsEnabled(ctx context.Context, profileID string) (bool, error) {
-	prefs, err := s.Preferences.Get(ctx, profileID)
+// notificationsEnabled reads the master toggle of the profile on userID's
+// account.
+func (s *System) notificationsEnabled(ctx context.Context, userID int, profileID string) (bool, error) {
+	prefs, err := s.Preferences.Get(ctx, userID, profileID)
 	if err != nil {
 		return false, err
 	}
 	return prefs.Enabled, nil
+}
+
+func (s *System) fulfilledDelivered(ctx context.Context, recipient requests.Follower, requestID string) (bool, error) {
+	return s.Deliveries.HasRequestFulfilled(ctx, recipient.UserID, recipient.ProfileID, requestID)
 }
 
 func (s *System) dispatchFulfilled(ctx context.Context, delivery Delivery) error {
@@ -115,11 +119,12 @@ func NewRequestFulfillmentNotifier(system *System) *RequestFulfillmentNotifier {
 // matched catalog item: deliveryRowSelect joins media_items on series_id, so
 // that one field renders the title, poster, and deep link for movies and
 // series alike. It tells the requester, then every follower, and returns the
-// first dispatch error so the caller retries the whole request later; a
-// recipient already told is deduped by the (account, profile, request) unique
-// index.
-// Skipping a recipient (master toggle off, missing attribution) still counts
-// as handled.
+// first dispatch error so the caller retries the whole request later. A
+// failed recipient does not stop the rest, and a retry skips every recipient
+// an earlier pass already told, so one recipient that keeps failing holds
+// back only itself.
+// Skipping a recipient (master toggle off, missing attribution, or no access
+// to the matched item; see DispatchOperational) still counts as handled.
 func (n *RequestFulfillmentNotifier) NotifyFulfilled(ctx context.Context, req requests.Request, contentID string) error {
 	if n == nil || n.backend == nil {
 		return nil
@@ -128,12 +133,11 @@ func (n *RequestFulfillmentNotifier) NotifyFulfilled(ctx context.Context, req re
 	// Legacy rows without attribution have no requester recipient.
 	// Profile ids repeat across accounts, so recipients are keyed by both.
 	told := map[requests.Follower]bool{}
+	var firstErr error
 	if req.RequestedByProfileID != "" && req.RequestedByUserID > 0 {
 		requester := requests.Follower{UserID: req.RequestedByUserID, ProfileID: req.RequestedByProfileID}
 		told[requester] = true
-		if err := n.notifyFulfilledProfile(ctx, requester, contentID, base); err != nil {
-			return err
-		}
+		firstErr = n.notifyFulfilledProfile(ctx, requester, contentID, base)
 	}
 	follower := base
 	follower.Follower = true
@@ -142,11 +146,11 @@ func (n *RequestFulfillmentNotifier) NotifyFulfilled(ctx context.Context, req re
 			continue
 		}
 		told[recipient] = true
-		if err := n.notifyFulfilledProfile(ctx, recipient, contentID, follower); err != nil {
-			return err
+		if err := n.notifyFulfilledProfile(ctx, recipient, contentID, follower); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // AnnounceFulfilled implements requests.FulfillmentNotifier: the server-channel
@@ -162,9 +166,15 @@ func (n *RequestFulfillmentNotifier) AnnounceFulfilled(ctx context.Context, req 
 }
 
 // notifyFulfilledProfile posts one request.fulfilled delivery to a profile
-// whose notifications are on.
+// whose notifications are on and that an earlier pass has not told yet. The
+// insert would dedupe anyway, but checking first keeps a told recipient from
+// failing the retry on its access check.
 func (n *RequestFulfillmentNotifier) notifyFulfilledProfile(ctx context.Context, recipient requests.Follower, contentID string, flags RequestFlags) error {
-	enabled, err := n.backend.notificationsEnabled(ctx, recipient.ProfileID)
+	delivered, err := n.backend.fulfilledDelivered(ctx, recipient, flags.RequestID)
+	if err != nil || delivered {
+		return err
+	}
+	enabled, err := n.backend.notificationsEnabled(ctx, recipient.UserID, recipient.ProfileID)
 	if err != nil {
 		return err
 	}
@@ -278,7 +288,7 @@ func (s *System) dispatchRequestLifecycle(ctx context.Context, req requests.Requ
 	if req.RequestedByProfileID == "" || req.RequestedByUserID <= 0 {
 		return nil // requests without attribution have no recipient
 	}
-	prefs, err := s.Preferences.Get(ctx, req.RequestedByProfileID)
+	prefs, err := s.Preferences.Get(ctx, req.RequestedByUserID, req.RequestedByProfileID)
 	if err != nil {
 		return err
 	}

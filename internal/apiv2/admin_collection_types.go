@@ -31,6 +31,7 @@ type AdminCollection struct {
 	PosterURL         string          `json:"poster_url"`
 	BackdropURL       string          `json:"backdrop_url"`
 	PosterThumbhash   string          `json:"poster_thumbhash,omitempty"`
+	PosterIsCollage   bool            `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first members it can access, composed by the server because the collection has no uploaded or template poster. False for an uploaded or template poster and whenever poster_url is empty, including before the collage is built and on reads that carry no poster_url" example:"false"`
 	BackdropThumbhash string          `json:"backdrop_thumbhash,omitempty"`
 	SourceURL         string          `json:"source_url"`
 	QueryDefinition   json.RawMessage `json:"query_definition"`
@@ -45,6 +46,8 @@ type AdminCollection struct {
 	SyncSchedule      string          `json:"sync_schedule,omitempty"`
 	NextSyncAt        *Instant        `json:"next_sync_at,omitempty" nullable:"false"`
 	ItemCount         int             `json:"item_count"`
+	HomeRowCount      *int            `json:"home_row_count,omitempty" nullable:"false" minimum:"0" doc:"Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted."`
+	RowCount          *int            `json:"row_count,omitempty" nullable:"false" minimum:"0" doc:"Rows on the administrator Home and library pages that show this collection, turned-off rows included. Set on listAdminCollections items only. Rows profiles added themselves are not counted."`
 	CreatedAt         Instant         `json:"created_at"`
 	UpdatedAt         Instant         `json:"updated_at"`
 }
@@ -140,25 +143,6 @@ type AdminTMDBListImport struct {
 	Limit            *int            `json:"limit,omitempty" nullable:"false" minimum:"1"`
 	Featured         bool            `json:"featured,omitempty"`
 	SortOrder        int             `json:"sort_order,omitempty"`
-	PosterURL        string          `json:"poster_url,omitempty"`
-	SyncSchedule     string          `json:"sync_schedule,omitempty"`
-	ManagementMode   string          `json:"management_mode,omitempty"`
-	ManagementSource string          `json:"management_source,omitempty"`
-	ManagementKey    string          `json:"management_key,omitempty"`
-}
-
-type AdminTraktImport struct {
-	SortConfig       json.RawMessage `json:"sort_config,omitempty"`
-	LibraryID        ID              `json:"library_id,omitempty"`
-	LibraryIDs       []ID            `json:"library_ids,omitempty" maxItems:"1000"`
-	Title            string          `json:"title" minLength:"1"`
-	Description      string          `json:"description,omitempty"`
-	Preset           string          `json:"preset,omitempty"`
-	MediaType        string          `json:"media_type,omitempty"`
-	ProfileID        ID              `json:"profile_id,omitempty"`
-	ListURL          string          `json:"list_url,omitempty"`
-	Limit            *int            `json:"limit,omitempty" nullable:"false"`
-	Featured         bool            `json:"featured,omitempty"`
 	PosterURL        string          `json:"poster_url,omitempty"`
 	SyncSchedule     string          `json:"sync_schedule,omitempty"`
 	ManagementMode   string          `json:"management_mode,omitempty"`
@@ -360,26 +344,6 @@ func (v AdminTMDBListImport) command() (handlers.AdminCollectionImportTMDBList, 
 	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
 	return c, nil
 }
-func (v AdminTraktImport) command() (handlers.AdminCollectionImportTrakt, *Problem) {
-	var c handlers.AdminCollectionImportTrakt
-	ids, p := intsOfIDs(v.LibraryIDs, "library_ids")
-	if p != nil {
-		return c, p
-	}
-	var libraryID int
-	if v.LibraryID != "" {
-		lowered, p := intsOfIDs([]ID{v.LibraryID}, "library_id")
-		if p != nil {
-			return c, p
-		}
-		libraryID = lowered[0]
-	}
-	c.LibraryID, c.LibraryIDs, c.Title, c.Description = libraryID, ids, v.Title, v.Description
-	c.Preset, c.MediaType, c.ProfileID, c.ListURL, c.Limit = v.Preset, v.MediaType, string(v.ProfileID), v.ListURL, v.Limit
-	c.SortConfig, c.Featured, c.PosterURL, c.SyncSchedule = v.SortConfig, v.Featured, v.PosterURL, v.SyncSchedule
-	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
-	return c, nil
-}
 func (v AdminTemplateApply) command() (handlers.AdminCollectionTemplateApply, *Problem) {
 	var c handlers.AdminCollectionTemplateApply
 	ids, p := intsOfIDs(v.LibraryIDs, "library_ids")
@@ -484,6 +448,7 @@ func adminCollectionOf(v handlers.AdminCollection) AdminCollection {
 		PosterURL:         v.PosterURL,
 		BackdropURL:       v.BackdropURL,
 		PosterThumbhash:   v.PosterThumbhash,
+		PosterIsCollage:   v.PosterIsCollage && v.PosterURL != "",
 		BackdropThumbhash: v.BackdropThumbhash,
 		SourceURL:         v.SourceURL,
 		QueryDefinition:   v.QueryDefinition,

@@ -28,6 +28,7 @@ type GroupPolicy struct {
 	MaxTranscodes              int
 	MaxRemoteStreamBitrateKbps int      // 0 = unlimited
 	MaxLocalStreamBitrateKbps  int      // 0 = unlimited
+	MaxProfiles                int      // household profiles per account; at least 1
 	AllowedPermissions         []string // nil = all assignable
 	RequestsAllowed            bool
 }
@@ -46,16 +47,34 @@ type EffectiveUserPolicy struct {
 	MaxTranscodes              int
 	MaxRemoteStreamBitrateKbps int
 	MaxLocalStreamBitrateKbps  int
+	MaxProfiles                int
 	Permissions                []string
 	RequestsAllowed            bool
 }
 
-// NoGroupPolicy is the policy applied to an account with no access group
-// (admins are ungrouped). It is permissive so that an unset field on such an
-// account keeps today's unrestricted behavior. DownloadTranscodeAllowed is
-// the exception: it defaults to false because that was the old column default
-// on users (and is the seeded Default Group's value), so an account that never
-// had the gate turned on does not silently gain it.
+// AdminPolicy is the policy under an admin account's own overrides: full
+// access, the same as the server Owner has. Admins never belong to an access
+// group, so this is the only layer beneath their overrides; an override on an
+// admin account still restricts it.
+func AdminPolicy() GroupPolicy {
+	policy := NoGroupPolicy()
+	policy.DownloadTranscodeAllowed = true
+	return policy
+}
+
+// DefaultMaxProfiles is the household profile limit of an account outside
+// every access group, and of a new group that does not set one. It was the
+// stored default on every account before groups set the limit.
+const DefaultMaxProfiles = 5
+
+// NoGroupPolicy is the policy applied to a regular account with no access
+// group. It is permissive so that an unset field on such an account keeps
+// today's unrestricted behavior. DownloadTranscodeAllowed is the exception: it
+// defaults to false because that was the old column default on users (and is
+// the seeded Default Group's value), so an account that never had the gate
+// turned on does not silently gain it. MaxProfiles is DefaultMaxProfiles, the
+// limit such an account always had: profiles were never unlimited. Admins use
+// AdminPolicy instead.
 func NoGroupPolicy() GroupPolicy {
 	return GroupPolicy{
 		LibraryIDs:                 nil,
@@ -68,6 +87,7 @@ func NoGroupPolicy() GroupPolicy {
 		MaxTranscodes:              0,
 		MaxRemoteStreamBitrateKbps: 0,
 		MaxLocalStreamBitrateKbps:  0,
+		MaxProfiles:                DefaultMaxProfiles,
 		AllowedPermissions:         nil,
 		RequestsAllowed:            true,
 	}
@@ -83,8 +103,7 @@ func GroupApplies(user *models.User) bool {
 
 // EffectivePolicyForUser loads a user's group policy and returns the resolved
 // policy. Nil providers are treated as "no group". An account whose group does
-// not apply (see GroupApplies) resolves against NoGroupPolicy without querying
-// the provider.
+// not apply (see GroupApplies) resolves without querying the provider.
 func EffectivePolicyForUser(ctx context.Context, user *models.User, provider GroupPolicyProvider) (EffectiveUserPolicy, error) {
 	if provider == nil || !GroupApplies(user) {
 		return ApplyGroupPolicy(user, nil), nil
@@ -99,13 +118,17 @@ func EffectivePolicyForUser(ctx context.Context, user *models.User, provider Gro
 // ApplyGroupPolicy resolves the user's account policy against the optional
 // access group: each field takes the user's explicit override when set and
 // the group's value otherwise. A nil group means the permissive
-// NoGroupPolicy. Permissions are the one mask-style field: the group's
+// NoGroupPolicy. An admin account resolves against AdminPolicy and ignores
+// any group. Permissions are the one mask-style field: the group's
 // allowed_permissions (when set) intersects the user's permissions.
 func ApplyGroupPolicy(user *models.User, group *GroupPolicy) EffectiveUserPolicy {
 	if user == nil {
 		return EffectiveUserPolicy{RequestsAllowed: true}
 	}
 	base := NoGroupPolicy()
+	if user.Role == models.RoleAdmin {
+		base, group = AdminPolicy(), nil
+	}
 	if group != nil {
 		base = *group
 	}
@@ -121,6 +144,7 @@ func ApplyGroupPolicy(user *models.User, group *GroupPolicy) EffectiveUserPolicy
 		MaxTranscodes:              inheritInt(user.MaxTranscodes, base.MaxTranscodes),
 		MaxRemoteStreamBitrateKbps: inheritInt(user.MaxRemoteStreamBitrateKbps, base.MaxRemoteStreamBitrateKbps),
 		MaxLocalStreamBitrateKbps:  inheritInt(user.MaxLocalStreamBitrateKbps, base.MaxLocalStreamBitrateKbps),
+		MaxProfiles:                inheritInt(user.MaxProfiles, base.MaxProfiles),
 		Permissions:                cloneStrings(user.Permissions),
 		RequestsAllowed:            inheritBool(user.RequestsAllowed, base.RequestsAllowed),
 	}

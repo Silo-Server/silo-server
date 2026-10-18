@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import DefaultArtwork from "@/components/DefaultArtwork";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -19,14 +20,25 @@ export default function TasteSeed() {
   useDocumentTitle("Pick what you love");
 
   const isReturning = searchParams.get("from") === "settings";
+  // Finishing the picker opens the recommendations it just shaped; skipping
+  // it, or returning from settings, goes back where the user came from.
+  const exitPath = isReturning ? "/settings/personalize" : "/";
+  const donePath = isReturning ? "/settings/personalize" : "/recommendations";
 
   // Track only the user's explicit toggles. Final `selected` set is derived
   // from items + toggles each render, so already-favorited items are
   // automatically pre-selected without needing setState-in-effect.
   const [userToggles, setUserToggles] = useState<Map<string, boolean>>(new Map());
 
-  const { data, fetchNextPage, hasNextPage, isFetching, isFetchingNextPage, isPending } =
-    useTasteSeedItems(true);
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    isPending,
+  } = useTasteSeedItems(true);
   const submit = useSubmitTasteSeed();
 
   // Flatten paginated pages into a single item list.
@@ -48,6 +60,15 @@ export default function TasteSeed() {
     }
     return set;
   }, [items, userToggles]);
+
+  // A page can hydrate to no cards the profile may see. Keep paging until a
+  // card shows up or the catalog runs out, instead of settling on the empty
+  // state; the sentinel below only exists once cards render.
+  const waitingForCards = items.length === 0 && hasNextPage && !isFetchNextPageError;
+  useEffect(() => {
+    if (isPending || !waitingForCards || isFetchingNextPage) return;
+    void fetchNextPage();
+  }, [fetchNextPage, isFetchingNextPage, isPending, waitingForCards]);
 
   // Infinite-scroll trigger: load the next page when sentinel becomes visible.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -82,8 +103,8 @@ export default function TasteSeed() {
     if (profile) {
       setTasteSeedDismissed(profile.id);
     }
-    navigate(isReturning ? "/settings/playback" : "/", { replace: true });
-  }, [navigate, profile, isReturning]);
+    navigate(exitPath, { replace: true });
+  }, [navigate, profile, exitPath]);
 
   const handleSubmit = useCallback(async () => {
     if (selected.size < MIN_PICKS) {
@@ -103,7 +124,7 @@ export default function TasteSeed() {
       if (profile) {
         setTasteSeedDismissed(profile.id);
       }
-      navigate(isReturning ? "/settings/playback" : "/", { replace: true });
+      navigate(donePath, { replace: true });
       return;
     }
 
@@ -114,14 +135,14 @@ export default function TasteSeed() {
       }
       toast.success(
         result.added === 1
-          ? "Added 1 favorite — personalizing your home"
-          : `Added ${result.added} favorites — personalizing your home`,
+          ? "Added 1 favorite — personalizing your recommendations"
+          : `Added ${result.added} favorites — personalizing your recommendations`,
       );
-      navigate(isReturning ? "/settings/playback" : "/", { replace: true });
+      navigate(donePath, { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save your picks");
     }
-  }, [selected, items, submit, navigate, profile, isReturning]);
+  }, [selected, items, submit, navigate, profile, donePath]);
 
   const submitDisabled = selected.size < MIN_PICKS || submit.isPending;
 
@@ -160,7 +181,7 @@ export default function TasteSeed() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        {isPending ? (
+        {isPending || waitingForCards ? (
           <TasteSeedGridSkeleton />
         ) : items.length === 0 ? (
           <div className="text-muted-foreground flex flex-col items-center gap-3 py-24 text-center">
@@ -219,6 +240,8 @@ function TasteSeedCard({
   onToggle: (contentId: string) => void;
 }) {
   const [loaded, setLoaded] = useState(false);
+  // Keyed by URL so a re-signed poster is tried again.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
 
   return (
@@ -242,18 +265,17 @@ function TasteSeedCard({
             : undefined
         }
       >
-        {item.poster_url ? (
+        {item.poster_url && failedUrl !== item.poster_url ? (
           <img
             src={item.poster_url}
             alt=""
             className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
             loading="lazy"
             onLoad={() => setLoaded(true)}
+            onError={() => setFailedUrl(item.poster_url ?? null)}
           />
         ) : (
-          <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-xs">
-            <span className="line-clamp-3 font-medium">{item.title || "No Poster"}</span>
-          </div>
+          !thumbhashUrl && <DefaultArtwork mediaType={item.type} />
         )}
 
         {/* Dim overlay when unselected to make selected posters pop */}

@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint lint-changed test test-go test-db-pins test-web embed-stub clean jellyfin-web verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint lint-changed test test-go test-db-pins test-web embed-stub clean jellyfin-web verify-local-paths verify-case-collisions install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -41,7 +41,7 @@ dev-frontend:
 
 # Run the Go backend (integrated mode)
 dev-backend:
-	go run ./cmd/silo/
+	SILO_SHUTDOWN_DELAY=$${SILO_SHUTDOWN_DELAY:-0} go run ./cmd/silo/
 
 # Run a proxy node (stateless stream proxy, no DB required)
 dev-proxy:
@@ -56,18 +56,40 @@ lint:
 	golangci-lint run
 	cd web && pnpm run lint
 
-# Lint the Go packages this branch touched, on the lines it changed. Same
-# findings as CI's changed-lines step at a fraction of the cost of ./... .
+# Lint changed lines in the Go packages this branch touched.
 # BASE_REF=origin/<pr-base> when not main.
 lint-changed:
 	BASE_REF=$(BASE_REF) scripts/lint-changed.sh
+
+.PHONY: verify-actionlint verify-shellcheck
+verify-actionlint:
+	@test "$$(actionlint -version | head -n 1)" = 1.7.12 || { echo 'actionlint 1.7.12 is required' >&2; exit 1; }
+	actionlint
+
+verify-shellcheck:
+	@test "$$(shellcheck --version | sed -n 's/^version: //p')" = 0.11.0 || { echo 'ShellCheck 0.11.0 is required' >&2; exit 1; }
+	@python3 -c 'import pathlib, re, subprocess; paths = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0"); files = [p for p in paths if p and pathlib.Path(p).is_file() and (pathlib.Path(p).suffix in (".sh", ".bash", ".ksh") or re.match(rb"^#!.*\b(?:sh|bash|dash|ksh)\b", pathlib.Path(p).open("rb").readline()))]; assert files, "no tracked shell inputs"; subprocess.run(["shellcheck", "--", *files], check=True)'
+
+# hadolint: not measured; adoption needs a pinned binary, a seeded-defect trial, and reviewed findings and cost.
+# Makefile shell lint: not measured; recipe expansion needs a prototype that preserves Make's shell context.
+
+.PHONY: verify-size-ratchet verify-bidi
+verify-size-ratchet:
+	@base=$$(git merge-base "$(BASE_REF)" HEAD) && \
+		go run ./scripts/ci/sizeratchet -base "$$base"
+
+# grep status 1 means no controls; unsupported PCRE and other errors refuse.
+verify-bidi:
+	@status=0; git grep -I -nP '[\x{061c}\x{200e}\x{200f}\x{202a}-\x{202e}\x{2066}-\x{2069}]' -- . || status=$$?; \
+		if [ "$$status" -eq 1 ]; then exit 0; fi; \
+		if [ "$$status" -eq 0 ]; then echo 'Bidi controls are not permitted in tracked text' >&2; exit 1; fi; \
+		exit "$$status"
 
 # Frontend test files that fail on main today. This list is shrink-only: delete
 # an entry along with its fix, and never extend it to land a change. The Go
 # suite has no equivalent — a Go test that cannot pass yet carries a t.Skip and
 # its reason in the source, where whoever reads the test finds it.
-WEBTEST_KNOWN_FAILURES := \
-	--exclude src/pages/Catalog.test.tsx
+WEBTEST_KNOWN_FAILURES :=
 
 # The Go binary embeds the built frontend, so every Go build and test needs
 # web/dist to exist. Tests never serve it, so a placeholder is enough; `make
@@ -82,14 +104,22 @@ test: test-go test-web
 test-go: embed-stub
 	go test ./...
 
-# Run the DB-backed query-budget pins listed in $(DB_PINS) against the
-# migrated, disposable database named by SILO_TEST_DATABASE_URL. Unlike
-# test-go, a listed test that skips (no URL, unmigrated schema) or is missing
-# fails the run. Migrate a fresh database first with
+# Run the DB-backed query-budget pins listed in $(DB_PINS), then the database
+# contracts, against the migrated, disposable database named by
+# SILO_TEST_DATABASE_URL. Unlike test-go, a listed test that skips (no URL,
+# unmigrated schema) or is missing fails the run. Migrate a fresh database first with
 # DATABASE_URL=<url> SECRET_KEY=<32+ chars> go run ./cmd/silo/ --migrate-only.
 DB_PINS := scripts/ci/db-pins.txt
 test-db-pins: embed-stub
 	go run ./scripts/ci/dbpins -list $(DB_PINS)
+	$(MAKE) test-db-contracts
+
+.PHONY: test-db-contracts
+# Existing database boundary tests own assertions retired from unit tests.
+# Use the same runner so a missing or skipped keeper fails validation.
+test-db-contracts: embed-stub
+	SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL="$${SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL:-$$SILO_TEST_DATABASE_URL}" \
+		go run ./scripts/ci/dbpins -list scripts/ci/db-contracts.txt
 
 # WEBTEST_ARGS passes extra vitest flags through; CI uses it to shard the
 # suite across runners (--shard=N/M).
@@ -168,7 +198,7 @@ verify-settings-bindings-all: verify-settings-bindings verify-settings-bindings-
 # this would let the contract and the implementation drift apart in silence.
 PLAYBACK_FIXTURE_DIR := internal/playback/testdata/protocol_v3
 PLAYBACK_SCHEMA_FIXTURE_DIR := docs/design/schemas/playback-v3/v3/fixtures/valid
-PLAYBACK_WIRE_FIXTURES := start_request.json replan_request.json decision_response.json native-decision_response.json capability_response.json error_response.json route_event.json
+PLAYBACK_WIRE_FIXTURES := start_request.json replan_request.json decision_response.json native-decision_response.json hls-subtitle-rendition-decision_response.json capability_response.json error_response.json route_event.json
 
 playback-fixtures:
 	go run ./cmd/playbackfixtures -out $(PLAYBACK_FIXTURE_DIR)
@@ -204,12 +234,15 @@ verify-route-inventory:
 	@go run ./cmd/route-inventory -check $(ROUTE_INVENTORY) \
 		|| { echo "::error::$(ROUTE_INVENTORY) is stale or a route is unaccounted for; run make route-inventory"; exit 1; }
 
-# Run the route inventory's router-recovery lint rule over the whole tree, not
-# only changed lines. It is the one gocritic check the repo enables (see
-# .golangci.yml), and the tree passes it today, so this can gate CI while the
-# rest of `make lint` cannot.
+.PHONY: verify-v1-route-freeze
+verify-v1-route-freeze:
+	@base=$$(git merge-base "$(BASE_REF)" HEAD) && \
+		python3 -c 'import json, subprocess, sys; path="contracts/api/v2/route-inventory.json"; project=lambda doc: sorted((r["method"], r["path"]) for r in doc["routes"] if r["namespace"] == "api_v1"); before=json.loads(subprocess.check_output(["git", "show", sys.argv[1]+":"+path])); after=json.load(open(path)); sys.exit("v1 routes changed; the bridge contract is frozen" if project(before) != project(after) else 0)' "$$base"
+
+# Run only the route inventory's router-recovery rule over the whole tree.
+# Tests are excluded from this rule, so do not analyze their package variants.
 lint-router-recovery:
-	golangci-lint run --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
+	golangci-lint run --config .golangci-router-recovery.yml --tests=false --max-same-issues=0 --max-issues-per-linter=0 --uniq-by-line=false ./...
 MIGRATION_LEDGER := contracts/api/v2/migration.json
 
 # CI gives test-go ownership of these Go assertions and passes 0 to avoid
@@ -380,6 +413,12 @@ verify-offline-routes:
 verify-local-paths:
 	scripts/check-local-path-leaks.sh
 
+# Fail on tracked paths that name the same file on a case-insensitive file
+# system (macOS, Windows), including JS/TS modules that differ only in case
+# once the extension an import omits is removed.
+verify-case-collisions:
+	go run ./scripts/ci/casecollisions
+
 # Create a timestamped Goose SQL migration. Usage: make migrate-create NAME=add_thing
 migrate-create:
 	@if [ -z "$(NAME)" ]; then echo "usage: make migrate-create NAME=add_thing"; exit 1; fi
@@ -388,6 +427,16 @@ migrate-create:
 # Validate Goose migration annotations and SQL parsing without touching a database.
 migrate-validate:
 	$(GOOSE) -dir $(GOOSE_DIR) validate
+
+.PHONY: verify-migrations verify-prometheus-rules
+verify-migrations: migrate-validate
+	@base=$$(git merge-base "$(BASE_REF)" HEAD) && \
+		go run ./scripts/ci/migrationcheck -base "$$base"
+
+# Use the same Prometheus release locally and in CI.
+PROMTOOL ?= docker run --rm --pull=never --entrypoint promtool -v "$(CURDIR)/deploy/observability:/rules:ro" -w /rules prom/prometheus:v3.5.0
+verify-prometheus-rules:
+	$(PROMTOOL) test rules silo.rules.test.yml
 
 # Show Goose migration status through Silo's bootstrapping runner.
 migrate-status:

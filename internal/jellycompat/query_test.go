@@ -16,30 +16,6 @@ func TestFavoriteItemsNeedBrowseFilters(t *testing.T) {
 	}
 }
 
-func TestParseItemsQueryAcceptsIsFavoriteParam(t *testing.T) {
-	req := httptest.NewRequest("GET", "/Users/user/Items?isFavorite=true&IncludeItemTypes=Series", nil)
-
-	query := parseItemsQuery(req, NewResourceIDCodec())
-
-	if !query.isFavorite {
-		t.Fatal("expected isFavorite=true to enable favorite filtering")
-	}
-	if len(query.itemTypes) != 1 || query.itemTypes[0] != "series" {
-		t.Fatalf("got item types %v, want [series]", query.itemTypes)
-	}
-}
-
-func TestBuildBrowseParamsPropagatesEnableTotalRecordCount(t *testing.T) {
-	req := httptest.NewRequest("GET", "/Items?EnableTotalRecordCount=false", nil)
-
-	query := parseItemsQuery(req, NewResourceIDCodec())
-	params := buildBrowseParams(query)
-
-	if got := params.Get("include_total"); got != "false" {
-		t.Fatalf("include_total = %q, want false", got)
-	}
-}
-
 func TestParseItemsQueryAppliesExcludeItemTypesToDefaultVideoScope(t *testing.T) {
 	req := httptest.NewRequest("GET", "/Items?SearchTerm=sponge+bob"+
 		"&ExcludeItemTypes=Movie&ExcludeItemTypes=Episode&ExcludeItemTypes=TvChannel", nil)

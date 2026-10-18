@@ -46,7 +46,9 @@ type RecipeDefinition struct {
 	Presets          []GalleryPreset `json:"presets"`
 	AvoidDuplicates  bool            `json:"avoid_duplicates"`
 	SupportsRotation bool            `json:"supports_rotation"`
-	AdminOnly        bool            `json:"admin_only"`
+	// AdminOnly recipes may be added only by an admin; a profile that is not
+	// an admin keeps and changes the sections of them it already has.
+	AdminOnly bool `json:"admin_only"`
 	// Hidden recipes are still resolvable (so existing sections with that type
 	// keep working) but the API gallery list omits them. Used to phase out
 	// duplicate type aliases like `genre` (which is just a custom_filter).
@@ -65,10 +67,11 @@ type DBPool interface{}
 
 // RecommendationReader matches the recommendation reader interface in sections/fetcher.go.
 type RecommendationReader interface {
-	GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
-	GetBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
-	GetSimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
-	GetTasteMatchRow(ctx context.Context, userID int, profileID, genre string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionForYouFill(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, string, error)
+	SectionSimilarUsersLiked(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SectionTasteMatchRow(ctx context.Context, userID int, profileID, genre string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
 }
 
 // ResolverContext is everything a resolver needs to resolve.
@@ -102,7 +105,7 @@ type SectionItemMeta struct {
 	DurationSeconds   *float64
 	ProgressUpdatedAt *string
 	ItemSource        string    // "in_progress" or "next_up"
-	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+	SortTimestamp     time.Time // orders Continue Watching: progress time, or a next-up row's catalog.NextUpResult.ActivityAt
 }
 
 // ResolvedItems is the resolver's output.

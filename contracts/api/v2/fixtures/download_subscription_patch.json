@@ -8,8 +8,9 @@
   ],
   "delete_watched": true,
   "max_storage_bytes": 1024,
+  "quality": "original",
   "active": true,
   "created_at": "2026-01-02T03:04:05.123Z",
   "updated_at": "2026-01-02T03:04:05.123Z",
-  "etag": "\"7b39536ecc52eb9d09f0198d1fea5167e3267c15597aa4b6c62c138d5642a715\""
+  "etag": "\"e899bde3b1d16fb7c1fe4d68f04a4295e6dd444b403289d4168dd6cddfa2fef0\""
 }

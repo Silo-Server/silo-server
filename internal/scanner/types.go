@@ -7,7 +7,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// ScanResult contains the outcome of scanning a media folder.
+// ScanResult contains the outcome of scanning a media folder. Missing counts the
+// files this scan marked missing that were not yet marked when it loaded the
+// folder's files; files an earlier scan already marked, still inside the
+// removal grace period, are not counted again. Two scans of the same folder
+// that overlap in time can both count the same file.
 type ScanResult struct {
 	New                int
 	Updated            int
@@ -36,6 +40,9 @@ type ScanResult struct {
 	// the operator confirms cleanup or the files return.
 	SuspectEmptyRoots []string
 	RootObservations  []RootObservation
+	// Sidecars lists the local metadata sidecars (.nfo, artwork) in every
+	// directory a video scan read. It is nil for other library types.
+	Sidecars SidecarListing
 }
 
 // FileHints contains the OSHash gathered during scanning.
@@ -125,11 +132,12 @@ type SubtitleTrackInfo struct {
 
 // ExternalSubtitleInfo describes a discovered sidecar subtitle file.
 type ExternalSubtitleInfo struct {
-	Path     string
-	Language string
-	Format   string // srt, vtt, ass, ssa, sub
-	Title    string
-	Forced   bool
+	Path            string
+	Language        string
+	Format          string // srt, vtt, ass, ssa, sub
+	Title           string
+	Forced          bool
+	HearingImpaired bool
 }
 
 // ChapterInfo describes an embedded chapter extracted from ffprobe.

@@ -1,10 +1,14 @@
 package catalog
 
 import (
+	"context"
+	"errors"
 	"net/url"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestMediaScopeItemTypes pins the expansion of group scopes: "video" covers
@@ -23,6 +27,7 @@ func TestMediaScopeItemTypes(t *testing.T) {
 		{"manga", []string{"manga"}},
 		{"video", []string{"movie", "series"}},
 		{" Video ", []string{"movie", "series"}},
+		{"video_with_episodes", []string{"movie", "series", "episode"}},
 	}
 	for _, tc := range cases {
 		if got := MediaScopeItemTypes(tc.scope); !reflect.DeepEqual(got, tc.want) {
@@ -45,6 +50,8 @@ func TestMediaScopeMatchesItemType(t *testing.T) {
 		{"manga", "manga", true},
 		{"manga", "ebook", false},
 		{"movie", "series", false},
+		{"video_with_episodes", "episode", true},
+		{"video_with_episodes", "audiobook", false},
 	}
 	for _, tc := range cases {
 		if got := MediaScopeMatchesItemType(tc.scope, tc.itemType); got != tc.want {
@@ -118,5 +125,84 @@ func TestQueryDefinitionValidate_VideoScope(t *testing.T) {
 	bad := QueryDefinition{MediaScope: "podcast"}
 	if err := bad.Validate(); err == nil {
 		t.Fatal("expected invalid media scope to fail validation")
+	}
+	// Smart collections and sections store definitions; the search-only
+	// scope must not become a stored scope the media_items executor cannot
+	// honor.
+	searchOnly := QueryDefinition{MediaScope: MediaScopeVideoWithEpisodes}
+	if err := searchOnly.Validate(); err == nil {
+		t.Fatal("expected the search-only scope to fail definition validation")
+	}
+}
+
+// TestParseCatalogRequest_VideoWithEpisodesScope pins the search-only scope:
+// the v2 grammar records it for text search and narrows every other read to
+// video, the v1 grammar keeps dropping it, and sources without text search
+// refuse it.
+func TestParseCatalogRequest_VideoWithEpisodesScope(t *testing.T) {
+	v2 := CatalogRequestOptions{SearchMediaScopes: true}
+	req, err := ParseCatalogRequestWithOptions(url.Values{
+		"source": {"query"},
+		"q":      {"the rookie"},
+		"type":   {" Video_With_Episodes "},
+	}, v2)
+	if err != nil {
+		t.Fatalf("ParseCatalogRequestWithOptions: %v", err)
+	}
+	if req.Query.MediaScope != MediaScopeVideo || req.SearchMediaScope != MediaScopeVideoWithEpisodes {
+		t.Fatalf("scopes = query %q search %q, want video and video_with_episodes", req.Query.MediaScope, req.SearchMediaScope)
+	}
+	if err := validateCatalogQueryRequest(req, true); err != nil {
+		t.Fatalf("validateCatalogQueryRequest: %v", err)
+	}
+	_, itemTypes, earlyEmpty := catalogSearchAccess(req, AccessFilter{})
+	if earlyEmpty || !reflect.DeepEqual(itemTypes, []string{"movie", "series", "episode"}) {
+		t.Fatalf("search item types = %v (early empty %v), want movie+series+episode", itemTypes, earlyEmpty)
+	}
+
+	browse, err := ParseCatalogRequestWithOptions(url.Values{"type": {"video_with_episodes"}}, v2)
+	if err != nil {
+		t.Fatalf("browse parse: %v", err)
+	}
+	if browse.Query.MediaScope != MediaScopeVideo || browse.SearchQuery != "" {
+		t.Fatalf("browse scope = %q, want video", browse.Query.MediaScope)
+	}
+
+	v1, err := ParseCatalogRequest(url.Values{"q": {"the rookie"}, "type": {"video_with_episodes"}})
+	if err != nil {
+		t.Fatalf("v1 parse: %v", err)
+	}
+	if v1.Query.MediaScope != "" || v1.SearchMediaScope != "" {
+		t.Fatalf("v1 grammar accepted the search-only scope: query %q search %q", v1.Query.MediaScope, v1.SearchMediaScope)
+	}
+
+	for _, source := range []string{"favorites", "watchlist", "history", "user_collection", "section"} {
+		values := url.Values{"source": {source}, "q": {"x"}, "type": {"video_with_episodes"}, "collection_id": {"7"}, "scope": {"home"}, "section_id": {"s"}}
+		if _, err := ParseCatalogRequestWithOptions(values, v2); !errors.Is(err, ErrSearchMediaScopeSource) {
+			t.Fatalf("source %s accepted the search-only scope (err %v)", source, err)
+		}
+	}
+}
+
+// TestResolveDirectSearchSource_VideoWithEpisodesScope asserts the search
+// provider receives the episode item type and an unscoped definition, so the
+// episode branch of a scoped search is not emptied by the browse scope.
+func TestResolveDirectSearchSource_VideoWithEpisodesScope(t *testing.T) {
+	provider := &fakeSearchProvider{result: &CatalogSearchResult{Items: []*models.MediaItem{}}}
+	resolver := &CatalogResolver{searchProvider: provider}
+	req, err := ParseCatalogRequestWithOptions(url.Values{"q": {"dune"}, "type": {"video_with_episodes"}}, CatalogRequestOptions{SearchMediaScopes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.CursorPaging = true
+	if _, err := resolver.resolveDirectSearchSource(context.Background(), req, AccessFilter{}); err != nil {
+		t.Fatalf("resolveDirectSearchSource: %v", err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(provider.requests))
+	}
+	got := provider.requests[0]
+	if !reflect.DeepEqual(got.ItemTypes, []string{"movie", "series", "episode"}) || got.Definition.MediaScope != "" {
+		t.Fatalf("provider request item types %v definition scope %q", got.ItemTypes, got.Definition.MediaScope)
 	}
 }

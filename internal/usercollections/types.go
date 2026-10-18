@@ -3,10 +3,10 @@
 // library_collections subsystem).
 //
 // User collections live in user_personal_collections and use external sources
-// (TMDB / Trakt / MDBList) the same way admin collections do, but resolved
-// against the entire catalog. Per-user library access is enforced at read
-// time by the catalog resolver, so the sync service does not have to scope
-// item resolution to a particular set of libraries.
+// (TMDB / MDBList) the same way admin collections do. A sync keeps
+// only titles the collection's owner profile can access (its libraries and
+// rating limit), so an item limit fills with titles the owner can see. Catalog
+// reads still limit what each viewer sees to that viewer's own access.
 package usercollections
 
 import (
@@ -16,14 +16,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 )
-
-// NormalizeMDBListURL accepts either a list page URL
-// (https://mdblist.com/lists/user/slug) or its JSON variant and returns the
-// canonical JSON URL. Trailing slashes are tolerated. Empty input is
-// returned unchanged so callers can keep their own validation.
-func NormalizeMDBListURL(url string) string {
-	return collectionutil.NormalizeMDBListURL(url)
-}
 
 // CanonicalMDBListURL normalizes a list URL and rejects anything that is not
 // an MDBList list page. Sync fetches that URL, so callers must use this
@@ -35,14 +27,13 @@ func CanonicalMDBListURL(url string) (string, error) {
 type SourceMode string
 
 const (
-	SourceModeMDBList     SourceMode = "mdblist_json"
-	SourceModeTMDBPreset  SourceMode = "tmdb_preset"
-	SourceModeTMDBList    SourceMode = "tmdb_list"
-	SourceModeTraktPreset SourceMode = "trakt_preset"
+	SourceModeMDBList    SourceMode = "mdblist_json"
+	SourceModeTMDBPreset SourceMode = "tmdb_preset"
+	SourceModeTMDBList   SourceMode = "tmdb_list"
 )
 
 // MinSyncIntervalHours is the smallest interval (in hours between fires) that
-// a user is allowed to schedule. Stricter than admin to keep TMDB/Trakt API
+// a user is allowed to schedule. Stricter than admin to keep TMDB API
 // quota bounded across many users.
 const MinSyncIntervalHours = 24
 
@@ -58,7 +49,7 @@ type SourceConfig struct {
 	ProfileID  string     `json:"profile_id,omitempty"`
 	Limit      *int       `json:"limit,omitempty"`
 	// LibraryIDs narrows sync resolution to these libraries. Empty/nil means
-	// resolve against every library the requesting user can access.
+	// resolve against every library the collection's owner can access.
 	LibraryIDs []int `json:"library_ids,omitempty"`
 }
 
@@ -83,7 +74,7 @@ func ParseSourceConfig(raw string) (SourceConfig, error) {
 
 // DisplayURL produces a stable, human-friendly identifier for the source —
 // stored on the row so list views can render it without reparsing
-// SourceConfig. Mirrors the admin tmdb://… / trakt://… scheme.
+// SourceConfig. Mirrors the admin tmdb://… scheme.
 func (c SourceConfig) DisplayURL() string {
 	switch c.Mode {
 	case SourceModeMDBList:
@@ -95,11 +86,6 @@ func (c SourceConfig) DisplayURL() string {
 		return fmt.Sprintf("tmdb://%s/%s", c.Preset, c.MediaType)
 	case SourceModeTMDBList:
 		return c.URL
-	case SourceModeTraktPreset:
-		if c.Preset == "recommended" {
-			return fmt.Sprintf("trakt://%s/%s/%s", c.Preset, c.MediaType, c.ProfileID)
-		}
-		return fmt.Sprintf("trakt://%s/%s", c.Preset, c.MediaType)
 	default:
 		return ""
 	}

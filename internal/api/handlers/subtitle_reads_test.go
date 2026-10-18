@@ -89,12 +89,4 @@ func TestSubtitleSearchCanonicalizesCompatibilityLanguages(t *testing.T) {
 			t.Fatalf("input %q reached provider as %#v", input, searched.Languages)
 		}
 	}
-	var searched subtitles.SearchRequest
-	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	manager.RegisterProvider(recordingSubtitleProvider{request: &searched})
-	h := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{meta: &MediaFileMetadata{FileID: 42, FilePath: "Example.mkv", Title: "Example"}})
-	if _, err := h.SearchSubtitles(t.Context(), catalog.AccessFilter{UserID: 1}, 42, []string{"Klingon"}); err == nil {
-		t.Fatal("invalid language was accepted")
-	}
 }

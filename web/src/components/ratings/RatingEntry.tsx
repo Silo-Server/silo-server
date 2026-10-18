@@ -29,13 +29,15 @@ export function RatingEntry({ rating, size = "md", className }: RatingEntryProps
         <span
           className={cn(
             "font-semibold tracking-tight opacity-75",
-            size === "sm" ? "text-xs" : "text-[13px]",
+            size === "sm" ? "text-xs" : "text-[0.8125rem]",
           )}
         >
           {rating.name}
         </span>
       )}{" "}
-      <span className={cn("font-bold tabular-nums", size === "sm" ? "text-sm" : "text-[15px]")}>
+      <span
+        className={cn("font-bold tabular-nums", size === "sm" ? "text-sm" : "text-[0.9375rem]")}
+      >
         {rating.display}
       </span>
     </span>

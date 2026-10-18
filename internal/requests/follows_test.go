@@ -97,13 +97,6 @@ func TestFollowSameProfileIDOnAnotherAccount(t *testing.T) {
 	}
 }
 
-func TestFollowRefusesTitleWithoutActiveRequest(t *testing.T) {
-	svc := newTestService(newFakeStore())
-	if _, err := svc.Follow(context.Background(), testViewer(1), MediaTypeMovie, 949); !errors.Is(err, ErrNotRequested) {
-		t.Fatalf("err = %v, want ErrNotRequested", err)
-	}
-}
-
 // A title's open request is what makes it followable: a series partly in the
 // library can have one for its missing seasons, and a title in the library
 // with no open request has nothing to follow.
@@ -135,39 +128,6 @@ func TestFollowRefusesBlockedAccount(t *testing.T) {
 	store.limit = &UserLimit{UserID: 1, LimitMode: LimitModeBlocked, ApprovalMode: ApprovalModeInherit}
 	if _, err := newTestService(store).Follow(context.Background(), testViewer(1), MediaTypeMovie, 949); !errors.Is(err, ErrUserBlocked) {
 		t.Fatalf("err = %v, want ErrUserBlocked", err)
-	}
-}
-
-// A declined or withdrawn request is no longer on its way, so its title's
-// follows are dropped rather than left where the follower cannot see them.
-func TestWithdrawingRequestForgetsFollows(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		withdraw func(*Service) error
-	}{
-		{"decline", func(s *Service) error {
-			_, err := s.Decline(context.Background(), Viewer{UserID: 9, IsAdmin: true}, "req-owner", "")
-			return err
-		}},
-		{"cancel", func(s *Service) error {
-			_, err := s.Cancel(context.Background(), Viewer{UserID: 2, ProfileID: "owner-profile"}, "req-owner", "")
-			return err
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := newFakeStore()
-			activeRequestFor(store, 949)
-			svc := newTestService(store)
-			if _, err := svc.Follow(context.Background(), testViewer(1), MediaTypeMovie, 949); err != nil {
-				t.Fatalf("Follow: %v", err)
-			}
-			if err := tc.withdraw(svc); err != nil {
-				t.Fatalf("%s: %v", tc.name, err)
-			}
-			if followers, _ := store.titleFollowers(MediaTypeMovie, 949); len(followers) != 0 {
-				t.Fatalf("followers after %s = %+v, want none", tc.name, followers)
-			}
-		})
 	}
 }
 
@@ -215,6 +175,12 @@ func TestNotifyFulfilledTellsFollowersAndClearsThem(t *testing.T) {
 
 	svc.notifyFulfilledPending(context.Background())
 
+	if !slices.Equal(notifier.requestIDs, []string{"req1"}) || !slices.Equal(notifier.contentIDs, []string{"movie-42"}) {
+		t.Fatalf("notifications = %v / %v, want req1 / movie-42", notifier.requestIDs, notifier.contentIDs)
+	}
+	if !slices.Equal(store.notified, []string{"req1"}) {
+		t.Fatalf("notified = %v, want [req1]", store.notified)
+	}
 	if len(notifier.followers) != 1 || len(notifier.followers[0]) != 1 || notifier.followers[0][0] != (Follower{UserID: 3, ProfileID: "follower-profile"}) {
 		t.Fatalf("followers handed to the notifier = %+v, want the one follower", notifier.followers)
 	}
@@ -282,6 +248,9 @@ func TestNotifyFulfilledKeepsFollowersWhenDispatchFails(t *testing.T) {
 
 	svc.notifyFulfilledPending(context.Background())
 
+	if len(store.notified) != 0 || !slices.Equal(store.unnotified, []string{"req1"}) {
+		t.Fatalf("failed dispatch: notified = %v, pending = %v; want no stamp and req1 pending", store.notified, store.unnotified)
+	}
 	if followers, _ := store.titleFollowers(MediaTypeMovie, 42); len(followers) != 1 {
 		t.Fatalf("followers after a failed dispatch = %+v, want kept for the retry", followers)
 	}

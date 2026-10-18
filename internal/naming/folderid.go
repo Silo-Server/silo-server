@@ -1,9 +1,11 @@
 package naming
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/providerid"
 )
 
@@ -62,6 +64,24 @@ func ParseStructuredFolderIDs(name string) *FolderIDHints {
 		return nil
 	}
 	return hints
+}
+
+// FileNameHasProviderTag reports whether a file's own name, without its
+// extension, carries a structured provider tag such as {tmdb-438631}.
+func FileNameHasProviderTag(filePath string) bool {
+	stem := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	return ParseStructuredFolderIDs(stem) != nil
+}
+
+// AnyFileNameHasProviderTag reports whether any of files, typically the files
+// of one movie root, carries a provider tag in its own name.
+func AnyFileNameHasProviderTag(files []*models.MediaFile) bool {
+	for _, file := range files {
+		if file != nil && FileNameHasProviderTag(file.FilePath) {
+			return true
+		}
+	}
+	return false
 }
 
 func isIMDbProviderID(value string) bool {

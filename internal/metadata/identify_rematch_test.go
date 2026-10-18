@@ -58,8 +58,11 @@ func assertIdentityIDs(t *testing.T, h *testHarness, providerRepo *fakeProviderI
 // Identify is how an admin corrects a wrong match (#1629). The chosen TMDB ID
 // replaces the stored one, and the wrong film's IMDb ID is dropped when the
 // corrected film has none, so it can't pull the wrong film's files in later.
+// The item is on a legacy id, which never re-anchors; moving a corrected
+// provider-anchored item is covered by
+// TestIdentify_CorrectedSeriesMovesWithItsChildren.
 func TestProcess_IdentifyReplacesWrongMatchIDs(t *testing.T) {
-	const contentID = "movie-tmdb-100"
+	const contentID = "146000000000000100"
 	h := newTestHarness()
 	providerRepo := seedWrongMatch(t, h, contentID)
 	provider := &capturingMetadataProvider{response: &MetadataResult{
@@ -83,6 +86,33 @@ func TestProcess_IdentifyReplacesWrongMatchIDs(t *testing.T) {
 		t.Errorf("identify fetched with the wrong film's imdb id %q", got)
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
+}
+
+// Picking the same film by a provider ID the item lacks reads as a correction
+// (the choice shares no key with the stored IDs), but the chosen film's
+// provider returns the item's anchor again, so the item keeps its id.
+func TestProcess_IdentifyAddingProviderIDKeepsAnchoredID(t *testing.T) {
+	const contentID = "movie-imdb-tt0000100"
+	h := newTestHarness()
+	providerRepo := seedMovieIdentity(t, h, contentID, "", "tt0000100")
+	provider := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: "Wrong Film", Year: 2006,
+		ProviderIDs: map[string]string{"tmdb": "100", "imdb": "tt0000100"},
+	}}
+
+	result, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		ContentID:   contentID,
+		ProviderIDs: map[string]string{"tmdb": "100"},
+		Language:    "en",
+		Mode:        ModeIdentify,
+	}, []Provider{provider})
+	if err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	if result == nil || result.ContentID != contentID {
+		t.Fatalf("result = %#v, want content id %s preserved", result, contentID)
+	}
+	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
 }
 
 // Re-applying the match an item already has confirms it rather than
@@ -262,49 +292,10 @@ func TestManualRefresh_CorrectedNFOReplacesIMDbOnlyMatch(t *testing.T) {
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
 }
 
-// A correction rejects the source's stored values, not whole keys, so a
-// re-anchor that merges into an existing item keeps that item's own IDs.
-func TestRejectedIdentityIDsKeepAnotherItemsValues(t *testing.T) {
-	rejected := make(providerIDValueSet)
-	rejectIdentityProviderIDs(rejected, map[string]string{"tmdb": "200"},
-		map[string]string{"tmdb": "100", "imdb": "tt0000100"})
-
-	destination := map[string]string{"tmdb": "200", "imdb": "tt0000200"}
-	suppressProviderIDValues(destination, rejected)
-	if destination["tmdb"] != "200" || destination["imdb"] != "tt0000200" {
-		t.Fatalf("destination IDs after suppression = %#v, want them unchanged", destination)
-	}
-	source := map[string]string{"tmdb": "100", "imdb": "tt0000100"}
-	suppressProviderIDValues(source, rejected)
-	if len(source) != 0 {
-		t.Fatalf("source IDs after suppression = %#v, want the rejected match gone", source)
-	}
-}
-
-// The item's columns and durable rows can disagree. A correction rejects the
-// values in both, so neither leaves the wrong match's ID behind.
-func TestRejectIdentityProviderIDsCoversColumnsAndDurableRows(t *testing.T) {
-	rejected := make(providerIDValueSet)
-	rejectIdentityProviderIDs(rejected, map[string]string{"tmdb": "200"},
-		map[string]string{"tmdb": "100", "imdb": "tt0000100"},
-		map[string]string{"tmdb": "100", "imdb": "tt0000200"})
-
-	durable := map[string]string{"tmdb": "100", "imdb": "tt0000200"}
-	suppressProviderIDValues(durable, rejected)
-	if len(durable) != 0 {
-		t.Fatalf("durable IDs after suppression = %#v, want both rejected", durable)
-	}
-	chosen := map[string]string{"tmdb": "200"}
-	suppressProviderIDValues(chosen, rejected)
-	if chosen["tmdb"] != "200" {
-		t.Fatalf("the chosen TMDB ID was rejected: %#v", chosen)
-	}
-}
-
 func TestProcess_IdentifyReplacesDivergentStoredIDs(t *testing.T) {
 	for _, chosenIMDb := range []string{"", "tt0000200"} {
 		t.Run("chosen IMDb="+chosenIMDb, func(t *testing.T) {
-			const contentID = "movie-tmdb-100"
+			const contentID = "146000000000000100"
 			h := newTestHarness()
 			providerRepo := seedWrongMatch(t, h, contentID)
 			providerRepo.set(contentID,

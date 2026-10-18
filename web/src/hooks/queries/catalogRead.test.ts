@@ -65,7 +65,12 @@ describe("catalog item reads on the v2 contract", () => {
     expect(detail.rating_imdb).toBeNull();
     expect(detail.release_date).toBeNull();
     expect(detail.intro).toBeNull();
-    expect(detail.user_state).toEqual({ played: true, is_favorite: true, in_watchlist: false });
+    expect(detail.user_state).toEqual({
+      played: true,
+      is_favorite: true,
+      in_watchlist: false,
+      not_interested: false,
+    });
     expect(detail.status).toBeUndefined();
   });
 
@@ -126,8 +131,9 @@ describe("catalog item reads on the v2 contract", () => {
   it("cancels an in-flight detail request through the transport", async () => {
     const controller = new AbortController();
     const aborted = new DOMException("The request was aborted", "AbortError");
+    // The request signal is the caller's under the read deadline, so the
+    // caller's abort reaches the transport.
     const fetchMock = vi.fn<typeof fetch>(async (_url, options) => {
-      expect(options?.signal).toBe(controller.signal);
       return new Promise<Response>((_resolve, reject) => {
         options?.signal?.addEventListener("abort", () => reject(aborted), { once: true });
       });

@@ -10,8 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Silo-Server/silo-server/internal/models"
-
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 )
 
@@ -379,15 +378,6 @@ const (
 
 const requestsTag = "requests"
 
-// requestOperationIDs lists the profile-scoped request operations; tests
-// check each documents the viewer-access headers.
-var requestOperationIDs = []string{
-	opCreateRequest, opListMyRequests, opGetRequest, opSearchRequestMedia, opGetRequestMediaDetail,
-	opListDiscoverSections, opGetDiscoverSection, opListDiscoverGenres, opListDiscoverNetworks, opListDiscoverStudios,
-	opBrowseDiscoverGenre, opBrowseDiscoverNetwork, opBrowseDiscoverStudio,
-	opFollowRequestMedia, opUnfollowRequestMedia,
-}
-
 func registerRequests(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 
@@ -501,7 +491,11 @@ func (reg *Registry) requestViewer(ctx context.Context) (MediaRequestService, me
 	if claims == nil || claims.UserID == 0 || profileID == "" {
 		return nil, mediarequests.Viewer{}, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	return reg.deps.Requests, mediarequests.Viewer{UserID: claims.UserID, ProfileID: profileID, IsAdmin: claims.Role == models.RoleAdmin}, nil
+	isAdmin, err := apimw.ActingAdmin(ctx)
+	if err != nil {
+		return nil, mediarequests.Viewer{}, serviceProblem(err)
+	}
+	return reg.deps.Requests, mediarequests.Viewer{UserID: claims.UserID, ProfileID: profileID, IsAdmin: isAdmin}, nil
 }
 
 // createRequest has no durable client request identity. An uncertain retry after

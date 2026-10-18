@@ -27,7 +27,7 @@ func newSkippedRootMemoryRepo(roots ...models.SkippedMediaRoot) *skippedRootMemo
 
 func TestThemeFileDoesNotCreateSkippedVideoRoot(t *testing.T) {
 	repo := newSkippedRootMemoryRepo()
-	e := &Executor{skippedRootRepo: repo}
+	e := &Executor{scanner: &finalizeRecordingScanner{}, skippedRootRepo: repo}
 	path := "/movies/Title (2020)/theme-music/opening.mp3"
 	if err := e.reconcileSkippedRoots(t.Context(), 1, "movies", scopeModeFile, path, []string{path}, nil); err != nil {
 		t.Fatal(err)
@@ -155,6 +155,11 @@ func (s *settleStubScanner) ScanFile(context.Context, string, *models.MediaFolde
 	return nil
 }
 
+func (s *settleStubScanner) ObserveFileRoot(_ context.Context, _ int, filePath, libraryType string, libraryRoots ...string) (scanner.RootObservation, bool, error) {
+	observation, ok := scanner.ObserveRoot(filePath, libraryType, libraryRoots...)
+	return observation, ok, nil
+}
+
 func (s *settleStubScanner) FinalizeVariantsByPathPrefix(context.Context, *models.MediaFolder, string) error {
 	return nil
 }
@@ -192,6 +197,11 @@ func (s *finalizeRecordingScanner) ScanSubtree(context.Context, *models.MediaFol
 
 func (s *finalizeRecordingScanner) ScanFile(context.Context, string, *models.MediaFolder) error {
 	return nil
+}
+
+func (s *finalizeRecordingScanner) ObserveFileRoot(_ context.Context, _ int, filePath, libraryType string, libraryRoots ...string) (scanner.RootObservation, bool, error) {
+	observation, ok := scanner.ObserveRoot(filePath, libraryType, libraryRoots...)
+	return observation, ok, nil
 }
 
 func (s *finalizeRecordingScanner) FinalizeVariantsByPathPrefix(context.Context, *models.MediaFolder, string) error {
@@ -283,8 +293,8 @@ func TestIngestFolderLetsActiveDrainerBatchFinishAfterSettleWindow(t *testing.T)
 	if got.err != nil {
 		t.Fatalf("expected ingest to complete, got error: %v", got.err)
 	}
-	if got.result == nil || got.result.Skipped {
-		t.Fatalf("expected a non-skipped result, got %+v", got.result)
+	if got.result == nil || got.result.ScanResult == nil {
+		t.Fatalf("expected a scanned result, got %+v", got.result)
 	}
 	if matcher.batchCalls.Load() == 0 {
 		t.Fatal("drainer never ran a batch; test did not exercise the settle-window shutdown path")
@@ -365,5 +375,72 @@ func TestReconcileSkippedRootsSubtreeKeepsRootsOutsideScope(t *testing.T) {
 	}
 	if !repo.has(folderID, outsideRoot) {
 		t.Fatalf("subtree reconcile removed out-of-scope root %q", outsideRoot)
+	}
+}
+
+// sidecarRecordingChecker records the local sidecar checks a scan asks for.
+type sidecarRecordingChecker struct {
+	mu         sync.Mutex
+	scopes     []string
+	listings   []scanner.SidecarListing
+	reapplied  []string
+	matched    *retryRecordingMatcher
+	afterMatch bool
+}
+
+func (c *sidecarRecordingChecker) CheckLocalSidecars(_ context.Context, _ int, scopePath string, listing scanner.SidecarListing) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.scopes = append(c.scopes, scopePath)
+	c.listings = append(c.listings, listing)
+	if c.matched != nil {
+		c.afterMatch = c.matched.processAllCalls.Load() > 0
+	}
+	return c.reapplied, nil
+}
+
+func TestIngestChecksLocalSidecarsAfterMatchingVideoScopes(t *testing.T) {
+	listing := scanner.SidecarListing{"/library/Film": {"movie.nfo"}}
+	for _, tt := range []struct {
+		folderType string
+		wantCheck  bool
+	}{
+		{folderType: "movies", wantCheck: true},
+		{folderType: "series", wantCheck: true},
+		{folderType: "mixed", wantCheck: true},
+		{folderType: "ebooks", wantCheck: false},
+		{folderType: "audiobooks", wantCheck: false},
+	} {
+		t.Run(tt.folderType, func(t *testing.T) {
+			matcher := &retryRecordingMatcher{}
+			checker := &sidecarRecordingChecker{reapplied: []string{"movie-1", "movie-2"}, matched: matcher}
+			exec := &Executor{
+				scanner:       &settleStubScanner{result: &scanner.ScanResult{Sidecars: listing}},
+				matcher:       matcher,
+				localSidecars: checker,
+				now:           time.Now,
+			}
+			folder := &models.MediaFolder{ID: 5, Type: tt.folderType, Paths: []string{"/library"}}
+
+			result, err := exec.IngestSubtree(context.Background(), folder, "/library/Film")
+			if err != nil {
+				t.Fatalf("ingest: %v", err)
+			}
+			if !tt.wantCheck {
+				if len(checker.scopes) != 0 {
+					t.Fatalf("checked %v in a %s library", checker.scopes, tt.folderType)
+				}
+				return
+			}
+			if len(checker.scopes) != 1 || checker.scopes[0] != "/library/Film" || len(checker.listings[0]) != 1 {
+				t.Fatalf("checks = %v listings = %v, want the scanned scope with the scan's listing", checker.scopes, checker.listings)
+			}
+			if !checker.afterMatch {
+				t.Fatal("checked local sidecars before matching the scope")
+			}
+			if result.LocalMetadataReapplied != 2 || !shouldPublish(result) {
+				t.Fatalf("result = %+v, want the re-applied count reported and published", result)
+			}
+		})
 	}
 }

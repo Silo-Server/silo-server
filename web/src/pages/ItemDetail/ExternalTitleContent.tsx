@@ -122,7 +122,7 @@ function TitleSeasons({ seasons }: { seasons: RequestMediaSeason[] }) {
                 </div>
               )}
             </div>
-            <p className="truncate px-0.5 pt-2.5 text-[13px] font-semibold">
+            <p className="truncate px-0.5 pt-2.5 text-[0.8125rem] font-semibold">
               {season.name || name}
             </p>
             <p className="text-muted-foreground truncate px-0.5 text-xs">
@@ -175,8 +175,8 @@ function castFromTMDB(cast: RequestMediaCastMember[]): CastMember[] {
 
 /**
  * TMDB names a movie's director and a series' creators without person IDs,
- * so the crew line shows them unlinked. Library series credit their creators
- * as directors under a "Created by" label; this follows suit.
+ * so the crew line shows them unlinked. Both go in as Director credits, which
+ * the crew line leads with by default; a series labels them "Created by".
  */
 function crewFromTMDB(names: string[]): CrewMember[] {
   return names.map((name) => ({ name, job: "Director", person_id: "" }));

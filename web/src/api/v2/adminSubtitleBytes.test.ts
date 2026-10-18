@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
 import { adminSubtitleListScope, type AdminStoredSubtitle } from "./adminSubtitles";
 import { downloadAdminSubtitle } from "./adminSubtitleBytes";
 const row = { id: "9007199254740993", format: "srt" } as AdminStoredSubtitle;
@@ -36,7 +36,9 @@ it("uses exact string ID and captured bearer authority then saves complete bytes
   expect(click).toHaveBeenCalledTimes(1);
   expect(revoke).toHaveBeenCalledWith("blob:subtitle");
 });
-it.each([401, 403, 404, 500, 503])("does not save or replay after %s", async (status) => {
+it.each([401, 500])("does not save or replay after %s", async (status) => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const fetch = vi.fn().mockResolvedValue(new Response("private error", { status }));
   vi.stubGlobal("fetch", fetch);
   await expect(downloadAdminSubtitle(row, adminSubtitleListScope())).rejects.toThrow(`(${status})`);

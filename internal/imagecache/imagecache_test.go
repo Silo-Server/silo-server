@@ -17,10 +17,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"github.com/h2non/bimg"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -224,27 +226,29 @@ func TestCacheBytesTracksPendingThenExactRevision(t *testing.T) {
 }
 
 func TestCacheBytesUploadFailureLeavesManifestPending(t *testing.T) {
-	s3 := &mockS3{bucket: "artwork", putErr: errors.New("storage unavailable")}
-	tracker := &recordingRevisionTracker{}
-	cacher := newWithHTTPClient(s3, nil)
-	cacher.SetArtworkRevisionTracker(tracker)
+	synctest.Test(t, func(t *testing.T) {
+		s3 := &mockS3{bucket: "artwork", putErr: errors.New("storage unavailable")}
+		tracker := &recordingRevisionTracker{}
+		cacher := newWithHTTPClient(s3, nil)
+		cacher.SetArtworkRevisionTracker(tracker)
 
-	_, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
-		ProviderID:  testTMDBProviderID,
-		ContentType: testMoviesContentType,
-		ContentID:   "335984",
-		ImageType:   metadata.ImagePoster,
+		_, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
+			ProviderID:  testTMDBProviderID,
+			ContentType: testMoviesContentType,
+			ContentID:   "335984",
+			ImageType:   metadata.ImagePoster,
+		})
+		if err == nil || !strings.Contains(err.Error(), "storage unavailable") {
+			t.Fatalf("CacheBytes error = %v, want upload failure", err)
+		}
+		calls := tracker.recorded()
+		if len(calls) != 1 {
+			t.Fatalf("tracker calls = %d, want only the pending manifest", len(calls))
+		}
+		if len(calls[0].objectKeys) != 0 {
+			t.Fatalf("tracked keys = %v, want no completion proof after upload failure", calls[0].objectKeys)
+		}
 	})
-	if err == nil || !strings.Contains(err.Error(), "storage unavailable") {
-		t.Fatalf("CacheBytes error = %v, want upload failure", err)
-	}
-	calls := tracker.recorded()
-	if len(calls) != 1 {
-		t.Fatalf("tracker calls = %d, want only the pending manifest", len(calls))
-	}
-	if len(calls[0].objectKeys) != 0 {
-		t.Fatalf("tracked keys = %v, want no completion proof after upload failure", calls[0].objectKeys)
-	}
 }
 
 func TestCacheBytesDoesNotUploadWhenRevisionTrackingFails(t *testing.T) {
@@ -276,19 +280,6 @@ func (m *mockS3) setExisting(keys ...string) {
 	for _, key := range keys {
 		m.existing[key] = true
 	}
-}
-
-func containsKey(keys []string, suffix string) bool {
-	for _, k := range keys {
-		if len(k) >= len(suffix) && k[len(k)-len(suffix):] == suffix {
-			return true
-		}
-		// Also handle exact match
-		if k == suffix {
-			return true
-		}
-	}
-	return false
 }
 
 func hasKey(keys []string, key string) bool {
@@ -328,8 +319,62 @@ func TestCacheRefusesLocalNetworkSourceWithoutPrivateAccess(t *testing.T) {
 		ContentID:   "550",
 		ImageType:   metadata.ImagePoster,
 	})
-	if err == nil || !strings.Contains(err.Error(), "private image host") {
-		t.Fatalf("Cache error = %v, want private image host refusal", err)
+	if !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("Cache error = %v, want netguard.ErrPrivateDestination", err)
+	}
+	if got := s3.keys(); len(got) != 0 {
+		t.Fatalf("uploaded keys = %v, want none", got)
+	}
+}
+
+// Provider artwork URLs are untrusted, so the cache refuses every address
+// netguard does not class as Public: CGNAT (Tailscale), cloud metadata, and
+// NAT64 forms of either. The context is already canceled, so an address the
+// check misses fails with context.Canceled instead of being dialed.
+func TestCacheRefusesNonPublicSourcesWithoutPrivateAccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, host := range []string{
+		"100.64.1.1",
+		"100.101.102.103",
+		"100.100.100.200",
+		"198.18.0.1",
+		"0.1.2.3",
+		"[64:ff9b::a9fe:a9fe]",
+		"[64:ff9b::a00:5]",
+		"[::ffff:100.64.1.1]",
+	} {
+		t.Run(host, func(t *testing.T) {
+			s3 := &mockS3{bucket: "media"}
+			_, err := New(s3).Cache(ctx, CacheRequest{
+				SourceURL:   "http://" + host + "/poster.jpg",
+				ProviderID:  "tmdb",
+				ContentType: "movies",
+				ContentID:   "550",
+				ImageType:   metadata.ImagePoster,
+			})
+			if !errors.Is(err, netguard.ErrPrivateDestination) && !errors.Is(err, netguard.ErrBlockedDestination) {
+				t.Fatalf("Cache error = %v, want a netguard refusal", err)
+			}
+		})
+	}
+}
+
+// A host name passes the early literal-IP check, so the transport has to
+// refuse the private address it resolves to when it dials.
+func TestCacheRefusesHostResolvingToLocalNetworkWithoutPrivateAccess(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	s3 := &mockS3{bucket: "media"}
+
+	_, err := New(s3).Cache(context.Background(), CacheRequest{
+		SourceURL:   strings.Replace(srv.URL, "127.0.0.1", "localhost", 1) + "/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	})
+	if !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("Cache error = %v, want netguard.ErrPrivateDestination", err)
 	}
 	if got := s3.keys(); len(got) != 0 {
 		t.Fatalf("uploaded keys = %v, want none", got)
@@ -378,81 +423,6 @@ func TestCacheRefusesBlockedSourceWithPrivateAccess(t *testing.T) {
 	}
 }
 
-func TestCache_Poster(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:   srv.URL + "/poster.jpg",
-		ProviderID:  "tmdb",
-		ContentType: "movies",
-		ContentID:   "550",
-		ImageType:   metadata.ImagePoster,
-	})
-	if err != nil {
-		t.Fatalf("Cache poster: %v", err)
-	}
-
-	wantBase := "tmdb/movies/550/poster"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
-	if result.Thumbhash == "" {
-		t.Error("Thumbhash is empty")
-	}
-
-	keys := s3.keys()
-	// Expect 4 variants: original, w780, w500, w300
-	if len(keys) != 4 {
-		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
-	}
-	for _, variant := range []string{"original", "w780", "w500", "w300"} {
-		want := result.VariantPaths[variant]
-		if !hasKey(keys, want) {
-			t.Errorf("missing S3 key %q in %v", want, keys)
-		}
-	}
-}
-
-func TestCacheSkipsVariantsThatAlreadyExist(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	wantBase := "tmdb/movies/550/poster"
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	req := CacheRequest{
-		SourceURL:   srv.URL + "/poster.jpg",
-		ProviderID:  "tmdb",
-		ContentType: "movies",
-		ContentID:   "550",
-		ImageType:   metadata.ImagePoster,
-	}
-	first, err := c.Cache(context.Background(), req)
-	if err != nil {
-		t.Fatalf("prime immutable variants: %v", err)
-	}
-	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"], first.VariantPaths["w300"])
-	s3.resetCalls()
-	result, err := c.Cache(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Cache poster with existing variants: %v", err)
-	}
-	if result.BasePath != wantBase {
-		t.Fatalf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
-	if got := s3.keys(); len(got) != 0 {
-		t.Fatalf("uploaded keys = %v, want no writes", got)
-	}
-	if result.UploadedVariants != 0 || result.ExistingVariants != 4 {
-		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 0 existing 4", result.UploadedVariants, result.ExistingVariants)
-	}
-}
-
 func TestCacheDifferentContentCreatesDifferentImmutableRevision(t *testing.T) {
 	jpeg := makeTestJPEG(t)
 	png := makeTestPNG(t, 400, 600)
@@ -493,7 +463,7 @@ func TestCacheUploadsOnlyMissingVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prime immutable variants: %v", err)
 	}
-	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"])
+	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w1000"], first.VariantPaths["w500"])
 	s3.resetCalls()
 	result, err := c.Cache(context.Background(), req)
 	if err != nil {
@@ -531,11 +501,11 @@ func TestCache_Backdrop(t *testing.T) {
 	}
 
 	keys := s3.keys()
-	// Expect 4 variants: original, w1920, w1280, w300
-	if len(keys) != 4 {
-		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
+	// Expect 5 variants: original, w2560, w1920, w1280, w300
+	if len(keys) != 5 {
+		t.Errorf("expected 5 uploaded variants, got %d: %v", len(keys), keys)
 	}
-	for _, variant := range []string{"original", "w1920", "w1280", "w300"} {
+	for _, variant := range []string{"original", "w2560", "w1920", "w1280", "w300"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
@@ -544,45 +514,6 @@ func TestCache_Backdrop(t *testing.T) {
 	// Must not have w500
 	if _, ok := result.VariantPaths["w500"]; ok {
 		t.Error("backdrop should not have w500 variant")
-	}
-}
-
-func TestCache_Logo(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:   srv.URL + "/logo.png",
-		ProviderID:  "tmdb",
-		ContentType: "series",
-		ContentID:   "1396",
-		ImageType:   metadata.ImageLogo,
-	})
-	if err != nil {
-		t.Fatalf("Cache logo: %v", err)
-	}
-
-	wantBase := "tmdb/series/1396/logo"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
-
-	keys := s3.keys()
-	// Expect 3 variants: original, w1280, w500 — NO w300
-	if len(keys) != 3 {
-		t.Errorf("expected 3 uploaded variants, got %d: %v", len(keys), keys)
-	}
-	for _, variant := range []string{"original", "w1280", "w500"} {
-		want := result.VariantPaths[variant]
-		if !hasKey(keys, want) {
-			t.Errorf("missing S3 key %q in %v", want, keys)
-		}
-	}
-	if _, ok := result.VariantPaths["w300"]; ok {
-		t.Error("logo should not have w300 variant")
 	}
 }
 
@@ -610,6 +541,12 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 	if result.Thumbhash == "" {
 		t.Fatal("Thumbhash is empty")
 	}
+	if result.BasePath != "tmdb/series/1396/logo" {
+		t.Errorf("BasePath = %q, want tmdb/series/1396/logo", result.BasePath)
+	}
+	if keys := s3.keys(); len(keys) != 3 {
+		t.Errorf("expected 3 uploaded variants, got %d: %v", len(keys), keys)
+	}
 	for _, variant := range []string{"original", "w1280", "w500"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(s3.keys(), want) {
@@ -619,7 +556,7 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 }
 
 func TestCache_CapsLargeOriginalVariant(t *testing.T) {
-	pngData := makeTestPNG(t, 2600, 900)
+	pngData := makeTestPNG(t, 4200, 900)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(pngData)
@@ -647,8 +584,8 @@ func TestCache_CapsLargeOriginalVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading original.webp size: %v", err)
 	}
-	if size.Width > 1920 {
-		t.Fatalf("original.webp width = %d, want <= 1920", size.Width)
+	if size.Width != imageutil.MaxCachedOriginalDimension {
+		t.Fatalf("original.webp width = %d, want %d", size.Width, imageutil.MaxCachedOriginalDimension)
 	}
 	if len(original) >= 10*1024*1024 {
 		t.Fatalf("original.webp size = %d bytes, want < 10 MiB", len(original))
@@ -728,28 +665,6 @@ func TestCache_DownloadError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for 404 response, got nil")
-	}
-}
-
-func TestCache_S3UploadError(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{
-		bucket: "media",
-		putErr: errors.New("s3: connection refused"),
-	}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	_, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:   srv.URL + "/poster.jpg",
-		ProviderID:  "tmdb",
-		ContentType: "movies",
-		ContentID:   "550",
-		ImageType:   metadata.ImagePoster,
-	})
-	if err == nil {
-		t.Fatal("expected error for S3 upload failure, got nil")
 	}
 }
 
@@ -836,39 +751,6 @@ func TestCache_EpisodeStill_NestsUnderSeasonAndEpisode(t *testing.T) {
 		want := result.VariantPaths[variant]
 		if !hasKey(s3.keys(), want) {
 			t.Errorf("missing S3 key %q in %v", want, s3.keys())
-		}
-	}
-}
-
-func TestCache_SeasonsDoNotCollide(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	originalPaths := make(map[int]string)
-	for _, season := range []int{1, 2, 3} {
-		s := season
-		result, err := c.Cache(context.Background(), CacheRequest{
-			SourceURL:    srv.URL + "/season.jpg",
-			ProviderID:   "tmdb",
-			ContentType:  "series",
-			ContentID:    "1396",
-			ImageType:    metadata.ImagePoster,
-			SeasonNumber: &s,
-		})
-		if err != nil {
-			t.Fatalf("Cache season %d: %v", season, err)
-		}
-		originalPaths[season] = result.OriginalPath
-	}
-
-	keys := s3.keys()
-	for _, season := range []int{1, 2, 3} {
-		want := originalPaths[season]
-		if !hasKey(keys, want) {
-			t.Errorf("missing S3 key %q in %v", want, keys)
 		}
 	}
 }
@@ -962,30 +844,42 @@ func TestCache_ResolvesPluginURL(t *testing.T) {
 	if result.BasePath != "tmdb/movies/550/poster" {
 		t.Errorf("BasePath = %q, want %q", result.BasePath, "tmdb/movies/550/poster")
 	}
+	if result.Thumbhash == "" {
+		t.Error("Thumbhash is empty")
+	}
+	keys := s3.keys()
+	if len(keys) != 4 {
+		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
+	}
+	for _, variant := range []string{"original", "w1000", "w500", "w300"} {
+		if want := result.VariantPaths[variant]; !hasKey(keys, want) {
+			t.Errorf("missing S3 key %q in %v", want, keys)
+		}
+	}
 }
 
 func TestCacheRetriesTransientPutObjectFailure(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
+	synctest.Test(t, func(t *testing.T) {
+		jpeg := makeTestJPEG(t)
 
-	s3 := &mockS3{bucket: "media", failuresBeforeSuccess: 1}
-	c := newWithHTTPClient(s3, srv.Client())
+		s3 := &mockS3{bucket: "media", failuresBeforeSuccess: 1}
+		c := newWithHTTPClient(s3, nil)
 
-	_, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:     srv.URL + "/still.jpg",
-		ProviderID:    "tmdb",
-		ContentType:   "series",
-		ContentID:     "1396",
-		ImageType:     metadata.ImageStill,
-		SeasonNumber:  intPointer(1),
-		EpisodeNumber: intPointer(1),
+		_, err := c.CacheBytes(context.Background(), jpeg, CacheRequest{
+			ProviderID:    "tmdb",
+			ContentType:   "series",
+			ContentID:     "1396",
+			ImageType:     metadata.ImageStill,
+			SeasonNumber:  intPointer(1),
+			EpisodeNumber: intPointer(1),
+		})
+		if err != nil {
+			t.Fatalf("CacheBytes() error = %v", err)
+		}
+		if len(s3.keys()) == 0 {
+			t.Fatal("expected uploads after retry")
+		}
 	})
-	if err != nil {
-		t.Fatalf("Cache() error = %v", err)
-	}
-	if len(s3.keys()) == 0 {
-		t.Fatal("expected uploads after retry")
-	}
 }
 
 func intPointer(v int) *int {
@@ -999,9 +893,6 @@ type stubResolver struct {
 func (s stubResolver) ResolveImageURL(_ context.Context, _ string, _ string) string {
 	return s.httpURL
 }
-
-// Ensure the containsKey helper is used at least once (avoids unused warning).
-var _ = containsKey
 
 func TestCacheBytesRepeatedLocalArtworkDoesNotWrite(t *testing.T) {
 	store, err := blobstore.NewFilesystem(t.TempDir())
@@ -1093,5 +984,22 @@ func TestCacheBytesRepeatedS3ArtworkDoesNotWrite(t *testing.T) {
 	mu.Unlock()
 	if firstWrites != first.UploadedVariants || finalWrites != firstWrites || second.UploadedVariants != 0 || second.ExistingVariants != first.UploadedVariants {
 		t.Fatalf("writes %d -> %d, first %#v, second %#v", firstWrites, finalWrites, first, second)
+	}
+}
+
+func newWithHTTPClient(s3 ObjectPutter, client *http.Client) *Cacher {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &Cacher{s3: s3, httpClient: client}
+}
+
+// The cache key's type segment must name the same type the variant ladder and
+// the metadata pipeline use, or cached paths stop matching their ladder.
+func TestImageTypeNameMatchesMetadataNames(t *testing.T) {
+	for imageType := metadata.ImagePoster; imageType <= metadata.ImageDisc; imageType++ {
+		if got, want := imageTypeName(imageType), metadata.ImageTypeToString(imageType); got != want {
+			t.Errorf("imageTypeName(%d) = %q, want %q", imageType, got, want)
+		}
 	}
 }

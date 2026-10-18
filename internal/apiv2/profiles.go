@@ -27,7 +27,7 @@ type Profile struct {
 	MaxContentRating           string  `json:"max_content_rating" doc:"Content-rating ceiling; empty means none" example:"PG-13"`
 	MaxAdvisoryAge             *int    `json:"max_advisory_age" nullable:"true" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null means no limit" example:"12"`
 	RequireAdvisoryAge         bool    `json:"require_advisory_age" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"false"`
-	QualityPreference          string  `json:"quality_preference" doc:"Free-form until the vocabulary is ratified (#135). Canonical values today: auto, original, 720p, 1080p, 2160p, 4k; empty when unset" example:"auto"`
+	QualityPreference          string  `json:"quality_preference" doc:"Free-form until the vocabulary is ratified (#135). Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto; empty when unset" example:"auto"`
 	Language                   string  `json:"language" doc:"Preferred audio language (ISO 639-1); empty inherits" example:"en"`
 	PreferredMetadataLanguage  string  `json:"preferred_metadata_language" doc:"Metadata language (ISO 639-1); empty inherits the library's" example:"en"`
 	SubtitleLanguage           string  `json:"subtitle_language" doc:"Preferred subtitle language (ISO 639-1); empty inherits" example:"en"`
@@ -54,7 +54,7 @@ type ProfileUpdate struct {
 	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it" example:"PG-13"`
 	MaxAdvisoryAge             Patch[int]    `json:"max_advisory_age,omitzero" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null removes it" example:"12"`
 	RequireAdvisoryAge         *bool         `json:"require_advisory_age,omitempty" nullable:"false" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"true"`
-	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k" example:"auto"`
+	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto" example:"auto"`
 	Language                   Patch[string] `json:"language,omitzero" doc:"Preferred audio language (ISO 639-1); null inherits" example:"en"`
 	PreferredMetadataLanguage  Patch[string] `json:"preferred_metadata_language,omitzero" doc:"Metadata language (ISO 639-1); null inherits the library's" example:"en"`
 	SubtitleLanguage           Patch[string] `json:"subtitle_language,omitzero" doc:"Preferred subtitle language (ISO 639-1); null inherits" example:"en"`
@@ -90,9 +90,11 @@ const fieldMaxAdvisoryAge = "max_advisory_age"
 // check the caller did not pass (an unverified PIN-locked primary profile).
 const codeProfileManagement = "profile_management"
 
-// locationAllowedLibraryIDs is the problem location of the allowlist member.
+// locationAllowedLibraryIDs is the problem location of the profile allowlist
+// member; locationLibraryIDs is the account, access group and invitation one.
 const (
 	locationAllowedLibraryIDs = locationBody + ".allowed_library_ids"
+	locationLibraryIDs        = locationBody + ".library_ids"
 	locationPIN               = locationBody + ".pin"
 )
 
@@ -145,7 +147,7 @@ type ProfileCreate struct {
 	MaxContentRating           *string `json:"max_content_rating,omitempty" nullable:"false" doc:"Content-rating ceiling" example:"PG-13"`
 	MaxAdvisoryAge             *int    `json:"max_advisory_age,omitempty" nullable:"false" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set" example:"12"`
 	RequireAdvisoryAge         *bool   `json:"require_advisory_age,omitempty" nullable:"false" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"true"`
-	QualityPreference          *string `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k" example:"auto"`
+	QualityPreference          *string `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto" example:"auto"`
 	Language                   *string `json:"language,omitempty" nullable:"false" doc:"Preferred audio language (ISO 639-1)" example:"en"`
 	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty" nullable:"false" doc:"Metadata language (ISO 639-1)" example:"en"`
 	SubtitleLanguage           *string `json:"subtitle_language,omitempty" nullable:"false" doc:"Preferred subtitle language (ISO 639-1)" example:"en"`
@@ -194,8 +196,8 @@ func registerProfiles(reg *Registry) {
 	Register(reg, Operation{
 		Operation: create,
 		// As v1 POST /profiles: the first profile on an account is
-		// bootstrapped by anyone signed in; after that an administrator or
-		// the verified primary profile manages the household.
+		// bootstrapped by anyone signed in; after that the verified primary
+		// profile manages the household, on an admin account too.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		// Demo restriction is a v2 addition: v1's demo guard does not list
@@ -214,13 +216,14 @@ func registerProfiles(reg *Registry) {
 	Register(reg, Operation{
 		Operation: update,
 		// Profile scoped without a required header, as v1 PUT /profiles/{id}:
-		// an administrator or the verified primary profile manages the
-		// household, and any other caller may change only its own active
+		// the verified primary profile manages the household (on an admin
+		// account too), and any other caller may change only its own active
 		// profile's playback preferences. Non-retryable until the profiles
 		// section guards it: the profile row converges, but v1 bumps the
 		// account-wide access_policy_revision on field presence rather than
-		// an effective change, so an identical retry invalidates tokens
-		// minted in between across sibling profiles (ledger DEFECT note).
+		// an effective change, and a retried PIN advances the profile's PIN
+		// revision again, ending that profile's tokens minted in between
+		// (ledger DEFECT note).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		// Demo restriction is a v2 addition: v1's demo guard does not list
@@ -238,8 +241,8 @@ func registerProfiles(reg *Registry) {
 	del.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{
 		Operation: del,
-		// As v1 DELETE /profiles/{id}: an administrator or the verified
-		// primary profile manages the household. Repeating the delete
+		// As v1 DELETE /profiles/{id}: the verified primary profile manages
+		// the household, on an admin account too. Repeating the delete
 		// answers 404 (already gone).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
@@ -253,8 +256,8 @@ func registerProfiles(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/profiles/household/sessions", "listHouseholdSessions", "profiles",
 			"List the live playback sessions on the signed-in account, for a household manager."),
-		// As v1 GET /profiles/household/sessions: an administrator or the
-		// verified primary profile; a bounded, unpaginated collection.
+		// As v1 GET /profiles/household/sessions: the verified primary
+		// profile, on an admin account too; a bounded, unpaginated collection.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
@@ -262,6 +265,7 @@ func registerProfiles(reg *Registry) {
 
 	verify := humaOp(http.MethodPost, Prefix+"/profiles/{id}/verify-pin", "verifyProfilePIN", "profiles",
 		"Check a profile's PIN; a match issues the X-Profile-Token that unlocks the profile for this login session.")
+	verify.Description = "Wrong PINs are counted per profile, Jellyfin password#PIN sign-ins included. Redis shares the count across server nodes; without Redis, each process counts its own attempts. Up to five attempts are allowed; the fifth wrong one locks the profile for five minutes, during which every check, even with the right PIN, is refused with 429 rate_limited and a Retry-After header giving the seconds left. A correct PIN while not locked clears the count, and an unlocked count expires five minutes after its first attempt. Each check affects the count and must not be automatically retried."
 	Register(reg, Operation{
 		Operation: verify,
 		// As v1 POST /profiles/{id}/verify-pin: any signed-in caller on the
@@ -271,7 +275,7 @@ func registerProfiles(reg *Registry) {
 		// credential.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
-		RetrySafety:     RetrySafetyNaturalIdempotent,
+		RetrySafety:     RetrySafetyNonRetryable,
 		ServiceBacked:   true,
 	}, reg.verifyProfilePIN)
 
@@ -517,7 +521,7 @@ type ProfilePINCheckInput struct {
 // an error: valid is false and no token is issued.
 type ProfileVerification struct {
 	Valid        bool            `json:"valid" doc:"Whether the PIN matched" example:"true"`
-	ProfileToken string          `json:"profile_token,omitempty" doc:"Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session. Absent when the PIN did not match" example:"pvt_5f3a9c1e7b2d4e8fa0c6"`
+	ProfileToken string          `json:"profile_token,omitempty" doc:"Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session and the profile's current PIN, so it stops being accepted when the session ends or the profile's PIN changes. Absent when the PIN did not match" example:"pvt_5f3a9c1e7b2d4e8fa0c6"`
 	ExpiresAt    NullableInstant `json:"expires_at" doc:"When the token stops being accepted; null when no token was issued or it does not expire" example:"2026-01-02T15:04:05.000Z"`
 }
 
@@ -528,7 +532,8 @@ type ProfileVerificationOutput struct {
 
 // verifyProfilePIN runs the same check and mint as v1 POST
 // /profiles/{id}/verify-pin. The token semantics are v1's: bound to the
-// caller's login session and the account's policy revision.
+// caller's login session and the profile's PIN revision (see
+// docs/architecture/profile-verification-tokens.md).
 func (reg *Registry) verifyProfilePIN(ctx context.Context, in *ProfilePINCheckInput) (*ProfileVerificationOutput, error) {
 	if reg.deps.Profiles == nil {
 		return nil, unavailable("profile")
@@ -651,6 +656,10 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 	}
 	items := make([]Profile, 0, len(view.Profiles))
 	for _, v := range view.Profiles {
+		// A remote-playback handoff sees only the profile it is bound to.
+		if claims.IsRemotePlayback() && v.ID != claims.ProfileID {
+			continue
+		}
 		profile, p := profileOf(v)
 		if p != nil {
 			return nil, p
@@ -684,7 +693,7 @@ func (reg *Registry) createProfile(ctx context.Context, in *ProfileCreateInput) 
 		return nil, p
 	}
 	if len(req.AllowedLibraryIDs) > 0 {
-		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs); p != nil {
+		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
 			return nil, p
 		}
 	}
@@ -773,7 +782,7 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 	if p != nil {
 		return nil, p
 	}
-	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs); p != nil {
+	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
 		return nil, p
 	}
 	view, err := reg.deps.Profiles.UpdateProfile(ctx, handlers.ProfileUpdateCommand{
@@ -793,11 +802,13 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 	return &ProfileOutput{Body: profile}, nil
 }
 
-// rejectUnknownLibraries refuses an allowlist naming a library that does not
-// exist. The store's row-by-row insert would otherwise hit the library
-// foreign key (a 500) on Postgres, and persist a dangling id where no key
-// is enforced. A nil or empty allowlist has nothing to check.
-func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int) *Problem {
+// rejectUnknownLibraries refuses a library list naming a library that does not
+// exist, reporting it at location. A profile allowlist's row-by-row insert
+// would otherwise hit the library foreign key (a 500) on Postgres; the
+// database silently drops an unknown id from account, access group and
+// invitation lists, so the client hears about it here. A nil or empty list
+// has nothing to check.
+func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int, location string) *Problem {
 	if ids == nil || len(*ids) == 0 {
 		return nil
 	}
@@ -815,7 +826,7 @@ func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int) *Pr
 	for _, id := range *ids {
 		if !known[id] {
 			return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "unknown library identifier: " + strconv.Itoa(id)})
+				WithErrors(ProblemError{Location: location, Code: codeInvalid, Detail: "unknown library identifier: " + strconv.Itoa(id)})
 		}
 	}
 	return nil

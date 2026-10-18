@@ -34,8 +34,8 @@ func TestEffectiveLastAirDateExpr_NonSeriesFallsBackToFirstAirDate(t *testing.T)
 
 // TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm pins the invariant that
 // no production code path deletes from `episodes`. The denormalized
-// media_items.last_air_date_at column is currently maintained only on
-// Upsert/BulkUpsert (see updateSeriesLastAirDateSQL / batchUpdateSeriesLastAirDateSQL).
+// media_items.last_air_date_at column is maintained on Upsert/BulkUpsert and
+// by the due-series sweep (see refreshSeriesAirDatesSQL).
 // If a future PR adds an episode-delete code path, last_air_date_at will
 // drift unless that path also recomputes the parent series' value.
 //
@@ -67,7 +67,7 @@ func TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm(t *testing.T) {
 	for _, root := range roots {
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return nil // skip unreadable
+				return nil //nolint:nilerr // skip unreadable paths in the checkout instead of aborting the source scan
 			}
 			if info.IsDir() {
 				// Skip vendor, node_modules, build artifacts, and the
@@ -94,7 +94,7 @@ func TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm(t *testing.T) {
 			}
 			data, readErr := os.ReadFile(path)
 			if readErr != nil {
-				return nil
+				return nil //nolint:nilerr // skip unreadable files, as the walk does for unreadable paths
 			}
 			if deletePattern.Match(data) {
 				hits = append(hits, rel)

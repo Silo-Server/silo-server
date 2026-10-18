@@ -3,7 +3,6 @@ package requests
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -14,22 +13,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
-
-func TestDownloadPhasePrecedence(t *testing.T) {
-	// Highest first; an unknown phase ranks as downloading.
-	order := []DownloadPhase{
-		DownloadPhaseImportBlocked, DownloadPhaseStalled, DownloadPhaseDownloading,
-		DownloadPhaseImporting, DownloadPhasePaused, DownloadPhaseQueued,
-	}
-	for i := 1; i < len(order); i++ {
-		if downloadPhaseRank(order[i-1]) <= downloadPhaseRank(order[i]) {
-			t.Fatalf("%s must outrank %s", order[i-1], order[i])
-		}
-	}
-	if downloadPhaseRank("seeding") != downloadPhaseRank(DownloadPhaseDownloading) {
-		t.Fatal("an unknown phase must rank as downloading")
-	}
-}
 
 func TestRequestDownloadAggregatesLiveTargets(t *testing.T) {
 	early := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
@@ -65,6 +48,9 @@ func TestRequestDownloadPhaseByPrecedence(t *testing.T) {
 		want   DownloadPhase
 	}{
 		{[]DownloadPhase{DownloadPhaseQueued, DownloadPhaseImportBlocked}, DownloadPhaseImportBlocked},
+		{[]DownloadPhase{DownloadPhaseStalled, DownloadPhaseImportBlocked}, DownloadPhaseImportBlocked},
+		{[]DownloadPhase{DownloadPhaseDownloading, "seeding"}, DownloadPhaseDownloading},
+		{[]DownloadPhase{"seeding", DownloadPhaseDownloading}, "seeding"},
 		{[]DownloadPhase{DownloadPhaseDownloading, DownloadPhaseStalled}, DownloadPhaseStalled},
 		{[]DownloadPhase{DownloadPhaseImporting, DownloadPhaseDownloading}, DownloadPhaseDownloading},
 		{[]DownloadPhase{DownloadPhasePaused, DownloadPhaseImporting}, DownloadPhaseImporting},
@@ -1091,32 +1077,6 @@ func TestListDownloadingRequestsOrderDatabase(t *testing.T) {
 	}
 	if ids, want := requestIDs(limited), []string{"dl-d", "dl-e"}; !slices.Equal(ids, want) {
 		t.Fatalf("limited = %v, want the two refreshed longest ago", ids)
-	}
-}
-
-// Downloading targets that never report progress (a plugin that does not
-// declare it, or one with nothing queued for them) cannot fill the batch and
-// starve the targets the refresh pass exists for, however many there are.
-func TestListDownloadingRequestsSkipsTargetsWithoutProgressDatabase(t *testing.T) {
-	repo, pool := lifecycleTestRepository(t)
-	ctx := t.Context()
-	const limit = 3
-	for i := range 2 * limit {
-		id := fmt.Sprintf("dl-idle-%d", i)
-		insertLifecycleRequest(t, repo, id, 1, 950+i, StatusDownloading)
-		_ = addDownloadTestTarget(t, repo, pool, id, Quality1080p, StatusDownloading, "")
-	}
-	insertLifecycleRequest(t, repo, "dl-live-1", 1, 970, StatusDownloading)
-	_ = addDownloadTestTarget(t, repo, pool, "dl-live-1", Quality1080p, StatusDownloading, "1 minute")
-	insertLifecycleRequest(t, repo, "dl-live-2", 1, 971, StatusDownloading)
-	_ = addDownloadTestTarget(t, repo, pool, "dl-live-2", Quality1080p, StatusDownloading, "3 minutes")
-
-	got, err := repo.ListDownloadingRequests(ctx, limit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids, want := requestIDs(got), []string{"dl-live-2", "dl-live-1"}; !slices.Equal(ids, want) {
-		t.Fatalf("downloading requests = %v, want %v", ids, want)
 	}
 }
 

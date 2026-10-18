@@ -56,6 +56,21 @@ type ExternalSignInHandler struct {
 	// credentials links a directory identity by its username and password;
 	// nil when the providers source cannot.
 	credentials credentialsLinker
+	// network links the network identity of the request's overlay peer;
+	// nil when the providers source cannot.
+	network networkLinker
+}
+
+// networkLinker is the network identity linking of *auth.Service.
+type networkLinker interface {
+	LinkNetworkIdentity(ctx context.Context, in auth.NetworkLinkInput) (*auth.LinkedIdentity, error)
+}
+
+// NetworkLinkInput is the caller linking the network identity of its
+// request's overlay peer, after re-entering its local password.
+type NetworkLinkInput struct {
+	InstallationID int
+	Password       string
 }
 
 // credentialsLinker is the directory (credentials provider) linking of
@@ -82,6 +97,9 @@ func NewExternalSignInHandler(identities *auth.IdentityService, providers interf
 	h := &ExternalSignInHandler{identities: identities, providers: providers, users: users}
 	if linker, ok := providers.(credentialsLinker); ok {
 		h.credentials = linker
+	}
+	if linker, ok := providers.(networkLinker); ok {
+		h.network = linker
 	}
 	if pluginHandler != nil {
 		h.plugins = pluginHandler
@@ -167,6 +185,28 @@ func (h *ExternalSignInHandler) LinkAccountIdentityCredentials(ctx context.Conte
 	linked, err := h.credentials.LinkCredentialsIdentity(ctx, auth.CredentialsLinkInput{
 		UserID: userID, InstallationID: in.InstallationID, Password: in.Password,
 		DirectoryUsername: in.DirectoryUsername, DirectoryPassword: in.DirectoryPassword,
+	})
+	if err != nil {
+		return ExternalIdentityView{}, err
+	}
+	return h.views([]auth.LinkedIdentity{*linked})[0], nil
+}
+
+// NetworkLinkingAvailable reports whether an account can link the network
+// identity of its request's overlay peer.
+func (h *ExternalSignInHandler) NetworkLinkingAvailable() bool {
+	return h.IdentitiesAvailable() && h.network != nil
+}
+
+// LinkAccountIdentityNetwork links the network identity of the request's
+// overlay peer to the caller's account. The errors are the auth package's
+// (auth.Service.LinkNetworkIdentity); the transport renders them.
+func (h *ExternalSignInHandler) LinkAccountIdentityNetwork(ctx context.Context, userID int, in NetworkLinkInput) (ExternalIdentityView, error) {
+	if h.network == nil {
+		return ExternalIdentityView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Network sign-in linking is not configured")
+	}
+	linked, err := h.network.LinkNetworkIdentity(ctx, auth.NetworkLinkInput{
+		UserID: userID, InstallationID: in.InstallationID, Password: in.Password,
 	})
 	if err != nil {
 		return ExternalIdentityView{}, err

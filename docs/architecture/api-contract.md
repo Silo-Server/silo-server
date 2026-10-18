@@ -338,7 +338,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `profile_verification_required` type so clients still know to ask for the PIN, a session
   holding a temporary password keeps `password_change_required` so clients route to the
   password change, and an access token minted before the account's role changed gets
-  `token_refresh_required` so clients refresh instead of signing out. A gate the
+  `token_refresh_required` so clients refresh instead of signing out. A credential the auth
+  gate could not check because its store failed (v1 `503 service_unavailable`) becomes
+  `503 dependency_unavailable` with `Retry-After`, never a 401. Viewer access answers the
+  same way, with reason `viewer_access_unavailable`, when the viewer's scope policy runs out
+  of evaluation time; the request is refused either way. A gate the
   wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
   removes them from the route table. Handlers read claims, profile, and viewer scope from the
   request context and never from headers. Every authenticated class guarantees non-nil
@@ -496,9 +500,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (97
+  tier-1 ported mutation rows (219 distinct operations) are classified (101
   `natural_idempotent`, 24 `unique_constraint`, 12 `domain_identity`, 9 `coalescing`, 3
-  `durable_dispatch`, 74 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `durable_dispatch`, 70 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
@@ -535,7 +539,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `non_retryable` until their durable identity and cleanup defects are fixed. Library creation,
   settings updates, stale-ID rematch, provider-chain replacement, and taste seeding also remain
   `non_retryable`: their current seams cannot resume dispatch after saving state, or
-  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Forty-three rows (42 distinct operations)
+  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Thirty-nine rows (38 distinct operations)
   carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
@@ -543,15 +547,16 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   invite-code redemption during signup, playback route events,
   watch-together selection and promotion, metadata-match-queue retry, playback session
   progress, download status, ebook reader progress, and onboarding progress,
-  whose last-write-wins update lets a delayed retry rewind a newer report, favorites,
-  watchlist, and rating add and remove, the taste seed, subtitle download and upload,
+  whose last-write-wins update lets a delayed retry rewind a newer report, rating add
+  and remove, the taste seed, subtitle download and upload,
   whose unique key resolves a retry but whose losing insert deletes the winner's S3
   object, transcode start, which replaces a live session under the same id, and media
   request creation, whose partial unique index stops covering a request once it reaches a
   terminal state, node creation, whose cross-replica pool reload runs after the insert
   without a transaction, push device registration (Apple and FCM), whose update overwrites
   a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
-  field presence rather than on an effective change, the provider device-auth poll, whose
+  field presence rather than on an effective change and the profile's PIN revision whenever
+  the request carries a PIN, the provider device-auth poll, whose
   completion check is a plain read ahead of the plugin call, admin user update, whose
   password branch re-hashes and revokes every session on each attempt, profile creation,
   whose name and limit checks run in application code with no unique index on the
@@ -797,6 +802,104 @@ until their normal expiry or revocation. V1 and v2 share one session/revocation 
 bridge; v2 does not mint a parallel credential universe. `Authorization`, `X-Profile-Id`, and
 `X-Profile-Token` retain their security meanings, as do account/profile, primary-profile,
 acting-admin, server-admin, and hidden-resource checks.
+
+A critical bridge fix narrows the v1 viewer routes that do not require a profile. Without
+`X-Profile-Id` they resolved to the account's own limits, so any device signed into the
+household could read past a restricted profile's limits, or a locked profile's PIN, by omitting
+the header. When any profile on the account has a PIN, a rating ceiling, an advisory-age limit,
+or a library restriction, those routes now answer `400 bad_request` with the message
+`X-Profile-Id header is required`, the response v1 playback start already gives. The marker
+writes are gated too, and the gate runs before their `marker_edit` check, so a caller without
+that permission that omits the header gets this 400 rather than 403. Accounts without such a
+profile keep account scope. API keys, capability probes, profile selection,
+account and admin routes, and the session-bound stream and transcode routes are not gated.
+Download links that pass the access token as `?token=` cannot send the header, so on such an
+account they get the 400 too; v1 gains no profile query parameter. The gate reads only the
+profiles' stored limits. A custom scope policy (`silo_custom.scope`) that narrows one profile
+through `input.profile_id` applies only to requests that name that profile; for the household
+to require a profile, that profile also needs one of the stored limits above. The gated routes
+carry the `household_profile_gate` trait in the route inventory, and
+`TestHouseholdProfileGateCoversV1ViewerRoutes` fails when a v1 route runs viewer access without
+a profile and neither carries the trait nor is listed as exempt. The change is recorded in
+[v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
+
+V2 applies the same rule to its profile-optional watch, marker and subtitle operations.
+An operation declares `HouseholdProfileGate`, and the gate chain runs the household gate right
+after viewer access. On an account with a limited profile, a request without `X-Profile-Id` (an
+empty header counts as absent) gets the `422 validation_failed` problem with an error at
+`header.x-profile-id`, the same problem profile-required operations answer. As on v1, the rule
+reads only the profiles' stored limits, so a custom scope override keyed on one profile does not
+trigger it. The gated
+operations are `getWatchState`, `getWatchTrickplay`, the marker reads and writes, and the
+subtitle operations that act on one media file or stored subtitle; their `X-Profile-Id`
+description states the rule. API keys are exempt. Capability probes, profile selection, account
+operations, `listUserLibraries`, the section recipe gallery and the session-bound playback
+delivery routes keep account scope. A new profile-optional operation that reads or acts on catalog content declares the gate;
+`TestHouseholdProfileGateCoversProfileOptionalOperations` fails until every profile-optional or
+permission-gated operation either declares it or is listed as exempt with a reason.
+
+Direct downloads (`getDirectDownload`, `getDirectDownloadProxy` and their HEAD forms) are gated
+too. A browser starts them as a navigation that cannot send headers, so the profile travels in a
+direct-download link instead: `createDirectDownloadLink`, a profile-scoped operation that needs
+the profile's PIN proof like any other, checks the file against that profile's access and returns
+URLs carrying a `dl` token. The token is a JWT signed with the session signing key, of
+`token_type` `direct_download_link`, naming the account, login session, profile and one media
+file, and valid for five minutes. Only the direct-download routes accept it, and only as `dl`;
+`RequireAuth` refuses it as a bearer credential because it is not an access token. On those
+routes it replaces the account credential: the login session must still be active, the
+`file_id` must match, and `X-Profile-Id` is rewritten to the token's profile. Viewer access then
+resolves that profile's current limits and skips only the PIN proof the link stands for, as it
+does for the Apple display token. The link authorizes the start of a request; a transfer that
+began in time may run longer.
+
+Household management (creating, editing, and deleting profiles, listing household sessions,
+managing another profile's devices or settings, importing history for another profile, and
+creating a personal API key) belongs to the account's primary profile, verified with
+`X-Profile-Token` when it has a PIN; v2 also refuses a scope whose PIN check an API key
+skipped. The account's admin role does not widen this, the same way acting-admin routes refuse
+admin powers to a non-primary profile: on an admin account, every other profile is a household
+member like any other. A request without `X-Profile-Id` manages the household only when the
+account is an admin and no profile on it has a PIN, a rating ceiling, an advisory-age limit, or
+a library restriction (the same test as the gate above), so first-run and admin tooling keep
+working on an unrestricted household. An admin API key that names no profile keeps household
+management on any household, as it keeps profile-less admin powers below: it is an account
+credential bounded by its scopes, and only the acting primary profile can create one. A key
+that names a profile is held to the primary-profile rule like a session. Refusals reuse the existing responses: v1 `403
+forbidden`, v2 `403 permission_denied` or `profile_verification_required`. The v1 change is a
+critical bridge fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
+`createPersonalAPIKey` became `profile_scoped` with an optional profile so the viewer gate can
+verify that profile.
+
+Admin powers follow the same household test. The acting-admin gate (v1 `RequireActingAdmin`
+and its policy-backed form; the v2 `acting_admin` class) and the metadata-curation admin
+bypass already refuse a non-primary declared profile; a login session that declares no profile
+now keeps admin powers only while no profile on the account has a PIN, a rating ceiling, an
+advisory-age limit, or a library restriction. The policy input carries this as
+`household_requires_profile`, precomputed in Go like `acting_as_primary`. A refused request gets
+the existing refusal (v1 `403 forbidden`, "Admin access requires the account's primary
+profile"; v2 `403 permission_denied`), and a failed profile lookup fails closed with the
+existing `500`. API keys keep their profile-less admin access. A PIN-locked primary profile
+needs its `X-Profile-Token` because the viewer gate runs before the acting-admin gate on the v1
+admin groups and on every v2 `acting_admin` and `permission_gated` operation; the one v1
+acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refresh`. The
+admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
+This is the same critical bridge fix.
+
+Routes outside the admin groups that widen what an admin sees or may do (another account's
+media requests and their download-server fields, another account's downloaded subtitles,
+on-disk file paths, job polls, administrator events, admin-only home-section recipes) take
+that reach from the same decision, the acting admin, never from the account role: v1 and v2 handlers call `apimw.ActingAdmin`, which answers with
+the decider the router hands the acting-admin gate. It counts a declared profile only after the
+viewer gate verified it in the same request, so an operation that relies on it runs the viewer
+gate (v2 `profile_scoped`, optionally with `ProfileOptional`). Without a decider it answers
+false. Another profile on an admin's account is treated like any profile on a regular account.
+
+A remote-playback handoff session is narrower still: it acts only as its bound profile, with
+the account role `user`, on the v2 routes a TV needs to play and browse, and ends at its
+`session_expires_at` however often it refreshes. Every other route answers the existing 403
+(v2 `permission_denied`, v1 `forbidden`). The rules are in
+[device sign-in](device-login.md#remote-playback-handoff); the v1 change is a critical bridge
+fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
 
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
@@ -1134,10 +1237,20 @@ tombstone. The retained contract is:
   `Content-Type: application/json` on every branch. Revision (2026-09-15, with local artwork
   storage): storage outages no longer remove a node from rotation, because the API keeps
   answering and artwork routes fail on their own; `degraded` is additive to the frozen shape.
+  Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
+  answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
+  while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the
+  listeners close. The booleans report the last dependency probe, so the answer does not wait
+  on a slow dependency; `shutting_down` is additive to the frozen shape. See
+  [api-shutdown.md](api-shutdown.md).
 - **Proxy / transcode-node `GET /api/v1/health`**: `200 application/json`
   `{"status":"ok","active_jobs":n,"capabilities_hash":…,"system":…,"gpu":…}` (proxy also
   `egress_kbps`); read from already-published snapshots, never a probe, path-redacted because the
   route takes no credential. `internal/nodepool/health.go` `CheckNode` is the internal consumer.
+  Revision (2026-10-11, with node drain): a draining transcode node answers the same `200` shape
+  with `status` `draining`, then `drained` once it has no work left; the values are additive to
+  the frozen shape, and the status code does not change, so probes keep passing while the node
+  finishes its sessions. See [node-drain.md](node-drain.md).
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
 container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
@@ -1274,10 +1387,17 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 `{item_id, rating, rated_at}` entries instead), a membership read that answers the entry
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
-the entry existed. All six mutations are `non_retryable`: the shared seams dispatch provider
-list and rating events and recommendation refresh without change gating, and rating updates
-replace `rated_at` even when unchanged. Their ledger `DEFECT` notes retain the durable-dispatch work
-required before clients can retry automatically. The mutations are not demo-restricted: v1's demo
+the entry existed. The four favorites and watchlist mutations are `natural_idempotent`: each
+store add and remove reports whether it inserted or deleted the row, and the shared v1/v2 seam
+sends the provider list event, the recommendation refresh, and the user-state event only for a
+change, so a repeated add or remove answers `204` and notifies nobody. The notices run detached
+from the request, so a client that disconnects after the write does not cancel them, but they
+are not durable: a crash between the write and the notices loses them, and a retry, which
+changes no row, does not resend them. The scheduled provider export resends an add the provider
+missed; a missed removal has no scheduled repair yet. The two rating mutations remain
+`non_retryable`: the rating seam dispatches provider rating events and recommendation refresh
+without change gating, and rating updates replace `rated_at` even when unchanged. Their ledger
+`DEFECT` notes retain the durable-dispatch work required before clients can retry automatically. The mutations are not demo-restricted: v1's demo
 guard only blocks its listed routes, so these writes pass in demo mode and v2 matches. The three
 lists page by keyset, not offset: the cursor is the (`added_at`, `item_id`) — for ratings
 (`rated_at`, `item_id`) — of the last entry emitted, and the next page resumes strictly after it
@@ -1311,14 +1431,26 @@ deliberate v1 differences, recorded per row in the ledger: `createProfile` answe
 `Location`; `deleteProfile` and `deleteProfileAvatar` are plain `204`s (v1 returned the profile
 from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
 ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
-keeps v1's token semantics (bound to the login session and policy revision, `no-store`) and
-reports `expires_at` as a nullable instant; `uploadProfileAvatar` is the first Huma multipart
+keeps v1's token semantics (bound to the login session and the profile's PIN revision, `no-store`) and
+reports `expires_at` as a nullable instant. PIN verification is `non_retryable`: a replayed wrong
+PIN counts as another lockout attempt. `uploadProfileAvatar` is the first Huma multipart
 operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared
 types or an undecodable image is `422` at `body.avatar`, an oversized avatar is `413`, and a
 server without an upload store answers `503`; section overrides drop the `/reset` suffix
 (`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
 method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
-casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+casing mismatch). `getProfileSectionSettings` also returns `default_title`, the administrator's
+own title for each admin row next to the profile's effective `title`, so a client can show that a
+profile renamed a row and offer the original name back (saving an empty `title` override restores
+it); it is empty for a profile-built row, and v1 does not return it. `getProfileSectionFlags`
+keeps `allow_profile_custom_sections` for clients that read it, but it is deprecated and always
+`true`: profiles may always add rule rows (`custom_filter`), with no server setting. Whether a
+profile that is not an admin may add a new row of a recipe is that recipe's `admin_only` in
+`listSectionRecipes`; clients follow it instead of the flag. On both versions,
+`replaceProfileSectionOverrides` refuses only a profile that is not an admin adding a new row of
+an `admin_only` recipe (Editor's picks, `admin_curated_list`); a row of that kind already saved on
+the page is kept and may change. v1 answers `403 custom_disabled` with its frozen message; v2
+answers `403 permission_denied` saying only an admin can add an Editor's picks row. Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
 **Settings section (Phase 4).** Operations: `getSettingsContract` (serves both v1
 `/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (also v1
@@ -1425,13 +1557,25 @@ its revision are read in one database snapshot; authorization and catalog hydrat
 by checks of that revision. Smart results are live keysets, not a frozen catalog snapshot.
 The pinned web carousel requests a bounded teaser and links to the full collection browse view.
 
-**Section catalog-home (Phase 4).** Eight profile-scoped operations under the `home` tag:
-`getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeLayout`, `listHomeSections`,
-`getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
+**Section catalog-home (Phase 4).** Nine profile-scoped operations under the `home` tag:
+`getCalendar`, `dismissHomeItem`, `undismissHomeItem`, `getHomeCapabilities`, `getHomeLayout`,
+`listHomeSections`, `getHomeSectionItems`, `listSectionRecipes`, `listSectionRecipeCandidates`. The two recipe
 gallery reads are profile scoped with an optional `X-Profile-Id`, as v1 registers them without
 `RequireProfile`, so an account-scoped caller reads the gallery. Home is the same
-shape as a library page with scope=home, so the layout, section, and card reads reuse
-`SectionLayout`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
+shape as a library page with scope=home, so the section and card reads reuse
+`SectionLayoutEntry`, `SectionCollection`, `Section`, and `CatalogItem` from catalog-libraries.
+`getHomeLayout` answers its own `HomeLayout` rather than `SectionLayout`: besides `sections` it
+carries `included_sections`, so the library layout's contract stays unchanged. With
+`include_items=N` (0 to 4, default 0) and an optional `image_size`, the layout also answers the
+first N sections in display order, each identical to its `getHomeSectionItems` answer for the
+same viewer and `image_size` (no cross-row duplicate filter). The rows are built in parallel
+under one fixed budget that covers each row's whole build, its item fetch and its card lookups; a
+row that errors or is not built in time is left out rather than failing or delaying the layout,
+and the client reads it from `getHomeSectionItems`. `included_sections` is `[]` when nothing was requested.
+Because v2 rejects unknown query parameters, a client sends `include_items` only after
+`getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
+largest value the layout accepts (4); the document is `not_configured`, without the field, when the
+home sections service is not wired.
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
@@ -1461,7 +1605,8 @@ The operation answers
 closed `scope` enum and answers `204`; `syncProgress` takes `position_ms`/`duration_ms` as
 integer milliseconds, string item ids and an `updated_at` instant (a malformed one is `422`, not a
 per-item error) and answers the v1 `results` list; `getWatchState` keeps the profile header
-optional as v1 does, takes `file_id` (string ID) and a strict `image_size`, renders file ids as
+optional as v1 does (narrowed by the household rule under
+[Credential continuity](#credential-continuity)), takes `file_id` (string ID) and a strict `image_size`, renders file ids as
 string IDs, `added_at` as an instant, `duration`/`total_duration` as `*_seconds`, markers as
 `{start_seconds, end_seconds}`, and answers a series (not directly playable) as `422` at `path.id`;
 `markWatched`/`unmarkWatched` answer `204` instead of v1's `{content_id, type, affected_count,
@@ -1471,6 +1616,14 @@ retry after an intervening unmark can create another watch; a durable client wat
 is still needed. History removal and unmark choose a fresh cutoff, so a delayed retry can
 hide an intervening watch. Sync accepts an omitted `updated_at`, so a delayed replay can
 overwrite newer progress; every item needs a stable event time before automatic retries are safe.
+Two v2-only operations extend the section without ledger rows: `clearResumePosition`
+(`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
+resume position while keeping its watched state and history, answers `204` (also when there is
+nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
+kind `markWatched` does not handle, and is
+`non_retryable` because a delayed retry would also clear a position recorded in between;
+`getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
+`clear_resume_position`. Semantics are in [the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,
@@ -1898,9 +2051,11 @@ has no view of these entries. There is no new realtime event. See
 Seven v2 operations list sources, list/create/read import runs, create/check a Plex
 PIN and perform Emby Connect login. Source discovery and external sign-in are account
 operations. Run creation, listing, and reads enforce the acting profile: a secondary
-profile acts only for itself, while an admin or the primary profile with any required
-PIN verification may act for its household. Non-admin creation requires an acting
-profile. Target account ownership is checked before source authentication. Run lists
+profile acts only for itself, while the primary profile with any required PIN
+verification may act for its household (see household management under
+[Credential continuity](#credential-continuity)).
+Creation requires an acting profile, except for an admin account on a household with
+no limited profile. Target account ownership is checked before source authentication. Run lists
 use signed `(created_at, id)` cursors scoped to the account and acting profile.
 The retained v1 run handlers enforce the same rule as a critical bridge fix, preserving
 their existing envelopes, success statuses, and 50-run list cap. See
@@ -1950,6 +2105,15 @@ update ignores the toggles. See
 [watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules. The
 dropped-show setting (`sync_dropped_enabled`) and `sync_dropped` capability are v2-only in
 the same way; see [dropped-shows.md](dropped-shows.md).
+
+Provider connection settings are v2-only in the same way. A plugin declares them in its
+watch-sync descriptor, and `GET /watch-providers` lists them per provider as
+`connection_settings` (key, label, description, `type`, `default_value`). The settings
+projection returns their values for the connection in `connection_settings`, defaults
+included, and PATCH accepts a partial `connection_settings` object whose keys are merged
+into the stored values. An undeclared key or a value of the wrong type fails with
+`validation_failed`. `boolean` is the only type so far; a client skips a setting whose
+type it does not know. See [watch-provider-plugins.md](watch-provider-plugins.md).
 
 ### Webhook connection management
 
@@ -2021,9 +2185,45 @@ multipart create/update operations. Creation and provider imports mint server ID
 non-retryable. Sync is synchronous and non-retryable: the existing scheduler guard is local to
 one process and does not provide cluster-wide coalescing or a durable request identity.
 
-Collection and group edits, deletes, and ordering require `If-Match`. Clients first load the
-canonical representation: `GET /collections/{id}`, `GET /collections/groups/{id}`,
-`GET /collections/order?group_id=...`, `GET /collections/groups/order`, or
+Ownership and visibility (#1615) are one rule, applied on every read and write path and in both
+user stores. A native personal collection has exactly one owner, `creator_profile_id`. Profile
+`P` on login `U` sees a collection when it belongs to `U` and either `P` created it or `is_shared`
+is true; the decision is made at read time (`userstore.Collection.VisibleTo`), so profiles created
+later see shared collections and no per-profile rows exist. A collection the profile cannot see
+answers `404 not_found` on every operation; a visible collection the profile does not own answers
+`403 permission_denied` on every mutation, including sync. Members and `item_count` are limited to
+what the owner can access and then to what the viewer can access; personalized smart rules and
+display filters use the viewer's state. Audiobookshelf (beta) collections and playlists share the
+PostgreSQL table; only rows with `native = TRUE` are personal collections, and the column defaults
+to false so another writer can never leak into native listings. See
+[the personal collections API](../collections-api.md).
+
+Migration `20261003235347_personal_collection_login_sharing` converts existing rows. A shared
+collection stays shared only when its allow list covered every profile on its login; any other
+shared collection becomes private. Release notes for a build containing this migration must say
+so and must carry a maintenance requirement: stop every API replica before a new replica runs
+migrations, and do not restart an old replica against the migrated database. An old replica
+creates collections without `native`, so they never appear in native listings, and it can still
+store an `is_shared` meant for a subset allow list, which the new rule reads as shared with the
+whole login. The later migration that drops `user_personal_collection_profiles` first repeats the
+`native` backfill and the sharing rule, so rows an old replica wrote are recovered without
+widening access.
+
+`listCollections` returns the profile's own collections in its order, then other profiles' shared
+collections grouped by owner, each in its owner's order. Each profile has one flat order of its own
+collections (`sort_order` numbered per creator). `reorderCollections` accepts only a permutation of
+the acting profile's own collections; any other ID is a `422 validation_failed` at
+`body.ordered_ids`. The order validator remains account-wide, so another profile's edit can make a
+profile's order tag stale; clients recover from the 412 as for any stale tag.
+
+Personal collection groups are removed in two phases. Today `groups` is always `[]`, `group_id`
+always null, the `groups` capability false, and the six group operations and a `group_id` update
+answer `501 capability_unsupported`. The members and operations leave `/api/v2` once shipped Apple
+and Android builds tolerate their absence, before the lock. `CollectionCapabilities.login_sharing`
+tells clients the server implements this model.
+
+Collection edits, deletes, and ordering require `If-Match`. Clients first load the
+canonical representation: `GET /collections/{id}`, `GET /collections/order`, or
 `GET /collections/{id}/items/order`. Paths in this section have the `/api/v2` prefix.
 Each response supplies a strong ETag bound to the representation, account, profile, and access
 scope. Canonical collection editors omit the volatile presigned poster URL; display listings
@@ -2031,7 +2231,7 @@ continue to provide artwork. Personal collection detail responses include the vi
 `item_count`, so their ETag also binds that count. A catalog or watch-state change that changes
 the count invalidates an earlier tag at precondition evaluation, even without a collection edit.
 The stored collection revision continues to guard concurrent definition edits in the write
-transaction. Ordering writes use PUT, group and collection partial edits use
+transaction. Ordering writes use PUT, collection partial edits use
 PATCH, and a successful delete returns 204 without an ETag. Storage compares the version and advances it in the transaction that applies the write. Missing preconditions return 428; stale
 preconditions return 412 with the current authorized validator. Clients must not automatically retry or implicitly
 replace the observed validator with a wildcard. Web editors retain the observed validator and preserve drafts
@@ -2050,9 +2250,13 @@ complete, accessible manual order; the canonical item-order read never returns m
 Artwork changes use `PUT /collections/{id}/poster` with either a bounded multipart `poster` or
 `source_url`. Definition PATCH does not download artwork. The web saves the definition first,
 then changes the poster; artwork failure leaves the saved collection intact and is reported
-separately. Membership and artwork operations check creator ownership, and item additions also
+separately. Artwork libvips cannot read, whether uploaded or fetched from `source_url`, a JPEG or
+PNG of up to 4 megapixels whose pixel data does not decode, and a `source_url` that has no http(s)
+host, answers other than `200`, or returns more than 10 MiB are `422 validation_failed` problems
+and leave the stored poster unchanged. Other processing failures, such as damaged pixel data in a
+larger image, stay `500`. Membership and artwork operations check creator ownership, and item additions also
 require catalog visibility. Adding an existing native member preserves its position; order changes
-use the explicit ordering operation. Shared viewers can read permitted collections but cannot mutate them.
+use the explicit ordering operation. Shared viewers can read shared collections but cannot mutate them.
 Native membership operations preserve audiobook chapter entries in the same storage table.
 
 Collection capabilities describe the acting account's selected user store:
@@ -2062,12 +2266,13 @@ Collection capabilities describe the acting account's selected user store:
 | Existing manual create/read/update/delete and membership | Supported | Supported |
 | Stable bounded manual continuation | Supported | Supported |
 | Guarded definition update/delete | Supported | Supported |
-| Groups and collection/item ordering | Supported | Pre-existing unsupported behavior |
+| Collection/item ordering | Supported | Pre-existing unsupported behavior |
+| Groups | Removed (#1615) | Removed |
 | Imported collections and sync | Supported | Pre-existing unsupported behavior |
 | Collection artwork | Supported | Pre-existing unsupported behavior |
 
-The `groups`, `imports`, `artwork`, and `item_reorder` flags let the bundled web hide unsupported
-actions. Unsupported store features answer the structured 501 `capability_unsupported` problem;
+The `imports`, `artwork`, and `item_reorder` flags let the bundled web hide unsupported
+actions; `groups` is always false. Unsupported store features answer the structured 501 `capability_unsupported` problem;
 they are not silently accepted. This migration does not add those feature families to SQLite.
 
 Apple and Android still need to adopt these v2 collection operation mappings, ID/envelope and
@@ -2133,15 +2338,18 @@ for limits), without volatile metadata. Integration reads include persisted publ
 configuration and check status, all covered by the row revision, and a credential
 presence flag. API credentials are write-only. A blank update preserves the saved
 credential and retains the existing requirement to re-enter it when changing the
-base URL. Plugin validation happens before the storage transaction; an intervening
-edit still fails the final comparison instead of overwriting it. A failed plugin
+base URL, which applies only when a credential is saved; clearing the base URL
+counts as changing it. Plugin validation happens before the storage
+transaction; an intervening edit still fails the final comparison instead of overwriting it. A failed plugin
 validation uses structured v2 problem errors for the web's inline field messages.
 
 A v2 integration's `base_url` is normalized before option loading and before
 create or update: `http://` is assumed when no scheme is given and a trailing
 slash is dropped, so the saved address is the one the options probe used. An
 address with credentials, a query or a fragment, or another scheme, is a
-`validation_failed` problem on `body.base_url`. When `POST
+`validation_failed` problem on `body.base_url`. An options request that leaves
+`base_url` out tests the saved address; one that sends it blank tests a router
+that declares `base_url_optional` without an address. When `POST
 /admin/request-integrations/{id}/options` fails, the host answers with its own
 sentences and never echoes the plugin's upstream text. What the admin must fix
 is a `validation_failed` problem on `body.base_url` (wrong address, missing URL
@@ -2165,7 +2373,7 @@ lost updates but do not make external validation or whole moderation flows atomi
 `GET /api/v2/devices` lists the acting profile's registered settings devices.
 `scope=household` explicitly requests all profiles on that account and requires
 household management authority: the primary profile (with PIN verification when
-configured) or a server admin. The collection uses bounded keyset pages ordered by
+configured), on an admin account too (see [Credential continuity](#credential-continuity)). The collection uses bounded keyset pages ordered by
 `last_seen_at DESC, profile_id, device_id`; continuation retains the store timestamp's
 full precision. A device observed again can move ahead of the continuation point;
 this is a live registry, not a historical snapshot. Cursors bind the account,
@@ -2183,10 +2391,26 @@ forget requests, return `404`; successful commands return `204`. Both commands a
 non-retryable because a later retry can remove settings written in the meantime.
 Neither operation revokes login sessions or changes push registrations.
 
+`PATCH /api/v2/devices/{device_id}` (`updateDevice`) updates the same registry entry,
+with the same `profile_id` authorization and `404` for a missing device. Its one
+member, `custom_name`, names the device for that profile: a string sets it, `null`
+removes it, and omission leaves it unchanged. The server removes control characters
+and bidirectional overrides, collapses spaces, and rejects a name with no visible
+character (`422`). Registration never writes the custom name, so it survives the
+device being seen again, and the reported `device_name` is kept. `listDevices`
+returns `custom_name` only when one is set; clients show it in place of
+`device_name`. The operation answers `200` with the entry as `listDevices` renders it
+and is naturally idempotent. A name
+belongs to one profile's entry, so a device two profiles use is named separately for
+each. `supports_device_rename` on `getSettingsContractCapabilities` tells a client
+the operation exists. Administrator device reads and download device views still
+show the reported name.
+
 The web device-settings screen uses these operations. The Apple and Android native
 clients have no callers for this settings-device lifecycle; Apple's push registration
 belongs to the separate notification contract. Jellyfin has no corresponding
-settings-device operation.
+settings-device operation; jellycompat does not serve Jellyfin's device list or its
+custom device names.
 
 ### Administrator collections v2
 
@@ -2195,7 +2419,8 @@ The administrator collection surface uses `/api/v2/admin/collections` and
 the demo write guard. Library IDs are opaque strings at the boundary. JSON definition inputs
 exclude artwork source URLs; poster and backdrop changes each use a separate bounded multipart
 PUT with `image` or `source_url`. A definition can save successfully even if a later artwork
-request fails. Creation, provider imports, sync, template application, and artwork changes are
+request fails. Artwork and source URLs that the personal poster operation rejects with
+`422 validation_failed` are rejected the same way here and leave the stored artwork unchanged. Creation, provider imports, sync, template application, and artwork changes are
 non-retryable. The capability endpoint reports configured groups, imports, artwork, and item
 ordering support.
 
@@ -2225,6 +2450,11 @@ older serializable delete snapshot to retry or report its exact validator stale;
 alone would allow that snapshot to miss a newly committed reference. Missing outgoing references
 can still be removed or replaced. Section-managed cleanup also checks management mode under the
 parent lock and reports whether it actually deleted the collection.
+
+`listAdminCollectionSections` and the `home_row_count` and `row_count` members of
+`listAdminCollections` items read those JSON references from the administrator page layouts
+without locks; the counts come from one grouped query per list request. Profile-added rows live
+in profile overrides and are not counted. The counts stay off the canonical collection read.
 
 Section storage writers use serializable transactions with sorted collection parents, section
 targets, and scope counters. Durable section and scope revisions cover definition, enabled,
@@ -2279,7 +2509,13 @@ defaults and requires the captured scope ETag. Its response is the refreshed can
 with its ETag; clients refetch definitions after replacement. `reset_profiles` selects the separate all-profile
 reset capability described above; an unsupported reset fails before definition writes. Creation
 and bulk creation use POST, while the retained preview POST samples recipe results using the
-requesting profile's access filter without saving a definition. Capabilities report whether the
+requesting profile's access filter without saving a definition. Preview items carry the same
+presigned, short-lived `poster_url` a saved row serves at its default size, and omit it when the
+item has no poster; storage keys are never serialized. Creation, bulk creation, preview,
+and a PATCH that changes `section_type` or `config` run the recipe's own config check and answer
+`validation_failed` when it fails, for example an Editor's Picks list with no items; a PATCH that
+leaves both unchanged, including one that echoes their stored values, does not re-check the stored
+config. The frozen `/api/v1` single create and update routes do not run this check. Capabilities report whether the
 service, preview, and atomic profile reset are available. Clients do not automatically replay
 administrator section operations after a conflict or a partial multi-request flow.
 

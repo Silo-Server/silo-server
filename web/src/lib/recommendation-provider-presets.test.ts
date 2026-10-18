@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -19,6 +21,18 @@ describe("recommendation provider presets", () => {
     expect(
       matchRecommendationProviderPreset("https://api.openai.com/", "text-embedding-3-large")?.id,
     ).toBe("openai");
+  });
+
+  it("uses an Ollama model whose vectors Silo can store", () => {
+    const ollama = RECOMMENDATION_PROVIDER_OPTIONS.find((preset) => preset.id === "ollama");
+    expect(ollama?.model).toBe("qwen3-embedding:0.6b");
+    expect(
+      matchRecommendationProviderPreset("http://ollama:11434", "qwen3-embedding:0.6b")?.id,
+    ).toBe("ollama");
+    // Servers saved with the 4096-dimension :latest tag show as a custom model.
+    expect(
+      matchRecommendationProviderPreset("http://ollama:11434", "qwen3-embedding:latest"),
+    ).toBeNull();
   });
 
   it("returns null when the settings do not match a built-in provider", () => {

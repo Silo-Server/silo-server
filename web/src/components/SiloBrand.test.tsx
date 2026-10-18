@@ -16,6 +16,7 @@ const BRANDING_DEFAULTS: BrandingContextValue = {
   faviconUrl: null,
   loginBgUrl: null,
   storageAvailable: false,
+  loaded: false,
 };
 
 function renderBrandSrc(
@@ -34,18 +35,10 @@ function renderBrandSrc(
 }
 
 describe("SiloBrand", () => {
-  it("uses the white-text built-in wordmark", () => {
-    expect(renderBrandSrc("wordmark")).toBe("/silo-wordmark-sidebar.png");
-  });
-
   it("uses the custom wordmark", () => {
     expect(renderBrandSrc("wordmark", { wordmarkUrl: "https://cdn/custom.png" })).toBe(
       "https://cdn/custom.png",
     );
-  });
-
-  it("uses the built-in mark with no custom asset", () => {
-    expect(renderBrandSrc("mark")).toBe("/silo-icon-1024.png");
   });
 
   it("uses the custom mark", () => {

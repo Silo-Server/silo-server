@@ -2,16 +2,21 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/gorilla/websocket"
 )
 
@@ -183,5 +188,65 @@ func TestHandleLogStreamWebSocketKeepsBridgeStatuses(t *testing.T) {
 		t.Fatalf("bridge upgrade with URL token: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
+	_ = resp.Body.Close()
+}
+
+func TestAuditSocketDomainFilterValidationMatchesHistory(t *testing.T) {
+	for _, key := range []string{"action", "target_type", "target_id"} {
+		for _, value := range []string{strings.Repeat("x", 64), strings.Repeat("界", 64)} {
+			_, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?"+key+"="+url.QueryEscape(value), nil))
+			if err != nil {
+				t.Fatalf("valid %s boundary: %v", key, err)
+			}
+		}
+		_, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?"+key+"="+strings.Repeat("x", 65), nil))
+		if err == nil {
+			t.Fatalf("overlong %s accepted", key)
+		}
+	}
+	for _, value := range []string{"0", "01", "+1", " 1", "-1", "a", strings.Repeat("1", 21), "99999999999999999999"} {
+		_, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?actor_user_id="+url.QueryEscape(value), nil))
+		if err == nil {
+			t.Fatalf("invalid actor %q accepted", value)
+		}
+	}
+	opts, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?actor_user_id=1", nil))
+	if err != nil || opts.ActorUserID == nil || *opts.ActorUserID != 1 {
+		t.Fatalf("valid actor rejected: %+v, %v", opts, err)
+	}
+}
+
+// The log stream follows the acting-admin rule: a profile-less admin session
+// on a household that requires a profile cannot mint, and a ticket it minted
+// before the household gained a PIN or limit no longer connects.
+func TestAdminLogsSocketV2RefusesProfileLessAdminOnHouseholdRequiringProfile(t *testing.T) {
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileVerified: true, PolicyRevision: 1}}
+	var requiresProfile atomic.Bool
+	decide := apimw.NewActingAdminDecider(
+		func(context.Context, int, string) (bool, bool, error) { return true, true, nil },
+		func(context.Context, int) (bool, error) { return requiresProfile.Load(), nil })
+	h := NewAdminLogsSocketV2(NewAdminLogsHandler(nil, nil, logstream.NewHub("admin-logs-household", nil)), evt.NewSocketTicketStore(nil), sessions, users, viewer, decide, "")
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", AccessExpiresAt: time.Now().Add(time.Minute)}
+	stale, err := h.Mint(t.Context(), identity)
+	if err != nil {
+		t.Fatalf("household without a requirement: %v", err)
+	}
+
+	requiresProfile.Store(true)
+	if _, err := h.Mint(t.Context(), identity); !errors.Is(err, ErrAdminLogsSocketForbidden) {
+		t.Fatalf("profile-less mint on a household that requires a profile: %v", err)
+	}
+	server := httptest.NewServer(h)
+	defer server.Close()
+	dialer := websocket.Dialer{Subprotocols: []string{AdminLogsSocketProtocol, eventsTicketProtocolPrefix + stale}}
+	conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"?stream=audit", nil)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil || resp == nil || resp.StatusCode == http.StatusSwitchingProtocols {
+		t.Fatal("ticket minted before the household gained a PIN still connected")
+	}
 	_ = resp.Body.Close()
 }

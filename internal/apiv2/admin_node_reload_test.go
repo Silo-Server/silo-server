@@ -25,12 +25,15 @@ func (f *fakeNodeReload) ForceReloadAdminNode(_ context.Context, id int) ([]hand
 	return f.rows, f.err
 }
 func TestAdminNodeReload(t *testing.T) {
+	f := new(fakeNodeReload)
+	deps := pilotDeps(nil, nil)
+	deps.AdminNodeReload = f
+	h := NewHandler(deps)
+	deps.AdminNodeReload = nil
+	missing := NewHandler(deps)
 	for _, suffix := range []string{"force-reload", "17/force-reload"} {
 		t.Run(suffix, func(t *testing.T) {
-			f := &fakeNodeReload{rows: []handlers.ForceReloadResult{{NodeID: 17, NodeName: "Synthetic", Status: "ok"}, {NodeID: 18, Status: "error", Error: "private-worker"}}}
-			deps := pilotDeps(nil, nil)
-			deps.AdminNodeReload = f
-			h := NewHandler(deps)
+			*f = fakeNodeReload{rows: []handlers.ForceReloadResult{{NodeID: 17, NodeName: "Synthetic", Status: "ok"}, {NodeID: 18, Status: "error", Error: "private-worker"}}}
 			path := Prefix + "/admin/nodes/" + suffix
 			requireProblem(t, do(t, h, "POST", path, "", nil), TypeAuthenticationRequired)
 			requireProblem(t, do(t, h, "POST", path, "", bearer(memberToken)), TypePermissionDenied)
@@ -60,8 +63,7 @@ func TestAdminNodeReload(t *testing.T) {
 					t.Fatal(rec.Code, rec.Body.String())
 				}
 			}
-			deps.AdminNodeReload = nil
-			requireProblem(t, do(t, NewHandler(deps), "POST", path, "", bearer(adminToken)), TypeDependencyUnavailable)
+			requireProblem(t, do(t, missing, "POST", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 		})
 	}
 }

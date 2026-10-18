@@ -287,7 +287,7 @@ func registerInvitations(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		view, err := svc.AcceptInvitation(ctx, in.Token, in.Body.Email, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
+		view, err := svc.AcceptInvitation(withClientDevice(ctx), in.Token, in.Body.Email, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
 		if err != nil && !errors.Is(err, invitations.ErrSessionStart) {
 			return nil, invitationProblem(err, true)
 		}
@@ -391,6 +391,9 @@ func registerInvitations(reg *Registry) {
 					return nil, NewProblem(TypeValidationFailed, "Invalid library ID.")
 				}
 				input.LibraryIDs = append(input.LibraryIDs, n)
+			}
+			if p := reg.rejectUnknownLibraries(ctx, &input.LibraryIDs, locationLibraryIDs); p != nil {
+				return nil, p
 			}
 		}
 		return invitationDelivery(svc.Send(ctx, input))

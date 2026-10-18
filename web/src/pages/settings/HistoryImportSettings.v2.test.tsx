@@ -23,6 +23,7 @@ vi.mock("@/hooks/queries/profiles", () => ({
 }));
 vi.mock("@/hooks/queries/history-import", () => ({
   useHistoryImportSources: () => ({ data: [], isLoading: false }),
+  useHistoryImportCapability: () => ({ data: undefined }),
   useHistoryImportRuns: () => ({
     data: [
       {
@@ -157,10 +158,20 @@ it("lets the primary profile choose the profile and names each run's profile", (
   expect(screen.getByText(/into Member/)).toBeTruthy();
 });
 
-it("lets an admin choose the profile", () => {
+it("lets an admin's primary profile choose the profile", () => {
   state.role = "admin";
+  state.primary = true;
   renderPage();
   expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
+});
+
+it("imports only into its own profile from an admin's non-primary profile", () => {
+  // The server refuses a non-primary profile's cross-profile import even on
+  // an admin account, so the picker must not offer it.
+  state.role = "admin";
+  renderPage();
+  expect(screen.queryByRole("combobox", { name: "Import into profile" })).toBeNull();
+  expect(screen.getByText(/The history goes into your profile, Member\./)).toBeTruthy();
 });
 
 it("keeps the server's message for a secondary profile's refused import", () => {
@@ -192,4 +203,15 @@ it("keeps the server's message for a refused import by the primary profile", () 
   const alerts = screen.getAllByRole("alert").map((alert) => alert.textContent ?? "");
   expect(alerts.some((text) => text.includes("This profile can only import"))).toBe(false);
   expect(alerts.some((text) => text.includes(state.createError!.message))).toBe(true);
+});
+
+it("says so when the server defines no Emby or Plex servers to pick from", () => {
+  renderPage();
+
+  fireEvent.click(screen.getByRole("button", { name: "Saved Server" }));
+  expect(screen.getByText("No server-defined Emby servers are available yet.")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /Plex account or direct server/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Saved Server" }));
+  expect(screen.getByText("No server-defined Plex servers are available yet.")).toBeTruthy();
 });

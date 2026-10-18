@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   useCanRequest: vi.fn(),
   useRequestSearch: vi.fn(),
   useCreateMediaRequest: vi.fn(),
-  useDebounce: vi.fn(),
 }));
 
 vi.mock("@/hooks/useCanRequest", () => ({
@@ -24,10 +23,6 @@ vi.mock("@/hooks/queries/useRequests", () => ({
 
 vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
   useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
-}));
-
-vi.mock("@/hooks/useDebounce", () => ({
-  useDebounce: <T,>(v: T) => mocks.useDebounce(v) ?? v,
 }));
 
 import { RequestToAddSection } from "./RequestToAddSection";
@@ -75,25 +70,11 @@ describe("RequestToAddSection (dialog variant)", () => {
   beforeEach(() => {
     mocks.useCanRequest.mockReset();
     mocks.useRequestSearch.mockReset();
-    mocks.useDebounce.mockReset();
     mocks.useCanRequest.mockReturnValue({
       discoveryEnabled: true,
       isResolving: false,
       submitDisabledReason: null,
     });
-    mocks.useDebounce.mockImplementation((v: unknown) => v);
-  });
-
-  it("renders nothing when discovery is disabled", () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
-
-    const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
-    expect(markup).toBe("");
   });
 
   it("passes enabled=false to useRequestSearch when discovery is disabled so no network call fires", () => {
@@ -102,9 +83,14 @@ describe("RequestToAddSection (dialog variant)", () => {
       isResolving: false,
       submitDisabledReason: null,
     });
-    mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+    mocks.useRequestSearch.mockReturnValue({
+      data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
+      isLoading: false,
+      isError: false,
+    });
 
-    render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
+    const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
+    expect(markup).toBe("");
 
     const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
     expect(call?.[0]).toBe("all");
@@ -112,30 +98,6 @@ describe("RequestToAddSection (dialog variant)", () => {
     expect(call?.[2]).toBe(1);
     expect(call?.[3]).toEqual({
       enabled: false,
-      requireProfile: true,
-      staleTime: 5 * 60 * 1000,
-      gcTime: 30_000,
-      retry: false,
-    });
-  });
-
-  it("passes enabled=true to useRequestSearch when discovery is enabled", () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 0, results: [] },
-      isLoading: false,
-      isError: false,
-    });
-
-    render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
-
-    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
-    expect(call?.[3]).toEqual({
-      enabled: true,
       requireProfile: true,
       staleTime: 5 * 60 * 1000,
       gcTime: 30_000,
@@ -152,6 +114,16 @@ describe("RequestToAddSection (dialog variant)", () => {
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
     expect(markup).toContain("Request to Add");
     expect(markup).toContain("Dune: Prophecy");
+    expect(markup).not.toContain(">Request<");
+    expect(markup).not.toContain("data-request-state");
+    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
+    expect(call?.[3]).toEqual({
+      enabled: true,
+      requireProfile: true,
+      staleTime: 5 * 60 * 1000,
+      gcTime: 30_000,
+      retry: false,
+    });
   });
 
   it("renders soft framing when library had 0 hits", () => {
@@ -222,16 +194,6 @@ describe("RequestToAddSection (dialog variant)", () => {
     expect(markup).toContain("Dune: Prophecy");
   });
 
-  it("renders nothing when all TMDB results are already in the library", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 1, results: [availableResult()] },
-      isLoading: false,
-      isError: false,
-    });
-    const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
-    expect(markup).toBe("");
-  });
-
   it("limits the dialog variant to at most 4 rows", () => {
     const many = Array.from({ length: 10 }, (_, i) =>
       missingResult({ tmdb_id: i + 100, title: `Result ${i}` }),
@@ -299,20 +261,6 @@ describe("RequestToAddSection (dialog variant)", () => {
     expect(markup).toContain('data-request-state="pending"');
     expect(markup).toContain(">Pending<");
     expect(markup).not.toContain('title="Blocked"');
-  });
-
-  it("shows no action pill on a requestable row, since the row itself opens the title", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
-      isLoading: false,
-      isError: false,
-    });
-
-    const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
-
-    expect(markup).toContain("Dune: Prophecy");
-    expect(markup).not.toContain(">Request<");
-    expect(markup).not.toContain("data-request-state");
   });
 });
 
@@ -509,28 +457,22 @@ describe("RequestToAddSection (grid variant)", () => {
     expect(markup).not.toContain("Result 20");
   });
 
-  it("searches the TMDB type the host's scope asks for and keeps a page on screen while paging", () => {
-    pages(1);
-    render(<PagedGrid query="dune" mediaType="series" libraryHadHits />);
-
-    expect(lastSearchCall().slice(0, 3)).toEqual(["series", "dune", 1]);
-    expect(lastSearchCall()[3]).toMatchObject({ enabled: true, keepPreviousPage: true });
-  });
-
   it("pages through TMDB's results", () => {
     pages(3);
     rtlRender(
       <MemoryRouter>
-        <PagedGrid query="bear" libraryHadHits />
+        <PagedGrid query="bear" mediaType="series" libraryHadHits />
       </MemoryRouter>,
     );
 
+    expect(lastSearchCall().slice(0, 3)).toEqual(["series", "bear", 1]);
+    expect(lastSearchCall()[3]).toMatchObject({ enabled: true, keepPreviousPage: true });
     const pager = screen.getByRole("navigation", { name: "Request to add pages" });
     expect(pager).toHaveTextContent("Page 1 of 3");
     expect(within(pager).getByRole("button", { name: "Previous" })).toBeDisabled();
 
     fireEvent.click(within(pager).getByRole("button", { name: "Next" }));
-    expect(lastSearchCall().slice(0, 3)).toEqual(["all", "bear", 2]);
+    expect(lastSearchCall().slice(0, 3)).toEqual(["series", "bear", 2]);
     expect(screen.getAllByRole("link", { name: "bear 2a" })[0]).toBeInTheDocument();
     expect(pager).toHaveTextContent("Page 2 of 3");
 
@@ -674,12 +616,6 @@ describe("RequestToAddSection (grid variant)", () => {
     fireEvent.click(within(section).getByRole("button", { name: "Back to page 1" }));
     expect(lastSearchCall().slice(0, 3)).toEqual(["all", "dune", 1]);
     expect(screen.getAllByRole("link", { name: "dune 1a" })[0]).toBeInTheDocument();
-  });
-
-  it("still hides the section when the first page fails", () => {
-    mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: true });
-
-    expect(render(<PagedGrid query="dune" libraryHadHits />)).toBe("");
   });
 
   it("stops at TMDB's 500-page cap whatever total it reports", () => {

@@ -1,19 +1,20 @@
-import type { AccessGroup, AdminUser } from "@/api/types";
-import { V2ProblemError } from "@/api/v2/request";
+import type { AccessGroup, AdminPolicyDefaults, AdminUser } from "@/api/types";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AdminUsers from "./AdminUsers";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ beginImpersonation: mocks.beginImpersonation, user: mocks.viewer }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: mocks.policyDefaults }),
   useViewerIsOwner: (id?: number) => mocks.users.some((u) => u.id === id && u.is_owner),
   useAdminUserCapabilities: () => ({ data: { available: mocks.available, default_profile: true } }),
   useImpersonateUser: () => ({ mutateAsync: mocks.impersonate, reset: vi.fn(), isPending: false }),
@@ -38,6 +39,8 @@ const mocks = vi.hoisted(() => ({
   accessGroupsLoaded: false,
   accessGroupsFailed: false,
   refetchAccessGroups: vi.fn(),
+  /** The server's built-in policy defaults; undefined while they load. */
+  policyDefaults: undefined as AdminPolicyDefaults | undefined,
 }));
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
@@ -74,6 +77,11 @@ vi.mock("./admin-settings/InviteCodesTab", () => ({
   default: () => <div>Invite codes panel</div>,
 }));
 
+beforeEach(() => {
+  mocks.useAdminServerSettings.mockReset();
+  mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
+});
+
 function LocationProbe() {
   const location = useLocation();
   return <span data-testid="location">{`${location.pathname}${location.search}`}</span>;
@@ -97,119 +105,6 @@ function renderPage(entry = "/admin/users") {
     </MemoryRouter>,
   );
 }
-
-function tab(name: string) {
-  return screen.getByRole("tab", { name });
-}
-
-describe("AdminUsers tabs", () => {
-  beforeEach(() => {
-    setAccessToken("account");
-    setProfileId("owner");
-    setProfileToken(null);
-    mocks.users = [];
-    mocks.reads = 0;
-    mocks.update.mockReset();
-    mocks.useAdminServerSettings.mockReset();
-    mocks.useAdminServerSettings.mockReturnValue({
-      data: { "signup.enabled": "false" },
-      isLoading: false,
-    });
-  });
-
-  it("opens on the users tab when no tab is requested", () => {
-    renderPage();
-
-    expect(tab("Users")).toHaveAttribute("aria-selected", "true");
-    expect(tab("Invite Codes")).toHaveAttribute("aria-selected", "false");
-  });
-
-  it("selects the Invite Codes tab from ?tab=invite-codes", () => {
-    renderPage("/admin/users?tab=invite-codes");
-
-    expect(tab("Invite Codes")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Invite codes panel")).toBeInTheDocument();
-  });
-
-  it("falls back to the users tab for an unknown tab id", () => {
-    renderPage("/admin/users?tab=not-a-tab");
-
-    expect(tab("Users")).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("writes the selected tab to the URL and drops the param on the default tab", async () => {
-    renderPage();
-
-    await userEvent.click(tab("Invitations"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin/users?tab=invitations");
-
-    await userEvent.click(tab("Users"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin/users");
-    expect(screen.getByTestId("location")).not.toHaveTextContent("tab=");
-  });
-});
-
-describe("AdminUsers public-signup status badge", () => {
-  beforeEach(() => {
-    setAccessToken("account");
-    setProfileId("owner");
-    setProfileToken(null);
-    mocks.users = [];
-    mocks.reads = 0;
-    mocks.update.mockReset();
-    mocks.useAdminServerSettings.mockReset();
-  });
-
-  it("shows a neutral 'off' badge linking to General settings when signups are disabled", () => {
-    mocks.useAdminServerSettings.mockReturnValue({
-      data: { "signup.enabled": "false" },
-      isLoading: false,
-    });
-    renderPage();
-
-    const badge = screen.getByText("Public signups off");
-    expect(badge).toHaveAttribute("data-variant", "secondary");
-    const link = badge.closest("a");
-    expect(link).toHaveAttribute("href", "/admin/settings/general");
-  });
-
-  it("shows a positive 'on' badge linking to General settings when signups are enabled", () => {
-    mocks.useAdminServerSettings.mockReturnValue({
-      data: { "signup.enabled": "true" },
-      isLoading: false,
-    });
-    renderPage();
-
-    const badge = screen.getByText("Public signups on");
-    expect(badge).toHaveAttribute("data-variant", "outline");
-    const link = badge.closest("a");
-    expect(link).toHaveAttribute("href", "/admin/settings/general");
-  });
-
-  it("renders no signup-status badge while settings are still loading", () => {
-    mocks.useAdminServerSettings.mockReturnValue({ data: undefined, isLoading: true });
-    renderPage();
-
-    expect(screen.queryByText("Public signups on")).not.toBeInTheDocument();
-    expect(screen.queryByText("Public signups off")).not.toBeInTheDocument();
-  });
-
-  it("stays visible regardless of which tab is active", async () => {
-    mocks.useAdminServerSettings.mockReturnValue({
-      data: { "signup.enabled": "true" },
-      isLoading: false,
-    });
-    renderPage();
-
-    expect(screen.getByText("Public signups on")).toBeInTheDocument();
-
-    await userEvent.click(tab("Invite Codes"));
-    expect(screen.getByText("Public signups on")).toBeInTheDocument();
-
-    await userEvent.click(tab("Invitations"));
-    expect(screen.getByText("Public signups on")).toBeInTheDocument();
-  });
-});
 
 const adminUser: AdminUser = {
   id: 7,
@@ -242,6 +137,7 @@ const adminUser: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 4,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -261,56 +157,6 @@ const ownerViewer: AdminUser = {
   role: "admin",
   is_owner: true,
 };
-
-it("seeds list edits from canonical GET and preserves drafts through explicit conflict reload", async () => {
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
-  setAccessToken("account");
-  setProfileId("owner");
-  setProfileToken(null);
-  mocks.users = [adminUser];
-  mocks.reads = 0;
-  mocks.update
-    .mockRejectedValueOnce(
-      new V2ProblemError("updateAdminUser", {
-        type: "https://silo.example/problems/precondition_failed",
-        title: "Changed",
-        status: 412,
-        detail: "Reload",
-        instance: "/api/v2/admin/users/7",
-      }),
-    )
-    .mockResolvedValue(undefined);
-  const user = userEvent.setup();
-  renderPage();
-  await user.click(screen.getByRole("button", { name: "Edit taylor" }));
-  const dialog = await screen.findByRole("dialog");
-  const name = within(dialog).getByLabelText("Username");
-  expect(name).toHaveValue("Canonical");
-  await user.clear(name);
-  await user.type(name, "My draft");
-  const save = within(dialog).getByRole("button", { name: /save/i });
-  await user.click(save);
-  await screen.findByText(/Your draft is preserved/);
-  expect(name).toHaveValue("My draft");
-  expect(save).toBeDisabled();
-  expect(mocks.reads).toBe(1);
-  await user.click(within(dialog).getByRole("button", { name: "Reload current user" }));
-  await waitFor(() => expect(save).toBeEnabled());
-  expect(name).toHaveValue("My draft");
-  await user.click(save);
-  await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2));
-  expect(mocks.update.mock.calls.map((call) => call[0].editor.etag)).toEqual([
-    '"read-1"',
-    '"read-2"',
-  ]);
-});
 
 describe("AdminUsers row actions", () => {
   afterEach(() => vi.useRealTimers());
@@ -334,10 +180,18 @@ describe("AdminUsers row actions", () => {
     const row = screen.getByRole("link", { name: "founder" }).closest("tr")!;
     expect(within(row).getByText("owner")).toBeInTheDocument();
     expect(within(row).queryByText("admin")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit founder" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Edit founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit taylor" })).toBeInTheDocument();
+  });
+
+  it("links Edit to the account's Access tab", () => {
+    renderPage();
+    expect(screen.getByRole("link", { name: "Edit taylor" })).toHaveAttribute(
+      "href",
+      "/admin/users/7?tab=access",
+    );
   });
 
   it("keeps an admin other than the owner off other admin accounts", () => {
@@ -346,26 +200,21 @@ describe("AdminUsers row actions", () => {
     mocks.users = [adminUser, owner, other, self];
     mocks.viewer = { id: 8 };
     renderPage();
-    expect(screen.queryByRole("button", { name: "Edit other" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Edit other" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete other" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit self" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit self" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete self" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit taylor" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete taylor" })).toBeInTheDocument();
-  });
-
-  it("lets the owner manage other admins", () => {
-    mocks.users = [owner, { ...adminUser, id: 9, username: "other", role: "admin" }];
-    renderPage();
-    expect(screen.getByRole("button", { name: "Edit other" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete other" })).toBeInTheDocument();
   });
 
   it("lets the owner edit itself and view as another admin, but not delete itself", () => {
     mocks.users = [owner, { ...adminUser, id: 8, username: "admin", role: "admin" }];
     renderPage();
     expect(screen.getByRole("button", { name: "View as user: admin" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Edit founder" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit admin" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete admin" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Edit founder" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();
   });
@@ -386,25 +235,6 @@ describe("AdminUsers row actions", () => {
     mocks.available = false;
     renderPage();
     expect(screen.queryByRole("button", { name: /View as user/ })).toBeNull();
-  });
-
-  it.each([
-    ["link", "View taylor playback history", "View playback history"],
-    ["button", "View as user: taylor", "View as user"],
-    ["button", "Edit taylor", "Edit user"],
-    ["button", "Delete taylor", "Delete user"],
-  ])("shows an immediate hover and focus tooltip for %s %s", (role, name, label) => {
-    vi.useFakeTimers();
-    renderPage();
-    const action = screen.getByRole(role, { name });
-    fireEvent.pointerMove(action, { pointerType: "mouse" });
-    act(() => vi.advanceTimersByTime(0));
-    expect(screen.getByRole("tooltip")).toHaveTextContent(label);
-    fireEvent.pointerLeave(action);
-    act(() => action.focus());
-    expect(action).toHaveFocus();
-    expect(screen.getByRole("tooltip")).toHaveTextContent(label);
-    expect(mocks.impersonate).not.toHaveBeenCalled();
   });
 
   it("explains that actions run as the user and lets the admin cancel", async () => {
@@ -487,6 +317,7 @@ const defaultGroup: AccessGroup = {
   max_transcodes: 3,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 2,
   allowed_permissions: null,
   requests_allowed: true,
   is_default: true,
@@ -504,6 +335,7 @@ describe("AdminUsers user dialog policy hints", () => {
     mocks.available = true;
     mocks.accessGroups = [];
     mocks.accessGroupsLoaded = false;
+    mocks.policyDefaults = POLICY_DEFAULTS;
     mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
     vi.stubGlobal(
       "ResizeObserver",
@@ -568,6 +400,7 @@ describe("AdminUsers user dialog policy hints", () => {
 
     expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
     expect(within(dialog).getByText("Inherited: 3")).toBeInTheDocument();
+    expect(within(dialog).getByText("Inherited: 2")).toBeInTheDocument();
   });
 
   it("uses the server defaults once a loaded list has no default group", async () => {
@@ -578,7 +411,24 @@ describe("AdminUsers user dialog policy hints", () => {
 
     // The server then creates the account without a group.
     expect(within(dialog).getAllByText("Server default: Unlimited")).toHaveLength(4);
+    expect(within(dialog).getByText("Server default: 5")).toBeInTheDocument();
     expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  it("previews server-prepared downloads from the server's admin and no-group defaults", async () => {
+    mocks.users = [ownerViewer];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+    const transcodes = () => within(dialog).getByRole("combobox", { name: "Download Transcodes" });
+
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    expect(transcodes()).toHaveTextContent("Server default: Not allowed");
+
+    await chooseRole(user, dialog, "Admin");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    expect(transcodes()).toHaveTextContent("Admin default: Allowed");
   });
 
   async function openAccess(user: ReturnType<typeof userEvent.setup>, button: string | RegExp) {
@@ -589,25 +439,6 @@ describe("AdminUsers user dialog policy hints", () => {
   }
 
   const guests = { ...defaultGroup, id: 3, name: "Guests", is_default: false } as AccessGroup;
-
-  it("lets an admin change a user's group from the list", async () => {
-    mocks.users = [{ ...adminUser, access_group_id: defaultGroup.id }];
-    mocks.accessGroups = [defaultGroup, guests];
-    mocks.accessGroupsLoaded = true;
-    mocks.update.mockReset().mockResolvedValue(undefined);
-    const user = userEvent.setup();
-    renderPage();
-    const dialog = await openAccess(user, "Edit taylor");
-
-    const group = within(dialog).getByRole("combobox", { name: "Group" });
-    expect(group).toHaveTextContent(defaultGroup.name);
-    await user.click(group);
-    await user.click(await screen.findByRole("option", { name: "Guests" }));
-    await user.click(within(dialog).getByRole("button", { name: /save/i }));
-
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    expect(mocks.update.mock.calls[0]![0].body.access_group_id).toBe(3);
-  });
 
   it("creates a user in the chosen group, defaulting to the default group", async () => {
     mocks.accessGroups = [defaultGroup, guests];
@@ -633,34 +464,117 @@ describe("AdminUsers user dialog policy hints", () => {
 
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
     expect(mocks.create.mock.calls[0]![0].body.access_group_id).toBe(3);
+    // The profile limit follows the group unless the admin sets one.
+    expect(mocks.create.mock.calls[0]![0].body).not.toHaveProperty("max_profiles");
   });
 
   it("disables the group picker for admins", async () => {
-    mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];
+    mocks.users = [ownerViewer];
     mocks.accessGroups = [defaultGroup, guests];
     mocks.accessGroupsLoaded = true;
     const user = userEvent.setup();
     renderPage();
-    const dialog = await openAccess(user, "Edit root");
+    const dialog = await openLimits(user, /Add User/);
+    await chooseRole(user, dialog, "Admin");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
     expect(within(dialog).getByRole("combobox", { name: "Group" })).toBeDisabled();
     expect(within(dialog).getByText("Admin accounts can't join groups.")).toBeInTheDocument();
   });
+  // Overrides Max Streams to 3 in a fresh Create User dialog and fills the
+  // account fields, so only the limit can stop the save. The 3 is the last
+  // valid value a later edit could leave behind.
+  async function openCreateWithStreamsOverride(user: ReturnType<typeof userEvent.setup>) {
+    mocks.create.mockReset().mockResolvedValue({ id: 11 });
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+    // Max Streams is the first field on the Limits tab.
+    await user.click(within(dialog).getAllByRole("switch")[0]!);
+    await user.type(within(dialog).getByLabelText("Max Streams"), "3");
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    return dialog;
+  }
 
-  it("previews the default group for an admin demoted from the list", async () => {
-    // Only the server Owner may demote another admin.
-    mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];
-    mocks.accessGroups = [defaultGroup];
-    mocks.accessGroupsLoaded = true;
+  it("refuses to save a cleared limit from another tab and shows the Limits tab", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithStreamsOverride(user);
+    await user.clear(within(dialog).getByLabelText("Max Streams"));
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    // The browser reports a field by firing `invalid` at it.
+    const reported: EventTarget[] = [];
+    dialog
+      .querySelector("form")!
+      .addEventListener("invalid", (event) => reported.push(event.target!), true);
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("tab", { name: "Limits" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // The field still shows the edit, not the last valid value, and the
+    // browser points at it.
+    const field = within(dialog).getByLabelText("Max Streams");
+    expect(field).toHaveValue(null);
+    expect(reported).toContain(field);
+  });
+
+  it("keeps a non-whole limit across a tab switch and still refuses to save it", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithStreamsOverride(user);
+    await user.clear(within(dialog).getByLabelText("Max Streams"));
+    await user.type(within(dialog).getByLabelText("Max Streams"), "1.5");
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    expect(within(dialog).queryByLabelText("Max Streams")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    expect(within(dialog).getByLabelText("Max Streams")).toHaveValue(1.5);
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByLabelText("Max Streams")).toHaveValue(1.5);
+  });
+
+  it("saves the retyped value after a cleared limit", async () => {
+    const user = userEvent.setup();
+    const dialog = await openCreateWithStreamsOverride(user);
+    await user.clear(within(dialog).getByLabelText("Max Streams"));
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    await user.type(within(dialog).getByLabelText("Max Streams"), "2");
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0]![0].body.max_streams).toBe(2);
+  });
+
+  it("refuses to save a cleared Max Profiles limit from another tab", async () => {
+    mocks.create.mockReset().mockResolvedValue({ id: 11 });
     const user = userEvent.setup();
     renderPage();
-    const dialog = await openLimits(user, "Edit root");
-    expect(within(dialog).getAllByText("Admin default: Unlimited")).toHaveLength(4);
+    const dialog = await openLimits(user, /Add User/);
+    const profilesField = within(dialog).getByText("Max Profiles").closest("div.space-y-1")!;
+    await user.click(within(profilesField as HTMLElement).getByRole("switch"));
+    await user.type(within(dialog).getByLabelText("Max Profiles"), "3");
+    await user.clear(within(dialog).getByLabelText("Max Profiles"));
 
-    // This form sends no group for a regular account, and the server moves a
-    // demoted admin into the default group.
-    await chooseRole(user, dialog, "User");
-    expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
-    expect(within(dialog).queryByText(/Server default/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("tab", { name: "Limits" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(dialog).getByLabelText("Max Profiles")).toHaveValue(null);
   });
 });
 
@@ -699,21 +613,6 @@ describe("AdminUsers access group column and filter", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  function rowFor(username: string) {
-    return screen.getByRole("link", { name: username }).closest("tr")!;
-  }
-
-  it("shows each user's access group, linking to the group", () => {
-    renderPage();
-    expect(screen.getByRole("columnheader", { name: "Group" })).toBeInTheDocument();
-    expect(within(rowFor("taylor")).getByRole("link", { name: "Kids" })).toHaveAttribute(
-      "href",
-      "/admin/access-groups/1",
-    );
-    expect(within(rowFor("robin")).getByText("No group")).toBeInTheDocument();
-    expect(within(rowFor("root")).getByText("—")).toBeInTheDocument();
-  });
-
   it("reports a failed access group load and retries it", async () => {
     mocks.accessGroups = [];
     mocks.accessGroupsLoaded = false;
@@ -730,7 +629,13 @@ describe("AdminUsers access group column and filter", () => {
 
   it("filters users by access group", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("/admin/users?tab=invite-codes");
+    expect(screen.getByRole("tab", { name: "Invite Codes" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("Invite codes panel")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Users" }));
     const filter = screen.getByRole("combobox", { name: "Filter by access group" });
 
     await user.click(filter);

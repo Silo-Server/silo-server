@@ -104,58 +104,6 @@ describe("ProfileEditorDialog", () => {
     }
   });
 
-  it("renders an unrestricted profile without throwing", async () => {
-    await act(async () => {
-      root.render(
-        <ProfileEditorDialog
-          open
-          profile={makeProfile({
-            max_content_rating: "",
-            max_playback_quality: "",
-          })}
-          libraries={[]}
-          onOpenChange={() => {}}
-        />,
-      );
-    });
-
-    expect(document.body.textContent).toContain("Edit profile");
-    expect(document.body.textContent).toContain("Any content");
-  });
-
-  it("shows the profile's advisory-age limit", async () => {
-    await act(async () => {
-      root.render(
-        <ProfileEditorDialog
-          open
-          profile={makeProfile({ max_advisory_age: 10 })}
-          libraries={[]}
-          advisoryAgeSupported
-          onOpenChange={() => {}}
-        />,
-      );
-    });
-
-    expect(document.body.textContent).toContain("Maximum advisory age");
-    expect(document.body.textContent).toContain("Ages 10 and under");
-  });
-
-  it("offers no advisory-age limit by default", async () => {
-    await act(async () => {
-      root.render(
-        <ProfileEditorDialog
-          open
-          profile={makeProfile()}
-          libraries={[]}
-          advisoryAgeSupported
-          onOpenChange={() => {}}
-        />,
-      );
-    });
-
-    expect(document.body.textContent).toContain("No limit");
-  });
-
   it("offers the require-advisory-age switch once a limit is set", async () => {
     await act(async () => {
       root.render(
@@ -170,6 +118,8 @@ describe("ProfileEditorDialog", () => {
       );
     });
 
+    expect(document.body.textContent).toContain("Maximum advisory age");
+    expect(document.body.textContent).toContain("Ages 10 and under");
     const toggle = document.querySelector<HTMLButtonElement>(
       'button[role="switch"][aria-describedby]',
     );
@@ -194,13 +144,16 @@ describe("ProfileEditorDialog", () => {
         />,
       );
     });
+    expect(document.body.textContent).toContain("Edit profile");
+    expect(document.body.textContent).toContain("Any content");
+    expect(document.body.textContent).toContain("No limit");
     expect(document.body.textContent).not.toContain("Hide titles without an advisory age");
 
     await act(async () => {
       root.render(
         <ProfileEditorDialog
           open
-          profile={makeProfile({ max_advisory_age: 10 })}
+          profile={makeProfile({ id: "profile-2", max_advisory_age: 10 })}
           libraries={[]}
           advisoryAgeSupported
           onOpenChange={() => {}}
@@ -208,6 +161,7 @@ describe("ProfileEditorDialog", () => {
       );
     });
     expect(document.body.textContent).toContain("Maximum advisory age");
+    expect(document.body.textContent).toContain("Ages 10 and under");
     expect(document.body.textContent).not.toContain("Hide titles without an advisory age");
   });
 

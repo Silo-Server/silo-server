@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -78,7 +79,7 @@ func adminJobOf(job *models.AdminJob) AdminJob {
 	if job.CancelRequested && !out.Terminal {
 		out.State = "canceling"
 	}
-	out.Cancelable = (job.JobType == adminjob.JobTypeLibraryRefresh || job.JobType == adminjob.JobTypeStorageTransition) && !out.Terminal
+	out.Cancelable = (job.JobType == adminjob.JobTypeLibraryRefresh || job.JobType == adminjob.JobTypeStorageTransition || job.JobType == adminjob.JobTypeImageCacheCleanup) && !out.Terminal
 	if job.JobType == adminjob.JobTypeLibraryRefresh && job.ProgressTotal > 0 && job.ProgressCurrent >= 0 && job.ProgressCurrent <= job.ProgressTotal {
 		out.Progress = &JobProgress{Current: job.ProgressCurrent, Total: job.ProgressTotal, Unit: "items"}
 	}
@@ -133,7 +134,7 @@ type LibraryJobOutput struct {
 }
 
 func registerLibraryJobs(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/library-jobs/{job_id}", "getLibraryJob", "libraries", "Poll accepted library work. Terminal jobs remain available for at least 24 hours."), Class: ClassAuthenticated, ServiceBacked: true, Conditional: true}, reg.getLibraryJob)
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/library-jobs/{job_id}", "getLibraryJob", "libraries", "Poll accepted library work. Terminal jobs remain available for at least 24 hours."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Conditional: true}, reg.getLibraryJob)
 	op := humaOp(http.MethodPost, Prefix+"/library-jobs/{job_id}/cancel", "cancelLibraryJob", "libraries", "Request best-effort cancellation of metadata refresh. Completed metadata changes remain. Deletion cannot be canceled.")
 	op.DefaultStatus = http.StatusAccepted
 	op.Errors = []int{http.StatusConflict}
@@ -144,9 +145,15 @@ func registerLibraryJobs(reg *Registry) {
 	}}
 	Register(reg, Operation{Operation: op, Class: ClassActingAdmin, DemoRestricted: isMutatingMethod(op.Method), ServiceBacked: true, RetrySafety: RetrySafetyCoalescing}, reg.cancelLibraryJob)
 }
+
+// visibleLibraryJob reads a library job for an acting admin; anyone else,
+// another profile on an admin's account included, gets 404.
 func (reg *Registry) visibleLibraryJob(ctx context.Context, id string) (*models.AdminJob, error) {
-	claims := claimsFrom(ctx)
-	if claims == nil || claims.Role != models.RoleAdmin {
+	actingAdmin, err := apimw.ActingAdmin(ctx)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	if !actingAdmin {
 		return nil, NewProblem(TypeNotFound, "Job not found")
 	}
 	if reg.deps.LibraryJobs == nil {

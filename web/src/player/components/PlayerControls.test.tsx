@@ -30,17 +30,8 @@ function renderControls(
       onSubtitleDelayChange={vi.fn()}
       audioTracks={[]}
       activeAudioIndex={-1}
-      qualityOptions={[
-        {
-          id: "original",
-          label: "Original",
-          sublabel: "",
-          resolution: "1080p",
-          bitrateKbps: 0,
-          isOriginal: true,
-        },
-      ]}
-      activeQualityId="original"
+      qualityOptions={[]}
+      activeQualityId="auto"
       isTranscoding={false}
       qualityError={null}
       onQualitySelect={vi.fn()}

@@ -7,8 +7,9 @@ import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 /**
  * Where each Access & limits value comes from, and how the page words it.
  * An account's own override wins; otherwise a grouped non-admin account
- * inherits from its access group, and everyone else gets the server's fixed
- * no-group defaults (see `NO_GROUP_POLICY` in UserPolicyFields).
+ * inherits from its access group, and everyone else gets the server's
+ * built-in defaults: full access for an admin, the no-group defaults for a
+ * regular account (`useAdminPolicyDefaults`).
  */
 
 export type ValueSource = "default" | "group" | "custom";
@@ -22,7 +23,8 @@ export type PolicyRowKey =
   | "localBitrate"
   | "downloads"
   | "serverPrepared"
-  | "requests";
+  | "requests"
+  | "maxProfiles";
 
 /** "Owner", "Admin" or "User". */
 export function roleLabel(user: Pick<AdminUser, "is_owner" | "role">): string {
@@ -66,6 +68,8 @@ function rowOverridden(user: AdminUser, row: PolicyRowKey): boolean {
       return user.download_transcode_allowed !== null;
     case "requests":
       return user.requests_allowed !== null;
+    case "maxProfiles":
+      return user.max_profiles !== null;
   }
 }
 
@@ -159,6 +163,8 @@ function inheritedValue(
       return lowered(hints.download_transcode_allowed, formatAllowed);
     case "requests":
       return lowered(hints.requests_allowed, (allowed) => (allowed ? "yes" : "no"));
+    case "maxProfiles":
+      return lowered(hints.max_profiles, String);
   }
 }
 
@@ -173,6 +179,7 @@ const POLICY_ROWS: PolicyRowKey[] = [
   "downloads",
   "serverPrepared",
   "requests",
+  "maxProfiles",
 ];
 
 /** Rows this account sets itself; video transcoding counts once for its two fields. */
@@ -199,21 +206,6 @@ export type VideoTranscoding =
   | { mode: "off" }
   | { mode: "unlimited" }
   | { mode: "limit"; max: number };
-
-/**
- * The account's own video transcoding setting; null when both fields follow
- * the default. The rare "inherit on/off, override the count" state reads as a
- * custom value too; the card shows it from the effective policy.
- */
-export function videoTranscodingFromOverrides(
-  allowed: boolean | null,
-  max: number | null,
-): VideoTranscoding | null {
-  if (allowed === null && max === null) return null;
-  if (allowed === false) return { mode: "off" };
-  if (max === null || max === 0) return { mode: "unlimited" };
-  return { mode: "limit", max };
-}
 
 export function videoTranscodingFromEffective(allowed: boolean, max: number): VideoTranscoding {
   if (!allowed) return { mode: "off" };

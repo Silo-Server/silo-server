@@ -376,16 +376,6 @@ func TestGetProviderLogout(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/auth/provider-logout", "", bearer(memberToken)), TypeDependencyUnavailable)
 }
 
-// TestLinkCompletionProblemAlreadyLinked: a native link to a provider the
-// account is already linked to answers already_linked, like directory
-// linking and the administrator's link.
-func TestLinkCompletionProblemAlreadyLinked(t *testing.T) {
-	var p *Problem
-	if !errors.As(linkCompletionProblem(auth.ErrAccountAlreadyLinked), &p) || p.Type != TypeAlreadyLinked.URI() || p.Status != http.StatusConflict {
-		t.Fatalf("problem = %+v", p)
-	}
-}
-
 // TestLinkingRefusalsShareProblemTypes: native link completion, link
 // tickets and directory linking answer each shared linking refusal with the
 // same problem type. A provider's account-disabled denial wraps
@@ -409,6 +399,9 @@ func TestLinkingRefusalsShareProblemTypes(t *testing.T) {
 			var p *Problem
 			if !errors.As(render(err), &p) || p.Type != want.URI() {
 				t.Fatalf("%s: %v -> %+v, want %s", name, err, p, want.ID)
+			}
+			if errors.Is(err, auth.ErrAccountAlreadyLinked) && p.Status != http.StatusConflict {
+				t.Fatalf("%s: already-linked status = %d, want409", name, p.Status)
 			}
 		}
 	}

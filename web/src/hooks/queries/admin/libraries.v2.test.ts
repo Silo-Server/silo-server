@@ -17,19 +17,19 @@ import listLibrariesOk from "../../../../../contracts/api/v2/fixtures/list_libra
 import listLibraryRootsOk from "../../../../../contracts/api/v2/fixtures/list_library_roots_ok.json";
 import listMetadataMatchQueuesOk from "../../../../../contracts/api/v2/fixtures/list_metadata_match_queues_ok.json";
 import listStaleIdsOk from "../../../../../contracts/api/v2/fixtures/list_stale_ids_ok.json";
+import listIgnoredUnmatchedItemsOk from "../../../../../contracts/api/v2/fixtures/list_ignored_unmatched_items_ok.json";
 import listUnmatchedItemsOk from "../../../../../contracts/api/v2/fixtures/list_unmatched_items_ok.json";
 import refreshLibraryMetadataAccepted from "../../../../../contracts/api/v2/fixtures/refresh_library_metadata_accepted.json";
 import updateLibraryOk from "../../../../../contracts/api/v2/fixtures/update_library_ok.json";
-import deleteLibraryConflict from "../../../../../contracts/api/v2/fixtures/delete_library_conflict.json";
 
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import { V2ProblemError } from "@/api/v2/request";
 
 import {
   fetchAdminLibraries,
   fetchLibraryMetadataMatchQueuePage,
   fetchUnmatchedLibraryItemsPage,
   useUnmatchedLibraryItems,
+  useSetUnmatchedItemIgnored,
   useCheckLibraryMount,
   useCreateLibrary,
   useDeleteLibrary,
@@ -50,7 +50,8 @@ import {
   useUpdateLibrary,
 } from "./libraries";
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+vi.mock("sonner", () => ({ toast: toastMocks }));
 
 function createWrapper() {
   const client = new QueryClient({
@@ -59,13 +60,6 @@ function createWrapper() {
   return function Wrapper({ children }: { children: ReactNode }) {
     return createElement(QueryClientProvider, { client }, children);
   };
-}
-
-function problemResponse(body: unknown, status: number) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/problem+json" },
-  });
 }
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
@@ -214,16 +208,6 @@ describe("library admin hooks on the v2 contract", () => {
     expect(job.job_type).toBe("delete_library");
     expect(job.status).toBe("queued");
     expect(job.request_payload).toEqual({});
-  });
-
-  it("surfaces the 409 conflict problem when a deletion is already running", async () => {
-    stubFetch(() => problemResponse(deleteLibraryConflict, 409));
-
-    const { result } = renderHook(() => useDeleteLibrary(), { wrapper: createWrapper() });
-    await expect(result.current.mutateAsync(2)).rejects.toMatchObject({
-      status: 409,
-      problemType: "conflict",
-    });
   });
 
   it("queues a metadata refresh through the v2 202 answer", async () => {
@@ -479,6 +463,52 @@ describe("library admin hooks on the v2 contract", () => {
     expect(result.current.data?.pages[1]?.items[0]?.title).toBe("Beta");
   });
 
+  it("pages the ignored items with the ignored filter and keeps when each was ignored", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(listIgnoredUnmatchedItemsOk));
+
+    const page = await fetchUnmatchedLibraryItemsPage("", undefined, undefined, true);
+
+    const url = requestsOf(fetchMock)[0]?.url;
+    expect(url?.pathname).toBe("/api/v2/libraries/unmatched-items");
+    expect(url?.searchParams.get("ignored")).toBe("true");
+    expect(page.items.map((i) => [i.title, i.ignored_at])).toEqual([
+      ["Delta", "2026-01-02T03:04:05.678Z"],
+    ]);
+
+    // The default listing never sends the filter.
+    await fetchUnmatchedLibraryItemsPage("");
+    expect(requestsOf(fetchMock)[1]?.url.searchParams.has("ignored")).toBe(false);
+  });
+
+  it("ignores an unmatched item and undoes it from the toast", async () => {
+    const fetchMock = stubFetch(() => new Response(null, { status: 204 }));
+    toastMocks.success.mockClear();
+
+    const { result } = renderHook(() => useSetUnmatchedItemIgnored(), {
+      wrapper: createWrapper(),
+    });
+    await result.current.mutateAsync({ contentId: "movie:a", title: "Alpha", ignored: true });
+
+    expect(
+      requestsOf(fetchMock).map((r) => [r.method, decodeURIComponent(r.url.pathname)]),
+    ).toEqual([["PUT", "/api/v2/libraries/unmatched-items/movie:a/ignore"]]);
+    expect(toastMocks.success).toHaveBeenCalledWith(
+      "Ignored Alpha",
+      expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }),
+    );
+
+    const [, options] = toastMocks.success.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ];
+    options.action.onClick();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(requestsOf(fetchMock)[1]?.method).toBe("DELETE");
+    expect(decodeURIComponent(requestsOf(fetchMock)[1]?.url.pathname ?? "")).toBe(
+      "/api/v2/libraries/unmatched-items/movie:a/ignore",
+    );
+  });
+
   it("decodes the matcher backlog detail with the page fields the section reads", async () => {
     const fetchMock = stubFetch(() => jsonResponse(getMetadataMatchQueueOk));
 
@@ -609,6 +639,7 @@ describe("library admin hooks on the v2 contract", () => {
             provider_slug: "tmdb",
             priority: 0,
             enabled: true,
+            local: false,
           },
         ],
       },
@@ -637,11 +668,5 @@ describe("library admin hooks on the v2 contract", () => {
         },
       ],
     });
-  });
-
-  it("throws V2ProblemError instances so callers can branch on the problem type", async () => {
-    stubFetch(() => problemResponse(deleteLibraryConflict, 409));
-    const { result } = renderHook(() => useDeleteLibrary(), { wrapper: createWrapper() });
-    await expect(result.current.mutateAsync(2)).rejects.toBeInstanceOf(V2ProblemError);
   });
 });

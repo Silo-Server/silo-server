@@ -32,6 +32,53 @@ run after this decision; an NFO never changes the type (see
 [local-nfo-metadata.md](local-nfo-metadata.md)).
 `TestEpisodePatternAgreesAcrossClassifiers` keeps the two classifiers' episode detection in step.
 
+## Season folders
+
+Every season-folder check (`deriveSeriesRoot`, `detectSeasonStructure`, episode parsing,
+`IsMisplacedSeriesFile`, `parseSeriesFolderIdentity`) goes through `seasonDirectoryNumber` and the
+label list in `internal/naming/season.go`, so they agree on what a season folder is. `Series`,
+`Serie`, and `Seria` also begin show titles. In a folder directly in a configured library
+folder, a bare one names a season only when at most a year, provider tag, or release token
+follows the number: `Series 7 Documentary` there is the show. The folder is still a season when
+the file name carries a different series title (`Doctor Who S05E03` in a library folder that is
+one show). Deeper folders, and names that start with the show title, keep the UK form
+`Series 5 Matt Smith` as season 5. A file name that repeats the whole show folder name
+(`La Série 2/La Série 2 S01E03.mkv`) keeps the label as part of the title. `TestSeasonDirectoryWordLabelsAtTheLibraryTop`
+and `TestWordSeasonLabelsKeepShowContext` hold these cases.
+
+### Extras folders in a series library
+
+The scanner's extras classifier (`internal/scanner/extras.go`) decides whether a folder named
+like an extras folder (`other`, `Trailers`, `Featurettes`, `Extras`, ...) holds extras or
+content. It is an extras folder only when its owner, the first ancestor not named like one,
+holds media directly or belongs to a title: a file up to three levels below the owner
+(`Season 01/Disc 1/episode.mkv`), outside the owner's own extras folders, resolves to the owner,
+to a show folder above it, or to a folder inside it with the owner's own title and year (a
+version folder such as `Alien (1979)/1080p/`, or a wrapper such as `Show/Show/`). A category
+folder such as `Kids/` holds shows that resolve to their own folders under other titles, so
+`Kids/Shorts/` and `Documentaries/Interviews/` stay content and keep their own series; so does a
+franchise folder such as `Doctor Who/` holding `Doctor Who (2005)/`. A folder named like an
+extras folder that holds episodes in season folders (`Kids/Shorts/Season 01/Shorts S01E01.mkv`)
+is a show of its own wherever it sits. A full scan, a subtree scan of the extras folder, and a
+single-file event apply the same test; the last two read the filesystem. A show folder with no
+episodes yet owns nothing, so its `trailers/` stays a series of its own until the show has an
+episode in the library; a later scan then turns it into an extra.
+
+An episode code makes a file in an extras folder an episode only under the show's own `Extras/`
+folder (`Show/Extras/Show S00E01.mkv` is a special). Anywhere else (`other/`,
+`Trailers/1080p/`, `Season 01/Extras/`, `Extras/Behind The Scenes/`) it is part of an extra's
+name, so a deleted scene numbered `S01E05` never becomes a second version of the real episode.
+An extra binds to its owner's item and never founds a series; while the owner has no item yet
+(a show's first scan), the scan defers it to the next one.
+
+`deriveSeriesRoot` puts a `Specials/` or `Extras/` folder inside a season folder (`Season 01`,
+`S01`, or a bare `Season` folder) with that season's show. A bare number or a
+`Specials`/`Extras` label above it (`Drama/1883/Specials/`, `Extras/Specials/`) is the show's
+title, not a season, and so is a folder the file's own title names (`Drama/Season 2/Specials/Season
+2 S00E01.mkv`) or a season word with more title after it (`Series 7 Documentary/`).
+`TestSeriesExtrasFoldersBelongToTheirShow`, `TestMixedLibraryVersionFolderOwnsExtras`, and
+`TestSpecialsInsideASeasonFolderJoinTheShow` hold these cases.
+
 ## Episode numbers
 
 - `parseEpisodeNumber` (`internal/naming/episode.go`) returns 0 for a digit run longer than
@@ -97,12 +144,46 @@ override typed as a series (or untyped). Tests: `TestStaleFlatSeriesQueueDoesNot
     (`deepestOverrideAncestor`) and replaces the inferred type, title, year, and provider IDs.
     The root becomes `resolved` with override source `manual`.
   - A group override, which the admin **Override** action on an ambiguous root writes
-    (`LibraryHandler.SetRootOverride`), is applied by `applyGroupOverrides`
-    (`internal/scanner/group_inference.go`) the same way, with high type confidence.
+    (`LibraryHandler.SetRootOverride`), is keyed by the root's content group and does not record
+    the root. The scanner applies it to the scanned group and location snapshots
+    (`applyGroupOverrides`, `internal/scanner/group_inference.go`) with high type confidence, and
+    leaves the files' stored group keys alone. The matcher applies its forced type, title, year,
+    and provider IDs (`applyGroupOverride`, `internal/metadata/service.go`) in two places:
+    - When it first links a file (`createOrFindSkeleton`), for every file in the group, whichever
+      root the file is in.
+    - When it matches files again that already link to a pending, unmatched, or ambiguous item
+      (`MatchWorker.applyQueuedGroupOverride`, `internal/metadata/worker.go`).
+
+    In both places a structured provider tag in the path beats a forced ID for the same provider,
+    and a forced ID beats a heuristic folder ID (a bare trailing IMDb ID). When the worker
+    matches a linked item again:
+    - When a matched item already owns a forced provider ID, the match moves the provisional
+      item's files to it and removes the provisional item (`rebindItemToExistingItem`).
+    - An ambiguous item is stored as `pending`, so the match replaces its scanned title.
+    - A matched item keeps its identity, even when its queue row runs again, and so does an
+      item that a split pinned as unmatched.
+    - Roots that are different titles can share a group key (two bare `Season` folders, or one
+      title with no year), each on its own item. A movie or series item gets the override only
+      when its present files and the group's present files are the same
+      (`itemOwnsContentGroup`). Otherwise the worker logs a warning and treats the item as if it
+      had no override, so an ambiguous item stays unmatched.
+    - The worker stores an ambiguous item's `pending` status only while the item is still
+      unmatched. When another writer matched or removed the item first, the queue row records
+      an error and the retry reads the item as it now is.
   - A file identity override beats a root override.
   - A location that identity overrides split across groups is not flagged ambiguous
     (`aggregateLocationState`).
 - Saving an override does not start a scan; the scanner applies it on the next one, and later
-  scans keep it. Tests: `TestApplyGroupOverrides_ForcesResolvedIdentity`,
+  scans keep it. Both match-queue fingerprints include a group override's forced values
+  (`matchQueueGroupOverrideHashSQL`, `internal/metadata/match_queue_policy.go`), so the queue sync at
+  the end of that scan wakes a match that was parked or backed off without the override.
+  Tests: `TestApplyGroupOverrides_ForcesResolvedIdentity`,
   `TestInferGroupAssignments_FileOverrideBeatsRootOverride`, and
-  `TestInferGroupAssignments_OverridesConvergeAcrossRescans` (`internal/scanner/group_inference_test.go`).
+  `TestInferGroupAssignments_OverridesConvergeAcrossRescans` (`internal/scanner/group_inference_test.go`);
+  `TestQueuedIdentityAppliesGroupOverrideToLinkedProvisionalItem`
+  (`internal/metadata/queued_identity_parity_test.go`),
+  `TestSeriesQueuePassesGroupOverrideForLinkedProvisionalRoot`
+  (`internal/metadata/series_queue_override_test.go`),
+  `TestSeriesQueueGroupOverrideRelinksLinkedProvisionalRoot`
+  (`internal/metadata/group_override_rebind_db_test.go`), and
+  `TestMatchQueueGroupOverrideWakesBackedOffRows` (`internal/metadata/match_queue_state_db_test.go`).

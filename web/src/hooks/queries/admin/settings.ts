@@ -66,17 +66,15 @@ function useRetainedSettingsBaseline(
     },
   };
 }
-/* eslint-enable react-hooks/refs */
+/* eslint-enable react-hooks/refs -- ends the baseline-capture exception */
 
 export type CatalogSearchStatus = V2Result<"GET /api/v2/admin/catalog/search/status">;
 
-export function useAdminServerSettings({ enabled = true }: { enabled?: boolean } = {}) {
-  const profileContext = captureProfileRequestContext();
-  return useQuery({
+function adminServerSettingsQuery(profileContext: ReturnType<typeof captureProfileRequestContext>) {
+  return {
     queryKey: profileContext
       ? adminSettingsKey(profileContext)
       : [...adminKeys.serverSettings(), null],
-    enabled: enabled && profileContext !== null,
     queryFn: () => {
       if (!profileContext) throw new StaleApiRequestContextError();
       return readAdminSettings(profileContext);
@@ -85,7 +83,36 @@ export function useAdminServerSettings({ enabled = true }: { enabled?: boolean }
     // with an older equal-valued record when only a redacted secret changed.
     structuralSharing: false,
     staleTime: 30_000,
+  };
+}
+
+export function useAdminServerSettings({ enabled = true }: { enabled?: boolean } = {}) {
+  const profileContext = captureProfileRequestContext();
+  return useQuery({
+    ...adminServerSettingsQuery(profileContext),
+    enabled: enabled && profileContext !== null,
   });
+}
+
+const ADMIN_SENSITIVE_STATUS_QUERY = {
+  queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
+  queryFn: () => v2("GET /api/v2/admin/settings/sensitive-status"),
+  staleTime: 30_000,
+};
+
+/**
+ * Warms what every settings page waits on before it can draw, so a click on
+ * Settings lands on a filled page instead of a skeleton. Call on intent
+ * (hover, focus); fresh entries are left alone.
+ */
+export function usePrefetchAdminServerSettings() {
+  const queryClient = useQueryClient();
+  return () => {
+    const profileContext = captureProfileRequestContext();
+    if (!profileContext) return;
+    void queryClient.prefetchQuery(adminServerSettingsQuery(profileContext));
+    void queryClient.prefetchQuery(ADMIN_SENSITIVE_STATUS_QUERY);
+  };
 }
 
 export type StorageTransitionPolicy = "start_fresh" | "preserve_uploads" | "migrate_all";
@@ -237,11 +264,8 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: adminKeys.catalogSearchStatus() }),
         );
       }
-      if (keys.some((key) => key.startsWith("branding.") || key.startsWith("ui.admin_"))) {
-        invalidations.push(
-          queryClient.invalidateQueries({ queryKey: themeKeys.adminCss() }),
-          queryClient.invalidateQueries({ queryKey: themeKeys.branding() }),
-        );
+      if (keys.some((key) => key.startsWith("branding."))) {
+        invalidations.push(queryClient.invalidateQueries({ queryKey: themeKeys.branding() }));
       }
       if (keys.some(affectsOverlayConfig)) {
         invalidations.push(
@@ -280,7 +304,13 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       }
     },
     mutateAsync: async (values: SettingsValues) => {
-      const intent = capture(values);
+      let intent;
+      try {
+        intent = capture(values);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        throw error;
+      }
       const result = await mutation.mutateAsync(intent);
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
@@ -338,15 +368,11 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: adminKeys.catalogSearchStatus() }),
         );
       }
-      // Branding and admin theme settings are served live by public endpoints
-      // (`/theme/branding`, `/theme/admin-css`) and require no restart. Refresh
-      // those caches so saved changes apply immediately instead of waiting out
-      // the 60s / 5min stale windows.
-      if (variables.key.startsWith("branding.") || variables.key.startsWith("ui.admin_")) {
-        invalidations.push(
-          queryClient.invalidateQueries({ queryKey: themeKeys.adminCss() }),
-          queryClient.invalidateQueries({ queryKey: themeKeys.branding() }),
-        );
+      // Branding settings are served live by the public `/theme/branding`
+      // endpoint and require no restart. Refresh that cache so saved changes
+      // apply immediately instead of waiting out its stale window.
+      if (variables.key.startsWith("branding.")) {
+        invalidations.push(queryClient.invalidateQueries({ queryKey: themeKeys.branding() }));
       }
       if (affectsOverlayConfig(variables.key)) {
         invalidations.push(
@@ -397,11 +423,7 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
 }
 
 export function useAdminSensitiveStatus() {
-  return useQuery({
-    queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
-    queryFn: () => v2("GET /api/v2/admin/settings/sensitive-status"),
-    staleTime: 30_000,
-  });
+  return useQuery(ADMIN_SENSITIVE_STATUS_QUERY);
 }
 
 export function useCheckAdminSettingsConnection() {
@@ -416,13 +438,20 @@ export function useCheckAdminSettingsConnection() {
   });
 }
 
-export function useCatalogSearchStatus(enabled = true) {
+/**
+ * Search status. The Search page polls it every 2s while an index rebuild is
+ * pending; `pollRebuild: false` is for readers that sit on every admin page
+ * (the sidebar's health dots), where that poll would run a full-catalog count
+ * on the server every 2s from anywhere in admin.
+ */
+export function useCatalogSearchStatus(enabled = true, { pollRebuild = true } = {}) {
   return useQuery({
     queryKey: adminKeys.catalogSearchStatus(),
     queryFn: ({ signal }) => v2("GET /api/v2/admin/catalog/search/status", { signal }),
     enabled,
     staleTime: 15_000,
-    refetchInterval: (query) => (query.state.data?.index.rebuild_required ? 2_000 : false),
+    refetchInterval: (query) =>
+      pollRebuild && query.state.data?.index.rebuild_required ? 2_000 : false,
   });
 }
 

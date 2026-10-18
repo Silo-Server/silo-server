@@ -15,6 +15,7 @@ import {
   type AdminDeviceSetting,
   useAdminDeviceDetail,
   useAdminDeviceOverrides,
+  useAdminUserSettings,
   useAdminDevices,
   useDeleteAdminUserDeviceSetting,
   useDeleteAllAdminUserDeviceSettingsForDevice,
@@ -22,12 +23,14 @@ import {
 } from "@/hooks/queries/admin/users";
 import type { AdminDeviceSummary } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   DeviceProfileTabs,
+  deviceSettingKeysForPlatform,
   PlatformTile,
   UNKNOWN_PROFILE_ID,
   classifyPlatform,
@@ -37,7 +40,6 @@ import {
   type DeviceProfileTabEntry,
   type PlatformKind,
 } from "@/components/admin/deviceOverrides";
-import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
@@ -349,41 +351,41 @@ export default function AdminDevices() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1920px] space-y-5 px-4 py-4 sm:px-6 sm:py-6 lg:px-8 xl:px-10">
-      {/* page header */}
-      <div className="page-header items-end gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Devices</h1>
-          <p className="page-subtitle max-w-2xl text-sm sm:text-base">
+    <div className="w-full space-y-5 pb-4 sm:pb-6">
+      <PageHeader
+        title="Devices"
+        subtitle={
+          <>
             Inspect, tune, and reset per-profile playback overrides across the fleet. Filter by
             user, platform, or override pattern. Press{" "}
             <kbd className="bg-surface/70 border-border/70 text-foreground/80 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10.5px]">
               {SEARCH_SHORTCUT_LABEL}
             </kbd>{" "}
             to jump to another admin page.
-          </p>
-        </div>
-
-        <div className="relative w-full sm:w-[340px]">
-          <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-          <Input
-            className="bg-background/60 h-9 pr-9 pl-9 text-[13px]"
-            placeholder="Search devices, users, IDs, profiles…"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          {search ? (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 transition-colors"
-              aria-label="Clear search"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
-        </div>
-      </div>
+          </>
+        }
+        actions={
+          <div className="relative w-full sm:w-[340px]">
+            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+            <Input
+              className="bg-background/60 h-9 pr-9 pl-9 text-[13px]"
+              placeholder="Search devices, users, IDs, profiles…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
+        }
+      />
 
       {/* fleet pulse */}
       {!isLoading && devices.length > 0 && (
@@ -1376,10 +1378,14 @@ function DeviceDetailPanel({
   // values API, because the detail endpoint's `settings` array still reports
   // the legacy device-settings table that nothing writes to any more.
   const { data, isLoading } = useAdminDeviceDetail(userId, deviceId);
-  const { data: overrides, isLoading: overridesLoading } = useAdminDeviceOverrides(
-    userId,
-    deviceId,
-  );
+  const {
+    data: overrides,
+    isLoading: overridesLoading,
+    isError: overridesError,
+  } = useAdminDeviceOverrides(userId, deviceId);
+  // The owner's stored values at every scope, so rows the device doesn't
+  // override can show what they inherit. Same cached list the overrides read.
+  const { data: storedSettings } = useAdminUserSettings(userId);
   const updateSetting = useUpdateAdminUserDeviceSetting();
   const deleteSetting = useDeleteAdminUserDeviceSetting();
   const deleteProfileOverrides = useDeleteAllAdminUserDeviceSettingsForDevice();
@@ -1444,6 +1450,19 @@ function DeviceDetailPanel({
         <Skeleton className="h-16 w-full rounded-md" />
         <Skeleton className="h-32 w-full rounded-md" />
         <Skeleton className="h-32 w-full rounded-md" />
+      </div>
+    );
+  }
+
+  // Without the stored values every row would read as "app default" and
+  // edits would start from values the account may not have.
+  if (overridesError) {
+    return (
+      <div className="flex min-h-[320px] flex-col items-center justify-center gap-1 text-center">
+        <div className="text-foreground text-sm font-medium">
+          Couldn't load this device's settings
+        </div>
+        <div className="text-muted-foreground max-w-xs text-xs">Reload the page to try again.</div>
       </div>
     );
   }
@@ -1650,7 +1669,12 @@ function DeviceDetailPanel({
         <div className="flex items-center gap-2">
           <SettingsScopeControl
             showAllSettings={effectiveShowAllSettings}
-            totalSettings={ALL_DEVICE_SETTING_KEYS.length}
+            totalSettings={
+              deviceSettingKeysForPlatform(
+                data.device_platform,
+                overrides.map((setting) => setting.key),
+              ).length
+            }
             overrideCount={totalOverrides}
             disabled={profileTabs.length === 0}
             lockToAllSettings={forceAllSettings}
@@ -1727,6 +1751,7 @@ function DeviceDetailPanel({
             profiles={profileTabs}
             initialProfileId={initialProfileId}
             showAllSettings={effectiveShowAllSettings}
+            storedSettings={storedSettings}
             device={{
               userId: data.user_id,
               deviceId: data.device_id,

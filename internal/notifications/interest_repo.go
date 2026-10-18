@@ -21,15 +21,20 @@ func NewInterestRepository(pool *pgxpool.Pool) *InterestRepository {
 
 // ListActiveBySeries loads candidate recipients for one (library, series).
 // This is the hot fanout query; it uses the partial active-interest index.
+// Profiles that muted the series are left out in the same query, so a mute
+// costs fanout no per-recipient read.
 func (r *InterestRepository) ListActiveBySeries(ctx context.Context, tx pgx.Tx, libraryID int, seriesID string) ([]SeriesInterest, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT user_id, profile_id, library_id, series_id,
-		       favorite, watchlist, continue_watching, next_up_candidate,
-		       last_completed_episode_key, next_expected_episode_key, last_notified_episode_key,
-		       updated_at
-		FROM profile_series_interest
-		WHERE library_id = $1 AND series_id = $2
-		  AND (favorite OR watchlist OR continue_watching OR next_up_candidate)`,
+		SELECT psi.user_id, psi.profile_id, psi.library_id, psi.series_id,
+		       psi.favorite, psi.watchlist, psi.continue_watching, psi.next_up_candidate,
+		       psi.last_completed_episode_key, psi.next_expected_episode_key, psi.last_notified_episode_key,
+		       psi.updated_at
+		FROM profile_series_interest psi
+		WHERE psi.library_id = $1 AND psi.series_id = $2
+		  AND (psi.favorite OR psi.watchlist OR psi.continue_watching OR psi.next_up_candidate)
+		  AND NOT EXISTS (
+			SELECT 1 FROM profile_series_notification_mutes m
+			WHERE m.series_id = psi.series_id AND m.user_id = psi.user_id AND m.profile_id = psi.profile_id)`,
 		libraryID, seriesID)
 	if err != nil {
 		return nil, fmt.Errorf("list series interest: %w", err)
@@ -81,8 +86,7 @@ func (r *InterestRepository) UpsertRows(ctx context.Context, interests []SeriesI
 		)
 	}
 	sb.WriteString(`
-		ON CONFLICT (profile_id, library_id, series_id) DO UPDATE SET
-			user_id = EXCLUDED.user_id,
+		ON CONFLICT (user_id, profile_id, library_id, series_id) DO UPDATE SET
 			favorite = EXCLUDED.favorite,
 			watchlist = EXCLUDED.watchlist,
 			continue_watching = EXCLUDED.continue_watching,
@@ -107,14 +111,14 @@ func (r *InterestRepository) UpsertRows(ctx context.Context, interests []SeriesI
 }
 
 // DeleteStaleForProfileSeries removes interest rows for libraries the profile
-// can no longer see (or the series no longer belongs to). keepLibraryIDs is
-// the freshly computed target set; an empty set deletes all rows for the
-// (profile, series) pair.
-func (r *InterestRepository) DeleteStaleForProfileSeries(ctx context.Context, profileID, seriesID string, keepLibraryIDs []int) error {
+// on userID's account can no longer see (or the series no longer belongs to).
+// keepLibraryIDs is the freshly computed target set; an empty set deletes all
+// rows for the (profile, series) pair.
+func (r *InterestRepository) DeleteStaleForProfileSeries(ctx context.Context, userID int, profileID, seriesID string, keepLibraryIDs []int) error {
 	_, err := r.pool.Exec(ctx, `
 		DELETE FROM profile_series_interest
-		WHERE profile_id = $1 AND series_id = $2 AND NOT (library_id = ANY($3))`,
-		profileID, seriesID, keepLibraryIDs)
+		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3 AND NOT (library_id = ANY($4))`,
+		userID, profileID, seriesID, keepLibraryIDs)
 	if err != nil {
 		return fmt.Errorf("delete stale series interest: %w", err)
 	}
@@ -122,13 +126,14 @@ func (r *InterestRepository) DeleteStaleForProfileSeries(ctx context.Context, pr
 }
 
 // ListSeriesForProfile returns the distinct series that currently have
-// interest rows for the profile. The rebuild pass recomputes these alongside
-// the series resolved from live sources so rows whose sources were removed
-// while the live updater was down get cleaned up instead of lingering.
-func (r *InterestRepository) ListSeriesForProfile(ctx context.Context, profileID string) ([]string, error) {
+// interest rows for the profile on userID's account. The rebuild pass
+// recomputes these alongside the series resolved from live sources so rows
+// whose sources were removed while the live updater was down get cleaned up
+// instead of lingering.
+func (r *InterestRepository) ListSeriesForProfile(ctx context.Context, userID int, profileID string) ([]string, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT DISTINCT series_id FROM profile_series_interest WHERE profile_id = $1`,
-		profileID)
+		`SELECT DISTINCT series_id FROM profile_series_interest WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("list profile interest series: %w", err)
 	}
@@ -145,30 +150,33 @@ func (r *InterestRepository) ListSeriesForProfile(ctx context.Context, profileID
 }
 
 // GuardedSetLastNotified raises last_notified_episode_key for the given
-// profiles. The < guard makes concurrent workers handling adjacent release
-// events safe: the higher key wins regardless of commit order.
-func (r *InterestRepository) GuardedSetLastNotified(ctx context.Context, tx pgx.Tx, libraryID int, seriesID string, episodeKey int, profileIDs []string) error {
-	if len(profileIDs) == 0 {
+// account profiles. The < guard makes concurrent workers handling adjacent
+// release events safe: the higher key wins regardless of commit order.
+func (r *InterestRepository) GuardedSetLastNotified(ctx context.Context, tx pgx.Tx, libraryID int, seriesID string, episodeKey int, profiles []profileKey) error {
+	if len(profiles) == 0 {
 		return nil
 	}
+	userIDs, profileIDs := profileKeyArrays(profiles)
 	_, err := tx.Exec(ctx, `
-		UPDATE profile_series_interest
+		UPDATE profile_series_interest psi
 		SET last_notified_episode_key = $1
-		WHERE library_id = $2 AND series_id = $3 AND profile_id = ANY($4)
-		  AND (last_notified_episode_key IS NULL OR last_notified_episode_key < $1)`,
-		episodeKey, libraryID, seriesID, profileIDs)
+		FROM unnest($4::integer[], $5::text[]) AS notified(user_id, profile_id)
+		WHERE psi.library_id = $2 AND psi.series_id = $3
+		  AND psi.user_id = notified.user_id AND psi.profile_id = notified.profile_id
+		  AND (psi.last_notified_episode_key IS NULL OR psi.last_notified_episode_key < $1)`,
+		episodeKey, libraryID, seriesID, userIDs, profileIDs)
 	if err != nil {
 		return fmt.Errorf("update last notified episode key: %w", err)
 	}
 	return nil
 }
 
-// DeleteAllForProfile removes every interest row for a deleted profile.
-// Profiles may live in per-user SQLite stores, so this cleanup cannot rely on
-// a Postgres cascade.
-func (r *InterestRepository) DeleteAllForProfile(ctx context.Context, profileID string) error {
+// DeleteAllForProfile removes every interest row for a deleted profile on
+// userID's account. Profiles may live in per-user SQLite stores, so this
+// cleanup cannot rely on a Postgres cascade.
+func (r *InterestRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM profile_series_interest WHERE profile_id = $1`, profileID)
+		`DELETE FROM profile_series_interest WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	return err
 }
 

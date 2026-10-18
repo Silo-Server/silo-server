@@ -23,6 +23,18 @@ describe("DetailOverview", () => {
     expect(screen.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("keeps a spoiler-hidden overview behind a reveal button", () => {
+    mockOverflow(false);
+    const onReveal = vi.fn();
+    const { rerender } = render(<DetailOverview overview="Who dies" hidden onReveal={onReveal} />);
+    expect(screen.queryByText("Who dies")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Description hidden/ }));
+    expect(onReveal).toHaveBeenCalledTimes(1);
+
+    rerender(<DetailOverview overview="Who dies" onReveal={onReveal} />);
+    expect(screen.getByText("Who dies")).toBeInTheDocument();
+  });
+
   it("hides the toggle when the whole overview fits", () => {
     mockOverflow(false);
     render(<DetailOverview overview="Short" clamp />);
@@ -34,5 +46,15 @@ describe("DetailOverview", () => {
     render(<DetailOverview overview="Full text" />);
     expect(screen.getByText("Full text")).not.toHaveClass("line-clamp-3");
     expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
+  });
+
+  it("labels machine-translated text, but not while a translation is running", () => {
+    mockOverflow(false);
+    const { rerender } = render(<DetailOverview overview="Übersetzt" machineTranslated />);
+    expect(screen.getByText("Translated by AI")).toBeInTheDocument();
+    rerender(<DetailOverview overview="Übersetzt" machineTranslated translating />);
+    expect(screen.queryByText("Translated by AI")).not.toBeInTheDocument();
+    rerender(<DetailOverview overview="Provider text" />);
+    expect(screen.queryByText("Translated by AI")).not.toBeInTheDocument();
   });
 });

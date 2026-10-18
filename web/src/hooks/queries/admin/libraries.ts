@@ -91,11 +91,12 @@ export function fetchAdminLibraries(signal?: AbortSignal): Promise<Library[]> {
   return v2("GET /api/v2/libraries", { signal }).then(librariesFromV2);
 }
 
-export function useAdminLibraries() {
+export function useAdminLibraries({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: adminKeys.libraries(),
     queryFn: ({ signal }) => fetchAdminLibraries(signal),
     staleTime: ADMIN_STALE_TIME,
+    enabled,
   });
 }
 
@@ -349,23 +350,6 @@ export function flattenStaleMediaIDs(
   return data?.pages.flatMap((page) => page.staleIDs) ?? [];
 }
 
-export function useRematchStaleMediaID() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (contentId: string) =>
-      v2("POST /api/v2/libraries/stale-ids/{content_id}/rematch", {
-        path: { content_id: contentId },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() });
-      toast.success("Re-match started");
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Re-match failed");
-    },
-  });
-}
-
 export function useCreateLibrary() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -597,24 +581,6 @@ export function useRetryLibraryMetadataMatchQueue() {
   });
 }
 
-export function useCancelLibraryMetadataMatchQueue() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) =>
-      v2("POST /api/v2/libraries/{id}/metadata-match-queue/cancel", {
-        path: { id: String(id) },
-      }),
-    onSuccess: (_data, id) => {
-      toast.success("Metadata matcher backlog cancelled");
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueDetail(id) });
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to cancel metadata matcher backlog");
-    },
-  });
-}
-
 export function useLibraryProviders(libraryId: number | null) {
   return useQuery({
     queryKey: adminKeys.libraryProviders(libraryId ?? 0),
@@ -764,16 +730,19 @@ export interface UnmatchedLibraryItemsPage {
 /**
  * Fetches one page of the unmatched-item listing; `cursor` is the previous
  * page's `nextCursor`. The search is server-side and spans the whole table.
+ * With `ignored` set it pages the items an admin ignored instead.
  */
 export async function fetchUnmatchedLibraryItemsPage(
   search: string,
   cursor?: string,
   signal?: AbortSignal,
+  ignored = false,
 ): Promise<UnmatchedLibraryItemsPage> {
   const result = await v2("GET /api/v2/libraries/unmatched-items", {
     query: {
       limit: UNMATCHED_PAGE_SIZE,
       ...(search ? { q: search } : {}),
+      ...(ignored ? { ignored: true } : {}),
       ...(cursor === undefined ? {} : { cursor }),
     },
     signal,
@@ -787,15 +756,17 @@ export async function fetchUnmatchedLibraryItemsPage(
 }
 
 /**
- * Pages the unmatched-item listing by cursor. The loaded pages keep their
- * cursors, so opening page N costs one request and a refetch refreshes the
- * loaded pages in place instead of walking the chain from the first page.
+ * Pages the unmatched-item listing by cursor, or with `ignored` the items an
+ * admin ignored. The loaded pages keep their cursors, so opening page N costs
+ * one request and a refetch refreshes the loaded pages in place instead of
+ * walking the chain from the first page.
  */
-export function useUnmatchedLibraryItems(search = "") {
+export function useUnmatchedLibraryItems(search = "", ignored = false) {
   const trimmed = search.trim();
   return useInfiniteQuery({
-    queryKey: adminKeys.unmatchedItems(trimmed),
-    queryFn: ({ pageParam, signal }) => fetchUnmatchedLibraryItemsPage(trimmed, pageParam, signal),
+    queryKey: adminKeys.unmatchedItems(trimmed, ignored),
+    queryFn: ({ pageParam, signal }) =>
+      fetchUnmatchedLibraryItemsPage(trimmed, pageParam, signal, ignored),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     staleTime: ADMIN_STALE_TIME,
@@ -803,6 +774,66 @@ export function useUnmatchedLibraryItems(search = "") {
 }
 
 export { UNMATCHED_PAGE_SIZE };
+
+export interface UnmatchedItemIgnoreVariables {
+  contentId: string;
+  title: string;
+  /** True ignores the item; false restores it to the unmatched list. */
+  ignored: boolean;
+}
+
+function setUnmatchedItemIgnored({ contentId, ignored }: UnmatchedItemIgnoreVariables) {
+  const path = { content_id: contentId };
+  return ignored
+    ? v2("PUT /api/v2/libraries/unmatched-items/{content_id}/ignore", { path })
+    : v2("DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore", { path });
+}
+
+/**
+ * Marks an unmatched item as intentionally unmatched, so it leaves the list
+ * and automatic matching leaves it alone, or restores an ignored one. The
+ * success toast offers Undo, which flips the item back.
+ */
+export function useSetUnmatchedItemIgnored() {
+  const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: adminKeys.unmatchedItems() });
+
+  const undoMutation = useMutation({
+    mutationFn: (variables: UnmatchedItemIgnoreVariables) =>
+      setUnmatchedItemIgnored({ ...variables, ignored: !variables.ignored }),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to undo");
+    },
+    onSettled: refresh,
+  });
+
+  return useMutation({
+    mutationFn: setUnmatchedItemIgnored,
+    onError: (err, variables) => {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : variables.ignored
+            ? "Failed to ignore item"
+            : "Failed to restore item",
+      );
+    },
+    onSuccess: (_data, variables) => {
+      toast.success(
+        variables.ignored ? `Ignored ${variables.title}` : `Restored ${variables.title}`,
+        {
+          description: variables.ignored
+            ? "Silo won't try to match it again. You can restore it from the Ignored view."
+            : "It's back on the unmatched list, and Silo will try to match it again.",
+          action: { label: "Undo", onClick: () => undoMutation.mutate(variables) },
+        },
+      );
+    },
+    // Refresh after a failure too: a 409 means the item was matched since the
+    // list loaded, so its row is stale either way.
+    onSettled: refresh,
+  });
+}
 
 export function useConfirmEmptyRootCleanup() {
   const queryClient = useQueryClient();

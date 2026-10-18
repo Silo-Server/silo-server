@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 var (
@@ -25,6 +27,9 @@ var (
 	// answers to. It is a client input problem, not an upstream failure, so the
 	// API layer answers 404 instead of 500.
 	ErrUnknownProvider = errors.New("unknown subtitle provider")
+	// ErrInvalidSubtitleID reports a provider result ID that is not in the
+	// shape the provider's search returns; no provider request was made.
+	ErrInvalidSubtitleID = errors.New("invalid subtitle id")
 )
 
 // Manager orchestrates subtitle search and download across providers.
@@ -112,7 +117,14 @@ func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 
 			results, err := prov.Search(pctx, req)
 			if err != nil {
-				ch <- providerResult{warning: fmt.Sprintf("%s: %v", prov.Name(), err)}
+				// Provider errors can carry request URLs and upstream bodies, so
+				// callers only learn which provider failed; the detail is logged
+				// unless the caller has already gone away.
+				if ctx.Err() == nil {
+					slog.WarnContext(ctx, "subtitle provider search failed", "component", "subtitles", "provider", prov.Name(),
+						"error", logredact.SanitizeText(logredact.SanitizeURLError(err).Error()))
+				}
+				ch <- providerResult{warning: prov.Name() + ": search failed"}
 				return
 			}
 			ch <- providerResult{results: results}
@@ -214,6 +226,11 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 	data, format, err := prov.Download(ctx, req.SubtitleID)
 	if err != nil {
 		return nil, fmt.Errorf("download from %s: %w", req.ProviderName, err)
+	}
+	// Providers bound their own reads; this check keeps any provider from
+	// storing a subtitle larger than an upload may be.
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("download from %s: %w: %d bytes, limit %d", req.ProviderName, ErrSubtitleTooLarge, len(data), MaxUploadSize)
 	}
 
 	return m.StoreSubtitle(ctx, StoreSubtitleRequest{

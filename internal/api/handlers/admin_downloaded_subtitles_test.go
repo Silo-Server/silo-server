@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 	"time"
 
@@ -124,7 +123,7 @@ func TestHandleDownloadDownloadedSubtitle(t *testing.T) {
 		Provider:    subtitles.ProviderUpload,
 		Language:    "en",
 		Format:      subtitles.FormatVTT,
-		ReleaseName: "sample.vtt",
+		ReleaseName: "../unsafe/path/movie.en.srt",
 		S3Key:       "subtitles/10/en_upload_deadbeef.vtt",
 		CreatedAt:   time.Now(),
 	}
@@ -146,8 +145,8 @@ func TestHandleDownloadDownloadedSubtitle(t *testing.T) {
 	if got := rr.Header().Get("Content-Type"); got != "text/vtt; charset=utf-8" {
 		t.Fatalf("content-type = %q", got)
 	}
-	if !bytes.Contains([]byte(rr.Header().Get("Content-Disposition")), []byte("sample.vtt")) {
-		t.Fatalf("content-disposition = %q", rr.Header().Get("Content-Disposition"))
+	if got := rr.Header().Get("Content-Disposition"); got != `attachment; filename="movie.en.vtt"` {
+		t.Fatalf("content-disposition = %q", got)
 	}
 	if !bytes.Equal(rr.Body.Bytes(), content) {
 		t.Fatalf("body mismatch")
@@ -214,21 +213,6 @@ func (c *trackingHandlerBlobStore) Delete(_ context.Context, key string) error {
 	delete(c.objects, key)
 	c.deletedKeys = append(c.deletedKeys, key)
 	return nil
-}
-
-func TestSubtitleDownloadFilename(t *testing.T) {
-	sub := &subtitles.DownloadedSubtitle{
-		ID:          9,
-		ReleaseName: "../unsafe/path/movie.en.srt",
-		Format:      subtitles.FormatSRT,
-	}
-	got := subtitleDownloadFilename(sub)
-	if got != "movie.en.srt" {
-		t.Fatalf("filename = %q, want movie.en.srt", got)
-	}
-	if strconv.Itoa(sub.ID) == "" {
-		t.Fatal("unexpected")
-	}
 }
 
 // The frozen v1 admin list serializes AdminDownloadedSubtitle; the stored

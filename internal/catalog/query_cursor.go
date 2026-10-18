@@ -63,11 +63,17 @@ type queryCursorTerm struct {
 	kind       string
 	descending bool
 	nullsLast  bool
+	// notNull marks an expression that is never NULL. Its seek needs no NULL
+	// arms, and a leading notNull term also bounds the seek so PostgreSQL can
+	// start an index range scan at the cursor instead of the first row.
+	notNull bool
 }
 
 func setCursorTermKinds(terms []queryCursorTerm, field string) {
 	for i := range terms {
-		terms[i].kind = cursorKindText
+		if terms[i].kind == "" {
+			terms[i].kind = cursorKindText
+		}
 		if !terms[i].descending {
 			terms[i].nullsLast = true
 		}
@@ -107,19 +113,24 @@ func (t queryCursorTerm) cast() string {
 // cursorSeekSQL expands a mixed-direction, nullable tuple comparison. SQL row
 // comparisons alone cannot express NULLS LAST or a descending primary key with
 // ascending title and identity tie breakers.
+//
+// PostgreSQL cannot derive an index range from the OR of those arms, so a
+// leading notNull term is also bounded on its own (expr >= value, or <= when
+// descending); without it every continuation scans from the first sorted row.
 func cursorSeekSQL(terms []queryCursorTerm, after *QueryCursor, start int) (string, []any, error) {
 	if after == nil {
 		return "", nil, nil
 	}
 	if len(after.Keys) != len(terms) {
-		return "", nil, fmt.Errorf("cursor key count does not match sort")
+		return "", nil, fmt.Errorf("%w: cursor key count does not match sort", ErrCatalogCursorChanged)
 	}
 	var arms, equal []string
 	var args []any
+	bound := ""
 	for i, term := range terms {
 		key := after.Keys[i]
 		if key.Kind != term.kind {
-			return "", nil, fmt.Errorf("cursor key %d has invalid kind", i)
+			return "", nil, fmt.Errorf("%w: cursor key %d has invalid kind", ErrCatalogCursorChanged, i)
 		}
 		expr := term.expression
 		comparison := "FALSE"
@@ -136,16 +147,23 @@ func cursorSeekSQL(terms []queryCursorTerm, after *QueryCursor, start int) (stri
 				operator = "<"
 			}
 			comparison = fmt.Sprintf("%s %s %s", expr, operator, param)
-			if term.nullsLast {
+			if term.nullsLast && !term.notNull {
 				comparison = "(" + comparison + " OR " + expr + " IS NULL)"
 			}
 			equality = fmt.Sprintf("%s = %s", expr, param)
+			if i == 0 && term.notNull {
+				bound = fmt.Sprintf("%s %s= %s", expr, operator, param)
+			}
 		}
 		prefix := append(append([]string{}, equal...), comparison)
 		arms = append(arms, "("+strings.Join(prefix, " AND ")+")")
 		equal = append(equal, equality)
 	}
-	return "(" + strings.Join(arms, " OR ") + ")", args, nil
+	seek := "(" + strings.Join(arms, " OR ") + ")"
+	if bound != "" {
+		seek = "(" + bound + " AND " + seek + ")"
+	}
+	return seek, args, nil
 }
 
 // PreviewCursorPage uses a SQL keyset, including the identity tie breaker. It
@@ -191,7 +209,7 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 		return QueryCursorPage{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	rows, err := tx.Query(ctx, sql, args...)
+	rows, err := tx.Query(ctx, sql, args...) //nolint:rowserrcheck // scanItemsWithMangaCounts checks Err through the cursorRows wrapper
 	if err != nil {
 		return QueryCursorPage{}, fmt.Errorf("querying cursor page: %w", err)
 	}
@@ -231,6 +249,25 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 }
 
 func (p previewPagePlan) cursorSQL(after *QueryCursor) (string, []any, error) {
+	where, args, err := p.whereAfter(after)
+	if err != nil {
+		return "", nil, err
+	}
+	columns := qualifiedListItemColumns("mi") + ", " + mangaCountColumns("mi")
+	for _, term := range p.cursorTerms {
+		columns += ", (" + term.expression + ")::text"
+	}
+	queryLimit := p.limit + 1
+	if p.maxResults > 0 {
+		queryLimit = min(queryLimit, p.maxResults)
+	}
+	args = append(args, queryLimit)
+	return fmt.Sprintf("%sSELECT %s %s %s %s LIMIT $%d", p.withClause(), columns, p.fromClausePaged, where, p.orderBy, len(args)), args, nil
+}
+
+// whereAfter is the plan's WHERE clause narrowed to the rows after the
+// cursor (all rows when after is nil), with every argument it binds.
+func (p previewPagePlan) whereAfter(after *QueryCursor) (string, []any, error) {
 	args := append([]any{}, p.cteArgs...)
 	args = append(args, p.args...)
 	args = append(args, p.sortArgs...)
@@ -247,20 +284,14 @@ func (p previewPagePlan) cursorSQL(after *QueryCursor) (string, []any, error) {
 			where += " AND " + seek
 		}
 	}
-	columns := qualifiedListItemColumns("mi") + ", " + mangaCountColumns("mi")
-	for _, term := range p.cursorTerms {
-		columns += ", (" + term.expression + ")::text"
+	return where, args, nil
+}
+
+func (p previewPagePlan) withClause() string {
+	if len(p.ctes) == 0 {
+		return ""
 	}
-	queryLimit := p.limit + 1
-	if p.maxResults > 0 {
-		queryLimit = min(queryLimit, p.maxResults)
-	}
-	args = append(args, queryLimit)
-	prefix := ""
-	if len(p.ctes) > 0 {
-		prefix = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
-	}
-	return fmt.Sprintf("%sSELECT %s %s %s %s LIMIT $%d", prefix, columns, p.fromClausePaged, where, p.orderBy, len(args)), args, nil
+	return "WITH " + strings.Join(p.ctes, ",\n") + "\n"
 }
 
 type cursorRows struct {
@@ -283,8 +314,10 @@ func (r *cursorRows) Scan(dest ...any) error {
 }
 
 // SeekCursor locates the tuple immediately before a requested zero-based page
-// position. Only explicit jumps use OFFSET; continuations always use the tuple.
-// The caller still binds the resulting cursor to its query and viewer scope.
+// position. Only explicit jumps use OFFSET, and with seek anchors they walk
+// from the nearest anchor instead of the first row; continuations always use
+// the tuple. The caller still binds the resulting cursor to its query and
+// viewer scope.
 func (e *QueryExecutor) SeekCursor(ctx context.Context, def QueryDefinition, access AccessFilter, index int) (*QueryCursor, error) {
 	if index < 0 || index > 10000000 {
 		return nil, fmt.Errorf("jump index must be between 0 and 10000000")
@@ -302,25 +335,36 @@ func (e *QueryExecutor) SeekCursor(ctx context.Context, def QueryDefinition, acc
 	if err != nil {
 		return nil, err
 	}
-	args := append([]any{}, plan.cteArgs...)
-	args = append(args, plan.args...)
-	args = append(args, plan.sortArgs...)
+	key, anchored, err := e.anchoredSeek(ctx, plan, index-1)
+	if !anchored {
+		key, err = e.queryTuple(ctx, plan, nil, index-1)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("seeking cursor: %w", err)
+	}
+	key.Consumed = index
+	return key, nil
+}
+
+// queryTuple reads the sort tuple offset rows past the cursor (past the
+// start when after is nil).
+func (e *QueryExecutor) queryTuple(ctx context.Context, plan previewPagePlan, after *QueryCursor, offset int) (*QueryCursor, error) {
+	where, args, err := plan.whereAfter(after)
+	if err != nil {
+		return nil, err
+	}
 	columns := make([]string, len(plan.cursorTerms))
-	key := &QueryCursor{Keys: make([]QueryCursorValue, len(plan.cursorTerms)), Consumed: index}
+	key := &QueryCursor{Keys: make([]QueryCursorValue, len(plan.cursorTerms))}
 	dest := make([]any, len(columns))
 	for i, term := range plan.cursorTerms {
 		columns[i] = "(" + term.expression + ")::text"
 		key.Keys[i].Kind = term.kind
 		dest[i] = &key.Keys[i].Value
 	}
-	prefix := ""
-	if len(plan.ctes) > 0 {
-		prefix = "WITH " + strings.Join(plan.ctes, ",\n") + "\n"
-	}
-	args = append(args, index-1)
-	sql := fmt.Sprintf("%sSELECT %s %s %s %s LIMIT 1 OFFSET $%d", prefix, strings.Join(columns, ", "), plan.fromClausePaged, plan.whereClause, plan.orderBy, len(args))
+	args = append(args, offset)
+	sql := fmt.Sprintf("%sSELECT %s %s %s %s LIMIT 1 OFFSET $%d", plan.withClause(), strings.Join(columns, ", "), plan.fromClausePaged, where, plan.orderBy, len(args))
 	if err := e.Pool.QueryRow(ctx, sql, args...).Scan(dest...); err != nil {
-		return nil, fmt.Errorf("seeking cursor: %w", err)
+		return nil, err
 	}
 	return key, nil
 }

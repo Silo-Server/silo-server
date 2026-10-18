@@ -52,20 +52,9 @@ describe("DownloadsWidget", () => {
     expect(screen.getByText("On devices")).toBeTruthy();
     expect(screen.getByText("5.0 GB")).toBeTruthy();
     expect(screen.getByText("quick")).toBeTruthy();
+    expect(screen.getByText("User #5")).toBeTruthy();
     expect(screen.getByText("11 items")).toBeTruthy();
     expect(screen.getByText(/3 started · 2 finished \(24h\)/)).toBeTruthy();
-  });
-
-  it("labels an account with no username by its id", () => {
-    mocks.useAdminDownloadsStats.mockReturnValue({
-      data: stats(),
-      isLoading: false,
-      error: null,
-    });
-
-    render(<DownloadsWidget />);
-
-    expect(screen.getByText("User #5")).toBeTruthy();
   });
 
   it("reads all zeros as the empty state, not as data", () => {

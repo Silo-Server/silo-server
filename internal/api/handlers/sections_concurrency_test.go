@@ -52,7 +52,7 @@ func TestBuildSectionsEnrichesConcurrentlyForViewer(t *testing.T) {
 	response := handler.buildSections(ctx, []sections.SectionWithItems{{
 		ResolvedSection: sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded},
 		Items:           []*models.MediaItem{{ContentID: "episode", Type: "episode", Title: "Episode"}},
-	}}, new(3), access, imagesize.Unset)
+	}}, new(3), access, imagesize.Request{})
 	if err := ctx.Err(); err != nil {
 		t.Fatalf("enrichment did not finish concurrently: %v", err)
 	}

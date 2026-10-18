@@ -7,7 +7,7 @@ import type {
 } from "@/api/types";
 import { normalizeQueryDefinition } from "@/api/types";
 import { v2, V2ProblemError } from "@/api/v2/request";
-import { requiredETag } from "@/api/personalCollections";
+import { withETag } from "@/api/v2/etag";
 
 type AdminCollection = components["schemas"]["AdminCollection"];
 export function adminCollectionFromV2(value: AdminCollection): LibraryCollection {
@@ -125,66 +125,50 @@ export function adminMutationMessage(error: unknown, fallback: string) {
       : fallback;
 }
 export async function fetchAdminCollectionSnapshot(id: string) {
-  let etag: string | null = null;
-  const collection = await v2("GET /api/v2/admin/collections/{id}", {
-    path: { id },
-    onResponse: (response) => {
-      etag = response.headers.get("ETag");
-    },
-  });
-  return { collection: adminCollectionFromV2(collection), etag: requiredETag(etag) };
+  const { body, etag } = await withETag("GET /api/v2/admin/collections/{id}", { path: { id } });
+  return { collection: adminCollectionFromV2(body), etag };
 }
 export async function fetchAdminGroupSnapshot(id: string) {
-  let etag: string | null = null;
-  const group = await v2("GET /api/v2/admin/collection-groups/{id}", {
+  const { body, etag } = await withETag("GET /api/v2/admin/collection-groups/{id}", {
     path: { id },
-    onResponse: (response) => {
-      etag = response.headers.get("ETag");
-    },
   });
-  return { group: adminGroupFromV2(group), etag: requiredETag(etag) };
+  return { group: adminGroupFromV2(body), etag };
 }
 export async function fetchAdminGroupOrderSnapshot(libraryId: number) {
-  let etag: string | null = null;
-  const body = await v2("GET /api/v2/admin/libraries/{library_id}/collection-groups/order", {
-    path: { library_id: String(libraryId) },
-    onResponse: (response) => {
-      etag = response.headers.get("ETag");
-    },
-  });
-  return { ...body, etag: requiredETag(etag) };
+  const { body, etag } = await withETag(
+    "GET /api/v2/admin/libraries/{library_id}/collection-groups/order",
+    { path: { library_id: String(libraryId) } },
+  );
+  return { ...body, etag };
 }
 export async function fetchAdminGroupCollectionOrderSnapshot(groupID: string, libraryId: number) {
-  let etag: string | null = null;
-  const body = await v2("GET /api/v2/admin/collection-groups/{group_id}/collections/order", {
-    path: { group_id: groupID },
-    query: { library_id: String(libraryId) },
-    onResponse: (response) => {
-      etag = response.headers.get("ETag");
-    },
-  });
-  return { ...body, etag: requiredETag(etag) };
+  const { body, etag } = await withETag(
+    "GET /api/v2/admin/collection-groups/{group_id}/collections/order",
+    { path: { group_id: groupID }, query: { library_id: String(libraryId) } },
+  );
+  return { ...body, etag };
 }
 export async function fetchAdminItemOrderSnapshot(id: string) {
-  let etag: string | null = null;
-  const body = await v2("GET /api/v2/admin/collections/{id}/items/order", {
+  const { body, etag } = await withETag("GET /api/v2/admin/collections/{id}/items/order", {
     path: { id },
-    onResponse: (response) => {
-      etag = response.headers.get("ETag");
-    },
   });
-  return { ...body, etag: requiredETag(etag) };
+  return { ...body, etag };
 }
 /** Read before opening the confirmation, with at most four requests in flight. */
+export type AdminCollectionDeleteSnapshot = {
+  id: string;
+  etag: string;
+  collection: LibraryCollection;
+};
 export async function prepareAdminCollectionDeletes(ids: string[]) {
-  const snapshots: { id: string; etag: string }[] = [];
+  const snapshots: AdminCollectionDeleteSnapshot[] = [];
   const unique = [...new Set(ids)];
   for (let offset = 0; offset < unique.length; offset += 4) {
     snapshots.push(
       ...(await Promise.all(
         unique
           .slice(offset, offset + 4)
-          .map(async (id) => ({ id, etag: (await fetchAdminCollectionSnapshot(id)).etag })),
+          .map(async (id) => ({ id, ...(await fetchAdminCollectionSnapshot(id)) })),
       )),
     );
   }

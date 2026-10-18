@@ -20,7 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
@@ -125,11 +125,17 @@ func NewRouter(deps Dependencies) chi.Router {
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
 	autoscanHandler.realtimeMonitoring = deps.RealtimeMonitoringEnabled
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
+	// Rate limiting mirrors the native API: credential endpoints spend their
+	// per-endpoint budget, and authenticated routes, media included, run the
+	// generic limiter after auth, as the native authenticated group does.
+	// Anonymous artwork, avatars, web assets, and public server info stay
+	// unlimited like native public artwork and server reads.
+	rateLimit := compatRateLimit(deps.RateLimit)
 	autoscanVirtualFoldersRegistered := false
 	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
-		r.With(RequireSessionOrAdminAPIKey(deps.Authenticator, adminAPIKeyAuth)).
+		r.With(RequireSessionOrAdminAPIKey(deps.Authenticator, adminAPIKeyAuth), rateLimit).
 			Get("/Library/VirtualFolders", autoscanHandler.HandleVirtualFolders)
-		r.With(adminAPIKeyAuth.RequireAdminAPIKey).
+		r.With(adminAPIKeyAuth.RequireAdminAPIKey, rateLimit).
 			Post("/Library/Media/Updated", autoscanHandler.HandleMediaUpdated)
 		autoscanVirtualFoldersRegistered = true
 	}
@@ -145,6 +151,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
 	playbackHandler.ScopeResolver = deps.PlaybackScopeResolver
+	playbackHandler.downloads = deps.Downloads
+	playbackHandler.accessFilter = deps.AccessFilterFn
 	startupSegmentRetention := playbackHandler.SegmentRetentionSeconds
 	playbackHandler.SegmentRetentionSeconds = func() int {
 		if cfg := deps.CurrentConfig(); cfg != nil {
@@ -157,9 +165,6 @@ func NewRouter(deps Dependencies) chi.Router {
 			return cfg.Playback
 		}
 		return config.PlaybackConfig{Routing: config.DefaultPlaybackRoutingPolicy()}
-	}
-	if deps.DB != nil {
-		playbackHandler.profileStaler = recommendations.NewRepo(deps.DB)
 	}
 	playbackHandler.NodePlanner = deps.NodePlanner
 	playbackHandler.JWTSecret = deps.JWTSecret
@@ -175,7 +180,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.RegisterShutdownWork != nil {
 		deps.RegisterShutdownWork(cleanupDone)
 	}
-	playbackHandler.profileRefreshRequester = deps.RecWorker
+	if deps.RecWorker != nil {
+		playbackHandler.signalsNotifier = deps.RecWorker
+	}
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
 	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
@@ -184,26 +191,36 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
 	playbackHandler.Trickplay = deps.Trickplay
+	playbackHandler.PlaySync = deps.SubtitlePlaySync
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
+		// The PostgreSQL repository also stores sidecar timing corrections.
+		if timings, ok := subtitleRepo.(subtitles.ExternalTimingLookup); ok {
+			playbackHandler.ExternalTimings = timings
+		}
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections
 	imagesHandler.collectionPosters = itemsHandler.collectionPosters
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
+	imagesHandler.artworkStore = deps.ArtworkStore
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
-	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.DetailSvc, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
+	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
 	r.Get("/System/Info/Public", systemHandler.HandlePublicInfo)
 	r.Get("/System/Info", systemHandler.HandleInfo)
 	r.Get("/System/Ping", systemHandler.HandlePing)
+	r.Post("/System/Ping", systemHandler.HandlePing)
 	r.Get("/System/Endpoint", systemHandler.HandleEndpoint)
 	r.Get("/Branding/Configuration", systemHandler.HandleBrandingConfiguration)
-	r.Get("/QuickConnect/Enabled", systemHandler.HandleQuickConnectEnabled)
+	r.Get("/Branding/Css", systemHandler.HandleBrandingCSS)
+	r.Get("/Branding/Css.css", systemHandler.HandleBrandingCSS)
 	r.Get("/Users/Public", authHandler.HandlePublicUsers)
-	r.Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
+	r.With(compatAuthEndpointRateLimit(deps.RateLimit, compatLoginRateLimitBucket)).
+		Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
+	registerQuickConnectRoutes(r, deps, authHandler)
 	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
 	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
@@ -227,6 +244,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.Authenticator != nil {
 		r.Group(func(r chi.Router) {
 			r.Use(RequireSessionOrAPIKeySession(deps.Authenticator, adminAPIKeyAuth))
+			r.Use(rateLimit)
 			r.Get("/Users/Me", authHandler.HandleCurrentUser)
 			r.Get("/Users", authHandler.HandleUsers)
 			r.Get("/Users/{id}", authHandler.HandleUserByID)
@@ -330,6 +348,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Media requests require a token or a PlaySessionId scoped to the negotiated source.
 	r.Group(func(r chi.Router) {
 		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
+		r.Use(rateLimit)
 		r.Method(http.MethodHead, "/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Get("/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Items/{id}/Download", playbackHandler.HandleDownload))
 		r.Method(http.MethodHead, "/Videos/{id}/stream", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/stream", playbackHandler.HandleVideoStream))
@@ -457,6 +476,9 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.SessionStore = NewSessionStore(deps.Config.JellyfinCompat.SessionTTL, deps.Now)
 		}
 	}
+	if deps.SessionStore != nil && deps.SessionStore.loginSessions == nil && deps.AuthService != nil {
+		deps.SessionStore.WithLoginSessions(deps.AuthService)
+	}
 	if deps.IDCodec == nil {
 		deps.IDCodec = NewResourceIDCodec()
 	}
@@ -494,7 +516,7 @@ func withDefaults(deps Dependencies) Dependencies {
 		}
 	}
 	if deps.HTTPClient == nil {
-		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+		deps.HTTPClient = newCompatImageClient()
 	}
 
 	// Build ContentService from repos if not provided
@@ -520,9 +542,9 @@ func withDefaults(deps Dependencies) Dependencies {
 
 	// Build UserDataService from store provider if not provided
 	if deps.UserDataService == nil && deps.UserStoreProvider != nil && deps.ItemRepo != nil {
-		var staler profileStaler
-		if deps.DB != nil {
-			staler = recommendations.NewRepo(deps.DB)
+		var signalsNotifier signalsChangedNotifier
+		if deps.RecWorker != nil {
+			signalsNotifier = deps.RecWorker
 		}
 		var pool *pgxpool.Pool
 		if deps.BrowseRepo != nil {
@@ -535,8 +557,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.ProviderIDRepo,
 			deps.DetailSvc,
 			catalog.NewContinueWatchingProgressFilter(pool),
-			staler,
-			deps.RecWorker,
+			signalsNotifier,
 			deps.WatchCompletionObserver,
 		)
 		svc.events = deps.UserStateEvents
@@ -545,7 +566,16 @@ func withDefaults(deps Dependencies) Dependencies {
 
 	// Build LoginResolver from auth service if not provided
 	if deps.LoginResolver == nil && deps.AuthService != nil && deps.UserStoreProvider != nil && deps.SessionStore != nil {
-		deps.LoginResolver = NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now)
+		pinAttempts := deps.ProfilePINAttempts
+		if pinAttempts == nil {
+			pinAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+		}
+		resolver := NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now).
+			WithPINAttempts(pinAttempts)
+		if deps.DeviceLogin != nil {
+			resolver.WithQuickConnect(deps.DeviceLogin)
+		}
+		deps.LoginResolver = resolver
 	}
 
 	if deps.Authenticator == nil && deps.SessionStore != nil {
@@ -570,4 +600,35 @@ func stripSlashesExceptWeb(next http.Handler) http.Handler {
 		}
 		stripped.ServeHTTP(w, r)
 	})
+}
+
+// registerQuickConnectRoutes serves Jellyfin Quick Connect. The routes spend
+// the native device sign-in budgets, keyed by client address: opening a
+// request spends device_start, polling and collecting spend device_poll, and
+// approving a code spends device_lookup, like the native operations that do
+// the same.
+func registerQuickConnectRoutes(r chi.Router, deps Dependencies, authHandler *AuthHandler) {
+	// Quick Connect is on only when an approved request can also be
+	// exchanged for a session.
+	var service QuickConnectService
+	if _, ok := deps.LoginResolver.(quickConnectLogin); ok {
+		service = deps.DeviceLogin
+	}
+	handler := NewQuickConnectHandler(service)
+	limited := func(bucket string, h http.HandlerFunc) http.Handler {
+		return compatAuthEndpointRateLimit(deps.RateLimit, bucket)(h)
+	}
+	r.Get("/QuickConnect/Enabled", handler.HandleEnabled)
+	initiate := limited("device_start", handler.HandleInitiate)
+	r.Method(http.MethodPost, "/QuickConnect/Initiate", initiate)
+	// Jellyfin 10.8 opened requests with GET; later servers keep it.
+	r.Method(http.MethodGet, "/QuickConnect/Initiate", initiate)
+	r.Method(http.MethodGet, "/QuickConnect/Connect", limited("device_poll", handler.HandleConnect))
+	r.Method(http.MethodPost, "/Users/AuthenticateWithQuickConnect", limited("device_poll", authHandler.HandleAuthenticateWithQuickConnect))
+	if deps.Authenticator != nil {
+		// Only a signed-in session approves, never an API key: an approval
+		// gives the device a login session of the account.
+		r.With(deps.Authenticator.RequireSession).
+			Method(http.MethodPost, "/QuickConnect/Authorize", limited("device_lookup", handler.HandleAuthorize))
+	}
 }

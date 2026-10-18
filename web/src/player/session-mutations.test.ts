@@ -1,14 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { PlayerConfig } from "./context/PlayerConfigContext";
 import {
+  captureSessionProgress,
+  observeSessionProgress,
   registerSessionMutations,
   resetSessionMutations,
-  observeSessionProgress,
-  captureSessionProgress,
   sendSessionProgress,
   stopSequencedSession,
-  sessionInstallation,
 } from "./session-mutations";
-import type { PlayerConfig } from "./context/PlayerConfigContext";
 
 const config: PlayerConfig = {
   apiBaseUrl: "/api/v1",
@@ -34,22 +33,6 @@ afterEach(() => {
 });
 
 describe("sequenced playback mutations", () => {
-  it("posts v2 bodies with the installation and a sequence per sample", async () => {
-    const fetcher = vi.fn().mockImplementation(async () => applied());
-    vi.stubGlobal("fetch", fetcher);
-    registerSessionMutations("seq", "install");
-    expect(sessionInstallation("seq")).toBe("install");
-    await sendSessionProgress(config, "seq", sample);
-    await sendSessionProgress(config, "seq", { ...sample, position: 10 });
-    expect(fetcher.mock.calls[0]![0]).toBe("/api/v2/playback/seq/progress");
-    expect(JSON.parse(fetcher.mock.calls[0]![1].body)).toEqual({
-      ...sample,
-      sequence: 1,
-      installation_id: "install",
-    });
-    expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toMatchObject({ sequence: 2, position: 10 });
-  });
-
   it("allocates once per sample and preserves the body after a lost reply", async () => {
     vi.useFakeTimers();
     const fetcher = vi
@@ -63,8 +46,13 @@ describe("sequenced playback mutations", () => {
     await first;
     await sendSessionProgress(config, "progress-retry", { ...sample, position: 10 });
     const bodies = fetcher.mock.calls.map((call) => call[1].body);
+    expect(fetcher.mock.calls[0]![0]).toBe("/api/v2/playback/progress-retry/progress");
     expect(bodies[0]).toBe(bodies[1]);
-    expect(JSON.parse(bodies[0]).sequence).toBe(1);
+    expect(JSON.parse(bodies[0])).toEqual({
+      ...sample,
+      sequence: 1,
+      installation_id: "install",
+    });
     expect(JSON.parse(bodies[2])).toMatchObject({ ...sample, position: 10, sequence: 2 });
   });
 

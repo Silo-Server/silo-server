@@ -14,7 +14,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userdb"
@@ -99,30 +98,6 @@ func listDevices(t *testing.T, h *DeviceHandler, query, profileID string) device
 	return body
 }
 
-// TestListDevices_FiltersToCallingProfile is the security test for this
-// endpoint. ListDevices is account-wide by construction in both backends —
-// "WHERE user_id" in Postgres and no WHERE at all in the per-user SQLite — so a
-// passthrough would show every household member's devices to everyone.
-func TestListDevices_FiltersToCallingProfile(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
-	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
-
-	body := listDevices(t, handler, "", "profile-1")
-
-	if len(body.Devices) != 1 {
-		t.Fatalf("returned %d devices, want 1: %+v", len(body.Devices), body.Devices)
-	}
-	if body.Devices[0].DeviceID != "device-1" {
-		t.Errorf("returned device %q, want device-1", body.Devices[0].DeviceID)
-	}
-	for _, device := range body.Devices {
-		if device.ProfileID != "profile-1" {
-			t.Errorf("leaked device %q from profile %q", device.DeviceID, device.ProfileID)
-		}
-	}
-}
-
 func TestListDevices_CountsChangedSettings(t *testing.T) {
 	handler, store := newDevicesTestHandler(t)
 	seedDevice(t, store, "profile-1", "device-1", "Laptop")
@@ -134,9 +109,18 @@ func TestListDevices_CountsChangedSettings(t *testing.T) {
 
 	body := listDevices(t, handler, "", "profile-1")
 
+	if len(body.Devices) != 2 {
+		t.Fatalf("devices = %+v, want two devices for the calling profile", body.Devices)
+	}
 	counts := map[string]int{}
 	for _, device := range body.Devices {
 		counts[device.DeviceID] = device.ChangedCount
+		if device.IsCurrentDevice != (device.DeviceID == "device-1") {
+			t.Errorf("device %q is_current_device = %v", device.DeviceID, device.IsCurrentDevice)
+		}
+		if device.ProfileName != "Sam" {
+			t.Errorf("device %q profile_name = %q, want Sam", device.DeviceID, device.ProfileName)
+		}
 	}
 	if counts["device-2"] != 2 {
 		t.Errorf("device-2 changed_count = %d, want 2", counts["device-2"])
@@ -169,33 +153,6 @@ func TestListDevices_CountsAMirroredPairOnce(t *testing.T) {
 	if body.Devices[0].ChangedCount != 2 {
 		t.Errorf("changed_count = %d, want 2: the mirrored intro pair is one preference",
 			body.Devices[0].ChangedCount)
-	}
-}
-
-func TestListDevices_MarksCurrentDevice(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "This browser")
-	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
-
-	body := listDevices(t, handler, "", "profile-1")
-
-	for _, device := range body.Devices {
-		want := device.DeviceID == "device-1"
-		if device.IsCurrentDevice != want {
-			t.Errorf("device %q is_current_device = %v, want %v",
-				device.DeviceID, device.IsCurrentDevice, want)
-		}
-	}
-}
-
-func TestListDevices_IncludesProfileName(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Laptop")
-
-	body := listDevices(t, handler, "", "profile-1")
-
-	if len(body.Devices) != 1 || body.Devices[0].ProfileName != "Sam" {
-		t.Errorf("profile_name = %q, want Sam", body.Devices[0].ProfileName)
 	}
 }
 
@@ -335,7 +292,6 @@ func TestClearDeviceSettings_KeepsRegistryRow(t *testing.T) {
 func householdDevicesHandler(t *testing.T) (*DeviceHandler, userstore.UserStore) {
 	t.Helper()
 	handler, store := newDevicesTestHandler(t)
-	handler.UserRepo = stubUserRepo{user: &models.User{ID: 1}}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
 	return handler, store
 }

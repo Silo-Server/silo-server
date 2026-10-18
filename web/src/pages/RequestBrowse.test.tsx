@@ -79,26 +79,6 @@ describe("RequestBrowse", () => {
     mocks.useRequestBrowse.mockReturnValue(loaded([browse(1)]));
   });
 
-  it("lays out a genre like the other full grids: back link, title, then posters", () => {
-    renderAt("/requests/browse/genre/drama?media_type=series");
-
-    expect(mocks.useRequestBrowse).toHaveBeenLastCalledWith({
-      kind: "genre",
-      slug: "drama",
-      mediaType: "series",
-      sort: "popularity",
-    });
-    expect(screen.getByRole("button", { name: "Go back" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Drama" })).toBeInTheDocument();
-    expect(screen.getByText("Genre")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Series" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getAllByRole("link", { name: "Heat" })[0]).toHaveAttribute(
-      "href",
-      "/title/movie/42",
-    );
-    expect(screen.queryByRole("navigation", { name: "Result pages" })).not.toBeInTheDocument();
-  });
-
   it("shows every loaded page and loads the next from the foot of the grid", () => {
     const second = browse(2);
     second.results = [

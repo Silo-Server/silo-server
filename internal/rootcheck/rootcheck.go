@@ -163,28 +163,6 @@ func probeMany(
 	return results
 }
 
-func probeBounded(ctx context.Context, timeout time.Duration, probe func() Result) Result {
-	if timeout <= 0 {
-		timeout = DefaultProbeTimeout
-	}
-	done := make(chan Result, 1)
-	go func() { done <- probe() }()
-
-	var ctxDone <-chan struct{}
-	if ctx != nil {
-		ctxDone = ctx.Done()
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case res := <-done:
-		return res
-	case <-ctxDone:
-	case <-timer.C:
-	}
-	return timeoutResult()
-}
-
 func awaitProbe(ctx context.Context, timeout time.Duration, done <-chan struct{}, result func() Result) Result {
 	var ctxDone <-chan struct{}
 	if ctx != nil {

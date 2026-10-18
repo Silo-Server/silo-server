@@ -92,12 +92,6 @@ type UserImportTMDBListRequest struct {
 	URL string `json:"url"`
 }
 
-type UserImportTraktRequest struct {
-	UserImportSharedFields
-	Preset    string `json:"preset"`
-	MediaType string `json:"media_type"`
-}
-
 type UserImportView struct {
 	Collection PersonalCollectionView      `json:"collection"`
 	Sync       *usercollections.SyncResult `json:"sync,omitempty"`
@@ -109,7 +103,11 @@ func (h *UserCollectionImportHandler) HandleImportMDBList(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.ImportMDBList(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req)
+	userID := apimw.GetUserID(r.Context())
+	resp, err := h.ImportMDBList(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
+	if err == nil {
+		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -123,7 +121,11 @@ func (h *UserCollectionImportHandler) HandleImportTMDB(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.ImportTMDB(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req)
+	userID := apimw.GetUserID(r.Context())
+	resp, err := h.ImportTMDB(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
+	if err == nil {
+		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -131,18 +133,15 @@ func (h *UserCollectionImportHandler) HandleImportTMDB(w http.ResponseWriter, r 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// HandleImportTrakt answers the frozen v1 profile Trakt import route. Silo no
+// longer supports Trakt, so every well-formed request is refused.
 func (h *UserCollectionImportHandler) HandleImportTrakt(w http.ResponseWriter, r *http.Request) {
-	var req UserImportTraktRequest
+	var req struct{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.ImportTrakt(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
+	writeAPIError(w, traktImportRetired())
 }
 
 // ImportMDBList creates an MDBList-backed collection for the profile and
@@ -217,36 +216,6 @@ func (h *UserCollectionImportHandler) ImportTMDBList(ctx context.Context, userID
 	return h.createImportedCollection(ctx, userID, profileID, "tmdb", cfg, req.UserImportSharedFields)
 }
 
-// ImportTrakt creates a Trakt-preset collection for the profile and runs its
-// first sync.
-func (h *UserCollectionImportHandler) ImportTrakt(ctx context.Context, userID int, profileID string, req UserImportTraktRequest) (UserImportView, error) {
-	var none UserImportView
-	return none, apiError(http.StatusGone, "unsupported_source", "new Trakt collections are not supported")
-	/* Legacy implementation retained below so existing Trakt collections can
-	continue to sync while creation is disabled.
-	if strings.TrimSpace(req.Title) == "" {
-		return none, fieldError("title", "title is required")
-	}
-	preset, mediaType, normalizedProfileID, err := normalizeTraktPresetRequest(req.Preset, req.MediaType, profileID)
-	if err != nil {
-		return none, apiError(http.StatusBadRequest, policyErrorBadRequest, err.Error())
-	}
-	if err := validateOptionalLimit(req.Limit); err != nil {
-		return none, err
-	}
-	cfg := usercollections.SourceConfig{
-		Mode:       usercollections.SourceModeTraktPreset,
-		Provider:   "trakt",
-		Preset:     preset,
-		MediaType:  mediaType,
-		ProfileID:  normalizedProfileID,
-		Limit:      req.Limit,
-		LibraryIDs: req.LibraryIDs,
-	}
-	return h.createImportedCollection(ctx, userID, profileID, "trakt", cfg, req.UserImportSharedFields)
-	*/
-}
-
 func (h *UserCollectionImportHandler) createImportedCollection(
 	ctx context.Context,
 	userID int,
@@ -308,7 +277,7 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process template poster")
 	}
 
-	syncResult, updated, syncErr := h.sync.RunSync(ctx, store, collection)
+	syncResult, updated, syncErr := h.sync.RunSync(ctx, userID, store, collection)
 	if syncErr != nil {
 		// Persist failure state inline so the UI shows the error and the user
 		// can retry; the row is intentionally kept around for that retry path.
@@ -318,10 +287,19 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 			Message:    syncErr.Error(),
 			LastSyncAt: time.Now().UTC(),
 			NextSyncAt: usercollections.InitialNextSyncAt(schedule),
+
+			// The sync started on the schedule and next run the collection was
+			// created with.
+			ScheduleAtStart:   collection.SyncSchedule,
+			NextSyncAtAtStart: collection.NextSyncAt,
 		})
-		updated = collection
-		updated.LastSyncStatus = "failed"
-		updated.LastSyncMessage = syncErr.Error()
+		// Render what was stored, as a successful sync does; a schedule
+		// edited while the sync ran kept its own next run.
+		if updated, err = store.GetCollection(ctx, collection.ID); err != nil {
+			updated = collection
+			updated.LastSyncStatus = "failed"
+			updated.LastSyncMessage = syncErr.Error()
+		}
 	}
 
 	return UserImportView{
@@ -419,15 +397,19 @@ type MDBListDiscoveryView struct {
 	Lists      []mdblist.ListSummary `json:"lists"`
 }
 
-// mdblistConfigured returns true when the discovery client is usable. When
-// false it has already written a "not configured" 200 response so callers
-// can simply early-return.
+// MDBListConfigured reports whether MDBList search and top lists can answer,
+// which needs an MDBList API key. v2 collection capabilities report it as
+// mdblist_search.
+func (h *UserCollectionImportHandler) MDBListConfigured() bool {
+	return h.mdblist != nil && h.mdblist.Configured()
+}
+
 // SearchMDBList answers the MDBList lists matching query. An unconfigured
 // MDBList client answers configured=false and no lists rather than an error,
 // so clients can hide the search box. v1 GET /collections/import/mdblist/search
 // and v2 searchMDBListLists both call it.
 func (h *UserCollectionImportHandler) SearchMDBList(ctx context.Context, query string) (MDBListDiscoveryView, error) {
-	if h.mdblist == nil || !h.mdblist.Configured() {
+	if !h.MDBListConfigured() {
 		return MDBListDiscoveryView{Configured: false, Lists: []mdblist.ListSummary{}}, nil
 	}
 	query = strings.TrimSpace(query)
@@ -444,7 +426,7 @@ func (h *UserCollectionImportHandler) SearchMDBList(ctx context.Context, query s
 // TopMDBList answers MDBList's most-liked lists; see SearchMDBList for the
 // unconfigured answer.
 func (h *UserCollectionImportHandler) TopMDBList(ctx context.Context) (MDBListDiscoveryView, error) {
-	if h.mdblist == nil || !h.mdblist.Configured() {
+	if !h.MDBListConfigured() {
 		return MDBListDiscoveryView{Configured: false, Lists: []mdblist.ListSummary{}}, nil
 	}
 	lists, err := h.mdblist.Top(ctx)
@@ -507,7 +489,7 @@ func (h *UserCollectionImportHandler) SyncPersonalCollection(ctx context.Context
 		return nil, err
 	}
 	collection, err := store.GetCollection(ctx, collectionID)
-	if err != nil {
+	if err != nil || !collection.VisibleTo(profileID) {
 		return nil, apiError(http.StatusNotFound, "not_found", "Collection not found")
 	}
 	if collection.CreatorProfileID != profileID {
@@ -517,7 +499,7 @@ func (h *UserCollectionImportHandler) SyncPersonalCollection(ctx context.Context
 		return nil, apiError(http.StatusConflict, "sync_in_flight", "A sync is already running for this collection")
 	}
 
-	result, _, err := h.sync.RunSync(ctx, store, collection)
+	result, _, err := h.sync.RunSync(ctx, userID, store, collection)
 	if err != nil {
 		if errors.Is(err, usercollections.ErrSyncUnsupported) {
 			return nil, apiError(http.StatusBadRequest, "bad_request", "This collection does not support sync")

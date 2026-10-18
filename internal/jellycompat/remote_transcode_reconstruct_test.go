@@ -221,7 +221,7 @@ func TestEnsureLocalTranscodeDeletesRemoteRecipeAndRestoresItWhenCentralUpdateFa
 		"mkdir -p \"$out\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func TestStartRemoteToneMapDelayedSuccessCannotOverwriteLocalSoftwareWinner(t *t
 		"mkdir -p \"$out\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +588,9 @@ func TestStartRemoteTranscodeDoesNotAdoptMismatchedAudioRecipe(t *testing.T) {
 // server published is re-checked against the local pool before the client is
 // sent to it.
 func TestMasterManifestGatesUnhealthyRemoteAdoption(t *testing.T) {
-	const adoptedURL = "http://adopted.invalid"
+	adoptedNode := httptest.NewServer(http.NotFoundHandler())
+	defer adoptedNode.Close()
+	adoptedURL := adoptedNode.URL
 	const healthyURL = "http://healthy.invalid"
 	newPool := func(adoptedHealthy bool) *nodepool.Planner {
 		transcodes := nodepool.NewTranscodePool()
@@ -980,7 +982,7 @@ func TestStartRemoteToneMapReportsConfirmedExecutorAndFallback(t *testing.T) {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusAccepted)
-					_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+					_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 				default:
 					w.WriteHeader(http.StatusNotFound)
 				}
@@ -1049,7 +1051,7 @@ func TestStartRemoteVideoToolboxToneMapUsesResolutionAwareBitrate(t *testing.T) 
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				return
 			}
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -1122,7 +1124,7 @@ func TestStartRemoteToneMapTimeoutFallsBackToSoftwareAfterCleanup(t *testing.T) 
 			if !cleaned.Load() {
 				t.Error("software retry started before the indeterminate hardware session was cleaned up")
 			}
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		case r.Method == http.MethodDelete && r.URL.Path == "/transcode/upstream-1":
 			cleaned.Store(true)
 			w.WriteHeader(http.StatusNoContent)
@@ -1444,5 +1446,41 @@ func TestStartRemoteTranscode_UpdateFailureRollsBackNode(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected rollback DELETE to the node after Update failure")
+	}
+}
+
+// A runtime published on a node that has since drained is gone, so a start
+// for the same session runs fresh on the planned node instead of adopting it.
+func TestStartRemoteTranscodeDoesNotAdoptRuntimeOnDrainedNode(t *testing.T) {
+	const drainedURL = "http://drained.invalid"
+	var received transcodenode.TranscodeStartRequest
+	node := fakeTranscodeNode(t, &received)
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, drainedURL, &stubRecipeNodeStore{})
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{
+		{URL: drainedURL, Enabled: true, Healthy: true, DrainRequested: true, DrainState: nodepool.DrainStateDrained},
+		{URL: node.URL, Enabled: true, Healthy: true},
+	})
+	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
+	source := testRemoteTranscodeSource()
+	playbackStore.Put(PlaybackSession{
+		ID: "play-1", UpstreamSessionID: "upstream-1", TranscodeStarted: true,
+		Recipe: &playback.RecipeCard{
+			TranscodeNodeURL:    drainedURL,
+			MediaFileID:         source.FileID,
+			AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+			SourceAudioChannels: compatHLSRecipeSourceAudioChannels(source),
+		},
+	})
+
+	err := handler.startRemoteTranscode(
+		context.Background(), "play-1", "upstream-1", source,
+		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", CodecVideo: "h264"}, 0, node.URL,
+	)
+	if err != nil {
+		t.Fatalf("startRemoteTranscode: %v; want a fresh start, not adoption of the drained node's runtime", err)
+	}
+	if received.SessionID == "" {
+		t.Fatal("the planned node received no start request")
 	}
 }

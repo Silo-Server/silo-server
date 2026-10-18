@@ -1,10 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SectionItem } from "@/api/types";
 import ContinueWatchingCard from "./ContinueWatchingCard";
+
+const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({ useEpisodeSpoilerPrefs: () => spoilerPrefs }));
 
 const startPlayback = () => {};
 
@@ -33,6 +37,66 @@ const continueMovie: SectionItem = {
 };
 
 describe("ContinueWatchingCard", () => {
+  beforeEach(() => {
+    spoilerPrefs.hideImages = false;
+  });
+  it.each([true, false, undefined])(
+    "uses selected image provenance (%s) for unwatched wide episodes",
+    (provenance) => {
+      spoilerPrefs.hideImages = true;
+      const queryClient = new QueryClient();
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <ContinueWatchingCard
+              sectionItem={{
+                ...continueMovie,
+                type: "episode",
+                item_source: "next_up",
+                position_seconds: 0,
+                backdrop_is_episode_still: provenance,
+              }}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      const image = screen.getByAltText("Apex");
+      if (provenance === false) expect(image).not.toHaveClass("blur-xl");
+      else expect(image).toHaveClass("blur-xl");
+    },
+  );
+
+  it("does not offer favorites or the watchlist in a Next Up episode's menu", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <ContinueWatchingCard
+            sectionItem={{
+              ...continueMovie,
+              content_id: "ep-002",
+              type: "episode",
+              title: "Second",
+              series_id: "series-1",
+              series_title: "Apex",
+              season_number: 1,
+              episode_number: 2,
+              item_source: "next_up",
+              position_seconds: 0,
+              user_state: { played: false, is_favorite: false, in_watchlist: false },
+            }}
+            quickActionMode="both"
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Mark Watched" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Add to Favorites" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Add to Watchlist" })).toBeNull();
+  });
+
   it("prefers the backdrop image for section episodes (backdrop_url is the horizontal still)", () => {
     const queryClient = new QueryClient();
     const markup = renderToStaticMarkup(
@@ -312,47 +376,6 @@ describe("ContinueWatchingCard", () => {
     expect(markup).toContain("lucide-eye-off");
   });
 
-  it("links the poster to the item page and reserves playback for the play button", () => {
-    const queryClient = new QueryClient();
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <ContinueWatchingCard
-            sectionItem={{
-              content_id: "movie-001",
-              type: "movie",
-              title: "Apex",
-              year: 2024,
-              genres: [],
-              status: "matched",
-              rating_imdb: 6.5,
-              overview: "Movie overview",
-              item_source: "continue_watching",
-              position_seconds: 600,
-              duration_seconds: 7200,
-              progress_updated_at: "2026-03-07T00:00:00Z",
-              poster_url: "/movie-poster.jpg",
-              poster_thumbhash: "",
-              backdrop_url: "/movie-backdrop.jpg",
-              backdrop_thumbhash: "",
-              logo_url: "",
-            }}
-            quickActionMode="both"
-          />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    // The poster link renders first and must navigate to the item page; the
-    // watch href is reserved for the explicit play button.
-    const posterLinkIndex = markup.indexOf('href="/item/movie-001"');
-    const playLinkIndex = markup.indexOf('href="/watch/movie-001"');
-    expect(posterLinkIndex).toBeGreaterThan(-1);
-    expect(playLinkIndex).toBeGreaterThan(-1);
-    expect(posterLinkIndex).toBeLessThan(playLinkIndex);
-    expect(markup).toContain('aria-label="Play Apex"');
-  });
-
   it("routes audiobook continue cards to the audiobook detail player", () => {
     const queryClient = new QueryClient();
     const markup = renderToStaticMarkup(
@@ -403,6 +426,10 @@ describe("ContinueWatchingCard", () => {
 
   it("always points the artwork at the item detail page", () => {
     expect(renderCard()).toHaveAttribute("href", "/item/movie-001");
+    expect(screen.getByRole("link", { name: "Play Apex" })).toHaveAttribute(
+      "href",
+      "/watch/movie-001",
+    );
     // The caption also reaches the detail page.
     expect(screen.getByText("Apex").closest("a")).toHaveAttribute("href", "/item/movie-001");
   });

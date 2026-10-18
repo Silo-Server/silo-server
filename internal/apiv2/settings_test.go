@@ -53,9 +53,15 @@ func TestGetSettingsContractCapabilities(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"api_version":1,"manifest_revision":12,"contract_etag":"\"etag-12\"","definition_count":40,"scopes":["account","profile"],"client_families":["tv","web"],"supports_batched_effective":true,"supports_idempotent_writes":true,"supports_atomic_shortcuts":true}` + "\n"
+	want := `{"api_version":1,"manifest_revision":12,"contract_etag":"\"etag-12\"","definition_count":40,"scopes":["account","profile"],"client_families":["tv","web"],"supports_batched_effective":true,"supports_idempotent_writes":true,"supports_atomic_shortcuts":true,"supports_device_rename":false}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	withDevices := pilotDeps(nil, nil)
+	withDevices.DeviceSettings = &fakeDeviceSettings{}
+	renamable := do(t, newTestHandler(t, withDevices), http.MethodGet, "/api/v2/settings/contract/capabilities", "", bearer(memberToken))
+	if !strings.Contains(renamable.Body.String(), `"supports_device_rename":true`) {
+		t.Fatalf("device settings wired, body = %s", renamable.Body.String())
 	}
 	deps := pilotDeps(nil, nil)
 	deps.SettingsContract = nil
@@ -64,23 +70,6 @@ func TestGetSettingsContractCapabilities(t *testing.T) {
 		t.Fatal(missing.Code, missing.Body.String())
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/contract/capabilities?fields=x", "", bearer(memberToken)), TypeValidationFailed)
-}
-
-func TestGetOverlayConfig(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodGet, "/api/v2/settings/overlay-config", "", bearer(memberToken))
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	// defaults is absent, not "", when the administrator set none.
-	want := `{"enabled":true,"quick_actions_enabled":false,"quick_actions_default":"both"}` + "\n"
-	if rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	if got := rec.Header().Get("Cache-Control"); got != "private, no-cache" {
-		t.Fatalf("Cache-Control = %q", got)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/overlay-config", "", bearer(expiredToken)), TypeSessionExpired)
 }
 
 func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
@@ -393,10 +382,11 @@ func TestSettingValueValidation(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile&profile_id=p-nope", "", settingsOwner()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile&profile_id=p-other", "", with(bearer(apiKeyToken), "X-Profile-Id", "p-locked")), TypePermissionDenied)
 	// Class denials.
+	demo := newTestHandler(t, parityDeps(true))
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", bearer(memberToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"x"}`, settingsOwner()), TypePermissionDenied)
-	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodDelete, "/api/v2/settings/values/ui.theme?scope=profile", "", settingsOwner()), TypePermissionDenied)
+	requireProblem(t, do(t, demo, http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"x"}`, settingsOwner()), TypePermissionDenied)
+	requireProblem(t, do(t, demo, http.MethodDelete, "/api/v2/settings/values/ui.theme?scope=profile", "", settingsOwner()), TypePermissionDenied)
 	deps := pilotDeps(nil, nil)
 	deps.SettingValues = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", settingsOwner()), TypeDependencyUnavailable)

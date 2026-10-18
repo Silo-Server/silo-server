@@ -42,6 +42,18 @@ type NodeAwarePreparer struct {
 	// flight when an operator changed the node's policy writes the report it
 	// was sent to collect, restoring the pre-edit inventory for a full TTL.
 	capabilityInvalidations map[string]uint64
+	// storageFull reports a node over its prepared-file budget or disk
+	// ceiling with nothing left to free; such a node gets no new jobs.
+	storageFull func(nodeID int) bool
+}
+
+// SetStorageGate wires the storage check placement applies to every job.
+func (p *NodeAwarePreparer) SetStorageGate(full func(nodeID int) bool) {
+	p.storageFull = full
+}
+
+func (p *NodeAwarePreparer) hasStorage(n *nodepool.Node) bool {
+	return n != nil && (p.storageFull == nil || !p.storageFull(n.ID))
 }
 
 // remoteToneMapCapabilities caches one node's validated inventory; an empty
@@ -60,10 +72,6 @@ const (
 	remoteToneMapCapabilityErrorTTL = 15 * time.Second
 	remoteToneMapProbeMinTimeout    = 5 * time.Second
 )
-
-func normalizeRemoteToneMapProbeTimeout(millis int64) time.Duration {
-	return playback.NormalizeProbeRequestTimeout(millis, remoteToneMapProbeMinTimeout)
-}
 
 // eligibleTranscodeWorkPlanner reserves work only on nodes that satisfy a
 // lock-safe capability predicate.
@@ -132,6 +140,9 @@ func (p *NodeAwarePreparer) prepareLocally(ctx context.Context, artifactID strin
 	if !p.LocalFallbackAllowed(ctx) {
 		return PreparedArtifact{}, errors.New("no eligible transcode node and local transcode fallback is disabled")
 	}
+	if p.storageFull != nil && p.storageFull(0) {
+		return PreparedArtifact{}, ErrStorageFull
+	}
 	return p.local.PrepareFile(ctx, artifactID, opts, outputPath)
 }
 
@@ -148,6 +159,16 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 	request := downloadprepare.NewRequest(artifactID, opts)
 	var node *nodepool.Node
 	var release func()
+	// storageRejected records a node turned away only for want of space, so a
+	// job no node can take says it waits for space rather than failing.
+	storageRejected := false
+	hasStorage := func(n *nodepool.Node) bool {
+		if p.hasStorage(n) {
+			return true
+		}
+		storageRejected = true
+		return false
+	}
 	if request.ToneMapRequested() || request.StereoDownmixBoostRequested() || request.PreparedTracksRequested() {
 		selector, ok := p.planner.(eligibleTranscodeWorkPlanner)
 		if ok {
@@ -183,18 +204,30 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 						return false
 					}
 				}
-				return true
+				// Last, so only a node that could run the recipe counts as
+				// turned away for space.
+				return hasStorage(candidate)
 			})
 		}
+	} else if selector, ok := p.planner.(eligibleTranscodeWorkPlanner); ok && p.storageFull != nil {
+		node, release = selector.ReserveTranscodeWorkWith("download-prepare-"+artifactID, hasStorage)
 	} else {
 		node, release = p.planner.ReserveTranscodeWork("download-prepare-" + artifactID)
 	}
 	if node == nil {
+		if storageRejected && !p.LocalFallbackAllowed(ctx) {
+			return PreparedArtifact{}, ErrStorageFull
+		}
 		return p.prepareLocally(ctx, artifactID, opts, outputPath)
 	}
 
 	slog.InfoContext(ctx, "dispatching download artifact prepare", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
+	observer := prepareObserverFrom(ctx)
+	nodeID := node.ID
+	observer.prepareWorker(&nodeID, node.Name)
+	stopProgress := p.pollRemoteProgress(ctx, node.URL, jwtSecret, artifactID, observer)
 	result, err := p.remote.Prepare(ctx, node.URL, jwtSecret, request)
+	stopProgress()
 	release()
 	prepareReturned := err == nil
 	if prepareReturned {
@@ -239,6 +272,61 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 	}
 	slog.WarnContext(ctx, "remote download artifact prepare unavailable; falling back to local", "component", "downloads", "artifact_id", artifactID, "node", node.URL, "error", err)
 	return p.prepareLocally(ctx, artifactID, opts, outputPath)
+}
+
+// remoteProgressReader is implemented by remote preparers that can read a
+// node's live progress for an attempt in flight.
+type remoteProgressReader interface {
+	Progress(ctx context.Context, nodeURL, jwtSecret, artifactID string) (downloadprepare.Progress, error)
+}
+
+// remoteProgressPollInterval matches the attempt observer's flush interval, so
+// each flush has a reading that is at most one interval old.
+var remoteProgressPollInterval = progressFlushInterval
+
+// pollRemoteProgress relays a node's progress for one attempt to observer
+// until the returned stop function is called. A node that predates the
+// progress endpoint is reported once as unable to report progress.
+func (p *NodeAwarePreparer) pollRemoteProgress(ctx context.Context, nodeURL, jwtSecret, artifactID string, observer prepareObserver) func() {
+	reader, ok := p.remote.(remoteProgressReader)
+	if !ok {
+		observer.prepareProgressUnavailable()
+		return func() {}
+	}
+	pollCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(remoteProgressPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pollCtx.Done():
+				return
+			case <-ticker.C:
+			}
+			progress, err := reader.Progress(pollCtx, nodeURL, jwtSecret, artifactID)
+			switch {
+			case errors.Is(err, downloadprepare.ErrProgressUnsupported):
+				observer.prepareProgressUnavailable()
+				return
+			case err != nil:
+				if pollCtx.Err() == nil {
+					slog.DebugContext(pollCtx, "reading remote download prepare progress failed", "component", "downloads", "artifact_id", artifactID, "node", nodeURL, "error", err)
+				}
+			case progress.Running:
+				observer.PrepareProgress(playback.PrepareProgress{
+					EncodedSeconds:  progress.EncodedSeconds,
+					DurationSeconds: progress.DurationSeconds,
+					Speed:           progress.Speed,
+				})
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 func remotePrepareResultMatches(result downloadprepare.Result, artifactID string, request downloadprepare.Request) bool {
@@ -506,7 +594,7 @@ func (p *NodeAwarePreparer) fetchToneMapCapabilitiesForNode(ctx context.Context,
 		transformations:     append([]playback.TransformationV3(nil), info.Transformations...),
 		transportFeatures:   append([]string(nil), info.TransportFeatures...),
 		expiresAt:           time.Now().Add(remoteToneMapCapabilityTTL),
-		probeRequestTimeout: normalizeRemoteToneMapProbeTimeout(info.ProbeRequestTimeoutMillis),
+		probeRequestTimeout: playback.NormalizeProbeRequestTimeout(info.ProbeRequestTimeoutMillis, remoteToneMapProbeMinTimeout),
 	}
 	p.capabilityMu.Lock()
 	if p.capabilityInvalidations[nodeURL] == generation {

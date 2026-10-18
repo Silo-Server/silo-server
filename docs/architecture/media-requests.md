@@ -81,7 +81,11 @@ media type's fallback route (no conditions) comes last. A route with no
 destination for a tier lets that tier fall through; `skip_uhd` stops a matching
 title from getting a 4K copy at all, even with `force_dual_quality`, and so
 does Everything else with no 4K server: "no 4K copy" means the same on a rule
-and on the fallback. The admin preview explains a decision route by route: the
+and on the fallback. Everything else with no HD server makes no HD copy when
+the title's 4K copy goes to a server, so a media type whose servers are all
+marked 4K gets its 4K versions without a failed HD tier; when the 4K copy goes
+nowhere too (a requester without 4K), HD stays undecided and fails, so a
+request is never sent nowhere. The admin preview explains a decision route by route: the
 conditions each failed and what it did per tier (sent, skipped, passed on, did
 not match, came after the tier was decided).
 
@@ -93,7 +97,8 @@ records the route that sent it. A server a route sends to cannot be deleted
 until the route stops using it, so deleting a server never silently reroutes
 titles, and it cannot be switched to the type the route's media type cannot use
 (Sonarr for movies, Radarr for series) or stop taking that media type. A chosen
-server that is disabled, not set up (no installation, no key), of the wrong type
+server that is disabled, not set up (no installation, or no key when its plugin
+needs one; see [Without a router](#without-a-router)), of the wrong type
 or not taking the media type anyway is an admin-fixable
 problem: when nothing has been
 sent yet, the submission retries with backoff; a later tier that fails that way
@@ -151,7 +156,9 @@ server marked 4K (the Sonarr/Radarr plugin's `is_4k` switch), with each
 server's own settings: Everything else's overrides do not apply. Anime series
 (see "Routing facts") go to the same servers with Sonarr's anime series type,
 as Seerr sends them. With no server
-marked 4K there is no 4K copy, even with `force_dual_quality`. A media type
+marked 4K there is no 4K copy, even with `force_dual_quality`; with only a
+server marked 4K there is no HD copy, and a requester without 4K gets a failed
+HD tier, as under Advanced. A media type
 whose server is another plugin (Seerr) keeps that plugin's own routing. Targets
 record the route as "Standard".
 
@@ -385,6 +392,28 @@ installation) is a setup problem instead: the submission retries with backoff
 and records the reason in `last_error`, so fixing the connection lets the
 request through.
 
+A connection needs an API key unless its plugin declares
+`request_router.api_key_optional` in its manifest. The host reads the
+declaration from the capability metadata stored when the plugin was installed
+or updated, without launching the plugin, and only for a connection without a
+key. Such a connection is routed, status-checked and probed like any other,
+with an empty key. A connection whose declaration cannot be read is skipped
+like one without a key; when no other connection can take the request, the
+submission retries with the read error. The v2 plugin installation view
+carries the same stored declaration, with `request_router.base_url_optional`,
+so the admin form saves a server without a key or URL only when routing will
+use it; the host itself never requires a URL. A saved key still has to be
+typed again when the server's URL changes to another address; a server saved
+without a key has none to protect, so its URL can change without one. The save
+checks this again under the row lock, so a key saved, or an address changed,
+by another admin in the meantime is never paired with a different address. A
+connection test of a saved server that leaves the URL out tests its saved
+address. A blank URL in a test stands for the saved address too, unless the
+plugin declares `base_url_optional`; then it is tested blank, so an admin can
+clear it. A save validates and stores the URL it is given, blank included.
+Clearing it counts as changing the address: a saved key has to be typed again,
+and the test goes without it.
+
 The library also completes requests that never reached a router: a `pending`
 request whose title appears needs no approval any more, and a `failed` request
 whose title appears is complete, unless it failed after delivering one quality,
@@ -534,6 +563,16 @@ request's state and `outcome_reason`, and each target's quality, status and
 `download`. An admin sees every field, on those operations and on the
 `/api/v2/admin/requests` operations. The frozen `/api/v1` request routes still
 return them to everyone.
+
+On these profile routes, v1 and v2 alike, "admin" means the acting admin
+(`apimw.ActingAdmin`, see [api-contract.md](api-contract.md)): an admin account
+acting through its primary profile, an admin API key, or an admin login session
+with no profile while no profile on the account has a PIN or an access limit, the
+same decision the admin request queue's gate makes. Only the acting admin reads or cancels another
+account's request, gets another account's `request_id` in request state, or
+cancels while requests are turned off. Any other profile on an admin's account,
+such as a child profile, is a requester like any other: it reads and cancels
+its own account's requests, including ones its household's other profiles made.
 
 ## Admin queue
 

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import type { Profile } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useDeleteProfile, useProfiles } from "@/hooks/queries/profiles";
 import { ProfileEditorDialog } from "@/components/profiles/ProfileEditorDialog";
 import { ProfilePinDialog } from "@/components/profiles/ProfilePinDialog";
+import { pinLockoutMessage } from "@/components/profiles/pinLockout";
 import { getProfileToken } from "@/api/client";
 import { buildProfileAccessSummary } from "@/lib/profile-management";
 import { HouseholdStreamsPanel } from "@/components/profiles/HouseholdStreamsPanel";
@@ -83,19 +85,16 @@ export default function ProfilesSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-2">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Profiles</h2>
-          <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-            Manage profile names, PINs, and access rules.
-          </p>
-        </div>
-
-        <Button onClick={openCreateDialog}>
-          <Plus className="h-4 w-4" />
-          New profile
-        </Button>
-      </div>
+      <PageHeader
+        title="Profiles"
+        subtitle="Manage profile names, PINs, and access rules."
+        actions={
+          <Button onClick={openCreateDialog}>
+            <Plus className="h-4 w-4" />
+            New profile
+          </Button>
+        }
+      />
 
       <HouseholdStreamsPanel />
 
@@ -223,8 +222,13 @@ export default function ProfilesSettings() {
                 selectProfile(savedProfile, response.profile_token);
                 return;
               }
-            } catch {
-              toast.error("Profile saved, but PIN verification failed");
+            } catch (err) {
+              const lockout = pinLockoutMessage(err);
+              toast.error(
+                lockout
+                  ? `Profile saved. ${lockout}`
+                  : "Profile saved, but PIN verification failed",
+              );
               return;
             }
           }

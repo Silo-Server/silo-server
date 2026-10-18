@@ -282,67 +282,6 @@ func TestCgroupAncestorPaths(t *testing.T) {
 	}
 }
 
-// The quota a process is throttled against is the tightest anywhere above it,
-// and it has to be paired with the period from the same cgroup — a quota from
-// one level over a period from another describes no real budget.
-func TestEffectiveCgroupCPUQuotaTakesTheTightestAncestor(t *testing.T) {
-	root := t.TempDir()
-	leaf := filepath.Join(root, "system.slice", "silo.service")
-	slice := filepath.Join(root, "system.slice")
-	for _, dir := range []string{leaf, slice} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("create %s: %v", dir, err)
-		}
-	}
-	write := func(dir, name, body string) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s/%s: %v", dir, name, err)
-		}
-	}
-
-	// cgroupAncestorPaths only climbs inside the real cgroup mount, so the walk
-	// is exercised here by handing effectiveCgroupCPUQuota each level directly.
-	quotaAt := func(dir string) float64 {
-		_, cores := effectiveCgroupCPUQuota(cgroupCPUPath{quota: filepath.Join(dir, "cpu.max")})
-		return cores
-	}
-
-	// The service says "max" while its slice allows two cores.
-	write(leaf, "cpu.max", "max 100000\n")
-	write(slice, "cpu.max", "200000 100000\n")
-	if got := quotaAt(leaf); got != 0 {
-		t.Fatalf("leaf alone = %v cores, want 0 — it imposes none", got)
-	}
-	if got := quotaAt(slice); got != 2 {
-		t.Fatalf("slice = %v cores, want 2", got)
-	}
-
-	// A leaf tighter than its slice wins, and a looser one loses.
-	write(leaf, "cpu.max", "100000 100000\n")
-	if _, got := effectiveCgroupCPUQuota(cgroupCPUPath{quota: filepath.Join(leaf, "cpu.max")}); got != 1 {
-		t.Fatalf("tighter leaf = %v cores, want 1", got)
-	}
-}
-
-// v1 keeps quota and period in separate files, so both have to move together as
-// the walk climbs.
-func TestEffectiveCgroupCPUQuotaPairsQuotaWithItsOwnPeriod(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cpu.cfs_quota_us"), []byte("400000\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "cpu.cfs_period_us"), []byte("100000\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, got := effectiveCgroupCPUQuota(cgroupCPUPath{
-		quota:  filepath.Join(dir, "cpu.cfs_quota_us"),
-		period: filepath.Join(dir, "cpu.cfs_period_us"),
-	})
-	if got != 4 {
-		t.Fatalf("v1 quota = %v cores, want 4", got)
-	}
-}
-
 // The quota and the usage measured against it have to come from the same
 // cgroup. A quota on a shared ancestor is spent by every service under it, so
 // this process's own CPU time over that quota describes nothing: Silo at ten

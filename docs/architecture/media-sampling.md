@@ -97,7 +97,8 @@ statistics. Rules:
   one keyframe interval earlier. Frame timestamps follow the list, not the
   input, so a frame without the tag is dropped. A keyframe that serves
   several sample times is decoded once for each; when one sample decodes a
-  second keyframe, the first is kept.
+  second keyframe, the first is kept. Sheets lists over Matroska start their
+  entries at keyframes instead (see [Keyframe entries](#keyframe-entries)).
 - Sample times are finite, non-negative, strictly increasing, and at most
   10,000 per request. `Samples` takes no audio output.
 - `Samples.ReadThrough` reads the sampled span as the one keyframes-only
@@ -120,7 +121,9 @@ statistics. Rules:
   so a list would decode nothing. They are read as one `KeyframesOnly`
   window from 10 s before the first sample to the last, and each sample
   takes the last keyframe at or before its time: the same frames, at the
-  cost of reading the whole span.
+  cost of reading the whole span. `Sheets` also fall back to that window
+  when the HEVC decoder drops listed keyframes as duplicates (see the
+  `Sheets` rules below).
 - The VP9 decoder ignores `-skip_frame nokey`, so a VP9 sample decodes every
   frame from its keyframe to the outpoint. The first frame is still the one
   kept, but the cost grows with the keyframe interval.
@@ -150,8 +153,8 @@ is held as PCM. Subtitle sync is its consumer.
 
 `POST /media-samples/run` on the transcode-node listener runs one `Request`
 with the node's ffmpeg and returns its `Result` as JSON
-(`mediasample.RemoteClient` is the caller). The node requires its bearer
-secret and an input path it is allowed to read, accepts software attempts
+(`mediasample.RemoteClient` is the caller). The node requires a
+[signed request](worker-http-protocol.md#authentication) and an input path it is allowed to read, accepts software attempts
 only, and answers a failed run with `422` and a `RemoteFailure` whose reason is
 the run's `Classify` cause. `RemoteError.Infrastructure` tells a caller
 whether running the request elsewhere may succeed: an unreachable node, a 5xx,
@@ -171,23 +174,30 @@ An attempt with `Hardware` set decodes the request's video on the runner's
 `HardwareResolver` (`hwresolver.go`), which caches the resolved backend per
 configured pair until the playback probe cache is invalidated, and asks again
 after `HardwareRetryInterval` when `auto` resolved to no hardware; credits
-detection uses one. Only QSV, VAAPI, and VideoToolbox decode
-here (`SupportsHardwareDecode`); NVENC does not. A hardware attempt needs a
-video output (`Images` or `Stats`). Audio in the same run always decodes in
-software.
+detection uses one. QSV, VAAPI, and VideoToolbox decode
+every video output (`SupportsHardwareDecode`); NVENC decodes only `Sheets`
+(`SupportsHardwareSheets`), on CUDA, so the stats chains cached intro
+fingerprints come from and the chapter-thumbnail images stay as they were. A
+hardware attempt needs a video output (`Images`, `Stats`, or `Sheets`); one
+whose output its accelerator does not decode fails as `unsupported` without
+starting ffmpeg. Audio in the same run always decodes in software.
 
 - QSV and VAAPI decode into VAAPI surfaces on a render device. QSV
   initializes its VAAPI parent device the way playback does
   (`tonemap.QSVInitDeviceArgs`) and decodes through it.
+- NVENC decodes into CUDA surfaces on the CUDA device `HWDevice` names (an
+  index, or the default when empty), declared as the filters' device too:
+  `-init_hw_device cuda=cu[:N] -filter_hw_device cu -hwaccel cuda
+  -hwaccel_output_format cuda`.
 - VideoToolbox decodes `Images` into system-memory frames, so software
   filters apply to them directly. `Stats` asks for VideoToolbox surfaces
   (`-hwaccel_output_format videotoolbox_vld`) and downloads them, because
   only surfaces prove the decode ran on hardware: given a stream VideoToolbox
   cannot decode, such as VP8, plain `-hwaccel videotoolbox` quietly decodes
   in software, while the download of a software frame fails the attempt.
-- Each hardware attempt reserves one render device through
-  `playback.AcquireHWDevice`, falling back to `playback.PickRenderDevice`,
-  before its timeout starts, and releases it when the attempt ends, before
+- Each hardware attempt reserves one device through
+  `playback.AcquireHWDevice`, falling back to `playback.PickRenderDevice` for
+  QSV and VAAPI, before its timeout starts, and releases it when the attempt ends, before
   the next attempt. A multi-device `Runner.HWDevice` list therefore resolves
   to one device per attempt. A hardware attempt that cannot be built, such as
   VAAPI without a render device, fails as `unsupported` without starting
@@ -196,6 +206,10 @@ software.
   the hardware one. A failed run takes its reason from its last attempt, so
   once the software attempt has run, a hardware failure costs only time and
   cannot mark an artifact unusable.
+- A GPU that cannot decode the stream makes ffmpeg log "Failed setup for
+  format …" or "doesn't support hardware accelerated …" and fall back to
+  software frames, which the GPU chain refuses; the attempt's cause is
+  `unsupported`.
 
 `Stats` on VAAPI surfaces (VAAPI and QSV) scales the whole picture on the
 GPU and converts it to 8-bit NV12 there before the download, since a 10-bit
@@ -295,21 +309,54 @@ metadata=mode=add:key=sample:value=-1,metadata@sheets=print
 
 `Sheets.UseInputAspect` derives the height from the input header instead,
 including a 90-degree display matrix, and returns the actual cell height in
-`Result.SheetTileHeight`. This reuses the sampling probe; a `ReadThrough`
-request also probes when this option is set. Callers publishing manifests
+`Result.SheetTileHeight`. This reuses the sampling probe, which every
+`Sheets` request runs, `ReadThrough` included. Callers publishing manifests
 must use the returned height and reject chunks whose geometry differs.
 
-- HDR sources are scaled before they are tone mapped, so the software
-  tone-map chain of [Images](#images) only handles thumbnail-sized frames,
-  followed by `scale=out_range=full:out_color_matrix=bt601`. VAAPI and QSV
-  tone map on the GPU first (`tonemap_vaapi` needs the source's HDR
-  metadata), scale with `scale_vaapi`, and download.
+- GPU surfaces (VAAPI, QSV, CUDA) are scaled on the GPU to four tiles' size,
+  or the frame's own size if smaller, downloaded as NV12 (P010 for a source
+  tone mapped below), and area-scaled to the tile in software:
+
+  ```text
+  scale_vaapi=w=min(iw\,4W):h=min(ih\,4H):format=nv12,hwdownload,format=nv12,scale=W:H:flags=area:out_range=full:…
+  scale_cuda=w=min(iw\,4W):h=min(ih\,4H):interp_algo=bilinear:format=nv12,hwdownload,format=nv12,scale=W:H:flags=area:out_range=full:…
+  ```
+
+  The GPU scalers sample a few source pixels per output pixel, so scaling a
+  4K frame straight to a 300-pixel tile aliases: SSIM 0.94 against the
+  software area scale on four 4K frames, where the two-step scale gives 0.999
+  and downloads a fraction of the frame.
+- HDR sources are tone mapped in software after scaling, so the tone map
+  only handles thumbnail-sized frames, followed by
+  `scale=out_range=full:out_color_matrix=bt601`.
+- `ToneMap.Source` names the base signal `tonemap.ResolveSource` classified
+  the input as. With it, every attempt converts with the chain playback
+  converts that signal with in software (`tonemap.SoftwareFilter`) on a
+  filter the binary lists: `tonemapx`, else `tonemap`'s Hable curve, which
+  cannot apply a Dolby Vision RPU. GPU attempts decode and scale as above,
+  download 10-bit P010 (`format=p010`, `hwdownload,format=p010le`), and take
+  the same software chain, so every decoder gives the same colors. The GPU
+  tone mappers do not: on an Intel Arc, `tonemap_vaapi` crushed PQ midtones
+  and turned HLG teal and inverted, AMD's refuses HDR, and neither applies an
+  RPU. A frame keeps its Dolby Vision RPU through the GPU scale and the
+  download (SSIM 0.986 against the software render, 0.85 without the RPU).
+  An attempt the binary has no filter for, such as a Dolby Vision base
+  (Profile 5, compatibility id 0) without `tonemapx`, or one that does not
+  allow software tone mapping, fails as `unsupported` before ffmpeg starts,
+  so it makes no sheets rather than green and magenta ones. A base that is
+  already SDR only changes gamut. Without `Source` the [Images](#images)
+  chains apply, as best effort for sources whose catalog facts cannot be
+  classified; CUDA has none of those, so its attempt is `unsupported`. Images
+  take no `Source`.
 - `metadata=print` logs a frame only when it carries metadata, so
   `metadata=mode=add` gives every frame a `sample` entry of -1 unless its
   packet was tagged. The log then counts every frame on stdout, and the Nth
-  raw frame is the frame logged as `frame:N`. A counter that skips or
-  restarts, frames without log lines, log lines without frames, or bytes
-  after the last whole frame fail the attempt as `output`.
+  raw frame is the frame logged as `frame:N`. A filter graph reinit, which a
+  hardware decoder that renews its surfaces causes mid-list, restarts the
+  counter at zero after the old graph passed on every frame it logged; the
+  frames still line up, and the count goes on. A counter that skips or
+  restarts anywhere else, frames without log lines, log lines without frames,
+  or bytes after the last whole frame fail the attempt as `output`.
 - `-fps_mode passthrough` is required: a list's timestamps jump back at every
   entry, and rawvideo would otherwise pick a constant frame rate and drop or
   duplicate frames. Windows bound their duration with an input `-t`, since an
@@ -327,20 +374,196 @@ must use the returned height and reject chunks whose geometry differs.
   half a second recovered all of them at no measurable cost. Stats keep the
   40 ms span their cached analyses were computed with. A window gives each
   sample the last frame at or before its time.
+- Sheets decode keyframes as the probed video codec needs. Interlaced MPEG-2
+  often codes a keyframe as an I field paired with a P field, which the
+  decoder reports as a P frame and `nokey` discards: a DVD-sourced episode
+  decoded 2 of 80 samples. MPEG-2 therefore decodes with
+  `-skip_frame:v noref`. The MPEG-1/2 decoder honors only `noref` and
+  `nokey` (`nointra` acts as `noref`), so this decodes every I and P
+  picture, about two and a half times the work of `nokey`. A list still
+  keeps each sample's first frame, its keyframe; a window gives each sample
+  the last I or P picture at or before its time. MPEG-1 has no field
+  pictures and keeps `nokey`.
+- MPEG-4 Part 2 (`mpeg4`, `msmpeg4*`) adds `-flags:v +low_delay`. Its
+  decoder otherwise holds each picture back for B-frames that a
+  keyframes-only read never sends, and releases it when the next keyframe
+  arrives; in AVI, whose packets carry no PTS, the frame then takes that
+  keyframe's time, and every cell showed the keyframe a GOP before its own.
+  Keyframes-only and reference-only reads decode no B-frames, so low delay
+  changes no picture. The repeat repair keeps its own `noref`.
 - A window also copies the same input's video packets to a `framecrc`
   timing file in a private temporary directory, separate from stderr and
   removed when the attempt ends. Their presentation times and durations
   bound the final keyframe's coverage without decoding extra frames or
   reading the file again. Samples beyond that observed extent remain missing, so
   premature EOF cannot turn every trailing cell into a decoded preview.
+- A packet without a PTS counts by its DTS only when the decoder runs in
+  low delay (MPEG-4 Part 2, above). A DTS never runs ahead of its PTS, so
+  the extent can only shrink, by the reorder delay. Without a PTS the decoder
+  stamps each frame with the DTS of the packet that released it, which is
+  the frame's own only when the decoder releases each keyframe as it
+  arrives. A reordering decoder does not: H.264 with B-frames in AVI
+  releases each keyframe two GOPs late in a keyframes-only read, and low
+  delay does not change that. Such windows fail with no usable packet timing
+  rather than publish every cell at an earlier keyframe.
 - A cell without a frame shows the previous cell's frame, and cells before
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,
   which sends a hardware attempt on to software.
-- A sheet is JPEG-encoded in-process (`image/jpeg`, `Quality`) as soon as
-  frames land two sheets further on, so at most three sheets are held.
-  `Result.Sheets` holds them in order and `Result.SheetFrames` counts the
-  decoded and filled cells.
+- A list run that fails as `empty` after the decoder logged a dropped
+  keyframe is read again, in the same attempt, as a window. Two messages
+  mark a dropped keyframe. One decoder serves every list entry and nothing
+  resets it between them, so an HEVC CRA keyframe (open GOP) after a jump
+  takes a picture order count derived from the previous sample's. When that
+  count matches a picture still in the decoder's buffer, the decoder drops
+  the keyframe ("Duplicate POC in a sequence", then "Skipping invalid
+  undecodable NALU: 21"). An H.264 keyframe whose reference marking names
+  pictures a keyframes-only read skipped is discarded too ("illegal short
+  term buffer state"). Either way such a file can lose nearly every sample
+  on every run. An HEVC list goes to the keyframes-only window that other
+  containers use, which decodes keyframes in order and keeps the counts
+  consistent, at the cost of reading the whole span. An H.264 list that
+  logged its message goes straight to the reference-picture window below,
+  since a keyframes-only window discards the same keyframes. A list that is
+  empty without either message, such as a truncated or damaged file's,
+  still fails without the extra read: damaged pictures log only "Skipping
+  invalid undecodable NALU", and a window would give their samples the last
+  good keyframe instead of failing.
+- Skipped pictures do not advance the decoder's count, so keyframes a whole
+  count cycle apart (256 pictures with the common 8-bit count) collide in a
+  keyframes-only window too, and H.264 windows discard keyframes as lists
+  do. A window that logged a dropped keyframe finds, for each sample that
+  holds a frame, the last keyframe packet at or before it in the timing
+  file; a sample whose own keyframe was not decoded shows an earlier one and
+  counts as filled. Such a window may fill up to 15 % of its cells instead
+  of 10 %, since the file is whole and a preview a keyframe early is still
+  usable; a list keeps 10 %, so too many drops still send it to the window.
+  A window that fills more, or that logged a drop and has a keyframe packet
+  without a time, which leaves the stale samples unknown, is read once more
+  with `-skip_frame:v noref` and `select=key` ahead of the sheets chain:
+  the decoder sees every reference picture, so its state stays whole, and
+  the chain still gets only the keyframes. That read costs several
+  keyframes-only reads and runs only for files that fail without it. If the
+  window fails for any reason, the attempt reports the window's failure,
+  whose reason and log describe the latest read, and after a list fallback
+  its error names the list run's.
+- Sheets are JPEG-encoded in-process (`image/jpeg`, `Quality`) once the run
+  and its repairs are done, since a repair may replace any cell. A run holds
+  its tiles until then, so a request whose sheets exceed 64 million tile
+  pixels is invalid; callers chunk longer files. `Result.Sheets` holds them
+  in order and `Result.SheetFrames` counts the decoded, filled, and
+  repaired (`Refined`) cells.
+
+### Keyframe entries
+
+A sample-time entry makes the concat demuxer seek to the keyframe before the
+sample and read every packet of every stream, video and all audio tracks,
+from there up to the sample; the decoder skips them. With keyframes several
+seconds apart that is most of the file: 32 GB of a 43 GB 4K HEVC remux for
+645 cells. A Sheets list over a Matroska input therefore starts each entry
+at the sample's keyframe and reads only it and the entry's span
+(`keyframes.go`):
+
+- `Runner.Run` reads the keyframes once, before any attempt and its timeout,
+  from the file's Cues with `keyframes.ReadMatroska`: the index the
+  demuxer's seek uses, plus its spot check of a few clusters' block headers,
+  in-process and without decoding. The read runs in a goroutine, and the run
+  stops waiting after 10 seconds or when its context ends, which also stops
+  the read at its next call; a read blocked on stalled storage is left
+  behind. At most 4 reads are in flight in a process, blocked ones
+  included, which also bounds the memory parsing Cues takes (a few times
+  their size), and a run that finds none free skips the read. A file that is not
+  Matroska, has no Cues, whose Cues leave out keyframes, or whose read is
+  skipped or stopped gets sample-time entries.
+- An entry starts at the last keyframe at or before the sample's inpoint
+  (sample time plus container start, in the microseconds the list is
+  written in), rounded up to the microsecond so the seek never lands on the
+  keyframe before it. On ffmpeg-muxed files with B-frames and with container
+  starts of 3.21 and 11.4 s, this matched where ffprobe's
+  `-read_intervals` seek, which makes the same seek call, landed for every
+  sample. Samples before the first keyframe keep sample-time entries.
+- A sample whose keyframe is the previous sample's gets no entry: it would
+  only decode the frame the previous cell shows, and the HEVC decoder drops
+  a keyframe sent twice in a row as a duplicate picture order count. Once
+  the list is read, such a sample shows the previous cell's frame and its
+  source time, so the repair below finds it repeating that cell and decodes
+  its own moment. A distinct keyframe keeps its entry even when it lies
+  inside the previous entry's span.
+- Every frame of a keyframe entry lies at or after its inpoint, so its time
+  places it back in the input exactly. A sample-time entry decodes the
+  keyframe from before its inpoint, where ffmpeg rewrites the time to keep
+  the list's timestamps monotonic; with samples sharing a 40-second GOP,
+  that hid a repeat from the repair and left a cell showing the scene before.
+- An open-GOP keyframe after a jump takes a picture order count derived
+  from the last picture whose header the decoder parsed, skipped pictures
+  included. Keyframe entries leave longer gaps between parsed pictures, and
+  across a gap of more than half the count's cycle (128 frames with x265's
+  default 8-bit count) the derived counts run backwards: the decoder passes
+  on keyframes out of list order with rewritten times, or drops them as
+  duplicates. As soon as a frame comes from an earlier entry than the frame
+  before it, or the decoder logs a dropped keyframe ("Duplicate POC in a
+  sequence", or H.264's "illegal short term buffer state"), the attempt
+  stops ffmpeg and reads the samples from their own times, exactly as a
+  file without Cues. An abandoned read is never published: if the
+  attempt's time ran out meanwhile, it fails as `timeout`. A drop in the
+  abandoned read does not count toward the window fallbacks above.
+  Closed-GOP keyframes start their counts afresh and keep their keyframe
+  entries.
+- MP4 and every other container keep sample-time entries: an MP4 entry that
+  starts exactly at its keyframe's time often seeks past it (45 of 80
+  samples of one H.264 episode decoded nothing). Stats lists and repairs
+  keep sample-time entries too.
+
+Over Matroska test encodes (x264 and x265 at default settings and with
+scene cuts off at 5, 10, 20, and 40-second GOPs, open- and closed-GOP HEVC,
+samples every 5 and 10 seconds) keyframe entries never placed more wrong
+cells than sample-time entries, and fewer where samples share long GOPs.
+Open-GOP HEVC with an 8-bit count falls back once its listed keyframes lie
+more than about 5 seconds apart, which covers x265's default 10-second GOP at
+either interval; it then reads what it did before, plus the few entries read
+before the fallback.
+
+### Repairs
+
+A list gives each sample the keyframe at or before its time, placed back in
+the input from its frame time: `pts + start - k*span + inpoint - container
+start` for list entry `k`, where `start` is the list input's start time from
+its header, by which ffmpeg shifted every frame, and `inpoint` is where the
+entry starts in the container. Two kinds of cell come out worse than the
+input allows, and the attempt reads their samples again in a second list,
+after the first run and before the sheets are encoded (`sheet_repair.go`):
+
+- Missing cells decoded no frame. The demuxer could not seek to a keyframe
+  before the sample, as in a container that flags no keyframes (VC-1 in
+  Matroska, whose I-frames only the decoder recognizes, lost a third of its
+  samples to half-second entries), or the HEVC decoder dropped the keyframe
+  as a duplicate picture order count. The repair lists them again,
+  keyframes only (with the codec's options above), each entry lasting until the next sample (the shortest gap
+  between the run's samples): the decoder starts afresh and finds the
+  keyframe before the sample, or failing that the first one after it.
+- Repeated cells show the same moment as the cell before: their frames lie
+  within a tenth of the time between the two samples, because no keyframe
+  lies between them (a GOP longer than the interval, including every sample
+  a keyframe list left out), or because an open-GOP keyframe brought a
+  leading picture just before it that one sample kept.
+  The repair lists them again with `-skip_frame:v noref`, decoding every
+  reference frame from the keyframe on, and keeps the last frame at or before
+  each sample's time.
+
+Each repaired sample keeps its nearest frame: the last at or before its
+time, else the first after it. A repair that ffmpeg finishes must line up
+with its log like any run; one cut short keeps the frames it placed, which
+were written and logged in order, and leaves the rest. Both repairs share one
+time box, 30 seconds plus a quarter second a sample of the run, within the
+attempt's timeout: on a 4K HEVC clip with a keyframe every 25 seconds and
+samples every 10, software repaired 12 of 31 cells in 26 seconds, CUDA in 4.
+Missing cells are repaired first, then the repeated cells, recomputed so a
+recovered cell that shows its neighbor's keyframe is decoded at its own time
+too. A list that decoded nothing is repaired as well, since a container
+without keyframe flags can miss every short entry. A repair never fails the
+run, except that the caller canceling ends it as `canceled`; the sparse check then counts what the run and its repairs
+decoded, so a list whose repairs recover its missing samples no longer needs
+the window fallback above.
 
 ## Argument stability
 

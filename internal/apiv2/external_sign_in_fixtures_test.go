@@ -131,5 +131,18 @@ func externalSignInFixtureCases() []fixtureCase {
 			scenario: "Deleting the last break-glass administrator while local password sign-in is off is refused.",
 			method:   http.MethodDelete, path: "/api/v2/admin/users/8", headers: with(actingRequestAdmin, "If-Match", "*"),
 			status: http.StatusConflict, assertHeaders: json, schema: problem},
+		{name: "sign_in_with_network_identity_ok", operationID: "signInWithNetworkIdentity",
+			scenario: "A TV on the server's Tailscale network signs its owner in with no password: the body is an empty JSON object.",
+			method:   http.MethodPost, path: "/api/v2/auth/network/5/sign-in", body: `{}`,
+			status: http.StatusOK, assertHeaders: json, schema: schema("TokenPair")},
+		{name: "sign_in_with_network_identity_off_overlay", operationID: "signInWithNetworkIdentity",
+			scenario: "A request that did not come through the provider's network has no device owner to sign in.",
+			method:   http.MethodPost, path: "/api/v2/auth/network/7/sign-in", body: `{}`,
+			status: http.StatusForbidden, assertHeaders: json, schema: problem},
+		{name: "link_account_identity_with_network_ok", operationID: "linkAccountIdentityWithNetwork",
+			scenario: "The account re-enters its password and links the Tailscale identity of the device it is using.",
+			method:   http.MethodPost, path: "/api/v2/account/identities/link-network", headers: bearer(memberToken),
+			body:   `{"installation_id":"5","password":"right password"}`,
+			status: http.StatusCreated, assertHeaders: append([]string{"Location"}, json...), schema: schema("AccountIdentity")},
 	}
 }

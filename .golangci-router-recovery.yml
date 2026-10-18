@@ -1,0 +1,32 @@
+version: "2"
+
+run:
+  timeout: 15m
+  allow-serial-runners: true
+  tests: false
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - ruleguard
+      settings:
+        ruleguard:
+          rules: '${base-path}/internal/routeinventory/lintrules/*.go'
+          failOn: all
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gocritic
+        text: "^ruleguard: route inventory:"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false

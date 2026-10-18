@@ -25,6 +25,8 @@ type fakeExternalSignIn struct {
 	testErr     error
 	// credentialLinks are the directory links made.
 	credentialLinks []handlers.CredentialsLinkInput
+	// networkLinks are the network identity links made.
+	networkLinks []handlers.NetworkLinkInput
 }
 
 func fixtureIdentity() handlers.ExternalIdentityView {
@@ -128,6 +130,29 @@ func (f *fakeExternalSignIn) LinkAccountIdentityCredentials(_ context.Context, u
 	return view, nil
 }
 
+func (f *fakeExternalSignIn) NetworkLinkingAvailable() bool { return true }
+
+// LinkAccountIdentityNetwork links network installation 5 for the local
+// password "right password" when the request came through its overlay
+// (password "off overlay" stands in for one that did not).
+func (f *fakeExternalSignIn) LinkAccountIdentityNetwork(_ context.Context, userID int, in handlers.NetworkLinkInput) (handlers.ExternalIdentityView, error) {
+	switch {
+	case in.InstallationID != 5:
+		return handlers.ExternalIdentityView{}, auth.ErrUnknownAuthInstallation
+	case in.Password == "off overlay":
+		return handlers.ExternalIdentityView{}, auth.ErrNetworkIdentityRequired
+	case in.Password != "right password":
+		return handlers.ExternalIdentityView{}, auth.ErrLinkTicketPassword
+	}
+	f.networkLinks = append(f.networkLinks, in)
+	view := fixtureIdentity()
+	view.ID, view.InstallationID, view.ProviderID, view.ProviderName = 8, 5, "plugin:5:tailscale", "Tailscale"
+	view.ExternalSubject, view.Issuer = "controlplane.tailscale.com|123456789", "https://controlplane.tailscale.com"
+	view.Username, view.Email = "alice@example.test", "alice@example.test"
+	view.LastSignInAt = nil
+	return view, nil
+}
+
 func externalSignInDeps(f *fakeExternalSignIn) Dependencies {
 	deps := pilotDeps(nil, nil)
 	deps.ExternalSignIn = f
@@ -137,7 +162,8 @@ func externalSignInDeps(f *fakeExternalSignIn) Dependencies {
 func TestExternalSignInCapabilities(t *testing.T) {
 	rec := do(t, newTestHandler(t, externalSignInDeps(&fakeExternalSignIn{})), http.MethodGet, Prefix+"/auth/external-sign-in/capabilities", "", nil)
 	var body ExternalSignInCapabilities
-	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.State != StateAvailable || !body.Identities || !body.AdminIdentities || !body.BreakGlass || !body.ConnectionTest || !body.LiveProviderChanges || !body.ProviderRecheck || !body.CredentialsLinking {
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.State != StateAvailable || !body.Identities || !body.AdminIdentities || !body.BreakGlass || !body.ConnectionTest || !body.LiveProviderChanges || !body.ProviderRecheck || !body.CredentialsLinking ||
+		!body.NetworkSignIn || !body.NetworkLinkKeepsPassword {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, newTestHandler(t, pilotDeps(nil, nil)), http.MethodGet, Prefix+"/auth/external-sign-in/capabilities", "", nil)

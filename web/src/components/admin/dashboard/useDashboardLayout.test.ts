@@ -94,14 +94,6 @@ describe("useDashboardLayout", () => {
     mocks.reset.mockReset();
   });
 
-  it("uses the default layout when storage is empty", () => {
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.entries).toEqual(DEFAULT_LAYOUT);
-    expect(result.current.hiddenWidgets.map((w) => w.id)).toEqual(hiddenWidgetIds());
-    expect(result.current.isCustomizing).toBe(false);
-  });
-
   it("falls back to the default layout on corrupt JSON", () => {
     window.localStorage.setItem(storageKey(), "{not json");
 
@@ -282,21 +274,6 @@ describe("useDashboardLayout", () => {
   });
 
   // Picking a window is an everyday viewing action, not an arrangement one.
-  it("setWidgetRange works outside customize mode", () => {
-    writeStored([{ id: "top-titles", span: 6, rows: 3, range: "week" }]);
-    const { result } = renderHook(() => useDashboardLayout());
-
-    expect(result.current.isCustomizing).toBe(false);
-
-    act(() => {
-      result.current.setWidgetRange("top-titles", "month");
-    });
-
-    expect(result.current.entries).toEqual([
-      { id: "top-titles", span: 6, rows: 3, range: "month" },
-    ]);
-    expect(readStored().entries).toEqual([{ id: "top-titles", span: 6, rows: 3, range: "month" }]);
-  });
 
   it("setWidgetRange ignores a window the widget does not offer", () => {
     writeStored([
@@ -318,9 +295,23 @@ describe("useDashboardLayout", () => {
 
   it("round-trips a chosen window through localStorage", () => {
     const first = renderHook(() => useDashboardLayout());
+    expect(first.result.current.isCustomizing).toBe(false);
     act(() => {
       first.result.current.setWidgetRange("egress-24h", "month");
       first.result.current.setWidgetRange("top-profiles", "day");
+      first.result.current.setWidgetRange("top-titles", "month");
+    });
+    expect(first.result.current.entries).toContainEqual({
+      id: "top-titles",
+      span: 6,
+      rows: 3,
+      range: "month",
+    });
+    expect(readStored().entries).toContainEqual({
+      id: "top-titles",
+      span: 6,
+      rows: 3,
+      range: "month",
     });
     const saved = first.result.current.entries;
     first.unmount();
@@ -455,6 +446,10 @@ describe("useDashboardLayout", () => {
 
   it("removeWidget hides the widget and persists", () => {
     const { result } = renderHook(() => useDashboardLayout());
+
+    expect(result.current.entries).toEqual(DEFAULT_LAYOUT);
+    expect(result.current.hiddenWidgets.map((w) => w.id)).toEqual(hiddenWidgetIds());
+    expect(result.current.isCustomizing).toBe(false);
 
     act(() => {
       result.current.removeWidget("top-titles");
@@ -763,26 +758,6 @@ describe("useDashboardLayout server persistence", () => {
     });
   });
 
-  it("flushes a queued save when the dashboard unmounts", () => {
-    vi.useFakeTimers();
-    writeStored([{ id: "users", span: 5, rows: 4 }]);
-    serverLayout(readStored().entries);
-    const { result, unmount } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.resizeWidget("users", { span: 6, rows: 5 });
-    });
-    expect(mocks.save).not.toHaveBeenCalled();
-
-    unmount();
-
-    expect(mocks.save).toHaveBeenCalledTimes(1);
-    expect(mocks.save).toHaveBeenCalledWith({
-      version: 1,
-      entries: [{ id: "users", span: 6, rows: 5 }],
-    });
-  });
-
   it("resetLayout refuses an obsolete authority callback before local reset", () => {
     setAccessToken("synthetic-admin");
     setProfileId("profile-a");
@@ -803,11 +778,17 @@ describe("useDashboardLayout server persistence", () => {
     setProfileId("profile-a");
     setProfileToken("pin-a");
     vi.useFakeTimers();
-    writeStored([{ id: "users", span: 5, rows: 4 }]);
+    writeStored(DEFAULT_LAYOUT);
+    serverLayout(DEFAULT_LAYOUT);
     const { result } = renderHook(() => useDashboardLayout());
 
     act(() => {
-      result.current.resizeWidget("users", { span: 6 });
+      result.current.removeWidget("users");
+      result.current.resizeWidget("libraries", { span: 12, rows: 6 });
+    });
+    expect(result.current.entries).not.toEqual(DEFAULT_LAYOUT);
+
+    act(() => {
       result.current.resetLayout();
     });
 

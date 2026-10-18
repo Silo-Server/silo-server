@@ -162,9 +162,17 @@ func (r *PluginProviderRegistry) Rebuild(ctx context.Context) error {
 		}
 		providers = append(providers, provider)
 	}
-	if len(providers) > 1 {
+	// A network identity provider may run next to the one primary provider
+	// (plugins.RuntimeConfigStore.UpsertAuthBinding).
+	primary := 0
+	for _, provider := range providers {
+		if provider.Info.Mode != ProviderModeNetwork {
+			primary++
+		}
+	}
+	if primary > 1 {
 		slog.WarnContext(ctx, "more than one external sign-in provider is enabled; turn all but one off",
-			"component", "auth", "count", len(providers))
+			"component", "auth", "count", primary)
 	}
 	r.current.Store(&providers)
 	return nil
@@ -229,10 +237,12 @@ func (r *PluginProviderRegistry) providerFor(ctx context.Context, binding *plugi
 	}
 	return RegisteredProvider{
 		Info: LoginProviderInfo{
-			ID:             PluginProviderID(binding.InstallationID, binding.CapabilityID),
-			DisplayName:    displayName,
-			Mode:           mode,
-			Default:        binding.DefaultLogin,
+			ID:          PluginProviderID(binding.InstallationID, binding.CapabilityID),
+			DisplayName: displayName,
+			Mode:        mode,
+			// The default is where a password login that names no provider
+			// goes; a network provider takes no password.
+			Default:        binding.DefaultLogin && mode != ProviderModeNetwork,
 			IconURL:        iconURL,
 			InstallationID: binding.InstallationID,
 		},
@@ -250,10 +260,13 @@ func (r *PluginProviderRegistry) providerFor(ctx context.Context, binding *plugi
 	}, nil
 }
 
-// Provider modes: a username and password form, or an OAuth button.
+// Provider modes: a username and password form, an OAuth button, or a
+// network identity button that signs in the overlay peer of the request
+// (network_sign_in.go).
 const (
 	ProviderModeCredentials = "credentials"
 	ProviderModeOAuth       = "oauth"
+	ProviderModeNetwork     = "network"
 )
 
 // CapabilityProviderMode is the sign-in mode an auth_provider.v1
@@ -275,12 +288,15 @@ func CapabilityProviderMode(metadata map[string]any) string {
 }
 
 // ProviderModeForAuthModes is the sign-in mode of a capability's auth_modes:
-// ["oauth2"] alone makes the provider an OAuth button; password alone or
-// alongside, or none, is a credentials form.
+// "network" makes the provider a network identity button whatever else is
+// listed, so a password never reaches it; ["oauth2"] alone makes it an OAuth
+// button; password alone or alongside, or none, is a credentials form.
 func ProviderModeForAuthModes(modes []string) string {
 	hasPassword, hasOAuth := false, false
 	for _, m := range modes {
 		switch m {
+		case manifest.AuthModeNetwork:
+			return ProviderModeNetwork
 		case manifest.AuthModePassword:
 			hasPassword = true
 		case manifest.AuthModeOAuth2:

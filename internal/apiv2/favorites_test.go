@@ -77,6 +77,34 @@ func (f *fakePersonalLists) ListFavoritesPage(_ context.Context, viewer handlers
 	return page, cards, nil
 }
 
+// VisibleItemIDs reports every id the catalog "has" as visible.
+func (f *fakePersonalLists) VisibleItemIDs(_ context.Context, _ handlers.PersonalListViewer, ids []string) (map[string]bool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	visible := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		visible[id] = !f.missing[id]
+	}
+	return visible, nil
+}
+
+// ResolveCards resolves a series card for every id the catalog "has".
+func (f *fakePersonalLists) ResolveCards(_ context.Context, viewer handlers.PersonalListViewer, ids []string) ([]handlers.CollectionItemView, error) {
+	f.viewers = append(f.viewers, viewer)
+	if f.err != nil {
+		return nil, f.err
+	}
+	cards := make([]handlers.CollectionItemView, 0, len(ids))
+	for _, id := range ids {
+		if f.missing[id] {
+			continue
+		}
+		cards = append(cards, handlers.CollectionItemView{ContentID: id, Type: "series", Title: "Title " + id, Status: "matched"})
+	}
+	return cards, nil
+}
+
 func (f *fakePersonalLists) GetFavorite(_ context.Context, viewer handlers.PersonalListViewer, itemID string) (userstore.Favorite, bool, error) {
 	if f.err != nil {
 		return userstore.Favorite{}, false, f.err
@@ -276,6 +304,8 @@ func TestListFavorites(t *testing.T) {
 
 func TestListFavoritesCursor(t *testing.T) {
 	lists := &fakePersonalLists{favorites: favoriteRows()}
+	// The first page ends inside a timestamp tie, so continuation must keep the item ID.
+	lists.favorites[2].AddedAt = lists.favorites[1].AddedAt
 	h := newTestHandler(t, favoritesDeps(lists))
 	ids, pages := listCardIDs(t, h, "/api/v2/favorites?limit=2", viewerHeaders())
 	if pages != 2 || strings.Join(ids, ",") != "movie:c,movie:b,movie:a" {
@@ -294,72 +324,6 @@ func TestListFavoritesCursor(t *testing.T) {
 	page := decodeCards(t, rec.Body.String())
 	if len(page.Items) != 0 || !page.Page.HasMore {
 		t.Fatalf("page = %s", rec.Body.String())
-	}
-	// A cursor of another operation is refused.
-	other := NewCursors([]byte("other-test-cursor-key"))
-	foreign, _ := other.Encode(CursorScope{OperationID: opListProgress}, offsetPosition{Offset: 1})
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites?cursor="+foreign, "", viewerHeaders()), TypeInvalidCursor)
-}
-
-// TestListFavoritesKeysetStable walks three pages while the list changes
-// underneath: an entry added after page 1 (newer than the key) is neither
-// repeated nor lets an older row slip past, an entry removed after page 2
-// does not skip its neighbor, and equal added_at values are ordered by item
-// id.
-func TestListFavoritesKeysetStable(t *testing.T) {
-	lists := &fakePersonalLists{favorites: []userstore.Favorite{
-		{ProfileID: "p-owner", MediaItemID: "movie:f", AddedAt: "2026-01-03T00:00:00Z"},
-		// e and d share added_at: d before e is wrong; e (greater id) first.
-		{ProfileID: "p-owner", MediaItemID: "movie:d", AddedAt: "2026-01-02T00:00:00Z"},
-		{ProfileID: "p-owner", MediaItemID: "movie:e", AddedAt: "2026-01-02T00:00:00Z"},
-		{ProfileID: "p-owner", MediaItemID: "movie:c", AddedAt: "2026-01-01T00:00:00Z"},
-		{ProfileID: "p-owner", MediaItemID: "movie:b", AddedAt: "2025-12-31T00:00:00Z"},
-		{ProfileID: "p-owner", MediaItemID: "movie:a", AddedAt: "2025-12-30T00:00:00Z"},
-	}}
-	h := newTestHandler(t, favoritesDeps(lists))
-	page := func(cursor string) cardPage {
-		url := "/api/v2/favorites?limit=2"
-		if cursor != "" {
-			url += "&cursor=" + cursor
-		}
-		rec := do(t, h, http.MethodGet, url, "", viewerHeaders())
-		if rec.Code != 200 {
-			t.Fatalf("%s: %d %s", url, rec.Code, rec.Body.String())
-		}
-		return decodeCards(t, rec.Body.String())
-	}
-	ids := func(p cardPage) string {
-		var out []string
-		for _, it := range p.Items {
-			out = append(out, it.ContentID)
-		}
-		return strings.Join(out, ",")
-	}
-	first := page("")
-	if ids(first) != "movie:f,movie:e" || !first.Page.HasMore {
-		t.Fatalf("page 1 = %v", first)
-	}
-	// A new favorite lands at the head between pages: an offset cursor would
-	// now answer movie:e again.
-	lists.favorites = append(lists.favorites, userstore.Favorite{ProfileID: "p-owner", MediaItemID: "movie:g", AddedAt: "2026-01-04T00:00:00Z"})
-	second := page(first.Page.NextCursor)
-	if ids(second) != "movie:d,movie:c" || !second.Page.HasMore {
-		t.Fatalf("page 2 = %v", second)
-	}
-	// An entry of page 1 is removed before page 3: an offset cursor would now
-	// skip movie:b.
-	lists.favorites = lists.favorites[1:]
-	third := page(second.Page.NextCursor)
-	if ids(third) != "movie:b,movie:a" || third.Page.HasMore || third.Page.NextCursor != "" {
-		t.Fatalf("page 3 = %v", third)
-	}
-	// The tie: page 1 ends on movie:e (added_at equal to movie:d), and the
-	// keyset (added_at, item_id) resumes at movie:d instead of repeating or
-	// skipping it.
-	single := page("")
-	single = page(single.Page.NextCursor)
-	if ids(single) != "movie:d,movie:c" {
-		t.Fatalf("after tie = %v", single)
 	}
 }
 

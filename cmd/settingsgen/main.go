@@ -33,7 +33,7 @@ func main() {
 
 	contract, err := settingscontract.Load()
 	if err != nil {
-		fail("loading contract: %v", err)
+		failf("loading contract: %v", err)
 	}
 
 	var body []byte
@@ -48,10 +48,10 @@ func main() {
 	case "swift":
 		body, err = generateSwift(contract)
 	default:
-		fail("unknown -lang %q: want go, ts, kotlin or swift", *lang)
+		failf("unknown -lang %q: want go, ts, kotlin or swift", *lang)
 	}
 	if err != nil {
-		fail("generating %s: %v", *lang, err)
+		failf("generating %s: %v", *lang, err)
 	}
 
 	if *out == "" {
@@ -59,11 +59,11 @@ func main() {
 		return
 	}
 	if err := os.WriteFile(*out, body, 0o644); err != nil { //nolint:gosec // generated source
-		fail("writing %s: %v", *out, err)
+		failf("writing %s: %v", *out, err)
 	}
 }
 
-func fail(format string, args ...any) {
+func failf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "settingsgen: "+format+"\n", args...)
 	os.Exit(1)
 }
@@ -245,7 +245,8 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  platforms?: readonly string[];\n")
 	out.WriteString("  suggestedOptions?: SettingOptionSetId;\n")
 	out.WriteString("  unsetLabel?: string;\n")
-	out.WriteString("  values?: readonly { value: unknown; label: string; introducedIn: number }[];\n")
+	out.WriteString("  /** A deprecated member stays a valid stored value but is no longer offered. */\n")
+	out.WriteString("  values?: readonly { value: unknown; label: string; introducedIn: number; deprecated?: boolean }[];\n")
 	out.WriteString("  /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */\n")
 	out.WriteString("  ordered?: boolean;\n")
 	out.WriteString("  minimum?: number;\n")
@@ -303,8 +304,12 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 				if err != nil {
 					return nil, err
 				}
-				fmt.Fprintf(&out, "      { value: %s, label: %s, introducedIn: %d },\n",
-					encoded, jsString(member.Label), memberRevision(def, member))
+				deprecated := ""
+				if member.Deprecated {
+					deprecated = ", deprecated: true"
+				}
+				fmt.Fprintf(&out, "      { value: %s, label: %s, introducedIn: %d%s },\n",
+					encoded, jsString(member.Label), memberRevision(def, member), deprecated)
 			}
 			out.WriteString("    ],\n")
 		}

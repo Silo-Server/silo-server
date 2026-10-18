@@ -98,7 +98,7 @@ func (p *PluginProvider) authenticateCredentials(ctx context.Context, creds Cred
 	if err != nil {
 		return nil, 0, pluginCallError(ctx, p.config.InstallationID, "authenticate", err)
 	}
-	return p.resolve(ctx, response, linkingUserID)
+	return p.resolve(ctx, response, linkingUserID, false)
 }
 
 // CompleteOAuth runs the post-RPC half of plugin authentication for an
@@ -107,10 +107,12 @@ func (p *PluginProvider) authenticateCredentials(ctx context.Context, creds Cred
 // links to, 0 for an ordinary sign-in. It answers the account and the
 // identity the sign-in went through.
 func (p *PluginProvider) CompleteOAuth(ctx context.Context, response *pluginv1.AuthenticateResponse, linkingUserID int) (*models.User, int64, error) {
-	return p.resolve(ctx, response, linkingUserID)
+	return p.resolve(ctx, response, linkingUserID, false)
 }
 
-func (p *PluginProvider) resolve(ctx context.Context, response *pluginv1.AuthenticateResponse, linkingUserID int) (*models.User, int64, error) {
+// resolve runs the plugin's answer through account resolution. network says
+// the answer is a network provider's (authenticatePeer).
+func (p *PluginProvider) resolve(ctx context.Context, response *pluginv1.AuthenticateResponse, linkingUserID int, network bool) (*models.User, int64, error) {
 	identity, err := externalIdentityFromResponse(ctx, p.config.InstallationID, response)
 	if err != nil {
 		return nil, 0, err
@@ -118,6 +120,7 @@ func (p *PluginProvider) resolve(ctx context.Context, response *pluginv1.Authent
 	return p.resolver.Resolve(ctx, ResolveInput{
 		InstallationID: p.config.InstallationID,
 		AutoProvision:  p.config.AutoProvision,
+		Network:        network,
 		Identity:       identity,
 		LinkingUserID:  linkingUserID,
 	})

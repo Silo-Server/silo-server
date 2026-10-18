@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"os"
@@ -240,6 +241,18 @@ func h264LevelFor(width, height int, frameRate float64, kbps int) int {
 	return 60
 }
 
+// H264LevelFor is h264LevelFor for callers outside this package.
+func H264LevelFor(width, height int, frameRate float64, kbps int) int {
+	return h264LevelFor(width, height, frameRate, kbps)
+}
+
+// H264EquivalentKbps is the rate an H.264 encode of a source at sourceKbps in
+// sourceCodec needs for the same quality (sourceEquivalentKbps), or 0 when
+// the source's rate is unknown.
+func H264EquivalentKbps(sourceKbps int, sourceCodec string) int {
+	return sourceEquivalentKbps(SourceDescriptorV3{BitrateKbps: sourceKbps, VideoCodec: sourceCodec}, transcodeCodecH264)
+}
+
 // h264LevelBitrateKbps is the highest cap whose rate and doubled buffer fit
 // the given level; 0 for an unknown level.
 func h264LevelBitrateKbps(idc int) int {
@@ -253,6 +266,9 @@ func h264LevelBitrateKbps(idc int) int {
 
 // h264HighProfileV3 is the profile every H.264 encode here produces.
 const h264HighProfileV3 = "high"
+
+// H264EncodeProfile is h264HighProfileV3 for callers outside this package.
+const H264EncodeProfile = h264HighProfileV3
 
 // downloadDecoder is the decoder bound a download encode must fit. Zero
 // fields are unbounded.
@@ -372,6 +388,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		return fmt.Errorf("prepare-file: %w", err)
 	}
 
+	logs := newPrepareLogWriter(ctx, opts)
 	runOnce := func(runOpts TranscodeOpts) error {
 		args := buildPrepareFileArgs(runOpts, partPath)
 		bin := runOpts.FFmpegPath
@@ -382,15 +399,27 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		cmd := exec.CommandContext(ctx, bin, args...)
 		stderr := newBoundedTailBuffer(stderrTailMaxBytes)
 		cmd.Stderr = stderr
+		if logs != nil {
+			logs.setHWAccel(runOpts.HWAccel)
+			cmd.Stderr = io.MultiWriter(stderr, logs)
+		}
+		if runOpts.PrepareProgressSink != nil {
+			cmd.Stdout = newPrepareProgressWriter(runOpts.PrepareProgressSink, runOpts.TotalDuration)
+		}
 		cmd.WaitDelay = 3 * time.Second
 
-		if err := cmd.Run(); err != nil {
+		logs.event("ffmpeg process starting", "")
+		err := cmd.Run()
+		logs.flush()
+		if err != nil {
 			_ = os.Remove(partPath)
+			logs.event("ffmpeg process exit error", formatWaitError(err))
 			if tail := truncateStderr(stderr.String()); tail != "" {
 				return fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, err, tail)
 			}
 			return fmt.Errorf("%w: %w", ErrTranscodeFailed, err)
 		}
+		logs.event("ffmpeg process exited", "")
 		return nil
 	}
 
@@ -404,6 +433,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		if retryAccel := StartupRetryHWAccel(opts); retryAccel != opts.HWAccel {
 			slog.WarnContext(ctx, "prepared encode failed; retrying with software encoding",
 				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
+			logs.event("retrying with software encoding", "")
 			retryOpts := opts
 			retryOpts.HWAccel = retryAccel
 			err = runOnce(retryOpts)
@@ -461,6 +491,11 @@ func buildPrepareFileArgs(opts TranscodeOpts, outputPath string) []string {
 	}
 
 	args := []string{"-nostdin", "-hide_banner", "-loglevel", "error"}
+	if opts.PrepareProgressSink != nil {
+		// Machine-readable progress on stdout; the output is a file, so stdout
+		// is otherwise unused.
+		args = append(args, "-progress", "pipe:1", "-nostats")
+	}
 
 	if !isVideoCopy {
 		args = appendHWAccelArgs(args, opts)

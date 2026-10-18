@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/Silo-Server/silo-server/internal/policy"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,11 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/policy"
+
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -53,6 +55,10 @@ type fixtureCase struct {
 // shape apimw.NewRequestID mints (24 hex characters) with a value no real
 // request produces.
 func fixtureRequestID(i int) string { return fmt.Sprintf("%024x", i+1) }
+
+// fixtureContractDigest stands in for the served contract_digest: the same
+// 64-hex shape with a value no real OpenAPI artifact hashes to.
+var fixtureContractDigest = strings.Repeat("0", 64)
 
 func fixtureCases() []fixtureCase {
 	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
@@ -439,7 +445,7 @@ func fixtureCases() []fixtureCase {
 		{name: "get_home_layout_ok", operationID: opGetHomeLayout,
 			scenario: "The home page's section layout for the acting profile, without items.",
 			method:   http.MethodGet, path: "/api/v2/home/layout", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
-			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SectionLayout"},
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/HomeLayout"},
 		{name: "get_home_layout_profile_header_required", operationID: opGetHomeLayout,
 			scenario: "A profile-scoped home read without X-Profile-Id: a validation failure naming the header.",
 			method:   http.MethodGet, path: "/api/v2/home/layout", headers: bearer(memberToken),
@@ -1172,11 +1178,11 @@ func fixtureCases() []fixtureCase {
 			scenario: "Import runs belong to the authenticated account and use bounded keyset paging.",
 			method:   http.MethodGet, path: "/api/v2/history-imports/runs", headers: bearer(memberToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/HistoryImportRunCollection"},
-		{name: "list_collections_ok", operationID: "listCollections", scenario: "Visible personal collections and account groups.", method: http.MethodGet, path: "/api/v2/collections", headers: viewer, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalCollectionCollection"},
+		{name: "list_collections_ok", operationID: "listCollections", scenario: "The acting profile's own collections, then another profile's shared collection; groups is always empty.", method: http.MethodGet, path: "/api/v2/collections", headers: viewer, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalCollectionCollection"},
 		{name: "get_collection_ok", operationID: "getCollection", scenario: "Canonical collection editor and strong validator.", method: http.MethodGet, path: "/api/v2/collections/c1", headers: viewer, status: 200, assertHeaders: []string{"Content-Type", "ETag"}, schema: "#/components/schemas/PersonalCollection"},
 		{name: "create_collection_ok", operationID: "createCollection", scenario: "A non-retryable manual collection creation.", method: http.MethodPost, path: "/api/v2/collections", body: `{"name":"Rainy days","collection_type":"manual"}`, headers: viewer, status: 201, assertHeaders: []string{"Content-Type", "Location"}, schema: "#/components/schemas/PersonalCollection"},
 		{name: "collection_order_precondition_required", operationID: "reorderCollections", scenario: "Ordering needs the validator observed before the edit.", method: http.MethodPut, path: "/api/v2/collections/order", body: `{"ordered_ids":["c1"]}`, headers: viewer, status: 428, assertHeaders: []string{"Content-Type"}, schema: problem},
-		{name: "collection_group_stale", operationID: "updateCollectionGroup", scenario: "A stale group edit leaves the resource unchanged and supplies the current validator.", method: http.MethodPatch, path: "/api/v2/collections/groups/g1", body: `{"name":"Winter"}`, headers: with(viewer, "If-Match", `"stale"`), status: 412, assertHeaders: []string{"Content-Type", "ETag"}, schema: problem},
+		{name: "collection_group_unsupported", operationID: "updateCollectionGroup", scenario: "Personal collection groups are no longer supported; every group operation answers capability_unsupported.", method: http.MethodPatch, path: "/api/v2/collections/groups/g1", body: `{"name":"Winter"}`, headers: with(viewer, "If-Match", "*"), status: 501, assertHeaders: []string{"Content-Type"}, schema: problem},
 		{name: "get_collection_items_ok", operationID: "getCollectionItems", scenario: "A bounded manual membership page with its continuation envelope.", method: http.MethodGet, path: "/api/v2/collections/c1/items", headers: viewer, status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/CollectionPersonalCollectionItem"},
 		{name: "get_library_job_ok", operationID: "getLibraryJob", scenario: "An administrator polls a queued refresh with a deterministic whole-body validator.",
 			method: http.MethodGet, path: "/api/v2/library-jobs/job-2", headers: bearer(adminToken), status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag", "Retry-After"}, schema: "#/components/schemas/AdminJob"},
@@ -1707,6 +1713,8 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/catalog/series/series:severance/seasons?include_artwork=invalid", headers: viewer,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "list_admin_users_exact_identity", operationID: opListAdminUsers, method: http.MethodGet, path: Prefix + "/admin/users?identity=LAURA%40example.test", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminUserCollection", scenario: "An exact identity filter matches case-insensitively before account pagination."},
+		{name: "admin_download_preparation_capabilities", operationID: "getAdminDownloadPreparationCapabilities", method: "GET", path: Prefix + "/admin/downloads/preparations/capabilities", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminDownloadPreparationCapabilitiesOutputBody", scenario: "Administrator discovery names the realtime channel and how long failed preparations stay listed."},
+		{name: "admin_download_preparations", operationID: "listAdminDownloadPreparations", method: "GET", path: Prefix + "/admin/downloads/preparations?limit=10", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminDownloadPreparationsOutputBody", scenario: "The preparation queue lists a running transcode with live progress, a queued remux, a paused transcode, and a recent failure, with totals across every listed job."},
 		{name: "admin_playback_summary", operationID: "getAdminPlaybackSummary", method: "GET", path: Prefix + "/admin/sessions/summary?user_id=7&limit=1", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminPlaybackSummaryOutputBody", scenario: "A bounded account activity sample omits diagnostic identifiers and network metadata."},
 		{name: "admin_resource_capabilities", operationID: "getAdminResourceCapabilities", scenario: "Administrator discovery reports unavailable sampling when no sampler is configured.", method: "GET", path: Prefix + "/admin/system/resources/capabilities", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/AdminResourceCapabilities", assertHeaders: []string{"Content-Type", "Cache-Control"}},
 		{name: "login_provider_null", operationID: "login",
@@ -1735,7 +1743,207 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, watchTrickplayFixtureCases()...)
 	cases = append(cases, adminTrickplayFixtureCases()...)
 	cases = append(cases, deviceSignInFixtureCases()...)
-	return append(cases, externalSignInFixtureCases()...)
+	cases = append(cases, externalSignInFixtureCases()...)
+	cases = append(cases, adminDownloadPreparationControlFixtureCases()...)
+	cases = append(cases, fixtureCase{name: "collection_order_foreign_id", operationID: "reorderCollections", scenario: "An order naming another profile's collection, even a shared one, is a validation failure at ordered_ids.", method: http.MethodPut, path: "/api/v2/collections/order", body: `{"ordered_ids":["c2","c1"]}`, headers: with(viewer, "If-Match", "*"), status: 422, assertHeaders: []string{"Content-Type"}, schema: problem})
+	cases = append(cases, personalCollectionCreateFixtureCases()...)
+	cases = append(cases, personalCollectionPreviewFixtureCases()...)
+	cases = append(cases, adminTemplateBundleFixtureCases()...)
+	cases = append(cases, adminCollectionRowFixtureCases()...)
+	cases = append(cases, adminCollectionCapabilityFixtureCases()...)
+	cases = append(cases, personalCollectionContainsFixtureCases()...)
+	cases = append(cases, loginSessionFixtureCases()...)
+	cases = append(cases, adminDownloadStorageFixtureCases()...)
+	cases = append(cases, homeLayoutItemsFixtureCases()...)
+	cases = append(cases, resumePositionFixtureCases()...)
+	cases = append(cases, catalogLettersFixtureCases()...)
+	cases = append(cases, pushRegistrationReceiptFixtureCases()...)
+	cases = append(cases, adminNotificationPushDeliveryFixtureCases()...)
+	cases = append(cases, unmatchedItemIgnoreFixtureCases()...)
+	cases = append(cases, notInterestedFixtureCases()...)
+	cases = append(cases, notificationSeriesFixtureCases()...)
+	return append(cases, notificationSeriesMuteFixtureCases()...)
+}
+
+// notInterestedFixtureCases pin the Not interested marks: the paged list, one
+// mark, the refusals, and the capability document.
+func notInterestedFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "list_not_interested_ok", operationID: opListNotInterested,
+			scenario: "The first page of the titles a profile marked Not interested as catalog cards, newest mark first, with an opaque cursor for the next page.",
+			method:   http.MethodGet, path: "/api/v2/not-interested?limit=1", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/NotInterestedCollection"},
+		{name: "get_not_interested_ok", operationID: "getNotInterested",
+			scenario: "The profile marked the title Not interested: the mark with when it was made.",
+			method:   http.MethodGet, path: "/api/v2/not-interested/movie:c", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/NotInterestedEntry"},
+		{name: "get_not_interested_not_found", operationID: "getNotInterested",
+			scenario: "The profile has not marked the title.",
+			method:   http.MethodGet, path: "/api/v2/not-interested/movie:nope", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "mark_not_interested_episode_rejected", operationID: "markNotInterested",
+			scenario: "An episode cannot be marked; the series can.",
+			method:   http.MethodPut, path: "/api/v2/not-interested/episode:x", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "mark_not_interested_not_found", operationID: "markNotInterested",
+			scenario: "A title the viewer may not see cannot be marked.",
+			method:   http.MethodPut, path: "/api/v2/not-interested/movie:hidden", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "unmark_not_interested_locked_profile", operationID: "unmarkNotInterested",
+			scenario: "A PIN-locked profile without X-Profile-Token.",
+			method:   http.MethodDelete, path: "/api/v2/not-interested/movie:c", headers: with(bearer(memberToken), "X-Profile-Id", "p-locked"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "get_not_interested_capability_ok", operationID: "getNotInterestedCapability",
+			scenario: "Profiles on this server can mark movies and series Not interested.",
+			method:   http.MethodGet, path: "/api/v2/capabilities/not-interested", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/NotInterestedCapability"},
+	}
+}
+
+// resumePositionFixtureCases pin clearing a resume position and the progress
+// capability document that advertises it.
+func resumePositionFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	return []fixtureCase{
+		{name: "get_progress_capabilities_ok", operationID: "getProgressCapabilities",
+			scenario: "The progress capability document: clearResumePosition is served.",
+			method:   http.MethodGet, path: "/api/v2/progress/capabilities", headers: owner,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/ProgressCapabilities"},
+		{name: "clear_resume_position_ok", operationID: "clearResumePosition",
+			scenario: "Clearing a movie's resume position: 204 with no body; its watched state and history stay.",
+			method:   http.MethodDelete, path: "/api/v2/progress/movie:heat-1995/position", headers: owner,
+			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
+		{name: "clear_resume_position_not_leaf", operationID: "clearResumePosition",
+			scenario: "A season or series has no single resume position: a validation failure naming the path parameter.",
+			method:   http.MethodDelete, path: "/api/v2/progress/series:heat/position", headers: owner,
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "clear_resume_position_not_found", operationID: "clearResumePosition",
+			scenario: "An item outside the viewer's catalog has no resume position to clear.",
+			method:   http.MethodDelete, path: "/api/v2/progress/movie:missing/position", headers: owner,
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
+}
+
+// homeLayoutItemsFixtureCases pin the home layout carrying the cards of its
+// first sections, the include_items bound, and the capability document that
+// advertises it.
+func homeLayoutItemsFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "get_home_capabilities_ok", operationID: opGetHomeCapabilities,
+			scenario: "The home capability document: getHomeLayout accepts include_items up to include_items_max.",
+			method:   http.MethodGet, path: "/api/v2/home/capabilities", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/HomeCapabilities"},
+		{name: "get_home_layout_with_items_ok", operationID: opGetHomeLayout,
+			scenario: "The home layout with the cards of its first section, artwork presigned at the requested size.",
+			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=1&image_size=medium", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/HomeLayout"},
+		{name: "get_home_layout_include_items_out_of_range", operationID: opGetHomeLayout,
+			scenario: "An include_items above the maximum of 4 is a validation failure naming the parameter.",
+			method:   http.MethodGet, path: "/api/v2/home/layout?include_items=5", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
+}
+
+// personalCollectionContainsFixtureCases pin the collection list marked for
+// one title, as Add to collection reads it.
+func personalCollectionContainsFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "list_collections_contains_item_ok", operationID: "listCollections", scenario: "Visible personal collections, each of the profile's own manual collections marked with whether it holds the title.", method: http.MethodGet, path: "/api/v2/collections?contains_item=movie-1", headers: viewerHeaders(), status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/PersonalCollectionCollection"},
+	}
+}
+
+// adminCollectionRowFixtureCases pin the rows that show a server collection:
+// the counted administrator list and the rows list of one collection.
+func adminCollectionRowFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "list_admin_collections_ok", operationID: "listAdminCollections", scenario: "Administrator collections with the number of Home rows and of all administrator page rows that show each one; a collection no row shows counts zero.", method: http.MethodGet, path: "/api/v2/admin/collections?library_id=1", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminCollectionList"},
+		{name: "list_admin_collection_sections_ok", operationID: "listAdminCollectionSections", scenario: "Rows that show a collection: Home rows first with a null library, including a starter-pack hero row, then library page rows, each with its page's row count.", method: http.MethodGet, path: "/api/v2/admin/collections/c1/sections", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/CollectionAdminCollectionSection"},
+	}
+}
+
+// adminCollectionCapabilityFixtureCases pin the administrator collection
+// capability document with MDBList search configured and the fixed fixture
+// schedule time zone.
+func adminCollectionCapabilityFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "get_admin_collection_capabilities_ok", operationID: "getAdminCollectionCapabilities", scenario: "Administrator collection features, including MDBList search and the time zone the answering node runs cron schedules in.", method: http.MethodGet, path: "/api/v2/admin/collections/capabilities", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AdminCollectionCapabilityOutputBody"},
+	}
+}
+
+// fixtureScheduleTimeZone is a node on Chicago daylight time with TZ set, so
+// the capability fixtures do not depend on the generating machine's zone.
+func fixtureScheduleTimeZone() CollectionScheduleTimeZone {
+	return CollectionScheduleTimeZone{UTCOffset: "-05:00", Abbreviation: "CDT", Name: "America/Chicago"}
+}
+
+// adminTemplateBundleFixtureCases pin a bundle list whose bundles carry a
+// summary of each template, with the franchise placeholder marked as needing
+// setup.
+func adminTemplateBundleFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "list_admin_collection_template_bundles_ok", operationID: "listAdminCollectionTemplateBundles", scenario: "Template bundles with a summary of each template in bundle order; a template that cannot sync until an administrator sets its source needs setup.", method: http.MethodGet, path: "/api/v2/admin/collections/template-bundles", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/BundleCatalog"},
+	}
+}
+
+// fixtureTemplateBundles is a two-template franchise bundle: one curated
+// franchise with a poster and the placeholder an administrator completes.
+func fixtureTemplateBundles() []templates.BundleWithTemplates {
+	registry := templates.NewRegistry()
+	registry.Register(templates.Template{ID: "tmdb_franchise_star_wars", Title: "Star Wars", Category: templates.CategoryEditorial, Source: templates.SourceTMDBCollection, MediaKind: templates.MediaMovie, Featured: true, PosterPath: "/images/collection-templates/tmdb_franchise_star_wars.jpg", TMDBCollection: &templates.TMDBCollectionSpec{CollectionID: 10}})
+	registry.Register(templates.Template{ID: "tmdb_franchise_placeholder", Title: "TMDB Franchise", Category: templates.CategoryEditorial, Source: templates.SourceTMDBCollection, MediaKind: templates.MediaMovie, TMDBCollection: &templates.TMDBCollectionSpec{}})
+	registry.RegisterBundle(templates.Bundle{ID: "franchise_collections", Title: "Franchise Collections", Description: "TMDB franchise and saga collections.", TemplateIDs: []string{"tmdb_franchise_star_wars", "tmdb_franchise_placeholder"}})
+	return registry.BundlesWithTemplates()
+}
+
+// personalCollectionPreviewFixtureCases pin a smart preview whose items carry
+// a poster URL when they have a poster and omit it otherwise.
+func personalCollectionPreviewFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "preview_collection_ok", operationID: "previewCollection", scenario: "A smart query's first matches within the acting profile's access, each with its poster when it has one.", method: http.MethodPost, path: "/api/v2/collections/preview", body: `{"query_definition":{"match":"all","groups":[]},"limit":2}`, headers: viewerHeaders(), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/PersonalCollectionPreviewOutputBody"},
+	}
+}
+
+// personalCollectionCreateFixtureCases pin a create that carries a
+// description and the capability that advertises it.
+func personalCollectionCreateFixtureCases() []fixtureCase {
+	viewer := viewerHeaders()
+	return []fixtureCase{
+		{name: "create_collection_with_description_ok", operationID: "createCollection", scenario: "A manual collection created with its description.", method: http.MethodPost, path: "/api/v2/collections", body: `{"name":"Rainy days","description":"For wet afternoons","collection_type":"manual"}`, headers: viewer, status: 201, assertHeaders: []string{"Content-Type", "Location"}, schema: "#/components/schemas/PersonalCollection"},
+		{name: "get_collection_capabilities_ok", operationID: "getCollectionCapabilities", scenario: "Personal collection features, including a description on create, MDBList search, the time zone the answering node runs cron schedules in, and preview posters.", method: http.MethodGet, path: "/api/v2/collections/capabilities", headers: viewer, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/CollectionCapabilities"},
+	}
+}
+
+func loginSessionFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "login_session_capabilities", operationID: "getLoginSessionCapabilities",
+			scenario: "An authenticated account discovers login-session management and recorded activity.",
+			method:   http.MethodGet, path: "/api/v2/auth/sessions/capabilities", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/LoginSessionCapabilities"},
+		{name: "login_session_list", operationID: "listSessions",
+			scenario: "An account lists live login sessions, with explicit null activity where none is recorded.",
+			method:   http.MethodGet, path: "/api/v2/auth/sessions", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/LoginSessionCollection"},
+		{name: "admin_login_session_list", operationID: "listAdminUserLoginSessions",
+			scenario: "An acting admin inspects a selected account's login sessions.",
+			method:   http.MethodGet, path: "/api/v2/admin/users/7/login-sessions", headers: with(bearer(adminToken), "X-Profile-Id", "p-primary"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/LoginSessionCollection"},
+		{name: "admin_login_session_delete", operationID: "deleteAdminUserLoginSession",
+			scenario: "An acting admin revokes one session of the selected account.",
+			method:   http.MethodDelete, path: "/api/v2/admin/users/7/login-sessions/00000000-0000-0000-0000-000000000001", headers: with(bearer(adminToken), "X-Profile-Id", "p-primary"),
+			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
+		{name: "admin_login_sessions_delete_all", operationID: "deleteAdminUserLoginSessions",
+			scenario: "An acting admin signs the selected account out everywhere and receives the live-session count.",
+			method:   http.MethodDelete, path: "/api/v2/admin/users/7/login-sessions", headers: with(bearer(adminToken), "X-Profile-Id", "p-primary"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminLoginSessionsRevoked"},
+		{name: "admin_login_session_forbidden", operationID: "listAdminUserLoginSessions",
+			scenario: "A non-admin cannot inspect another account's sessions.",
+			method:   http.MethodGet, path: "/api/v2/admin/users/7/login-sessions", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // deviceSignInFixtureCases covers the TV sign-in additions: the opened
@@ -1782,9 +1990,16 @@ func fixtureDeps() Dependencies {
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.NetworkAccess = newFakeNetworkAccess()
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
+	deps.OrderedApplePush = new(fakeOrderedApple)
+	deps.OrderedAndroidPush = new(fakeOrderedPush)
 	fixtureProviders := netaccess.NewStatusCache()
 	fixtureProviders.Report(netaccess.Status{InstallationID: 7, Provider: "stub", State: netaccess.StateConnected, Origin: "https://silo.overlay.example.test"})
-	deps.ServerConnections = ServerConnections{PublicURL: func() string { return "https://silo.example.test" }, Providers: fixtureProviders}
+	deps.ServerConnections = ServerConnections{
+		PublicURL:   func() string { return "https://silo.example.test" },
+		LocalURL:    func() string { return "http://silo.lan.example.test:8080" },
+		Providers:   fixtureProviders,
+		LocalTLSPin: "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
+	}
 	deps.SubtitleAIReads = &fakeSubtitleAIReads{}
 	deps.Downloads = &fakeDownloadRegistry{}
 	deps.DownloadCreation = &fakeDownloadCreation{row: &downloads.Download{ID: "entry", ContentID: "movie", MediaFileID: 42, Revision: 1, CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Status: downloads.StatusReady, Quality: downloads.QualityOriginal, EffectiveQuality: downloads.QualityOriginal, Format: downloads.FormatOriginal, DeviceID: "device-one"}, page: downloads.CreatePage{BatchID: "intent", Skipped: []downloads.SkippedDownload{{EpisodeID: "missing", Reason: "no_file"}}}}
@@ -1796,7 +2011,9 @@ func fixtureDeps() Dependencies {
 	deps.EbookConfig = &fakeEbookConfig{}
 	deps.EbookAnnotations = &fakeEbookAnnotations{}
 	deps.ProgressBootstrap = &fakeBootstrap{}
-	deps.PersonalCollections = &fixturePersonalCollections{fakePersonalCollections: fakePersonalCollections{list: handlers.PersonalCollectionListView{Collections: []handlers.PersonalCollectionView{fixtureCollectionView()}, Groups: []handlers.CollectionGroupView{}}}}
+	sharedCollection := fixtureCollectionView()
+	sharedCollection.ID, sharedCollection.ProfileID, sharedCollection.CreatorProfileID, sharedCollection.Name, sharedCollection.IsShared = "c2", "p-primary", "p-primary", "Family night", true
+	deps.PersonalCollections = &fixturePersonalCollections{fakePersonalCollections: fakePersonalCollections{list: handlers.PersonalCollectionListView{Collections: []handlers.PersonalCollectionView{fixtureCollectionView(), sharedCollection}, Groups: []handlers.CollectionGroupView{}}, holding: map[string]bool{"c1": true}, features: userstore.CollectionFeatures{Description: true}}, previewCollections: previewCollections{view: fixturePreviewView()}}
 	deps.CollectionImports = &fakeCollectionImports{configured: true}
 	deps, _ = withLibraryAdmin(deps)
 	deps.LibraryMonitoring = &fakeLibraryMonitoring{snap: librarymonitor.StatusSnapshot{
@@ -1813,6 +2030,10 @@ func fixtureDeps() Dependencies {
 	adminCollections.view.SortConfig = json.RawMessage(`{}`)
 	adminCollections.view.SourceConfig = json.RawMessage(`{}`)
 	adminCollections.job = &models.AdminJob{ID: "collection-job", JobType: adminjob.JobTypeTemplateBundleApply, Status: adminjob.StatusQueued, RequestedAt: fixedTime()}
+	adminCollections.bundles = fixtureTemplateBundles()
+	rows := fakeRowReferences()
+	adminCollections.listed, adminCollections.sections, adminCollections.rowCounts = rows.listed, rows.sections, rows.rowCounts
+	deps.ScheduleZone = fixtureScheduleTimeZone
 	deps.AdminCollections = adminCollections
 	deps.AdminSections = newFakeAdminSections()
 	adminPolicy := newFakeAdminPolicy()
@@ -1853,6 +2074,7 @@ func fixtureDeps() Dependencies {
 	deps.HomeSections = home
 	deps.Recipes = home
 	deps.PersonalLists = &fakePersonalLists{favorites: favoriteRows(), watchlist: watchlistRows(), missing: map[string]bool{"movie:hidden": true, "series:hidden": true}}
+	deps.NotInterested = &fakeNotInterested{marks: notInterestedRows(), missing: map[string]bool{"movie:hidden": true}}
 	deps.Ratings = &fakeRatings{ratings: ratingRows(), hidden: map[string]bool{"movie:hidden": true}}
 	deps.History = newFakeHistory()
 	deps.Watch = &fakeWatch{}
@@ -1866,6 +2088,11 @@ func fixtureDeps() Dependencies {
 	deps.ThemeSongs = &fakeThemeSongs{}
 	deps.UserLibraries = new(fakeUserLibraries)
 	deps.AdminPlaybackSessions = new(fakeAdminPlaybackSessions)
+	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
+	deps.AdminDownloadPreparationControls = new(fakeAdminDownloadPreparationControls)
+	deps.AdminDownloadStorage = new(fakeAdminDownloadStorage)
+	deps.AdminDownloadDevices = new(fakeAdminDownloadDevices)
+	deps.DownloadPrepareAgain = fakeDownloadPrepareAgain{}
 	deps.AdminDevices = new(fakeAdminDevices)
 	deps.Invitations = fixtureInvitations()
 	deps.PasswordResets = fixturePasswordResets()
@@ -1887,7 +2114,9 @@ func fixtureDeps() Dependencies {
 	deps.AdminAccounts = accounts
 	deps.AdminAccessGroups = fixtureAdminAccessGroups()
 	deps.AdminAccountSettings = &fakeAdminAccountSettings{}
+	deps.AdminProfileSections = fixtureAdminProfileSections()
 	deps.AdminAccountActivity = &fakeAdminAccountActivity{}
+	deps.AdminLoginSessions = &fakeAdminLoginSessions{}
 	deps = withAdminAccountInsights(deps)
 	deps.HistoryImports = fixtureHistoryImports()
 	deps.WebhookSync = &fakeWebhookManagement{}
@@ -2013,8 +2242,11 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			}
 		} else {
 			mt := strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0])
+			// The real digest changes with every contract edit, so committing
+			// it would make any two API pull requests conflict on this line.
+			raw := bytes.ReplaceAll(rec.Body.Bytes(), []byte(contractDigest), []byte(fixtureContractDigest))
 			var pretty bytes.Buffer
-			if err := json.Indent(&pretty, bytes.TrimSpace(rec.Body.Bytes()), "", "  "); err != nil {
+			if err := json.Indent(&pretty, bytes.TrimSpace(raw), "", "  "); err != nil {
 				t.Fatalf("%s: body is not JSON: %v", c.name, err)
 			}
 			pretty.WriteByte('\n')
@@ -2101,18 +2333,10 @@ func TestContractFixtures(t *testing.T) {
 	}
 }
 
-// TestContractFixturesAreDeterministic pins the property the golden depends
-// on: two generations in one process are byte-identical.
-func TestContractFixturesAreDeterministic(t *testing.T) {
-	a, b := generateFixtures(t), generateFixtures(t)
-	for name := range a {
-		if !bytes.Equal(a[name], b[name]) {
-			t.Errorf("%s differs between generations", name)
-		}
-	}
+type fixturePersonalCollections struct {
+	fakePersonalCollections
+	previewCollections
 }
-
-type fixturePersonalCollections struct{ fakePersonalCollections }
 
 func (f *fixturePersonalCollections) PersonalCollectionItemsPage(context.Context, int, string, string, catalogsvc.AccessFilter, userstore.CollectionItemsPageOptions, *catalogsvc.QueryCursor) (handlers.PersonalCollectionPageView, error) {
 	return handlers.PersonalCollectionPageView{Items: []handlers.PersonalCollectionItemView{{CollectionID: "c1", MediaItemID: "movie:heat-1995", Position: 0, AddedAt: "2026-01-02T03:04:05.000Z"}}, Revision: 1}, nil

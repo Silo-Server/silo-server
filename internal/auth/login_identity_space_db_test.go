@@ -348,21 +348,31 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 	})
 
 	t.Run("accounts exchanging identifiers concurrently do not deadlock", func(t *testing.T) {
+		// These rows exercise identifier-update contention; password hashing is
+		// covered by the account-creation cases above.
+		seedAccount := func(username, email string) int {
+			t.Helper()
+			var id int
+			if err := pool.QueryRow(ctx, `INSERT INTO users (username, email, password_hash, role, enabled) VALUES ($1, $2, 'unused', 'user', true) RETURNING id`, username, email).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
 		for i := range 20 {
 			x := fmt.Sprintf("%s-swap%d-x@example.invalid", prefix, i)
 			y := fmt.Sprintf("%s-swap%d-y@example.invalid", prefix, i)
-			a := mustCreate(t, fmt.Sprintf("%s-swap%d-a", prefix, i), x)
-			b := mustCreate(t, y, fmt.Sprintf("%s-swap%d-b@example.invalid", prefix, i))
+			a := seedAccount(fmt.Sprintf("%s-swap%d-a", prefix, i), x)
+			b := seedAccount(y, fmt.Sprintf("%s-swap%d-b@example.invalid", prefix, i))
 
 			start := make(chan struct{})
 			results := make(chan error, 2)
 			go func() {
 				<-start
-				results <- users.Update(ctx, a.ID, models.UpdateUserInput{Email: &y})
+				results <- users.Update(ctx, a, models.UpdateUserInput{Email: &y})
 			}()
 			go func() {
 				<-start
-				results <- users.Update(ctx, b.ID, models.UpdateUserInput{Username: &x})
+				results <- users.Update(ctx, b, models.UpdateUserInput{Username: &x})
 			}()
 			close(start)
 			for range 2 {

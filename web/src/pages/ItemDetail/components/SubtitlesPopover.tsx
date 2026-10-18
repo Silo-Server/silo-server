@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Captions, Check, ChevronDown, Loader2 } from "lucide-react";
+import { Captions, Check, ChevronDown, Loader2, Search } from "lucide-react";
 
 import type { FileVersion } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,8 @@ interface SubtitlesPopoverProps {
   onSelectSubtitle?: (selection: PrePlaySubtitleSelection) => void;
   onSelectSubtitleOff?: () => void;
   onResetSelection?: () => void;
+  /** Opens the subtitle provider search for this version. */
+  onSearchSubtitles?: () => void;
 }
 
 function SubtitleFlagBadges({
@@ -51,17 +53,17 @@ function SubtitleFlagBadges({
   return (
     <>
       {forced && (
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px] uppercase">
+        <Badge variant="outline" className="px-1.5 py-0 text-[0.625rem] uppercase">
           Forced
         </Badge>
       )}
       {hearingImpaired && (
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px] uppercase">
+        <Badge variant="outline" className="px-1.5 py-0 text-[0.625rem] uppercase">
           HI
         </Badge>
       )}
       {isDefault && (
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px] uppercase">
+        <Badge variant="outline" className="px-1.5 py-0 text-[0.625rem] uppercase">
           Default
         </Badge>
       )}
@@ -129,7 +131,7 @@ function SubtitleSection({
 
   return (
     <div>
-      <div className="text-muted-foreground/60 mb-1 px-3 text-[11px] font-medium">{title}</div>
+      <div className="text-muted-foreground/60 mb-1 px-3 text-[0.6875rem] font-medium">{title}</div>
       <div className="space-y-0.5">
         {rows.map((row) => {
           const titleFlags = inferSubtitleFlagsFromTitle(row.title);
@@ -148,7 +150,7 @@ function SubtitleSection({
               badges={
                 <>
                   {row.codec && (
-                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
+                    <Badge variant="secondary" className="px-1.5 py-0 text-[0.625rem] uppercase">
                       {getSubtitleFormatLabel(row.codec) || row.codec.toUpperCase()}
                     </Badge>
                   )}
@@ -203,6 +205,7 @@ export default function SubtitlesPopover({
   onSelectSubtitle,
   onSelectSubtitleOff,
   onResetSelection,
+  onSearchSubtitles,
 }: SubtitlesPopoverProps) {
   const [open, setOpen] = useState(false);
   // Downloaded subtitles normally load lazily on open, but when the saved
@@ -278,7 +281,7 @@ export default function SubtitlesPopover({
         >
           <Captions className="size-3.5" />
           Subs
-          <span className="text-muted-foreground max-w-44 truncate text-[11px] font-normal sm:max-w-64">
+          <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
             {isInteractive ? activeSummary : candidates.all.length}
           </span>
           <ChevronDown className="text-muted-foreground size-3" />
@@ -330,6 +333,21 @@ export default function SubtitlesPopover({
         )}
         {candidates.all.length === 0 && !downloadedQuery.isLoading && (
           <div className="text-muted-foreground px-3 py-2 text-sm">No subtitles available.</div>
+        )}
+        {onSearchSubtitles && (
+          <div className="border-border bg-popover sticky -bottom-1.5 -mx-1.5 border-t px-1.5 pt-1.5 pb-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onSearchSubtitles();
+              }}
+              className="hover:bg-accent/30 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors"
+            >
+              <Search className="text-muted-foreground size-4" />
+              Search for Subtitles…
+            </button>
+          </div>
         )}
       </div>
     </DetailPopover>

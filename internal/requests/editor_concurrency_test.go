@@ -154,7 +154,7 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	}
 	raceEditorWrites(t, func() error {
 		edit := *row
-		edit.APIKeyRef = ""
+		edit.APIKeyRef = "   "
 		_, err := repo.UpdateIntegrationConditional(ctx, edit, row.Revision)
 		return err
 	}, 1)
@@ -169,6 +169,14 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	var stored string
 	if err = repo.pool.QueryRow(ctx, `SELECT api_key_ref FROM request_integrations WHERE id=$1`, in.ID).Scan(&stored); err != nil || stored == in.APIKeyRef {
 		t.Fatalf("key not encrypted: %v", err)
+	}
+	// Startup backfill uses this table and column binding independently.
+	plaintext, err := repo.cipher.Decrypt(stored, secret.RowAAD("request_integrations", "api_key_ref", in.ID))
+	if err != nil || plaintext != in.APIKeyRef {
+		t.Fatalf("stored key under backfill AAD = %q, %v", plaintext, err)
+	}
+	if _, err := repo.cipher.Decrypt(stored, apiKeyAAD(other.ID)); err == nil {
+		t.Fatal("stored key decrypted with another row's AAD")
 	}
 	router := &fakeRouterProvider{}
 	service := NewService(repo, nil, nil)
@@ -198,6 +206,12 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	}
 	if err = repo.DeleteIntegrationConditional(ctx, in.ID, current.Revision); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("live target protection: %v", err)
+	}
+	if _, err = repo.pool.Exec(ctx, `UPDATE media_request_targets SET status='downloading'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.DeleteIntegrationConditional(ctx, in.ID, current.Revision); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("downloading target protection: %v", err)
 	}
 	if _, err = repo.pool.Exec(ctx, `DELETE FROM media_request_targets`); err != nil {
 		t.Fatal(err)
@@ -252,5 +266,64 @@ func TestEditorValidationRaceDatabase(t *testing.T) {
 	current, err := repo.GetIntegration(ctx, in.ID)
 	if err != nil || current.Name != "Concurrent winner" {
 		t.Fatalf("concurrent edit lost: %+v %v", current, err)
+	}
+}
+
+// A blank key keeps the saved key only for the address it was saved for. The
+// write checks this under the row lock, on both save paths, so a key saved
+// after validation, or an address changed since, never ends up paired with
+// another address.
+func TestIntegrationKeyStaysWithItsAddressDatabase(t *testing.T) {
+	repo := editorTestRepository(t)
+	ctx := t.Context()
+	keyed := Integration{ID: "keyed", Name: "Keyed", Enabled: true, BaseURL: "http://radarr.invalid:7878/", APIKeyRef: "secret-key", CapabilityID: "arr", InstallationID: new(1)}
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, keyed, true); err != nil {
+		t.Fatal(err)
+	}
+	keyless := Integration{ID: "keyless", Name: "Keyless", Enabled: true, CapabilityID: "local", InstallationID: new(2)}
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, keyless, true); err != nil {
+		t.Fatal(err)
+	}
+	refused := func(err error) bool {
+		var ve *ValidationError
+		return errors.As(err, &ve) && ve.FieldErrors[fieldAPIKey] == integrationKeyReentry
+	}
+
+	// The same address, written another way, keeps the key.
+	same := keyed
+	same.APIKeyRef, same.BaseURL = "", "radarr.invalid:7878"
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, same, false); err != nil {
+		t.Fatalf("same address: %v", err)
+	}
+	// Another address without the key is refused, and the row is unchanged.
+	moved := keyed
+	moved.APIKeyRef, moved.BaseURL = "", "http://elsewhere.invalid"
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, moved, false); !refused(err) {
+		t.Fatalf("new address without the key: %v, want the re-enter error", err)
+	}
+	current, err := repo.GetIntegration(ctx, keyed.ID)
+	if err != nil || current.BaseURL != same.BaseURL || current.APIKeyRef != keyed.APIKeyRef {
+		t.Fatalf("after the refused save: %+v %v", current, err)
+	}
+	edit := *current
+	edit.APIKeyRef, edit.BaseURL = "", "http://elsewhere.invalid"
+	if _, err = repo.UpdateIntegrationConditional(ctx, edit, current.Revision); !refused(err) {
+		t.Fatalf("conditional save of a new address without the key: %v, want the re-enter error", err)
+	}
+	// Clearing the address is a change of address too.
+	cleared := *current
+	cleared.APIKeyRef, cleared.BaseURL = "", ""
+	if _, err = repo.SaveIntegrationWithDefaults(ctx, cleared, false); !refused(err) {
+		t.Fatalf("cleared address without the key: %v, want the re-enter error", err)
+	}
+	// With the key typed again, the address can change.
+	moved.APIKeyRef = keyed.APIKeyRef
+	if _, err = repo.SaveIntegrationWithDefaults(ctx, moved, false); err != nil {
+		t.Fatalf("new address with the key: %v", err)
+	}
+	// A server saved without a key has none to keep, so its address can change.
+	keyless.BaseURL = "http://local.invalid"
+	if _, err = repo.SaveIntegrationWithDefaults(ctx, keyless, false); err != nil {
+		t.Fatalf("keyless server's new address: %v", err)
 	}
 }

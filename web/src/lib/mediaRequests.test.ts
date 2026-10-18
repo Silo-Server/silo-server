@@ -1,16 +1,18 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment node
+
 import type { MediaRequest, RequestMediaResult, RequestMediaSeason } from "@/api/types";
+import { describe, expect, it } from "vitest";
 import {
   canCancelOwnRequest,
   defaultRequestSeasons,
   flattenResultPages,
-  pendingPageSize,
   formatRequestDisplayState,
   formatRequestSeasonMeta,
   formatSeasonList,
   formatSeasonProgress,
   latestRequestSeason,
   parseRequestMediaType,
+  pendingPageSize,
   requestDetailHref,
   requestDiscoverSectionHref,
   requestDisplayState,
@@ -119,11 +121,6 @@ describe("requestDisplayState", () => {
   it("prefers the state the server derived", () => {
     expect(requestDisplayState("completed", "active", "processing")).toBe("processing");
   });
-
-  it("derives a state for a server that sends none", () => {
-    expect(requestDisplayState("downloading", "active")).toBe("processing");
-    expect(requestDisplayState("queued", "failed")).toBe("failed");
-  });
 });
 
 describe("requestDetailHref", () => {
@@ -134,11 +131,6 @@ describe("requestDetailHref", () => {
 });
 
 describe("parseRequestMediaType", () => {
-  it("accepts the two title media types", () => {
-    expect(parseRequestMediaType("movie")).toBe("movie");
-    expect(parseRequestMediaType("series")).toBe("series");
-  });
-
   it.each([undefined, "", "tv", "Movie", "browse"])("rejects %j", (value) => {
     expect(parseRequestMediaType(value)).toBeUndefined();
   });

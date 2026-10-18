@@ -28,7 +28,8 @@ func TestItemDetailSubtitlePreferenceCarriesIntoPlayback(t *testing.T) {
 			{name: "off overrides file default", mode: "off", audio: "en", fileDefault: true, want: -1},
 			{name: "forced only", mode: "off", audio: "en", forced: true, trackForced: true, want: 2},
 			{name: "forced hidden", mode: "always", audio: "en", trackForced: true, want: -1},
-			{name: "downloaded preferred", mode: "always", audio: "en", forced: true, downloaded: true, want: 4},
+			{name: "embedded preferred over downloaded", mode: "always", audio: "en", forced: true, downloaded: true, want: 2},
+			{name: "downloaded fills in for a hidden forced track", mode: "always", audio: "en", trackForced: true, downloaded: true, want: 4},
 		} {
 			t.Run(kind+"/"+tc.name, func(t *testing.T) {
 				version := catalog.FileVersion{FileID: 42, Container: "mkv", Duration: 100,

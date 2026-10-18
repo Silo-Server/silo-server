@@ -64,6 +64,10 @@ type StreamHandler struct {
 	// PlaybackHandler's); an aborted session's attempt row is marked stopped
 	// through it. May be nil (tests / minimal setups).
 	PlanStoreV3 playback.PlanStoreV3
+	// SessionRecipeStore is the PlaybackHandler's store of header-authenticated
+	// session recipes (same instance), the only reconstruction source for a
+	// session whose URLs carry no stream token. May be nil.
+	SessionRecipeStore sessionRecipeStoreV3
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
@@ -79,6 +83,19 @@ type StreamHandler struct {
 	SubtitleCache *playback.SubtitleCache
 	SubtitleRepo  subtitles.Repository // optional; enables S3-sourced subtitles
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// ExternalTimings finds sidecar timing corrections; nil serves sidecars as
+	// they are on disk.
+	ExternalTimings subtitles.ExternalTimingLookup
+	// PlaySync aligns a subtitle the first time a player is served it, when
+	// it was never synced; nil leaves that to a request.
+	PlaySync subtitles.PlaySyncer
+}
+
+// subtitlePlayed hands a subtitle a player is being served to PlaySync.
+func (h *StreamHandler) subtitlePlayed(r *http.Request, target subtitles.SyncTarget) {
+	if h.PlaySync != nil {
+		h.PlaySync.SubtitlePlayed(r.Context(), target)
+	}
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -137,9 +154,20 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		// let stale recipe routing override the current session, and do not revive
 		// the stale recipe if the live session disappears during this request.
 		loadCard = nil
-	} else if errors.Is(err, playback.ErrSessionNotFound) && !requireNativeRecipeAPIEgressV3(w, card) {
-		return
-	} else if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+	} else if errors.Is(err, playback.ErrSessionNotFound) {
+		if loadCard == nil {
+			// A header-authenticated session carries no token; its recipe is the
+			// server-side recovery card.
+			var recipeErr error
+			if loadCard, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, userID); recipeErr != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+				return
+			}
+		}
+		if !requireNativeRecipeAPIEgressV3(w, loadCard) {
+			return
+		}
+	} else {
 		// Do not turn an inconsistent backend read into authority to reconstruct
 		// from a recipe whose route was never checked against a clean miss.
 		loadCard = nil
@@ -248,14 +276,15 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		// source buffer whose advertised type its probe rejected — so the
 		// response has to keep the same promise the plan made.
 		if err := playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
-			DVMode:                 session.RemuxDVMode,
-			FFmpegPath:             h.ffmpegPath(),
-			ContentType:            playback.RemuxContentType(file.IsAudioOnly()),
-			AudioOnly:              file.IsAudioOnly(),
-			SourceAudioChannels:    session.SourceAudioChannels,
-			TargetAudioChannels:    session.TargetAudioChannels,
-			TargetAudioBitrateKbps: session.TargetAudioBitrateKbps,
-			Abort:                  abort,
+			DVMode:                    session.RemuxDVMode,
+			FFmpegPath:                h.ffmpegPath(),
+			DropResumeLeadingPictures: session.RemuxResumeLeadingPictureDrop,
+			ContentType:               playback.RemuxContentType(file.IsAudioOnly()),
+			AudioOnly:                 file.IsAudioOnly(),
+			SourceAudioChannels:       session.SourceAudioChannels,
+			TargetAudioChannels:       session.TargetAudioChannels,
+			TargetAudioBitrateKbps:    session.TargetAudioBitrateKbps,
+			Abort:                     abort,
 		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
@@ -281,6 +310,12 @@ func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessi
 		loadCard = nil
 	} else if !errors.Is(err, playback.ErrSessionNotFound) {
 		loadCard = nil
+	} else if loadCard == nil {
+		// A header-authenticated session's sidecar URLs carry no reference either.
+		var recipeErr error
+		if loadCard, recipeErr = h.storedSessionRecipeV3(ctx, sessionID, userID); recipeErr != nil {
+			return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+		}
 	}
 	session, status, _ := h.TM.LoadOrReconstructSessionDetail(ctx, h.sessionMgr.GetSession, sessionID, userID, loadCard)
 	switch status {
@@ -411,29 +446,24 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Serve ASS/SSA external subtitles as raw data for client-side
-		// rendering, and SRT the same way when the URL asks for .srt.
-		if servesOriginalSubRip(r, sub.Format, requestedFormat) {
-			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
+		// A sidecar's timing correction can change behind the same URL.
+		w.Header().Set("Cache-Control", "private, no-cache")
+		if subtitles.SupportsRetime(subtitles.SubtitleFormat(sub.Format)) {
+			data, err := playback.LoadExternalSubtitle(r.Context(), h.ExternalTimings, file.ID, sub)
 			if err != nil {
+				slog.ErrorContext(r.Context(), "load sidecar subtitle failed", "component", "api",
+					"file_id", file.ID, "error", err)
 				writeError(w, http.StatusInternalServerError, "internal_error",
 					"Failed to load external subtitle")
 				return
 			}
-			serveOriginalSubRip(w, data)
-			return
-		}
-		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
-			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal_error",
-					"Failed to load external subtitle")
-				return
-			}
-			playback.ServeSubtitle(w, data, subtitleFormatASS)
+			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, ExternalPath: sub.Path})
+			h.serveSubtitleData(w, r, sub.Format, data, requestedFormat)
 			return
 		}
 
+		// Other formats (MicroDVD .sub) cannot be retimed; ffmpeg converts
+		// them from the file.
 		vttData, err := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.ffmpegPath())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error",
@@ -519,6 +549,9 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
 		return
 	}
+	// Both routes to a stored subtitle (the pinned ID and the ordinal) are
+	// plays; callers answer HEAD requests before this.
+	h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: subtitle.MediaFileID, StoredID: subtitle.ID})
 	// The stored timing correction can change behind the same URL; a player
 	// refetching after a sync or reset must not get a cached copy.
 	w.Header().Set("Cache-Control", "private, no-cache")
@@ -531,26 +564,30 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to prepare subtitle")
 		return
 	}
+	h.serveSubtitleData(w, r, string(subtitle.Format), data, requestedFormat)
+}
 
-	// Serve ASS/SSA downloaded subtitles as raw data, and SRT the same way
-	// when the URL asks for .srt.
-	if servesOriginalSubRip(r, string(subtitle.Format), requestedFormat) {
+// serveSubtitleData answers a subtitle request from text subtitle bytes that
+// already carry their timing correction: ASS/SSA raw, and SRT as stored when
+// the URL asks for .srt; anything else as WebVTT.
+func (h *StreamHandler) serveSubtitleData(w http.ResponseWriter, r *http.Request, format string, data []byte, requestedFormat string) {
+	if servesOriginalSubRip(r, format, requestedFormat) {
 		serveOriginalSubRip(w, data)
 		return
 	}
-	if playback.IsASS(string(subtitle.Format)) && requestedFormat != "vtt" {
+	if playback.IsASS(format) && requestedFormat != subtitleFormatVTTV3 {
 		playback.ServeSubtitle(w, data, subtitleFormatASS)
 		return
 	}
 
 	// If the subtitle is already VTT, serve directly.
-	if subtitle.Format == subtitles.FormatVTT {
+	if subtitles.SubtitleFormat(strings.ToLower(format)) == subtitles.FormatVTT {
 		serveSubtitleVTT(w, data)
 		return
 	}
 
 	// Convert other text formats to VTT using the playback conversion pipeline.
-	vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(subtitle.Format), h.ffmpegPath())
+	vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, format, h.ffmpegPath())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
 		return
@@ -794,6 +831,7 @@ func (h *StreamHandler) abortPlaybackSession(ctx context.Context, session *playb
 	}
 	h.finalizeSessionAbort(ctx, session, true, "stream_abort")
 	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID)
+	deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
 }
 
 func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session *playback.Session, file *models.MediaFile, err error) {

@@ -10,6 +10,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -225,7 +226,7 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(ctx context.Context, v It
 		season,
 		episodes,
 		h.items.getAggregateUserData(ctx, v, episodes),
-		filter.ImageSize,
+		filter.ImageSizeFor(imagesize.SlotPoster),
 	)
 	return &catalog.ItemDetail{
 		ContentID:         seasonID,
@@ -263,8 +264,9 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 			SeriesID:     detail.SeriesID,
 			SeasonNumber: detail.SeasonNumber,
 		}
-		playTargets := h.items.resolvePlayableTargetInputs(ctx, v, []catalog.PlayableTargetInput{input}, nil, v.Access)
-		detail.PlayContentID = playTargets[input.Key()]
+		target := h.items.resolvePlayableTargets(ctx, v, []catalog.PlayableTargetInput{input}, nil, v.Access)[input.Key()]
+		detail.PlayContentID = target.ContentID
+		detail.PlaySeasonNumber = target.SeasonNumber
 	}
 
 	switch detail.Type {
@@ -319,11 +321,16 @@ func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemVi
 	if err != nil {
 		return
 	}
+	notInterested, err := store.GetNotInterested(ctx, profileID, detail.ContentID)
+	if err != nil {
+		return
+	}
 
 	detail.UserState = &catalog.ItemUserState{
-		Played:      detail.SeasonUserData != nil && detail.SeasonUserData.Played,
-		IsFavorite:  isFavorite,
-		InWatchlist: inWatchlist,
+		Played:        detail.SeasonUserData != nil && detail.SeasonUserData.Played,
+		IsFavorite:    isFavorite,
+		InWatchlist:   inWatchlist,
+		NotInterested: notInterested != nil,
 	}
 
 	if h.items.ratingsRepo == nil {

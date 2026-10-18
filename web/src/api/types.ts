@@ -485,6 +485,7 @@ export interface CreateHistoryImportRunRequest {
   plex_session_id?: string;
   plex_server_id?: string;
   plex_base_url?: string;
+  plex_base_urls?: string[];
   plex_token?: string;
   plex_account_token?: string;
 }
@@ -732,6 +733,8 @@ export interface Season {
   poster_url: string;
   poster_thumbhash: string;
   user_data?: SeasonUserData;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface SeasonsResponse {
@@ -765,6 +768,8 @@ export interface MediaItemUserState {
   played: boolean;
   is_favorite: boolean;
   in_watchlist: boolean;
+  /** The profile marked the movie or series Not interested. */
+  not_interested?: boolean;
 }
 
 export interface BrowseItemSortMetrics {
@@ -806,6 +811,8 @@ export interface BrowseItem {
   rating_rt_audience?: number | null;
   original_language?: string;
   overview: string;
+  poster_is_episode_still?: boolean;
+  backdrop_is_episode_still?: boolean;
   poster_url: string;
   poster_thumbhash: string;
   backdrop_url: string;
@@ -1033,6 +1040,9 @@ export interface TimeRange {
 export type MarkerKind = "intro" | "credits" | "recap" | "preview";
 
 export interface MarkerOccurrence {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start_seconds: number;
   end_seconds: number;
@@ -1132,6 +1142,8 @@ export interface ItemDetail {
   };
   content_id: string;
   play_content_id?: string;
+  /** The season of `play_content_id` when it is an episode. */
+  play_season_number?: number;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
@@ -1148,6 +1160,11 @@ export interface ItemDetail {
    * keys off this.
    */
   pending_translation_language?: string;
+  /**
+   * Localized fields ("overview", "tagline") whose text was machine-translated
+   * by AI rather than supplied by a metadata provider or a person.
+   */
+  machine_translated_fields?: string[];
   runtime: number;
   content_rating: string;
   /**
@@ -1184,6 +1201,8 @@ export interface ItemDetail {
   air_timezone?: string | null;
 
   // Presigned image URLs.
+  poster_is_episode_still?: boolean;
+  backdrop_is_episode_still?: boolean;
   poster_url: string;
   poster_thumbhash: string;
   backdrop_url: string;
@@ -1282,6 +1301,8 @@ export interface EpisodeFile {
   audio_channels: number;
   container: string;
   file_size: number;
+  /** True when the server could not read the file (empty, corrupt, or truncated). */
+  unreadable?: boolean;
 }
 
 export interface EpisodeListItem {
@@ -1295,11 +1316,16 @@ export interface EpisodeListItem {
   imdb_id?: string;
   tmdb_id?: string;
   tvdb_id?: string;
+  still_is_episode_still?: boolean;
   still_url: string;
   still_thumbhash: string;
   user_data?: LeafItemUserData;
   files: EpisodeFile[];
   overlay_summary?: OverlaySummary | null;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
+  /** This profile's language when the episode's description is not in it yet. */
+  pending_translation_language?: string;
 }
 
 export interface EpisodesResponse {
@@ -1307,7 +1333,7 @@ export interface EpisodesResponse {
 }
 
 // Collections
-export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb";
 
 export type UserCollectionSyncStatus = "" | "running" | "success" | "failed" | "warning";
 // UI-only presets for the two display-filter dropdowns. They no longer map to
@@ -1325,15 +1351,18 @@ export interface Collection {
   name: string;
   description?: string;
   collection_type: UserCollectionType;
+  /** Every profile on the login sees the collection read-only; otherwise only its creator. */
   is_shared: boolean;
-  allowed_profile_ids: string[];
   query_definition: QueryDefinition;
   sort_config: Record<string, unknown>;
+  /** Position in the creator's own order of collections. */
   sort_order: number;
   group_id?: string | null;
   source_url?: string;
   source_config?: Record<string, unknown>;
   sync_schedule?: string;
+  /** The cadence `sync_schedule` names; "custom" for a schedule no name produces. */
+  sync_cadence?: UserCollectionSyncCadence;
   next_sync_at?: string;
   last_sync_at?: string;
   last_sync_status?: UserCollectionSyncStatus;
@@ -1344,6 +1373,10 @@ export interface Collection {
   include_in_server_collections?: boolean;
   poster_url?: string;
   poster_thumbhash?: string;
+  /** `poster_url` is the collage the server made of its titles, not an uploaded or imported image. */
+  poster_is_collage?: boolean;
+  /** Whether it holds the list's `contains_item` title; only on the profile's own manual collections. */
+  contains?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -1368,17 +1401,9 @@ export interface CollectionItem {
   added_at: string;
 }
 
-export interface CollectionGroup {
-  id: string;
-  name: string;
-  slug: string;
-  default_sort_mode: GroupSortMode;
-  sort_order: number;
-}
-
 export interface CollectionsListResponse {
+  /** The profile's own collections in its order, then other profiles' shared ones. */
   collections: Collection[];
-  groups: CollectionGroup[];
 }
 
 export interface CollectionCapabilitiesResponse {
@@ -1473,11 +1498,6 @@ export interface QueryDefinitionInput {
   limit?: number;
 }
 
-export interface SmartCollectionAccess {
-  is_shared: boolean;
-  allowed_profile_ids: string[];
-}
-
 export interface CollectionPreviewRequest {
   query_definition: QueryDefinition;
   limit?: number;
@@ -1496,9 +1516,10 @@ export interface CollectionPreviewResponse {
 
 export interface CreateCollectionRequest {
   name: string;
+  /** Accepted when collection capabilities report `create_description`. */
+  description?: string;
   collection_type?: "manual" | "smart";
   is_shared?: boolean;
-  allowed_profile_ids?: string[];
   query_definition?: QueryDefinition;
   sort_config?: Record<string, unknown>;
   /** Filter-only QueryDefinition fragment; omit for no display filter. */
@@ -1511,7 +1532,6 @@ export interface UpdateCollectionRequest {
   name?: string;
   description?: string;
   is_shared?: boolean;
-  allowed_profile_ids?: string[];
   query_definition?: QueryDefinition;
   sort_config?: Record<string, unknown>;
   source_url?: string;
@@ -1523,6 +1543,8 @@ export interface UpdateCollectionRequest {
   include_in_server_collections?: boolean;
   poster_source_url?: string;
   group_id?: string | null;
+  /** A synced list's cadence; "" stops scheduled syncs. */
+  sync_schedule?: UserCollectionSyncSchedule;
 }
 
 export interface LibraryCollection {
@@ -1532,7 +1554,7 @@ export interface LibraryCollection {
   slug: string;
   title: string;
   description: string;
-  collection_type: "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+  collection_type: "manual" | "smart" | "mdblist" | "tmdb";
   visibility: "visible" | "hidden";
   sort_order: number;
   group_id?: string | null;
@@ -1541,6 +1563,8 @@ export interface LibraryCollection {
   backdrop_url: string;
   poster_thumbhash?: string;
   backdrop_thumbhash?: string;
+  /** `poster_url` is the collage the server made of its members, not an uploaded or template image. */
+  poster_is_collage?: boolean;
   source_url: string;
   query_definition: QueryDefinition;
   sort_config: Record<string, unknown>;
@@ -1554,6 +1578,10 @@ export interface LibraryCollection {
   sync_schedule?: string;
   next_sync_at?: string;
   item_count: number;
+  /** Admin list only: turned-on Home rows that show it. */
+  home_row_count?: number;
+  /** Admin list only: Home and library page rows that show it, turned-off ones included. */
+  row_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -1596,7 +1624,7 @@ export interface CreateLibraryCollectionRequest {
   slug?: string;
   title: string;
   description?: string;
-  collection_type?: "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+  collection_type?: "manual" | "smart" | "mdblist" | "tmdb";
   visibility?: "visible" | "hidden";
   sort_order?: number;
   group_id?: string | null;
@@ -1726,39 +1754,11 @@ export interface ImportTMDBCollectionResponse {
   sync_run?: LibraryCollectionSyncRun;
 }
 
-export interface ImportTraktCollectionRequest {
-  library_id?: number;
-  library_ids?: number[];
-  title: string;
-  description?: string;
-  // preset/media_type drive a discovery-feed collection; list_url drives a
-  // user-authored Trakt list. Exactly one path is used per request.
-  preset?: "trending" | "popular" | "recommended";
-  media_type?: "movie" | "tv";
-  profile_id?: string;
-  list_url?: string;
-  limit?: number;
-  featured?: boolean;
-  poster_url?: string;
-  poster_source_url?: string;
-  backdrop_source_url?: string;
-  sync_schedule?: string;
-  management_mode?: LibraryCollectionManagementMode;
-  management_source?: string;
-  management_key?: string;
-  /** Default order viewers land on; `{}` keeps the source list's own order. */
-  sort_config?: CollectionSortConfig;
-}
-
-export interface ImportTraktCollectionResponse {
-  collection: LibraryCollection;
-  sync_run?: LibraryCollectionSyncRun;
-}
-
 // User-facing imports omit library_ids / featured / visibility (server-wide
 // concerns). sync_schedule is restricted to a fixed set so we can guarantee
 // the >=24h minimum interval without parsing user-supplied cron.
 export type UserCollectionSyncSchedule = "" | "daily" | "weekly" | "monthly";
+export type UserCollectionSyncCadence = UserCollectionSyncSchedule | "custom";
 
 export interface UserImportSharedFields {
   title: string;
@@ -1773,10 +1773,6 @@ export interface UserImportSharedFields {
   library_ids?: number[];
   /** Default order viewers land on; `{}` keeps the source list's own order. */
   sort_config?: CollectionSortConfig;
-}
-
-export interface ImportUserMDBListCollectionRequest extends UserImportSharedFields {
-  url: string;
 }
 
 export interface MDBListListSummary {
@@ -1799,17 +1795,6 @@ export interface MDBListDiscoveryResponse {
   lists: MDBListListSummary[];
 }
 
-export interface ImportUserTMDBCollectionRequest extends UserImportSharedFields {
-  preset: ImportTMDBCollectionRequest["preset"];
-  media_type: ImportTMDBCollectionRequest["media_type"];
-  time_window?: ImportTMDBCollectionRequest["time_window"];
-}
-
-export interface ImportUserTMDBListCollectionRequest extends UserImportSharedFields {
-  /** A public TMDB list page URL or its numeric ID. */
-  url: string;
-}
-
 // A completed sync always has a non-empty status; the empty-string variant in
 // UserCollectionSyncStatus only appears on un-synced rows.
 export type UserCollectionSyncResultStatus = Exclude<UserCollectionSyncStatus, "">;
@@ -1821,11 +1806,6 @@ export interface UserCollectionSyncResult {
   items_unmatched: number;
   started_at: string;
   completed_at: string;
-}
-
-export interface ImportUserCollectionResponse {
-  collection: Collection;
-  sync?: UserCollectionSyncResult;
 }
 
 // Media Requests
@@ -2314,6 +2294,7 @@ export interface AutoscanSourceCreateInput {
   poll_interval_seconds?: number | null;
   path_rewrites: AutoscanPathRewrite[];
   source_config?: Record<string, string>;
+  label?: string;
 }
 
 export interface AutoscanConnectionTestInput {
@@ -2380,6 +2361,44 @@ export interface AutoscanStatus {
 
 export type AutoscanEventStatus = "running" | "success" | "error" | "unresolved";
 
+/** Outcome counters of a completed autoscan scan run. */
+export interface AutoscanScanResult {
+  new: number;
+  updated: number;
+  unchanged: number;
+  missing: number;
+  missing_skipped_protected: number;
+  files_deleted: number;
+  items_deleted: number;
+  memberships_removed: number;
+  errors: number;
+  /** Non-zero when the run did not scan because an overlapping scan was in progress. */
+  skipped: number;
+}
+
+export type AutoscanChangeOutcome =
+  | "queued"
+  | "joined"
+  | "suppressed"
+  | "unresolved"
+  | "ignored"
+  | "error";
+
+/** One change an autoscan event received and what the host did with it. */
+export interface AutoscanEventChange {
+  source_path: string;
+  rewritten_path: string;
+  scope?: string;
+  /** A known outcome, or the raw value a newer server sent. */
+  outcome: AutoscanChangeOutcome | (string & {});
+  reason?: string;
+  detail?: string;
+  library_id?: number;
+  target_mode?: string;
+  target_path?: string;
+  scan_run_id?: string;
+}
+
 export interface AutoscanEventScanRun {
   id: string;
   library_id: number;
@@ -2391,6 +2410,7 @@ export interface AutoscanEventScanRun {
   started_at?: string;
   completed_at?: string;
   error_message?: string;
+  result?: AutoscanScanResult;
 }
 
 export interface AutoscanEvent {
@@ -2412,6 +2432,8 @@ export interface AutoscanEvent {
   scans_suppressed: number;
   error_message?: string;
   scan_runs: AutoscanEventScanRun[];
+  changes: AutoscanEventChange[];
+  changes_truncated: boolean;
 }
 
 export interface AutoscanEventsResponse {
@@ -2440,6 +2462,7 @@ export interface AutoscanScan {
   capability_id?: string;
   event_status?: AutoscanEventStatus;
   event_completed_at?: string;
+  result?: AutoscanScanResult;
 }
 
 export interface AutoscanScansResponse {
@@ -2471,6 +2494,8 @@ export interface AccessGroup {
   max_transcodes: number;
   max_remote_stream_bitrate_kbps: number;
   max_local_stream_bitrate_kbps: number;
+  /** Household profiles each member account may have, unless it overrides it. */
+  max_profiles: number;
   allowed_permissions: string[] | null;
   requests_allowed: boolean;
   is_default: boolean;
@@ -2492,6 +2517,7 @@ export interface AccessGroupInput {
   max_transcodes?: number;
   max_remote_stream_bitrate_kbps?: number;
   max_local_stream_bitrate_kbps?: number;
+  max_profiles?: number;
   allowed_permissions?: string[] | null;
   requests_allowed?: boolean;
   is_default?: boolean;
@@ -2507,12 +2533,21 @@ export interface AdminUserEffectivePolicy {
   max_transcodes: number;
   max_remote_stream_bitrate_kbps: number;
   max_local_stream_bitrate_kbps: number;
+  max_profiles: number;
   transcode_allowed: boolean;
   audio_transcode_allowed: boolean;
   download_allowed: boolean;
   download_transcode_allowed: boolean;
   requests_allowed: boolean;
   permissions: string[];
+}
+
+// The built-in layer an ungrouped account resolves its unset policy fields to
+// (GET /api/v2/admin/users/policy-defaults).
+export type AdminPolicyDefaultLayer = Omit<AdminUserEffectivePolicy, "permissions">;
+export interface AdminPolicyDefaults {
+  admin: AdminPolicyDefaultLayer;
+  ungrouped: AdminPolicyDefaultLayer;
 }
 
 export interface AdminUser {
@@ -2531,7 +2566,7 @@ export interface AdminUser {
   max_local_stream_bitrate_kbps: number | null;
   transcode_allowed: boolean | null;
   audio_transcode_allowed: boolean | null;
-  max_profiles: number;
+  max_profiles: number | null;
   download_allowed: boolean | null;
   download_transcode_allowed: boolean | null;
   requests_allowed: boolean | null;
@@ -2602,7 +2637,7 @@ export interface UpdateUserRequest {
   max_local_stream_bitrate_kbps?: number | null;
   transcode_allowed?: boolean | null;
   audio_transcode_allowed?: boolean | null;
-  max_profiles?: number;
+  max_profiles?: number | null;
   download_allowed?: boolean | null;
   download_transcode_allowed?: boolean | null;
   requests_allowed?: boolean | null;
@@ -2705,6 +2740,7 @@ export interface AdminSession {
   source_bitrate_kbps: number | null;
   source_video_codec?: string;
   source_video_resolution?: string;
+  source_video_height?: number;
   source_audio_codec?: string;
   source_audio_channels: number | null;
   source_audio_language?: string;
@@ -2749,6 +2785,10 @@ export interface OperationalLogEntry {
 }
 
 export interface AuditLogEntry {
+  action?: string;
+  target_type?: string;
+  target_id?: string;
+  changes?: { field: string; before?: string; after?: string }[];
   id: number;
   timestamp: string;
   client_ip: string;
@@ -2931,7 +2971,9 @@ export type EventChannel =
   // useSettingValuesRealtime.
   | "user_settings"
   | "settings"
-  | "notifications";
+  | "notifications"
+  // Admin-only changes to the offline-download preparation queue.
+  | "download_preparations";
 
 export interface NotificationReasonFlags {
   // episode.available reasons
@@ -3268,7 +3310,10 @@ export interface AdminDeviceProfileSummary {
 /** One device the signed-in viewer watches on. */
 export interface UserDevice {
   device_id: string;
+  /** The name the device reports for itself. */
   device_name: string;
+  /** The name the profile gave the device; absent when it has none. */
+  custom_name?: string;
   device_platform: string;
   last_seen_at: string;
   profile_id: string;
@@ -3693,6 +3738,8 @@ export interface LibraryProviderChainEntry {
   provider_slug: string;
   priority: number;
   enabled: boolean;
+  /** The built-in local metadata provider (.nfo files and sidecar artwork), always first. */
+  local: boolean;
 }
 
 export interface LibraryProviderChainResponse {
@@ -3801,11 +3848,13 @@ export interface PluginCapability {
   config_schema?: PluginConfigSchema[];
   metadata?: Record<string, unknown>;
   /** How an auth_provider.v1 capability signs people in; absent for other types. */
-  sign_in_mode?: "oauth" | "credentials";
+  sign_in_mode?: "oauth" | "credentials" | "network";
   /** An installation's OAuth sign-in capability: the redirect URI to register at the provider. */
   callback_url?: string;
   /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */
   post_logout_redirect_url?: string;
+  /** A request_router.v1 capability: the request server fields its plugin can do without. */
+  request_router?: { api_key_optional: boolean; base_url_optional: boolean };
 }
 
 export interface PluginRoute {
@@ -4257,6 +4306,10 @@ export interface StreamNode {
   hw_accel_override?: string | null;
   /** Comma-separated render device paths pinned to this node; null inherits. */
   hw_device_override?: string | null;
+  /** This node's own prepared-download directory; absent when inherited. */
+  download_artifact_dir_override?: string | null;
+  /** This node's own prepared-download budget in bytes (0 for none); absent when inherited. */
+  download_artifact_max_bytes_override?: number | null;
   /**
    * Human-readable note describing how this node's hardware got worse at the
    * last capability refetch: a backend that used to pass its probe and now
@@ -4265,6 +4318,16 @@ export interface StreamNode {
    * note on its next refetch. Nothing routes on it.
    */
   capability_drift?: string | null;
+  /**
+   * An administrator asked this transcode node to drain: placement skips it
+   * while its sessions finish. Absent on servers that predate draining.
+   */
+  drain_requested?: boolean;
+  /**
+   * What the node reported on its last health check: draining while it takes
+   * no new work, drained once it has none left. Absent on older servers.
+   */
+  drain_state?: "none" | "draining" | "drained";
 }
 
 export interface CreateNodeRequest {
@@ -4293,6 +4356,10 @@ export interface UpdateNodeRequest {
   // empty string) restores inheritance of the cluster-wide playback setting.
   hw_accel_override?: string | null;
   hw_device_override?: string | null;
+  // Same convention: null restores the inherited directory or budget. The
+  // directory applies when the node restarts.
+  download_artifact_dir_override?: string | null;
+  download_artifact_max_bytes_override?: number | null;
 }
 
 export interface CheckNodeResponse {
@@ -4375,6 +4442,8 @@ export interface SectionItem {
   position_seconds?: number;
   duration_seconds?: number;
   progress_updated_at?: string;
+  poster_is_episode_still?: boolean;
+  backdrop_is_episode_still?: boolean;
   poster_url: string;
   poster_thumbhash: string;
   backdrop_url: string;
@@ -4384,6 +4453,10 @@ export interface SectionItem {
   badges?: string[];
   user_state?: MediaItemUserState;
   upcoming_event?: SectionItemUpcomingEvent | null;
+  /** This profile's language when the card's description is not in it yet. */
+  pending_translation_language?: string;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface ResolvedSection {
@@ -4558,7 +4631,9 @@ export function queryDefinitionFromSectionConfig(
               ? "ebook"
               : config.media_scope === "manga" || config.filter_type === "manga"
                 ? "manga"
-                : undefined;
+                : config.media_scope === "video"
+                  ? "video"
+                  : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;
@@ -4606,6 +4681,8 @@ export interface SettingsSectionEntry {
   id: string;
   section_type: string;
   title: string;
+  /** The admin row's own title; empty for a profile-built row. Absent on entries built locally. */
+  default_title?: string;
   featured: boolean;
   item_limit: number;
   hidden: boolean;
@@ -4740,8 +4817,8 @@ export interface RateLimitConfig {
   active_backend?: string;
   /**
    * Whether the Redis backend can be selected at all (GET responses only).
-   * Sentinel and REDIS_URL deployments have no stored `redis.url`, so only the
-   * server can answer this.
+   * REDIS_URL deployments have no stored `redis.url`, so only the server can
+   * answer this.
    */
   redis_available?: boolean;
 }
@@ -4927,6 +5004,13 @@ export interface AdminTimeseries {
   from: string;
   to: string;
   oldest_sample_at: string | null;
+  // Data transferred over the whole window, integrated server-side from every
+  // sampled minute (not from `points`, which are per-bucket peaks). An estimate:
+  // node egress is a rolling average and unsampled minutes count as nothing.
+  // v2 only (advertised by the `egress_totals` dashboard capability); optional
+  // because older servers do not send it.
+  egress_bytes?: number;
+  download_egress_bytes?: number;
   points: AdminTimeseriesPoint[];
 }
 
@@ -5257,6 +5341,8 @@ export interface UnmatchedLibraryItem {
   library_id: number;
   library_name: string;
   status: string;
+  /** When an admin marked the item as intentionally unmatched; absent unless ignored. */
+  ignored_at?: string;
 }
 
 export interface FilesystemBrowseEntry {

@@ -326,32 +326,6 @@ func TestInferGroupAssignments_FileOverrideBeatsRootOverride(t *testing.T) {
 	}
 }
 
-func TestInferGroupAssignments_OverridesConvergeAcrossRescans(t *testing.T) {
-	t.Parallel()
-
-	filePaths := []string{
-		"/Media/Movies/The Thing (1982)/The Thing (1982).mkv",
-		"/Media/Movies/The Thing (1982)/The Thing (1982) Remaster.mkv",
-	}
-	overrides := []models.MediaIdentityOverride{{
-		MediaFolderID: 1,
-		Scope:         "file",
-		FilePath:      filePaths[1],
-		ForcedTmdbID:  "1091",
-	}}
-
-	rootInference := inferRootAssignments(filePaths, "movies", 1, nil)
-	first := inferGroupAssignments(filePaths, "movies", 1, rootInference.Assignments, newIdentityOverrideSet(overrides))
-	second := inferGroupAssignments(filePaths, "movies", 1, rootInference.Assignments, newIdentityOverrideSet(overrides))
-
-	for _, path := range filePaths {
-		if first.Assignments[path].ContentGroupKey != second.Assignments[path].ContentGroupKey {
-			t.Fatalf("group key for %s not stable across rescans: %q != %q",
-				path, first.Assignments[path].ContentGroupKey, second.Assignments[path].ContentGroupKey)
-		}
-	}
-}
-
 func TestInferGroupAssignments_StructuredTagsAnchorGroupKeys(t *testing.T) {
 	t.Parallel()
 

@@ -155,6 +155,10 @@ func TestImageCacheDiscoverySurfacesUseBoundedNativeKeyPages(t *testing.T) {
 		{"FROM season_localizations\n\t\t\t\tWHERE (season_content_id, language) > ($2, $3)\n\t\t\t\tORDER BY season_content_id, language\n\t\t\t\tLIMIT $1\n\t\t\t) loc", "loc.poster_source_path", "loc.poster_path", []string{"LEFT JOIN seasons s", "LEFT JOIN media_items mi"}},
 		{"FROM episodes\n\t\t\t\tWHERE content_id > $2\n\t\t\t\tORDER BY content_id\n\t\t\t\tLIMIT $1\n\t\t\t) e", "e.still_source_path", "e.still_path", []string{"LEFT JOIN media_items mi"}},
 		{"FROM people\n\t\t\t\tWHERE id > $2\n\t\t\t\tORDER BY id\n\t\t\t\tLIMIT $1\n\t\t\t) p", "p.photo_source_path", "p.photo_path", nil},
+		{"FROM media_items\n\t\t\t\tWHERE content_id > $2\n\t\t\t\tORDER BY content_id\n\t\t\t\tLIMIT $1\n\t\t\t) mi", "mi.banner_source_path", "mi.banner_path", nil},
+		{"FROM media_items\n\t\t\t\tWHERE content_id > $2\n\t\t\t\tORDER BY content_id\n\t\t\t\tLIMIT $1\n\t\t\t) mi", "mi.thumb_source_path", "mi.thumb_path", nil},
+		{"FROM media_items\n\t\t\t\tWHERE content_id > $2\n\t\t\t\tORDER BY content_id\n\t\t\t\tLIMIT $1\n\t\t\t) mi", "mi.clearart_source_path", "mi.clearart_path", nil},
+		{"FROM media_items\n\t\t\t\tWHERE content_id > $2\n\t\t\t\tORDER BY content_id\n\t\t\t\tLIMIT $1\n\t\t\t) mi", "mi.disc_source_path", "mi.disc_path", nil},
 	}
 	for surface := 0; surface < imageCacheDiscoverySurfaceCount; surface++ {
 		shape := shapes[surface]

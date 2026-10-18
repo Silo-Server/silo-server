@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCatalogFiltersOk from "../../../../contracts/api/v2/fixtures/get_catalog_filters_ok.json";
 import { setProfileId } from "@/api/client";
+import { createEmptyQueryDefinition } from "@/api/types";
 import type { V2Body } from "@/api/v2/request";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
@@ -55,6 +56,13 @@ function catalogTransport() {
   });
   vi.stubGlobal("fetch", fetchMock);
   return { requests, fetchMock, reply };
+}
+
+function titleOrderedLibrary(): CatalogSearchState {
+  return createCatalogSearchState("query", {
+    library_id: 7,
+    query_definition: { ...createEmptyQueryDefinition(), sort: { field: "title", order: "asc" } },
+  });
 }
 
 describe("catalog window cursor paging", () => {
@@ -138,6 +146,105 @@ describe("catalog window cursor paging", () => {
     expect(requests[4]?.body.seek).toBeUndefined();
   });
 
+  it("seeks once for a distant title-ordered window and continues its later pages from cursors", async () => {
+    const { requests, fetchMock, reply } = catalogTransport();
+    const pending: (() => void)[] = [];
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as CatalogQueryBody;
+      requests.push({ body, signal: options?.signal });
+      if (!body.seek) return reply(body);
+      return new Promise((resolve) => pending.push(() => resolve(reply(body))));
+    });
+    const { wrapper } = makeClient();
+    const state = titleOrderedLibrary();
+    const { result, rerender } = renderHook(
+      ({ visibleRange }) =>
+        useCatalogWindow(state, { limit: 2, includeTotal: false, visibleRange }),
+      { wrapper, initialProps: { visibleRange: [100, 105] as [number, number] } },
+    );
+    await waitFor(() => expect(pending).toHaveLength(1));
+    expect(requests.slice(1).map(({ body }) => body.seek)).toEqual([100]);
+    expect(requests[1]?.body.cursor).toMatch(/^root:/);
+    await act(async () => pending.shift()!());
+    await waitFor(() => expect(result.current.data.pages.get(53)).toHaveLength(2));
+    // Pages 51-53 continue from cursors; only the page above seeks.
+    expect(
+      requests
+        .slice(2)
+        .filter(({ body }) => body.seek === undefined)
+        .map(({ body }) => body.cursor?.split(":")[1]),
+    ).toEqual(["102", "104", "106"]);
+    expect(
+      requests
+        .slice(2)
+        .map(({ body }) => body.seek)
+        .filter(Boolean),
+    ).toEqual([98]);
+    expect(
+      [50, 51, 52].flatMap((page) =>
+        result.current.data.pages.get(page)!.map((item) => item.content_id),
+      ),
+    ).toEqual(["item-100", "item-101", "item-102", "item-103", "item-104", "item-105"]);
+
+    rerender({ visibleRange: [106, 107] });
+    await waitFor(() => expect(result.current.data.pages.get(54)).toHaveLength(2));
+    expect(requests.at(-1)?.body.cursor).toMatch(/^next:108:/);
+    expect(requests.at(-1)?.body.seek).toBeUndefined();
+  });
+
+  it("loads the page above a jump after the first visible page", async () => {
+    const { requests, fetchMock, reply } = catalogTransport();
+    const pending: (() => void)[] = [];
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as CatalogQueryBody;
+      requests.push({ body, signal: options?.signal });
+      if (!body.seek) return reply(body);
+      return new Promise((resolve) => pending.push(() => resolve(reply(body))));
+    });
+    const { wrapper } = makeClient();
+    // A library browse keeps a buffer page on each side of the window.
+    const state = titleOrderedLibrary();
+    const { result } = renderHook(
+      ({ visibleRange }) =>
+        useCatalogWindow(state, { limit: 2, includeTotal: false, visibleRange }),
+      { wrapper, initialProps: { visibleRange: [100, 101] as [number, number] } },
+    );
+    await waitFor(() => expect(pending).toHaveLength(1));
+    expect(requests.slice(1).map(({ body }) => body.seek)).toEqual([100]);
+    await act(async () => pending.shift()!());
+    await waitFor(() => expect(pending).toHaveLength(1));
+    expect(requests.slice(2).map(({ body }) => body.seek ?? body.cursor?.split(":")[1])).toEqual(
+      expect.arrayContaining(["102", 98]),
+    );
+    await act(async () => pending.shift()!());
+    await waitFor(() => expect(result.current.data.pages.get(49)).toHaveLength(2));
+    expect(result.current.data.pages.get(51)?.map((item) => item.content_id)).toEqual([
+      "item-102",
+      "item-103",
+    ]);
+    expect(requests.filter(({ body }) => body.seek !== undefined)).toHaveLength(2);
+  });
+
+  it("seeks when the page before it fails", async () => {
+    const { requests, fetchMock, reply } = catalogTransport();
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as CatalogQueryBody;
+      requests.push({ body, signal: options?.signal });
+      if (body.seek === 100) return jsonResponse({ title: "boom", status: 500 }, 500);
+      return reply(body);
+    });
+    const { wrapper } = makeClient();
+    const state = titleOrderedLibrary();
+    const { result } = renderHook(
+      ({ visibleRange }) =>
+        useCatalogWindow(state, { limit: 2, includeTotal: false, visibleRange }),
+      { wrapper, initialProps: { visibleRange: [100, 103] as [number, number] } },
+    );
+    await waitFor(() => expect(result.current.data.pages.get(51)).toHaveLength(2));
+    expect(requests.find(({ body }) => body.seek === 102)).toBeDefined();
+    expect(result.current.data.pages.get(50)).toBeUndefined();
+  });
+
   it("seeks when the adjacent cached page has been invalidated", async () => {
     const { requests } = catalogTransport();
     const { wrapper, queryClient } = makeClient();
@@ -176,6 +283,42 @@ describe("catalog window cursor paging", () => {
     expect(requests[4]?.body.cursor).toMatch(/^next:4:/);
     expect(requests[4]?.body.cursor).not.toContain(oldCursor!.replace(/^next:\d+:/, ""));
     expect(requests[4]?.body.seek).toBeUndefined();
+  });
+
+  it("keeps showing a loaded page while it reloads under a new snapshot", async () => {
+    const { fetchMock, reply } = catalogTransport();
+    let releaseHeld: (() => void) | undefined;
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as CatalogQueryBody;
+      // Hold page 1 only once it is read under page 0's second snapshot.
+      const offset = body.seek ?? Number(body.cursor?.match(/^next:(\d+):/)?.[1] ?? 0);
+      if (offset === 2 && body.cursor?.endsWith(":2")) {
+        await new Promise<void>((resolve) => (releaseHeld = resolve));
+      }
+      return reply(body);
+    });
+    const { wrapper, queryClient } = makeClient();
+    const state = createCatalogSearchState("history");
+    const { result } = renderHook(
+      () => useCatalogWindow(state, { limit: 2, includeTotal: false, visibleRange: [2, 3] }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.data.pages.get(1)).toHaveLength(2));
+
+    // A realtime event invalidates the list. Page 0 comes back under a new
+    // snapshot, which re-keys page 1.
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["catalog"] });
+    });
+    await waitFor(() => expect(releaseHeld).toBeDefined());
+    expect(result.current.data.pages.get(1)?.map((item) => item.content_id)).toEqual([
+      "item-2",
+      "item-3",
+    ]);
+
+    act(() => releaseHeld!());
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(result.current.data.pages.get(1)).toHaveLength(2);
   });
 
   it.each([

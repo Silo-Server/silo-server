@@ -71,9 +71,10 @@ func enabledParityHandler(t *testing.T) *StreamTelemetryParityHandler {
 	}
 }
 
-// A source that cannot be read must report itself unavailable with a reason.
-// Omitting it would read as "there was nothing to compare against".
-func TestStreamTelemetryParityReportsUnreadableSources(t *testing.T) {
+// The completeness flag has to travel with the diff: a degraded view is missing
+// sessions by construction, so a parity report built on one is evidence of
+// blindness rather than disagreement.
+func TestStreamTelemetryParitySurfacesViewCompleteness(t *testing.T) {
 	response := serveParity(t, enabledParityHandler(t))
 	if !response.Enabled {
 		t.Fatalf("response = %+v", response)
@@ -102,13 +103,6 @@ func TestStreamTelemetryParityReportsUnreadableSources(t *testing.T) {
 			t.Fatalf("source %q was omitted from the response entirely", name)
 		}
 	}
-}
-
-// The completeness flag has to travel with the diff: a degraded view is missing
-// sessions by construction, so a parity report built on one is evidence of
-// blindness rather than disagreement.
-func TestStreamTelemetryParitySurfacesViewCompleteness(t *testing.T) {
-	response := serveParity(t, enabledParityHandler(t))
 	if !response.View.Available {
 		t.Fatalf("view = %+v", response.View)
 	}

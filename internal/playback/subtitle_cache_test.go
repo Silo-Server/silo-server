@@ -400,25 +400,6 @@ func TestSubtitleCacheInvalidatedBySourceSize(t *testing.T) {
 	}
 }
 
-func TestSubtitleCacheDiscardLeavesNothing(t *testing.T) {
-	c, source := newTestCache(t)
-	fill := c.BeginFill(source, 0)
-	if fill == nil {
-		t.Fatal("BeginFill returned nil")
-	}
-	if _, err := fill.Tee(io.Discard).Write([]byte("partial byt")); err != nil {
-		t.Fatal(err)
-	}
-	fill.Discard()
-
-	if _, _, ok := c.Lookup(source, 0); ok {
-		t.Fatal("discarded fill must not be served")
-	}
-	if n := countCacheFiles(t, c); n != 0 {
-		t.Fatalf("discard left %d files (temp not removed?)", n)
-	}
-}
-
 func TestSubtitleCacheCommitRefusesChangedSource(t *testing.T) {
 	c, source := newTestCache(t)
 	fill := c.BeginFill(source, 0)

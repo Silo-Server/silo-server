@@ -185,13 +185,13 @@ type authProviderResponse struct {
 // HandleLogin handles POST /auth/login.
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
-	// Extract device name from User-Agent header and IP from request.
-	view, err := h.Login(r.Context(), LoginInput{
+	// The session records the device headers, else the User-Agent as its
+	// name, and the client IP.
+	view, err := h.Login(auth.WithClientDevice(r.Context(), r.Header), LoginInput{
 		Provider:   req.Provider,
 		Username:   req.Username,
 		Password:   req.Password,
@@ -244,6 +244,47 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
 		User:         buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil),
+	}, nil
+}
+
+// NetworkSignInInput is a network identity sign-in as the transport received
+// it. The overlay peer travels on the request context (netaccess.Path).
+type NetworkSignInInput struct {
+	InstallationID int
+	DeviceName     string
+	IP             string
+}
+
+// NetworkSignIn signs in the overlay peer of the request through a network
+// identity provider (auth.Service.NetworkSignIn) and opens a login session.
+// v2 signInWithNetworkIdentity calls it; a failure is an *APIError.
+func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) (TokenPairView, error) {
+	pair, err := h.service.NetworkSignIn(ctx, auth.NetworkSignInInput{
+		InstallationID: in.InstallationID, DeviceName: in.DeviceName, IP: in.IP,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrUnknownAuthInstallation):
+			return TokenPairView{}, apiError(http.StatusNotFound, "not_found", "No enabled network sign-in provider has this installation")
+		case errors.Is(err, auth.ErrNetworkIdentityRequired):
+			return TokenPairView{}, apiError(http.StatusForbidden, "network_identity_required", "Open this server through the provider's network address to sign in this way")
+		case errors.Is(err, auth.ErrInvalidCredentials):
+			// The plugin could not identify the peer; there is no credential
+			// the person could correct.
+			return TokenPairView{}, apiError(http.StatusForbidden, "not_permitted", "This device is not permitted to sign in to this server")
+		case errors.Is(err, auth.ErrUserDisabled):
+			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
+		}
+		if apiErr := externalSignInError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
+		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return TokenPairView{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresIn:    pair.ExpiresIn,
+		User:         buildUserResponse(pair.User, effectiveDownloadAllowed(ctx, pair.User, h.accessGroups), nil, nil),
 	}, nil
 }
 
@@ -329,12 +370,11 @@ func (h *AuthHandler) HandleSetupStatus(w http.ResponseWriter, r *http.Request) 
 // HandleSetup handles POST /auth/setup.
 func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
 	var req setupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
-	view, err := h.SetupInitialUser(r.Context(), RegistrationInput{
+	view, err := h.SetupInitialUser(auth.WithClientDevice(r.Context(), r.Header), RegistrationInput{
 		Username:             req.Username,
 		Email:                req.Email,
 		Password:             req.Password,
@@ -385,8 +425,7 @@ func (h *AuthHandler) HandleEndImpersonation(w http.ResponseWriter, r *http.Requ
 // HandleRefresh handles POST /auth/refresh.
 func (h *AuthHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
@@ -540,12 +579,11 @@ func (h *AuthHandler) HandleSignupStatus(w http.ResponseWriter, r *http.Request)
 // HandleSignup handles POST /auth/signup.
 func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	var req signupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+	if !decodeAuthRequestBody(w, r, &req, false) {
 		return
 	}
 
-	view, err := h.Signup(r.Context(), RegistrationInput{
+	view, err := h.Signup(auth.WithClientDevice(r.Context(), r.Header), RegistrationInput{
 		Username:             req.Username,
 		Email:                req.Email,
 		Password:             req.Password,

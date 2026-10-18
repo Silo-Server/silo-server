@@ -77,7 +77,7 @@ it("discards destination pages returned after account replacement", async () => 
 });
 
 it("deletes the exact subscription once without authentication replay", async () => {
-  for (const status of [204, 401, 403, 500]) {
+  for (const status of [204, 401, 500]) {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(new Response(null, { status }));

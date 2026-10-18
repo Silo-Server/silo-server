@@ -24,9 +24,11 @@ import {
   adminSignInErrorText,
   authBindingOf,
   authCapabilityOf,
-  authPluginInstallations,
+  primarySignInInstallations,
   authProviderLabel,
   authProviderName,
+  savedAutoProvision,
+  signInBindingWrite,
 } from "@/lib/externalSignInAdmin";
 import { pluginPagePath } from "@/lib/pluginPresentation";
 import { cn } from "@/lib/utils";
@@ -250,7 +252,7 @@ function Step({
       <div className="flex items-center gap-2.5">
         <span
           aria-hidden="true"
-          className="border-border bg-muted/40 text-muted-foreground grid size-[22px] shrink-0 place-items-center rounded-full border text-[11.5px] font-semibold"
+          className="border-border bg-muted/40 text-muted-foreground grid size-[22px] shrink-0 place-items-center rounded-full border text-xs font-semibold"
         >
           {number}
         </span>
@@ -292,20 +294,12 @@ function useBindingSwitch({
   const updateBinding = useUpdateSignInBinding();
   const bindingWrites = useIsMutating({ mutationKey: signInBindingMutationKey });
   const [confirmOff, setConfirmOff] = useState(false);
-  const capability = authCapabilityOf(installation)!;
-  const binding = authBindingOf(installation);
 
   function write(enabled: boolean, success: string) {
     updateBinding.mutate(
       {
         installationId: installation.id,
-        body: {
-          capability_id: capability.id,
-          enabled,
-          display_order: binding?.display_order ?? 1,
-          auto_provision: binding?.auto_provision ?? true,
-          default_login: binding?.default_login ?? false,
-        },
+        body: signInBindingWrite(installation, { enabled }),
       },
       {
         onSuccess: () => report({ tone: "ok", text: success }),
@@ -491,7 +485,7 @@ function ProviderPanel({
       key="auto-provision"
       label="Create accounts on first sign-in"
       htmlFor={autoProvisionId}
-      dirty={autoProvision !== (binding?.auto_provision ?? true)}
+      dirty={autoProvision !== savedAutoProvision(installation)}
       description="People the provider lets in get a Silo account the first time they sign in. Off: only people whose Silo account is already connected can sign in."
       descriptionId={autoProvisionDescription}
     >
@@ -912,7 +906,7 @@ export function SignInProviderSlot({
     );
   }
 
-  const candidates = authPluginInstallations(installations);
+  const candidates = primarySignInInstallations(installations);
   if (candidates.length === 0) {
     return (
       <p className="text-muted-foreground py-3.5 text-sm">
@@ -982,7 +976,7 @@ export function SignInProviderSlot({
               <span className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold">{choice.title}</span>
                 {choice.state ? (
-                  <span className="text-muted-foreground border-border inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]">
+                  <span className="text-muted-foreground border-border inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs">
                     <StateDot tone={choice.state.tone} />
                     {choice.state.word}
                   </span>

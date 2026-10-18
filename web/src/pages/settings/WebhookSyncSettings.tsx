@@ -16,6 +16,7 @@ import {
   Server,
   Trash2,
 } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
@@ -80,7 +81,7 @@ const JELLYFIN_TEMPLATE = `{
   "server_name": "{{ServerName}}",
   "user": {
     "id": "{{UserId}}",
-    "name": "{{{Username}}}"
+    "name": "{{{NotificationUsername}}}"
   },
   "item": {
     "id": "{{ItemId}}",
@@ -101,6 +102,10 @@ const JELLYFIN_TEMPLATE = `{
     "position_ticks": {{#if_exist PlaybackPositionTicks}}{{PlaybackPositionTicks}}{{else}}0{{/if_exist}},
     "played_to_completion": {{#if_equals PlayedToCompletion 'true'}}true{{else}}false{{/if_equals}},
     "runtime_ticks": {{#if_exist RunTimeTicks}}{{RunTimeTicks}}{{else}}0{{/if_exist}}
+  },
+  "user_data": {
+    "save_reason": "{{SaveReason}}",
+    "played": {{#if_exist Played}}{{#if_equals Played 'true'}}true{{else}}false{{/if_equals}}{{else}}null{{/if_exist}}
   }
 }`;
 
@@ -244,7 +249,7 @@ function EventMatrix({ sections }: { sections: EventMatrixSection[] }) {
         <div key={section.label} className="space-y-1.5 px-3 py-2.5">
           <p
             className={cn(
-              "text-[11px] font-medium tracking-wide uppercase",
+              "text-xs font-medium tracking-wide uppercase",
               EVENT_MATRIX_TONE[section.tone],
             )}
           >
@@ -581,12 +586,10 @@ export default function WebhookSyncSettings() {
 
   return (
     <div className="space-y-6 pb-6">
-      <div className="space-y-3">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Webhook Sync</h2>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Receive watched, stop, and progress events from Plex, Emby, and Jellyfin.
-        </p>
-      </div>
+      <PageHeader
+        title="Webhook Sync"
+        subtitle="Receive watched, stop, and progress events from Plex, Emby, and Jellyfin."
+      />
 
       <SettingsGroup
         title="Add a connection"
@@ -774,7 +777,7 @@ export default function WebhookSyncSettings() {
                   </div>
                   <Badge
                     variant={health === "error" ? "destructive" : "outline"}
-                    className="shrink-0 text-[11px]"
+                    className="shrink-0 text-xs"
                   >
                     {HEALTH_LABEL[health]}
                   </Badge>
@@ -1038,6 +1041,10 @@ export default function WebhookSyncSettings() {
                             Save. Plex sends events automatically — no per-event toggles to
                             configure.
                           </li>
+                          <li>
+                            Plex sends no webhook when someone marks an item watched or unwatched by
+                            hand, so only playback reaches Silo.
+                          </li>
                         </ol>
                       ) : null}
                       {selectedConnection.provider === "emby" ? (
@@ -1117,10 +1124,13 @@ export default function WebhookSyncSettings() {
                             </li>
                             <li>
                               Under <span className="text-foreground">Notification Type</span>,
-                              enable only <span className="text-foreground">Playback Stop</span>.
-                              Leave <span className="text-foreground">Playback Progress</span> and{" "}
-                              <span className="text-foreground">User Data Saved</span> off — Silo
-                              ignores them and they generate heavy traffic.
+                              enable <span className="text-foreground">Playback Stop</span> for
+                              watch progress and{" "}
+                              <span className="text-foreground">User Data Saved</span> for items
+                              marked played or unplayed. User Data Saved also fires during playback;
+                              Silo ignores those deliveries. Leave{" "}
+                              <span className="text-foreground">Playback Progress</span> off — Silo
+                              ignores it and it generates heavy traffic.
                             </li>
                             <li>
                               Paste the template below into{" "}
@@ -1231,7 +1241,7 @@ export default function WebhookSyncSettings() {
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className={cn("text-[11px]", EVENT_OUTCOME_BADGE[event.outcome])}
+                              className={cn("text-xs", EVENT_OUTCOME_BADGE[event.outcome])}
                             >
                               {EVENT_OUTCOME_LABEL[event.outcome]}
                             </Badge>
@@ -1341,7 +1351,7 @@ export default function WebhookSyncSettings() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge
                   variant="outline"
-                  className={cn("text-[11px]", EVENT_OUTCOME_BADGE[selectedEvent.outcome])}
+                  className={cn("text-xs", EVENT_OUTCOME_BADGE[selectedEvent.outcome])}
                 >
                   {EVENT_OUTCOME_LABEL[selectedEvent.outcome]}
                 </Badge>
@@ -1366,7 +1376,7 @@ export default function WebhookSyncSettings() {
                       .sort(([a], [b]) => a.localeCompare(b))
                       .map(([key, value]) => (
                         <div key={key} className="min-w-0">
-                          <p className="text-muted-foreground text-[11px]">{eventAttrLabel(key)}</p>
+                          <p className="text-muted-foreground text-xs">{eventAttrLabel(key)}</p>
                           <p className="truncate text-xs break-all">
                             {typeof value === "string" ? value : JSON.stringify(value)}
                           </p>

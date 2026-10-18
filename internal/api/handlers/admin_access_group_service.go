@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -42,6 +44,9 @@ func (h *AccessGroupHandler) CreateAdminAccessGroup(ctx context.Context, in acce
 		return nil, ErrAccessGroupUnavailable
 	}
 	update := access.UpdateGroupInput{Name: &in.Name, LibraryIDs: &in.LibraryIDs, MaxPlaybackQuality: &in.MaxPlaybackQuality, MaxStreams: &in.MaxStreams, MaxTranscodes: &in.MaxTranscodes, MaxRemoteStreamBitrateKbps: &in.MaxRemoteStreamBitrateKbps, MaxLocalStreamBitrateKbps: &in.MaxLocalStreamBitrateKbps, AllowedPermissions: &in.AllowedPermissions}
+	if in.MaxProfiles != 0 {
+		update.MaxProfiles = &in.MaxProfiles
+	}
 	if err := normalizeAdminGroupInput(&update); err != nil {
 		return nil, err
 	}
@@ -58,7 +63,15 @@ func (h *AccessGroupHandler) UpdateAdminAccessGroup(ctx context.Context, id int6
 	if err := normalizeAdminGroupInput(&in); err != nil {
 		return nil, err
 	}
-	return s.UpdateConditional(ctx, id, in, guard)
+	librariesChange := h.groupLibrariesChange(in)
+	group, err := s.UpdateConditional(ctx, id, in, guard)
+	if err != nil {
+		return nil, err
+	}
+	if librariesChange {
+		notifyAccountsScopeChanged(ctx, h.RecWorker, h.groupMembers(ctx, id)...)
+	}
+	return group, nil
 }
 
 // DeleteAdminAccessGroup deletes a group. Its members move into the default
@@ -70,12 +83,54 @@ func (h *AccessGroupHandler) DeleteAdminAccessGroup(ctx context.Context, id int6
 	if !ok {
 		return ErrAccessGroupUnavailable
 	}
-	mover, ok := h.store.(memberMovingGroupStore)
-	if !ok {
-		return s.DeleteConditional(ctx, id, guard)
+	// The members are listed first: the delete moves them out of the group.
+	members := h.groupMembers(ctx, id)
+	var err error
+	if mover, ok := h.store.(memberMovingGroupStore); ok {
+		// Set-based, so the group-writer lock is not held for per-member statements.
+		err = mover.DeleteMovingMembers(ctx, id, guard)
+	} else {
+		err = s.DeleteConditional(ctx, id, guard)
 	}
-	// Set-based, so the group-writer lock is not held for per-member statements.
-	return mover.DeleteMovingMembers(ctx, id, guard)
+	if err != nil {
+		return err
+	}
+	notifyAccountsScopeChanged(ctx, h.RecWorker, members...)
+	return nil
+}
+
+// accessGroupMemberLister lists the accounts in an access group.
+// *access.GroupStore implements it.
+type accessGroupMemberLister interface {
+	MemberIDs(ctx context.Context, id int64) ([]int, error)
+}
+
+// groupMembers lists group id's member accounts for a recommendations
+// rebuild; without a worker, or when the list fails, it is empty.
+func (h *AccessGroupHandler) groupMembers(ctx context.Context, id int64) []int {
+	lister, ok := h.store.(accessGroupMemberLister)
+	if h.RecWorker == nil || !ok {
+		return nil
+	}
+	// The update has committed: the request ending must not leave its
+	// members' rows built under the old scope.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	members, err := lister.MemberIDs(ctx, id)
+	if err != nil {
+		slog.WarnContext(ctx, "listing access group members for a recommendations rebuild failed", "component", "api", "access_group_id", id, "error", err)
+		return nil
+	}
+	return members
+}
+
+// groupLibrariesChange reports whether in may change group id's libraries:
+// whenever it sets them. Comparing with the stored group would read it
+// outside the update's writer lock, where an overlapping update can change it
+// back and forth unnoticed; a save that keeps the same libraries only costs
+// its members a rebuild.
+func (h *AccessGroupHandler) groupLibrariesChange(in access.UpdateGroupInput) bool {
+	return in.LibraryIDs != nil && h.RecWorker != nil
 }
 func normalizeAdminGroupInput(in *access.UpdateGroupInput) error {
 	if in.Name != nil {
@@ -93,6 +148,9 @@ func normalizeAdminGroupInput(in *access.UpdateGroupInput) error {
 		}
 	}
 	if in.MaxStreams != nil && *in.MaxStreams < 0 || in.MaxTranscodes != nil && *in.MaxTranscodes < 0 || in.MaxRemoteStreamBitrateKbps != nil && *in.MaxRemoteStreamBitrateKbps < 0 || in.MaxLocalStreamBitrateKbps != nil && *in.MaxLocalStreamBitrateKbps < 0 {
+		return ErrInvalidAccessGroup
+	}
+	if in.MaxProfiles != nil && *in.MaxProfiles < 1 {
 		return ErrInvalidAccessGroup
 	}
 	if in.MaxPlaybackQuality != nil {

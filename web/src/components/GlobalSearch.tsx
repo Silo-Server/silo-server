@@ -171,7 +171,7 @@ function GlobalSearchResultRow({
               onError={onError}
             />
           ) : (
-            <div className="text-muted-foreground flex h-full items-center justify-center px-1 text-center text-[10px] leading-tight">
+            <div className="text-muted-foreground flex h-full items-center justify-center px-1 text-center text-[0.625rem] leading-tight">
               {item.title.slice(0, 24)}
             </div>
           )}
@@ -208,7 +208,7 @@ function ResultGroupHeading({ id, children }: { id: string; children: string }) 
     <div
       id={id}
       role="presentation"
-      className="text-muted-foreground px-3 pt-2 pb-1 text-[10px] font-medium tracking-[0.1em] uppercase"
+      className="text-muted-foreground px-3 pt-2 pb-1 text-[0.625rem] font-medium tracking-[0.1em] uppercase"
     >
       {children}
     </div>

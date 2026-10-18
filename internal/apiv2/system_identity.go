@@ -24,7 +24,9 @@ import (
 // The identity alone authorizes nothing: it is public and any host can echo
 // one. Clients pair or send credentials to an alternate address only after
 // the existing device-login approval, which proves both addresses share one
-// backend, has succeeded there.
+// backend, has succeeded there, or, for the API server's own local-network
+// address, after TLS there presents the key pinned in the connections
+// document (internal/lantls).
 
 // ServerIdentityService reads the deployment's stable native server identity.
 // *serveridentity.Service implements it.
@@ -33,12 +35,15 @@ type ServerIdentityService interface {
 }
 
 // ServerConnections is where the connections document reads the deployment's
-// client-facing addresses from: the configured public URL, read live so a
-// settings change applies without restart, and the API host's provider
-// status cache for overlay origins. Both are optional.
+// client-facing addresses from: the configured public and local URLs, read
+// live so a settings change applies without restart, the API host's provider
+// status cache for overlay origins, and the pin of the API listener's
+// local-network TLS key. All are optional.
 type ServerConnections struct {
-	PublicURL func() string
-	Providers *netaccess.StatusCache
+	PublicURL   func() string
+	LocalURL    func() string
+	Providers   *netaccess.StatusCache
+	LocalTLSPin string
 }
 
 // ServerIdentity is the public identity document.
@@ -126,12 +131,22 @@ func (ServerAccessPath) Schema(r huma.Registry) *huma.Schema {
 	}}
 }
 
+// ServerLocalRoute tells a signed-in client how to reach the API server
+// directly on the local network: the key the API listener presents over TLS
+// on its own port, and the admin-configured local address when there is one.
+// Clients use a local address only over TLS that presents this key.
+type ServerLocalRoute struct {
+	SPKISHA256 string `json:"spki_sha256" doc:"Base64 SHA-256 of the SubjectPublicKeyInfo of the certificate the API listener presents over TLS on its own port. A client accepts a local-network address only when TLS there presents this key, and learns it only over an address it already trusts. Derived from SECRET_KEY, so it changes when that key is rotated." example:"n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg="`
+	URL        string `json:"url,omitempty" doc:"server.local_url: scheme://host[:port] of the API server on the local network, when an admin set one. Clients connect with https on the same host and port, whatever the scheme says, and require the pinned key. Absent when unset; clients may still find local addresses through LAN discovery." example:"http://192.168.1.20:8080"`
+}
+
 // ServerConnectionsDocument is the connections capability document.
 type ServerConnectionsDocument struct {
 	Capability
-	ServerID  string           `json:"server_id" doc:"The same identity getServerIdentity reports"`
-	Current   ServerAccessPath `json:"current" doc:"How this request reached the server"`
-	Endpoints []ServerEndpoint `json:"endpoints" doc:"Addresses the deployment offers, public first then providers in slug order; empty when no public URL is configured and no provider is installed. Reachability is the client's to test."`
+	ServerID   string            `json:"server_id" doc:"The same identity getServerIdentity reports"`
+	Current    ServerAccessPath  `json:"current" doc:"How this request reached the server"`
+	Endpoints  []ServerEndpoint  `json:"endpoints" doc:"Addresses the deployment offers, public first then providers in slug order; empty when no public URL is configured and no provider is installed. Reachability is the client's to test."`
+	LocalRoute *ServerLocalRoute `json:"local_route,omitempty" doc:"How to reach the API server directly on the local network; absent on a server whose API port does not answer TLS."`
 }
 
 // ServerConnectionsOutput is the getServerConnections response.
@@ -171,6 +186,19 @@ func (reg *Registry) serverID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// knownServerID is the identity for a response that names it as a courtesy
+// and must not fail over it: empty when the identity cannot be read.
+func (reg *Registry) knownServerID(ctx context.Context) string {
+	if reg.deps.ServerIdentity == nil {
+		return ""
+	}
+	id, err := reg.deps.ServerIdentity.ServerID(ctx)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
 func (reg *Registry) getServerIdentity(ctx context.Context, _ *struct{}) (*ServerIdentityOutput, error) {
 	id, err := reg.serverID(ctx)
 	if err != nil {
@@ -192,6 +220,14 @@ func (reg *Registry) getServerConnections(ctx context.Context, _ *CapabilityInpu
 	if connections.PublicURL != nil {
 		if origin, ok := netaccess.NormalizeOrigin(connections.PublicURL()); ok {
 			doc.Endpoints = append(doc.Endpoints, ServerEndpoint{Kind: EndpointKindPublic, URL: origin})
+		}
+	}
+	if connections.LocalTLSPin != "" {
+		doc.LocalRoute = &ServerLocalRoute{SPKISHA256: connections.LocalTLSPin}
+		if connections.LocalURL != nil {
+			if origin, ok := netaccess.NormalizeOrigin(connections.LocalURL()); ok {
+				doc.LocalRoute.URL = origin
+			}
 		}
 	}
 	if reg.deps.NetworkAccess != nil {

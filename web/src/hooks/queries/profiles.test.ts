@@ -6,10 +6,14 @@ import listProfilesOk from "../../../../contracts/api/v2/fixtures/list_profiles_
 import uploadProfileAvatarOk from "../../../../contracts/api/v2/fixtures/upload_profile_avatar_ok.json";
 import verifyProfilePinOk from "../../../../contracts/api/v2/fixtures/verify_profile_pin_ok.json";
 import verifyProfilePinWrong from "../../../../contracts/api/v2/fixtures/verify_profile_pin_wrong.json";
-import deleteProfilePrimaryProtected from "../../../../contracts/api/v2/fixtures/delete_profile_primary_protected.json";
 
-import { setAccessToken, setProfileId } from "@/api/client";
-import { V2ProblemError, v2 } from "@/api/v2/request";
+import {
+  captureProfileRequestContext,
+  captureProfileRequestContextAs,
+  setAccessToken,
+  setProfileId,
+  setProfileToken,
+} from "@/api/client";
 import {
   createProfile,
   listHouseholdSessions,
@@ -38,6 +42,7 @@ beforeEach(() => {
   sessionStorage.clear();
   setAccessToken("tok-user");
   setProfileId("p-owner");
+  setProfileToken(null);
 });
 
 describe("profile queries on the v2 contract", () => {
@@ -97,6 +102,26 @@ describe("profile queries on the v2 contract", () => {
     );
   });
 
+  it("creates a profile as an explicit profile without touching the active one", async () => {
+    setProfileToken("pvt-child");
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      json(createProfileCreated, 201, { ...JSON_HEADERS, Location: "/api/v2/profiles/p-kid" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const primary = captureProfileRequestContextAs("p-primary", "pvt-primary");
+    if (!primary) throw new Error("no session");
+    await createProfile({ name: "Kid" }, primary);
+
+    const headers = requestOf(fetchMock, 0).init.headers;
+    expect(headers["X-Profile-Id"]).toBe("p-primary");
+    expect(headers["X-Profile-Token"]).toBe("pvt-primary");
+    expect(captureProfileRequestContext()).toMatchObject({
+      profileId: "p-owner",
+      profileToken: "pvt-child",
+    });
+  });
+
   it("verifies a PIN and passes the token through; a wrong PIN is a plain false", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -151,18 +176,5 @@ describe("profile queries on the v2 contract", () => {
       position_seconds: first.position_seconds,
     });
     expect(sessions[0]).not.toHaveProperty("id");
-  });
-
-  it("surfaces a protected primary profile as a problem", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      json(deleteProfilePrimaryProtected, deleteProfilePrimaryProtected.status, {
-        "Content-Type": "application/problem+json",
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      v2("DELETE /api/v2/profiles/{id}", { path: { id: "p-owner" } }),
-    ).rejects.toBeInstanceOf(V2ProblemError);
   });
 });

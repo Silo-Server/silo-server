@@ -102,6 +102,8 @@ type baseItemDTO struct {
 	ParentBackdropItemID     string                                 `json:"ParentBackdropItemId,omitempty"`
 	ParentThumbImageTag      string                                 `json:"ParentThumbImageTag,omitempty"`
 	ParentThumbItemID        string                                 `json:"ParentThumbItemId,omitempty"`
+	ParentLogoItemID         string                                 `json:"ParentLogoItemId,omitempty"`
+	ParentLogoImageTag       string                                 `json:"ParentLogoImageTag,omitempty"`
 	ParentPrimaryImageItemID string                                 `json:"ParentPrimaryImageItemId,omitempty"`
 	ParentPrimaryImageTag    string                                 `json:"ParentPrimaryImageTag,omitempty"`
 	ParentID                 string                                 `json:"ParentId,omitempty"`
@@ -215,9 +217,16 @@ type searchHintDTO struct {
 }
 
 type playbackInfoResponseDTO struct {
-	PlaySessionID string           `json:"PlaySessionId"`
+	PlaySessionID string           `json:"PlaySessionId,omitempty"`
 	MediaSources  []mediaSourceDTO `json:"MediaSources"`
+	// ErrorCode is Jellyfin's PlaybackErrorCode. Clients show it to the viewer
+	// instead of trying to play; see playbackErrorNoCompatibleStream.
+	ErrorCode string `json:"ErrorCode,omitempty"`
 }
+
+// playbackErrorNoCompatibleStream is what Jellyfin answers, with a 200 and no
+// media sources, when nothing the request could use is playable.
+const playbackErrorNoCompatibleStream = "NoCompatibleStream"
 
 type mediaSourceDTO struct {
 	SiloSeekReanchor                    bool              `json:"SiloSeekReanchor,omitzero"`

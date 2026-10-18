@@ -41,16 +41,7 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.4)
-      '@fontsource-variable/manrope':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource-variable/outfit':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource-variable/sora':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource-variable/urbanist':
+      '@fontsource-variable/plus-jakarta-sans':
         specifier: ^5.3.0
         version: 5.3.0
       '@fontsource/noto-sans-arabic':
@@ -104,6 +95,9 @@ importers:
       lucide-react:
         specifier: ^0.576.0
         version: 0.576.0(react@19.2.4)
+      mediabunny:
+        specifier: ^1.61.0
+        version: 1.61.0
       node-unrar-js:
         specifier: ^2.0.2
         version: 2.0.2
@@ -138,6 +132,9 @@ importers:
         specifier: ^0.1.1
         version: 0.1.1
     devDependencies:
+      '@eslint-community/eslint-plugin-eslint-comments':
+        specifier: 4.8.1
+        version: 4.8.1(eslint@9.39.4(jiti@2.6.1))
       '@eslint/js':
         specifier: ^9.39.4
         version: 9.39.4
@@ -165,6 +162,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.4.0
         version: 4.7.0(vite@6.4.3(@types/node@25.5.0)(jiti@2.6.1)(lightningcss@1.32.0))
+      '@webgpu/types':
+        specifier: ^0.1.74
+        version: 0.1.74
       eslint:
         specifier: ^9.39.4
         version: 9.39.4(jiti@2.6.1)
@@ -587,6 +587,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@eslint-community/eslint-plugin-eslint-comments@4.8.1':
+    resolution: {integrity: sha512-vafrdi15JHBFh1qWOAucyJwlEEuhdoMof28jOdKdgnwZ7bXwd6v4wzHYSmAVLwnx0yc7bqAtfJ0EZQV1WAzV/Q==}
+    engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
+    peerDependencies:
+      eslint: ^6.0.0 || ^7.0.0 || ^8.0.0 || ^9.0.0 || ^10.0.0
+
   '@eslint-community/eslint-utils@4.9.1':
     resolution: {integrity: sha512-phrYmNiYppR7znFEdqgfWHXR6NCkZEK7hwWDHZUjit/2/U0r6XvkDl0SYnoM51Hq7FhCGdLDT6zxCCOY1hexsQ==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
@@ -649,17 +655,8 @@ packages:
   '@floating-ui/utils@0.2.11':
     resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
 
-  '@fontsource-variable/manrope@5.3.0':
-    resolution: {integrity: sha512-6D5dgokHsWDDMtmXHznKa0hK229NN+1a4BLPmUCLqcO1Pw5EEhWY5RFt0AcXnVRAljFFPfRtLkJePQj6LSsV6g==}
-
-  '@fontsource-variable/outfit@5.3.0':
-    resolution: {integrity: sha512-fPb5XnYK0k7SbR++HEmm4+ZqDszmLKQ+sPRUr8oQ/KNC0vy6r6hazJFe8iYozv4cqlHbvJ/JECkJWrfDodUMVQ==}
-
-  '@fontsource-variable/sora@5.3.0':
-    resolution: {integrity: sha512-h8kHta4Z8SkfUGeI82TUy1n3rbrKpBRGwuk4t4qCwto5oEHxlbOFD2yGP+Df5fbmTXwKGn+o667vYp0E4K8Whw==}
-
-  '@fontsource-variable/urbanist@5.3.0':
-    resolution: {integrity: sha512-riHbcRgoOhEdCwVw3n3R1JLEwvRD1N9GlXtBcwl/UJ2KabfyDBuryE2Yq10308QJgbXw3F/IFF+VoMuuqwVfIA==}
+  '@fontsource-variable/plus-jakarta-sans@5.3.0':
+    resolution: {integrity: sha512-/l/4r0yyWK9JzAlmA0LiYgGgmJe/Gswt4jTJEzr5QhJfwMbvJZDmYWyW0M4X7yCK69BajMVlV/Lx8g7WDc1+sw==}
 
   '@fontsource/noto-sans-arabic@5.2.10':
     resolution: {integrity: sha512-Hgj3NwQJ0NquIADW3hFboFjsts4UvEOJQ8tOX0bhQZgpNKHsMawjv/1SZnq0QvRbP6efHTZM/A1k7tdy9S6sbA==}
@@ -1807,6 +1804,12 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
+  '@types/dom-mediacapture-transform@0.1.12':
+    resolution: {integrity: sha512-d7/QsLRwF864A5mgIM/YrfiglHoYn7zgCcAoJgW404r+2DwnNr7EBbLnCWpmOMgH8y0te73L1AV6H1bmauaWFw==}
+
+  '@types/dom-webcodecs@0.1.13':
+    resolution: {integrity: sha512-O5hkiFIcjjszPIYyUSyvScyvrBoV3NOEEZx/pMlsu44TKzWNkLVBBxnxJz42in5n3QIolYOcBYFCPZZ0h8SkwQ==}
+
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
@@ -1942,6 +1945,9 @@ packages:
 
   '@vitest/utils@4.1.11':
     resolution: {integrity: sha512-zTCVGpyFsGWBhllOyKlTw/vnr6D9qxsfSDyfbyZmTyjHw5N/VuvzHpHoQjm2ZJzn4RJgx5w4r7V0er69CmLgPQ==}
+
+  '@webgpu/types@0.1.74':
+    resolution: {integrity: sha512-lgiI4hbuLcI9unnm2cL/tvCaQU45dp0xcLWJh5uB/9MBGvIA4F8XIk7nSiBeg+K4xWGYwgZKn80LmERI5CxoTA==}
 
   '@zip.js/zip.js@2.8.26':
     resolution: {integrity: sha512-RQ4h9F6DOiHxpdocUDrOl6xBM+yOtz+LkUol47AVWcfebGBDpZ7w7Xvz9PS24JgXvLGiXXzSAfdCdVy1tPlaFA==}
@@ -2627,6 +2633,9 @@ packages:
   mdn-data@2.27.1:
     resolution: {integrity: sha512-9Yubnt3e8A0OKwxYSXyhLymGW4sCufcLG6VdiDdUGVkPhpqLxlvP5vl1983gQjJl3tqbrM731mjaZaP68AgosQ==}
 
+  mediabunny@1.61.0:
+    resolution: {integrity: sha512-WciPOYwKZwgYkoBKcEK6JzzIf+w5whypPzFdOihOylZ/5Qv19FmNfRnTcaprH+jD136YpEASU30Eb6VNCJiz3A==}
+
   min-indent@1.0.1:
     resolution: {integrity: sha512-I9jwMn07Sy/IwOj3zVkVik2JTvgpaykDZEigL6Rx6N9LbMywwUSMtxET+7lVoDLLd3O3IXwJwvuuns8UB/HeAg==}
     engines: {node: '>=4'}
@@ -2958,8 +2967,8 @@ packages:
       react: ^18.0.0 || ^19.0.0 || ^19.0.0-rc
       react-dom: ^18.0.0 || ^19.0.0 || ^19.0.0-rc
 
-  source-map-js@1.2.1:
-    resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
+  source-map-js@1.2.2:
+    resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
 
   stackback@0.0.2:
@@ -3616,6 +3625,12 @@ snapshots:
   '@esbuild/win32-x64@0.25.12':
     optional: true
 
+  '@eslint-community/eslint-plugin-eslint-comments@4.8.1(eslint@9.39.4(jiti@2.6.1))':
+    dependencies:
+      escape-string-regexp: 4.0.0
+      eslint: 9.39.4(jiti@2.6.1)
+      ignore: 7.0.5
+
   '@eslint-community/eslint-utils@4.9.1(eslint@9.39.4(jiti@2.6.1))':
     dependencies:
       eslint: 9.39.4(jiti@2.6.1)
@@ -3681,13 +3696,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.11': {}
 
-  '@fontsource-variable/manrope@5.3.0': {}
-
-  '@fontsource-variable/outfit@5.3.0': {}
-
-  '@fontsource-variable/sora@5.3.0': {}
-
-  '@fontsource-variable/urbanist@5.3.0': {}
+  '@fontsource-variable/plus-jakarta-sans@5.3.0': {}
 
   '@fontsource/noto-sans-arabic@5.2.10': {}
 
@@ -4656,7 +4665,7 @@ snapshots:
       jiti: 2.6.1
       lightningcss: 1.31.1
       magic-string: 0.30.21
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
       tailwindcss: 4.2.1
 
   '@tailwindcss/oxide-android-arm64@4.2.1':
@@ -4795,6 +4804,12 @@ snapshots:
       assertion-error: 2.0.1
 
   '@types/deep-eql@4.0.2': {}
+
+  '@types/dom-mediacapture-transform@0.1.12':
+    dependencies:
+      '@types/dom-webcodecs': 0.1.13
+
+  '@types/dom-webcodecs@0.1.13': {}
 
   '@types/estree@1.0.8': {}
 
@@ -4985,6 +5000,8 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
 
+  '@webgpu/types@0.1.74': {}
+
   '@zip.js/zip.js@2.8.26': {}
 
   abslink@1.2.2: {}
@@ -5115,7 +5132,7 @@ snapshots:
   css-tree@3.2.1:
     dependencies:
       mdn-data: 2.27.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   css.escape@1.5.1: {}
 
@@ -5601,6 +5618,11 @@ snapshots:
 
   mdn-data@2.27.1: {}
 
+  mediabunny@1.61.0:
+    dependencies:
+      '@types/dom-mediacapture-transform': 0.1.12
+      '@types/dom-webcodecs': 0.1.13
+
   min-indent@1.0.1: {}
 
   minimatch@10.2.4:
@@ -5696,7 +5718,7 @@ snapshots:
     dependencies:
       nanoid: 3.3.18
       picocolors: 1.1.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   prelude-ls@1.2.1: {}
 
@@ -5911,7 +5933,7 @@ snapshots:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
 
-  source-map-js@1.2.1: {}
+  source-map-js@1.2.2: {}
 
   stackback@0.0.2: {}
 

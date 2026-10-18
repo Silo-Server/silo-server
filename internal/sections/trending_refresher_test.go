@@ -79,22 +79,6 @@ func (f fakeTMDB) GetCollectionPreset(context.Context, string, string, string, i
 	return f.entries, f.err
 }
 
-type fakeTrakt struct {
-	byMediaType map[string][]catalog.TraktCollectionEntry
-	errByType   map[string]error
-}
-
-func (f fakeTrakt) GetUserList(context.Context, string, string, int, string) ([]catalog.TraktCollectionEntry, error) {
-	return nil, nil
-}
-
-func (f fakeTrakt) GetCollectionPreset(_ context.Context, _, mediaType string, _ int, _ string) ([]catalog.TraktCollectionEntry, error) {
-	if err := f.errByType[mediaType]; err != nil {
-		return nil, err
-	}
-	return f.byMediaType[mediaType], nil
-}
-
 type fakeResolver struct {
 	byType map[string]*catalog.ExternalIDLookup
 }
@@ -128,7 +112,7 @@ func TestRefresherSavesOrderedContentIDs(t *testing.T) {
 			{ID: 10, MediaType: "movie"},
 			{ID: 20, MediaType: "tv"},
 		}},
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	data, err := r.RunOnce(context.Background())
@@ -162,7 +146,7 @@ func TestRefresherSkipsFetchWhenLeaseIsHeld(t *testing.T) {
 		Snapshots:    store,
 		Resolver:     fakeResolver{},
 		TMDBTrending: fakeTMDB{err: errors.New("must not fetch")},
-		Clock:        recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock:        fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	data, err := r.RunOnce(context.Background())
@@ -251,7 +235,7 @@ func TestRefresherFailurePreservesLastGood(t *testing.T) {
 		Snapshots:    store,
 		Resolver:     fakeResolver{},
 		TMDBTrending: fakeTMDB{err: errors.New("tmdb 503")},
-		Clock:        recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock:        fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	data, err := r.RunOnce(context.Background())
@@ -281,7 +265,7 @@ func TestRefresherEmptyProviderPreservesLastGood(t *testing.T) {
 		Snapshots: store,
 		Resolver:  fakeResolver{},
 		// TMDBTrending nil => provider unconfigured => empty entries, no error.
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	data, err := r.RunOnce(context.Background())
@@ -318,7 +302,7 @@ func TestRefresherSkipsPersonEntries(t *testing.T) {
 			{ID: 99, MediaType: "person"},
 			{ID: 20, MediaType: "tv"},
 		}},
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 	}
 
 	if _, err := r.RunOnce(context.Background()); err != nil {
@@ -332,64 +316,10 @@ func TestRefresherSkipsPersonEntries(t *testing.T) {
 	}
 }
 
-func TestRefresherTraktInterleavesMoviesAndShows(t *testing.T) {
-	store := newFakeSnapshotStore()
-	r := &TrendingRefresher{
-		Sections:  fakeSectionLister{configs: []json.RawMessage{tmdbConfig(t, "trakt", "week")}},
-		Snapshots: store,
-		Resolver: fakeResolver{byType: map[string]*catalog.ExternalIDLookup{
-			"movie":  {ByTMDB: map[string]string{"1": "m1", "2": "m2"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
-			"series": {ByTMDB: map[string]string{"3": "s1"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
-		}},
-		TraktTrending: fakeTrakt{byMediaType: map[string][]catalog.TraktCollectionEntry{
-			"movie": {{TMDBID: 1, MediaType: "movie"}, {TMDBID: 2, MediaType: "movie"}},
-			"tv":    {{TMDBID: 3, MediaType: "tv"}},
-		}},
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
-	}
-
-	if _, err := r.RunOnce(context.Background()); err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-
-	// Interleaved order: movie[0], show[0], movie[1] => m1, s1, m2. A plain
-	// concat would have buried s1 after all movies.
-	got := store.saved["trakt|week"].contentIDs
-	want := []string{"m1", "s1", "m2"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
-		t.Fatalf("content IDs = %v; want %v (interleaved)", got, want)
-	}
-}
-
-func TestRefresherTraktPartialFailurePreservesLastGood(t *testing.T) {
-	store := newFakeSnapshotStore()
-	r := &TrendingRefresher{
-		Sections:  fakeSectionLister{configs: []json.RawMessage{tmdbConfig(t, "trakt", "week")}},
-		Snapshots: store,
-		Resolver:  fakeResolver{},
-		TraktTrending: fakeTrakt{
-			byMediaType: map[string][]catalog.TraktCollectionEntry{"movie": {{TMDBID: 1, MediaType: "movie"}}},
-			errByType:   map[string]error{"tv": errors.New("trakt shows 500")},
-		},
-		Clock: recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
-	}
-
-	if _, err := r.RunOnce(context.Background()); err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-
-	if _, ok := store.saved["trakt|week"]; ok {
-		t.Fatal("SaveSuccess must not run when one Trakt sub-fetch fails (would drop a media type)")
-	}
-	if store.attempts["trakt|week"].status != "error" {
-		t.Fatalf("attempt status = %q; want error", store.attempts["trakt|week"].status)
-	}
-}
-
-func TestDistinctTrendingCombosCollapsesTrakt(t *testing.T) {
+func TestDistinctTrendingCombosCollapsesDuplicates(t *testing.T) {
 	configs := []json.RawMessage{
-		tmdbConfig(t, "trakt", "day"),
-		tmdbConfig(t, "trakt", "week"),
+		tmdbConfig(t, "tmdb", "week"),
+		tmdbConfig(t, "", "bogus"),
 		tmdbConfig(t, "tmdb", "day"),
 		tmdbConfig(t, "tmdb", "day"),
 	}
@@ -401,8 +331,8 @@ func TestDistinctTrendingCombosCollapsesTrakt(t *testing.T) {
 	for _, c := range got {
 		seen[c] = true
 	}
-	if !seen[trendingCombo{"trakt", "week"}] || !seen[trendingCombo{"tmdb", "day"}] {
-		t.Fatalf("combos = %+v; want {trakt week} and {tmdb day}", got)
+	if !seen[trendingCombo{"tmdb", "week"}] || !seen[trendingCombo{"tmdb", "day"}] {
+		t.Fatalf("combos = %+v; want {tmdb week} and {tmdb day}", got)
 	}
 }
 
@@ -426,7 +356,7 @@ func TestRefresherAlwaysRefreshesCalendarFeed(t *testing.T) {
 					"movie": {ByTMDB: map[string]string{"10": "c-movie"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}},
 				}},
 				TMDBTrending: fakeTMDB{entries: []catalog.TMDBCollectionEntry{{ID: 10, MediaType: "movie"}}},
-				Clock:        recipes.FixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
+				Clock:        fixedClock(time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)),
 			}
 
 			_, err := r.RunOnce(context.Background())

@@ -116,14 +116,9 @@ type fakeProgressQuery struct {
 	Limit     int
 }
 
-// fakeProgress stands in for handlers.ProgressHandler.ListProgressPage: a
-// keyset store over entries plus the library filter (libraries maps
-// media_item_id to its library; a nil map leaves the filter a no-op, a
-// non-nil one puts unknown ids in no library), applied the way the real seam
-// does — fetch, filter, re-fetch until limit+1 matches.
+// fakeProgress supplies pages for transport tests and records the query.
 type fakeProgress struct {
-	entries   []userstore.WatchProgress
-	libraries map[string]int
+	entries []userstore.WatchProgress
 	// calls records each query so a test can assert the window and filter
 	// the handler asked for.
 	calls []fakeProgressQuery
@@ -157,21 +152,7 @@ func (f *fakeProgress) ListProgressPage(_ context.Context, _ int, profileID stri
 	if f.err != nil {
 		return nil, false, f.err
 	}
-	want := limit + 1
-	var matches []userstore.WatchProgress
-	for len(matches) < want {
-		batch := f.page(profileID, status, after, want)
-		for _, e := range batch {
-			if libraryID == 0 || f.libraries == nil || f.libraries[e.MediaItemID] == libraryID {
-				matches = append(matches, e)
-			}
-		}
-		if len(batch) < want {
-			break
-		}
-		last := batch[len(batch)-1]
-		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
-	}
+	matches := f.page(profileID, status, after, limit+1)
 	if len(matches) > limit {
 		return matches[:limit], true, nil
 	}
@@ -494,17 +475,16 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
 	deps.ProfileSections = &fakeProfileSections{rows: fixtureSectionOverrides()}
-	deps.SectionFlags = fakeSectionFlags{allow: true}
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()
 	deps.AdminUsers = fakeAdminUsers{users: []handlers.AdminUserView{
 		{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{}, Enabled: true,
 			MaxStreams: &two, DownloadAllowed: &yes, MaxProfiles: 5, AccessGroupID: &groupID,
-			EffectivePolicy: handlers.EffectivePolicyView{LibraryIDs: []int{3}, MaxPlaybackQuality: "1080p", MaxStreams: 2, TranscodeAllowed: true, Permissions: []string{}},
+			EffectivePolicy: handlers.EffectivePolicyView{LibraryIDs: []int{3}, MaxPlaybackQuality: "1080p", MaxStreams: 2, MaxProfiles: 5, TranscodeAllowed: true, Permissions: []string{}},
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime(), LastActiveAt: &last},
 		{ID: 2, Username: "ada", Role: "admin", Permissions: []string{"marker_edit"}, Enabled: true, LibraryIDs: []int{}, MaxProfiles: 5,
-			EffectivePolicy: handlers.EffectivePolicyView{Permissions: []string{"marker_edit", "metadata_curation"}},
+			EffectivePolicy: handlers.EffectivePolicyView{MaxProfiles: 5, Permissions: []string{"marker_edit", "metadata_curation"}},
 			CreatedAt:       fixedTime(), UpdatedAt: fixedTime()},
 	}}
 	deps.SettingsContract, deps.Settings, deps.PluginSettings, deps.SettingValues = settingsFakes()
@@ -992,14 +972,10 @@ func (f *fakeProfileSections) ResolveProfileSectionSettings(_ context.Context, u
 		return nil, f.err
 	}
 	return []sections.ResolvedSection{
-		{ID: "s-continue", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
+		{ID: "s-continue", SectionType: "continue_watching", Title: "Keep watching", DefaultTitle: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
 		{ID: "u-gems", SectionType: "hidden_gems", Title: "Hidden gems", ItemLimit: 12, Position: 1, IsCustom: true, Config: json.RawMessage(`{"library_ids":[3]}`)},
 	}, nil
 }
-
-type fakeSectionFlags struct{ allow bool }
-
-func (f fakeSectionFlags) AllowProfileCustomSections(context.Context) bool { return f.allow }
 
 func fixtureSectionOverrides() []userstore.SectionOverride {
 	pos, featured, limit := 2, false, 10
@@ -1060,6 +1036,10 @@ func (f fakeDevices) find(in auth.DeviceLoginLookupInput) (*fakeDeviceRequest, e
 		return r, nil
 	}
 	if r := f.requests[in.UserCode]; r != nil && in.UserCode != "" {
+		// As the service: a Quick Connect code is found only for an account.
+		if r.Purpose == auth.DeviceLoginPurposeQuickConnect && in.AccountID == 0 {
+			return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+		}
 		return r, nil
 	}
 	return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
@@ -1141,7 +1121,7 @@ func (f fakeDevices) ApproveDeviceLogin(_ context.Context, in auth.DeviceLoginLo
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 401, Code: "unauthorized", Message: "Authentication required"}
 	}
 	r, err := f.find(in)
-	if err == nil && r.Purpose == auth.DeviceLoginPurposeRemote {
+	if err == nil && r.Purpose != auth.DeviceLoginPurposeLogin {
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "purpose_mismatch", Message: "Device login purpose does not match this approval route"}
 	}
 	return f.decide(in, auth.DeviceLoginStatusApproved)
@@ -1152,7 +1132,7 @@ func (f fakeDevices) ApproveDeviceHandoff(_ context.Context, in auth.DeviceLogin
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 403, Code: "profile_required", Message: "An active verified profile is required"}
 	}
 	r, err := f.find(in)
-	if err == nil && r.Purpose != auth.DeviceLoginPurposeRemote {
+	if err == nil && r.Purpose != auth.DeviceLoginPurposeRemote && r.Purpose != auth.DeviceLoginPurposeQuickConnect {
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "purpose_mismatch", Message: "Device login purpose does not match this approval route"}
 	}
 	return f.decide(in, auth.DeviceLoginStatusApproved)
@@ -1181,6 +1161,7 @@ func fixtureDevices() fakeDevices {
 		"dev-approved": approved,
 		"dev-handoff":  handoff,
 		"br-remote":    remotePending,
+		"482177":       {Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeQuickConnect, ExpiresAt: exp},
 		"br-expired":   {Status: "expired", Purpose: auth.DeviceLoginPurposeLogin},
 		"br-consumed":  {Status: auth.DeviceLoginStatusConsumed, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
 		"br-denied":    {Status: auth.DeviceLoginStatusDenied, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp},
@@ -1193,6 +1174,7 @@ type fakeSessionService struct {
 	// sessions overrides the default live-session set; pageCalls records
 	// every ListSessionsPage query.
 	sessions  []*models.AuthSession
+	current   *models.AuthSession
 	pageCalls []sessionPageQuery
 	// loggedOut, ended and revoked record the session ids the calls received.
 	loggedOut []string
@@ -1204,12 +1186,25 @@ type fakeSessionService struct {
 	// localLoginOff leaves the local provider out of discovery, as the
 	// server does while auth.local_password_login is off.
 	localLoginOff bool
-	// lastLogin is the input the most recent Login received.
-	lastLogin handlers.LoginInput
+	// lastLogin is the input the most recent Login received, and
+	// lastLoginDevice the device its context carried for the session.
+	lastLogin       handlers.LoginInput
+	lastLoginDevice auth.ClientDevice
+	// networkPeer makes discovery list the network provider (installation
+	// 5), as for a request that came through that provider's overlay.
+	// NetworkSignIn signs laura in at installation 5 and answers installation
+	// 7 as a request from off the overlay; lastNetwork is its last input.
+	networkPeer bool
+	lastNetwork handlers.NetworkSignInInput
 }
 
-func (f *fakeSessionService) Login(_ context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
+func (f *fakeSessionService) CurrentLoginSession(context.Context, int, string) (*models.AuthSession, error) {
+	return f.current, nil
+}
+
+func (f *fakeSessionService) Login(ctx context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
 	f.lastLogin = in
+	f.lastLoginDevice = auth.ClientDeviceFromContext(ctx)
 	if f.err != nil {
 		return handlers.TokenPairView{}, f.err
 	}
@@ -1251,13 +1246,35 @@ func (f *fakeSessionService) EndImpersonation(_ context.Context, claims *auth.Cl
 
 func (f *fakeSessionService) DiscoverProviders(context.Context) (auth.ProviderDiscovery, error) {
 	sso := auth.LoginProviderInfo{ID: "plugin-3", DisplayName: "Example SSO", Mode: auth.ProviderModeOAuth, IconURL: "https://plugins.example.test/icon.svg", InstallationID: 3}
+	var discovery auth.ProviderDiscovery
 	if f.localLoginOff {
 		sso.Default = true
-		return auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{sso}}, nil
+		discovery = auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{sso}}
+	} else {
+		discovery = auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{
+			{ID: "local", DisplayName: "Silo account", Mode: auth.ProviderModeCredentials, Default: true}, sso,
+		}, PasswordLogin: true}
 	}
-	return auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{
-		{ID: "local", DisplayName: "Silo account", Mode: auth.ProviderModeCredentials, Default: true}, sso,
-	}, PasswordLogin: true}, nil
+	if f.networkPeer {
+		discovery.Providers = append(discovery.Providers, auth.LoginProviderInfo{
+			ID: "plugin:5:tailscale", DisplayName: "Tailscale", Mode: auth.ProviderModeNetwork, InstallationID: 5,
+			NetworkIdentity: &auth.NetworkIdentityPreview{DisplayName: "Laura Example", Username: "laura@example.test"},
+		})
+	}
+	return discovery, nil
+}
+
+func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error) {
+	f.lastNetwork = in
+	switch in.InstallationID {
+	case 5:
+	case 7:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "network_identity_required", Message: "Open this server through the provider's network address to sign in this way"}
+	default:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "No enabled network sign-in provider has this installation"}
+	}
+	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
+		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {
@@ -1271,6 +1288,10 @@ func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.
 		// fail_closed outage policy (the v1 handler answers 401 with this
 		// cause).
 		return handlers.RefreshedTokensView{}, fmt.Errorf("refresh: %w", auth.ErrProviderUnavailable)
+	case "store-down":
+		// The session store could not be read (the v1 handler answers 503
+		// service_unavailable with this cause).
+		return handlers.RefreshedTokensView{}, fmt.Errorf("refresh: %w", auth.ErrSessionCheckUnavailable)
 	}
 	return handlers.RefreshedTokensView{}, &handlers.APIError{Status: 401, Code: "invalid_token", Message: "Invalid or expired refresh token"}
 }
@@ -1291,7 +1312,7 @@ func (f *fakeSessionService) liveSessions(userID int) []*models.AuthSession {
 	}
 	expires := fixedTime().Add(30 * 24 * time.Hour)
 	return []*models.AuthSession{
-		{ID: "s3", UserID: userID, DeviceName: "Silo/1.0 (tvOS)", IPAddress: "127.0.0.1", CreatedAt: fixedTime().Add(time.Hour), ExpiresAt: expires},
+		{ID: "s3", UserID: userID, DeviceName: "Living Room Apple TV", DeviceID: "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50", DevicePlatform: "tvOS", IPAddress: "127.0.0.1", CreatedAt: fixedTime().Add(time.Hour), ExpiresAt: expires},
 		{ID: "s2", UserID: userID, DeviceName: "Silo/1.0 (iOS)", IPAddress: "127.0.0.2", CreatedAt: fixedTime().Add(time.Hour), ExpiresAt: expires},
 		{ID: "s1", UserID: userID, DeviceName: "", IPAddress: "", CreatedAt: fixedTime(), ExpiresAt: expires},
 	}

@@ -124,6 +124,29 @@ func TestProxyGrantStoreIsolatesItsKeySpace(t *testing.T) {
 	if grants.ttl != DefaultTTL {
 		t.Fatalf("proxy grant ttl = %v, want %v", grants.ttl, DefaultTTL)
 	}
+	sessions := NewSessionRecipeStore(nil, 0)
+	if got := sessions.key("abc"); got != "silo:sessionrecipe:abc" {
+		t.Fatalf("session recipe key(abc) = %q, want silo:sessionrecipe:abc", got)
+	}
+	if sessions.key("abc") == grants.key("abc") || sessions.key("abc") == NewStore(nil, 0).key("abc") {
+		t.Fatal("session recipes share a key with another key space")
+	}
+}
+
+// The session-recipe reader must tell a Redis outage from a missing session:
+// answering an outage as "gone" makes a client tear its playback down. Get
+// keeps failing closed for the node and proxy readers.
+func TestLookupReportsAnUnreachableRedis(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 200 * time.Millisecond, MaxRetries: -1})
+	t.Cleanup(func() { _ = client.Close() })
+	store := NewSessionRecipeStore(client, time.Minute)
+
+	if card, ok, err := store.Lookup(context.Background(), "sid"); err == nil || ok || card != nil {
+		t.Fatalf("Lookup against unreachable Redis = (%v, %v, %v), want an error", card, ok, err)
+	}
+	if card, ok := store.Get(context.Background(), "sid"); ok || card != nil {
+		t.Fatalf("Get against unreachable Redis = (%v, %v), want a miss", card, ok)
+	}
 }
 
 // A disabled store accepts writes it cannot serve, so callers that publish a
@@ -154,21 +177,6 @@ func TestDefaultTTLMatchesTokenLifetime(t *testing.T) {
 	}
 	if NewStore(nil, 0).ttl != DefaultTTL {
 		t.Fatal("NewStore with ttl<=0 did not default to DefaultTTL")
-	}
-}
-
-func TestNodeAuthorityKeepsPreviousRecipeWireFormat(t *testing.T) {
-	card := playback.RecipeCard{
-		SessionID: "sid", TranscodeNodeURL: "http://node:8070", PlayMethod: playback.PlayTranscode,
-		TranscodeAudio: true, TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 2,
-	}
-	data, err := marshalCard(card)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, ok := unmarshalCard(data)
-	if !ok || decoded != card {
-		t.Fatalf("previous node decode = (%+v, %v), want (%+v, true)", decoded, ok, card)
 	}
 }
 

@@ -2,10 +2,8 @@ package recommendations
 
 import (
 	"math"
-	"sort"
+	"slices"
 )
-
-const minGenreCapRetainedFraction = 0.5
 
 // applyMMR re-ranks candidates using Maximal Marginal Relevance to balance
 // relevance against diversity. It selects up to limit items from candidates,
@@ -14,6 +12,10 @@ const minGenreCapRetainedFraction = 0.5
 //	score = λ × normalizedRelevance - (1-λ) × maxSimilarityToSelected
 //
 // Candidates without an entry in embeddings are scored by relevance alone.
+//
+// Each remaining candidate keeps its highest similarity to the picks so far,
+// updated against only the newest pick, so a call costs O(n·k) cosines for n
+// candidates and k picks rather than O(n·k²).
 func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda float64, limit int) []ScoredItem {
 	if len(candidates) == 0 || limit <= 0 {
 		return nil
@@ -33,14 +35,35 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 		maxScore = 1 // avoid division by zero
 	}
 
-	// Track which candidates remain available and which have been selected.
+	// remaining holds the candidates still available; maxSim[i] is
+	// remaining[i]'s highest similarity to a pick with an embedding. Picks
+	// remove their entry from both slices together.
 	remaining := make([]int, len(candidates))
 	for i := range remaining {
 		remaining[i] = i
 	}
-
+	maxSim := make([]float64, len(candidates))
 	selected := make([]ScoredItem, 0, limit)
-	selectedEmbeddings := make([][]float32, 0, limit)
+
+	take := func(at int) {
+		pick := candidates[remaining[at]]
+		selected = append(selected, pick)
+		remaining = append(remaining[:at], remaining[at+1:]...)
+		maxSim = append(maxSim[:at], maxSim[at+1:]...)
+		pickEmb, ok := embeddings[pick.MediaItemID]
+		if !ok {
+			return
+		}
+		for i, ri := range remaining {
+			candidateEmb := embeddings[candidates[ri].MediaItemID]
+			if candidateEmb == nil {
+				continue
+			}
+			if sim := cosineSimilarity(candidateEmb, pickEmb); sim > maxSim[i] {
+				maxSim[i] = sim
+			}
+		}
+	}
 
 	// First pick: highest relevance score.
 	bestIdx := 0
@@ -49,12 +72,7 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 			bestIdx = i
 		}
 	}
-	first := remaining[bestIdx]
-	selected = append(selected, candidates[first])
-	if emb, ok := embeddings[candidates[first].MediaItemID]; ok {
-		selectedEmbeddings = append(selectedEmbeddings, emb)
-	}
-	remaining = append(remaining[:bestIdx], remaining[bestIdx+1:]...)
+	take(bestIdx)
 
 	// Subsequent picks via MMR scoring.
 	for len(selected) < limit && len(remaining) > 0 {
@@ -63,24 +81,13 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 
 		for i, ri := range remaining {
 			normalizedRelevance := candidates[ri].Score / maxScore
-			candidateEmb := embeddings[candidates[ri].MediaItemID]
-
-			var maxSim float64
-			if candidateEmb != nil && len(selectedEmbeddings) > 0 {
-				for _, selEmb := range selectedEmbeddings {
-					sim := cosineSimilarity(candidateEmb, selEmb)
-					if sim > maxSim {
-						maxSim = sim
-					}
-				}
-			}
 
 			var mmrScore float64
-			if candidateEmb == nil {
+			if embeddings[candidates[ri].MediaItemID] == nil {
 				// No embedding available — use relevance only.
 				mmrScore = normalizedRelevance
 			} else {
-				mmrScore = lambda*normalizedRelevance - (1-lambda)*maxSim
+				mmrScore = lambda*normalizedRelevance - (1-lambda)*maxSim[i]
 			}
 
 			if mmrScore > bestMMRScore {
@@ -89,101 +96,60 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 			}
 		}
 
-		pick := remaining[bestMMRIdx]
-		selected = append(selected, candidates[pick])
-		if emb, ok := embeddings[candidates[pick].MediaItemID]; ok {
-			selectedEmbeddings = append(selectedEmbeddings, emb)
-		}
-		remaining = append(remaining[:bestMMRIdx], remaining[bestMMRIdx+1:]...)
+		take(bestMMRIdx)
 	}
 
 	return selected
 }
 
-// applyGenreCap enforces that no single genre exceeds maxPct of the result set.
-// When a genre is over-represented, the lowest-scored items from that genre are
-// removed until the genre falls within the cap.
-func applyGenreCap(items []ScoredItem, genres map[string][]string, maxPct float64) []ScoredItem {
-	if len(items) == 0 || maxPct <= 0 || maxPct >= 1 {
-		return items
+// servedGenreShare is the largest share of the served window one genre may
+// hold while the row has items of other genres to offer.
+const servedGenreShare = 0.5
+
+// applyGenreCap reorders a row ranked by MMR to keep any one genre to
+// servedGenreShare of its served window, its first ServedRowSize positions or
+// the whole row when shorter. It is greedy and keeps relevance order: it walks
+// the row in order, an item enters the window only if none of its genres
+// already holds that many places there, and the items it passes over fill the
+// window's remaining places, in order, when the row runs out of others. It
+// never revisits a title it let in, so with multi-genre titles a genre can
+// exceed the share even when another choice of titles would meet it; the
+// higher-ranked titles win. Everything after the window keeps its order, and
+// no item is removed. Items without genre data are never counted.
+func applyGenreCap(items []ScoredItem, genres map[string][]string) []ScoredItem {
+	window := min(len(items), ServedRowSize)
+	maxPerGenre := max(1, int(servedGenreShare*float64(window)))
+	counts := make(map[string]int)
+	out := make([]ScoredItem, 0, len(items))
+	var skipped []ScoredItem
+	next := 0
+	for ; next < len(items) && len(out) < window; next++ {
+		item := items[next]
+		itemGenres := distinctGenres(genres[item.MediaItemID])
+		if slices.ContainsFunc(itemGenres, func(g string) bool { return counts[g] >= maxPerGenre }) {
+			skipped = append(skipped, item)
+			continue
+		}
+		for _, g := range itemGenres {
+			counts[g]++
+		}
+		out = append(out, item)
 	}
-	minRetained := int(math.Ceil(float64(len(items)) * minGenreCapRetainedFraction))
-	if minRetained < 1 {
-		minRetained = 1
-	}
-
-	// Sort a copy by score descending so removals take lowest-scored first.
-	sorted := make([]ScoredItem, len(items))
-	copy(sorted, items)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Score != sorted[j].Score {
-			return sorted[i].Score > sorted[j].Score
-		}
-		return sorted[i].MediaItemID < sorted[j].MediaItemID
-	})
-
-	// Iteratively remove until all genres are within cap. Re-check after each
-	// removal because the total count changes.
-	for {
-		// Count items per genre.
-		genreCounts := make(map[string]int)
-		for _, item := range sorted {
-			for _, genre := range genres[item.MediaItemID] {
-				if genre != "" {
-					genreCounts[genre]++
-				}
-			}
-		}
-
-		// Find a genre that exceeds the cap.
-		total := len(sorted)
-		maxAllowed := int(math.Floor(maxPct * float64(total)))
-		if maxAllowed < 1 {
-			maxAllowed = 1
-		}
-
-		overGenre := ""
-		for g, count := range genreCounts {
-			if count > maxAllowed {
-				if overGenre == "" ||
-					count > genreCounts[overGenre] ||
-					(count == genreCounts[overGenre] && g < overGenre) {
-					overGenre = g
-				}
-			}
-		}
-		if overGenre == "" {
-			break // all genres within cap
-		}
-		if len(sorted) <= minRetained {
-			break
-		}
-
-		// Remove the lowest-scored item of the over-represented genre.
-		// Items are sorted descending, so scan from the end.
-		removed := false
-		for i := len(sorted) - 1; i >= 0; i-- {
-			if itemHasGenre(genres[sorted[i].MediaItemID], overGenre) {
-				sorted = append(sorted[:i], sorted[i+1:]...)
-				removed = true
-				break
-			}
-		}
-		if !removed {
-			break
-		}
-	}
-
-	return sorted
+	// The skipped items fill the window first, then precede the untouched
+	// rest, which they came before.
+	out = append(out, skipped...)
+	return append(out, items[next:]...)
 }
 
-func itemHasGenre(genres []string, target string) bool {
-	for _, genre := range genres {
-		if genre == target {
-			return true
+// distinctGenres returns genres without blanks and repeats.
+func distinctGenres(genres []string) []string {
+	out := make([]string, 0, len(genres))
+	for _, g := range genres {
+		if g != "" && !slices.Contains(out, g) {
+			out = append(out, g)
 		}
 	}
-	return false
+	return out
 }
 
 // cosineSimilarity computes the cosine similarity between two float32 vectors.

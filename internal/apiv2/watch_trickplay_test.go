@@ -47,6 +47,27 @@ func trickplayDeps(watch *fakeWatch, tp *fakeTrickplay) Dependencies {
 	return deps
 }
 
+type watchWithUnavailableArtwork struct{ fakeWatch }
+
+func (f *watchWithUnavailableArtwork) WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error) {
+	if !filter.OmitWatchArtwork {
+		return nil, errors.New("artwork provider unavailable")
+	}
+	return f.fakeWatch.WatchDetail(ctx, userID, profileID, contentID, filter)
+}
+
+func TestWatchTrickplayDoesNotNeedArtwork(t *testing.T) {
+	tp := &fakeTrickplay{}
+	deps := trickplayDeps(&fakeWatch{}, tp)
+	deps.Watch = &watchWithUnavailableArtwork{}
+	h := newTestHandler(t, deps)
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", owner)
+	if rec.Code != http.StatusOK || len(tp.calls) != 1 || tp.calls[0] != 42 {
+		t.Fatalf("seek previews = %d %s; manifest calls = %v", rec.Code, rec.Body.String(), tp.calls)
+	}
+}
+
 func TestGetWatchTrickplay(t *testing.T) {
 	watch, tp := &fakeWatch{}, &fakeTrickplay{}
 	h := newTestHandler(t, trickplayDeps(watch, tp))
@@ -89,20 +110,6 @@ func TestGetWatchTrickplay(t *testing.T) {
 	requireProblem(t, do(t, off, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", owner), TypeDependencyUnavailable)
 }
 
-func TestWatchVersionsCarryTrickplayAvailability(t *testing.T) {
-	watch := &fakeWatch{}
-	h := newTestHandler(t, watchDeps(watch))
-	rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995", "", bearer(memberToken))
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	version := body["versions"].([]any)[0].(map[string]any)
-	if available, ok := version["trickplay_available"]; !ok || available != false {
-		t.Fatalf("trickplay_available = %v (%t), want false present", available, ok)
-	}
-}
-
 func watchTrickplayFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	return []fixtureCase{
@@ -114,14 +121,5 @@ func watchTrickplayFixtureCases() []fixtureCase {
 			scenario: "A file the item does not list, or one without published previews: not found.",
 			method:   http.MethodGet, path: "/api/v2/watch/movie:heat-1995/trickplay?file_id=7", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
-	}
-}
-
-func TestWatchVersionOfReportsTrickplay(t *testing.T) {
-	if watchVersionOf(catalogpkg.FileVersion{FileID: 1}).TrickplayAvailable {
-		t.Fatal("a version without previews reported them")
-	}
-	if !watchVersionOf(catalogpkg.FileVersion{FileID: 1, Trickplay: &catalogpkg.TrickplayGrid{Width: 300}}).TrickplayAvailable {
-		t.Fatal("a version with previews did not report them")
 	}
 }

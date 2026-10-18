@@ -169,12 +169,18 @@ func (r *Runner) Dispatch(id int64, run func(ctx context.Context), onAbort func(
 			}
 			return
 		}
-		defer func() { <-r.sem }()
+		jobSlot := &slot{sem: r.sem, held: true}
+		defer func() {
+			if jobSlot.held {
+				<-r.sem
+			}
+		}()
+		jobCtx := context.WithValue(runCtx, slotKey{}, jobSlot)
 
 		// A terminal signal or local cancellation can race semaphore admission.
-		if runCtx.Err() != nil {
+		if jobCtx.Err() != nil {
 			if onAbort != nil {
-				onAbort(context.WithoutCancel(runCtx))
+				onAbort(context.WithoutCancel(jobCtx))
 			}
 			return
 		}
@@ -185,10 +191,42 @@ func (r *Runner) Dispatch(id int64, run func(ctx context.Context), onAbort func(
 		case "metadata translation":
 			workload = "metadata"
 		}
-		runCtx, observation := workmetrics.Start(runCtx, workload, queuedAt)
+		jobCtx, observation := workmetrics.Start(jobCtx, workload, queuedAt)
 		defer observation.Finish("unknown")
-		workmetrics.Do(runCtx, run)
+		workmetrics.Do(jobCtx, run)
 	}()
+}
+
+type slotKey struct{}
+
+// slot is the semaphore slot a dispatched job holds; only that job's
+// goroutine touches it.
+type slot struct {
+	sem  chan struct{}
+	held bool
+}
+
+// Yield gives up the semaphore slot of the job running in ctx and queues for
+// it again, so jobs waiting on the shared bound can start between the units of
+// a long job. Waiting senders are admitted in order, so a job that was queued
+// runs before the yielding job gets its slot back. It returns ctx's error when
+// ctx ends first; the job must then stop. Outside a dispatched job it only
+// reports ctx's error.
+func Yield(ctx context.Context) error {
+	s, _ := ctx.Value(slotKey{}).(*slot)
+	if s == nil || !s.held {
+		return ctx.Err()
+	}
+	<-s.sem
+	s.held = false
+	select {
+	case s.sem <- struct{}{}:
+		s.held = true
+		// Both cases may be ready; a canceled job must still stop.
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Cancel cancels the in-flight goroutine for id, returning false when none is

@@ -85,7 +85,14 @@ func TestAlignRecoversTiming(t *testing.T) {
 	for name, truth := range cases {
 		t.Run(name, func(t *testing.T) {
 			windows := speechFor(cues, truth, spread(runtime, 120, 12), 120, 7)
-			got, err := Align(windows, cues)
+			input := cues
+			if name == "offset" {
+				// Corrupt cues must neither allocate their span nor disturb alignment.
+				input = append(append([]subtitles.SubtitleCue(nil), cues...),
+					subtitles.SubtitleCue{Start: 9999 * time.Hour, End: 9999*time.Hour + time.Second, Lines: []string{"x"}},
+					subtitles.SubtitleCue{Start: seconds(100), End: 99999 * time.Hour, Lines: []string{"y"}})
+			}
+			got, err := Align(windows, input)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,25 +147,6 @@ func TestAlignInputs(t *testing.T) {
 	if _, err := Align([]mediasample.SpeechLevels{flat}, dialogCues(1, 600)); !errors.Is(err, ErrNoSpeech) {
 		t.Fatalf("silent audio: %v", err)
 	}
-}
-
-func TestAlignIgnoresCuesOutOfReach(t *testing.T) {
-	const runtime = 3600.0
-	cues := dialogCues(8, runtime)
-	truth := subtitles.Timing{OffsetMS: 1500}
-	windows := speechFor(cues, truth, spread(runtime, 120, 12), 120, 4)
-	// A corrupt cue thousands of hours out must neither allocate its span
-	// nor disturb the result.
-	cues = append(cues, subtitles.SubtitleCue{Start: 9999 * time.Hour, End: 9999*time.Hour + time.Second, Lines: []string{"x"}},
-		subtitles.SubtitleCue{Start: seconds(100), End: 99999 * time.Hour, Lines: []string{"y"}})
-	got, err := Align(windows, cues)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.Matched() {
-		t.Fatalf("no match: %+v", got)
-	}
-	assertTiming(t, got.Timing, truth, runtime)
 }
 
 func assertTiming(t *testing.T, got, want subtitles.Timing, runtime float64) {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -177,9 +178,14 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	if err != nil {
 		return 0, err
 	}
+	audit, err := auditmutation.RecordUserMutation(ctx, tx, nil, user, true)
+	if err != nil {
+		return 0, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return 0, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	h.invalidateStats(ctx, cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(user.ID))
 	return user.ID, nil
 }
@@ -210,7 +216,7 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 	if input.Role != nil && *input.Role != roleAdmin && *input.Role != models.RoleUser {
 		return 0, fieldError("role", "Role must be admin or user")
 	}
-	if input.MaxProfiles != nil && *input.MaxProfiles < 1 {
+	if input.MaxProfiles.Value != nil && *input.MaxProfiles.Value < 1 {
 		return 0, fieldError("max_profiles", "Must be at least 1")
 	}
 	if err := validateStreamLimits(input.MaxStreams.Value, input.MaxTranscodes.Value); err != nil {
@@ -252,8 +258,8 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		if input.Role != nil {
 			role = *input.Role
 		}
-		if actorIsScopedAPIKey(ctx) && ((input.Role != nil && role == roleAdmin) || (current.Role == roleAdmin && (input.Password != nil || input.Role != nil || input.BreakGlass != nil))) {
-			return false, apiError(403, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
+		if err := checkScopedAPIKeyUpdate(ctx, current, input); err != nil {
+			return false, err
 		}
 		if input.BreakGlass != nil && *input.BreakGlass && role != roleAdmin {
 			return false, fieldError("break_glass", "Only admin accounts can be break-glass accounts")
@@ -274,6 +280,9 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 	}
 	if revoked && h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(ctx, id)
+	}
+	if accountScopeChanged(input) {
+		notifyAccountsScopeChanged(ctx, h.RecWorker, id)
 	}
 	return snapshot.Revision, nil
 }

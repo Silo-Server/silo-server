@@ -27,8 +27,8 @@ import "github.com/quasilyte/go-ruleguard/dsl"
 // entry function returns a sealed handler whose dynamic type is never a router,
 // so no assertion can recover one (the generator checks that shape). The rule
 // catches the attempt early and covers routers that are not listeners. Tests
-// are exempt (see .golangci.yml): they walk routers and register nothing that
-// ships.
+// are exempt (see .golangci-router-recovery.yml): they walk routers and
+// register nothing that ships.
 func routerTypeRecovery(m dsl.Matcher) {
 	m.Import("github.com/go-chi/chi/v5")
 

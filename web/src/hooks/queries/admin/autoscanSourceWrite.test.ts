@@ -86,20 +86,7 @@ for (const create of [true, false]) {
     expect(sent.source_config.key).toBe("old");
     expect(fetchMock.mock.calls[0]![1].method).toBe(create ? "POST" : "PUT");
   });
-  it(`${create ? "create" : "update"} rejects offline authority replacement`, async () => {
-    onlineManager.setOnline(false);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useWrite, fixture());
-    act(() => result.current.submit(body()));
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
-    act(() => {
-      setProfileToken("pin-b");
-      onlineManager.setOnline(true);
-    });
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+
   it.each(["401", "network"])(
     `${create ? "create" : "update"} never replays %s under retry3`,
     async (failure) => {
@@ -125,27 +112,42 @@ for (const create of [true, false]) {
       expect(fetchMock).toHaveBeenCalledOnce();
     },
   );
-  it(`${create ? "create" : "update"} fences late receipt and caller callback`, async () => {
-    let release!: (r: Response) => void;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        () =>
-          new Promise<Response>((r) => {
-            release = r;
-          }),
-      ),
-    );
-    const { client, wrapper } = fixture();
-    const invalidation = vi.spyOn(client, "invalidateQueries");
-    const callback = vi.fn();
-    const { result } = renderHook(useWrite, { wrapper });
-    act(() => result.current.submit(body(), callback));
-    await waitFor(() => expect(release).toBeTypeOf("function"));
-    act(() => setProfileToken("pin-b"));
-    await act(async () => release(response(create)));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(callback).not.toHaveBeenCalled();
-    expect(invalidation).not.toHaveBeenCalled();
-  });
 }
+
+it("create rejects offline authority replacement", async () => {
+  onlineManager.setOnline(false);
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useCreateAutoscanSource, fixture());
+  act(() => result.current.mutate(body()));
+  await waitFor(() => expect(result.current.isPaused).toBe(true));
+  act(() => {
+    setProfileToken("pin-b");
+    onlineManager.setOnline(true);
+  });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+it("create fences late receipt and caller callback", async () => {
+  let release!: (r: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise<Response>((r) => {
+          release = r;
+        }),
+    ),
+  );
+  const { client, wrapper } = fixture();
+  const invalidation = vi.spyOn(client, "invalidateQueries");
+  const callback = vi.fn();
+  const { result } = renderHook(useCreateAutoscanSource, { wrapper });
+  act(() => result.current.mutate(body(), { onSuccess: callback }));
+  await waitFor(() => expect(release).toBeTypeOf("function"));
+  act(() => setProfileToken("pin-b"));
+  await act(async () => release(response(true)));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(callback).not.toHaveBeenCalled();
+  expect(invalidation).not.toHaveBeenCalled();
+});

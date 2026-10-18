@@ -13,7 +13,8 @@ import {
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { ShortcutTarget } from "@/lib/uiCustomization";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
-import { deviceKeys, sectionKeys, settingsKeys } from "./keys";
+import { deviceKeys, libraryKeys, sectionKeys, settingsKeys } from "./keys";
+import { refreshLocalizedMediaQueries } from "./mediaSurfaceRefresh";
 
 /**
  * Typed access to the canonical settings API.
@@ -195,26 +196,136 @@ export function useEffectiveSettings(options?: {
 
   return useQuery({
     queryKey: effectiveSettingsQueryKey({ keys, libraryIds, seriesIds, deviceId, profileId }),
-    queryFn: async () => {
-      const result = await v2("GET /api/v2/settings/values/effective", {
-        query: {
-          keys: keys?.length ? [...keys] : undefined,
-          library_ids: libraryIds?.length ? libraryIds.map(String) : undefined,
-          series_ids: seriesIds?.length ? [...seriesIds] : undefined,
-          device_id: deviceId || undefined,
-          profile_id: profileId || undefined,
-        },
-      });
-      const byKey: EffectiveSettingsMap = {};
-      for (const item of result.items) {
-        const setting = effectiveSettingFromV2(item);
-        if (setting) byKey[setting.key] = setting;
-      }
-      return byKey;
-    },
+    queryFn: () =>
+      keys?.length
+        ? loadEffectiveSettingsBatched({ keys, libraryIds, seriesIds, deviceId, profileId })
+        : fetchEffectiveSettings({ libraryIds, seriesIds, deviceId, profileId }),
     enabled: options?.enabled ?? true,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+interface EffectiveSettingsRequest {
+  keys?: readonly SettingKey[];
+  libraryIds?: readonly number[];
+  seriesIds?: readonly string[];
+  deviceId?: string;
+  profileId?: string;
+}
+
+async function fetchEffectiveSettings(
+  request: EffectiveSettingsRequest,
+): Promise<EffectiveSettingsMap> {
+  const { keys, libraryIds, seriesIds, deviceId, profileId } = request;
+  const result = await v2("GET /api/v2/settings/values/effective", {
+    query: {
+      keys: keys?.length ? [...keys] : undefined,
+      library_ids: libraryIds?.length ? libraryIds.map(String) : undefined,
+      series_ids: seriesIds?.length ? [...seriesIds] : undefined,
+      device_id: deviceId || undefined,
+      profile_id: profileId || undefined,
+    },
+  });
+  const byKey: EffectiveSettingsMap = {};
+  for (const item of result.items) {
+    const setting = effectiveSettingFromV2(item);
+    if (setting) byKey[setting.key] = setting;
+  }
+  return byKey;
+}
+
+const EFFECTIVE_BATCH_MAX_KEYS = 50;
+
+interface PendingEffectiveBatch {
+  request: Omit<EffectiveSettingsRequest, "keys">;
+  keys: Set<SettingKey>;
+  waiters: {
+    keys: readonly SettingKey[];
+    resolve: (value: EffectiveSettingsMap) => void;
+    reject: (reason: unknown) => void;
+  }[];
+}
+
+const pendingEffectiveBatches = new Map<string, PendingEffectiveBatch>();
+
+function effectiveBatchScope(request: EffectiveSettingsRequest): string {
+  const { libraryIds, seriesIds, deviceId, profileId } = request;
+  return JSON.stringify([
+    profileId ?? activeProfileId() ?? "",
+    deviceId ?? "",
+    libraryIds ? [...libraryIds].sort() : [],
+    seriesIds ? [...seriesIds].sort() : [],
+  ]);
+}
+
+/**
+ * Keyed reads that start in the same tick for the same scope share one request.
+ *
+ * Screens read settings one key at a time (useSettingValue), so a first render
+ * of the app shell would otherwise send a dozen requests at once and, on
+ * HTTP/1.1, hold up the requests the page actually needs behind them. Each
+ * caller keeps its own query key and cache entry; only the network read is
+ * shared, and every caller gets back exactly the keys it asked for.
+ */
+function loadEffectiveSettingsBatched(
+  request: EffectiveSettingsRequest & { keys: readonly SettingKey[] },
+): Promise<EffectiveSettingsMap> {
+  const scope = effectiveBatchScope(request);
+  let batch = pendingEffectiveBatches.get(scope);
+  if (batch && batch.keys.size + request.keys.length > EFFECTIVE_BATCH_MAX_KEYS) {
+    flushEffectiveBatch(scope, batch);
+    batch = undefined;
+  }
+  if (!batch) {
+    const { libraryIds, seriesIds, deviceId, profileId } = request;
+    const opened: PendingEffectiveBatch = {
+      request: { libraryIds, seriesIds, deviceId, profileId },
+      keys: new Set(),
+      waiters: [],
+    };
+    pendingEffectiveBatches.set(scope, opened);
+    setTimeout(() => flushEffectiveBatch(scope, opened), 0);
+    batch = opened;
+  }
+  for (const key of request.keys) batch.keys.add(key);
+  const { waiters } = batch;
+  return new Promise((resolve, reject) => {
+    waiters.push({ keys: request.keys, resolve, reject });
+  });
+}
+
+function flushEffectiveBatch(scope: string, batch: PendingEffectiveBatch) {
+  if (pendingEffectiveBatches.get(scope) === batch) pendingEffectiveBatches.delete(scope);
+  if (batch.waiters.length === 0) return;
+  const waiters = batch.waiters.splice(0);
+  fetchEffectiveSettings({ ...batch.request, keys: [...batch.keys] }).then(
+    (byKey) => {
+      for (const waiter of waiters) {
+        const own: EffectiveSettingsMap = {};
+        for (const key of waiter.keys) {
+          const setting = byKey[key];
+          if (setting) own[key] = setting;
+        }
+        waiter.resolve(own);
+      }
+    },
+    (error: unknown) => {
+      // The server rejects the whole read (422, a query.keys error) when any
+      // one key is missing from its contract. Re-read each caller's own keys so
+      // only the caller that asked for the unknown key fails, as it did before
+      // batching.
+      if (waiters.length > 1 && isUnknownSettingKeyError(error)) {
+        for (const waiter of waiters) {
+          fetchEffectiveSettings({ ...batch.request, keys: waiter.keys }).then(
+            waiter.resolve,
+            waiter.reject,
+          );
+        }
+        return;
+      }
+      for (const waiter of waiters) waiter.reject(error);
+    },
+  );
 }
 
 /**
@@ -285,6 +396,14 @@ export function useStoredSettingValues(options: {
   });
 }
 
+function isUnknownSettingKeyError(error: unknown): boolean {
+  return (
+    error instanceof V2ProblemError &&
+    error.status === 422 &&
+    (error.problem.errors?.some((detail) => detail.location === "query.keys") ?? false)
+  );
+}
+
 /** The HTTP status of a documented v2 problem, or null for anything else (transport, network). */
 export function settingMutationStatus(error: unknown): number | null {
   return error instanceof V2ProblemError ? error.status : null;
@@ -310,13 +429,44 @@ function shouldReconcileAfterMutationError(error: unknown): boolean {
   return !isDefinitiveSettingMutationRejection(error);
 }
 
+// Profile preferences that change which cards Home's rows hold or their order.
+const HOME_REFRESH_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+  SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+]);
+
 function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, key?: string) {
-  if (key !== SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS) return;
+  if (!key || !HOME_REFRESH_KEYS.has(key)) return;
   // Home uses observer-less fetchQuery calls. Mark its data stale before
   // resetting the load queue, including when the settings screen has unmounted.
   return queryClient
     .invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" })
     .then(() => bumpHomeRefreshSignal(queryClient));
+}
+
+// A profile with a library limit gets its hidden libraries left out of the
+// server's library list, so the list has to refetch when the profile hides or
+// shows one; otherwise navigation keeps the old list until it goes stale.
+function refreshLibrariesForSetting(queryClient: ReturnType<typeof useQueryClient>, key?: string) {
+  if (key !== SETTING_KEYS.UI_DISABLED_LIBRARY_IDS) return;
+  return queryClient.invalidateQueries({ queryKey: libraryKeys.all });
+}
+
+const METADATA_LANGUAGE_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
+]);
+
+// The metadata language decides the localized titles and descriptions in the
+// media reads (catalog, home sections, people, collections, episodes). The
+// write does not wait for their refetch, so the settings controls unlock as
+// soon as the value is saved.
+function refreshLocalizedMediaForSetting(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key?: string,
+) {
+  if (!key || !METADATA_LANGUAGE_KEYS.has(key)) return;
+  return refreshLocalizedMediaQueries(queryClient);
 }
 
 /** Refreshes the reads a setting write changes, as useSetSettingValue does. */
@@ -328,6 +478,8 @@ export function invalidateSettingValueQueries(
   const invalidations = [
     queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
     refreshHomeForSetting(queryClient, key),
+    refreshLibrariesForSetting(queryClient, key),
+    refreshLocalizedMediaForSetting(queryClient, key),
   ];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
@@ -458,7 +610,10 @@ export type SettingsCapabilities = Pick<
   Partial<
     Pick<
       V2Result<"GET /api/v2/settings/contract/capabilities">,
-      "supports_batched_effective" | "supports_idempotent_writes" | "supports_atomic_shortcuts"
+      | "supports_batched_effective"
+      | "supports_idempotent_writes"
+      | "supports_atomic_shortcuts"
+      | "supports_device_rename"
     >
   >;
 
@@ -567,6 +722,8 @@ export function useSettingValuesRealtime() {
 
         qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
         void refreshHomeForSetting(qc, event.data?.key);
+        void refreshLibrariesForSetting(qc, event.data?.key);
+        void refreshLocalizedMediaForSetting(qc, event.data?.key);
       },
     }),
     [qc],

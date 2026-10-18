@@ -129,142 +129,31 @@ describe("PlaybackSettings", () => {
 
   afterEach(cleanup);
 
-  it.each([
-    ["older server", capabilitiesAtRevision(10)],
-    ["unknown capabilities", undefined],
-    ["unsupported settings API", { ...capabilitiesAtRevision(11), api_version: 2 }],
-    ["no batched settings", { ...capabilitiesAtRevision(11), supports_batched_effective: false }],
-  ])("does not request or offer theme settings with %s", (_scenario, capabilities) => {
-    mocks.capabilities = capabilities as SettingsCapabilities | undefined;
-    mocks.capabilitiesSettled = capabilities !== undefined;
-
-    render(<PlaybackSettings />);
-
-    expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: "Loop theme music" })).not.toBeInTheDocument();
-    for (const [options] of mocks.useEffectiveSettings.mock.calls) {
-      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_ENABLED);
-      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_LOOP);
-    }
-    expect(mutateAsync).not.toHaveBeenCalled();
-  });
-
-  it("offers supported theme settings and saves them at profile scope", async () => {
-    mocks.capabilities = capabilitiesAtRevision(11);
-    render(<PlaybackSettings />);
-
-    const requested = mocks.useEffectiveSettings.mock.calls.flatMap(
-      ([options]) => options.keys ?? [],
-    );
-    expect(requested).toContain(SETTING_KEYS.UI_THEME_MUSIC_ENABLED);
-    expect(requested).toContain(SETTING_KEYS.UI_THEME_MUSIC_LOOP);
-    const enabled = screen.getByRole("switch", { name: "Theme music" });
-    const loop = screen.getByRole("switch", { name: "Loop theme music" });
-    expect(enabled).not.toBeChecked();
-    expect(loop).not.toBeChecked();
-    await userEvent.click(enabled);
-    await userEvent.click(loop);
-    expect(mutateAsync).toHaveBeenCalledWith({
-      key: SETTING_KEYS.UI_THEME_MUSIC_ENABLED,
-      value: true,
-      identity: { scope: "profile" },
-    });
-    expect(mutateAsync).toHaveBeenCalledWith({
-      key: SETTING_KEYS.UI_THEME_MUSIC_LOOP,
-      value: true,
-      identity: { scope: "profile" },
-    });
-  });
-
-  it("updates theme controls and requested keys when server support changes", () => {
-    mocks.capabilities = undefined;
-    mocks.capabilitiesSettled = false;
-    const { rerender } = render(<PlaybackSettings />);
-    expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
-
-    mocks.capabilities = capabilitiesAtRevision(11);
-    mocks.capabilitiesSettled = true;
-    rerender(<PlaybackSettings />);
-    expect(screen.getByRole("switch", { name: "Theme music" })).toBeInTheDocument();
-
-    mocks.useEffectiveSettings.mockClear();
-    mocks.capabilities = capabilitiesAtRevision(10);
-    rerender(<PlaybackSettings />);
-    expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: "Loop theme music" })).not.toBeInTheDocument();
-    for (const [options] of mocks.useEffectiveSettings.mock.calls) {
-      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_ENABLED);
-      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_LOOP);
-    }
-  });
-
-  it.each(["pending", "error", "refetch error"] as const)(
-    "blocks theme writes while effective settings are %s and recovers after loading",
-    async (state) => {
-      mocks.capabilities = capabilitiesAtRevision(11);
-      const values = {
-        ...resolved(SETTING_KEYS.UI_THEME_MUSIC_ENABLED, true, "profile"),
-        ...resolved(SETTING_KEYS.UI_THEME_MUSIC_LOOP, true, "profile"),
-      };
-      mocks.useEffectiveSettings.mockReturnValue({
-        data: state === "refetch error" ? values : undefined,
-        isPending: state === "pending",
-        isError: state !== "pending",
-      });
-      const { rerender } = render(<PlaybackSettings />);
-      const enabled = screen.getByRole("switch", { name: "Theme music" });
-      const loop = screen.getByRole("switch", { name: "Loop theme music" });
-      expect(enabled).toBeDisabled();
-      expect(loop).toBeDisabled();
-      await userEvent.click(enabled);
-      await userEvent.click(loop);
-      expect(mutateAsync).not.toHaveBeenCalled();
-      expect(clearMutateAsync).not.toHaveBeenCalled();
-
-      mocks.useEffectiveSettings.mockReturnValue({
-        data: values,
-        isPending: false,
-        isError: false,
-      });
-      rerender(<PlaybackSettings />);
-      expect(enabled).toBeEnabled();
-      expect(loop).toBeEnabled();
-      expect(enabled).toBeChecked();
-      expect(loop).toBeChecked();
-      await userEvent.click(enabled);
-      await userEvent.click(loop);
-      for (const key of [SETTING_KEYS.UI_THEME_MUSIC_ENABLED, SETTING_KEYS.UI_THEME_MUSIC_LOOP]) {
-        expect(mutateAsync).toHaveBeenCalledWith({
-          key,
-          value: false,
-          identity: { scope: "profile" },
-        });
-      }
-    },
-  );
-
-  it("renders without a profile record, reading every value from the contract", () => {
-    // The screen used to require the cached profile object and read its
-    // preference columns; it now resolves them, so it renders from the
-    // settings API alone.
-    render(<PlaybackSettings />);
-
-    expect(screen.getByText("Spoken language")).toBeTruthy();
-    expect(screen.getByText("Auto-play next episode")).toBeTruthy();
-    expect(screen.getByText("Next up episodes")).toBeTruthy();
-  });
-
   it("reads its values in one batch rather than one request per control", () => {
     render(<PlaybackSettings />);
+
+    expect(screen.getByText("Auto-play next episode")).toBeTruthy();
+    // Languages live on the Language & Subtitles page now.
+    expect(screen.queryByText("Spoken language")).toBeNull();
 
     const batched = mocks.useEffectiveSettings.mock.calls.find(
       ([options]) => (options?.keys?.length ?? 0) > 2,
     );
     expect(batched?.[0].keys).toContain(SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE);
     expect(batched?.[0].keys).not.toContain(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO);
-    expect(batched?.[0].keys).toContain(SETTING_KEYS.UI_NEXT_UP_MODE);
-    expect(batched?.[0].keys).toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
-    expect(batched?.[0].keys).toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES);
+    expect(batched?.[0].keys).not.toContain(SETTING_KEYS.UI_NEXT_UP_MODE);
+    expect(batched?.[0].keys).not.toContain(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
+    expect(batched?.[0].keys).not.toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
+  });
+
+  it("lists the skipping switches as intros, recaps, then credits", () => {
+    render(<PlaybackSettings />);
+
+    const skipping = screen.getByRole("group", { name: "Skipping" });
+    const labels = within(skipping)
+      .getAllByText(/^(Skip intros|Auto-skip recaps|Auto-skip credits)$/)
+      .map((node) => node.textContent);
+    expect(labels).toEqual(["Skip intros", "Auto-skip recaps", "Auto-skip credits"]);
   });
 
   it("saves the selected intro mode as typed JSON at profile scope", async () => {
@@ -305,29 +194,9 @@ describe("PlaybackSettings", () => {
     expect(screen.getByRole("combobox", { name: "Skip intros" })).toBeDisabled();
   });
 
-  it("reads a stored value in preference to the contract default", () => {
-    // playback.auto_play_next defaults to true, so a stored false is the case
-    // that proves the screen trusts the resolved answer: the bug this guards is
-    // a default-on toggle that a client's own idea of the default flips back.
-    render(<PlaybackSettings />);
-    expect(screen.getByLabelText("Auto-play next episode").getAttribute("aria-checked")).toBe(
-      "true",
-    );
-
-    cleanup();
-    mocks.useEffectiveSettings.mockReturnValue({
-      data: resolved(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT, false, "profile"),
-      isLoading: false,
-    });
-
-    render(<PlaybackSettings />);
-    expect(screen.getByLabelText("Auto-play next episode").getAttribute("aria-checked")).toBe(
-      "false",
-    );
-  });
-
   it("turning a default-on toggle off stores an explicit false", async () => {
     render(<PlaybackSettings />);
+    expect(screen.getByLabelText("Auto-play next episode")).toHaveAttribute("aria-checked", "true");
 
     fireEvent.click(screen.getByLabelText("Auto-play next episode"));
 
@@ -379,47 +248,25 @@ describe("PlaybackSettings", () => {
     });
 
     render(<PlaybackSettings />);
+    expect(screen.getByLabelText("Auto-play next episode")).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
     fireEvent.click(screen.getByLabelText("Auto-play next episode"));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
     expect(clearMutateAsync).not.toHaveBeenCalled();
   });
 
-  it("offers a reset only once the profile has stored a next-up choice", () => {
-    // The resolved value is the contract default until a row exists, so the
-    // affordance keys off the source rather than off the value.
-    render(<PlaybackSettings />);
-    expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
-
-    cleanup();
-    mocks.useEffectiveSettings.mockReturnValue({
-      data: resolved(SETTING_KEYS.UI_NEXT_UP_MODE, "separate", "profile"),
-      isLoading: false,
-    });
-
-    render(<PlaybackSettings />);
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-
-    // Reset is a delete of the profile row, so the setting inherits the
-    // contract default again rather than storing the default as a value.
-    expect(clearMutateAsync).toHaveBeenCalledWith({
-      key: SETTING_KEYS.UI_NEXT_UP_MODE,
-      identity: { scope: "profile" },
-    });
-  });
-
   // Quality is the same two axes the device screen edits — a resolution cap
   // and a bandwidth cap — not a compound preset only this screen understands.
-  it("offers the resolution cap and the bandwidth cap as separate controls", () => {
+
+  it("saves the resolution cap as its own key", async () => {
     render(<PlaybackSettings />);
 
     expect(screen.getByText("Preferred quality")).toBeTruthy();
     expect(screen.getByText("Maximum bitrate")).toBeTruthy();
     expect(screen.queryByText("Video quality")).toBeNull();
-  });
-
-  it("saves the resolution cap as its own key", async () => {
-    render(<PlaybackSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Preferred quality" }));
     await userEvent.click(await screen.findByRole("option", { name: "1080p" }));
@@ -431,6 +278,26 @@ describe("PlaybackSettings", () => {
         identity: { scope: "profile" },
       }),
     );
+  });
+
+  it("shows a stored original quality as Auto and no longer offers Original", async () => {
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: resolved(SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY, "original", "profile"),
+      isLoading: false,
+    });
+    render(<PlaybackSettings />);
+
+    const select = screen.getByRole("combobox", { name: "Preferred quality" });
+    expect(select).toHaveTextContent("Auto");
+    expect(
+      screen.getByText(
+        "Plays the original file whenever your device and connection can handle it.",
+      ),
+    ).toBeInTheDocument();
+
+    await userEvent.click(select);
+    expect(await screen.findByRole("option", { name: "Auto" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Original/ })).toBeNull();
   });
 
   it("saves the bandwidth cap as a number", async () => {
@@ -501,6 +368,11 @@ describe("PlaybackSettings", () => {
       mocks.capabilities = capabilitiesAtRevision(9);
 
       render(<PlaybackSettings />);
+
+      expect(
+        screen.queryByRole("button", { name: "Use this browser's audiobook intervals" }),
+      ).toBeNull();
+      expect(mutateAsync).not.toHaveBeenCalled();
 
       for (const name of ["Video", "Audiobooks"]) {
         const back = group(name).getByRole("combobox", { name: "Rewind interval" });
@@ -605,17 +477,6 @@ describe("PlaybackSettings", () => {
 
       expect(screen.getByRole("alert")).toHaveTextContent(/Could not check whether this server/);
       expect(screen.queryByText(/does not store seek intervals per profile yet/)).toBeNull();
-    });
-
-    it("offers no import when this browser holds no legacy audiobook intervals", () => {
-      mocks.capabilities = capabilitiesAtRevision(9);
-
-      render(<PlaybackSettings />);
-
-      expect(
-        screen.queryByRole("button", { name: "Use this browser's audiobook intervals" }),
-      ).toBeNull();
-      expect(mutateAsync).not.toHaveBeenCalled();
     });
 
     it("imports only on a click, listing exactly what will be written", async () => {

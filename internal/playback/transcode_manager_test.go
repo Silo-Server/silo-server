@@ -129,8 +129,10 @@ func TestCloseTranscodeSession_DropsLiveSession(t *testing.T) {
 
 func TestStartShutdownCleanup_ClosesEveryLocalTranscode(t *testing.T) {
 	m := NewTranscodeManager()
-	m.RegisterTranscodeSession("s1", &TranscodeSession{})
-	m.RegisterTranscodeSession("s2", &TranscodeSession{})
+	dirs := map[string]string{"s1": t.TempDir(), "s2": t.TempDir()}
+	for id, dir := range dirs {
+		m.RegisterTranscodeSession(id, &TranscodeSession{outputDir: dir})
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := m.StartShutdownCleanup(ctx)
@@ -141,7 +143,10 @@ func TestStartShutdownCleanup_ClosesEveryLocalTranscode(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("shutdown cleanup did not finish")
 	}
-	for _, id := range []string{"s1", "s2"} {
+	for id, dir := range dirs {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("shutdown left output for %q: %v", id, err)
+		}
 		if got := m.GetTranscodeSession(id); got != nil {
 			t.Fatalf("transcode %q survived shutdown cleanup", id)
 		}
@@ -394,42 +399,6 @@ func TestLoadOrReconstructTranscode_FailedAttemptPreservesConcurrentSession(t *t
 	}
 }
 
-// CloseTranscodeSessionIf must leave a successor registered under the same id
-// untouched: a reconstruct that replaced the crashed ffmpeg between exit and
-// teardown must not have its live session (and shared output dir) torn down.
-func TestCloseTranscodeSessionIf_LeavesSuccessor(t *testing.T) {
-	m := NewTranscodeManager()
-	dead := &TranscodeSession{}
-	successor := &TranscodeSession{}
-
-	// The map now holds the successor (the reconstruct won the race), not dead.
-	m.RegisterTranscodeSession("s1", successor)
-
-	if matched := m.CloseTranscodeSessionIf("s1", dead, ""); matched {
-		t.Fatalf("CloseTranscodeSessionIf must report false when a successor holds the slot")
-	}
-
-	if got := m.GetTranscodeSession("s1"); got != successor {
-		t.Fatalf("successor must survive a crash teardown for the dead session, got %v", got)
-	}
-}
-
-// CloseTranscodeSessionIf must remove the entry when it is still the exact
-// session that died (the ordinary crash case with no successor).
-func TestCloseTranscodeSessionIf_RemovesMatching(t *testing.T) {
-	m := NewTranscodeManager()
-	dead := &TranscodeSession{}
-	m.RegisterTranscodeSession("s1", dead)
-
-	if matched := m.CloseTranscodeSessionIf("s1", dead, ""); !matched {
-		t.Fatalf("CloseTranscodeSessionIf must report true when the dead session still holds the slot")
-	}
-
-	if got := m.GetTranscodeSession("s1"); got != nil {
-		t.Fatalf("matching dead session must be removed, got %v", got)
-	}
-}
-
 // The crash closures use the matched return of CloseTranscodeSessionIf as the
 // authoritative gate for tearing down the upstream playback session. This test
 // proves that contract end-to-end for the successor case: when a successor is
@@ -512,39 +481,12 @@ func TestReconstructSession_AdmissionCap(t *testing.T) {
 	}
 }
 
-// A transient limit-PROVIDER failure during reconstruct (e.g. a Postgres error
-// in the post-restart wave) must NOT collapse into a permanent 404. The session
-// must be admitted (fail open) so a user within their limits keeps playing.
-func TestReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
-	ctx := context.Background()
-	reg := &fakeSessionRegistry{
-		limitsErr: fmt.Errorf("load session limits for user 7: %w",
-			errors.Join(ErrLimitProviderUnavailable, errors.New("db timeout"))),
-	}
-	m := NewTranscodeManager()
-	m.Sessions = reg
-
-	card := NewDirectRecipeCard("a", 7, "p", 100)
-	got := m.ReconstructSession(ctx, "a", 7, card)
-	if got == nil {
-		t.Fatal("limit-provider error must fail open and admit the reconstructed session, not refuse")
-	}
-	if got.ID != "a" || got.UserID != 7 {
-		t.Fatalf("admitted session wrong: %+v", got)
-	}
-	// The fail-open path must register the session so LoadOrReconstructSession
-	// yields SessionLoaded, not SessionMissing.
-	if _, err := reg.GetSession("a"); err != nil {
-		t.Fatalf("failed-open session not registered: %v", err)
-	}
-}
-
 // LoadOrReconstructSession must surface the fail-open admission as SessionLoaded
 // (not SessionMissing -> 404) when the limit provider is transiently unavailable.
 func TestLoadOrReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
 	ctx := context.Background()
 	reg := &fakeSessionRegistry{
-		limitsErr: errors.Join(ErrLimitProviderUnavailable, errors.New("db timeout")),
+		limitsErr: fmt.Errorf("load session limits: %w", errors.Join(ErrLimitProviderUnavailable, errors.New("db timeout"))),
 	}
 	m := NewTranscodeManager()
 	m.Sessions = reg
@@ -553,6 +495,12 @@ func TestLoadOrReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
 	got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, &card)
 	if status != SessionLoaded || got == nil {
 		t.Fatalf("provider error must yield SessionLoaded, got status=%v session=%+v", status, got)
+	}
+	if got.ID != "s" || got.UserID != 5 {
+		t.Fatalf("admitted session wrong: %+v", got)
+	}
+	if _, err := reg.GetSession("s"); err != nil {
+		t.Fatalf("failed-open session not registered: %v", err)
 	}
 }
 

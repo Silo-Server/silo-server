@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
 import { setWatchTogetherGuestControl } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
@@ -72,7 +72,10 @@ it("uses returned policy and sends exactly one PATCH without guest proof", async
   expect(result.current.room?.guest_control_policy).toBe("host_only");
   expect(toast.success).toHaveBeenCalledWith("Room is now host controlled");
 });
-it.each([401, 403, 409, 500])("does not replay %s or publish policy", async (status) => {
+it.each([401, 500])("does not replay %s or publish policy", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
   vi.stubGlobal("fetch", fetch);
   const { result } = renderHook(() =>

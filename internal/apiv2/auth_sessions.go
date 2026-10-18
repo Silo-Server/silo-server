@@ -2,14 +2,20 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // The rest of the auth domain: provider discovery, token refresh, the
@@ -19,13 +25,24 @@ import (
 
 // AuthProvider is one way to sign in.
 type AuthProvider struct {
-	ID              string `json:"id" doc:"Provider id; the value login takes as provider" example:"local"`
-	DisplayName     string `json:"display_name" doc:"Label for the sign-in button" example:"Silo account"`
-	Mode            string `json:"mode" doc:"How the provider authenticates: credentials (login) or oauth (the OAuth handshake)" example:"credentials"`
-	Default         bool   `json:"default" doc:"Whether this is the provider login uses when none is named" example:"true"`
-	IconURL         string `json:"icon_url,omitempty" doc:"Icon shown next to the button; absent when the provider ships none" example:"https://plugins.example.test/icon.svg"`
-	InstallationID  ID     `json:"installation_id,omitempty" doc:"Plugin installation backing the provider; absent for the built-in provider" example:"3"`
-	NativeStartPath string `json:"native_start_path,omitempty" doc:"Path of startNativeOAuthLogin below the server base, for an oauth provider while OAuth sign-in is served (a public URL is configured); absent for credentials providers. An app appends it to its saved server base URL, which keeps a reverse proxy's path prefix, adds the PKCE and state parameters, and opens the result in the system browser. An oauth provider without it offers no native sign-in" example:"/api/v2/auth/oauth/3/native/start"`
+	ID                string `json:"id" doc:"Provider id; the value login takes as provider" example:"local"`
+	DisplayName       string `json:"display_name" doc:"Label for the sign-in button" example:"Silo account"`
+	Mode              string `json:"mode" doc:"How the provider authenticates: credentials (login), oauth (the OAuth handshake) or network (signInWithNetworkIdentity: the provider's network says who owns the device; listed only to a request that arrived through that network). Clients ignore modes they do not know" example:"credentials"`
+	Default           bool   `json:"default" doc:"Whether this is the provider login uses when none is named" example:"true"`
+	IconURL           string `json:"icon_url,omitempty" doc:"Icon shown next to the button; absent when the provider ships none" example:"https://plugins.example.test/icon.svg"`
+	InstallationID    ID     `json:"installation_id,omitempty" doc:"Plugin installation backing the provider; absent for the built-in provider" example:"3"`
+	NativeStartPath   string `json:"native_start_path,omitempty" doc:"Path of startNativeOAuthLogin below the server base, for an oauth provider while OAuth sign-in is served (a public URL is configured); absent for credentials providers. An app appends it to its saved server base URL, which keeps a reverse proxy's path prefix, adds the PKCE and state parameters, and opens the result in the system browser. An oauth provider without it offers no native sign-in" example:"/api/v2/auth/oauth/3/native/start"`
+	NetworkSignInPath string `json:"network_sign_in_path,omitempty" doc:"Path of signInWithNetworkIdentity below the server base, for a network provider; absent for other modes. An app appends it to its saved server base URL and POSTs {} to sign in, with no password and no browser" example:"/api/v2/auth/network/5/sign-in"`
+	// NetworkIdentity is who the network provider says owns the requesting
+	// device, for a "Continue as" label.
+	NetworkIdentity *AuthProviderNetworkIdentity `json:"network_identity,omitempty" doc:"Who the network provider says owns the device that sent this request, for a Continue as label; present only for a network provider. It authorizes nothing: signInWithNetworkIdentity asks the provider again"`
+}
+
+// AuthProviderNetworkIdentity is the owner of the requesting device as a
+// network provider names them.
+type AuthProviderNetworkIdentity struct {
+	DisplayName string `json:"display_name" doc:"Name at the provider; may be empty" example:"Alice Example"`
+	Username    string `json:"username" doc:"Login name at the provider; may be empty" example:"alice@example.test"`
 }
 
 // AuthProviderCollection is the listAuthProviders response: the bounded list
@@ -62,11 +79,15 @@ type RefreshSessionOutput struct {
 
 // LoginSession is one live login session of the caller's account.
 type LoginSession struct {
-	ID         ID      `json:"id" doc:"Session identifier; the value deleteSession takes" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
-	DeviceName string  `json:"device_name" doc:"User-Agent recorded at login; empty when none was sent" example:"Silo/1.0 (tvOS)"`
-	IPAddress  string  `json:"ip_address" doc:"Client address recorded at login; empty when unknown" example:"203.0.113.7"`
-	CreatedAt  Instant `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
-	ExpiresAt  Instant `json:"expires_at" example:"2026-02-01T03:04:05.678Z"`
+	ID             ID              `json:"id" doc:"Session identifier; the value deleteSession takes" example:"6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"`
+	DeviceName     string          `json:"device_name" doc:"Device name the client sent in X-Silo-Device-Name when it signed in, else its User-Agent; empty when it sent neither. A device-code sign-in falls back to the name the device started with, then its User-Agent, then This device" example:"Living Room Apple TV"`
+	IPAddress      string          `json:"ip_address" doc:"Client address recorded at login; empty when unknown" example:"203.0.113.7"`
+	CreatedAt      Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
+	ExpiresAt      Instant         `json:"expires_at" example:"2026-02-01T03:04:05.678Z"`
+	DeviceID       string          `json:"device_id,omitempty" doc:"Device identifier the client sent in X-Silo-Device-Id when it signed in; absent when it sent none. Client-reported: it identifies the device for display and audit and authorizes nothing" example:"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"`
+	DevicePlatform string          `json:"device_platform,omitempty" doc:"Platform the client sent in X-Silo-Device-Platform when it signed in; absent when it sent none" example:"tvOS"`
+	LastSeenAt     NullableInstant `json:"last_seen_at" doc:"Most recent authenticated request, coalesced to at most one update per minute; null until recorded" example:"2026-01-02T03:04:05.678Z"`
+	Current        bool            `json:"current" doc:"Whether this is the login session making this request"`
 }
 
 // LoginSessionListInput is the listSessions query.
@@ -88,6 +109,19 @@ type loginSessionPosition struct {
 // account's live sessions, newest first.
 type LoginSessionCollection struct {
 	Collection[LoginSession]
+	CurrentSession NullableLoginSession `json:"current_session" doc:"The caller's live session, even when it falls outside this page; null for API-key callers or another account's admin listing"`
+}
+
+// NullableLoginSession inlines the object so Huma can describe explicit null.
+type NullableLoginSession struct{ Value *LoginSession }
+
+func (n NullableLoginSession) MarshalJSON() ([]byte, error)  { return json.Marshal(n.Value) }
+func (n *NullableLoginSession) UnmarshalJSON(b []byte) error { return json.Unmarshal(b, &n.Value) }
+func (NullableLoginSession) Schema(r huma.Registry) *huma.Schema {
+	s := r.Schema(reflect.TypeFor[LoginSession](), false, "")
+	out := *s
+	out.Nullable = true
+	return &out
 }
 
 // LoginSessionCollectionOutput is the listSessions response.
@@ -149,6 +183,8 @@ const opSignup = "signup"
 const opListSessions = "listSessions"
 
 func registerAuthSessions(reg *Registry) {
+	registerLoginSessionCapabilities(reg)
+	registerAdminLoginSessions(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/auth/providers", "listAuthProviders", "auth",
@@ -161,7 +197,9 @@ func registerAuthSessions(reg *Registry) {
 	// invalid_token. A session opened through an external sign-in provider
 	// whose due re-check could not reach the provider, under the fail_closed
 	// outage policy, is 503 provider_unavailable: the session stays valid
-	// and the client retries later.
+	// and the client retries later. A refresh that could not read the
+	// session or account from the store is 503 dependency_unavailable with
+	// Retry-After; the token was not judged and the client keeps it.
 	refresh.Errors = []int{http.StatusUnauthorized, http.StatusServiceUnavailable}
 	Register(reg, Operation{Operation: refresh, RetrySafety: RetrySafetyDomainIdentity, Class: ClassPublic, ServiceBacked: true}, reg.refreshSession)
 	Register(reg, Operation{
@@ -214,6 +252,12 @@ func (reg *Registry) listAuthProviders(ctx context.Context, _ *struct{}) (*AuthP
 					item.NativeStartPath = auth.NativeStartPath(Prefix, p.InstallationID)
 				}
 			}
+			if p.Mode == auth.ProviderModeNetwork {
+				item.NetworkSignInPath = networkSignInPath(p.InstallationID)
+				if p.NetworkIdentity != nil {
+					item.NetworkIdentity = &AuthProviderNetworkIdentity{DisplayName: p.NetworkIdentity.DisplayName, Username: p.NetworkIdentity.Username}
+				}
+			}
 		}
 		items = append(items, item)
 	}
@@ -228,6 +272,10 @@ func (reg *Registry) refreshSession(ctx context.Context, in *RefreshSessionInput
 	if err != nil {
 		if errors.Is(err, auth.ErrProviderUnavailable) {
 			return nil, NewProblem(TypeProviderUnavailable, "The sign-in provider could not confirm the account. Try again later; the session stays valid.")
+		}
+		if errors.Is(err, auth.ErrSessionCheckUnavailable) {
+			return nil, NewProblem(TypeDependencyUnavailable, "The session could not be checked right now. Retry after the Retry-After delay; the session stays valid.").
+				WithRetryAfter(apimw.CredentialCheckRetryAfterSeconds)
 		}
 		var apiErr *handlers.APIError
 		if errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
@@ -261,35 +309,67 @@ func (reg *Registry) listSessions(ctx context.Context, cursors *Cursors, in *Log
 		Sort:        loginSessionCursorSort,
 		Tiebreaker:  "id",
 	}
-	var after *auth.SessionKey
-	if in.Cursor != "" {
-		var pos loginSessionPosition
-		if p := cursors.Decode(scope, in.Cursor, &pos); p != nil {
-			return nil, p
-		}
-		createdAt, err := time.Parse(time.RFC3339Nano, pos.CreatedAt)
-		if err != nil {
-			return nil, NewProblem(TypeInvalidCursor, "The cursor is malformed, tampered with, or belongs to a different query.")
-		}
-		after = &auth.SessionKey{CreatedAt: createdAt, ID: pos.ID}
+	after, p := decodeLoginSessionCursor(cursors, scope, in.Cursor)
+	if p != nil {
+		return nil, p
 	}
 	sessions, hasMore, err := reg.deps.Sessions.ListSessionsPage(ctx, claims.UserID, after, in.Limit)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
+	return reg.loginSessionPage(ctx, cursors, scope, sessions, hasMore, claims.UserID)
+}
+
+func decodeLoginSessionCursor(cursors *Cursors, scope CursorScope, cursor string) (*auth.SessionKey, *Problem) {
+	if cursor == "" {
+		return nil, nil
+	}
+	var pos loginSessionPosition
+	if p := cursors.Decode(scope, cursor, &pos); p != nil {
+		return nil, p
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, pos.CreatedAt)
+	if err != nil {
+		return nil, NewProblem(TypeInvalidCursor, "The cursor is malformed, tampered with, or belongs to a different query.")
+	}
+	return &auth.SessionKey{CreatedAt: createdAt, ID: pos.ID}, nil
+}
+
+func loginSessionView(s *models.AuthSession, currentID string) LoginSession {
+	out := LoginSession{ID: ID(s.ID), DeviceName: s.DeviceName, IPAddress: s.IPAddress, CreatedAt: NewInstant(s.CreatedAt), ExpiresAt: NewInstant(s.ExpiresAt), DeviceID: s.DeviceID, DevicePlatform: s.DevicePlatform, Current: s.ID == currentID}
+	if s.LastSeenAt != nil {
+		out.LastSeenAt = NullableInstant{Valid: true, Time: NewInstant(*s.LastSeenAt)}
+	}
+	return out
+}
+
+func (reg *Registry) loginSessionPage(ctx context.Context, cursors *Cursors, scope CursorScope, sessions []*models.AuthSession, hasMore bool, userID int) (*LoginSessionCollectionOutput, error) {
 	next := ""
 	if hasMore && len(sessions) > 0 {
 		last := sessions[len(sessions)-1]
+		var err error
 		next, err = cursors.Encode(scope, loginSessionPosition{CreatedAt: last.CreatedAt.UTC().Format(time.RFC3339Nano), ID: last.ID})
 		if err != nil {
 			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
 	}
+	claims := claimsFrom(ctx)
 	items := make([]LoginSession, 0, len(sessions))
 	for _, s := range sessions {
-		items = append(items, LoginSession{ID: ID(s.ID), DeviceName: s.DeviceName, IPAddress: s.IPAddress, CreatedAt: NewInstant(s.CreatedAt), ExpiresAt: NewInstant(s.ExpiresAt)})
+		items = append(items, loginSessionView(s, claims.SessionID))
 	}
-	return &LoginSessionCollectionOutput{Body: LoginSessionCollection{Collection: Paginated(items, next)}}, nil
+	out := &LoginSessionCollectionOutput{Body: LoginSessionCollection{Collection: Paginated(items, next)}}
+	if claims.UserID == userID && claims.SessionID != "" && reg.deps.Sessions != nil {
+		current, err := reg.deps.Sessions.CurrentLoginSession(ctx, userID, claims.SessionID)
+		if err != nil {
+			return nil, serviceProblem(err)
+		}
+		if current != nil {
+			view := loginSessionView(current, claims.SessionID)
+			out.Body.CurrentSession.Value = &view
+		}
+	}
+	return out, nil
 }
 
 func (reg *Registry) deleteSession(ctx context.Context, in *DeleteSessionInput) (*struct{}, error) {
@@ -329,7 +409,7 @@ func (reg *Registry) setupServer(ctx context.Context, in *SetupServerInput) (*To
 	if p := invalidEmailProblem(in.Body.Email); p != nil {
 		return nil, p
 	}
-	view, err := reg.deps.Sessions.SetupInitialUser(ctx, reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, "", in.Body.CreateDefaultProfile, in.Body.DefaultProfileName))
+	view, err := reg.deps.Sessions.SetupInitialUser(withClientDevice(ctx), reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, "", in.Body.CreateDefaultProfile, in.Body.DefaultProfileName))
 	if err != nil {
 		var apiErr *handlers.APIError
 		if errors.As(err, &apiErr) && apiErr.Code == "setup_complete" {
@@ -362,7 +442,7 @@ func (reg *Registry) signup(ctx context.Context, in *SignupInput) (*TokenPairOut
 	if p := invalidEmailProblem(in.Body.Email); p != nil {
 		return nil, p
 	}
-	view, err := reg.deps.Sessions.Signup(ctx, reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, in.Body.InviteCode, in.Body.CreateDefaultProfile, in.Body.DefaultProfileName))
+	view, err := reg.deps.Sessions.Signup(withClientDevice(ctx), reg.registration(ctx, in.Body.Username, in.Body.Email, in.Body.Password, in.Body.InviteCode, in.Body.CreateDefaultProfile, in.Body.DefaultProfileName))
 	if err != nil {
 		var apiErr *handlers.APIError
 		if errors.As(err, &apiErr) && apiErr.Code == "duplicate" {

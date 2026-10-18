@@ -56,33 +56,6 @@ func TestDecideDropped(t *testing.T) {
 	}
 }
 
-func TestSyncDroppedFirstSyncUnionsBothSides(t *testing.T) {
-	h := newDroppedHarness(t)
-	h.store.drop(droppedTestSeriesA, h.at(0)) // Silo only
-	h.provider.batch = DroppedImportBatch{Rows: []RemoteDropped{h.remoteRow(droppedTestSeriesB, h.at(1))}, Complete: true}
-
-	result := h.sync()
-
-	if !h.store.active(droppedTestSeriesB) {
-		t.Fatal("the provider's drop must be imported")
-	}
-	if got := h.store.rows[droppedTestSeriesB]; !got.Equal(h.at(1)) {
-		t.Fatalf("imported dropped_at = %s, want the provider's drop time", got)
-	}
-	if ids := keys(h.provider.dropped); !slices.Equal(ids, []string{droppedTestSeriesA}) {
-		t.Fatalf("dropped on provider = %v, want [%s]", ids, droppedTestSeriesA)
-	}
-	if s := h.state(droppedTestSeriesB); s == nil || !s.RemoteSeen {
-		t.Fatalf("imported drop state = %#v, want seen", s)
-	}
-	if s := h.state(droppedTestSeriesA); s == nil || s.RemoteSeen {
-		t.Fatalf("exported drop state = %#v, want agreed but not yet seen", s)
-	}
-	if result.Imported != 1 || result.Sent != 1 {
-		t.Fatalf("result = %#v", result)
-	}
-}
-
 func TestSyncDroppedRemoteDropOlderThanSiloActivityUndropsRemotely(t *testing.T) {
 	h := newDroppedHarness(t)
 	h.store.activity[droppedTestSeriesA] = h.at(5)

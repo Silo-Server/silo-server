@@ -29,6 +29,24 @@ test_acting_admin_no_declared_profile if {
 	got.reason_code == ""
 }
 
+test_acting_admin_no_declared_profile_on_limited_household if {
+	got := decision with input as object.union(base_input, {
+		"role": "admin",
+		"permission": "acting_admin",
+		"household_requires_profile": true,
+	})
+	not got.allowed
+	got.reason_code == "primary_profile_required"
+}
+
+test_metadata_curation_no_admin_bypass_on_limited_household if {
+	got := decision with input as object.union(base_input, {
+		"role": "admin",
+		"household_requires_profile": true,
+	})
+	not got.allowed
+}
+
 test_acting_admin_primary_profile if {
 	got := decision with input as object.union(base_input, {
 		"role": "admin",

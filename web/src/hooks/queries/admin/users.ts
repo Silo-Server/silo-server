@@ -14,7 +14,8 @@ import {
   adminUserScope,
   captureAdminUserAuthority,
   listAdminUsers,
-  getAdminUser,
+  getAdminUserSnapshot,
+  isStrongTag,
   createAdminUser,
   updateAdminUser,
   deleteAdminUser,
@@ -22,6 +23,7 @@ import {
   issueAdminPasswordReset,
   transferAdminUserOwnership,
   getAdminUserCapabilities,
+  getAdminUserPolicyDefaults,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
 export { adminUserFromV2 } from "@/api/v2/adminUsers";
@@ -189,12 +191,14 @@ export function useAdminUser(id: number) {
   const context = captureProfileRequestContext();
   const query = useQuery({
     queryKey: [...adminUsersKey(adminUserScope(context)), "detail", id],
-    queryFn: () => getAdminUser(id, context ?? captureAdminUserAuthority()),
+    queryFn: () => getAdminUserSnapshot(id, context ?? captureAdminUserAuthority()),
     enabled: context !== null && Number.isSafeInteger(id) && id > 0,
     retry: false,
     staleTime: ADMIN_STALE_TIME,
   });
-  return { ...query, editor: query.data, data: query.data?.user };
+  // A proxy that strips the ETag leaves the account readable but not editable.
+  const editor = query.data && isStrongTag(query.data.etag) ? query.data : undefined;
+  return { ...query, editor, data: query.data?.user };
 }
 export function useAdminUserCapabilities() {
   const context = captureProfileRequestContext();
@@ -204,6 +208,17 @@ export function useAdminUserCapabilities() {
     enabled: context !== null,
     retry: false,
     staleTime: ADMIN_STALE_TIME,
+  });
+}
+// The values change only with a server upgrade.
+export function useAdminPolicyDefaults() {
+  const context = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [...adminKeys.policyDefaults(), adminUserScope(context)],
+    queryFn: () => getAdminUserPolicyDefaults(context ?? captureAdminUserAuthority()),
+    enabled: context !== null,
+    retry: false,
+    staleTime: Infinity,
   });
 }
 export function useCreateUser() {

@@ -1,3 +1,4 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => {
     useWatchedStateMutation: vi.fn(),
     useSeasons: vi.fn(),
     useItemEpisodes: vi.fn(),
+    useOnViewTranslation: vi.fn(),
     useSimilarItems: vi.fn(),
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
@@ -37,11 +39,14 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
   useDetailWatchTogether: () => ({ menu: undefined, sheet: null }),
 }));
 vi.mock("@/hooks/useOnViewTranslation", () => ({
-  useOnViewTranslation: () => ({ translating: false, onTranslate: undefined }),
+  useOnViewTranslation: mocks.useOnViewTranslation,
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -61,6 +66,11 @@ vi.mock("@/hooks/queries/favorites", () => ({
 vi.mock("@/hooks/queries/watchlist", () => ({
   useIsInWatchlist: mocks.useIsInWatchlist,
   useToggleWatchlist: mocks.useToggleWatchlist,
+}));
+
+vi.mock("@/hooks/queries/notInterested", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/notInterested")>()),
+  useToggleNotInterested: () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -91,10 +101,6 @@ vi.mock("@/hooks/queries/ratings", () => ({
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
-  default: () => <div />,
-}));
-
-vi.mock("@/components/CrewList", () => ({
   default: () => <div />,
 }));
 
@@ -210,56 +216,27 @@ describe("SeriesContent", () => {
     mocks.useSimilarItems.mockReturnValue({ data: undefined, isLoading: false });
     mocks.useSetRating.mockReturnValue({ mutate: mocks.setRatingMutate });
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: undefined });
   });
 
-  it.each([false, true])(
-    "only reserves empty season navigation while loading (%s)",
-    (isLoading) => {
-      mocks.useSeasons.mockReturnValue({ data: { seasons: [] }, isLoading });
-      const markup = renderToStaticMarkup(
-        <QueryClientProvider client={new QueryClient()}>
-          <MemoryRouter>
-            <SeriesContent item={makeSeriesItem()} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      );
-      expect(markup.includes("series-detail-navigation")).toBe(isLoading);
-      expect(markup.includes('role="region" aria-label="Seasons and episodes"')).toBe(isLoading);
-    },
-  );
-
-  it.each([
-    ["season rail", [makeSeason(), makeSeason({ content_id: "season-2", season_number: 2 })], true],
-    ["single-season episode grid", [makeSeason()], false],
-  ])("marks only the season rail as content-sized navigation (%s)", (_, seasons, isRail) => {
-    mocks.useSeasons.mockReturnValue({ data: { seasons } });
-    const markup = renderToStaticMarkup(
+  it("offers the season's translation for the inline episode list in button mode", () => {
+    const translateSeason = vi.fn();
+    mocks.useOnViewTranslation.mockImplementation((target?: { content_id: string }) => ({
+      translating: false,
+      onTranslate: target?.content_id === makeSeason().content_id ? translateSeason : undefined,
+    }));
+    mocks.useItemEpisodes.mockReturnValue({
+      data: { episodes: [{ content_id: "episode-1", pending_translation_language: "de" }] },
+    });
+    render(
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
           <SeriesContent item={makeSeriesItem()} />
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(markup).toContain(
-      isRail
-        ? 'class="page-shell series-detail-navigation series-detail-rail"'
-        : 'class="page-shell series-detail-navigation"',
-    );
-  });
-
-  it("passes rating state and change handler to ActionBar", () => {
-    renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/item/series-1"]}>
-          <SeriesContent item={makeSeriesItem()} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      rating: 4,
-    });
-    expect(mocks.capturedActionBarProps.value?.onRatingChange).toBeTypeOf("function");
+    fireEvent.click(screen.getByRole("button", { name: "Translate episodes" }));
+    expect(translateSeason).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -290,6 +267,8 @@ describe("SeriesContent", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
+
+    expect(mocks.capturedActionBarProps.value?.rating).toBe(4);
 
     const onRatingChange = mocks.capturedActionBarProps.value?.onRatingChange as
       | ((rating: number | null) => void)

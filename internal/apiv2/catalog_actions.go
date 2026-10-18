@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
 )
@@ -35,14 +36,14 @@ type TranslateDescriptionInput struct {
 
 // TranslateDescription names the language the viewer wants.
 type TranslateDescription struct {
-	TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" doc:"BCP 47 tag of the wanted language, as the detail document's pending_translation_language reported it" example:"de"`
+	TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" doc:"BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language." example:"de"`
 }
 
 // PeopleSearchInput is the listPeople query.
 type PeopleSearchInput struct {
-	Q          string `query:"q" maxLength:"200" doc:"Name prefix or fragment; empty lists the first people"`
+	Q          string `query:"q" maxLength:"200" doc:"Name to match: each word must start a word of the name, case-insensitively, and only the first eight distinct words count; empty lists the first people"`
 	Limit      int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most people to answer"`
-	MediaScope string `query:"media_scope" enum:"video,movie,series,episode,audiobook,ebook,manga" doc:"Restrict people to accessible credits in this media scope; omitted searches all media scopes"`
+	MediaScope string `query:"media_scope" enum:"video,video_with_episodes,movie,series,episode,audiobook,ebook,manga" doc:"Restrict people to accessible credits in this media scope; omitted searches all media scopes. video covers movies and series; video_with_episodes adds episodes (check getCatalogSearchCapabilities.video_with_episodes_scope first)"`
 }
 
 // PersonInput names one person.
@@ -97,7 +98,7 @@ type TrailerRefreshOutput struct {
 // and how the viewer-facing on-view translation behaves.
 type MetadataAICapability struct {
 	Capability
-	OnView string `json:"on_view" doc:"Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the server queues it on view)" example:"button"`
+	OnView string `json:"on_view" doc:"Viewer-triggered translation mode: off, button (the detail page offers the action), or auto (the client requests the translation itself when it shows an item whose pending_translation_language is set)" example:"button"`
 }
 
 // MetadataAICapabilityOutput is the getMetadataAICapability response.
@@ -111,7 +112,7 @@ type MetadataAICapabilityOutput struct {
 // MetadataTranslationJob is one queued or running translation.
 type MetadataTranslationJob struct {
 	ID              ID      `json:"id" example:"42"`
-	TargetKind      string  `json:"target_kind" doc:"item, season, or episode"`
+	TargetKind      string  `json:"target_kind" doc:"item, season, episode, or library (a prewarm, whose fields_done and fields_total count items)"`
 	ContentID       string  `json:"content_id"`
 	IncludeChildren bool    `json:"include_children"`
 	SourceLanguage  string  `json:"source_language"`
@@ -123,7 +124,7 @@ type MetadataTranslationJob struct {
 	ProgressMessage string  `json:"progress_message"`
 	FieldsDone      int     `json:"fields_done"`
 	FieldsTotal     int     `json:"fields_total"`
-	Force           bool    `json:"force"`
+	Force           bool    `json:"force" doc:"The job also replaces earlier AI text; provider and manual text is never replaced"`
 	ErrorMessage    string  `json:"error_message,omitempty"`
 	CreatedAt       Instant `json:"created_at"`
 	UpdatedAt       Instant `json:"updated_at"`
@@ -269,9 +270,9 @@ func registerCatalogActions(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/metadata-ai", "getMetadataAICapability", "catalog",
 		"Whether AI metadata translation is configured and how the viewer-facing on-view translation behaves.")), reg.getMetadataAICapability)
 	translate := humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/translate-description", "translateCatalogItemDescription", "catalog",
-		"Queue a translation of the item's descriptions into the language the detail document reported missing; answers 202 with the job.")
+		"Queue a translation of the descriptions a page shows into the language its detail document reported missing: a movie's or series' own overview and tagline, a season's overview and its episodes' overviews, or one episode. Answers 202 with the job.")
 	translate.DefaultStatus = http.StatusAccepted
-	translate.Errors = []int{http.StatusConflict}
+	translate.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
 	translateOperation := viewerOperation(translate)
 	translateOperation.RetrySafety = RetrySafetyCoalescing
 	Register(reg, translateOperation, reg.translateCatalogItemDescription)
@@ -351,10 +352,10 @@ func (reg *Registry) refreshCatalogItemTrailers(ctx context.Context, in *Catalog
 	return out, nil
 }
 
-func (reg *Registry) getMetadataAICapability(_ context.Context, _ *CapabilityInput) (*MetadataAICapabilityOutput, error) {
+func (reg *Registry) getMetadataAICapability(ctx context.Context, _ *CapabilityInput) (*MetadataAICapabilityOutput, error) {
 	view := handlers.MetadataAIStatusView{OnView: metadataAIOnViewOff}
 	if reg.deps.MetadataAI != nil {
-		view = reg.deps.MetadataAI.Status()
+		view = reg.deps.MetadataAI.Status(ctx)
 	}
 	state := StateNotConfigured
 	if view.Enabled {
@@ -376,7 +377,7 @@ func (reg *Registry) translateCatalogItemDescription(ctx context.Context, in *Tr
 	if userID != 0 {
 		requestedBy = &userID
 	}
-	viewer, p := reg.itemViewer(ctx, "", "", "")
+	viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -402,12 +403,9 @@ func (reg *Registry) listPeople(ctx context.Context, in *PeopleSearchInput) (*Pe
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	if reg.deps.CatalogAccess == nil {
-		return nil, unavailable("catalog access")
-	}
-	filter, err := reg.deps.CatalogAccess.ContextAccessFilter(ctx, handlers.AccessFilterOptions{})
-	if err != nil {
-		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+	filter, p := reg.peopleAccessFilter(ctx)
+	if p != nil {
+		return nil, p
 	}
 	people, err := svc.SearchPeopleScoped(ctx, in.Q, in.Limit, in.MediaScope, filter)
 	if err != nil {
@@ -432,7 +430,11 @@ func (reg *Registry) getPerson(ctx context.Context, in *PersonReadInput) (*Perso
 	if p != nil {
 		return nil, p
 	}
-	person, err := svc.Person(ctx, int64(id), !in.Prefetch)
+	filter, p := reg.peopleAccessFilter(ctx)
+	if p != nil {
+		return nil, p
+	}
+	person, err := svc.Person(ctx, int64(id), !in.Prefetch, filter)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -452,10 +454,28 @@ func (reg *Registry) refreshPerson(ctx context.Context, in *PersonInput) (*Perso
 	if p != nil {
 		return nil, p
 	}
-	if err := svc.RefreshPerson(ctx, userID, int64(id)); err != nil {
+	filter, p := reg.peopleAccessFilter(ctx)
+	if p != nil {
+		return nil, p
+	}
+	if err := svc.RefreshPerson(ctx, userID, int64(id), filter); err != nil {
 		return nil, catalogActionProblem(err)
 	}
 	return &PersonRefreshOutput{Body: PersonRefresh{Status: trailerStatusQueued, PersonID: in.ID}}, nil
+}
+
+// peopleAccessFilter resolves the viewer's catalog access for the people
+// operations: search lists, and detail and refresh admit, only people with a
+// credit the viewer can see.
+func (reg *Registry) peopleAccessFilter(ctx context.Context) (catalogpkg.AccessFilter, *Problem) {
+	if reg.deps.CatalogAccess == nil {
+		return catalogpkg.AccessFilter{}, unavailable("catalog access")
+	}
+	filter, err := reg.deps.CatalogAccess.ContextAccessFilter(ctx, handlers.AccessFilterOptions{})
+	if err != nil {
+		return catalogpkg.AccessFilter{}, NewProblem(TypeInternalError, "An unexpected error occurred.")
+	}
+	return filter, nil
 }
 
 func (reg *Registry) getLiteraryWork(ctx context.Context, in *LiteraryWorkInput) (*LiteraryWorkOutput, error) {

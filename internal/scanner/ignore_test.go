@@ -226,12 +226,7 @@ func TestSiloIgnoreSkipsMatchedFilesAndDirs(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "Sub", "notes.txt"), "test")
 	writeTestFile(t, filepath.Join(root, "Sub", "clip.mkv"), "test")
 	writeTestFile(t, filepath.Join(root, "Sub", "nested", "Episode 01.mkv"), "test")
-	writeTestFile(t, filepath.Join(root, ".siloignore"), `# comments and blanks are ignored
-
-sample.mkv
-Extras
-*.txt
-`)
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "# comments and blanks are ignored\n\n  sample.mkv  \n\tExtras\n*.txt\n")
 
 	files := collectTestFilePaths(t, root, "series")
 	assertFilePaths(t, files, root, []string{"Movie.mkv", "Sub/clip.mkv", "Sub/nested/Episode 01.mkv"})
@@ -291,21 +286,6 @@ func TestSymlinkedMarkerAndPatternFilesAreNotHonored(t *testing.T) {
 	// every media file stays scannable.
 	files := collectTestFilePaths(t, root, "series")
 	assertFilePaths(t, files, root, []string{"Episode 01.mkv", "Sub/Episode 02.mkv"})
-}
-
-func TestParseIgnorePatterns(t *testing.T) {
-	t.Parallel()
-
-	patterns := parseIgnorePatterns("# comment\n\n  sample.mkv  \nExtras\n\t*.txt\n")
-	want := []string{"sample.mkv", "Extras", "*.txt"}
-	if len(patterns) != len(want) {
-		t.Fatalf("patterns = %v, want %v", patterns, want)
-	}
-	for i := range want {
-		if patterns[i] != want[i] {
-			t.Fatalf("patterns[%d] = %q, want %q", i, patterns[i], want[i])
-		}
-	}
 }
 
 func TestSiloIgnoreDoesNotMatchAcrossPathSeparators(t *testing.T) {

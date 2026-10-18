@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 // Compile-time assertions that *Engine satisfies both catalog provider
@@ -29,11 +31,12 @@ func newEngineTestPool(t *testing.T) *pgxpool.Pool {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	// The application's pool, so queries run with its vector codecs.
+	pool, err := database.NewPool(ctx, config.DatabaseConfig{URL: dsn})
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
-	t.Cleanup(pool.Close)
+	t.Cleanup(func() { database.ClosePool(pool) })
 	var tableName *string
 	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.server_settings')::text`).Scan(&tableName); err != nil {
 		t.Fatalf("check server_settings table: %v", err)

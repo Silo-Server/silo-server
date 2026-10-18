@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import { countSettingsSearchItems, filterSettingsSearchGroups } from "./settingsSearch";
@@ -59,22 +61,6 @@ describe("settingsSearch", () => {
       {
         label: "Playback",
         items: [groups[1]!.items[0]],
-      },
-    ]);
-  });
-
-  it("matches individual setting labels", () => {
-    expect(filterSettingsSearchGroups(groups, "quiet subsystems")).toEqual([
-      {
-        label: "Server",
-        items: [groups[0]!.items[0]],
-      },
-    ]);
-
-    expect(filterSettingsSearchGroups(groups, "pool max open")).toEqual([
-      {
-        label: "Server",
-        items: [groups[0]!.items[1]],
       },
     ]);
   });

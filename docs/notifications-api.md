@@ -16,6 +16,9 @@ push-registration protocol retain their existing shapes.
 | `POST /read-all` | 204; body requires `{ "through": "<read_cutoff>" }` |
 | `GET /preferences` | Profile ID and five preference booleans |
 | `PUT /preferences` | Updated preferences; omitted fields retain their values |
+| `GET /series` | The series whose new episodes can notify the profile, as `items` and `page` |
+| `PUT /series/{series_id}/mute` | 204; mutes the series for the profile, already muted succeeds, a series the viewer may not see is 404 |
+| `DELETE /series/{series_id}/mute` | 204; unmutes the series, not muted succeeds |
 
 The inbox list accepts `status=all|unread`, `limit` up to 200, and `cursor`.
 A cursor binds the acting account/profile, filter, page size, last delivery tuple,
@@ -35,6 +38,81 @@ retention. A later delivery therefore cannot commit behind an observed cutoff.
 Fanout transactions lock their complete recipient profile union in sorted order
 before inserting; unrelated profiles can progress independently. Existing rows
 retain their timestamps, and migration seeds the boundary from their maximum.
+
+## Notified series
+
+`GET /series` (`listNotificationSeries`) lists every series the acting profile
+favorited, put on its watchlist, is partway through, or waits on a next episode
+of, and every series it muted. It reads the same interest index and mutes
+episode fanout reads, so it names exactly the series a new episode is evaluated
+for. A series in several libraries is one entry carrying every library's
+reasons.
+
+Each entry has the series as a catalog card in `item`, the profile's
+relationships in `reasons`, and in `active_reasons` the ones the profile's
+preferences let notify. `muted` is true when the profile muted the series.
+`notifies` is true when any reason is active and the series is not muted. A
+muted series keeps its `active_reasons`, so a client can say what would notify
+after an unmute, and it is listed even with no reason left, so the profile can
+still unmute it. With an
+active Next Up reason, `next_up_after` names the last episode the profile
+finished; on that reason alone, only a new episode after it notifies. It names
+the finished episode rather than the next one because the next may not exist
+yet: after a season finale, the following season's first episode notifies.
+The other reasons notify on any new episode. Delivery still skips an episode the profile was
+already notified about and a series the profile can no longer open.
+
+Filters combine:
+
+- `status=active` keeps the series that notify, `status=inactive` the ones that
+  do not (the preferences silence every reason, or the profile muted the
+  series), and the default `all` keeps both.
+- `reason=favorite|watchlist|continue_watching|next_up` keeps the series with
+  that relationship, whether or not the preferences let it notify.
+- `q` keeps the series whose title or sort title contains the text,
+  case-insensitively.
+
+`sort` takes one field, descending with a leading `-`: `title` (the default,
+by sort title), `year`, `added_at` (when the series joined the catalog), or
+`latest_episode_added` (when it last gained an episode). A series without a
+year or an episode sorts last in either direction, and ties order by sort title
+then item ID.
+
+The list accepts `limit` and `cursor`. The cursor carries every sort field of
+the last entry, so the next page resumes after it even if that series has left
+the list, and it binds the account, profile, viewer policy, filters, and sort.
+Series the viewer may not see are dropped before paging with one batch access
+check, so a cursor never names a hidden series. A page can still hold fewer
+than `limit` entries if access changes between that check and card resolution.
+`image_size` selects the card artwork variant.
+
+The interest index follows favorites, watchlist, and progress changes
+asynchronously, so a just-favorited series can take a moment to appear.
+`series.available` in `GET /capabilities` reports the operation.
+
+### Muting one series
+
+`PUT /series/{series_id}/mute` (`muteNotificationSeries`) mutes one series for
+the acting profile: it gets no new-episode notification for that series on any
+channel, whatever its reasons, until it unmutes. Favorites, the watchlist, Home,
+and watch history do not change, and other profiles on the account are not
+affected. The mute does not lapse when the profile watches the series again.
+Muting a series already muted succeeds and changes nothing. An ID that names no
+series, or a series the viewer may not see, is 404.
+
+`DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
+The series notifies again for its active reasons. Fanout reads the mute when it
+evaluates a new episode, after the release settle delay (30 seconds by
+default): an episode it evaluated while the series was muted is not announced
+later, and one still waiting for fanout when the profile unmutes is announced.
+The same holds the other way: a mute made just after an episode arrives can
+still stop its notification. Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
+profile can lift a mute on a series it can no longer open.
+
+Notifications already delivered stay in the inbox, and a delivery fanout
+created before the mute committed can still reach its channels. Both writes
+answer 204 with no body. `series.mute` in `GET /capabilities` reports both
+operations and the `muted` field.
 
 ## Fixed read cutoff
 
@@ -115,6 +193,19 @@ new outbox attempt, invokes the configured sender, and returns HTTP 200 with
 `attempt_id`, `push_device_id`, `server_device_id`, `outcome`, and any existing
 relay/upstream diagnostic fields. A `retrying` or `failed` outcome is still a
 successful HTTP report of that attempt, not proof that a push was delivered.
+
+The test push carries the newest notification of the selected device's profile
+(matched by account as well, since profile IDs repeat across accounts), and the
+response names it as `delivery_id`. The device fetches that notification's real
+title, body and tap target exactly as for an ordinary push, and because the
+push reuses the notification's collapse ID it replaces that notification on the
+device if it is still shown. When the profile has no notification yet,
+`delivery_id` is absent and the push carries the attempt ID instead: it still
+proves transport, but the display fetch returns `404` and the device shows the
+relay's generic text. The test changes neither the notification's read state
+nor the inbox; it adds one `test` attempt to that notification's push attempt
+history, which nothing counts as a delivery. Pruning the notification removes
+the attempt with it.
 Background attempt recovery and sender retries retain their existing semantics.
 These operations are `non_retryable`: clients must not repeat a lost request
 automatically because another request creates another test attempt.
@@ -162,6 +253,23 @@ relay, and the relay keeps no device state, so a new deployment needs no client
 change. This covers a generation superseded by another holder of the same
 credential (a database cloned to a second server shares it), a signing key the
 relay retired, and a capability that expired past its renewal grace.
+
+Every push the server sends, administrator test pushes included, names the
+deployment (`server_id`, the identity `getServerIdentity` reports) and the push
+device's profile (`profile_id`). The relay forwards them to the device as
+`silo_server_id` and `silo_profile_id`, so a device signed into several servers
+or profiles fetches display data from the one the push belongs to. The two are
+sent together or not at all; without a readable server identity the push goes
+out without them. A relay that predates the fields answers 400
+`unexpected_field`. The sender then resends the attempt once without them under
+the same idempotency key, and leaves them out of later sends to that relay for an
+hour. The fields are part of the relay's idempotency hash, and a retry can
+differ from the attempt's first send (an earlier server version, another
+replica, or the hour ending). The relay answers such a retry with 422
+`idempotency_key_reuse`, and the sender resends it once with the other choice,
+which the relay replays or resumes. When the identity lookup failed, so the
+sender has no other choice to offer, that 422 is retried later instead of
+failing the push.
 Only an administrator's clear or a relay `deployment_disabled` response parks
 delivery behind the re-registration marker; either one stores an empty
 credential. An older server stored the rejected key along with the marker. That

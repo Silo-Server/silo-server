@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     show_forced_subtitles BOOLEAN NOT NULL DEFAULT true,
     library_restrictions_enabled BOOLEAN DEFAULT false,
     max_playback_quality TEXT DEFAULT '',
+    pin_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -103,6 +104,13 @@ CREATE TABLE IF NOT EXISTS watchlist (
     media_item_id TEXT NOT NULL,
     added_at TEXT NOT NULL,
     sort_index INTEGER,
+    PRIMARY KEY (profile_id, media_item_id)
+);
+
+CREATE TABLE IF NOT EXISTS not_interested (
+    profile_id TEXT NOT NULL,
+    media_item_id TEXT NOT NULL,
+    added_at TEXT NOT NULL,
     PRIMARY KEY (profile_id, media_item_id)
 );
 
@@ -232,6 +240,7 @@ CREATE TABLE IF NOT EXISTS user_devices (
     device_name TEXT NOT NULL DEFAULT '',
     device_platform TEXT NOT NULL DEFAULT '',
     last_seen_at TEXT NOT NULL,
+    custom_name TEXT,
     PRIMARY KEY (profile_id, device_id)
 );
 
@@ -284,9 +293,27 @@ CREATE INDEX IF NOT EXISTS idx_personal_collection_profiles_lookup
 CREATE INDEX IF NOT EXISTS idx_home_item_dismissals_lookup
     ON home_item_dismissals(profile_id, surface);
 
+CREATE INDEX IF NOT EXISTS idx_not_interested_profile_added
+    ON not_interested(profile_id, added_at DESC, media_item_id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_hidden_history_items_lookup
     ON hidden_history_items(profile_id, hidden_before);
 ` + settingContractSchema + jellycompatDisplayPrefsSchema + playbackSinkSchema + playbackSourceSchema + onboardingRevisionSchema
+
+// profilePINRevisionSchema advances profiles.pin_revision whenever pin_hash
+// changes, the SQLite twin of the Postgres user_profiles_pin_revision trigger.
+// Profile tokens are bound to the revision. The trigger lives in the file, so
+// every writer advances it, including a process from an older release that
+// still holds a connection it opened before the v30 migration. Install it only
+// after migrations add pin_revision: earlier table renames validate all trigger
+// references, including references to columns that do not exist yet.
+const profilePINRevisionSchema = `
+CREATE TRIGGER IF NOT EXISTS profiles_pin_revision AFTER UPDATE OF pin_hash ON profiles
+WHEN NEW.pin_hash IS NOT OLD.pin_hash
+BEGIN
+ UPDATE profiles SET pin_revision = OLD.pin_revision + 1 WHERE id = NEW.id;
+END;
+`
 
 // The selected account database supplies account scope. Receipts deliberately
 // do not reference watch_history: deleting history must not reopen a stop.

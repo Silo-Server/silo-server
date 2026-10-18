@@ -45,6 +45,39 @@ export function formatMbps(mbps: number) {
   return `${formatMbpsValue(mbps)} Mbps`;
 }
 
+const DATA_TOTAL_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
+
+/**
+ * Data transferred over a window. Decimal (1000-based) units, matching the
+ * Mbps rates beside it, with one decimal below 100 so a quiet window does not
+ * round to a misleading whole number.
+ *
+ * Unit and precision are chosen on the value as it will be displayed, so
+ * rounding never produces "1,000 KB" (it reads "1.0 MB") or "100.0 GB" (it
+ * reads "100 GB").
+ */
+export function formatDataTotal(bytes: number | null | undefined) {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) {
+    return "—";
+  }
+  let value = bytes;
+  let unit = 0;
+  for (;;) {
+    const decimals = unit > 0 && value < 100 ? 1 : 0;
+    const rounded = Number(value.toFixed(decimals));
+    if (rounded >= 1000 && unit < DATA_TOTAL_UNITS.length - 1) {
+      value /= 1000;
+      unit += 1;
+      continue;
+    }
+    const shown = unit > 0 && rounded < 100 ? 1 : 0;
+    return `${rounded.toLocaleString(undefined, {
+      minimumFractionDigits: shown,
+      maximumFractionDigits: shown,
+    })} ${DATA_TOTAL_UNITS[unit]}`;
+  }
+}
+
 export function formatDashboardLibraryScanProgress(scan: ScanRun, activeScanCount: number) {
   const status = scan.status === "running" ? "Scanning" : "Queued";
   const progress = formatActiveScanProgress(scan);

@@ -19,6 +19,7 @@ import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 const mockUseHomeLayout = vi.fn();
 const mockFetchHomeSectionItems = vi.fn();
+const mockFetchRecipeCatalog = vi.fn();
 const SAFARI_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.6 Safari/605.1.15";
 const FIREFOX_USER_AGENT =
@@ -33,12 +34,16 @@ vi.mock("@/hooks/queries/sections", () => ({
   HOME_SECTION_GC_TIME: 60 * 60 * 1000,
 }));
 
+vi.mock("@/lib/recipes", () => ({
+  fetchRecipeCatalog: () => mockFetchRecipeCatalog(),
+}));
+
 vi.mock("@/hooks/useDocumentTitle", () => ({
   useDocumentTitle: vi.fn(),
 }));
 
 vi.mock("react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
 
 vi.mock("@/components/TasteSeedBanner", () => ({
@@ -50,11 +55,18 @@ vi.mock("@/components/HeroBanner", () => ({
 }));
 
 vi.mock("@/components/SectionRow", () => ({
-  default: ({ section }: { section: { id: string; items: Array<{ title: string }> } }) => (
+  default: ({
+    section,
+    priority,
+  }: {
+    section: { id: string; items: Array<{ title: string }> };
+    priority?: boolean;
+  }) => (
     <div
       data-kind="section-row"
       data-section-id={section.id}
       data-first-item={section.items[0]?.title}
+      data-priority={String(Boolean(priority))}
     />
   ),
 }));
@@ -75,6 +87,8 @@ describe("Home", () => {
       refetch: vi.fn(),
     });
     mockFetchHomeSectionItems.mockReset();
+    mockFetchRecipeCatalog.mockReset();
+    mockFetchRecipeCatalog.mockResolvedValue({ categories: {} });
   });
 
   afterEach(async () => {
@@ -103,6 +117,22 @@ describe("Home", () => {
 
     expect(invalidateQueries).not.toHaveBeenCalled();
     invalidateQueries.mockRestore();
+  });
+
+  it("links an empty Home to the Home Screen settings page", async () => {
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Home />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    const link = Array.from(container.querySelectorAll("a")).find(
+      (anchor) => anchor.textContent === "Customize Home Screen",
+    );
+    expect(link?.getAttribute("href")).toBe("/settings/home-screen");
   });
 
   it("keeps section items cached past the client-wide gc time", async () => {
@@ -407,6 +437,110 @@ describe("Home", () => {
       observers.every((observer) => vi.mocked(observer.disconnect).mock.calls.length > 0),
     ).toBe(true);
     root = createRoot(container);
+  });
+
+  it("renders above-fold rows in the commit their data arrives, without a placeholder", async () => {
+    const layout = [homeLayout("row-1"), homeLayout("row-2"), homeLayout("row-3")];
+    mockUseHomeLayout.mockReturnValue({
+      data: { sections: layout },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    const responses = new Map<string, (value: unknown) => void>();
+    mockFetchHomeSectionItems.mockImplementation(
+      (sectionId: string) => new Promise((resolve) => responses.set(sectionId, resolve)),
+    );
+    const placeholdersSeen = new Set<string>();
+    const watcher = new MutationObserver((records) => {
+      for (const record of records) {
+        record.addedNodes.forEach((node) => {
+          if (!(node instanceof HTMLElement)) return;
+          const placeholders = [
+            node,
+            ...Array.from(node.querySelectorAll<HTMLElement>("[data-home-section-placeholder]")),
+          ];
+          placeholders.forEach((el) => {
+            if (el.dataset.homeSectionPlaceholder) {
+              placeholdersSeen.add(el.dataset.homeSectionPlaceholder);
+            }
+          });
+        });
+      }
+    });
+    watcher.observe(container, { childList: true, subtree: true });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Home />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      for (const id of ["row-1", "row-2", "row-3"]) responses.get(id)?.(homeSection(id));
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-kind="section-row"]').length).toBeGreaterThan(1),
+    );
+    watcher.disconnect();
+
+    expect(placeholdersSeen.has("row-1")).toBe(false);
+    expect(placeholdersSeen.has("row-2")).toBe(false);
+    expect(
+      container.querySelector('[data-section-id="row-1"]')?.getAttribute("data-priority"),
+    ).toBe("true");
+    expect(
+      container.querySelector('[data-section-id="row-2"]')?.getAttribute("data-priority"),
+    ).toBe("false");
+  });
+
+  it("budgets eager rows by layout position, not by which rows load first", async () => {
+    const layout = [homeLayout("row-1"), homeLayout("row-2"), homeLayout("row-3")];
+    mockUseHomeLayout.mockReturnValue({
+      data: { sections: layout },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        readonly root = null;
+        readonly thresholds = [0];
+        readonly rootMargin = "100% 0px";
+        constructor(_callback: IntersectionObserverCallback) {}
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+        takeRecords = () => [];
+      },
+    );
+    const responses = new Map<string, (value: unknown) => void>();
+    mockFetchHomeSectionItems.mockImplementation(
+      (sectionId: string) => new Promise((resolve) => responses.set(sectionId, resolve)),
+    );
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Home />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    // The third row answers first; rows one and two still hold the fold.
+    await act(async () => {
+      responses.get("row-3")?.(homeSection("row-3"));
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-section-id="row-3"]')).toBeNull();
+    expect(container.querySelector('[data-home-section-placeholder="row-3"]')).not.toBeNull();
   });
 
   it("counts only ready media rows toward the eager paint budget", async () => {
@@ -728,6 +862,80 @@ describe("Home", () => {
     });
   });
 
+  it("drops what an earlier row shows from avoid-duplicates rows, whatever order rows load in", async () => {
+    mockFetchRecipeCatalog.mockResolvedValue({
+      categories: {
+        personalized: [
+          {
+            type: "recommended_for_you",
+            category: "personalized",
+            presets: [],
+            avoid_duplicates: true,
+            supports_rotation: false,
+            admin_only: false,
+          },
+          {
+            type: "taste_match",
+            category: "personalized",
+            presets: [],
+            avoid_duplicates: true,
+            supports_rotation: false,
+            admin_only: false,
+          },
+        ],
+      },
+    });
+    const layout = [
+      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
+      { ...homeLayout("top-picks"), section_type: "taste_match" },
+      homeLayout("recent"),
+    ];
+    const rows: Record<string, string[]> = {
+      "for-you": ["Shared", "For You Only"],
+      "top-picks": ["Shared", "Top Pick Only"],
+      recent: ["Shared"],
+    };
+    mockUseHomeLayout.mockReturnValue({
+      data: { sections: layout },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    const requests = deferSectionRequests();
+    const respond = (sectionId: string) => {
+      const request = requests.find((candidate) => candidate.sectionId === sectionId)!;
+      const entry = layout.find((candidate) => candidate.id === sectionId)!;
+      request.respond({
+        section: {
+          ...entry,
+          total_count: rows[sectionId]!.length,
+          items: rows[sectionId]!.map((title) => ({
+            ...homeSection(sectionId).section.items[0],
+            content_id: title,
+            title,
+          })),
+        },
+      });
+    };
+
+    await renderHome(new QueryClient());
+    await waitForRequestCount(requests, 3);
+
+    // The later rows answer first and show the shared title.
+    respond("top-picks");
+    respond("recent");
+    await waitForRenderedFirstItems({ "top-picks": "Shared", recent: "Shared" });
+
+    // Once the first row loads, the later avoid-duplicates row gives it up;
+    // the plain row keeps it.
+    respond("for-you");
+    await waitForRenderedFirstItems({
+      "for-you": "Shared",
+      "top-picks": "Top Pick Only",
+      recent: "Shared",
+    });
+  });
+
   async function renderHome(queryClient: QueryClient) {
     await act(async () => {
       root.render(
@@ -760,6 +968,7 @@ interface DeferredSectionRequest {
   sectionId: string;
   signal: AbortSignal;
   resolve: (label: string) => void;
+  respond: (response: unknown) => void;
   reject: (error: Error) => void;
 }
 
@@ -774,6 +983,7 @@ function deferSectionRequests(): DeferredSectionRequest[] {
           sectionId,
           signal: options.signal,
           resolve: (label) => resolve(homeSection(sectionId, label)),
+          respond: resolve,
           reject,
         });
       }),

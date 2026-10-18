@@ -1,8 +1,11 @@
+import type { SettingsHealthItem } from "@/hooks/admin/useSettingsHealth";
+import type { BuildInfo } from "@/hooks/queries/admin/system";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import AdminSidebar from "./AdminSidebar";
-import type { BuildInfo } from "@/hooks/queries/admin/system";
 
 interface MockBuildInfoResult {
   data?: BuildInfo;
@@ -66,16 +69,50 @@ vi.mock("@/hooks/queries/admin/requests", () => ({
   useAdminRequestCounts: () => mockUseAdminRequestCounts(),
 }));
 
-function renderSidebar(embedded = false) {
+const mockPrefetchSettings = vi.fn();
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  usePrefetchAdminServerSettings: () => mockPrefetchSettings,
+}));
+
+const mockUseSettingsAttention = vi.fn<() => SettingsHealthItem[]>(() => []);
+vi.mock("@/hooks/admin/useSettingsHealth", () => ({
+  useSettingsAttention: () => mockUseSettingsAttention(),
+}));
+
+function renderSidebar(path = "/admin") {
   return renderToStaticMarkup(
-    <MemoryRouter initialEntries={["/admin"]}>
-      <AdminSidebar embedded={embedded} />
+    <MemoryRouter initialEntries={[path]}>
+      <AdminSidebar />
     </MemoryRouter>,
   );
 }
 
+function renderLiveSidebar(path = "/admin") {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <AdminSidebar />
+    </MemoryRouter>,
+  );
+}
+
+function stubLocalStorage() {
+  const memory = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => memory.set(key, value),
+    removeItem: (key: string) => memory.delete(key),
+  });
+  return memory;
+}
+
 describe("AdminSidebar", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
+    stubLocalStorage();
+    mockUseSettingsAttention.mockReturnValue([]);
     mockUsePolicyCapability.mockReturnValue({
       data: {
         enabled: true,
@@ -86,66 +123,156 @@ describe("AdminSidebar", () => {
     });
   });
 
-  it("shows how many requests need approval on the Requests entry", () => {
-    mockUseAdminRequestCounts.mockReturnValueOnce({ data: { needs_approval: 3 } });
-    const markup = renderSidebar();
-    const requestsLink = markup.match(/<a[^>]*href="\/admin\/requests"[^>]*>.*?<\/a>/)?.[0];
+  it("shows how many requests need approval on the queue, and on Requests while it is closed", () => {
+    mockUseAdminRequestCounts.mockReturnValue({ data: { needs_approval: 3 } });
+    const queue = renderSidebar("/admin/requests").match(
+      /<a[^>]*href="\/admin\/requests"[^>]*>.*?<\/a>/,
+    )?.[0];
+    expect(queue).toContain('<span aria-hidden="true">3</span>');
+    expect(queue).toContain(", 3 need approval");
 
-    expect(requestsLink).toContain('<span aria-hidden="true">3</span>');
-    expect(requestsLink).toContain(", 3 need approval");
+    renderLiveSidebar("/admin");
+    expect(screen.getByRole("button", { name: /^Requests, 3 need approval/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    mockUseAdminRequestCounts.mockReturnValue({ data: { needs_approval: 0 } });
   });
 
-  it("leaves the Requests entry plain when nothing needs approval", () => {
-    const markup = renderSidebar();
-    const requestsLink = markup.match(/<a[^>]*href="\/admin\/requests"[^>]*>.*?<\/a>/)?.[0];
+  it("leaves Requests plain when nothing needs approval", () => {
+    renderLiveSidebar("/admin");
 
-    expect(requestsLink).toBeDefined();
-    expect(requestsLink).not.toContain("need approval");
+    expect(screen.getByRole("button", { name: "Requests" })).not.toHaveTextContent("approval");
   });
 
-  it("renders the grouped navigation sections", () => {
-    const markup = renderSidebar();
+  it("opens the topic holding the current page and marks the page", () => {
+    renderLiveSidebar("/admin/settings/playback");
 
-    for (const section of ["Overview", "Content", "Automation", "Users", "Settings", "System"]) {
-      expect(markup).toContain(`>${section}<`);
-    }
+    expect(screen.getByRole("button", { name: "Playback" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    const playback = screen.getByRole("list", { name: "Playback" });
+    expect(within(playback).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(playback).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/admin/settings/playback",
+    );
+    expect(screen.getByRole("button", { name: "Integrations" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
-  it("keeps settings as one sidebar destination", () => {
-    const markup = renderSidebar();
-    const settingsLinks = markup.match(/href="\/admin\/settings[^"]*"/g) ?? [];
+  it("opens and closes a topic on click and remembers the choice", () => {
+    const view = renderLiveSidebar("/admin");
+    const integrations = screen.getByRole("button", { name: "Integrations" });
 
-    expect(settingsLinks).toEqual(['href="/admin/settings"']);
-    expect(markup).not.toContain("/admin/settings?tab=");
+    fireEvent.click(integrations);
+    expect(integrations).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(screen.getByRole("list", { name: "Integrations" })).getByRole("link", {
+        name: "AI Services",
+      }),
+    ).toHaveAttribute("href", "/admin/settings/ai");
+
+    view.unmount();
+    renderLiveSidebar("/admin/users");
+    expect(screen.getByRole("button", { name: "Integrations" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
-  it("renders as an embedded rail inside the mobile drawer", () => {
-    const markup = renderSidebar(true);
+  it("reopens the current page's topic even after it was closed there", () => {
+    renderLiveSidebar("/admin/libraries");
+    fireEvent.click(screen.getByRole("button", { name: "Libraries" }));
+    expect(screen.getByRole("button", { name: "Libraries" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    cleanup();
 
-    expect(markup).toContain('data-layout="drawer"');
-    expect(markup).toContain("relative h-full w-full");
-    expect(markup).not.toContain("fixed top-0 bottom-0 left-0");
+    renderLiveSidebar("/admin/collections");
+    expect(screen.getByRole("button", { name: "Libraries" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
-  it("includes a Sections link in the content navigation", () => {
-    const markup = renderSidebar();
+  it("marks a broken setting on its page and on its closed topic", () => {
+    mockUseSettingsAttention.mockReturnValue([
+      {
+        id: "transcoding",
+        label: "Transcoding",
+        state: "warn",
+        stateText: "Restart pending",
+        detail: "Saved changes apply after a restart",
+        action: { label: "Fix", page: "playback" },
+      },
+      {
+        id: "email",
+        label: "Email",
+        state: "off",
+        stateText: "Not set up",
+        detail: "Invites and resets can't send",
+        action: { label: "Set up", page: "notifications" },
+      },
+    ]);
+    renderLiveSidebar("/admin");
+
+    expect(
+      screen.getByRole("button", { name: /^Playback, Transcoding restart pending/ }),
+    ).toBeInTheDocument();
+    // Setup nobody has done yet is the Dashboard's to mention, not a dot.
+    expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
+  });
+
+  it("fetches what a settings page needs once the pointer is on its link", () => {
+    mockPrefetchSettings.mockClear();
+    renderLiveSidebar("/admin/libraries");
+    const libraries = screen.getByRole("list", { name: "Libraries" });
+
+    fireEvent.pointerEnter(within(libraries).getByRole("link", { name: "Collections" }));
+    expect(mockPrefetchSettings).not.toHaveBeenCalled();
+
+    fireEvent.pointerEnter(within(libraries).getByRole("link", { name: "Settings" }));
+    expect(mockPrefetchSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts the admin search at the top of the desktop sidebar", () => {
+    const onSearch = vi.fn();
+    render(
+      <MemoryRouter initialEntries={["/admin"]}>
+        <AdminSidebar onSearch={onSearch} />
+      </MemoryRouter>,
+    );
+
+    const search = screen.getByRole("button", { name: "Search admin sections" });
+    expect(search).toHaveTextContent(SEARCH_SHORTCUT_LABEL);
+    fireEvent.click(search);
+    expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves search out of the phone drawer, whose header has its own", () => {
+    render(
+      <MemoryRouter initialEntries={["/admin"]}>
+        <AdminSidebar embedded />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Search admin sections" })).not.toBeInTheDocument();
+  });
+
+  it("lists home rows as Home Sections under Libraries", () => {
+    const markup = renderSidebar("/admin/sections");
 
     expect(markup).toContain('href="/admin/sections"');
-    expect(markup).toContain(">Sections<");
-  });
-
-  it("includes Diagnostics next to the operational overview links", () => {
-    const markup = renderSidebar();
-
-    expect(markup).toContain('href="/admin/diagnostics"');
-    expect(markup).toContain(">Diagnostics<");
-  });
-
-  it("includes a Maintenance link in the system navigation", () => {
-    const markup = renderSidebar();
-
-    expect(markup).toContain('href="/admin/maintenance"');
-    expect(markup).toContain(">Maintenance<");
+    expect(markup).toContain(">Home Sections<");
+    expect(markup).not.toContain('href="/admin/home-rows"');
   });
 
   it("hides Policy navigation when the editor capability is unavailable", () => {
@@ -158,24 +285,12 @@ describe("AdminSidebar", () => {
       },
     });
 
-    const markup = renderSidebar();
+    // The topic is open on API Keys, so Policy would be listed beside it.
+    const markup = renderSidebar("/admin/api-keys");
 
+    expect(markup).toContain('href="/admin/api-keys"');
     expect(markup).not.toContain('href="/admin/policy"');
     expect(markup).not.toContain(">Policy<");
-  });
-
-  it("includes a Recommendations link in the automation navigation", () => {
-    const markup = renderSidebar();
-
-    expect(markup).toContain('href="/admin/recommendations"');
-    expect(markup).toContain(">Recommendations<");
-  });
-
-  it("includes a Markers link in the automation navigation", () => {
-    const markup = renderSidebar();
-
-    expect(markup).toContain('href="/admin/marker-history"');
-    expect(markup).toContain(">Markers<");
   });
 
   it("renders the build identifier in the footer", () => {

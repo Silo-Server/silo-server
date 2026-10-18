@@ -65,7 +65,6 @@ func TestToAdminUserResponseReportsOverridesAndEffectivePolicy(t *testing.T) {
 		Enabled:         true,
 		MaxStreams:      ptrOf(6),
 		DownloadAllowed: ptrOf(true),
-		MaxProfiles:     5,
 		AccessGroupID:   &groupID,
 	}
 	group := &access.GroupPolicy{
@@ -78,6 +77,7 @@ func TestToAdminUserResponseReportsOverridesAndEffectivePolicy(t *testing.T) {
 		AudioTranscodeAllowed:    true,
 		MaxStreams:               2,
 		MaxTranscodes:            1,
+		MaxProfiles:              3,
 		RequestsAllowed:          true,
 	}
 
@@ -88,7 +88,8 @@ func TestToAdminUserResponseReportsOverridesAndEffectivePolicy(t *testing.T) {
 		t.Fatalf("overrides = streams %v download %v, want 6/true", resp.MaxStreams, resp.DownloadAllowed)
 	}
 	if resp.MaxTranscodes != nil || resp.MaxPlaybackQuality != nil || resp.TranscodeAllowed != nil ||
-		resp.AudioTranscodeAllowed != nil || resp.DownloadTranscodeAllowed != nil || resp.RequestsAllowed != nil || resp.LibraryIDs != nil {
+		resp.AudioTranscodeAllowed != nil || resp.DownloadTranscodeAllowed != nil || resp.RequestsAllowed != nil || resp.LibraryIDs != nil ||
+		resp.MaxProfilesOverride != nil {
 		t.Fatalf("inherited fields must serialize as null, got %+v", resp)
 	}
 
@@ -98,6 +99,7 @@ func TestToAdminUserResponseReportsOverridesAndEffectivePolicy(t *testing.T) {
 		MaxPlaybackQuality:       access.PlaybackQualityStandard,
 		MaxStreams:               6,
 		MaxTranscodes:            1,
+		MaxProfiles:              3,
 		TranscodeAllowed:         true,
 		AudioTranscodeAllowed:    true,
 		DownloadAllowed:          true,
@@ -120,6 +122,11 @@ func TestToAdminUserResponseReportsOverridesAndEffectivePolicy(t *testing.T) {
 	}
 	if decoded["max_transcodes"] != nil || decoded["library_ids"] != nil {
 		t.Fatalf("inherited fields should be JSON null, got %v / %v", decoded["max_transcodes"], decoded["library_ids"])
+	}
+	// The frozen v1 body has no inherit state for the profile limit: it
+	// carries the limit that applies.
+	if decoded["max_profiles"] != float64(3) {
+		t.Fatalf("max_profiles JSON = %v, want the inherited 3", decoded["max_profiles"])
 	}
 	effective, ok := decoded["effective_policy"].(map[string]any)
 	if !ok || effective["max_streams"] != float64(6) || effective["download_allowed"] != true {

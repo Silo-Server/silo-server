@@ -26,7 +26,12 @@ const (
 	// pipeline is fully supported once initialized.
 	nvencProbeCommandTimeout = 30 * time.Second
 	probeNegativeTTL         = 15 * time.Second
-	probeTimeoutSlack        = time.Second
+	// probeUnsettledDolbyVisionTTL retries a Dolby Vision smoke that failed
+	// for a reason other than a refused apply_dovi option. It is longer than
+	// probeNegativeTTL because an RPU path that keeps failing that way would
+	// otherwise rerun the whole device matrix every 15 seconds.
+	probeUnsettledDolbyVisionTTL = 5 * time.Minute
+	probeTimeoutSlack            = time.Second
 	// probeEndpointSlack covers what a capability endpoint spends around the
 	// tone-map matrix itself: one bounded hardware detection walk (30s in
 	// playback.hwAccelWalkTimeout), the transformation registry's three 3s
@@ -113,13 +118,16 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 		}
 		probeCtx, cancel := context.WithTimeout(context.Background(), ProbeTotalTimeout(hardwareBackend, hardwareDevice))
 		defer cancel()
-		result, err := probeWithRunner(probeCtx, ffmpegPath, hardwareBackend, hardwareDevice, run)
+		result, dolbyVisionUnsettled, err := probeWithRunner(probeCtx, ffmpegPath, hardwareBackend, hardwareDevice, run)
 		if err != nil {
 			return nil, err
 		}
 		entry := probeCacheEntry{capabilities: append(Capabilities(nil), result...)}
-		if !probeCapabilitiesComplete(result, hardwareBackend) {
+		switch {
+		case !probeCapabilitiesComplete(result, hardwareBackend):
 			entry.expiresAt = now().Add(probeNegativeTTL)
+		case dolbyVisionUnsettled:
+			entry.expiresAt = now().Add(probeUnsettledDolbyVisionTTL)
 		}
 		probeCache.Lock()
 		probeCache.entries[key] = entry
@@ -151,15 +159,29 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 
 // probeWithRunner preserves deadline and cancellation failures from any
 // bounded FFmpeg command. Ordinary FFmpeg failures still mean the executor is
-// genuinely unsupported and produce a completed empty inventory.
+// genuinely unsupported and produce a completed empty inventory. The Dolby
+// Vision kind is outside that inventory, so its smoke counts as a settled
+// refusal only when FFmpeg rejects the apply_dovi option; any other failure,
+// such as a busy device, is reported as unsettled so the result is retried
+// after probeUnsettledDolbyVisionTTL.
 func probeWithRunner(
 	ctx context.Context,
 	ffmpegPath, hardwareBackend, hardwareDevice string,
 	run CommandRunner,
-) (Capabilities, error) {
+) (Capabilities, bool, error) {
 	var transientErr error
+	dolbyVisionUnsettled := false
 	trackingRunner := func(commandCtx context.Context, name string, args ...string) ([]byte, error) {
 		output, err := run(commandCtx, name, args...)
+		// The Dolby Vision smoke is optional, so while the whole probe still
+		// has time, its own deadline is just another unsettled failure; it
+		// must not discard the standard kinds that already passed.
+		if err != nil && dolbyVisionSmokeCommand(args) && ctx.Err() == nil {
+			if !hasToken(output, "option 'apply_dovi'") {
+				dolbyVisionUnsettled = true
+			}
+			return output, err
+		}
 		if commandErr := commandCtx.Err(); commandErr != nil {
 			transientErr = errors.Join(transientErr, commandErr)
 		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -170,9 +192,15 @@ func probeWithRunner(
 	capabilities := ProbeWithRunner(ctx, ffmpegPath, hardwareBackend, hardwareDevice, trackingRunner)
 	transientErr = errors.Join(transientErr, ctx.Err())
 	if transientErr != nil {
-		return nil, transientErr
+		return nil, false, transientErr
 	}
-	return capabilities, nil
+	return capabilities, dolbyVisionUnsettled, nil
+}
+
+// dolbyVisionSmokeCommand reports whether a probe command smoke-tests RPU
+// reshaping, which only the Dolby Vision kind's filter graphs request.
+func dolbyVisionSmokeCommand(args []string) bool {
+	return slices.ContainsFunc(args, func(arg string) bool { return strings.Contains(arg, "apply_dovi=1") })
 }
 
 // probeCacheKey binds reusable capabilities to the resolved FFmpeg binary and
@@ -260,6 +288,11 @@ func probeCacheEntryCurrent(entry probeCacheEntry, now time.Time) bool {
 // for every executor class it was asked to inspect. A software capability does
 // not make a missing configured hardware executor permanent: temporary device
 // contention must be retried after the negative-cache interval.
+//
+// Only the standard kinds count. A Dolby Vision smoke that FFmpeg refuses is a
+// genuine answer for that build, and executors that cannot apply an RPU never
+// run it; counting it would re-probe those devices every negative-cache
+// interval for good.
 func probeCapabilitiesComplete(capabilities Capabilities, hardwareBackend string) bool {
 	if !capabilityCoversAllSourceKinds(capabilities, ModeSoftware, BackendSoftware) {
 		return false
@@ -280,19 +313,20 @@ func capabilityCoversAllSourceKinds(capabilities Capabilities, mode Mode, backen
 	if index < 0 {
 		return false
 	}
-	return !slices.ContainsFunc(AllSourceKinds(), func(kind SourceKind) bool {
+	return !slices.ContainsFunc(StandardSourceKinds(), func(kind SourceKind) bool {
 		return !slices.Contains(capabilities[index].SourceKinds, kind)
 	})
 }
 
 // ProbeTotalTimeout budgets one bounded deadline for every listing and smoke
-// command the selected backend and device set can execute.
+// command the selected backend and device set can execute. The software filter
+// is only known after the listing, so its Dolby Vision smoke is always counted.
 func ProbeTotalTimeout(hardwareBackend, hardwareDevice string) time.Duration {
 	total := time.Duration(2+len(AllSourceKinds())) * probeCommandTimeout
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
 	switch backend {
 	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
-		hardwareCommandCount := len(AllSourceKinds()) * len(probeDevices(hardwareDevice, backend))
+		hardwareCommandCount := len(smokeKindsForFilter(hardwareFilter(backend))) * len(probeDevices(hardwareDevice, backend))
 		total += time.Duration(hardwareCommandCount) * hardwareProbeCommandTimeout(backend)
 	}
 	return total + probeTimeoutSlack
@@ -369,7 +403,7 @@ func ProbeWithRunner(
 		softwareFilter = selected
 	}
 	if softwareFilter != "" && hasToken(encoders, "libx264") {
-		kinds := smokeSourceKinds(ctx, run, ffmpegPath, probeCommandTimeout, func(kind SourceKind) []string {
+		kinds := smokeSourceKinds(ctx, run, ffmpegPath, probeCommandTimeout, smokeKindsForFilter(softwareFilter), func(kind SourceKind) []string {
 			return softwareSmokeArgs(fixturePath, kind, softwareFilter)
 		})
 		if len(kinds) > 0 {
@@ -391,9 +425,9 @@ func ProbeWithRunner(
 // every configured device so the advertised union is safe for later selection.
 func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath, fixturePath, backend, hardwareDevice string) []SourceKind {
 	devices := probeDevices(hardwareDevice, backend)
-	validated := AllSourceKinds()
+	validated := smokeKindsForFilter(hardwareFilter(backend))
 	for _, device := range devices {
-		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), func(kind SourceKind) []string {
+		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), validated, func(kind SourceKind) []string {
 			return hardwareSmokeArgs(fixturePath, backend, device, kind)
 		})
 		validated = intersectSourceKinds(validated, supported)
@@ -514,7 +548,11 @@ func hasToken(output []byte, token string) bool {
 func hardwareProbeAvailable(backend string, filters, encoders []byte) bool {
 	switch backend {
 	case BackendQSV:
-		return hasToken(filters, HardwareFilterOpenCL) && hasToken(filters, "hwmap") && hasToken(filters, "scale_vaapi") && hasToken(encoders, "h264_qsv")
+		// Bitmap subtitle burn-in on HDR sources composites and scales on
+		// OpenCL, so a build without those filters falls back to software
+		// tone mapping instead of failing at transcode start.
+		return hasToken(filters, HardwareFilterOpenCL) && hasToken(filters, "hwmap") && hasToken(filters, "scale_vaapi") &&
+			hasToken(filters, "overlay_opencl") && hasToken(filters, "scale_opencl") && hasToken(encoders, "h264_qsv")
 	case BackendVAAPI:
 		return hasToken(filters, HardwareFilterVAAPI) && hasToken(filters, "scale_vaapi") && hasToken(encoders, "h264_vaapi")
 	case BackendNVENC:
@@ -526,6 +564,20 @@ func hardwareProbeAvailable(backend string, filters, encoders []byte) bool {
 	}
 }
 
+// smokeKindsForFilter lists the source kinds worth smoke testing on an
+// executor. The Dolby Vision kind is tried only where the filter can apply an
+// RPU; elsewhere the conversion would run and still be wrong.
+//
+// The embedded fixture carries no RPU, so a Dolby Vision smoke proves the
+// filter accepts apply_dovi and the graph runs on the device, not the reshaping
+// itself.
+func smokeKindsForFilter(filter string) []SourceKind {
+	if FilterAppliesDolbyVision(filter) {
+		return AllSourceKinds()
+	}
+	return StandardSourceKinds()
+}
+
 // smokeSourceKinds runs one bounded conversion per source kind and returns only
 // the kinds whose command completed successfully.
 func smokeSourceKinds(
@@ -533,10 +585,11 @@ func smokeSourceKinds(
 	run CommandRunner,
 	ffmpegPath string,
 	commandTimeout time.Duration,
+	candidates []SourceKind,
 	argsFor func(SourceKind) []string,
 ) []SourceKind {
-	kinds := make([]SourceKind, 0, len(AllSourceKinds()))
-	for _, kind := range AllSourceKinds() {
+	kinds := make([]SourceKind, 0, len(candidates))
+	for _, kind := range candidates {
 		if _, err := runBoundedWithTimeout(ctx, commandTimeout, run, ffmpegPath, argsFor(kind)...); err == nil {
 			kinds = append(kinds, kind)
 		}
@@ -601,11 +654,11 @@ func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth in
 		if IsSDRSource(kind) {
 			return "hwdownload,format=" + NVENCSoftwareFallbackPixelFormat(sourceVideoBitDepth) + "," + SoftwareFilter(kind, "") + ",format=nv12,hwupload_cuda"
 		}
-		return SourceParameters(kind) + "," + CUDAFilter() + "," + HDRMetadataRemovalFilter()
+		return SourceParameters(kind) + "," + CUDAFilter(kind) + "," + HDRMetadataRemovalFilter()
 	}
 	filter := VAAPIFilter(kind)
 	if backend == BackendQSV {
-		filter = QSVFilter(kind) + "," + QSVInteropFilter()
+		filter = QSVFilter(kind, 0) + "," + QSVInteropFilter()
 	}
 	return filter + "," + HDRMetadataRemovalFilter()
 }

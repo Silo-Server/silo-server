@@ -21,6 +21,7 @@ type DownloadSubscriptionCreateBody struct {
 	SeasonNumbers   []int  `json:"season_numbers,omitempty" maxItems:"10000"`
 	DeleteWatched   bool   `json:"delete_watched"`
 	MaxStorageBytes int64  `json:"max_storage_bytes" minimum:"0"`
+	Quality         string `json:"quality,omitempty" enum:"original,20mbps,10mbps,5mbps,2mbps,1mbps" doc:"Quality to register episodes in. Defaults to original. A new monitor needs the monitor_quality capability for any other preset; an existing monitor keeps its quality."`
 }
 type DownloadSubscriptionCreateInput struct {
 	DeviceID       string `header:"X-Silo-Device-Id" required:"true" minLength:"1" maxLength:"128"`
@@ -33,6 +34,7 @@ type DownloadSubscriptionPatchBody struct {
 	SeasonNumbers   Patch[[]int]  `json:"season_numbers,omitzero"`
 	DeleteWatched   Patch[bool]   `json:"delete_watched,omitzero"`
 	MaxStorageBytes Patch[int64]  `json:"max_storage_bytes,omitzero"`
+	Quality         Patch[string] `json:"quality,omitzero" enum:"original,20mbps,10mbps,5mbps,2mbps,1mbps" doc:"Quality preset for episodes registered from now on; already-registered downloads keep theirs."`
 	Active          Patch[bool]   `json:"active,omitzero"`
 }
 type DownloadSubscriptionPatchInput struct {
@@ -68,6 +70,8 @@ func subscriptionMutationProblem(err error) *Problem {
 	switch {
 	case errors.Is(err, downloads.ErrInvalidSubscriptionMode), errors.Is(err, downloads.ErrSeasonsRequired), errors.Is(err, downloads.ErrInvalidSeasonNumbers), errors.Is(err, downloads.ErrNotSeries):
 		return NewProblem(TypeMalformedRequest, err.Error())
+	case errors.Is(err, downloads.ErrInvalidQuality), errors.Is(err, downloads.ErrTranscodeDisabled), errors.Is(err, downloads.ErrQualityUnavailable), errors.Is(err, downloads.ErrCapacityUnavailable), errors.Is(err, downloads.ErrCapabilityUnavailable):
+		return downloadCreationProblem(err)
 	default:
 		return downloadProblem(err)
 	}
@@ -84,7 +88,7 @@ func (reg *Registry) createDownloadSubscription(ctx context.Context, in *Downloa
 	if p != nil {
 		return nil, p
 	}
-	row, err := reg.deps.DownloadSubscriptionMutations.CreateSubscriptionMonitor(ctx, user, downloads.SubscriptionRequest{SeriesID: in.Body.SeriesID, Mode: in.Body.Mode, SeasonNumbers: in.Body.SeasonNumbers, DeleteWatched: in.Body.DeleteWatched, MaxStorageBytes: in.Body.MaxStorageBytes, ProfileID: profile, DeviceID: in.DeviceID, DeviceName: in.DeviceName, DevicePlatform: in.DevicePlatform}, handlers.AccessFilterFromContext(ctx, ""))
+	row, err := reg.deps.DownloadSubscriptionMutations.CreateSubscriptionMonitor(ctx, user, downloads.SubscriptionRequest{SeriesID: in.Body.SeriesID, Mode: in.Body.Mode, SeasonNumbers: in.Body.SeasonNumbers, DeleteWatched: in.Body.DeleteWatched, MaxStorageBytes: in.Body.MaxStorageBytes, Quality: in.Body.Quality, ProfileID: profile, DeviceID: in.DeviceID, DeviceName: in.DeviceName, DevicePlatform: in.DevicePlatform}, handlers.AccessFilterFromContext(ctx, ""))
 	if err != nil {
 		return nil, subscriptionMutationProblem(err)
 	}
@@ -105,13 +109,13 @@ func (reg *Registry) updateDownloadSubscription(ctx context.Context, in *Downloa
 		return nil, p
 	}
 	b := in.Body
-	if b.Mode.Null || b.SeasonNumbers.Null || b.DeleteWatched.Null || b.MaxStorageBytes.Null || b.Active.Null {
+	if b.Mode.Null || b.SeasonNumbers.Null || b.DeleteWatched.Null || b.MaxStorageBytes.Null || b.Quality.Null || b.Active.Null {
 		return nil, NewProblem(TypeMalformedRequest, "Monitor fields cannot be null.")
 	}
 	if b.MaxStorageBytes.Present && b.MaxStorageBytes.Value < 0 || len(b.SeasonNumbers.Value) > 10000 {
 		return nil, NewProblem(TypeMalformedRequest, "Invalid monitor storage or season bounds.")
 	}
-	patch := downloads.SubscriptionPatch{Mode: subscriptionPatchPointer(b.Mode), SeasonNumbers: subscriptionPatchPointer(b.SeasonNumbers), DeleteWatched: subscriptionPatchPointer(b.DeleteWatched), MaxStorageBytes: subscriptionPatchPointer(b.MaxStorageBytes), Active: subscriptionPatchPointer(b.Active)}
+	patch := downloads.SubscriptionPatch{Mode: subscriptionPatchPointer(b.Mode), SeasonNumbers: subscriptionPatchPointer(b.SeasonNumbers), DeleteWatched: subscriptionPatchPointer(b.DeleteWatched), MaxStorageBytes: subscriptionPatchPointer(b.MaxStorageBytes), Quality: subscriptionPatchPointer(b.Quality), Active: subscriptionPatchPointer(b.Active)}
 	row, err := reg.deps.DownloadSubscriptionMutations.UpdateSubscriptionMonitor(ctx, user, profile, in.DeviceID, in.ID, patch, handlers.AccessFilterFromContext(ctx, ""), subscriptionGuard(in.IfMatch, in.IfNoneMatch))
 	if err != nil {
 		return nil, subscriptionMutationProblem(err)

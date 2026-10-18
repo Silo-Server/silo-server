@@ -99,6 +99,7 @@ export interface PlayerAudioTrack {
   embedded_title?: string;
   language?: string;
   codec?: string;
+  profile?: string;
   layout?: string;
   channels?: number;
   bitrate?: number;
@@ -131,6 +132,8 @@ export interface PlayerSubtitleInfo {
   source?: "external" | "embedded" | "downloaded";
   forced?: boolean;
   hearing_impaired?: boolean;
+  /** Names the track to the subtitle sync operations; absent when it can't be synced. */
+  sync_key?: string;
   url: string;
   /**
    * Optional endpoint returning base64-encoded container font attachments for
@@ -182,6 +185,9 @@ export type MarkerKind = "intro" | "recap" | "credits" | "preview";
 
 /** Every occurrence in the v2 marker inventory. An empty array means no markers. */
 export interface PlayerMarkerSegment {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start_seconds: number;
   end_seconds: number;
@@ -197,6 +203,9 @@ export interface MarkerDraft {
 
 /** A marker range positioned on the seek bar, tagged with its kind for color. */
 export interface MarkerRegionView {
+  thumbnail_url?: string;
+  thumbnail_thumbhash?: string;
+  thumbnail_capture_seconds?: number;
   kind: MarkerKind;
   start: number;
   end: number;
@@ -318,7 +327,6 @@ export interface QualityOption {
   sublabel: string;
   resolution: string;
   bitrateKbps: number;
-  isOriginal: boolean;
 }
 
 /** Context for series playback (episode navigation). */
@@ -339,7 +347,14 @@ export interface EpisodeRef {
   runtime: number;
   /** Optional display fields for post-roll / next-episode UI. */
   overview?: string;
+  /** Localized fields whose text was machine-translated by AI. */
+  machineTranslatedFields?: string[];
   stillUrl?: string;
+  stillIsEpisodeStill?: boolean;
   stillThumbhash?: string;
   airDate?: string | null;
+  /** The profile's watch state, for spoiler protection. */
+  watchState?: { played?: boolean; is_in_progress?: boolean; position_seconds?: number };
+  /** A shuffle can play a movie next; spoiler protection covers episodes only. */
+  isMovie?: boolean;
 }

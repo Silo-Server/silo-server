@@ -347,11 +347,12 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 // AllowedLibraryIDs means unrestricted (all enabled libraries); a non-nil but
 // empty allowlist grants access to no libraries at all.
 func (s *directContentService) accessibleFolders(ctx context.Context, filter catalog.AccessFilter) ([]*models.MediaFolder, error) {
-	if filter.AllowedLibraryIDs != nil {
-		if len(filter.AllowedLibraryIDs) == 0 {
-			return nil, nil
-		}
-		return s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
+	libraryIDs, none := filter.LibraryScope(nil)
+	if none {
+		return nil, nil
+	}
+	if libraryIDs != nil {
+		return s.folderRepo.ListByIDs(ctx, libraryIDs)
 	}
 	return s.folderRepo.GetEnabled(ctx)
 }
@@ -1415,6 +1416,10 @@ func mediaItemToListItem(mi *models.MediaItem) upstreamListItem {
 		BackdropPath:      mi.BackdropPath,
 		BackdropThumbhash: mi.BackdropThumbhash,
 		LogoPath:          mi.LogoPath,
+		BannerPath:        mi.BannerPath,
+		ThumbPath:         mi.ThumbPath,
+		ClearArtPath:      mi.ClearArtPath,
+		DiscPath:          mi.DiscPath,
 		UpdatedAt:         mi.UpdatedAt,
 		Runtime:           mi.Runtime,
 		SeasonCount:       mi.SeasonCount,
@@ -1429,6 +1434,8 @@ func mediaItemToListItem(mi *models.MediaItem) upstreamListItem {
 
 func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	versions := append([]catalog.FileVersion(nil), d.Versions...)
+	// applyListFileFields picks the same first version in SQL; keep the two
+	// orders in step.
 	sort.SliceStable(versions, func(i, j int) bool {
 		return compatPrimaryVideoTrack(versions[i]).Width > compatPrimaryVideoTrack(versions[j]).Width
 	})
@@ -1453,6 +1460,11 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		PosterURL:        d.PosterURL,
 		BackdropURL:      d.BackdropURL,
 		LogoURL:          d.LogoURL,
+		BannerURL:        d.BannerURL,
+		ThumbURL:         d.ThumbURL,
+		ClearArtURL:      d.ClearArtURL,
+		DiscURL:          d.DiscURL,
+		BackdropURLs:     d.BackdropURLs,
 		Studios:          d.Studios,
 		Countries:        d.Countries,
 		SeasonCount:      d.SeasonCount,
@@ -1469,6 +1481,28 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		Crew:             d.Crew,
 		Videos:           d.Videos,
 		Extras:           d.Extras,
+		// Cached artwork paths that seed the image tags.
+		BannerPath:         d.BannerPath,
+		ThumbPath:          d.ThumbPath,
+		ClearArtPath:       d.ClearArtPath,
+		DiscPath:           d.DiscPath,
+		ExtraBackdropPaths: d.ExtraBackdropPaths,
+		// The stored paths seed the image tags alongside UpdatedAt; without
+		// them the timestamp alone would give every language's artwork, and
+		// every artwork update that leaves the item row alone, the same tag.
+		PosterPath:   d.PosterPath,
+		BackdropPath: d.BackdropPath,
+		LogoPath:     d.LogoPath,
+		UpdatedAt:    d.UpdatedAt,
+	}
+	// A thumbhash joins the seed only with its stored path. Episode and season
+	// details carry no paths, and a thumbhash alone would keep a replaced
+	// image's tag; without either their tags follow the presigned URL.
+	if d.PosterPath != "" {
+		detail.PosterThumbhash = d.PosterThumbhash
+	}
+	if d.BackdropPath != "" {
+		detail.BackdropThumbhash = d.BackdropThumbhash
 	}
 	if detail.Genres == nil {
 		detail.Genres = []string{}

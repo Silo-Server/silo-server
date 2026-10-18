@@ -1,9 +1,15 @@
 package transcodeproxy
 
-import "net/http"
+import (
+	"net/http"
 
-// nodeClient is shared by every hop that relays transcode output from a node:
-// the API's native and Jellyfin-compatible relays and the dedicated proxy.
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+)
+
+// nodeClient is shared by every hop that relays transcode output from a node
+// (the API's native and Jellyfin-compatible relays and the dedicated proxy) and
+// by the API's playback control calls to nodes: transcode start and capability
+// reads.
 //
 // It sets no overall timeout, because segment bodies stream at the viewer's
 // download speed, and no response-header timeout, because no fixed limit
@@ -23,11 +29,11 @@ var nodeClient = &http.Client{
 	},
 }
 
-// NodeClient returns a client for relaying manifests, segments and their
-// completion acknowledgements to a transcode node. Every returned client
-// shares one process-wide transport and connection pool; each call returns a
-// fresh copy of the client so a caller that changes its settings cannot change
-// them for every other relay. Pass it to telemetry.DoTrustedNode so the calls
+// NodeClient returns a client for calls to a transcode node: relayed manifests,
+// segments and their completion acknowledgements, and control requests such as
+// transcode start. Every returned client shares one process-wide transport and
+// connection pool; each call returns a fresh copy of the client so a caller
+// that changes its settings cannot change them for every other caller. Pass it to telemetry.DoTrustedNode so the calls
 // land in the node dependency metrics, and give every request a context that
 // ends when its caller stops waiting.
 func NodeClient() *http.Client {
@@ -45,6 +51,9 @@ func newStreamTransport() *http.Transport {
 		base = &http.Transport{}
 	}
 	t := base.Clone()
+	// Only the connect is bounded (nodepool.NodeDialTimeout). Once a
+	// connection is open, the request context bounds the call, as below.
+	t.DialContext = nodepool.NodeDialContext()
 	t.MaxIdleConns = 128
 	t.MaxIdleConnsPerHost = 32
 	// See nodeClient: the request context, not a header deadline, bounds a

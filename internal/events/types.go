@@ -22,6 +22,10 @@ const (
 	// (inbox deliveries). Subscriptions require a websocket ticket binding
 	// the connection to a (user, profile).
 	ChannelNotifications EventChannel = "notifications"
+	// ChannelDownloadPreparations carries admin-only changes to the prepared
+	// download encode queue: download_preparation.changed and
+	// download_preparation.progress.
+	ChannelDownloadPreparations EventChannel = "download_preparations"
 )
 
 var AllChannels = []EventChannel{
@@ -36,6 +40,7 @@ var AllChannels = []EventChannel{
 	ChannelSettings,
 	ChannelPlugins,
 	ChannelNotifications,
+	ChannelDownloadPreparations,
 }
 
 // ClientChannels is every channel a websocket client may subscribe to: it is
@@ -54,6 +59,7 @@ var ClientChannels = []EventChannel{
 	ChannelUserSettings,
 	ChannelSettings,
 	ChannelNotifications,
+	ChannelDownloadPreparations,
 }
 
 type Envelope struct {

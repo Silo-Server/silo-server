@@ -6,12 +6,18 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 // Seams of the catalog-items section's actions and lookups: trailer refresh,
@@ -148,11 +154,11 @@ type MetadataAIStatusView struct {
 
 // Status reports whether metadata AI translation is configured and the
 // viewer-facing on-view mode; a nil handler is the clean negative.
-func (h *MetadataAIHandler) Status() MetadataAIStatusView {
+func (h *MetadataAIHandler) Status(ctx context.Context) MetadataAIStatusView {
 	if h == nil || h.service == nil {
 		return MetadataAIStatusView{OnView: metadataAIOnViewOff}
 	}
-	return MetadataAIStatusView{Enabled: h.service.Enabled(), OnView: h.service.OnViewMode()}
+	return MetadataAIStatusView{Enabled: h.service.Enabled(ctx), OnView: h.service.OnViewMode(ctx)}
 }
 
 // TranslateOnView queues the viewer-facing description translation of the
@@ -179,12 +185,65 @@ func (h *MetadataAIHandler) TranslateOnView(ctx context.Context, filter catalog.
 		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to authorize item")
 	}
+	// A disabled feature answers as disabled before any guard below can
+	// spend the budget or report a language problem instead.
+	if h.service.OnViewMode(ctx) == metadataAIOnViewOff {
+		return nil, onViewNotConfigured(translation.ErrNotConfigured)
+	}
+	// Fallback preferences from a failed settings read would check the
+	// request against the wrong language; refuse until the read recovers.
+	if scope, ok := access.GetScope(ctx); ok && scope.PreferencesDegraded {
+		unavailable := apiError(http.StatusServiceUnavailable, "unavailable", "Profile preferences are temporarily unavailable")
+		unavailable.RetryAfter = 1
+		return nil, unavailable
+	}
+	// The account budget comes first, so a refused request cannot fan out
+	// into the pending-language reads below without spending it.
+	if h.Limiter != nil && requestedBy != nil {
+		result := h.onViewAllow(ctx, *requestedBy)
+		if !result.Allowed {
+			limited := apiError(http.StatusTooManyRequests, "rate_limited", "Too many translation requests")
+			if result.RetryAfter > 0 {
+				limited.RetryAfter = ratelimit.RetryAfterSeconds(result.RetryAfter)
+			}
+			return nil, limited
+		}
+	}
+	if h.Pending != nil {
+		// Only the language this viewer's detail page reports missing may be
+		// queued; anything else would let any profile spend the provider
+		// budget on languages nobody reads.
+		pending, err := h.viewerPendingLanguage(ctx, target, filter, targetLanguage)
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to check on-view translation language", "component", "api",
+				"content_id", contentID, "error", err)
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to start translation")
+		}
+		if pending == "" {
+			// A retry sees nothing missing once its job's first batch has
+			// landed. As the coalescing contract promises, it gets back the
+			// job this account started, which is still running; anyone else
+			// gets the refusal. An invalid language has no job.
+			active, err := h.service.ActiveOnViewJob(ctx, target.kind, contentID, targetLanguage)
+			if err != nil && !errors.Is(err, translation.ErrInvalidRequest) {
+				slog.ErrorContext(ctx, "failed to look up on-view translation", "component", "api",
+					"content_id", contentID, "error", err)
+				return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to start translation")
+			}
+			if active != nil && requestedBy != nil && active.RequestedBy != nil && *active.RequestedBy == *requestedBy {
+				return active, nil
+			}
+			return nil, fieldError("target_language", "This item has nothing to translate for this profile")
+		}
+		if !strings.EqualFold(strings.TrimSpace(targetLanguage), pending) {
+			return nil, fieldError("target_language", "target_language must be this profile's metadata language ("+pending+")")
+		}
+	}
 	job, err := h.service.RequestOnView(ctx, target.kind, contentID, targetLanguage, requestedBy)
 	if err != nil {
 		switch {
 		case errors.Is(err, translation.ErrNotConfigured):
-			return nil, &APIError{Status: http.StatusServiceUnavailable, Code: "not_configured",
-				Message: "On-view translation is not enabled on this server", cause: err}
+			return nil, onViewNotConfigured(err)
 		case errors.Is(err, translation.ErrInvalidRequest):
 			return nil, &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: err.Error(), cause: err}
 		}
@@ -195,12 +254,18 @@ func (h *MetadataAIHandler) TranslateOnView(ctx context.Context, filter catalog.
 	return job, nil
 }
 
-// SearchPeople answers up to limit people matching query; limit <= 0 is 20.
-func (h *PeopleHandler) SearchPeople(ctx context.Context, query string, limit int) ([]PersonView, error) {
+func onViewNotConfigured(cause error) *APIError {
+	return &APIError{Status: http.StatusServiceUnavailable, Code: "not_configured", //nolint:goconst // wire error code
+		Message: "On-view translation is not enabled on this server", cause: cause}
+}
+
+// SearchPeople answers up to limit people matching query that the viewer can
+// see through at least one credit, as person detail requires; limit <= 0 is 20.
+func (h *PeopleHandler) SearchPeople(ctx context.Context, query string, limit int, filter catalog.AccessFilter) ([]PersonView, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	people, err := h.personRepo.Search(ctx, query, limit)
+	people, err := h.personRepo.SearchAlphabetical(ctx, query, limit, filter)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "search_failed", err.Error())
 	}
@@ -224,13 +289,14 @@ func (h *PeopleHandler) SearchPeopleScoped(ctx context.Context, query string, li
 	return resp, nil
 }
 
-// Person answers one person. A view (queueRefresh) also queues a provider
-// refresh when one is due; a speculative prefetch leaves that to the sweep.
-func (h *PeopleHandler) Person(ctx context.Context, id int64, queueRefresh bool) (PersonView, error) {
-	person, err := h.personRepo.Get(ctx, id)
+// Person answers one person the viewer can see through at least one credit
+// (the people search predicate); any other person is not found, like an
+// unknown ID. A view (queueRefresh) also queues a provider refresh when one is
+// due; a speculative prefetch leaves that to the sweep.
+func (h *PeopleHandler) Person(ctx context.Context, id int64, queueRefresh bool, filter catalog.AccessFilter) (PersonView, error) {
+	person, err := h.visiblePerson(ctx, id, filter)
 	if err != nil {
-		slog.WarnContext(ctx, "people: get person failed", "component", "api", "id", id, "id_str", strconv.FormatInt(id, 10), "error", err)
-		return PersonView{}, apiError(http.StatusNotFound, policyErrorNotFound, "person not found")
+		return PersonView{}, err
 	}
 	if queueRefresh {
 		h.enqueuePersonRefreshIfDue(*person)
@@ -239,8 +305,9 @@ func (h *PeopleHandler) Person(ctx context.Context, id int64, queueRefresh bool)
 }
 
 // RefreshPerson queues a provider refresh of the person for the viewer
-// userID, at most personRefreshRate per user.
-func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64) error {
+// userID, at most personRefreshRate per user. A person the viewer cannot see
+// is not found, as in Person.
+func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64, filter catalog.AccessFilter) error {
 	if h == nil || h.refreshQueue == nil {
 		return apiError(http.StatusServiceUnavailable, policyErrorUnavailable, "Person refresh is not configured")
 	}
@@ -255,12 +322,27 @@ func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64)
 		}
 		return limited
 	}
-	person, err := h.personRepo.Get(ctx, id)
-	if err != nil || person == nil {
-		return apiError(http.StatusNotFound, policyErrorNotFound, "person not found")
+	person, err := h.visiblePerson(ctx, id, filter)
+	if err != nil {
+		return err
 	}
-	h.refreshQueue.Enqueue(id)
+	h.refreshQueue.Enqueue(id, person.MetadataRefreshAttemptedAt)
 	return nil
+}
+
+// visiblePerson loads a person the viewer can see through at least one credit.
+// A hidden or unknown person is a 404; a failed lookup is a 500, because the
+// person may well be visible.
+func (h *PeopleHandler) visiblePerson(ctx context.Context, id int64, filter catalog.AccessFilter) (*models.Person, error) {
+	person, err := h.personRepo.GetVisible(ctx, id, filter)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, apiError(http.StatusNotFound, policyErrorNotFound, "person not found")
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "people: get person failed", "component", "api", "id", id, "id_str", strconv.FormatInt(id, 10), "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load person")
+	}
+	return person, nil
 }
 
 // Work answers a literary work with the formats the viewer can see.

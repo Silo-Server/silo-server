@@ -7,10 +7,7 @@ import (
 )
 
 func TestRequiredSignupFamilyPairingCannotChange(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	selected, err := SignupFamilyAcceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)

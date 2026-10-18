@@ -7,10 +7,7 @@ import (
 )
 
 func TestDeviceStartLookupSelector(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	selected, err := DeviceStartLookupAcceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)

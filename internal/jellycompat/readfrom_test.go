@@ -47,16 +47,6 @@ func TestResponseWritersPreserveReaderFrom(t *testing.T) {
 	}
 }
 
-func TestDebugResponseWriterReadFromKeepsTextCapture(t *testing.T) {
-	spy := &readerFromSpy{header: make(http.Header)}
-	spy.header.Set("Content-Type", "application/json")
-	w := &debugResponseWriter{ResponseWriter: spy}
-	_, err := w.ReadFrom(bytes.NewBufferString(`{"ok":true}`))
-	if err != nil || w.body.String() != `{"ok":true}` || w.totalBytes != 11 {
-		t.Fatalf("text capture = body=%q bytes=%d err=%v", w.body.String(), w.totalBytes, err)
-	}
-}
-
 func TestDebugLogMiddlewareReadFromLogsTextAndMedia(t *testing.T) {
 	for _, tt := range []struct {
 		name, contentType, body, want string
@@ -68,12 +58,21 @@ func TestDebugLogMiddlewareReadFromLogsTextAndMedia(t *testing.T) {
 			var log bytes.Buffer
 			h := newDebugLogMiddleware(&log, "")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tt.contentType)
-				_, _ = io.Copy(w, bytes.NewBufferString(tt.body))
+				_, _ = io.Copy(w, struct{ io.Reader }{bytes.NewBufferString(tt.body)})
 			}))
 			spy := &readerFromSpy{header: make(http.Header)}
 			h.ServeHTTP(spy, httptest.NewRequest(http.MethodGet, "/", nil))
+			if spy.String() != tt.body {
+				t.Fatalf("forwarded body = %q, want %q", spy.String(), tt.body)
+			}
 			if !strings.Contains(log.String(), tt.want) {
 				t.Fatalf("debug log = %q, want %q", log.String(), tt.want)
+			}
+			if tt.name == "json" && !strings.Contains(log.String(), `"ok": true`) {
+				t.Fatalf("JSON body missing from debug log: %q", log.String())
+			}
+			if tt.name == "media" && spy.calls != 1 {
+				t.Fatalf("media ReadFrom calls = %d, want 1", spy.calls)
 			}
 			if tt.name == "media" && strings.Contains(log.String(), "media\n") {
 				t.Fatalf("binary body leaked into debug log: %q", log.String())

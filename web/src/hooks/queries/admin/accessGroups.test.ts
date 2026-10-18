@@ -32,6 +32,7 @@ const group: AccessGroup = {
   max_transcodes: 0,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 5,
   allowed_permissions: null,
   requests_allowed: true,
   is_default: false,

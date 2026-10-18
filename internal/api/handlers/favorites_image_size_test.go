@@ -17,7 +17,7 @@ import (
 const (
 	personalPosterPath   = "tmdb/movies/550/poster/original.abc123.webp"
 	personalBackdropPath = "tmdb/movies/550/backdrop/original.abc123.webp"
-	personalStillPath    = "tvdb/series/1/seasons/1/episodes/1/still/original.webp"
+	personalLogoPath     = "tmdb/movies/550/logo/original.png"
 )
 
 // newPersonalDataImageHandler wires a PersonalDataHandler whose image resolver
@@ -35,6 +35,7 @@ func newPersonalDataImageHandler(t *testing.T, store userstore.UserStore) *Perso
 				Title:        "Fight Club",
 				PosterPath:   personalPosterPath,
 				BackdropPath: personalBackdropPath,
+				LogoPath:     personalLogoPath,
 			},
 		},
 	})
@@ -62,7 +63,7 @@ func listFavoritesURLs(t *testing.T, handler *PersonalDataHandler, query string)
 
 func seedFavorite(t *testing.T, store userstore.UserStore) {
 	t.Helper()
-	if err := store.AddFavorite(context.Background(), "profile-1", "movie-1"); err != nil {
+	if _, err := store.AddFavorite(context.Background(), "profile-1", "movie-1"); err != nil {
 		t.Fatalf("AddFavorite: %v", err)
 	}
 }
@@ -82,6 +83,10 @@ func TestPersonalListsUnsetImageSizeUnchanged(t *testing.T) {
 	if !strings.Contains(item.BackdropURL, ":card:") || !strings.Contains(item.BackdropURL, "/backdrop/w300.") {
 		t.Errorf("backdrop URL = %q, want the card w300 backdrop", item.BackdropURL)
 	}
+	// Card images resolve in batches, not one lookup each.
+	if !strings.HasPrefix(item.PosterURL, "batch:") || !strings.HasPrefix(item.BackdropURL, "batch:") {
+		t.Errorf("poster %q, backdrop %q: want both resolved in a batch", item.PosterURL, item.BackdropURL)
+	}
 }
 
 // An explicit size applies to every image in the response, collapsing the
@@ -95,7 +100,7 @@ func TestPersonalListsHonorImageSize(t *testing.T) {
 	}{
 		{"small", ":card:", "/poster/w300.", "/backdrop/w300."},
 		{"medium", ":featured:", "/poster/w500.", "/backdrop/w1920."},
-		{"large", ":large:", "/poster/w780.", "/backdrop/w1920."},
+		{"large", ":large:", "/poster/w1000.", "/backdrop/w2560."},
 		{"original", ":original:", "/poster/original.", "/backdrop/original."},
 	}
 
@@ -163,30 +168,46 @@ func TestPersonalListsAcceptValidImageSize(t *testing.T) {
 	}
 }
 
-// The episode branch of the personal lists resolves a still into the backdrop
-// slot; it rides the still ladder, so a backdrop-only width would name a key
-// that was never generated.
-func TestPersonalListsEpisodeStillHonorsImageSize(t *testing.T) {
+// A personal-list card carries the logo item detail shows: the medium rung at
+// the featured hint unless the request asks for a size.
+func TestPersonalListsLogoMatchesItemDetail(t *testing.T) {
 	for _, tt := range []struct {
-		size string
+		name string
+		size imagesize.Size
 		want string
 	}{
-		{"", "/still/w300."},
-		{"small", "/still/w300."},
-		{"large", "/still/w780."},
+		{"unset", imagesize.Unset, ":featured:tmdb/movies/550/logo/w500.png"},
+		{"large", imagesize.Large, ":large:tmdb/movies/550/logo/w1280.png"},
 	} {
-		name := tt.size
-		if name == "" {
-			name = "unset"
-		}
-		t.Run(name, func(t *testing.T) {
-			size, err := imagesize.Parse(tt.size)
+		t.Run(tt.name, func(t *testing.T) {
+			handler := newPersonalDataImageHandler(t, newProfileTestStore(t))
+			items, err := resolveItemsByIDs(handler, context.Background(), PersonalListViewer{ImageSize: tt.size}, []string{"movie-1"})
 			if err != nil {
-				t.Fatalf("Parse(%q): %v", tt.size, err)
+				t.Fatalf("resolveItemsByIDs: %v", err)
 			}
-			if got := sizedCardPath(personalStillPath, "still", size); !strings.Contains(got, tt.want) {
-				t.Fatalf("still path = %q, want %s", got, tt.want)
+			if len(items) != 1 {
+				t.Fatalf("items = %d, want 1", len(items))
+			}
+			if !strings.HasSuffix(items[0].LogoURL, tt.want) {
+				t.Fatalf("logo URL = %q, want it to end in %q", items[0].LogoURL, tt.want)
 			}
 		})
+	}
+}
+
+// /api/v1 is frozen: the listing logo exists for the v2 renderer only.
+func TestPersonalListsV1OmitsLogo(t *testing.T) {
+	store := newProfileTestStore(t)
+	seedFavorite(t, store)
+	handler := newPersonalDataImageHandler(t, store)
+
+	req := newAuthorizedProfileRequestWithRole(http.MethodGet, "/favorites", "", "user", "profile-1")
+	rr := httptest.NewRecorder()
+	handler.HandleListFavorites(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "logo_url") {
+		t.Fatalf("v1 favorites body carries logo_url: %s", rr.Body.String())
 	}
 }

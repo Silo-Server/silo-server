@@ -19,6 +19,9 @@ func TestDisabledLibraryStopsServingAndRemovesPublishedWorkDB(t *testing.T) {
 				}
 			}
 			reader := NewReader(f.pool, identityStore(testStore), fakeURLs{})
+			if grids, err := reader.TrickplayGrids(t.Context(), []int{file}); err != nil || len(grids) != 1 {
+				t.Fatalf("enabled availability: %+v %v", grids, err)
+			}
 			if _, ok, err := reader.SignedManifest(t.Context(), file); err != nil || !ok {
 				t.Fatalf("enabled manifest: %v %v", ok, err)
 			}

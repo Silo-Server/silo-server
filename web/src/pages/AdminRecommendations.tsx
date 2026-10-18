@@ -1,13 +1,18 @@
 import { useState, useEffect } from "react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, ChevronDown, ChevronRight, Play, Loader2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Play, Loader2, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { AdminSettingsConnectionCheckRequest, ConnectionCheckResponse } from "@/api/types";
+import type { components } from "@/api/v2/schema";
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { formatRelativeTime } from "@/lib/date";
 import {
   useAdminServerSettings,
   useCheckAdminSettingsConnection,
@@ -20,6 +25,7 @@ import {
   useTriggerTasteProfiles,
   useTriggerRecommendations,
   useTriggerCowatch,
+  useResetEmbeddings,
 } from "@/hooks/queries/admin/recommendations";
 import {
   buildRecommendationSections,
@@ -32,6 +38,8 @@ import {
   matchRecommendationProviderPreset,
   type RecommendationProviderPreset,
 } from "@/lib/recommendation-provider-presets";
+
+type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
 
 interface RecLocalValues {
   [key: string]: string;
@@ -215,11 +223,41 @@ function RecSettingField({
   );
 }
 
+function RecJobLastRun({ run, label = "Last run" }: { run?: RecJobRun; label?: string }) {
+  if (!run) {
+    return <p className="text-muted-foreground text-xs">No finished run recorded</p>;
+  }
+  const when = formatRelativeTime(run.completed_at) ?? run.completed_at;
+  if (run.status === "failed") {
+    return (
+      <div className="space-y-0.5">
+        <p className="text-destructive text-xs font-medium">
+          {label} failed {when}
+        </p>
+        {run.error && (
+          <p className="text-muted-foreground line-clamp-3 text-xs break-words" title={run.error}>
+            {run.error}
+          </p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <p className="text-muted-foreground text-xs">
+      {label} completed {when}
+    </p>
+  );
+}
+
 function RecJobStatusCard({
   title,
   count,
   total,
   running,
+  lastRun,
+  secondaryRun,
+  secondaryRunLabel,
+  note,
   onTrigger,
   triggerPending,
 }: {
@@ -227,6 +265,11 @@ function RecJobStatusCard({
   count: number;
   total?: number;
   running: boolean;
+  lastRun?: RecJobRun;
+  /** Work that runs between full runs (a catch-up pass, the stale sweep), shown beside the last full run. */
+  secondaryRun?: RecJobRun;
+  secondaryRunLabel?: string;
+  note?: string;
   onTrigger: () => void;
   triggerPending: boolean;
 }) {
@@ -244,6 +287,9 @@ function RecJobStatusCard({
               ? `${count.toLocaleString()} / ${total.toLocaleString()} items`
               : `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`}
           </p>
+          {note && <p className="text-muted-foreground text-xs">{note}</p>}
+          <RecJobLastRun run={lastRun} />
+          {secondaryRun && <RecJobLastRun run={secondaryRun} label={secondaryRunLabel} />}
         </div>
         <Button
           size="sm"
@@ -296,8 +342,7 @@ function RecEmbeddingLockCard({
         <div className="space-y-1">
           <h2 className="text-sm font-semibold">Embedding Lock</h2>
           <p className="text-muted-foreground text-sm">
-            This installation is locked to a specific embedding space after the first successful
-            embed.
+            This installation is locked to the embedding space of its first stored embedding.
           </p>
         </div>
         <Badge variant="outline" className="shrink-0">
@@ -329,6 +374,70 @@ function RecEmbeddingLockCard({
   );
 }
 
+function RecEmbeddingResetCard({
+  lockConflict,
+  disabled,
+  isPending,
+  onReset,
+}: {
+  lockConflict: string;
+  disabled: boolean;
+  isPending: boolean;
+  onReset: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className="surface-panel max-w-3xl space-y-3 rounded-2xl border-0 px-5 py-4">
+      {lockConflict && (
+        <div
+          role="alert"
+          className="border-warning/30 bg-warning/10 text-warning flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <span>{lockConflict}</span>
+        </div>
+      )}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold">Reset Embeddings</h2>
+          <p className="text-muted-foreground text-sm">
+            Deletes the embedding lock, every item embedding and personal recommendation rows, and
+            clears taste profiles, so you can switch embedding models. Run the embedding job
+            afterwards; taste profiles rebuild as their titles are embedded again.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="text-destructive shrink-0"
+          onClick={() => setConfirming(true)}
+          disabled={disabled || isPending}
+        >
+          {isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <RotateCcw className="size-3.5" />
+          )}
+          Reset embeddings
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Reset embeddings?"
+        description="Every item embedding and personal recommendation row is deleted, and taste profiles are cleared. Personal recommendations and semantic search stay unavailable until the embedding job has run again."
+        confirmLabel="Reset embeddings"
+        variant="destructive"
+        isPending={isPending}
+        onConfirm={() => {
+          setConfirming(false);
+          onReset();
+        }}
+      />
+    </div>
+  );
+}
+
 export default function AdminRecommendations() {
   const { data: settings, isLoading } = useAdminServerSettings();
   const { data: sensitiveData } = useAdminSensitiveStatus();
@@ -340,6 +449,7 @@ export default function AdminRecommendations() {
   const triggerTasteProfiles = useTriggerTasteProfiles();
   const triggerCowatch = useTriggerCowatch();
   const triggerRecommendations = useTriggerRecommendations();
+  const resetEmbeddings = useResetEmbeddings();
 
   const [localValues, setLocalValues] = useState<RecLocalValues>({});
   const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
@@ -366,7 +476,7 @@ export default function AdminRecommendations() {
       }
       return merged;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds only keys missing from localValues; depending on it would rerun on every edit
   }, [settings, sensitiveData]);
 
   function handleLocalChange(key: string, value: string) {
@@ -433,6 +543,17 @@ export default function AdminRecommendations() {
     }
   }
 
+  async function handleResetEmbeddings() {
+    try {
+      const deleted = await resetEmbeddings.mutateAsync();
+      toast.success(
+        `Embeddings reset: deleted ${deleted.embeddings.toLocaleString()} embeddings and cleared ${deleted.taste_profiles.toLocaleString()} taste profiles.`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to reset embeddings");
+    }
+  }
+
   function toggleSection(title: string) {
     setCollapsed((prev) => ({ ...prev, [title]: !prev[title] }));
   }
@@ -466,7 +587,7 @@ export default function AdminRecommendations() {
 
   if (isLoading)
     return (
-      <div className="page-shell space-y-6 py-4 sm:py-6">
+      <div className="space-y-6 pb-4 sm:pb-6">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-2xl" />
@@ -489,16 +610,11 @@ export default function AdminRecommendations() {
   );
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Recommendations</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Configure the AI-powered recommendation engine. Requires pgvector and an
-            OpenAI-compatible embedding endpoint.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="Recommendations"
+        subtitle="Configure the AI-powered recommendation engine. Requires pgvector and an OpenAI-compatible embedding endpoint."
+      />
 
       {restartRequired && (
         <div className="border-warning/30 bg-warning/10 text-warning flex max-w-3xl items-center gap-3 rounded-xl border px-4 py-3 text-sm">
@@ -519,6 +635,9 @@ export default function AdminRecommendations() {
               count={status.embeddings.count}
               total={status.embeddings.total}
               running={status.embeddings.running}
+              lastRun={status.embeddings.last_run}
+              secondaryRun={status.embeddings.last_partial_run}
+              secondaryRunLabel="Last catch-up"
               onTrigger={() => triggerEmbeddings.mutate()}
               triggerPending={triggerEmbeddings.isPending}
             />
@@ -526,6 +645,14 @@ export default function AdminRecommendations() {
               title="Taste Profiles"
               count={status.taste_profiles.count}
               running={status.taste_profiles.running}
+              lastRun={status.taste_profiles.last_run}
+              secondaryRun={status.stale_sweep.last_run}
+              secondaryRunLabel="Last stale sweep"
+              note={
+                status.stale_sweep.pending > 0
+                  ? `${status.stale_sweep.pending.toLocaleString()} ${status.stale_sweep.pending === 1 ? "profile waits" : "profiles wait"} for a rebuild`
+                  : undefined
+              }
               onTrigger={() => triggerTasteProfiles.mutate()}
               triggerPending={triggerTasteProfiles.isPending}
             />
@@ -533,6 +660,7 @@ export default function AdminRecommendations() {
               title="Co-Watch Matrix"
               count={status.cowatch.count}
               running={status.cowatch.running}
+              lastRun={status.cowatch.last_run}
               onTrigger={() => triggerCowatch.mutate()}
               triggerPending={triggerCowatch.isPending}
             />
@@ -540,6 +668,16 @@ export default function AdminRecommendations() {
               title="Recommendations"
               count={status.recommendations.count}
               running={status.recommendations.running}
+              lastRun={status.recommendations.last_run}
+              secondaryRun={status.recommendations.last_partial_run}
+              secondaryRunLabel="Last startup build"
+              // Profile refreshes also write rows, so this is not job health;
+              // the last run above is.
+              note={
+                status.cache_refreshed_at
+                  ? `Newest cached row written ${formatRelativeTime(status.cache_refreshed_at) ?? status.cache_refreshed_at}`
+                  : undefined
+              }
               onTrigger={() => triggerRecommendations.mutate()}
               triggerPending={triggerRecommendations.isPending}
             />
@@ -549,6 +687,18 @@ export default function AdminRecommendations() {
 
       <div className="space-y-3">
         <RecEmbeddingLockCard lock={embeddingLock} />
+        {status && (
+          <RecEmbeddingResetCard
+            lockConflict={status.lock_conflict}
+            disabled={
+              status.embeddings.running ||
+              status.taste_profiles.running ||
+              status.recommendations.running
+            }
+            isPending={resetEmbeddings.isPending}
+            onReset={() => void handleResetEmbeddings()}
+          />
+        )}
 
         {buildRecommendationSections().map((section) => {
           const isOpen = !collapsed[section.title];
