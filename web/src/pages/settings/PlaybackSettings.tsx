@@ -502,8 +502,8 @@ export default function PlaybackSettings() {
             )}
           />
         )}
-        {supportsBuffering && <PlaybackConnection />}
       </SettingsGroup>
+      {supportsBuffering && <PlaybackConnection />}
 
       <SettingsGroup title="Skipping">
         {introSkipControl === "mode" ? (

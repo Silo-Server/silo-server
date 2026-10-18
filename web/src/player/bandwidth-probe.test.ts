@@ -21,11 +21,17 @@ class FakeBroadcastChannel {
   }
 }
 const fetchWithSession = vi.fn();
+vi.mock("@/api/v2/request", () => ({
+  V2_CLIENT_HEADERS: {},
+  v2: vi.fn(async () => ({ features: ["bandwidth_probe_v1"] })),
+}));
 vi.mock("@/api/client", () => ({
   fetchWithSession: (...args: unknown[]) => fetchWithSession(...args),
 }));
 
 import {
+  testConnectionSpeed,
+  ProbeRateLimited,
   BANDWIDTH_ESTIMATE_TTL_MS,
   cancelBandwidthProbe,
   forgetBandwidthEstimate,
@@ -34,6 +40,7 @@ import {
   scheduleBandwidthProbe,
   stopBandwidthProbes,
 } from "./bandwidth-probe";
+import { v2 } from "@/api/v2/request";
 import { storage } from "@/utils/storage";
 
 /** A body that yields `chunks` of `chunkBytes`, advancing a fake clock `stepMs` per chunk. */
@@ -370,5 +377,40 @@ describe("scheduleBandwidthProbe", () => {
     stop();
     await vi.advanceTimersByTimeAsync(BANDWIDTH_ESTIMATE_TTL_MS * 2);
     expect(fetchWithSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("reported connection speed", () => {
+  it("uses the advertised media path and reports the timed sample", async () => {
+    stopBandwidthProbes();
+    const body = timedBody(1000, 1_000_000, 80);
+    fetchWithSession.mockResolvedValue({ res: body.res });
+    const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
+    vi.mocked(v2)
+      .mockResolvedValueOnce({
+        features: ["connection_speed_v1"],
+        bandwidth_probe_url: "/api/v2/playback/bandwidth-probe?media_path=true",
+      } as never)
+      .mockResolvedValueOnce(undefined as never);
+    expect(await testConnectionSpeed()).toBe(100000);
+    expect(fetchWithSession.mock.calls[0]?.[0]).toContain("media_path=true&size=40000000");
+    expect(v2).toHaveBeenCalledWith("POST /api/v2/playback/bandwidth-probe/results", {
+      body: expect.objectContaining({
+        kbps: 100000,
+        transport: "other",
+        bytes: expect.any(Number),
+        duration_ms: expect.any(Number),
+      }),
+    });
+    clock.mockRestore();
+  });
+  it("preserves Retry-After for a foreground rate-limit message", async () => {
+    fetchWithSession.mockResolvedValue({
+      res: { status: 429, headers: new Headers({ "Retry-After": "19" }) },
+    });
+    await expect(measureBandwidthKbps(new AbortController().signal)).rejects.toMatchObject({
+      retryAfter: 19,
+    });
+    expect(new ProbeRateLimited(19).message).toBe("Try again in 19 seconds");
   });
 });

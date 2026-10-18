@@ -1,5 +1,5 @@
 import { fetchWithSession } from "@/api/client";
-import { V2_CLIENT_HEADERS } from "@/api/v2/request";
+import { v2, V2_CLIENT_HEADERS } from "@/api/v2/request";
 import { storage } from "@/utils/storage";
 
 /**
@@ -54,16 +54,9 @@ export function networkInformation(): NetworkInformationLike | undefined {
 interface StoredEstimate {
   kbps: number;
   measuredAt: number;
-  /**
-   * Set when playback itself showed the link could not sustain more. Unlike a
-   * probe result it describes whatever link the viewer is on now, so it still
-   * applies on a metered connection.
-   */
+  /** Legacy observed limits are discarded when reading the cache. */
   observed?: boolean;
-  /**
-   * The metered link an observed limit was recorded on (see meteredLink), or
-   * absent for an unmetered one.
-   */
+  /** Legacy metered-link cache entries are not used. */
   link?: string;
 }
 
@@ -134,10 +127,11 @@ export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined 
  * Times one probe download. Returns undefined when the probe failed, was
  * aborted, or moved too little data in too short a window to mean anything.
  */
-export async function measureBandwidthKbps(
+async function measureBandwidth(
   signal: AbortSignal,
   clock: () => number = () => performance.now(),
-): Promise<number | undefined> {
+  probeURL = "/api/v2/playback/bandwidth-probe",
+): Promise<ProbeMeasurement | undefined> {
   // The caller's signal cancels the probe; the first-byte deadline abandons a
   // request or body that never starts flowing.
   const controller = new AbortController();
@@ -163,12 +157,23 @@ export async function measureBandwidthKbps(
   let bytes = 0;
   let now = 0;
   try {
-    const { res } = await fetchWithSession(`/api/v2/playback/bandwidth-probe?size=${PROBE_BYTES}`, {
-      method: "GET",
-      headers: { ...V2_CLIENT_HEADERS, Accept: "application/octet-stream" },
-      cache: "no-store",
-      signal: controller.signal,
-    });
+    const { res } = await fetchWithSession(
+      `${probeURL}${probeURL.includes("?") ? "&" : "?"}size=${PROBE_BYTES}`,
+      {
+        method: "GET",
+        headers: {
+          ...V2_CLIENT_HEADERS,
+          Accept: "application/octet-stream",
+          "X-Profile-Token": "",
+        },
+        cache: "no-store",
+        signal: controller.signal,
+      },
+    );
+    if (res.status === 429) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new ProbeRateLimited(Number(res.headers.get("Retry-After")) || 30);
+    }
     if (!res.ok || !res.body) {
       await res.body?.cancel().catch(() => undefined);
       return undefined;
@@ -210,15 +215,79 @@ export async function measureBandwidthKbps(
   if (elapsed < PROBE_MIN_WINDOW_MS && bytes < PROBE_MIN_BYTES) return undefined;
   // Prefer the rate after ramp-up when at least as much time followed it.
   if (warm && now - warm.at >= warm.at - start) {
-    return clampKbps(((bytes - warm.bytes) * 8) / (now - warm.at));
+    const duration_ms = Math.max(1, Math.round(now - warm.at));
+    const kbps = clampKbps(((bytes - warm.bytes) * 8) / (now - warm.at));
+    return kbps === undefined ? undefined : { kbps, bytes: bytes - warm.bytes, duration_ms };
   }
   // bytes * 8 bits / ms = kbit/s.
-  return clampKbps((bytes * 8) / elapsed);
+  const kbps = clampKbps((bytes * 8) / elapsed);
+  return kbps === undefined
+    ? undefined
+    : { kbps, bytes, duration_ms: Math.max(1, Math.round(elapsed)) };
+}
+
+interface ProbeMeasurement {
+  kbps: number;
+  bytes: number;
+  duration_ms: number;
+}
+export class ProbeRateLimited extends Error {
+  constructor(readonly retryAfter: number) {
+    super(`Try again in ${retryAfter} seconds`);
+  }
+}
+export async function measureBandwidthKbps(
+  signal: AbortSignal,
+  clock?: () => number,
+): Promise<number | undefined> {
+  return (await measureBandwidth(signal, clock))?.kbps;
+}
+async function collectProbe(signal: AbortSignal): Promise<number | undefined> {
+  const cap = await v2("GET /api/v2/playback/capabilities");
+  const reporting = cap.features.includes("connection_speed_v1") && !!cap.bandwidth_probe_url;
+  if (signal.aborted || !probeAllowed()) return undefined;
+  const result = await measureBandwidth(
+    signal,
+    undefined,
+    reporting ? cap.bandwidth_probe_url : undefined,
+  );
+  if (!result || signal.aborted) return undefined;
+  writeStored(result.kbps, Date.now());
+  if (reporting) {
+    const type = networkInformation()?.type;
+    const transport =
+      type === "wifi" || type === "ethernet" || type === "cellular" ? type : "other";
+    await v2("POST /api/v2/playback/bandwidth-probe/results", { body: { ...result, transport } });
+  }
+  return result.kbps;
+}
+/** A foreground test uses the same playback and cross-tab guards as the schedule. */
+export async function testConnectionSpeed(): Promise<number | undefined> {
+  if (!probeAllowed() || activeProbe) return undefined;
+  const controller = new AbortController();
+  activeProbe = controller;
+  const run = async () => {
+    if (controller.signal.aborted || !probeAllowed()) return undefined;
+    const locks = lockManager();
+    if (locks && (await mediaActiveInAnyTab(locks))) return undefined;
+    return collectProbe(controller.signal);
+  };
+  try {
+    const locks = lockManager();
+    return locks
+      ? await locks.request(PROBE_LOCK_NAME, { ifAvailable: true }, (lock) =>
+          lock ? run() : undefined,
+        )
+      : await run();
+  } finally {
+    if (activeProbe === controller) activeProbe = undefined;
+  }
 }
 
 let scheduledTimer: ReturnType<typeof setTimeout> | undefined;
 /** Bumped by stopBandwidthProbes so a stopped schedule never re-arms. */
 let scheduleGeneration = 0;
+let scheduleCleanup: (() => void) | undefined;
 /**
  * Bumped by cancelBandwidthProbe, so a probe still waiting for the cross-tab
  * lock when playback starts does not begin once the lock arrives.
@@ -347,9 +416,26 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
   } catch {
     // Cross-tab coordination is optional.
   }
+  const network = networkInformation() as (NetworkInformationLike & EventTarget) | undefined;
+  const onNetworkChange = () => {
+    cancelEpoch++;
+    activeProbe?.abort();
+    forgetBandwidthEstimate();
+    schedule(PROBE_START_DELAY_MS);
+  };
+  const onVisible = () => {
+    if (document.visibilityState === "visible") schedule(PROBE_START_DELAY_MS);
+  };
+  network?.addEventListener?.("change", onNetworkChange);
+  document.addEventListener("visibilitychange", onVisible);
+  scheduleCleanup = () => {
+    network?.removeEventListener?.("change", onNetworkChange);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
   const generation = scheduleGeneration;
   const schedule = (ms: number) => {
     if (generation !== scheduleGeneration) return;
+    clearTimeout(scheduledTimer);
     scheduledTimer = setTimeout(run, Math.max(0, ms));
   };
   // Schedules the next look for when a fresh cached result expires.
@@ -366,7 +452,7 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
     const controller = new AbortController();
     activeProbe = controller;
     try {
-      const kbps = await measureBandwidthKbps(controller.signal);
+      const kbps = await collectProbe(controller.signal);
       if (kbps !== undefined && !controller.signal.aborted) writeStored(kbps, Date.now());
     } catch {
       // Best effort: without a measurement playback plans as it did before.
@@ -439,6 +525,8 @@ export function cancelBandwidthProbe(): void {
 
 /** Stops the schedule and any running probe, e.g. on sign-out. */
 export function stopBandwidthProbes(): void {
+  scheduleCleanup?.();
+  scheduleCleanup = undefined;
   scheduleGeneration++;
   lastPlaybackStartAt = undefined;
   playbackChannel?.close();

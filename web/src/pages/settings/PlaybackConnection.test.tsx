@@ -4,6 +4,13 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { PlaybackConnection } from "./PlaybackConnection";
 
 const request = vi.hoisted(() => vi.fn());
+const speedTest = vi.hoisted(() => vi.fn());
+vi.mock("@/player/bandwidth-probe", () => ({
+  networkInformation: () => undefined,
+  onMeteredConnection: () => false,
+  testConnectionSpeed: speedTest,
+  ProbeRateLimited: class extends Error {},
+}));
 vi.mock("@/api/v2/request", () => ({ v2: request }));
 beforeEach(() => {
   request.mockReset();
@@ -46,4 +53,28 @@ it("resets the server limit and refreshes the row", async () => {
   fireEvent.click(await screen.findByText("Reset"));
   await waitFor(() => expect(screen.queryByText("Reset")).not.toBeInTheDocument());
   expect(request).toHaveBeenCalledWith("DELETE /api/v2/playback/connection/learned-limit");
+});
+
+it("shows server speed and budget and refreshes after a speed test", async () => {
+  request.mockImplementation(async (operation: string) =>
+    operation.endsWith("capabilities")
+      ? { features: ["buffering_quality_v1", "connection_speed_v1"] }
+      : {
+          connection: "remote",
+          learned_limit: null,
+          probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
+          auto_budget_kbps: 35280,
+        },
+  );
+  speedTest.mockResolvedValue(48000);
+  mount();
+  expect(await screen.findByText(/48 Mbps.*Wi-Fi/)).toBeInTheDocument();
+  expect(screen.getByText(/35.3 Mbps without converting/)).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Test speed"));
+  await waitFor(() => expect(speedTest).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(
+      request.mock.calls.filter(([op]) => op === "GET /api/v2/playback/connection"),
+    ).toHaveLength(2),
+  );
 });

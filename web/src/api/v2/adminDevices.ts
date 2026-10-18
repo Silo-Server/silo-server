@@ -54,6 +54,7 @@ export async function getAdminDevice(
   requireAdminUserAuthority(context);
   return {
     ...deviceOf(row),
+    ...(row.connections ? { connections: row.connections } : {}),
     settings: row.settings.map((s) => ({
       ...s,
       user_id: userID(s.user_id),
