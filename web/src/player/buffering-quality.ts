@@ -66,17 +66,21 @@ export class BufferingQualityController {
   }
 
   setObscured(value: boolean, now: number) {
+    this.tick(now);
     this.obscured = value;
-    if (!value && this.deferredPill) this.show(this.deferredPill, now);
+    if (value && this.pill) {
+      this.deferredPill = this.pill;
+      this.pill = null;
+    } else if (!value && this.deferredPill) this.show(this.deferredPill, now, false);
   }
-  private show(pill: "prompt" | "undo", now: number) {
+  private show(pill: "prompt" | "undo", now: number, resetTimer = true) {
+    if (resetTimer) this.remainingMs = 15_000;
     if (this.obscured) {
       this.deferredPill = pill;
       return;
     }
     this.deferredPill = null;
     this.pill = pill;
-    this.remainingMs = 15_000;
     this.emit({ type: pill === "prompt" ? "prompt_shown" : "undo_shown" }, now);
   }
   private summary() {
@@ -119,6 +123,12 @@ export class BufferingQualityController {
   event(event: BufferingEvent, now: number) {
     this.tick(now);
     switch (event.type) {
+      case "pill_obscured":
+        this.setObscured(true, now);
+        break;
+      case "pill_unobscured":
+        this.setObscured(false, now);
+        break;
       case "plan_adopted": {
         if (!event.plan || event.plan.plan_id === this.plan?.plan_id) return;
         const previousQuality = this.plan?.quality;
@@ -323,7 +333,11 @@ export class BufferingQualityController {
       this.action("ignored");
       return;
     }
-    if (!this.lowerRung()) {
+    const estimate = Math.floor(this.plan.delivered_kbps * 0.7);
+    if (
+      !this.lowerRung() ||
+      (this.plan.quality === "auto" && (!Number.isFinite(estimate) || estimate < 100))
+    ) {
       this.noticeCant(now);
       this.blockedUntil = now + 300_000;
       return;
@@ -338,7 +352,7 @@ export class BufferingQualityController {
     if (!this.plan) return;
     const rung = this.lowerRung();
     const estimate = Math.floor(this.plan.delivered_kbps * 0.7);
-    if (!rung || (this.plan.quality === "auto" && estimate < 100)) {
+    if (!rung || (this.plan.quality === "auto" && (!Number.isFinite(estimate) || estimate < 100))) {
       this.noticeCant(now);
       return;
     }

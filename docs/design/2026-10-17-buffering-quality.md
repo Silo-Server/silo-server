@@ -120,7 +120,10 @@ measured and where it came from, and never do Auto's arithmetic.
   `lowerQualityOption`.
 - **Step-down estimate**: `floor(0.7 × delivered bitrate)`. It counts only when
   it is at least 100 kbps. Auto plans for 80% of an estimate, so the next stream
-  targets about 56% of the one that stalled.
+  targets about 56% of the one that stalled. If Auto has no known delivered
+  bitrate, or the estimate is below 100 kbps, treat it as no lower rung: show
+  `cant_lower` once per title, report `cant_lower`, and send no prompt or replan.
+  In `never` mode, continue detecting/reporting only (`ignored`).
 - **Answered**: the viewer has decided about buffering for this title at this
   quality, by **Keep quality** or **Restore quality**. An answered title is not
   lowered or prompted again until the viewer changes quality.
@@ -193,14 +196,18 @@ The prompt has a title, **"Playback keeps buffering"**, a primary action,
 | Pause while a pill shows | The timer freezes, and resumes on play. |
 | The viewer changes quality, or a replan the controller did not send is adopted | Any pill hides and stall history clears. A quality change also clears the answer. |
 | The plan adopted after a lowering is no lower, or carries `quality_reduction_unavailable` | Show **"Can't lower quality for this video"**. Leave this plan alone for `NO_LOWER_COOLDOWN_MS = 300000`. |
-| The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. |
+| The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. Rearming starts fresh stall history without startup grace; an in-progress stall is timed from the rearm. |
 
 Presentation rules:
 
-- At most one actionable pill shows at a time. If the intro-skip or Next Up pill
-  is showing, a buffering pill waits until that pill hides, then shows if the
-  plan has not changed. An automatic lowering does not wait; only its undo pill
-  does.
+- At most one actionable pill shows at a time. Intro skip, other segment skip
+  (including recap and credits), and Next Up take priority over buffering pills.
+  If one is showing, a new buffering pill waits with its full timer. If one
+  arrives while a buffering pill is visible, hide the buffering pill and freeze
+  its remaining timer. When the other pill hides, show the buffering pill and
+  resume that remaining timer, only if the plan has not changed. A plan change
+  or manual quality change discards the waiting/hidden pill. An automatic
+  lowering does not wait; only its undo pill does.
 - Select and Back are handled at the player root, as for intro skip.
 - The pills use the platform's notice position. A caption and its action, or
   two actions, are separate elements, never one phrase.
@@ -434,7 +441,11 @@ complete list of outputs it must produce. Events are `plan_adopted` (carrying
 the plan's delivered bitrate, quality, menu and warnings), `playing`, `waiting`
 (optionally with a `seek`, `pause` or `reload` cause), `pause`, `seek`,
 `transport_error_start`/`end`, `replan_failed`, and the pill answers
-`select_lower`, `select_keep`, `select_restore` and `back`. Timeouts come from
+`select_lower`, `select_keep`, `select_restore` and `back`. Presentation events
+`pill_obscured` and `pill_unobscured` mean a higher-priority actionable pill
+appears or the last such pill disappears. A resumed pill emits its corresponding
+`prompt_shown` or `undo_shown` output again. Missing delivered bitrate is encoded
+as `delivered_kbps: 0`. Timeouts come from
 the clock. Outputs are `replan` with its body, `prompt_shown`, `undo_shown`, and
 `notice` with its copy key. Some cases also give the `buffering_action` each
 plan's `plan_summary` must report.

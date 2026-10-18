@@ -160,5 +160,9 @@ export function useAutoQualityDownshift(options: Options) {
     controller.current?.event({ type }, Date.now());
     refresh();
   };
-  return { pill: options.enabled && pill?.planId === options.plan.plan_id ? pill : null, answer };
+  return {
+    pill:
+      options.enabled && !options.obscured && pill?.planId === options.plan.plan_id ? pill : null,
+    answer,
+  };
 }
