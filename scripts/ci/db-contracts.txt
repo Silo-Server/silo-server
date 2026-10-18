@@ -398,3 +398,11 @@
 # values fails the run without allocating it.
 ./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+
+# Buffering quality: a learned limit expires after seven days, a reset keeps the
+# probe and plan summary, rows go with the device's last registration and after
+# 30 days without an update, a seek replay never records a limit, and a plan
+# summary keeps the delivery of the plan it reports after a replan replaced it.
+./internal/playback/connectionstore TestStoreLifecycle
+./internal/api/handlers TestSeekReplayKeepsLearnedLimitDB
+./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
