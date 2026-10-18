@@ -10,6 +10,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
+// probeWriteTimeout bounds one probe response. The standalone proxy runs
+// without a server write timeout, so a client that stopped reading would
+// otherwise hold its account's probe slot for good. A probe is short, so it
+// gets the API listener's absolute two minutes, not a streaming stall window.
+var probeWriteTimeout = 2 * time.Minute
+
 type probeCountingWriter struct {
 	http.ResponseWriter
 	bytes int
@@ -41,6 +47,7 @@ func (s *Server) handleBandwidthProbe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "probe rate limited", http.StatusTooManyRequests)
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(probeWriteTimeout))
 	writer := &probeCountingWriter{ResponseWriter: w}
 	defer func() { s.probeLimiter.Release(claims.UserID, size-writer.bytes, window, time.Now()) }()
 	streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID), StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
