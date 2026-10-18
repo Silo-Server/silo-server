@@ -183,15 +183,14 @@ func TestPersonWriteWaitingOnARenameReindexesTitlesPostgres(t *testing.T) {
 		if waiting {
 			break
 		}
-		select {
-		case err := <-done:
-			t.Fatalf("refresh write finished (err %v) before the rename committed", err)
-		default:
-		}
 		if time.Now().After(deadline) {
 			t.Fatal("refresh write never waited on the rename")
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case err := <-done:
+			t.Fatalf("refresh write finished (err %v) before the rename committed", err)
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 	if err := rename.Commit(ctx); err != nil {
 		t.Fatalf("commit rename: %v", err)

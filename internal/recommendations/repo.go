@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -231,7 +232,7 @@ func (r *Repo) withHNSWCandidateScan(ctx context.Context, fn func(pgx.Tx) error)
 	_, err = tx.Exec(ctx, `
 		SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true),
 		       set_config('hnsw.ef_search', $1, true)
-	`, fmt.Sprintf("%d", hnswEfSearch))
+	`, strconv.Itoa(hnswEfSearch))
 	if err != nil {
 		return fmt.Errorf("configure hnsw candidate scan: %w", err)
 	}

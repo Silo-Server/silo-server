@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -67,7 +68,7 @@ func TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB(t *testing.T
 		if err := tx.QueryRow(ctx, `SELECT current_setting('hnsw.ef_search'), current_setting('hnsw.iterative_scan')`).Scan(&efSearch, &iterativeScan); err != nil {
 			return err
 		}
-		if efSearch != fmt.Sprint(hnswEfSearch) || iterativeScan != "relaxed_order" {
+		if efSearch != strconv.Itoa(hnswEfSearch) || iterativeScan != "relaxed_order" {
 			t.Errorf("candidate scan runs with ef_search=%s iterative_scan=%s", efSearch, iterativeScan)
 		}
 		return nil
