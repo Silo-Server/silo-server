@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,5 +197,23 @@ func TestLearnedLimitAnnotationRequiresAdditionalReduction(t *testing.T) {
 				t.Fatalf("annotation=%+v", result.Plan.BandwidthLimit)
 			}
 		})
+	}
+}
+
+// TestV1StartIgnoresBufferingQualityFields: /api/v1 is frozen and ignored
+// these fields as unknown before buffering_quality_v1 existed. A v1 start that
+// sends them without the feature still plays rather than failing with 400.
+func TestV1StartIgnoresBufferingQualityFields(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: source})
+	handler.PlaybackConfig = playbackTestConfig("", "")
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	start := v3HandlerStartRequest()
+	start.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
+	start.LearnedLimit = playback.LearnedLimitClearV3
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

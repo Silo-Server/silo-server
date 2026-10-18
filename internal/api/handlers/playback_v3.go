@@ -1691,6 +1691,11 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if err := json.Unmarshal(body, &req); err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid protocol v3 request body")
 	}
+	if !isNativeAPIV2(r.Context()) {
+		// The frozen /api/v1 surface ignored these fields as unknown. Drop them
+		// before validation so v1 neither rejects nor acts on them.
+		req.BandwidthEstimateSource, req.LearnedLimit = "", ""
+	}
 	warnings, err := req.NormalizeAndValidate()
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", err.Error())
@@ -1701,8 +1706,6 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// of every later replan of this attempt too.
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1)
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeaturePlaybackPlanSummaryV1)
-		req.BandwidthEstimateSource = ""
-		req.LearnedLimit = ""
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureSubripSidecarV3)
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureMarkerThumbnailsV3)
 		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureHLSSubtitleRenditionsV3)
@@ -4766,6 +4769,10 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	var req playback.ReplanRequestV3
 	if err := json.Unmarshal(body, &req); err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid replan request")
+	}
+	if !isNativeAPIV2(r.Context()) {
+		// As on start: /api/v1 ignores the buffering-quality fields.
+		req.BandwidthEstimateSource, req.LearnedLimit = "", ""
 	}
 	// Reject malformed identity/bounds before doing any session lookup. When
 	// client_features is omitted, temporarily allow the only validation rule
