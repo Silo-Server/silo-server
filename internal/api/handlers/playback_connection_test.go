@@ -20,7 +20,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
-// TestSeekReplayKeepsLearnedLimitDB: a seek-scoped replan replays the stored
+// TestSeekReplayKeepsLearnedLimitDB: only a request carrying observed_rebuffer
+// records a limit. A client replan that repeats its kept step-down estimate has
+// no source and records nothing. A seek-scoped replan replays the stored
 // start request, which applyLearnedLimit has already rewritten to the limit or
 // marked observed_rebuffer over a lower probe. Only the client's own request
 // may record or clear the limit, so a replay neither renews it nor stores the
@@ -70,6 +72,17 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, before, _ := stored()
+	// A client replan that repeats the kept step-down estimate has no source:
+	// it plans with min(estimate, limit) and records nothing.
+	for _, tc := range []struct{ sent, planned int }{{50000, 44100}, {44100, 44100}, {30000, 30000}} {
+		kept := request("", new(tc.sent), "")
+		if _, err := h.applyLearnedLimit(r, &kept, true); err != nil || kept.BandwidthEstimateKbps == nil || *kept.BandwidthEstimateKbps != tc.planned {
+			t.Fatalf("kept estimate %d planned %v, want %d (err %v)", tc.sent, kept.BandwidthEstimateKbps, tc.planned, err)
+		}
+	}
+	if kbps, observed, ok := stored(); !ok || kbps != 44100 || !observed.Equal(before) {
+		t.Fatalf("a kept estimate changed the limit: kbps=%d observed=%v", kbps, observed)
+	}
 	probed := request(playback.BandwidthEstimateProbeV3, new(20000), "")
 	if limit, err := h.applyLearnedLimit(r, &probed, true); err != nil || limit != nil || probed.BandwidthEstimateSource != playback.BandwidthEstimateObservedRebufferV3 {
 		t.Fatalf("lower probe: limit=%+v source=%q err=%v", limit, probed.BandwidthEstimateSource, err)
