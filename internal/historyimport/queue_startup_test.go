@@ -61,7 +61,7 @@ func TestQueueStartupWaitsForConfiguredIdentityAndObservers(t *testing.T) {
 	if _, err := repo.pool.Exec(ctx, `CREATE TABLE media_items(content_id text,type text,title text,year integer,status text,imdb_id text,tmdb_id text,tvdb_id text);INSERT INTO media_items VALUES('movie','movie','Movie',2026,'matched','tt1234567',NULL,NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	run, err := repo.EnqueueAdminRun(ctx, 1)
+	run, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

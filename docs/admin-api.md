@@ -1515,7 +1515,8 @@ for source configuration and `/api/v2/admin/history-imports` for mappings, crede
 and runs. All operations require an acting administrator. Mutations enforce the
 demo restriction; reads do not.
 `GET /api/v2/admin/history-imports/capabilities` reports availability, guarded
-configuration, durable administrative runs, and the 200-mapping bulk limit.
+configuration, durable administrative runs, the 200-mapping bulk limit, and
+`played_lookback` with its `max_lookback_hours` bound.
 
 Read a source or mapping by ID before editing it. The response contains its canonical
 configuration and a strong `ETag`. Send that exact tag in `If-Match` on source,
@@ -1547,6 +1548,27 @@ locations when available, and counts for each outcome. A source with more than 2
 mappings is rejected before any run admission. Bulk work is partially successful;
 it is not an atomic transaction across mappings. Mutations are not automatically
 retryable after an uncertain response.
+
+Run and bulk start take an optional body. Without one, with an empty or
+whitespace-only body (whatever its `Content-Type`), or with `lookback_hours`
+omitted or `null`, a run imports the full history; any other body must be
+`application/json`. `{"lookback_hours": N}`, N a plain JSON integer (1 to 8760),
+imports only items last played in the N hours before the run was queued: the
+cutoff is fixed at admission and stored with the run, so a run that waits in the
+queue still reads its window, and a bulk start gives every run one cutoff.
+Resume positions and favorites are still read in full. A lookback never removes
+or un-marks anything: items outside the window are left as they are. Because
+favorites are read in full, an item un-favorited in Silo but still a favorite in
+Jellyfin is favorited again by every run, as a full import already does;
+scheduled lookback runs make that more noticeable. If Jellyfin does not return
+plays newest first, the run reads the full played history instead and records a
+warning saying so. Only Jellyfin sources support it; an Emby or Plex source
+answers 422 `validation_failed`, and a bulk start on one queues nothing. A
+completed lookback run does not update the mapping's `last_imported_at`, which
+records the last completed full import. Run responses carry the cutoff as
+`played_since`, absent for a full import. The intended pattern is one full
+import per mapping, then recurring lookback runs with a window comfortably wider
+than the interval between them.
 
 Cancellation records intent. A queued run can become cancelled immediately; a running
 worker acknowledges cancellation at its next boundary. Pending cancellation returns

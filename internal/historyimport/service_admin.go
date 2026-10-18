@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netguard"
 )
@@ -82,8 +83,8 @@ func (s *Service) GetMapping(ctx context.Context, id int) (*UserMapping, error) 
 const BulkRunAccepted = "accepted"
 
 // CreateAdminRun persists dispatch intent before notifying the local runner.
-func (s *Service) CreateAdminRun(ctx context.Context, mappingID int) (*Run, error) {
-	run, err := s.repo.EnqueueAdminRun(ctx, mappingID)
+func (s *Service) CreateAdminRun(ctx context.Context, mappingID int, opts AdminRunOptions) (*Run, error) {
+	run, err := s.repo.EnqueueAdminRun(ctx, mappingID, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -94,18 +95,24 @@ func (s *Service) CreateAdminRun(ctx context.Context, mappingID int) (*Run, erro
 
 // BulkCreateAdminRuns reports every mapping in stable source order. The size
 // check precedes all admissions; active mappings are outcomes, not omissions.
-func (s *Service) BulkCreateAdminRuns(ctx context.Context, sourceID int) (*BulkRunResult, error) {
+// Every run in the batch gets the same options, so a lookback shares one cutoff.
+func (s *Service) BulkCreateAdminRuns(ctx context.Context, sourceID int, opts AdminRunOptions) (*BulkRunResult, error) {
 	ids, err := s.repo.bulkMappingIDs(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = s.repo.GetSourceByID(ctx, sourceID); err != nil {
+	source, err := s.repo.GetSourceByID(ctx, sourceID)
+	if err != nil {
 		return nil, err
+	}
+	// Refuse the whole batch up front rather than failing every mapping.
+	if opts.PlayedSince != nil && source.SourceType != SourceTypeJellyfin {
+		return nil, ErrLookbackUnsupported
 	}
 	result := &BulkRunResult{Runs: []*Run{}, Outcomes: []BulkRunOutcome{}}
 	for _, id := range ids {
 		outcome := BulkRunOutcome{MappingID: id}
-		run, err := s.CreateAdminRun(ctx, id)
+		run, err := s.CreateAdminRun(ctx, id, opts)
 		switch {
 		case err == nil:
 			outcome.Status = BulkRunAccepted
@@ -163,8 +170,10 @@ func (s *Service) CancelAdminRun(ctx context.Context, runID string) error {
 	return nil
 }
 
-// buildAdminProvider constructs the appropriate Provider for an admin-initiated run.
-func (s *Service) buildAdminProvider(source *Source, adminToken, externalUserID string) (Provider, error) {
+// buildAdminProvider constructs the appropriate Provider for an admin-initiated
+// run. playedSince is the run's lookback cutoff, which enqueue admits only for
+// Jellyfin.
+func (s *Service) buildAdminProvider(source *Source, adminToken, externalUserID string, playedSince *time.Time) (Provider, error) {
 	switch source.SourceType {
 	case SourceTypeEmby:
 		auth := embyLocalAuth{
@@ -179,7 +188,7 @@ func (s *Service) buildAdminProvider(source *Source, adminToken, externalUserID 
 			UserID:      externalUserID,
 			AccessToken: adminToken,
 		}
-		return NewJellyfinProvider(s.jellyfin, auth), nil
+		return NewJellyfinProvider(s.jellyfin, auth).WithPlayedSince(playedSince), nil
 	case SourceTypePlex:
 		return NewPlexAdminProvider(s.plex, source.BaseURL, adminToken, externalUserID), nil
 	default:
