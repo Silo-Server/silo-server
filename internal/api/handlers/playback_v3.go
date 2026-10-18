@@ -5284,9 +5284,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
 		if limitErr != nil {
-			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "connection_store_unavailable", message: "Connection observations are temporarily unavailable", retryable: true}
+			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: limitErr}
 		}
-
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
 		if qualityChange {
 			effectiveFile, start, audioIndex = h.lowerBufferedVersion(r, start, effectiveFile, audioIndex, plannerSettings)
