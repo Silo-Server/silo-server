@@ -1,7 +1,7 @@
 {
   "version": 1,
   "spec": "docs/design/2026-10-17-buffering-quality.md",
-  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it.",
+  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10.",
   "constants": {
     "STARTUP_GRACE_MS": 10000,
     "STALL_MIN_MS": 1000,
@@ -2730,6 +2730,66 @@
         "p1": "lowered",
         "p2": "lowered"
       }
+    },
+    {
+      "name": "step_down_uses_exact_integer_floor",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 22120,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        }
+      ],
+      "until": 140000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 15484,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ]
     }
   ],
   "connection_budget_cases": [

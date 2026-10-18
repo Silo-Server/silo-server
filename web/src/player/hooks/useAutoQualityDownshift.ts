@@ -12,10 +12,14 @@ interface Options {
   enabled: boolean;
   sessionId: string;
   plan: BufferingPlan;
+  planRevision: number;
   mode: BufferingMode;
   obscured: boolean;
   transportTrouble?: () => boolean;
-  onReplan: (request: BufferingReplan, onAdopt: (planId?: string) => void) => void;
+  onReplan: (
+    request: BufferingReplan,
+    onAdopt: (planId?: string, planRevision?: number) => void,
+  ) => void;
   onNotice: (key: "lowered" | "cant_lower") => void;
   onSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
 }
@@ -26,10 +30,10 @@ export function useAutoQualityDownshift(options: Options) {
     latest.current = options;
   });
   const controller = useRef<BufferingQualityController | null>(null);
-  const requestedPlan = useRef<string | undefined>(undefined);
-  const adoptedPlan = useRef<string | undefined>(undefined);
+  const requestedPlan = useRef<number | undefined>(undefined);
+  const adoptedPlan = useRef<number | undefined>(undefined);
   const [pill, setPill] = useState<{
-    planId: string;
+    planRevision: number;
     kind: "prompt" | "undo";
     remainingMs: number;
   } | null>(null);
@@ -37,7 +41,7 @@ export function useAutoQualityDownshift(options: Options) {
     const c = controller.current;
     setPill(
       c?.pill
-        ? { planId: latest.current.plan.plan_id, kind: c.pill, remainingMs: c.remainingMs }
+        ? { planRevision: latest.current.planRevision, kind: c.pill, remainingMs: c.remainingMs }
         : null,
     );
   };
@@ -48,8 +52,8 @@ export function useAutoQualityDownshift(options: Options) {
       (output) => {
         if (output.type === "replan") {
           requestedPlan.current = undefined;
-          latest.current.onReplan(output.body, (id) => {
-            if (controller.current === c) requestedPlan.current = id;
+          latest.current.onReplan(output.body, (_id, revision) => {
+            if (controller.current === c) requestedPlan.current = revision;
           });
         }
         if (output.type === "notice") latest.current.onNotice(output.key);
@@ -69,16 +73,17 @@ export function useAutoQualityDownshift(options: Options) {
     if (!c) return;
     c.mode = options.mode;
     c.setObscured(options.obscured, Date.now());
-    const isNewPlan = adoptedPlan.current !== options.plan.plan_id;
-    adoptedPlan.current = options.plan.plan_id;
+    const isNewPlan = adoptedPlan.current !== options.planRevision;
+    adoptedPlan.current = options.planRevision;
     c.event(
       {
         type: "plan_adopted",
-        plan: options.plan,
-        controllerInitiated: requestedPlan.current === options.plan.plan_id,
+        plan: { ...options.plan, adoption_id: String(options.planRevision) },
+        controllerInitiated: requestedPlan.current === options.planRevision,
       },
       Date.now(),
     );
+    if (isNewPlan) requestedPlan.current = undefined;
     const video = options.videoRef.current;
     if (
       isNewPlan &&
@@ -89,6 +94,7 @@ export function useAutoQualityDownshift(options: Options) {
       c.event({ type: "playing" }, Date.now());
   }, [
     options.plan,
+    options.planRevision,
     options.mode,
     options.obscured,
     options.enabled,
@@ -162,7 +168,9 @@ export function useAutoQualityDownshift(options: Options) {
   };
   return {
     pill:
-      options.enabled && !options.obscured && pill?.planId === options.plan.plan_id ? pill : null,
+      options.enabled && !options.obscured && pill?.planRevision === options.planRevision
+        ? pill
+        : null,
     answer,
   };
 }

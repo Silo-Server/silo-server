@@ -2,6 +2,8 @@
 export type BufferingMode = "never" | "ask" | "always";
 export interface BufferingPlan {
   plan_id: string;
+  /** Local adoption identity; server plan IDs can repeat across replans. */
+  adoption_id?: string;
   delivered_kbps: number;
   quality: string;
   available_qualities: { label: string; bitrate_kbps?: number; preserves_source?: boolean }[];
@@ -84,7 +86,7 @@ export class BufferingQualityController {
     this.emit({ type: pill === "prompt" ? "prompt_shown" : "undo_shown" }, now);
   }
   private summary() {
-    return this.plan && this.summaries.get(this.plan.plan_id);
+    return this.plan && this.summaries.get(this.plan.adoption_id ?? this.plan.plan_id);
   }
   private action(value: string) {
     const s = this.summary();
@@ -130,14 +132,19 @@ export class BufferingQualityController {
         this.setObscured(false, now);
         break;
       case "plan_adopted": {
-        if (!event.plan || event.plan.plan_id === this.plan?.plan_id) return;
+        if (
+          !event.plan ||
+          (event.plan.adoption_id ?? event.plan.plan_id) ===
+            (this.plan?.adoption_id ?? this.plan?.plan_id)
+        )
+          return;
         const previousQuality = this.plan?.quality;
         this.flush(now);
         const pending = event.controllerInitiated === false ? undefined : this.pending;
         this.pending = undefined;
         this.plan = event.plan;
         if (previousQuality !== this.plan.quality && !pending) this.answered = false;
-        this.summaries.set(this.plan.plan_id, {
+        this.summaries.set(this.plan.adoption_id ?? this.plan.plan_id, {
           played_ms: 0,
           stall_count: 0,
           stall_total_ms: 0,
@@ -333,7 +340,7 @@ export class BufferingQualityController {
       this.action("ignored");
       return;
     }
-    const estimate = Math.floor(this.plan.delivered_kbps * 0.7);
+    const estimate = Math.floor((this.plan.delivered_kbps * 7) / 10);
     if (
       !this.lowerRung() ||
       (this.plan.quality === "auto" && (!Number.isFinite(estimate) || estimate < 100))
@@ -351,7 +358,7 @@ export class BufferingQualityController {
   private lower(now: number, undo: boolean) {
     if (!this.plan) return;
     const rung = this.lowerRung();
-    const estimate = Math.floor(this.plan.delivered_kbps * 0.7);
+    const estimate = Math.floor((this.plan.delivered_kbps * 7) / 10);
     if (!rung || (this.plan.quality === "auto" && (!Number.isFinite(estimate) || estimate < 100))) {
       this.noticeCant(now);
       return;

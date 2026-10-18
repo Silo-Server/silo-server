@@ -220,7 +220,7 @@ interface VideoPlayerProps {
     label: string,
     currentPosition: number,
     buffering?: BufferingReplan,
-    onAdopt?: (planId?: string) => void,
+    onAdopt?: (planId?: string, planRevision?: number) => void,
   ) => void;
   /** `track_change` replan for a subtitle the server has to render. */
   onSubtitleTrackChange?: (combinedIndex: number | null, currentPosition: number) => void;
@@ -4143,6 +4143,7 @@ export function VideoPlayer({
   // lower-quality offer.
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
+    planRevision,
     enabled: !watchTogetherRoomActive,
     sessionId: bufferingTitleId ?? sessionId,
     mode: bufferingMode,

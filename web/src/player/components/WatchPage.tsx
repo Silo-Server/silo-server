@@ -715,7 +715,11 @@ function WatchPagePlayer({
       bufferingMode={bufferingMode}
       bufferingTitleId={contentId}
       onBufferingSummary={(plan, summary) =>
-        session.reportEvent("plan_summary", { planId: plan.plan_id, diagnostics: { ...summary } })
+        session.reportEvent("plan_summary", {
+          planId: plan.plan_id,
+          adoptionId: plan.adoption_id,
+          diagnostics: { ...summary },
+        })
       }
       credits={activeMarkers.credits}
       recap={activeMarkers.recap}

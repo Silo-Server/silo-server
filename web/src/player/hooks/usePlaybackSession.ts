@@ -191,7 +191,7 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     label: string,
     currentPosition: number,
     buffering?: BufferingReplan,
-    onAdopt?: (planId?: string) => void,
+    onAdopt?: (planId?: string, planRevision?: number) => void,
   ) => void;
   /** `failure_recovery` replan after the client could not play the plan. */
   recoverFromFailure: (failure: FailureV3, currentPosition: number) => void;
@@ -233,6 +233,7 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
       failureClassification?: string;
       fallbackReason?: string;
       planId?: string;
+      adoptionId?: string;
       diagnostics?: Record<string, string | number | boolean | undefined | null>;
     },
   ) => void;
@@ -457,6 +458,7 @@ export function usePlaybackSession(
         playbackAttemptId: string;
         sessionId: string | null;
         planId: string;
+        adoptionId: string;
         planAttemptId: string;
         planAttemptKey: string;
       }
@@ -633,6 +635,7 @@ export function usePlaybackSession(
         failureClassification?: string;
         fallbackReason?: string;
         planId?: string;
+        adoptionId?: string;
         diagnostics?: Record<string, string | number | boolean | undefined | null>;
       },
     ) => {
@@ -645,8 +648,12 @@ export function usePlaybackSession(
       if (!attemptId) return;
       const plan = planRef.current;
       const summaryIdentity =
-        event === "plan_summary" && extra?.planId
-          ? summaryIdentitiesRef.current.get(extra.planId)
+        event === "plan_summary"
+          ? extra?.adoptionId
+            ? summaryIdentitiesRef.current.get(extra.adoptionId)
+            : [...summaryIdentitiesRef.current.values()].find(
+                (identity) => identity.planId === extra?.planId,
+              )
           : undefined;
       const input = {
         event,
@@ -656,7 +663,7 @@ export function usePlaybackSession(
         ...summaryIdentity,
       };
       const sessionId = summaryIdentity?.sessionId ?? sessionIdRef.current;
-      if (summaryIdentity) summaryIdentitiesRef.current.delete(summaryIdentity.planId);
+      if (summaryIdentity) summaryIdentitiesRef.current.delete(summaryIdentity.adoptionId);
       if (sessionId && hasSequencedProgress(sessionId)) {
         void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input));
       }
@@ -709,7 +716,9 @@ export function usePlaybackSession(
       planRef.current = plan;
       sessionEndedRef.current = false;
       sessionIdRef.current = sessionId ?? null;
-      summaryIdentitiesRef.current.set(plan.plan_id, {
+      planRevisionRef.current += 1;
+      summaryIdentitiesRef.current.set(String(planRevisionRef.current), {
+        adoptionId: String(planRevisionRef.current),
         playbackAttemptId: playbackAttemptIdRef.current ?? "",
         sessionId: sessionId ?? null,
         planId: plan.plan_id,
@@ -720,7 +729,6 @@ export function usePlaybackSession(
         const oldest = summaryIdentitiesRef.current.keys().next().value;
         if (oldest) summaryIdentitiesRef.current.delete(oldest);
       }
-      planRevisionRef.current += 1;
       hasAdoptedPlanRef.current = true;
       if (
         Number.isFinite(plan.timeline.source_start_seconds) &&
@@ -1505,7 +1513,7 @@ export function usePlaybackSession(
       label: string,
       currentPosition: number,
       buffering?: BufferingReplan,
-      onAdopt?: (planId?: string) => void,
+      onAdopt?: (planId?: string, planRevision?: number) => void,
     ) => {
       const normalized = normalizeQualityPreferenceV3(label);
       const previousPreference = qualityRef.current;
@@ -1522,7 +1530,10 @@ export function usePlaybackSession(
             }
           : {}),
       }).then((adopted) => {
-        onAdopt?.(adopted ? planRef.current?.plan_id : undefined);
+        onAdopt?.(
+          adopted ? planRef.current?.plan_id : undefined,
+          adopted ? planRevisionRef.current : undefined,
+        );
         if (adopted) return;
         if (qualityRef.current !== normalized) return;
         qualityRef.current = previousPreference;

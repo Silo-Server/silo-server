@@ -92,9 +92,13 @@ measured and where it came from, and never do Auto's arithmetic.
 
 ## Terms
 
-- **Plan**: the playback plan the player is playing. A replan that returns a
-  different plan starts a new one. An in-place update, such as a subtitle that
-  became ready, does not.
+- **Plan**: one adoption of a playback plan. Every adopted replan starts a new
+  plan, even when its server `plan_id` repeats: that ID is deterministic from
+  the attempt, files, delivery and recipe, not unique per adoption. Clients use
+  a local adoption counter/identity for controller state and request correlation,
+  and keep the server `plan_id` for `plan_summary` route events. The vectors'
+  `plan_id` labels stand for adoption identities. An in-place update, such as a
+  subtitle that became ready, does not start a new adoption.
 - **Delivered bitrate**: `effective_recipe.bitrate_kbps`, else
   `source.bitrate_kbps`.
 - **Stall**: the player has run out of data while it should be playing. These
@@ -118,8 +122,10 @@ measured and where it came from, and never do Auto's arithmetic.
   the bitrate of the active rung. When the active quality is Auto, the
   comparison is against the delivered bitrate. This is the web's
   `lowerQualityOption`.
-- **Step-down estimate**: `floor(0.7 × delivered bitrate)`. It counts only when
-  it is at least 100 kbps. Auto plans for 80% of an estimate, so the next stream
+- **Step-down estimate**: `floor(delivered bitrate × 7 / 10)`. It counts only when
+  it is at least 100 kbps. Compute the integer floor exactly (for example,
+  22120 gives 15484); multiplying by floating-point `0.7` can round one kbps
+  too low. Auto plans for 80% of an estimate, so the next stream
   targets about 56% of the one that stalled. If Auto has no known delivered
   bitrate, or the estimate is below 100 kbps, treat it as no lower rung: show
   `cant_lower` once per title, report `cant_lower`, and send no prompt or replan.

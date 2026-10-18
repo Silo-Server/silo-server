@@ -23,6 +23,7 @@ function setup() {
     enabled: true,
     sessionId: "title",
     plan,
+    planRevision: 1,
     mode: "always" as const,
     obscured: false,
     transportTrouble: vi.fn(() => false),
@@ -48,8 +49,12 @@ it("correlates a controller replan before showing its undo", () => {
   expect(h.options.onReplan).toHaveBeenCalledTimes(1);
   const [request, adopted] = h.options.onReplan.mock.calls[0]!;
   expect(request.bandwidth_estimate_kbps).toBe(44100);
-  act(() => adopted("p2"));
-  h.rerender({ ...h.options, plan: { ...plan, plan_id: "p2", delivered_kbps: 31600 } });
+  act(() => adopted("p2", 2));
+  h.rerender({
+    ...h.options,
+    planRevision: 2,
+    plan: { ...plan, plan_id: "p2", delivered_kbps: 31600 },
+  });
   h.advance(100);
   expect(h.result.current.pill?.kind).toBe("undo");
 });
@@ -58,7 +63,11 @@ it("does not claim an unrelated plan adopted while a lowering is pending", () =>
   const h = setup();
   h.send("waiting");
   h.advance(6_000);
-  h.rerender({ ...h.options, plan: { ...plan, plan_id: "unrelated", delivered_kbps: 10000 } });
+  h.rerender({
+    ...h.options,
+    planRevision: 2,
+    plan: { ...plan, plan_id: "unrelated", delivered_kbps: 10000 },
+  });
   h.advance(100);
   expect(h.result.current.pill).toBeNull();
   expect(h.options.onNotice).not.toHaveBeenCalled();
@@ -82,8 +91,12 @@ it("freezes the pill timer while paused and reports the retired plan once", () =
   const h = setup();
   h.send("waiting");
   h.advance(6_000);
-  act(() => h.options.onReplan.mock.calls[0]![1]("p2"));
-  h.rerender({ ...h.options, plan: { ...plan, plan_id: "p2", delivered_kbps: 31600 } });
+  act(() => h.options.onReplan.mock.calls[0]![1]("p2", 2));
+  h.rerender({
+    ...h.options,
+    planRevision: 2,
+    plan: { ...plan, plan_id: "p2", delivered_kbps: 31600 },
+  });
   h.send("playing");
   h.advance(1_000);
   h.send("pause");
@@ -100,4 +113,40 @@ it("freezes the pill timer while paused and reports the retired plan once", () =
   });
   h.unmount();
   expect(h.options.onSummary).toHaveBeenCalledTimes(2);
+});
+
+it("settles a no-lower adoption even when its server plan ID repeats", () => {
+  const h = setup();
+  h.send("waiting");
+  h.advance(6000);
+  act(() => h.options.onReplan.mock.calls[0]![1]("p1", 2));
+  h.rerender({ ...h.options, planRevision: 2, plan: { ...plan } });
+  expect(h.options.onNotice).toHaveBeenCalledExactlyOnceWith("cant_lower");
+  h.send("playing");
+  h.advance(10000);
+  h.send("waiting");
+  h.advance(70000);
+  expect(h.options.onReplan).toHaveBeenCalledTimes(1);
+  h.unmount();
+  expect(h.options.onSummary).toHaveBeenCalledTimes(2);
+  expect(h.options.onSummary.mock.calls.map(([p]) => p.plan_id)).toEqual(["p1", "p1"]);
+  expect(h.options.onSummary.mock.calls[1]![1].buffering_action).toBe("cant_lower");
+});
+it("does not treat an in-place update as a new adoption", () => {
+  const h = setup();
+  h.send("waiting");
+  h.advance(6000);
+  act(() => h.options.onReplan.mock.calls[0]![1]("p2", 2));
+  const next = {
+    ...h.options,
+    planRevision: 2,
+    plan: { ...plan, plan_id: "p2", delivered_kbps: 31600 },
+  };
+  h.rerender(next);
+  h.advance(1000);
+  const remaining = h.result.current.pill?.remainingMs;
+  h.rerender({ ...next, plan: { ...next.plan } });
+  h.advance(100);
+  expect(h.result.current.pill?.remainingMs).toBe(remaining! - 100);
+  expect(h.options.onSummary).toHaveBeenCalledTimes(1);
 });

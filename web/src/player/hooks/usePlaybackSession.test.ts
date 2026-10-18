@@ -3065,3 +3065,55 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     unmount();
   });
 });
+
+it("keeps summary identities separate when adopted server plan IDs repeat", async () => {
+  const plan = fixturePlanV3({ session_id: "session-1" });
+  const summaries: Record<string, unknown>[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start") || url.endsWith("/replan")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "playback_plan_summary_v1"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: plan,
+        });
+      }
+      if (url.endsWith("/playback/route-events")) {
+        const body = JSON.parse(String(init?.body));
+        if (body.event === "plan_summary") summaries.push(body);
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  const { result, unmount } = renderHook(
+    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  const adopted = vi.fn();
+  act(() => result.current.changeQuality("auto", 120, undefined, adopted));
+  await waitFor(() => expect(adopted).toHaveBeenCalledWith(plan.plan_id, 2));
+  act(() => {
+    result.current.reportEvent("plan_summary", {
+      planId: plan.plan_id,
+      adoptionId: "1",
+      diagnostics: { buffering_action: "lowered" },
+    });
+    result.current.reportEvent("plan_summary", {
+      planId: plan.plan_id,
+      adoptionId: "2",
+      diagnostics: { buffering_action: "cant_lower" },
+    });
+  });
+  await waitFor(() => expect(summaries).toHaveLength(2));
+  expect(summaries.map((s) => s.plan_id)).toEqual([plan.plan_id, plan.plan_id]);
+  expect(summaries[0].plan_attempt_id).not.toBe(summaries[1].plan_attempt_id);
+  expect(summaries[0]).not.toHaveProperty("adoptionId");
+  unmount();
+});
