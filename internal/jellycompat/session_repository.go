@@ -230,6 +230,26 @@ func (r *SessionRepository) DeleteByToken(ctx context.Context, token string) err
 	return nil
 }
 
+// PseudoUserOwner returns the account and profile of a live compat session
+// signed in as the pseudo-user id, or ErrSessionNotFound when none is. Every
+// session of one pseudo-user names the same owner, since the id is derived
+// from it.
+func (r *SessionRepository) PseudoUserOwner(ctx context.Context, id uuid.UUID, now time.Time) (pseudoUserOwner, error) {
+	var owner pseudoUserOwner
+	err := r.pool.QueryRow(ctx, `
+		SELECT streamapp_user_id, profile_id
+		FROM jellycompat_sessions
+		WHERE pseudo_user_id = $1 AND expires_at > $2
+		LIMIT 1`, id, now).Scan(&owner.UserID, &owner.ProfileID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return owner, ErrSessionNotFound
+	}
+	if err != nil {
+		return owner, fmt.Errorf("find compat session owner: %w", err)
+	}
+	return owner, nil
+}
+
 // DeleteExpired removes expired compat sessions.
 func (r *SessionRepository) DeleteExpired(ctx context.Context, now time.Time) (int, error) {
 	tag, err := r.pool.Exec(ctx, `DELETE FROM jellycompat_sessions WHERE expires_at <= $1`, now)

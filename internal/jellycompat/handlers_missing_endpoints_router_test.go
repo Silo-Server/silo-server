@@ -54,15 +54,13 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 		}
 	}
 
-	// (2) /UserImage is anonymous-by-design (PR #158 palette): serves with no auth.
+	// (2) /UserImage is anonymous by design: with no auth it answers, and a
+	// user without an uploaded avatar is 404 as in Jellyfin, never 401.
 	{
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/UserImage?userId=router-test", nil))
-		if rec.Code != http.StatusOK {
-			t.Errorf("GET /UserImage = %d, want 200", rec.Code)
-		}
-		if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
-			t.Errorf("GET /UserImage Content-Type = %q, want image/png", ct)
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/UserImage?userId="+compatUserID(PseudoUserID(1, "p1")), nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET /UserImage = %d, want 404", rec.Code)
 		}
 	}
 

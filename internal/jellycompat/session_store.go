@@ -135,6 +135,25 @@ func (s *SessionStore) PutTx(ctx context.Context, tx pgx.Tx, session Session) (S
 	return session, nil
 }
 
+// PseudoUserOwner returns the account and profile a live compat session
+// signed in as the pseudo-user id names, or ErrSessionNotFound. A persistent
+// store asks the database, which sees every replica's sessions; a memory-only
+// store searches its own.
+func (s *SessionStore) PseudoUserOwner(ctx context.Context, id uuid.UUID) (pseudoUserOwner, error) {
+	if lookup, ok := s.repo.(pseudoUserOwnerLookup); ok {
+		return lookup.PseudoUserOwner(ctx, id, s.now())
+	}
+	now := s.now()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, session := range s.sessions {
+		if session.PseudoUserID == id && (session.ExpiresAt.IsZero() || session.ExpiresAt.After(now)) {
+			return pseudoUserOwner{UserID: session.StreamAppUserID, ProfileID: session.ProfileID}, nil
+		}
+	}
+	return pseudoUserOwner{}, ErrSessionNotFound
+}
+
 // txSessionPersistence is a sessionPersistence that can write inside a
 // caller's transaction (SessionRepository).
 type txSessionPersistence interface {

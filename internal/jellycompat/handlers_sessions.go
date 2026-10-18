@@ -95,7 +95,7 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 		if play.UpstreamSessionID == "" || q.Get("deviceId") != "" && q.Get("deviceId") != play.ClientDeviceID {
 			continue
 		}
-		dto := sessionInfoDTO{ID: play.ID, UserID: session.PseudoUserID.String(), UserName: session.Username, DeviceID: play.ClientDeviceID, LastActivityDate: play.UpdatedAt.UTC().Format(time.RFC3339Nano), IsActive: true, PlayableMediaTypes: []string{}, SupportedCommands: []string{}}
+		dto := sessionInfoDTO{ID: play.ID, UserID: compatUserID(session.PseudoUserID), UserName: session.Username, DeviceID: play.ClientDeviceID, LastActivityDate: play.UpdatedAt.UTC().Format(time.RFC3339Nano), IsActive: true, PlayableMediaTypes: []string{}, SupportedCommands: []string{}}
 		activity := play.UpdatedAt
 		if h.sessionMgr != nil {
 			if native, err := h.sessionMgr.GetSession(play.UpstreamSessionID); err == nil && native != nil && native.UserID == session.StreamAppUserID && native.ProfileID == session.ProfileID {

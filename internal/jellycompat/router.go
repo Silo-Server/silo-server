@@ -217,6 +217,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
 	imagesHandler.artworkStore = deps.ArtworkStore
+	userAvatars := newCompatUserAvatars(deps.SessionStore, deps.UserStoreProvider, deps.AvatarStore)
+	imagesHandler.userAvatars = userAvatars
+	authHandler.avatars = userAvatars
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -243,7 +246,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Get(compatUserImageRoute, imagesHandler.HandleUserImage)
 	r.Method(http.MethodHead, compatUserImageRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	// Modern Jellyfin clients fetch the current user's avatar via /UserImage?userId=
-	// (the path form above is [Obsolete] upstream). Same anonymous palette handler.
+	// (the path form above is [Obsolete] upstream). Same anonymous handler.
 	r.Get(compatUserImageQueryRoute, imagesHandler.HandleUserImage)
 	r.Method(http.MethodHead, compatUserImageQueryRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
