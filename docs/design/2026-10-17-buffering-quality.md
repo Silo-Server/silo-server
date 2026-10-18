@@ -217,6 +217,9 @@ Presentation rules:
   resume that remaining timer, only if the plan has not changed. A plan change
   or a manual quality change discards the waiting or hidden pill. An automatic
   lowering does not wait; only its undo pill does.
+- A player that cannot show its pills, because it is minimized or in picture
+  in picture, hides them the same way: a pill waits with its remaining timer
+  and shows when the full player returns.
 - Select and Back are handled at the player root, as for intro skip.
 - The pills use the platform's notice position. A caption and its action, or
   two actions, are separate elements, never one phrase.
@@ -485,8 +488,9 @@ events are:
   `replan_failed`.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
 - `pill_obscured` and `pill_unobscured`: a higher-priority actionable pill
-  appears, or the last one disappears. A pill that comes back emits its
-  `prompt_shown` or `undo_shown` output again.
+  appears, or the last one disappears. The player leaving and regaining the
+  full view (minimized, picture in picture) sends the same events. A pill that
+  comes back emits its `prompt_shown` or `undo_shown` output again.
 - `client_replan`, with an `operation` of `track_change`, `seek_reanchor`,
   `seek_failure_recovery`, `failure_recovery` or `output_change`: the client
   sends a replan for its own reasons. It outputs a `replan` whose body holds
