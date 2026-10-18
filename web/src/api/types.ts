@@ -3342,7 +3342,7 @@ export interface AdminDeviceSummary {
 }
 
 export interface AdminDeviceDetail {
-  connections?: import("./v2/request").V2Result<"GET /api/v2/admin/devices/{user_id}/{device_id}">["connections"];
+  connections?: V2Components["schemas"]["AdminDeviceConnection"][];
   user_id: number;
   username: string;
   email: string;

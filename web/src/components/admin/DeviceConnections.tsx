@@ -1,11 +1,56 @@
 import { useState } from "react";
 import { v2 } from "@/api/v2/request";
 import type { AdminDeviceDetail } from "@/api/types";
+import { formatRelative } from "@/components/admin/deviceOverrides";
 import { Button } from "@/components/ui/button";
+import { formatBitrateKbps } from "@/lib/bitrateOptions";
+import { formatDate } from "@/lib/datetime";
 import { toast } from "sonner";
 
-const mbps = (kbps: number) =>
-  `${(kbps / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} Mbps`;
+type DeviceConnection = NonNullable<AdminDeviceDetail["connections"]>[number];
+
+const TRANSPORT_LABELS: Record<string, string> = {
+  wifi: "Wi-Fi",
+  ethernet: "Ethernet",
+  cellular: "Cellular",
+  other: "Other network",
+};
+
+/** The last action on the latest plan, as `plan_summary` reports it. */
+const BUFFERING_ACTION_LABELS: Record<string, string> = {
+  none: "no buffering action",
+  ignored: "buffering seen, lowering off",
+  lowered: "lowered automatically",
+  restored: "quality restored",
+  accepted: "lowered when asked",
+  kept: "quality kept when asked",
+  timed_out: "prompt not answered",
+  cant_lower: "could not lower",
+};
+
+function connectionLabel(connection: string) {
+  if (connection === "local") return "Local network";
+  if (connection === "remote") return "Remote connection";
+  if (connection.startsWith("provider:")) return `Network access: ${connection.slice(9)}`;
+  return connection;
+}
+
+function planSummaryText(summary: NonNullable<DeviceConnection["plan_summary"]>) {
+  const stalls = Number(summary.diagnostics.stall_count ?? 0);
+  const seconds = Math.round(Number(summary.diagnostics.stall_total_ms ?? 0) / 1000);
+  const action = summary.diagnostics.buffering_action ?? "none";
+  return [
+    `${stalls} ${stalls === 1 ? "stall" : "stalls"}`,
+    `${seconds} ${seconds === 1 ? "second" : "seconds"} buffering`,
+    BUFFERING_ACTION_LABELS[action] ?? action,
+    formatRelative(summary.reported_at),
+  ].join(" · ");
+}
+
+/**
+ * Each connection this device played on: its latest speed test, the limit
+ * the server learned after buffering, and how the latest plan played.
+ */
 export function DeviceConnections({
   device,
   refresh,
@@ -17,29 +62,33 @@ export function DeviceConnections({
   if (!device.connections?.length) return null;
   return (
     <section
-      className="max-h-80 shrink-0 space-y-3 overflow-y-auto border-b p-4"
-      aria-label="Connections"
+      aria-labelledby="device-connections-title"
+      className="border-border/60 max-h-80 shrink-0 space-y-3 overflow-y-auto border-b px-5 py-4 sm:px-6"
     >
-      <h3 className="text-sm font-medium">Connections</h3>
+      <h3 id="device-connections-title" className="text-foreground text-sm font-medium">
+        Connections
+      </h3>
       {device.connections.map((connection) => (
-        <div key={connection.id} className="space-y-1 rounded-md border p-3 text-sm">
-          <div className="font-medium">
-            {connection.connection === "local"
-              ? "Local network"
-              : connection.connection === "remote"
-                ? "Remote connection"
-                : connection.connection}
+        <div
+          key={connection.id}
+          className="border-border/60 space-y-1 rounded-md border px-3 py-2.5 text-[13px]"
+        >
+          <div className="text-foreground font-medium">
+            {connectionLabel(connection.connection)}
           </div>
           {connection.probe && (
             <p className="text-muted-foreground">
-              {mbps(connection.probe.kbps)} ·{" "}
-              {connection.probe.transport === "wifi" ? "Wi-Fi" : connection.probe.transport} ·{" "}
-              {new Date(connection.probe.measured_at).toLocaleString()}
+              {formatBitrateKbps(connection.probe.kbps)} on{" "}
+              {TRANSPORT_LABELS[connection.probe.transport] ?? connection.probe.transport} ·
+              measured {formatRelative(connection.probe.measured_at)}
             </p>
           )}
           {connection.learned_limit && (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>Limited to {mbps(connection.learned_limit.kbps)} after buffering</span>
+              <span>
+                Limited to {formatBitrateKbps(connection.learned_limit.kbps)} after buffering ·
+                until {formatDate(connection.learned_limit.expires_at, "medium")}
+              </span>
               <Button
                 size="sm"
                 variant="outline"
@@ -67,10 +116,7 @@ export function DeviceConnections({
           )}
           {connection.plan_summary && (
             <p className="text-muted-foreground">
-              Latest playback: {connection.plan_summary.diagnostics.stall_count ?? "0"} stalls ·{" "}
-              {Math.round(Number(connection.plan_summary.diagnostics.stall_total_ms ?? 0) / 1000)}{" "}
-              seconds buffering ·{" "}
-              {connection.plan_summary.diagnostics.buffering_action?.replaceAll("_", " ") ?? "none"}
+              Latest playback: {planSummaryText(connection.plan_summary)}
             </p>
           )}
         </div>

@@ -35,6 +35,7 @@ Settled on 2026-10-17:
 | How long a learned limit lasts | Longer than the web's 30 minutes: 7 days from the last observation (proposed below). |
 | Margin on a probe estimate | Keep the server's 80%. |
 | Report probe results to the server? | Yes. Admins can see per-device connection speeds. |
+| What do later replans send after a lowering? | The lowering's step-down estimate, without a source, until **Restore quality**, a quality change or a new start (see *Later replans after a lowering*). |
 
 ## Motivation
 
@@ -220,6 +221,32 @@ Presentation rules:
 - The pills use the platform's notice position. A caption and its action, or
   two actions, are separate elements, never one phrase.
 
+### Later replans after a lowering
+
+A lowering holds only while the client's own replans keep asking for it. An
+Auto replan without an estimate returns to the source unless a learned limit
+applies. None applies on a server without `buffering_quality_v1`, or on a
+request without a device ID or with `learned_limit: "ignore"`. The source then
+stalls and the controller lowers again, in a loop.
+
+So the client keeps the step-down estimate of its latest Auto lowering in
+memory, from the moment it sends that replan until the playback attempt ends:
+
+- Every later Auto replan the client sends for its own reasons, such as a track
+  change, seek reanchor, seek failure recovery, failure recovery or output
+  change, carries it as `bandwidth_estimate_kbps` without
+  `bandwidth_estimate_source`. It repeats an earlier observation; it is not a
+  new one.
+- The next lowering replaces it.
+- **Restore quality**, a quality change the controller did not send (the
+  viewer's pick, or a switch between Wi-Fi and cellular quality), and a new
+  start each discard it. The **Restore quality** replan sends no estimate, and
+  `learned_limit: "clear"` when the server advertises `buffering_quality_v1`.
+- A retry of the lowering request itself resends its original body, source
+  included, so the server can replay its decision.
+- The kept estimate is never written to storage, and it does not replace the
+  server's learned limit.
+
 ### The setting
 
 `playback.buffering_quality_mode` joins the settings manifest in phase 1:
@@ -254,7 +281,9 @@ A limit is recorded when a start or replan carries
   planning under the old limit.
 - **Lifetime**: `LEARNED_LIMIT_TTL = 7 days` from the most recent observation. A
   changed home IP address simply starts a new key. That fails toward the source,
-  and a new lowering follows.
+  and a new lowering follows. Only a request that carries `observed_rebuffer` is
+  an observation. A replan that repeats the kept estimate without a source, and
+  any seek replan, records nothing and does not extend the 7 days.
 - **Use**: Auto on a matching key plans with `min(request estimate, limit)`, or
   with the limit alone when the request has no estimate. Fixed rungs ignore it,
   as they ignore estimates today. The admin bitrate cap and
@@ -458,6 +487,17 @@ events are:
 - `pill_obscured` and `pill_unobscured`: a higher-priority actionable pill
   appears, or the last one disappears. A pill that comes back emits its
   `prompt_shown` or `undo_shown` output again.
+- `client_replan`, with an `operation` of `track_change`, `seek_reanchor`,
+  `seek_failure_recovery`, `failure_recovery` or `output_change`: the client
+  sends a replan for its own reasons. It outputs a `replan` whose body holds
+  that operation, the adopted plan's quality as `quality_preference` and, on
+  Auto with a kept estimate, `bandwidth_estimate_kbps`. The client's other
+  request fields are outside the vectors.
+- `quality_changed`: a quality change the controller did not send, such as the
+  viewer's pick. It has no fields; the new quality arrives with the next
+  `plan_adopted`.
+- `new_attempt`: the client starts a new playback attempt. It has no fields,
+  and the cases rely only on its discarding the kept estimate.
 
 Outputs are `replan` with its body, `prompt_shown`, `undo_shown`, and `notice`
 with its copy key. Some cases also give the `buffering_action` each plan's
@@ -514,6 +554,11 @@ The remaining cases pin the rules added since:
 | `obscured_prompt_discarded_on_plan_change` | A plan change discards a hidden prompt. |
 | `visible_undo_retains_stall_history` | Stalls while the undo pill shows still count once it hides. |
 | `step_down_uses_exact_integer_floor` | 22120 steps down to 15484. |
+| `kept_estimate_on_later_replans` | After a lowering, a track change, seek reanchor and failure recovery carry 44100 without a source, including after an adoption the controller did not request. |
+| `kept_estimate_replaced_by_next_lowering` | A second lowering replaces the kept estimate: an output change then carries 22120. |
+| `restore_discards_kept_estimate` | After **Restore quality**, a track change carries no estimate. |
+| `quality_change_discards_kept_estimate` | After the viewer picks a rung and then Auto again, a track change carries no estimate. |
+| `new_attempt_discards_kept_estimate` | After a new start, a track change carries no estimate. |
 
 ## Phases
 
