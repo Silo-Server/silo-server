@@ -76,21 +76,25 @@ describe("typed setting mutations", () => {
     },
   );
 
-  it("refreshes Home when Show new episodes first changes", async () => {
+  // The server adds the Next Up row and orders Continue Watching on Home and
+  // on library pages alike, so both sets of rows refetch.
+  it.each([
+    [SETTING_KEYS.UI_NEXT_UP_MODE, "separate"],
+    [SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST, true],
+  ])("refreshes Home and library rows when %s changes", async (key, value) => {
     v2Mock.mockResolvedValueOnce({});
     const { queryClient, wrapper } = createHarness();
     const homeKey = sectionKeys.homeItems("continue-watching");
+    const libraryLayout = sectionKeys.libraryLayout(7);
     queryClient.setQueryData(homeKey, { section: { items: [] } });
+    queryClient.setQueryData(libraryLayout, { sections: [] });
     queryClient.setQueryData(mediaSurfaceKeys.refreshSignal(), 0);
     const { result } = renderHook(() => useSetSettingValue(), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync({
-        key: SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
-        value: true,
-        identity: { scope: "profile" },
-      });
+      await result.current.mutateAsync({ key, value, identity: { scope: "profile" } });
     });
     expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(libraryLayout)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
   });
 

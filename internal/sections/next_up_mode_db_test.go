@@ -128,7 +128,7 @@ func TestNextUpModeStatementBudgetPostgres(t *testing.T) {
 			}
 
 			tracer.take()
-			if got := NextUpMode(callCtx, store, tt.profileID); got != tt.want {
+			if got := NextUpMode(callCtx, store, nil, tt.profileID); got != tt.want {
 				t.Fatalf("NextUpMode = %q, want %q", got, tt.want)
 			}
 			issued := tracer.take()

@@ -136,7 +136,7 @@ func TestResolveViewerPreferencesIncludesMetadataLanguageOverrides(t *testing.T)
 		},
 	}}
 
-	preferences := ResolveViewerPreferences(context.Background(), store, "profile-1")
+	preferences := ResolveViewerPreferences(context.Background(), store, nil, "profile-1")
 	if preferences.PreferredMetadataLanguage != "en" {
 		t.Fatalf("fallback language = %q, want en", preferences.PreferredMetadataLanguage)
 	}

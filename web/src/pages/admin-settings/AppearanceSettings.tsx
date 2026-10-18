@@ -38,6 +38,7 @@ import {
   type OverlayPosition,
   type PresetId,
 } from "@/lib/overlays";
+import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
 import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
@@ -67,7 +68,7 @@ const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
  * admin_default. Unset means the contract default; viewers who chose their own
  * keep it.
  */
-const TITLE_ART_DEFAULT_KEY = `defaults.${SETTING_KEYS.UI_TITLE_ART}`;
+const TITLE_ART_DEFAULT_KEY = adminDefaultServerKey(SETTING_KEYS.UI_TITLE_ART);
 const TITLE_ART = SETTING_DEFINITIONS[SETTING_KEYS.UI_TITLE_ART];
 
 /**
