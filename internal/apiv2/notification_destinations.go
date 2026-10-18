@@ -19,16 +19,16 @@ const (
 type NotificationDestinationService interface {
 	UpdateNotificationServerChannel(context.Context, string, notifications.ServerChannelInput) (*notifications.ServerChannel, error)
 	RotateNotificationServerChannelSecret(context.Context, string) (string, error)
-	UpdateNotificationWebhook(context.Context, string, string, notifications.WebhookInput, func(int64) error) (*notifications.Webhook, error)
-	RotateNotificationWebhookSecret(context.Context, string, string) (string, error)
+	UpdateNotificationWebhook(context.Context, int, string, string, notifications.WebhookInput, func(int64) error) (*notifications.Webhook, error)
+	RotateNotificationWebhookSecret(context.Context, int, string, string) (string, error)
 	DeleteNotificationServerChannel(context.Context, string) error
-	DeleteNotificationWebhook(context.Context, string, string, func(int64) error) error
+	DeleteNotificationWebhook(context.Context, int, string, string, func(int64) error) error
 	SubscribeNotificationWebPush(context.Context, int, string, string, string, string, string) (*notifications.WebPushSubscription, error)
 	UnsubscribeNotificationWebPush(context.Context, int, string, string) error
 	DeleteNotificationWebPushSubscription(context.Context, int, string, string) error
 
-	ListNotificationWebPushPage(context.Context, string, int, *notifications.Cursor) ([]notifications.WebPushSubscription, error)
-	ListNotificationWebhookPage(context.Context, string, int, *notifications.Cursor) ([]notifications.Webhook, error)
+	ListNotificationWebPushPage(context.Context, int, string, int, *notifications.Cursor) ([]notifications.WebPushSubscription, error)
+	ListNotificationWebhookPage(context.Context, int, string, int, *notifications.Cursor) ([]notifications.Webhook, error)
 	ListNotificationServerChannelPage(context.Context, int, *notifications.Cursor) ([]notifications.ServerChannel, error)
 }
 
@@ -230,7 +230,11 @@ func registerNotificationDestinations(reg *Registry) {
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
-		value, err := reg.deps.NotificationDestinations.RotateNotificationWebhookSecret(ctx, profileFrom(ctx), in.ID)
+		user, profile, p := viewerIdentity(ctx)
+		if p != nil {
+			return nil, p
+		}
+		value, err := reg.deps.NotificationDestinations.RotateNotificationWebhookSecret(ctx, user, profile, in.ID)
 		if errors.Is(err, notifications.ErrWebhookNotFound) {
 			return nil, NewProblem(TypeNotFound, "Webhook not found.")
 		}
@@ -287,8 +291,12 @@ func registerNotificationDestinations(reg *Registry) {
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
-		err := reg.deps.NotificationDestinations.DeleteNotificationWebhook(ctx, profileFrom(ctx), in.ID, func(revision int64) error {
-			if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, notificationWebhookTag(profileFrom(ctx), in.ID, revision)); p != nil {
+		user, profile, p := viewerIdentity(ctx)
+		if p != nil {
+			return nil, p
+		}
+		err := reg.deps.NotificationDestinations.DeleteNotificationWebhook(ctx, user, profile, in.ID, func(revision int64) error {
+			if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, notificationWebhookTag(profile, in.ID, revision)); p != nil {
 				return p
 			}
 			return nil
@@ -380,7 +388,11 @@ func registerNotificationDestinations(reg *Registry) {
 				return nil, p
 			}
 		}
-		rows, err := svc.ListNotificationWebPushPage(ctx, profileFrom(ctx), in.Limit+1, after)
+		user, profile, p := viewerIdentity(ctx)
+		if p != nil {
+			return nil, p
+		}
+		rows, err := svc.ListNotificationWebPushPage(ctx, user, profile, in.Limit+1, after)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -416,7 +428,11 @@ func registerNotificationDestinations(reg *Registry) {
 				return nil, p
 			}
 		}
-		rows, err := svc.ListNotificationWebhookPage(ctx, profileFrom(ctx), in.Limit+1, after)
+		user, profile, p := viewerIdentity(ctx)
+		if p != nil {
+			return nil, p
+		}
+		rows, err := svc.ListNotificationWebhookPage(ctx, user, profile, in.Limit+1, after)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}

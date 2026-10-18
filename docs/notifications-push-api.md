@@ -64,9 +64,19 @@ the display credential:
   "removed": false,
   "push_mode": "private_push",
   "display_token": "<jwt>",
-  "display_token_expires_at": "2026-10-03T00:00:00Z"
+  "display_token_expires_at": "2026-10-03T00:00:00Z",
+  "server_id": "3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"
 }
 ```
+
+- `server_id` is the identity `getServerIdentity` reports. Each push from this
+  server carries it as `silo_server_id`, with the registering profile as
+  `silo_profile_id`, beside `silo_delivery_id`. A device signed into several
+  servers or profiles keys each display credential by that pair and fetches
+  from the server and profile a push names. The receipt omits `server_id` when
+  the server cannot read its identity, and older servers never send it; pushes
+  then carry neither key, and the client keeps using its active server and
+  profile.
 
 - `display_token` is a JWT with `token_type: "apple_push_display"`, bound to
   the registering user, login session, and profile.
@@ -95,8 +105,8 @@ Authorization: Bearer <display token or access token>
 ```json
 {
   "delivery_id": "01M...",
-  "title": "The latest episode of Severance S02E01 just dropped!",
-  "body": "Hello, Ms. Cobel",
+  "title": "Severance",
+  "body": "New episode · S02E01 · Hello, Ms. Cobel",
   "thread_id": "series:series-1",
   "category": "episode_available",
   "url": "/item/episode-1"
@@ -115,6 +125,12 @@ Authentication rules for this route only:
 `404` is returned when the delivery does not belong to the
 authenticated profile. The route is rate-limited like other authenticated
 routes.
+
+An administrator test push names the profile's newest notification, so this
+fetch returns that notification's display data. A test sent to a profile with
+no notification names its own attempt ID instead, and the fetch returns `404`;
+keep the generic text in that case. Android's `getNotification` fetch behaves
+the same way.
 
 ## Ordered Android registration
 
@@ -140,8 +156,9 @@ require these headers in addition to captured login/profile credentials:
   exact generation, payload and captured authority through uncertainty. Never
   allocate a new generation merely to retry a request.
 
-POST returns `200` with string `generation`, `registration_id`, `server_device_id`
-and the accepted `push_mode`. This acknowledges registration storage, not provider
+POST returns `200` with string `generation`, `registration_id`, `server_device_id`,
+the accepted `push_mode`, and `server_id`, which names the server in this
+server's pushes exactly as in the Apple receipt. This acknowledges registration storage, not provider
 acceptance or successful delivery. DELETE returns bodyless `204`. The latest
 exact command may replay with the same receipt and no device rewrite, re-enable,
 last-seen refresh, or provider request. A lower generation or same generation with

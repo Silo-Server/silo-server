@@ -75,7 +75,7 @@ func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req 
 		return handlers.CatalogFacetSearchView{}, f.err
 	}
 	f.lastReq = req
-	if facet == "author" && strings.HasPrefix("frank herbert", q) {
+	if facet == "author" && strings.HasPrefix("frank herbert", q) { //nolint:gocritic // the fake matches a typed prefix of the name
 		return handlers.CatalogFacetSearchView{
 			Matches: []string{"Frank Herbert"}, HasMore: limit == 1,
 			Values: []catalogpkg.FacetValue{{Value: "Frank Herbert", Count: 6}}, ValuesHasMore: limit == 1,
@@ -85,6 +85,19 @@ func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req 
 		return handlers.CatalogFacetSearchView{Values: []catalogpkg.FacetValue{{Value: "Drama", Count: 9}}, ValuesHasMore: true}, nil
 	}
 	return handlers.CatalogFacetSearchView{}, nil
+}
+
+func (f *fakeCatalog) LetterIndex(_ context.Context, v handlers.ItemViewer, req catalogpkg.CatalogRequest) (catalogpkg.LetterIndex, error) {
+	if f.err != nil {
+		return catalogpkg.LetterIndex{}, f.err
+	}
+	f.lastReq, f.lastViewer = req, v
+	// A digit title, three H titles, and a non-Latin one the collation sorts
+	// after them, so # has two runs.
+	return catalogpkg.LetterIndex{
+		Letters: []catalogpkg.LetterBucket{{Letter: "#", Count: 2, Position: 0}, {Letter: "H", Count: 3, Position: 1}},
+		Runs:    []catalogpkg.LetterRun{{Letter: "#", Position: 0}, {Letter: "H", Position: 1}, {Letter: "#", Position: 4}},
+	}, nil
 }
 
 func (f *fakeCatalog) AudiobookGroups(_ context.Context, v handlers.ItemViewer, q catalogpkg.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error) {
@@ -173,8 +186,12 @@ func (f *fakeCatalog) MangaFiles(_ context.Context, _ handlers.ItemViewer, id st
 }
 
 func fakeEpisode(n int) handlers.EpisodeView {
-	return handlers.EpisodeView{ContentID: "episode:severance-s01e0" + string(rune('0'+n)), SeasonNumber: 1, EpisodeNumber: n, Title: "Good News About Hell", AirDate: "2022-02-18", Runtime: 57,
+	ep := handlers.EpisodeView{ContentID: "episode:severance-s01e0" + string(rune('0'+n)), SeasonNumber: 1, EpisodeNumber: n, Title: "Good News About Hell", AirDate: "2022-02-18", Runtime: 57,
 		Files: []handlers.EpisodeFileView{{FileID: 200 + n, Resolution: "1080p", FileSize: 1}}, UserData: &catalogpkg.SeasonUserData{Played: n == 1, WatchedCount: 1}}
+	if n == 1 {
+		ep.RatingIMDB, ep.RatingTMDB = new(8.7), new(8.25)
+	}
+	return ep
 }
 
 func (f *fakeCatalog) ItemEpisodes(_ context.Context, _ handlers.ItemViewer, id string) ([]handlers.EpisodeView, error) {
@@ -513,7 +530,7 @@ func TestGetCatalogItem(t *testing.T) {
 	decodeJSON(t, rec.Body, &body)
 	for k, want := range map[string]string{
 		"content_id": `"movie:heat-1995"`, "tagline": `"A Los Angeles crime saga"`, "keywords": `[]`, "crew": `[]`, "subtitles": `[]`,
-		"user_state": `{"played":true,"is_favorite":true,"in_watchlist":false}`, "overlay_summary": `{"resolution":"4K"}`,
+		"user_state": `{"played":true,"is_favorite":true,"in_watchlist":false,"not_interested":false}`, "overlay_summary": `{"resolution":"4K"}`,
 		"work_formats": `[{"type":"ebook","content_id":"ebook:heat","library_id":"2"}]`,
 	} {
 		if string(body[k]) != want {
@@ -803,5 +820,47 @@ func TestListCatalogItemsVideoWithEpisodesScope(t *testing.T) {
 	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/query", `{"source":"section","scope":"home","section_id":"s","type":"video_with_episodes"}`, viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.type" {
 		t.Fatalf("section errors = %+v", p.Errors)
+	}
+}
+
+// An episode states its ratings as a title page does: on a 0-100 score with
+// the source's own display, IMDb before TMDB. A stored 0 (unrated) or a value
+// off the 0-10 scale is dropped, and an episode with no rating omits the field.
+func TestEpisodesOfStatesRatings(t *testing.T) {
+	episodes := episodesOf([]handlers.EpisodeView{
+		{ContentID: "episode:1", RatingIMDB: new(8.7), RatingTMDB: new(8.25)},
+		{ContentID: "episode:2", RatingIMDB: new(0.0), RatingTMDB: new(42.0)},
+		{ContentID: "episode:3"},
+	})
+	want := []CatalogRating{
+		{Source: "imdb", Name: "IMDb", Score: 87, Display: "8.7"},
+		{Source: "tmdb", Name: "TMDB", Score: 82.5, Display: "8.3"},
+	}
+	if !reflect.DeepEqual(episodes[0].Ratings, want) {
+		t.Fatalf("ratings = %+v, want %+v", episodes[0].Ratings, want)
+	}
+	for _, ep := range episodes[1:] {
+		body, err := json.Marshal(ep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(body, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := fields["ratings"]; ok {
+			t.Fatalf("%s carries ratings: %s", ep.ContentID, body)
+		}
+	}
+}
+
+// The episode's rating columns stay off the frozen /api/v1 wire.
+func TestEpisodeViewKeepsRatingsOffV1(t *testing.T) {
+	body, err := json.Marshal(handlers.EpisodeView{ContentID: "episode:1", RatingIMDB: new(8.7), RatingTMDB: new(8.2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "rating") {
+		t.Fatalf("v1 episode = %s", body)
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -25,7 +24,7 @@ import (
 )
 
 const (
-	maxDownloadBytes = 25 * 1024 * 1024 // allow oversized provider originals; cached variants are dimension-capped
+	maxDownloadBytes = metadata.MaxArtworkSourceBytes // allow oversized provider originals; cached variants are dimension-capped
 	downloadTimeout  = 30 * time.Second
 )
 
@@ -88,17 +87,16 @@ type CacheResult struct {
 type Cacher struct {
 	s3              ObjectPutter
 	revisionTracker ArtworkRevisionTracker
-	httpClient      *http.Client
-	// trustedClient fetches for requests whose context carries
-	// netguard.WithPrivateAccess. Its netguard transport may reach the
-	// server's local network but still refuses blocked addresses.
-	trustedClient     *http.Client
+	// httpClient's netguard transport checks every address it dials,
+	// redirect hops included: public addresses only, or the local network
+	// too when the request context carries netguard.WithPrivateAccess.
+	httpClient        *http.Client
 	enforcePublicURLs bool
 }
 
 // New creates a new Cacher backed by the given ObjectPutter.
 func New(s3 ObjectPutter) *Cacher {
-	return &Cacher{s3: s3, httpClient: newSecureHTTPClient(), trustedClient: newTrustedHTTPClient(), enforcePublicURLs: true}
+	return &Cacher{s3: s3, httpClient: newGuardedHTTPClient(), enforcePublicURLs: true}
 }
 
 // SetArtworkRevisionTracker wires durable revision lifecycle tracking. The
@@ -451,6 +449,14 @@ func imageTypeName(t metadata.ImageType) string {
 		return "still"
 	case metadata.ImageProfile:
 		return "profile"
+	case metadata.ImageBanner:
+		return "banner"
+	case metadata.ImageThumb:
+		return "thumb"
+	case metadata.ImageClearArt:
+		return "clearart"
+	case metadata.ImageDisc:
+		return "disc"
 	default:
 		return "unknown"
 	}
@@ -485,14 +491,8 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 	if err != nil {
 		return nil, fmt.Errorf("parse URL: %w", err)
 	}
-	client := c.httpClient
 	if c.enforcePublicURLs {
-		if netguard.PrivateAccess(ctx) {
-			if err := validateImageURL(parsed); err != nil {
-				return nil, err
-			}
-			client = c.trustedClient
-		} else if err := validatePublicImageURL(parsed); err != nil {
+		if err := validateImageURLFor(ctx, parsed); err != nil {
 			return nil, err
 		}
 	}
@@ -504,8 +504,9 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
+	client := c.httpClient
 	if client == nil {
-		client = newSecureHTTPClient()
+		client = newGuardedHTTPClient()
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -529,105 +530,38 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 	return data, nil
 }
 
-func newSecureHTTPClient() *http.Client {
-	transport := &http.Transport{
-		Proxy:               nil,
-		DialContext:         secureImageDialContext,
-		TLSHandshakeTimeout: 10 * time.Second,
-	}
-	return &http.Client{
-		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return http.ErrUseLastResponse
-			}
-			return validatePublicImageURL(req.URL)
-		},
-	}
-}
-
-// newTrustedHTTPClient returns the client for trusted requests. The
-// netguard transport checks every address it dials, redirect hops included,
-// and uses its trusted pool because those requests carry
-// netguard.WithPrivateAccess.
-func newTrustedHTTPClient() *http.Client {
+// newGuardedHTTPClient returns the image download client. Its netguard
+// transport keeps trusted and untrusted requests in separate connection pools.
+func newGuardedHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: netguard.NewTransport(),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return http.ErrUseLastResponse
 			}
-			return validateImageURL(req.URL)
+			return validateImageURLFor(req.Context(), req.URL)
 		},
 	}
 }
 
-func validateImageURL(u *url.URL) error {
+// validateImageURLFor checks u before it is requested. A literal IP host
+// gets an early netguard refusal; the transport checks every address it
+// dials, including hosts that resolve through DNS.
+func validateImageURLFor(ctx context.Context, u *url.URL) error {
 	if u == nil {
 		return fmt.Errorf("empty URL")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("unsupported URL scheme %q", u.Scheme)
 	}
-	if u.Hostname() == "" {
+	host := u.Hostname()
+	if host == "" {
 		return fmt.Errorf("URL host is required")
 	}
-	return nil
-}
-
-func validatePublicImageURL(u *url.URL) error {
-	if err := validateImageURL(u); err != nil {
-		return err
-	}
-	host := u.Hostname()
-	if addr, err := netip.ParseAddr(host); err == nil && !isPublicAddr(addr) {
-		return fmt.Errorf("private image host %q is not allowed", host)
-	}
-	return nil
-}
-
-func secureImageDialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, err
-	}
-	addr, err := resolvePublicAddr(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	dialer := &net.Dialer{Timeout: downloadTimeout}
-	return dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
-}
-
-func resolvePublicAddr(ctx context.Context, host string) (netip.Addr, error) {
 	if addr, err := netip.ParseAddr(host); err == nil {
-		if isPublicAddr(addr) {
-			return addr, nil
-		}
-		return netip.Addr{}, fmt.Errorf("private image host %q is not allowed", host)
-	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("resolve image host %q: %w", host, err)
-	}
-	for _, ip := range ips {
-		addr, ok := netip.AddrFromSlice(ip.IP)
-		if ok && isPublicAddr(addr) {
-			return addr, nil
+		if err := netguard.CheckAddr(addr, netguard.PrivateAccess(ctx)); err != nil {
+			return fmt.Errorf("image host %q is not allowed: %w", host, err)
 		}
 	}
-	return netip.Addr{}, fmt.Errorf("image host %q did not resolve to a public address", host)
-}
-
-func isPublicAddr(addr netip.Addr) bool {
-	if addr.Is4In6() {
-		addr = addr.Unmap()
-	}
-	return addr.IsGlobalUnicast() &&
-		!addr.IsPrivate() &&
-		!addr.IsLoopback() &&
-		!addr.IsLinkLocalUnicast() &&
-		!addr.IsLinkLocalMulticast() &&
-		!addr.IsMulticast() &&
-		!addr.IsUnspecified()
+	return nil
 }

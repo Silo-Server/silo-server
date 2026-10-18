@@ -255,7 +255,7 @@ func TestSearchOptimizedAccuracyPostgres(t *testing.T) {
 				}
 				candidateUnion := regexp.MustCompile(`mi.content_id IN \(SELECT title_mi.content_id FROM media_items title_mi WHERE (?s:.*?) UNION SELECT alias_scores.content_id FROM alias_scores\)`)
 				baselineSQL := originalExpressions.Replace(candidateUnion.ReplaceAllStringFunc(dataSQL, func(string) string { return oldMatch }))
-				rows, err := pool.Query(ctx, baselineSQL, args...)
+				rows, err := pool.Query(ctx, baselineSQL, args...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -270,7 +270,11 @@ func TestSearchOptimizedAccuracyPostgres(t *testing.T) {
 				if err := pool.QueryRow(ctx, countSQL, options.countArgs...).Scan(&total); err != nil {
 					t.Fatal(err)
 				}
-				scoredCount := baselineSQL[:strings.Index(baselineSQL, ", page AS (")] + " SELECT COUNT(*) FROM scored WHERE $1::text IS NOT NULL"
+				baselineScored, _, ok := strings.Cut(baselineSQL, ", page AS (")
+				if !ok {
+					t.Fatalf("baseline search SQL has no page CTE:\n%s", baselineSQL)
+				}
+				scoredCount := baselineScored + " SELECT COUNT(*) FROM scored WHERE $1::text IS NOT NULL"
 				if err := pool.QueryRow(ctx, scoredCount, options.countArgs...).Scan(&scoredTotal); err != nil {
 					t.Fatal(err)
 				}

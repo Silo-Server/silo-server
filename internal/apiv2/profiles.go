@@ -27,7 +27,7 @@ type Profile struct {
 	MaxContentRating           string  `json:"max_content_rating" doc:"Content-rating ceiling; empty means none" example:"PG-13"`
 	MaxAdvisoryAge             *int    `json:"max_advisory_age" nullable:"true" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null means no limit" example:"12"`
 	RequireAdvisoryAge         bool    `json:"require_advisory_age" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"false"`
-	QualityPreference          string  `json:"quality_preference" doc:"Free-form until the vocabulary is ratified (#135). Canonical values today: auto, original, 720p, 1080p, 2160p, 4k; empty when unset" example:"auto"`
+	QualityPreference          string  `json:"quality_preference" doc:"Free-form until the vocabulary is ratified (#135). Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto; empty when unset" example:"auto"`
 	Language                   string  `json:"language" doc:"Preferred audio language (ISO 639-1); empty inherits" example:"en"`
 	PreferredMetadataLanguage  string  `json:"preferred_metadata_language" doc:"Metadata language (ISO 639-1); empty inherits the library's" example:"en"`
 	SubtitleLanguage           string  `json:"subtitle_language" doc:"Preferred subtitle language (ISO 639-1); empty inherits" example:"en"`
@@ -54,7 +54,7 @@ type ProfileUpdate struct {
 	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it" example:"PG-13"`
 	MaxAdvisoryAge             Patch[int]    `json:"max_advisory_age,omitzero" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null removes it" example:"12"`
 	RequireAdvisoryAge         *bool         `json:"require_advisory_age,omitempty" nullable:"false" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"true"`
-	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k" example:"auto"`
+	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto" example:"auto"`
 	Language                   Patch[string] `json:"language,omitzero" doc:"Preferred audio language (ISO 639-1); null inherits" example:"en"`
 	PreferredMetadataLanguage  Patch[string] `json:"preferred_metadata_language,omitzero" doc:"Metadata language (ISO 639-1); null inherits the library's" example:"en"`
 	SubtitleLanguage           Patch[string] `json:"subtitle_language,omitzero" doc:"Preferred subtitle language (ISO 639-1); null inherits" example:"en"`
@@ -90,9 +90,11 @@ const fieldMaxAdvisoryAge = "max_advisory_age"
 // check the caller did not pass (an unverified PIN-locked primary profile).
 const codeProfileManagement = "profile_management"
 
-// locationAllowedLibraryIDs is the problem location of the allowlist member.
+// locationAllowedLibraryIDs is the problem location of the profile allowlist
+// member; locationLibraryIDs is the account, access group and invitation one.
 const (
 	locationAllowedLibraryIDs = locationBody + ".allowed_library_ids"
+	locationLibraryIDs        = locationBody + ".library_ids"
 	locationPIN               = locationBody + ".pin"
 )
 
@@ -145,7 +147,7 @@ type ProfileCreate struct {
 	MaxContentRating           *string `json:"max_content_rating,omitempty" nullable:"false" doc:"Content-rating ceiling" example:"PG-13"`
 	MaxAdvisoryAge             *int    `json:"max_advisory_age,omitempty" nullable:"false" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set" example:"12"`
 	RequireAdvisoryAge         *bool   `json:"require_advisory_age,omitempty" nullable:"false" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"true"`
-	QualityPreference          *string `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k" example:"auto"`
+	QualityPreference          *string `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto" example:"auto"`
 	Language                   *string `json:"language,omitempty" nullable:"false" doc:"Preferred audio language (ISO 639-1)" example:"en"`
 	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty" nullable:"false" doc:"Metadata language (ISO 639-1)" example:"en"`
 	SubtitleLanguage           *string `json:"subtitle_language,omitempty" nullable:"false" doc:"Preferred subtitle language (ISO 639-1)" example:"en"`
@@ -654,6 +656,10 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 	}
 	items := make([]Profile, 0, len(view.Profiles))
 	for _, v := range view.Profiles {
+		// A remote-playback handoff sees only the profile it is bound to.
+		if claims.IsRemotePlayback() && v.ID != claims.ProfileID {
+			continue
+		}
 		profile, p := profileOf(v)
 		if p != nil {
 			return nil, p
@@ -687,7 +693,7 @@ func (reg *Registry) createProfile(ctx context.Context, in *ProfileCreateInput) 
 		return nil, p
 	}
 	if len(req.AllowedLibraryIDs) > 0 {
-		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs); p != nil {
+		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
 			return nil, p
 		}
 	}
@@ -776,7 +782,7 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 	if p != nil {
 		return nil, p
 	}
-	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs); p != nil {
+	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
 		return nil, p
 	}
 	view, err := reg.deps.Profiles.UpdateProfile(ctx, handlers.ProfileUpdateCommand{
@@ -796,11 +802,13 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 	return &ProfileOutput{Body: profile}, nil
 }
 
-// rejectUnknownLibraries refuses an allowlist naming a library that does not
-// exist. The store's row-by-row insert would otherwise hit the library
-// foreign key (a 500) on Postgres, and persist a dangling id where no key
-// is enforced. A nil or empty allowlist has nothing to check.
-func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int) *Problem {
+// rejectUnknownLibraries refuses a library list naming a library that does not
+// exist, reporting it at location. A profile allowlist's row-by-row insert
+// would otherwise hit the library foreign key (a 500) on Postgres; the
+// database silently drops an unknown id from account, access group and
+// invitation lists, so the client hears about it here. A nil or empty list
+// has nothing to check.
+func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int, location string) *Problem {
 	if ids == nil || len(*ids) == 0 {
 		return nil
 	}
@@ -818,7 +826,7 @@ func (reg *Registry) rejectUnknownLibraries(ctx context.Context, ids *[]int) *Pr
 	for _, id := range *ids {
 		if !known[id] {
 			return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: locationAllowedLibraryIDs, Code: codeInvalid, Detail: "unknown library identifier: " + strconv.Itoa(id)})
+				WithErrors(ProblemError{Location: location, Code: codeInvalid, Detail: "unknown library identifier: " + strconv.Itoa(id)})
 		}
 	}
 	return nil

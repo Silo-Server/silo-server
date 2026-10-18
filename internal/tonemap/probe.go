@@ -548,7 +548,11 @@ func hasToken(output []byte, token string) bool {
 func hardwareProbeAvailable(backend string, filters, encoders []byte) bool {
 	switch backend {
 	case BackendQSV:
-		return hasToken(filters, HardwareFilterOpenCL) && hasToken(filters, "hwmap") && hasToken(filters, "scale_vaapi") && hasToken(encoders, "h264_qsv")
+		// Bitmap subtitle burn-in on HDR sources composites and scales on
+		// OpenCL, so a build without those filters falls back to software
+		// tone mapping instead of failing at transcode start.
+		return hasToken(filters, HardwareFilterOpenCL) && hasToken(filters, "hwmap") && hasToken(filters, "scale_vaapi") &&
+			hasToken(filters, "overlay_opencl") && hasToken(filters, "scale_opencl") && hasToken(encoders, "h264_qsv")
 	case BackendVAAPI:
 		return hasToken(filters, HardwareFilterVAAPI) && hasToken(filters, "scale_vaapi") && hasToken(encoders, "h264_vaapi")
 	case BackendNVENC:
@@ -654,7 +658,7 @@ func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth in
 	}
 	filter := VAAPIFilter(kind)
 	if backend == BackendQSV {
-		filter = QSVFilter(kind) + "," + QSVInteropFilter()
+		filter = QSVFilter(kind, 0) + "," + QSVInteropFilter()
 	}
 	return filter + "," + HDRMetadataRemovalFilter()
 }

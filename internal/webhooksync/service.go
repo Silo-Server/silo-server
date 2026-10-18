@@ -20,6 +20,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
+// SignalsChangedNotifier records that a profile's recommendation signals
+// changed, so its taste profile and cached recommendations get rebuilt.
+// *recommendations.Worker implements it.
+type SignalsChangedNotifier interface {
+	NotifySignalsChanged(ctx context.Context, userID int, profileID string)
+}
+
 type Service struct {
 	repo      *Repository
 	matcher   *historyimport.Matcher
@@ -29,6 +36,10 @@ type Service struct {
 	// localNetwork decides whether a connection's server address may be on
 	// this server's own network. Nil limits it to the public internet.
 	localNetwork *historyimport.LocalNetworkAccess
+
+	// signals hears about applied events that change a profile's
+	// recommendation signals. Nil reports nothing.
+	signals SignalsChangedNotifier
 }
 
 func NewService(repo *Repository, importRepo *historyimport.Repository, storeProvider userstore.UserStoreProvider) *Service {
@@ -50,6 +61,20 @@ func NewService(repo *Repository, importRepo *historyimport.Repository, storePro
 func (s *Service) SetLocalNetworkAccess(access *historyimport.LocalNetworkAccess) {
 	if s != nil {
 		s.localNetwork = access
+	}
+}
+
+// SetSignalsChangedNotifier installs where applied events that change a
+// profile's recommendation signals are reported.
+func (s *Service) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	if s != nil {
+		s.signals = notifier
+	}
+}
+
+func (s *Service) notifySignalsChanged(ctx context.Context, userID int, profileID string) {
+	if s.signals != nil {
+		s.signals.NotifySignalsChanged(ctx, userID, profileID)
 	}
 }
 
@@ -236,6 +261,11 @@ func (s *Service) CreateEventLog(ctx context.Context, entry WebhookEventLog) (*W
 	return s.repo.CreateEventLog(ctx, entry)
 }
 
+// MaxWebhookDeliveryBytes is the largest webhook delivery body any receiver
+// accepts. Every receiver route shares it, so the cap cannot depend on which
+// URL alias a provider was configured with.
+const MaxWebhookDeliveryBytes int64 = 10 << 20
+
 var ErrWebhookTooLarge = errors.New("webhook body exceeds limit")
 var ErrWebhookBody = errors.New("invalid webhook body")
 
@@ -244,8 +274,9 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 }
 
 // ProcessWebhookBounded authenticates the receiver secret before reading the body.
-// A positive limit bounds the entire delivery before provider parsing or side effects.
-// Zero preserves the frozen bridge's provider-specific parsing behavior.
+// The limit bounds the entire delivery before provider parsing or side effects;
+// a zero, negative or larger-than-default limit falls back to
+// MaxWebhookDeliveryBytes, so no caller can read an unbounded body.
 func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *http.Request, limit int64) (*ProcessWebhookResult, error) {
 	conn, err := s.repo.GetConnectionBySecret(ctx, secret)
 	if err != nil {
@@ -255,27 +286,31 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		ConnectionID: conn.ID,
 		Provider:     conn.Provider,
 	}
-	if limit > 0 {
-		body, readErr := io.ReadAll(io.LimitReader(r.Body, limit+1))
-		if int64(len(body)) > limit {
-			readErr = ErrWebhookTooLarge
-		} else if readErr != nil {
-			readErr = ErrWebhookBody
-		}
-		if readErr != nil {
-			result.Outcome = OutcomeRejected
-			result.Summary = "Rejected invalid webhook body"
-			result.ErrorMessage = readErr.Error()
-			_ = s.repo.MarkWebhookError(ctx, conn.ID, readErr.Error())
-			return result, readErr
-		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		defer func() {
-			if r.MultipartForm != nil {
-				_ = r.MultipartForm.RemoveAll()
-			}
-		}()
+	if limit <= 0 || limit > MaxWebhookDeliveryBytes {
+		limit = MaxWebhookDeliveryBytes
 	}
+	// Taken before the body is buffered, so a slow upload cannot make the
+	// delivery look newer than Silo activity written while it arrived.
+	ctx = withWebhookReceivedAt(ctx, time.Now())
+	body, readErr := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if int64(len(body)) > limit {
+		readErr = ErrWebhookTooLarge
+	} else if readErr != nil {
+		readErr = ErrWebhookBody
+	}
+	if readErr != nil {
+		result.Outcome = OutcomeRejected
+		result.Summary = "Rejected invalid webhook body"
+		result.ErrorMessage = readErr.Error()
+		_ = s.repo.MarkWebhookError(ctx, conn.ID, readErr.Error())
+		return result, readErr
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	provider, err := s.provider(conn.Provider)
 	if err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Provider configuration failed")
@@ -375,6 +410,7 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		if err := s.watch.RecordImportedMarkUnplayed(ctx, conn.UserID, profileID, match.MediaItemID, event.OccurredAt); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to apply mark-unplayed event")
 		}
+		s.notifySignalsChanged(ctx, conn.UserID, profileID)
 		if err := s.repo.UpsertItemState(ctx, ItemState{
 			ConnectionID:       conn.ID,
 			ExternalUserID:     event.UserID,
@@ -393,6 +429,7 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		if err := s.watch.SetFavorite(ctx, conn.UserID, profileID, match.MediaItemID, true); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to add favorite from webhook event")
 		}
+		s.notifySignalsChanged(ctx, conn.UserID, profileID)
 		result.Outcome = OutcomeApplied
 		result.Summary = "Applied favorite add event"
 		return result, nil
@@ -400,6 +437,7 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		if err := s.watch.SetFavorite(ctx, conn.UserID, profileID, match.MediaItemID, false); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to remove favorite from webhook event")
 		}
+		s.notifySignalsChanged(ctx, conn.UserID, profileID)
 		result.Outcome = OutcomeApplied
 		result.Summary = "Applied favorite removal event"
 		return result, nil
@@ -407,6 +445,7 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		if _, err := s.watch.ToggleFavorite(ctx, conn.UserID, profileID, match.MediaItemID); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to toggle favorite from webhook event")
 		}
+		s.notifySignalsChanged(ctx, conn.UserID, profileID)
 		result.Outcome = OutcomeApplied
 		result.Summary = "Applied favorite toggle event"
 		return result, nil
@@ -462,6 +501,10 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 	if err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Failed to apply imported watch progress")
 	}
+	// Only stop-like events reach here (see the providers), and any recorded
+	// stop can move the taste profile: a finish, a stop at half way or more,
+	// or an early abandonment. The native stop path notifies the same way.
+	s.notifySignalsChanged(ctx, conn.UserID, profileID)
 
 	if err := s.repo.UpsertItemState(ctx, applied); err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Failed to persist imported watch progress")

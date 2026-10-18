@@ -44,3 +44,17 @@ func NextUpMode(ctx context.Context, store userstore.UserStore, profileID string
 	}
 	return mode
 }
+
+// NextUpNewReleasesFirst reports whether the acting profile ranks next-up rows
+// by when their next episode was released (ui.next_up_new_releases_first),
+// answering from a resolved access scope like NextUpMode. A failed read
+// degrades to the default, off.
+func NextUpNewReleasesFirst(ctx context.Context, store userstore.UserStore, profileID string) bool {
+	if profileID == "" {
+		return false
+	}
+	if scope, ok := access.GetScope(ctx); ok && scope.ProfileID == profileID && scope.NextUpMode != "" {
+		return scope.NextUpNewReleasesFirst
+	}
+	return access.ResolveViewerPreferences(ctx, store, profileID).NextUpNewReleasesFirst
+}

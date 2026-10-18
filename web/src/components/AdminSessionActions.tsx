@@ -221,39 +221,37 @@ export function AdminSessionActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        {layout === "menu" ? (
-          <>
-            <DropdownMenuLabel>
-              {supportsPlaybackControl ? "Playback Actions" : "Limited Playback Actions"}
-            </DropdownMenuLabel>
-            {supportsPlaybackControl ? (
-              <DropdownMenuItem onSelect={() => void runAction(primaryAction.action)}>
-                {primaryAction.action === "pause" ? (
-                  <Pause className="h-4 w-4" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-                {primaryAction.label}
-              </DropdownMenuItem>
+        <DropdownMenuLabel>
+          {layout === "inline"
+            ? "Session Actions"
+            : supportsPlaybackControl
+              ? "Playback Actions"
+              : "Limited Playback Actions"}
+        </DropdownMenuLabel>
+        {supportsPlaybackControl ? (
+          <DropdownMenuItem onSelect={() => void runAction(primaryAction.action)}>
+            {primaryAction.action === "pause" ? (
+              <Pause className="h-4 w-4" />
             ) : (
-              <>
-                <div className="text-muted-foreground px-2 py-1.5 text-xs leading-5">
-                  {unsupportedPlaybackControlCopy}
-                </div>
-                <DropdownMenuSeparator />
-              </>
+              <Play className="h-4 w-4" />
             )}
-            <DropdownMenuItem onSelect={() => void runAction("stop")}>
-              <Square className="h-4 w-4" />
-              Stop
-            </DropdownMenuItem>
-          </>
+            {primaryAction.label}
+          </DropdownMenuItem>
         ) : (
-          <DropdownMenuLabel>Session Actions</DropdownMenuLabel>
+          <>
+            <div className="text-muted-foreground px-2 py-1.5 text-xs leading-5">
+              {unsupportedPlaybackControlCopy}
+            </div>
+            <DropdownMenuSeparator />
+          </>
         )}
+        <DropdownMenuItem onSelect={() => void runAction("stop")}>
+          <Square className="h-4 w-4" />
+          Stop
+        </DropdownMenuItem>
         {extraMenuItems ? (
           <>
-            {layout === "menu" ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuSeparator />
             {extraMenuItems}
           </>
         ) : null}
@@ -262,13 +260,6 @@ export function AdminSessionActions({
             <MessageSquare className="h-4 w-4" />
             Message…
           </DropdownMenuItem>
-        ) : layout === "inline" ? (
-          <>
-            <div className="text-muted-foreground px-2 py-1.5 text-xs leading-5">
-              {unsupportedPlaybackControlCopy}
-            </div>
-            <DropdownMenuSeparator />
-          </>
         ) : null}
         {showInlineTerminate ? null : (
           <>
@@ -286,7 +277,7 @@ export function AdminSessionActions({
   return (
     <>
       {layout === "inline" ? (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
           {inlinePrefixActions}
           {terminateButton}
           {menu}

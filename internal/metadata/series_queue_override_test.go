@@ -75,8 +75,11 @@ func TestSeriesQueueManualIdentityRequiresCompleteGroupCoverage(t *testing.T) {
 // that share a group key on separate items may be different shows.
 func TestSeriesQueuePassesGroupOverrideForLinkedProvisionalRoot(t *testing.T) {
 	const (
-		root      = "/tv/Example Show (2013)/Season"
-		otherRoot = "/tv/Other Show (2015)/Season"
+		// Show folders literally named Season, the one layout that still
+		// parses to the "Season" group after a bare Season folder inside a
+		// show folder became a season folder.
+		root      = "/tv/Season"
+		otherRoot = "/tv2/Season"
 		groupKey  = "v1|series|season|0000"
 	)
 	file := func(id int, root, name, contentID, key string) *models.MediaFile {
@@ -121,7 +124,7 @@ func TestSeriesQueuePassesGroupOverrideForLinkedProvisionalRoot(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHarness()
-			h.service.folderRepo = &fakeWorkerFolderRepo{folders: map[int]*models.MediaFolder{10: {ID: 10, Type: "series", Enabled: true, Paths: []string{"/tv"}}}}
+			h.service.folderRepo = &fakeWorkerFolderRepo{folders: map[int]*models.MediaFolder{10: {ID: 10, Type: "series", Enabled: true, Paths: []string{"/tv", "/tv2"}}}}
 			files := []*models.MediaFile{
 				file(1, root, "Example Show - S01E01.mkv", "local-stray", groupKey),
 				file(2, root, "Example Show - S01E02.mkv", "local-stray", groupKey),

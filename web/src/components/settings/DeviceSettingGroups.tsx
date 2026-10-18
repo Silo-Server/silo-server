@@ -14,11 +14,12 @@ import { SettingSlider } from "@/components/settings/SettingSlider";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { groupDeviceSettings } from "@/lib/deviceSettingGroups";
 import type { EffectiveSetting } from "@/hooks/queries/settingValues";
-import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
+import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import { namedLanguageOptionsFor } from "@/lib/languageOptions";
 import { controlKindFor, formatSettingValue, optionsFor } from "@/lib/settingsDisplay";
 import { cn } from "@/lib/utils";
+import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 
 const EMPTY_SELECT_VALUE = "__empty__";
 
@@ -140,7 +141,9 @@ function DeviceSettingRow({
   // the limit capped.
   const inheritedFrom =
     changedHere || profileWide || constrained ? null : sourceLabel(effective, ownerLabel);
-  const value = effective?.value ?? definition.defaultValue;
+  // A stored null is a value ("No limit"), not a missing one, so only a
+  // missing answer falls back to the default.
+  const value = displayedValue(settingKey, effective ? effective.value : definition.defaultValue);
   const inlineControl = controlKindFor(definition) === "switch";
 
   return (
@@ -162,7 +165,7 @@ function DeviceSettingRow({
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium">{definition.label}</span>
             {changedHere ? (
-              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[10px] font-semibold tracking-[0.04em] text-amber-300 uppercase">
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-xs font-semibold tracking-[0.04em] text-amber-300 uppercase">
                 Changed here
               </span>
             ) : null}
@@ -170,7 +173,7 @@ function DeviceSettingRow({
               <span className="text-muted-foreground text-xs">{inheritedFrom}</span>
             ) : null}
             {constrained ? (
-              <span className="border-info/30 bg-info/10 text-info inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-semibold tracking-[0.04em] uppercase">
+              <span className="border-info/30 bg-info/10 text-info inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-xs font-semibold tracking-[0.04em] uppercase">
                 <Lock className="h-2.5 w-2.5" />
                 Household limit
               </span>
@@ -180,12 +183,12 @@ function DeviceSettingRow({
             {definition.description}
           </p>
           {constrained ? (
-            <p className="text-[12.5px] leading-relaxed text-amber-300/90">
+            <p className="text-[13px] leading-relaxed text-amber-300/90">
               {constraintExplanation(effective)}
             </p>
           ) : null}
           {profileWide ? (
-            <p className="text-muted-foreground text-[12.5px] leading-relaxed">
+            <p className="text-muted-foreground text-[13px] leading-relaxed">
               {retainedHere
                 ? `Set for all devices on this profile, so this device's own choice (${retainedValueLabel(settingKey, storedOnDevice?.[settingKey])}) isn't used right now. `
                 : "Set for all devices on this profile. "}
@@ -220,6 +223,16 @@ function DeviceSettingRow({
       </div>
     </div>
   );
+}
+
+/**
+ * The value the control shows. A stored "original" quality is a deprecated
+ * alias of Auto that the select no longer offers, so it shows as Auto.
+ */
+function displayedValue(settingKey: SettingKey, value: unknown): unknown {
+  return settingKey === SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY && typeof value === "string"
+    ? normalizeQualityPreferenceV3(value)
+    : value;
 }
 
 /**
@@ -368,7 +381,7 @@ function DeviceSettingControl({
   // showing nothing at all. Present the range as bandwidth choices people
   // recognise instead, and keep the stored value visible if it is not one of
   // them.
-  const numericChoices = numericSelectChoices(settingKey, definition, options, asString);
+  const numericChoices = numericSelectChoices(definition, options, asString);
   if (numericChoices) {
     return (
       <Select
@@ -453,7 +466,6 @@ function permittedOptions(settingKey: SettingKey, effective: EffectiveSetting | 
  * profile Defaults screen offers the same choices.
  */
 function numericSelectChoices(
-  settingKey: SettingKey,
   definition: (typeof SETTING_DEFINITIONS)[SettingKey],
   options: { value: string; label: string }[],
   currentValue: string,
@@ -462,7 +474,7 @@ function numericSelectChoices(
   const hasMembers = options.some((option) => option.value !== "");
   if (!isNumeric || hasMembers) return null;
 
-  const unsetLabel = settingKey === "playback.max_bitrate_kbps" ? "No limit" : "Unset";
+  const unsetLabel = definition.unit === "kbps" ? "No limit" : "Unset";
   return bitrateSelectChoices(definition, currentValue, unsetLabel);
 }
 

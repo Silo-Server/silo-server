@@ -49,20 +49,20 @@ func TestWebhookSecretRotationPG(t *testing.T) {
 	if _, err = pool.Exec(ctx, `UPDATE notification_webhooks SET name='newer-config',notify_requests=true,consecutive_failures=9 WHERE id='row'`); err != nil {
 		t.Fatal(err)
 	}
-	if err = repo.ReplaceSigningSecret(ctx, "owner", "row", "replacement-cipher"); err != nil {
+	if err = repo.ReplaceSigningSecret(ctx, 1, "owner", "row", "replacement-cipher"); err != nil {
 		t.Fatal(err)
 	}
-	row, err := repo.GetByID(ctx, "owner", "row")
+	row, err := repo.GetByID(ctx, 1, "owner", "row")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if row.Name != "newer-config" || row.Enabled || !row.NotifyRequests || row.ConsecutiveFailures != 9 || row.URLCiphertext != "url-cipher" || row.SigningSecretCiphertext == nil || *row.SigningSecretCiphertext != "replacement-cipher" {
 		t.Fatalf("rotation changed unrelated state: %+v", row)
 	}
-	if err = repo.ReplaceSigningSecret(ctx, "foreign", "row", "foreign"); !errors.Is(err, ErrWebhookNotFound) {
+	if err = repo.ReplaceSigningSecret(ctx, 1, "foreign", "row", "foreign"); !errors.Is(err, ErrWebhookNotFound) {
 		t.Fatalf("foreign: %v", err)
 	}
-	if err = repo.ReplaceSigningSecret(ctx, "owner", "missing", "missing"); !errors.Is(err, ErrWebhookNotFound) {
+	if err = repo.ReplaceSigningSecret(ctx, 1, "owner", "missing", "missing"); !errors.Is(err, ErrWebhookNotFound) {
 		t.Fatalf("missing: %v", err)
 	}
 	cipher, err := secret.New([]byte("01234567890123456789012345678901"))
@@ -70,11 +70,11 @@ func TestWebhookSecretRotationPG(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &WebhookService{repo: repo, cipher: cipher}
-	value, err := svc.RotateSecretV2(ctx, "owner", "row")
+	value, err := svc.RotateSecretV2(ctx, 1, "owner", "row")
 	if err != nil || value == "" {
 		t.Fatalf("rotate: %v", err)
 	}
-	row, err = repo.GetByID(ctx, "owner", "row")
+	row, err = repo.GetByID(ctx, 1, "owner", "row")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,16 +82,23 @@ func TestWebhookSecretRotationPG(t *testing.T) {
 	if err != nil || decoded != value {
 		t.Fatal("stored secret did not match receipt")
 	}
-	if _, err = svc.RotateSecretV2(ctx, "owner", "discord"); !errors.Is(err, ErrWebhookInvalid) {
+	if _, err = svc.RotateSecretV2(ctx, 1, "owner", "discord"); !errors.Is(err, ErrWebhookInvalid) {
 		t.Fatalf("discord: %v", err)
 	}
-	if _, err = svc.RotateSecretV2(ctx, "other", "row"); !errors.Is(err, ErrWebhookNotFound) {
+	if _, err = svc.RotateSecretV2(ctx, 1, "other", "row"); !errors.Is(err, ErrWebhookNotFound) {
 		t.Fatalf("other: %v", err)
 	}
-	if err = repo.Delete(ctx, "owner", "row"); err != nil {
+	// A profile with the same ID on another account can't rotate it.
+	if _, err = svc.RotateSecretV2(ctx, 2, "owner", "row"); !errors.Is(err, ErrWebhookNotFound) {
+		t.Fatalf("other account: %v", err)
+	}
+	if err = repo.ReplaceSigningSecret(ctx, 2, "owner", "row", "other-account"); !errors.Is(err, ErrWebhookNotFound) {
+		t.Fatalf("other account replace: %v", err)
+	}
+	if err = repo.Delete(ctx, 1, "owner", "row"); err != nil {
 		t.Fatal(err)
 	}
-	if err = repo.ReplaceSigningSecret(ctx, "owner", "row", "after-deletion"); !errors.Is(err, ErrWebhookNotFound) {
+	if err = repo.ReplaceSigningSecret(ctx, 1, "owner", "row", "after-deletion"); !errors.Is(err, ErrWebhookNotFound) {
 		t.Fatalf("deleted row success: %v", err)
 	}
 }

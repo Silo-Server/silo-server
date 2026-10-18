@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { AlertTriangle, Loader2, Play, Square } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TaskStatusBadge } from "@/components/admin/TaskStatusBadge";
@@ -35,6 +36,7 @@ const REFRESH_REASON_LABELS: Record<string, string> = {
   refresh_failure: "Refresh failure",
   core_metadata_incomplete: "Core metadata incomplete",
   trailers_requested: "Trailers requested",
+  provider_artwork: "Provider artwork",
 };
 
 function useTaskClock() {
@@ -314,17 +316,11 @@ export default function AdminTasks() {
   ].filter((g) => g.tasks.length > 0);
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Scheduled Tasks</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            View and manage background tasks. You can trigger tasks manually or adjust their
-            schedules, including whether a task runs on server startup. Internal workers that need
-            no attention run automatically and are not listed.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="Scheduled Tasks"
+        subtitle="View and manage background tasks. You can trigger tasks manually or adjust their schedules, including whether a task runs on server startup. Internal workers that need no attention run automatically and are not listed."
+      />
 
       {isLoading && <p className="text-muted-foreground text-sm">Loading tasks...</p>}
 

@@ -10,11 +10,23 @@ import { expectPhoneLayout, stubPhone } from "@/components/homeRows/phoneLayout.
 import { recipeCatalogFixture } from "@/lib/homeRows/recipeCatalogFixture.test-support";
 import HomeScreenSettings from "./HomeScreenSettings";
 
+// Radix Select (Next up episodes) opens through pointer capture and scrolls
+// its options into view; jsdom provides neither.
+if (!window.HTMLElement.prototype.hasPointerCapture) {
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+}
+
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   role: "user" as string | undefined,
   collections: [] as Array<Record<string, unknown>>,
   catalog: vi.fn(),
+  effective: {} as Record<string, unknown>,
+  effectiveError: false,
+  setSetting: vi.fn(),
+  mutateSetting: vi.fn(),
+  clearSetting: vi.fn(),
 }));
 vi.mock("@/api/v2/request", async () => ({
   ...(await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request")),
@@ -29,8 +41,17 @@ vi.mock("@/hooks/queries/libraries", () => {
   return { useUserLibraries: () => ({ data }), useAvailableUserLibraries: () => ({ data }) };
 });
 vi.mock("@/hooks/queries/settingValues", () => ({
-  useEffectiveSettings: () => ({ data: {}, isLoading: false }),
-  useSetSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
+  useEffectiveSettings: () => ({
+    data: mocks.effectiveError ? undefined : mocks.effective,
+    isLoading: false,
+    isError: mocks.effectiveError,
+  }),
+  useSetSettingValue: () => ({
+    mutate: mocks.mutateSetting,
+    mutateAsync: mocks.setSetting,
+    isPending: false,
+  }),
+  useClearSettingValue: () => ({ mutateAsync: mocks.clearSetting, isPending: false }),
   invalidateSettingValueQueries: vi.fn(),
 }));
 vi.mock("@/hooks/queries/useAllUserCollections", () => ({
@@ -122,6 +143,10 @@ async function release(operation: string) {
 }
 
 beforeEach(() => {
+  mocks.effective = {};
+  mocks.effectiveError = false;
+  mocks.setSetting.mockReset();
+  mocks.clearSetting.mockReset();
   vi.clearAllMocks();
   // The signed-in profile; saves are written as it.
   setAccessToken("token");
@@ -239,15 +264,79 @@ describe("Settings > Home Screen", () => {
     await expectPhoneLayout("Home");
   });
 
-  it("is titled Home screen and says only this profile changes", async () => {
+  it("is titled Home Screen and says only this profile changes", async () => {
     await renderPage();
-    expect(screen.getByRole("heading", { level: 2, name: "Home screen" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Home Screen" })).toBeInTheDocument();
     expect(
       screen.getByText(
         "Choose the rows you see and their order. Only this profile changes, and it saves as you go.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("2 rows · 2 shown")).toBeInTheDocument();
+  });
+
+  it("keeps the next up preference with Home's other row preferences", async () => {
+    mocks.setSetting.mockResolvedValue(undefined);
+    mocks.clearSetting.mockResolvedValue(undefined);
+    await renderPage();
+    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Next up episodes" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Separate row" }));
+
+    expect(mocks.setSetting).toHaveBeenCalledWith({
+      key: "ui.next_up_mode",
+      value: "separate",
+      identity: { scope: "profile" },
+    });
+  });
+
+  it("saves Show new episodes first for this profile, off until chosen", async () => {
+    await renderPage();
+    const toggle = screen.getByRole("switch", { name: "Show new episodes first" });
+    expect(toggle).not.toBeChecked();
+
+    await userEvent.click(toggle);
+
+    expect(mocks.mutateSetting).toHaveBeenCalledWith(
+      { key: "ui.next_up_new_releases_first", value: true, identity: { scope: "profile" } },
+      expect.anything(),
+    );
+  });
+
+  it("shows Show new episodes first on when the profile turned it on", async () => {
+    mocks.effective = {
+      "ui.next_up_new_releases_first": {
+        key: "ui.next_up_new_releases_first",
+        value: true,
+        source: "profile",
+      },
+    };
+    await renderPage();
+
+    expect(screen.getByRole("switch", { name: "Show new episodes first" })).toBeChecked();
+  });
+
+  it("locks next up while this profile's current values cannot be read", async () => {
+    mocks.effectiveError = true;
+    await renderPage();
+
+    expect(screen.getByRole("combobox", { name: "Next up episodes" })).toBeDisabled();
+  });
+
+  it("resets a stored next up choice so it inherits again", async () => {
+    mocks.clearSetting.mockResolvedValue(undefined);
+    mocks.effective = {
+      "ui.next_up_mode": { key: "ui.next_up_mode", value: "separate", source: "profile" },
+    };
+    await renderPage();
+
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(mocks.clearSetting).toHaveBeenCalledWith({
+      key: "ui.next_up_mode",
+      identity: { scope: "profile" },
+    });
   });
 
   it("hides a row with its switch, saving only the hide, and keeps the page switcher off until it lands", async () => {

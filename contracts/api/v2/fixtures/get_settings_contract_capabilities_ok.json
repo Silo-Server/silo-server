@@ -1,5 +1,5 @@
 {
-  "revision": "36e767e32d6613323df470594b9c91068ed062132912c3af462965668b2d31a4",
+  "revision": "221d308c596c46d40c4dfa9f5bdc0777e4cb0fb54c0c49685059d709f9eb56ae",
   "state": "available",
   "allowed": true,
   "api_version": 1,
@@ -16,5 +16,6 @@
   ],
   "supports_batched_effective": true,
   "supports_idempotent_writes": true,
-  "supports_atomic_shortcuts": true
+  "supports_atomic_shortcuts": true,
+  "supports_device_rename": true
 }

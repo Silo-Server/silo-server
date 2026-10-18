@@ -21,12 +21,19 @@ const (
 	ImageCacheTargetSeasonLocalization = "season_localization"
 	ImageCacheTargetEpisode            = "episode"
 	ImageCacheTargetPerson             = "person"
+	// ImageCacheTargetItemBackdrop is one media_item_backdrops row:
+	// target_content_id is the row ID and series_id the item's content ID.
+	ImageCacheTargetItemBackdrop = "item_backdrop"
 
 	ImageCacheImagePoster   = "poster"
 	ImageCacheImageBackdrop = "backdrop"
 	ImageCacheImageLogo     = "logo"
 	ImageCacheImageStill    = "still"
 	ImageCacheImageProfile  = "profile"
+	ImageCacheImageBanner   = "banner"
+	ImageCacheImageThumb    = "thumb"
+	ImageCacheImageClearArt = "clearart"
+	ImageCacheImageDisc     = "disc"
 
 	ImageCacheStatusQueued    = "queued"
 	ImageCacheStatusRunning   = "running"
@@ -205,6 +212,15 @@ func (r *ImageCacheJobRepository) EnqueueBatch(ctx context.Context, inputs []Enq
 }
 
 func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool) (int, error) {
+	return r.upsertImageCacheJobs(ctx, inputs, requeueSucceeded, 0, nil)
+}
+
+// upsertImageCacheJobs upserts jobs. A positive hold makes every row it queues
+// or re-queues due only after the hold, so background drains leave it alone
+// while the caller works through it (see enqueueHeldLocalJobs). When queued is
+// non-nil, it also receives the target key and source of every row left
+// queued.
+func (r *ImageCacheJobRepository) upsertImageCacheJobs(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool, hold time.Duration, queued *[]EnqueueImageCacheJobInput) (int, error) {
 	if r == nil || r.pool == nil {
 		return 0, nil
 	}
@@ -237,7 +253,7 @@ func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []Enq
 	}{{plain, false}, {requeue, true}} {
 		for start := 0; start < len(group.inputs); start += 250 {
 			end := min(start+250, len(group.inputs))
-			affected, err := r.enqueueBatchChunk(ctx, group.inputs[start:end], group.requeue)
+			affected, err := r.enqueueBatchChunk(ctx, group.inputs[start:end], group.requeue, hold, queued)
 			if err != nil {
 				return total, err
 			}
@@ -265,9 +281,12 @@ func normalizeImageCacheJobInput(in EnqueueImageCacheJobInput) (EnqueueImageCach
 	return in, true
 }
 
-func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool) (int, error) {
+func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool, hold time.Duration, queued *[]EnqueueImageCacheJobInput) (int, error) {
 	var sql strings.Builder
-	args := make([]any, 0, len(inputs)*11+1)
+	args := make([]any, 0, len(inputs)*11+2)
+	// Arg 1 is the hold. Rows re-queued by the conflict branch below take the
+	// inserted row's next_attempt_at, so both paths honor it.
+	args = append(args, intervalLiteral(max(hold, 0)))
 	sql.WriteString(`
 		INSERT INTO metadata_image_cache_jobs (
 			target_type, target_content_id, target_language, series_id, source_path,
@@ -281,7 +300,7 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			sql.WriteString(", ")
 		}
 		base := len(args)
-		fmt.Fprintf(&sql, `($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, 'queued', 0, NOW(), NULL, '', '', NOW(), NOW(), NULL)`,
+		fmt.Fprintf(&sql, `($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, 'queued', 0, NOW() + $1::interval, NULL, '', '', NOW(), NOW(), NULL)`,
 			base+1, base+2, base+3, base+4, base+5,
 			base+6, base+7, base+8, base+9, base+10, base+11)
 		args = append(args,
@@ -327,13 +346,21 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			next_attempt_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
-					THEN NOW()
+					THEN EXCLUDED.next_attempt_at
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
-					THEN NOW()
+					THEN EXCLUDED.next_attempt_at
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
-					THEN NOW()
+					THEN EXCLUDED.next_attempt_at
+				-- A held enqueue also holds a due job that has not failed
+				-- (fresh, or deferred for missing storage), so the caller can
+				-- claim it before other drains do; an active hold is kept.
+				WHEN $1::interval > interval '0'
+					AND metadata_image_cache_jobs.status = 'queued'
+					AND metadata_image_cache_jobs.attempt_count = 0
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
+					THEN EXCLUDED.next_attempt_at
 				ELSE metadata_image_cache_jobs.next_attempt_at
 			END,
 			locked_at = CASE
@@ -400,11 +427,36 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 		requeueSucceededArg,
 		requeueSucceededArg)
 
-	tag, err := r.pool.Exec(ctx, sql.String(), args...)
+	if queued == nil {
+		tag, err := r.pool.Exec(ctx, sql.String(), args...)
+		if err != nil {
+			return 0, fmt.Errorf("enqueuing metadata image cache jobs: %w", err)
+		}
+		return int(tag.RowsAffected()), nil
+	}
+	sql.WriteString(`
+		RETURNING target_type, target_content_id, image_type, target_language, source_path, status`)
+	rows, err := r.pool.Query(ctx, sql.String(), args...)
 	if err != nil {
 		return 0, fmt.Errorf("enqueuing metadata image cache jobs: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	defer rows.Close()
+	affected := 0
+	for rows.Next() {
+		var in EnqueueImageCacheJobInput
+		var status string
+		if err := rows.Scan(&in.TargetType, &in.TargetContentID, &in.ImageType, &in.TargetLanguage, &in.SourcePath, &status); err != nil {
+			return affected, fmt.Errorf("scanning enqueued metadata image cache job: %w", err)
+		}
+		affected++
+		if status == ImageCacheStatusQueued {
+			*queued = append(*queued, in)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return affected, fmt.Errorf("enqueuing metadata image cache jobs: %w", err)
+	}
+	return affected, nil
 }
 
 // imageCacheTargetScope matches every job an interactive refresh of one
@@ -414,9 +466,10 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 // refresh only reaches them through series_id. Item and item_localization
 // rows carry series_id = the item's own content ID, so a movie or a
 // season/episode target still matches on target_content_id alone. Person
-// jobs have an empty series_id and stay out of scope.
+// jobs stay out of scope: a photo an NFO names carries the title's content
+// ID in series_id only to confine its read to that title's library roots.
 func imageCacheTargetScope(param string) string {
-	return "(target_content_id = " + param + " OR series_id = " + param + ")"
+	return "(target_content_id = " + param + " OR (series_id = " + param + " AND target_type <> '" + ImageCacheTargetPerson + "'))"
 }
 
 // recoverExpiredRunning releases jobs whose worker lease expired, burning one
@@ -486,20 +539,26 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 	// immediate retry, it does not reset the retry budget a background worker
 	// already spent on artwork that keeps failing. Failed rows are requeued
 	// regardless of their timer; queued rows are only pulled forward while
-	// they are still deferred, so the reset stays a small, one-off write.
-	// CacheTargetArtwork runs this once per refresh, not once per poll.
-	_, err := r.pool.Exec(ctx, `
+	// they are still deferred, or carry a missing-storage deferral to start
+	// over, so the reset stays a small, one-off write. CacheTargetArtwork runs
+	// this once per refresh, not once per poll.
+	query := `
 		UPDATE metadata_image_cache_jobs
 		SET status = 'queued',
 			next_attempt_at = NOW(),
 			locked_at = NULL,
 			locked_by = '',
+			-- A deferral for missing storage starts over, so a refresh on a
+			-- server without the mount does not push it to the long repeat
+			-- delay.
+			last_error = CASE WHEN starts_with(last_error, $2) THEN '' ELSE last_error END,
 			completed_at = NULL,
 			updated_at = NOW()
-		WHERE `+imageCacheTargetScope("$1")+`
+		WHERE ` + imageCacheTargetScope("$1") + `
 		  AND status IN ('queued', 'failed')
-		  AND (status = 'failed' OR next_attempt_at > NOW())
-	`, targetContentID)
+		  AND (status = 'failed' OR next_attempt_at > NOW() OR starts_with(last_error, $2))
+		  AND NOT ` + heldLocalDiscoverySQL
+	_, err := r.pool.Exec(ctx, query, targetContentID, localImageStorageUnavailable)
 	if err != nil {
 		return fmt.Errorf("retrying target metadata image cache jobs: %w", err)
 	}
@@ -522,37 +581,54 @@ func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targ
 	if targetContentID == "" {
 		return false, nil
 	}
-	var running bool
-	if err := r.pool.QueryRow(ctx, `
+	query := `
 		SELECT EXISTS (
 			SELECT 1
 			FROM metadata_image_cache_jobs
-			WHERE `+imageCacheTargetScope("$1")+`
-			  AND status = 'running'
-		)
-	`, targetContentID).Scan(&running); err != nil {
+			WHERE ` + imageCacheTargetScope("$1") + `
+			  AND status = 'running'`
+	var running bool
+	if err := r.pool.QueryRow(ctx, query+")", targetContentID).Scan(&running); err != nil {
 		return false, fmt.Errorf("checking running metadata image cache jobs: %w", err)
 	}
 	return running, nil
 }
 
+// claimDue claims due queued jobs, optionally only those for one target scope.
 func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error) {
 	if r == nil || r.pool == nil || limit <= 0 {
 		return nil, nil
+	}
+	args := []any{limit, workerID}
+	if targetContentID != "" {
+		args = append(args, targetContentID)
+	}
+	rows, err := r.pool.Query(ctx, claimDueQuery(targetContentID != ""), args...)
+	if err != nil {
+		return nil, fmt.Errorf("claiming metadata image cache jobs: %w", err)
+	}
+	return scanClaimedImageCacheJobs(rows, limit)
+}
+
+// claimDueQuery claims up to $1 due jobs for worker $2, within target scope
+// $3 when targeted.
+func claimDueQuery(targeted bool) string {
+	due := "next_attempt_at <= NOW()"
+	if targeted {
+		// A refresh's own discoveries are its to copy now, hold or not.
+		due = "(" + due + " OR " + heldLocalDiscoverySQL + ")"
 	}
 	query := `
 		WITH due AS (
 			SELECT id
 			FROM metadata_image_cache_jobs
 			WHERE status = 'queued'
-			  AND next_attempt_at <= NOW()
+			  AND ` + due + `
 	`
-	args := []any{limit, workerID}
-	if targetContentID != "" {
+	if targeted {
 		query += " AND " + imageCacheTargetScope("$3")
-		args = append(args, targetContentID)
 	}
-	query += `
+	return query + `
 			ORDER BY next_attempt_at ASC, id ASC
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
@@ -564,20 +640,20 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 			updated_at = NOW()
 		FROM due
 		WHERE j.id = due.id
-		RETURNING
+		RETURNING ` + imageCacheJobReturningColumns
+}
+
+const imageCacheJobReturningColumns = `
 			j.id, j.target_type, j.target_content_id, j.target_language, j.series_id,
 			j.source_path, j.provider_id, j.provider_content_id,
 			j.content_type, j.image_type, j.season_number, j.episode_number,
 			j.status, j.attempt_count, j.next_attempt_at, j.locked_at,
 			j.locked_by, j.last_error, j.created_at, j.updated_at, j.completed_at
 	`
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("claiming metadata image cache jobs: %w", err)
-	}
-	defer rows.Close()
 
-	jobs := make([]*models.MetadataImageCacheJob, 0, limit)
+func scanClaimedImageCacheJobs(rows pgx.Rows, sizeHint int) ([]*models.MetadataImageCacheJob, error) {
+	defer rows.Close()
+	jobs := make([]*models.MetadataImageCacheJob, 0, sizeHint)
 	for rows.Next() {
 		job := new(models.MetadataImageCacheJob)
 		if err := rows.Scan(
@@ -656,7 +732,9 @@ func (r *ImageCacheJobRepository) RequeueClaimed(ctx context.Context, ids []int6
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
 		SET status = 'queued',
-			next_attempt_at = NOW(),
+			-- A job claimed before it was due (a held discovery or a
+			-- deferral) keeps its wait.
+			next_attempt_at = GREATEST(next_attempt_at, NOW()),
 			locked_at = NULL,
 			locked_by = '',
 			updated_at = NOW()
@@ -702,11 +780,10 @@ func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, j
 	if r == nil || r.pool == nil || job == nil {
 		return "", nil
 	}
-	query, args, ok := currentTargetSourceQuery(job)
+	query, args, ok := currentTargetCachedPathQuery(job)
 	if !ok {
 		return "", nil
 	}
-	query = strings.Replace(query, "_source_path", "_path", 1)
 	var current string
 	err := r.pool.QueryRow(ctx, query, args...).Scan(&current)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -718,14 +795,28 @@ func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, j
 	return current, nil
 }
 
+// currentTargetCachedPathQuery reads the served path column beside the source
+// column currentTargetSourceQuery reads ("poster_source_path" ->
+// "poster_path", "source_path" -> "path").
+func currentTargetCachedPathQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
+	query, args, ok := currentTargetSourceQuery(job)
+	return strings.Replace(query, "source_path", "path", 1), args, ok
+}
+
 func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
 	switch job.TargetType {
 	case ImageCacheTargetItem:
 		col, ok := itemArtworkSourceColumn(job.ImageType)
 		if !ok {
+			col, ok = itemOnlyArtworkSourceColumn(job.ImageType)
+		}
+		if !ok {
 			return "", nil, false
 		}
 		return fmt.Sprintf("SELECT %s FROM media_items WHERE content_id = $1", col),
+			[]any{job.TargetContentID}, true
+	case ImageCacheTargetItemBackdrop:
+		return "SELECT source_path FROM media_item_backdrops WHERE id = $1::bigint",
 			[]any{job.TargetContentID}, true
 	case ImageCacheTargetItemLocalization:
 		col, ok := itemArtworkSourceColumn(job.ImageType)
@@ -764,6 +855,63 @@ func itemArtworkSourceColumn(imageType string) (string, bool) {
 	}
 }
 
+// itemOnlyArtworkSlot is an item image slot that localizations do not carry.
+type itemOnlyArtworkSlot struct {
+	imageType    string
+	sourceColumn string
+	pathColumn   string
+}
+
+// itemOnlyArtworkSlots lists those slots in the order the provider-artwork
+// backfill walks them.
+var itemOnlyArtworkSlots = [...]itemOnlyArtworkSlot{
+	{ImageCacheImageBanner, "banner_source_path", "banner_path"},
+	{ImageCacheImageThumb, "thumb_source_path", "thumb_path"},
+	{ImageCacheImageClearArt, "clearart_source_path", "clearart_path"},
+	{ImageCacheImageDisc, "disc_source_path", "disc_path"},
+}
+
+// itemOnlyArtworkSourceColumn names the source column of the item slots that
+// localizations do not carry.
+func itemOnlyArtworkSourceColumn(imageType string) (string, bool) {
+	for _, slot := range itemOnlyArtworkSlots {
+		if slot.imageType == imageType {
+			return slot.sourceColumn, true
+		}
+	}
+	return "", false
+}
+
+// itemOnlyArtworkRepairBranches adds the item-only slots to
+// enqueueArtworkRepair's candidates, one branch per slot as for the other
+// columns, so a repair by path can use each slot's partial path index.
+func itemOnlyArtworkRepairBranches() string {
+	var b strings.Builder
+	for _, slot := range itemOnlyArtworkSlots {
+		fmt.Fprintf(&b, `
+			UNION ALL
+			SELECT
+				'%[1]s'::text,
+				'item'::text,
+				mi.content_id,
+				''::text,
+				mi.content_id,
+				mi.%[2]s,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_items mi
+			WHERE mi.%[2]s LIKE '%%://%%'
+			  AND lower(mi.%[2]s) NOT LIKE ALL (@nonProviderSchemes)
+			  AND ((cardinality($2::text[]) = 0 AND (mi.%[3]s LIKE '%%://%%' OR mi.%[3]s = '')) OR (mi.%[3]s = ANY($2) AND mi.%[3]s <> ''))`,
+			slot.imageType, slot.sourceColumn, slot.pathColumn)
+	}
+	return b.String()
+}
+
 func (r *ImageCacheJobRepository) DeleteSucceededBefore(ctx context.Context, before time.Time, limit int) (int, error) {
 	if r == nil || r.pool == nil || limit <= 0 {
 		return 0, nil
@@ -796,7 +944,7 @@ func (r *ImageCacheJobRepository) EnqueueArtworkRepair(ctx context.Context, path
 	return r.enqueueArtworkRepair(ctx, limit, paths)
 }
 
-const imageCacheDiscoverySurfaceCount = 10
+const imageCacheDiscoverySurfaceCount = 14
 const imageCachePosterPathColumn = "poster_path"
 const imageCacheBackdropPathColumn = "backdrop_path"
 const imageCacheLogoPathColumn = "logo_path"
@@ -947,11 +1095,7 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 	textArgs := []any{limit, cursor.Key}
 	localizedArgs := []any{limit, cursor.Key, cursor.Subkey}
 
-	switch cursor.Surface {
-	case 0, 1, 2:
-		imageType := imageTypes[cursor.Surface]
-		sourceColumn := sourceColumns[cursor.Surface]
-		pathColumn := pathColumns[cursor.Surface]
+	itemQuery := func(imageType, sourceColumn, pathColumn string) (string, []any) {
 		return fmt.Sprintf(`
 			SELECT '%s'::text AS image_type, 'item'::text AS target_type,
 			       mi.content_id AS target_content_id, ''::text AS target_language,
@@ -969,6 +1113,11 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 				LIMIT $1
 			) mi
 		`, imageType, sourceColumn, candidate("mi."+sourceColumn, "mi."+pathColumn)), textArgs
+	}
+
+	switch cursor.Surface {
+	case 0, 1, 2:
+		return itemQuery(imageTypes[cursor.Surface], sourceColumns[cursor.Surface], pathColumns[cursor.Surface])
 	case 3, 4, 5:
 		index := cursor.Surface - 3
 		imageType := imageTypes[index]
@@ -1068,6 +1217,10 @@ func imageCacheDiscoverySourceQuery(cursor imageCacheDiscoveryCursor, limit int)
 				LIMIT $1
 			) p
 		`, candidate("p.photo_source_path", "p.photo_path")), []any{limit, cursor.NumericKey}
+	case 10, 11, 12, 13:
+		// Banner, thumb, clear art and disc art, one surface each like 0-2.
+		slot := itemOnlyArtworkSlots[cursor.Surface-10]
+		return itemQuery(slot.imageType, slot.sourceColumn, slot.pathColumn)
 	default:
 		return `SELECT NULL WHERE false`, []any{limit}
 	}
@@ -1122,14 +1275,16 @@ func ladderMissingRungSQL(pathColumn, rungPattern string) string {
 // ladderCandidateRowsSQL is the set of cached artwork still missing the rung its
 // image type gained at the current artworkkey.LadderVersion.
 //
-// Only poster, still, and logo appear: those are the types whose ladder changed.
-// Re-downloading backdrops and headshots would spend the same bandwidth to
-// produce byte-identical objects. Revisit this list together with
-// artworkkey.VariantWidths and ladderTypesWithAddedRung.
+// Only poster, still, backdrop, and logo appear: those are the types whose
+// ladder has changed. Re-downloading headshots and the extended item artwork
+// would spend the same bandwidth to produce byte-identical rungs. Revisit this
+// list together with artworkkey.VariantWidths and ladderTypesWithAddedRung.
 func ladderCandidateRowsSQL() string {
 	return strings.NewReplacer(
 		"@recachableSchemes", ladderRecachableSchemesSQL,
-		"@wideRung", ladderRungLiteral(ImageCacheImagePoster),
+		"@posterRung", ladderRungLiteral(ImageCacheImagePoster),
+		"@stillRung", ladderRungLiteral(ImageCacheImageStill),
+		"@backdropRung", ladderRungLiteral(ImageCacheImageBackdrop),
 		"@logoRung", ladderRungLiteral(ImageCacheImageLogo),
 	).Replace(`
 			SELECT
@@ -1150,7 +1305,7 @@ func ladderCandidateRowsSQL() string {
 			  AND lower(mi.poster_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(mi.poster_path, '') <> ''
 			  AND mi.poster_path NOT LIKE '%://%'
-			  AND ` + ladderMissingRungSQL("mi.poster_path", "@wideRung") + `
+			  AND ` + ladderMissingRungSQL("mi.poster_path", "@posterRung") + `
 			UNION ALL
 			SELECT
 				'logo'::text,
@@ -1191,7 +1346,7 @@ func ladderCandidateRowsSQL() string {
 			  AND lower(loc.poster_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(loc.poster_path, '') <> ''
 			  AND loc.poster_path NOT LIKE '%://%'
-			  AND ` + ladderMissingRungSQL("loc.poster_path", "@wideRung") + `
+			  AND ` + ladderMissingRungSQL("loc.poster_path", "@posterRung") + `
 			UNION ALL
 			SELECT
 				'logo'::text,
@@ -1233,7 +1388,7 @@ func ladderCandidateRowsSQL() string {
 			  AND lower(s.poster_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(s.poster_path, '') <> ''
 			  AND s.poster_path NOT LIKE '%://%'
-			  AND ` + ladderMissingRungSQL("s.poster_path", "@wideRung") + `
+			  AND ` + ladderMissingRungSQL("s.poster_path", "@posterRung") + `
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -1255,7 +1410,7 @@ func ladderCandidateRowsSQL() string {
 			  AND lower(loc.poster_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(loc.poster_path, '') <> ''
 			  AND loc.poster_path NOT LIKE '%://%'
-			  AND ` + ladderMissingRungSQL("loc.poster_path", "@wideRung") + `
+			  AND ` + ladderMissingRungSQL("loc.poster_path", "@posterRung") + `
 			UNION ALL
 			SELECT
 				'still'::text,
@@ -1276,7 +1431,69 @@ func ladderCandidateRowsSQL() string {
 			  AND lower(e.still_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(e.still_path, '') <> ''
 			  AND e.still_path NOT LIKE '%://%'
-			  AND ` + ladderMissingRungSQL("e.still_path", "@wideRung") + `
+			  AND ` + ladderMissingRungSQL("e.still_path", "@stillRung") + `
+			UNION ALL
+			SELECT
+				'backdrop'::text,
+				'item'::text,
+				mi.content_id,
+				''::text,
+				mi.content_id,
+				mi.backdrop_source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_items mi
+			WHERE mi.backdrop_source_path LIKE '%://%'
+			  AND lower(mi.backdrop_source_path) NOT LIKE ALL (@recachableSchemes)
+			  AND coalesce(mi.backdrop_path, '') <> ''
+			  AND mi.backdrop_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("mi.backdrop_path", "@backdropRung") + `
+			UNION ALL
+			SELECT
+				'backdrop'::text,
+				'item_localization'::text,
+				loc.content_id,
+				loc.language,
+				loc.content_id,
+				loc.backdrop_source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_item_localizations loc
+			JOIN media_items mi ON mi.content_id = loc.content_id
+			WHERE loc.backdrop_source_path LIKE '%://%'
+			  AND lower(loc.backdrop_source_path) NOT LIKE ALL (@recachableSchemes)
+			  AND coalesce(loc.backdrop_path, '') <> ''
+			  AND loc.backdrop_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("loc.backdrop_path", "@backdropRung") + `
+			UNION ALL
+			SELECT
+				'backdrop'::text,
+				'item_backdrop'::text,
+				b.id::text,
+				''::text,
+				b.content_id,
+				b.source_path,
+				mi.type,
+				NULL::integer,
+				NULL::integer,
+				mi.tmdb_id,
+				mi.tvdb_id,
+				mi.imdb_id
+			FROM media_item_backdrops b
+			JOIN media_items mi ON mi.content_id = b.content_id
+			WHERE b.source_path LIKE '%://%'
+			  AND lower(b.source_path) NOT LIKE ALL (@recachableSchemes)
+			  AND coalesce(b.path, '') <> ''
+			  AND b.path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("b.path", "@backdropRung") + `
 `)
 }
 
@@ -1590,7 +1807,7 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 			FROM people p
 			WHERE p.photo_source_path LIKE '%://%'
 			  AND lower(p.photo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))
+			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))@itemOnlyArtworkBranches
 		),
 		candidates AS (
 			SELECT ac.*
@@ -1616,7 +1833,8 @@ func (r *ImageCacheJobRepository) enqueueArtworkRepair(ctx context.Context, limi
 		       COALESCE(tvdb_id, '') AS tvdb_id,
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
-	`, "@nonProviderSchemes", nonProviderImageSchemesSQL)
+	`, "@itemOnlyArtworkBranches", itemOnlyArtworkRepairBranches())
+	query = strings.ReplaceAll(query, "@nonProviderSchemes", nonProviderImageSchemesSQL)
 	rows, err := r.pool.Query(ctx, query, limit, repairPaths)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing existing provider artwork: %w", err)
@@ -1661,7 +1879,7 @@ const imageCacheLocalProviderID = "local"
 
 func imageCacheProviderIDFromSource(sourcePath, fallback string) string {
 	if isLocalImageSourcePath(sourcePath) {
-		return imageCacheLocalProviderID
+		return localSourceProviderID(sourcePath)
 	}
 	if provider := providerIDFromPluginURL(sourcePath); provider != "" {
 		return provider

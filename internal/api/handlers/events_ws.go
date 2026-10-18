@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -10,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -85,12 +88,16 @@ type EventsHandler struct {
 	// periodic login-session check; see SetSessionRoles.
 	sessionRoles         sessionRoleChecker
 	sessionCheckInterval time.Duration
+	// profiles re-verifies the PIN proof of the profile a connection holding
+	// the admin channels acts as; see SetProfileVerifier.
+	profiles apimw.ViewerResolver
 }
 
-// sessionRoleChecker reports whether a login session is still active and the
-// current role of its account; auth.SessionRepository implements it.
+// sessionRoleChecker reports whether a login session is still active and its
+// authority, including the current role of its account;
+// auth.SessionRepository implements it.
 type sessionRoleChecker interface {
-	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
+	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
 }
 
 // SetSessionRoles makes the v1 events socket recheck its login session. The
@@ -100,6 +107,16 @@ type sessionRoleChecker interface {
 func (h *EventsHandler) SetSessionRoles(sessions sessionRoleChecker) {
 	if h != nil {
 		h.sessionRoles = sessions
+	}
+}
+
+// SetProfileVerifier makes the v1 events socket re-verify, at the handshake
+// and on every session check, the PIN proof of the profile a connection on an
+// admin account acts as, so changing that profile's PIN takes the admin
+// channels away as it does on the v2 socket.
+func (h *EventsHandler) SetProfileVerifier(profiles apimw.ViewerResolver) {
+	if h != nil {
+		h.profiles = profiles
 	}
 }
 
@@ -147,36 +164,102 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	// identity arrives as a short-lived single-use ticket minted via
 	// POST /events/ws-ticket. A connection without a ticket stays unbound and
 	// simply cannot subscribe to the profile-scoped notifications channel.
-	boundProfileID := ""
+	var bound notifications.Ticket
 	if ticket := r.URL.Query().Get("ticket"); ticket != "" && h.notifications != nil {
-		ticketUserID, ticketProfileID, ok := h.notifications.Tickets.Consume(r.Context(), ticket)
-		if ok && ticketUserID == claims.UserID {
-			boundProfileID = ticketProfileID
+		binding, ok := h.notifications.Tickets.Consume(r.Context(), ticket)
+		if ok && binding.UserID == claims.UserID {
+			bound = binding
 		} else {
 			// Expired, reused, consumed on a different node, or minted for
 			// another user: degrade to an unbound connection instead of
-			// failing the handshake. The binding grants nothing on its own —
-			// the client retries it when its notifications subscription is
-			// rejected — whereas a hard 403 would take down every realtime
-			// channel over a notifications-only concern.
+			// failing the handshake, which would take down every realtime
+			// channel. An unbound connection cannot subscribe to
+			// notifications, and on an admin account it is judged as acting
+			// with no profile below, so a household that requires a profile
+			// gets the user channels. Both fail closed: the client gets the
+			// binding back by reconnecting with a fresh ticket, which it does
+			// when its notifications subscription is rejected.
 			slog.WarnContext(r.Context(), "events: websocket ticket rejected; connection unbound", "component", "api",
 				"user_id", claims.UserID)
+		}
+	}
+
+	// Admin channels and other accounts' events follow the acting profile, as
+	// on the v2 socket: another profile on an admin's account connects with
+	// the user role. A handshake that declares no profile acts as the profile
+	// its ticket was minted for, which the viewer gate verified then. Either
+	// way the profile's PIN proof is re-verified here and on every session
+	// check. The session check below still compares the account's real role.
+	boundProfileID := bound.ProfileID
+	effective := claims
+	var stillActingAdmin func(context.Context) (bool, error)
+	if claims.Role == models.RoleAdmin {
+		stillActingAdmin = apimw.ActingAdmin
+		actingProfileID, profileToken := apimw.GetProfileID(r.Context()), r.Header.Get("X-Profile-Token")
+		if actingProfileID == "" && boundProfileID != "" {
+			actingProfileID, profileToken = boundProfileID, bound.ProfileToken
+			stillActingAdmin = func(ctx context.Context) (bool, error) { return apimw.ActingAdminAs(ctx, boundProfileID) }
+		}
+		stillActingAdmin = h.withProfileProof(stillActingAdmin, claims, actingProfileID, profileToken)
+		actingAdmin, err := stillActingAdmin(r.Context())
+		if err != nil {
+			http.Error(w, "failed to verify active profile", http.StatusInternalServerError)
+			return
+		}
+		if !actingAdmin {
+			demoted := *claims
+			demoted.Role = models.RoleUser
+			effective = &demoted
+			stillActingAdmin = nil
 		}
 	}
 
 	if h.sessionRoles != nil && claims.SessionID != "" {
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
-		go h.closeOnSessionChange(ctx, cancel, claims)
+		go h.closeOnSessionChange(ctx, cancel, claims, stillActingAdmin)
 		r = r.WithContext(ctx)
 	}
-	h.serveWebSocket(w, r, claims, boundProfileID, wsUpgrader, nil)
+	h.serveWebSocket(w, r, effective, boundProfileID, wsUpgrader, nil)
+}
+
+// withProfileProof narrows decide to while profileID's PIN proof still
+// verifies for the connection's login session. The proof is bound to the
+// profile's PIN revision, so a PIN change, or a PIN newly set on the profile,
+// ends it. With no verifier wired, or no profile, decide is returned as is.
+func (h *EventsHandler) withProfileProof(decide func(context.Context) (bool, error), claims *auth.Claims, profileID, profileToken string) func(context.Context) (bool, error) {
+	if h.profiles == nil || profileID == "" {
+		return decide
+	}
+	input := access.ResolveInput{
+		UserID:       claims.UserID,
+		SessionID:    claims.SessionID,
+		ProfileID:    profileID,
+		ProfileToken: profileToken,
+		// API keys carry no PIN proof by design, as at the viewer gate.
+		SkipPINVerification: claims.TokenType == auth.TokenTypeAPIKey,
+	}
+	return func(ctx context.Context) (bool, error) {
+		scope, err := h.profiles.Resolve(ctx, input)
+		if errors.Is(err, access.ErrProfileUnverified) || errors.Is(err, access.ErrProfileNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if !scope.ProfileVerified {
+			return false, nil
+		}
+		return decide(ctx)
+	}
 }
 
 // closeOnSessionChange cancels a v1 connection once its login session is no
-// longer active or the account's role differs from the access token's. A
-// failed check is skipped; the next one decides.
-func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context.CancelFunc, claims *auth.Claims) {
+// longer active or the account's role differs from the access token's, and,
+// for a connection holding the admin channels, once stillActingAdmin stops
+// holding (say the household gained a PIN, or the acting profile's PIN
+// changed). A failed check is skipped; the next one decides.
+func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context.CancelFunc, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) {
 	interval := h.sessionCheckInterval
 	if interval <= 0 {
 		interval = eventsSessionCheckInterval
@@ -189,14 +272,32 @@ func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context
 			return
 		case <-ticker.C:
 			checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-			role, active, err := h.sessionRoles.ActiveSessionRole(checkCtx, claims.SessionID)
+			changed := h.sessionChanged(checkCtx, claims, stillActingAdmin)
 			stop()
-			if err == nil && (!active || role != claims.Role) {
+			if changed {
 				cancel()
 				return
 			}
 		}
 	}
+}
+
+// sessionChanged reports whether one recheck found the connection's access
+// gone: the session ended, the account's role changed, or stillActingAdmin
+// (when set) no longer holds. A failed session lookup reports no change; a
+// failed acting-admin decision counts as lost, so a connection holding the
+// administrator channels fails closed like the HTTP routes and reconnects.
+func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) bool {
+	authority, active, err := h.sessionRoles.ActiveSession(ctx, claims.SessionID)
+	// A remote-playback handoff never holds a v1 socket.
+	if err == nil && (!active || authority.Role != claims.Role || authority.IsRemotePlayback()) {
+		return true
+	}
+	if stillActingAdmin == nil {
+		return false
+	}
+	acting, err := stillActingAdmin(ctx)
+	return err != nil || !acting
 }
 
 // serveWebSocket runs one events connection. When accessChanged closes, the
@@ -237,7 +338,7 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 		return writeWebSocketControl(conn, websocket.PingMessage, nil)
 	})
 
-	allowedChannels := allowedChannelsForRole(claims.Role)
+	allowedChannels := allowedChannelsForClaims(claims)
 
 	// A connection may declare its channels on the URL instead of sending a
 	// subscribe frame. That is all an observer needs — subscribe is the only
@@ -585,6 +686,16 @@ func parseDeclaredChannels(query url.Values) ([]evt.EventChannel, bool) {
 	return channels, true
 }
 
+// allowedChannelsForClaims is allowedChannelsForRole, less the household
+// channels a remote-playback handoff may not see: history imports cover every
+// profile on the account.
+func allowedChannelsForClaims(claims *auth.Claims) []evt.EventChannel {
+	if claims.IsRemotePlayback() {
+		return []evt.EventChannel{evt.ChannelCatalog, evt.ChannelUserState, evt.ChannelUserSettings, evt.ChannelNotifications}
+	}
+	return allowedChannelsForRole(claims.Role)
+}
+
 func allowedChannelsForRole(role string) []evt.EventChannel {
 	channels := []evt.EventChannel{
 		evt.ChannelCatalog,
@@ -623,6 +734,11 @@ func allowsEventForClaims(claims *auth.Claims, boundProfileID string, env evt.En
 	if env.UserID > 0 && claims.Role != "admin" && env.UserID != claims.UserID {
 		return false
 	}
+	// A remote-playback handoff sees its bound profile's events, not those
+	// of the account's other profiles.
+	if claims.IsRemotePlayback() && env.ProfileID != "" && env.ProfileID != claims.ProfileID {
+		return false
+	}
 	return true
 }
 
@@ -657,7 +773,7 @@ func (h *EventsHandler) snapshotForChannel(
 		if h == nil || h.notifications == nil || boundProfileID == "" {
 			return json.RawMessage("[]"), nil
 		}
-		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), boundProfileID, 25)
+		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), claims.UserID, boundProfileID, 25)
 		if err != nil {
 			return nil, err
 		}

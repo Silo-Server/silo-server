@@ -84,6 +84,37 @@ Jellyfin-compatible browsing and existing progress uploads retain their behavior
 Storage and transaction invariants are described in
 [progress bootstrap storage](architecture/progress-bootstrap.md).
 
+## Clearing a resume position
+
+`clearResumePosition` (DELETE `/api/v2/progress/{media_item_id}/position`)
+clears the acting profile's resume position on a movie or episode and answers
+204. It is the manual edit for an item someone skimmed and does not want left
+partly watched. The progress entry stays with `position_seconds` 0 and keeps
+`completed` and `duration_seconds`, so a rewatched item stays watched. Watch
+history is untouched. Mark unwatched (`unmarkWatched`) is different: it removes
+the item's history, including unfinished plays.
+
+The write is stamped with the server time. It advances the delta-sync cursor, so
+other devices receive the cleared position, and an older provider resume point
+cannot restore it. No watch-provider event is sent, so a provider that kept a
+resume point from an earlier scrobble keeps it. Like mark unwatched, clearing an
+episode of a [dropped series](architecture/dropped-shows.md) ends the drop, and
+watch sync then lifts it on providers that sync drops. When a position was
+cleared, the server publishes `user_state.changed` with `change: "progress"`.
+
+An item without a resume position is a no-op 204. A season, series or ebook has
+no single resume position and fails validation at `path.media_item_id` (422). An
+unknown or hidden item is 404, as is any other kind `markWatched` does not
+handle, such as an audiobook. The operation is profile scoped and
+`non_retryable`: a delayed retry would also clear a position recorded after the
+first request.
+
+Clients detect the operation with `getProgressCapabilities`
+(GET `/api/v2/progress/capabilities`), a profile-scoped capability document
+whose `clear_resume_position` is true when it is served. Jellyfin clients
+already have the equivalent: `PlaybackPositionTicks` 0 without `Played` on
+`/UserItems/{itemId}/UserData` ([Jellyfin compatibility](jellycompat-api.md)).
+
 ## Playback-origin uploads
 
 `POST /api/v2/sync/progress` and its v1 counterpart upload playback positions,

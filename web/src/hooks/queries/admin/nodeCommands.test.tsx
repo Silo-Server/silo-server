@@ -15,6 +15,12 @@ import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "
 import type { StreamNode } from "@/api/types";
 import { useAdminNodes, useCheckNodeHealth, useReprobeNode } from "./nodes";
 import AdminNodes from "@/pages/AdminNodes";
+
+// Routing settings have their own suite, and their unsaved-changes guard needs
+// a data router these node-command tests do not mount.
+vi.mock("@/pages/admin-settings/NodeRoutingSettings", () => ({
+  NodeRoutingSettings: () => null,
+}));
 const node: StreamNode = {
   id: "17",
   name: "Synthetic",
@@ -189,3 +195,50 @@ it(`check fences late node observation and invalidation`, async () => {
   expect(invalidate).not.toHaveBeenCalled();
   expect(result.current.data).toBeUndefined();
 });
+
+it.each([
+  [false, "Drain Synthetic", "drain"],
+  [true, "Resume Synthetic", "resume"],
+] as const)(
+  "node row drain action (requested=%s) posts %s once and shows the drain line",
+  async (requested, label, path) => {
+    const writes: string[] = [];
+    const listed: StreamNode = {
+      ...node,
+      active_jobs: 2,
+      drain_requested: requested,
+      drain_state: requested ? "draining" : "none",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown, init: RequestInit) => {
+        if (init.method === "POST") {
+          writes.push(String(url));
+          return Promise.resolve(
+            reply({
+              node_id: "17",
+              drain_requested: !requested,
+              drain_state: requested ? "none" : "draining",
+              active_jobs: 2,
+            }),
+          );
+        }
+        return Promise.resolve(reply({ items: [listed], page: { has_more: false } }));
+      }),
+    );
+    const { wrapper: Wrapper } = fixture();
+    render(
+      <MemoryRouter>
+        <Wrapper>
+          <AdminNodes />
+        </Wrapper>
+      </MemoryRouter>,
+    );
+    const button = await screen.findByRole("button", { name: label });
+    if (requested) expect(screen.getByText("Draining · 2 transcodes left")).toBeInTheDocument();
+    else expect(screen.queryByText(/Draining ·/)).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toContain(`/api/v2/admin/nodes/17/${path}`);
+  },
+);

@@ -259,8 +259,8 @@ func TestMarkerResolverUsesShowIDsAndPreservesSpecials(t *testing.T) {
 		_, _ = fixture.pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id=$1`, episodeID)
 		_, _ = fixture.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, seriesID)
 	})
-	if _, err := fixture.pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,tmdb_id,imdb_id,tvdb_id,air_date)
-		VALUES($1,$2,0,2,'88','tt99','99','2026-09-30')`, episodeID, seriesID); err != nil {
+	if _, err := fixture.pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,tmdb_id,imdb_id,tvdb_id,title,air_date)
+		VALUES($1,$2,0,2,'88','tt99','99',' Special Two ','2026-09-30')`, episodeID, seriesID); err != nil {
 		t.Fatal(err)
 	}
 	resolver := NewDBExternalIDResolver(fixture.pool)
@@ -270,6 +270,9 @@ func TestMarkerResolverUsesShowIDsAndPreservesSpecials(t *testing.T) {
 	}
 	if ids.TmdbID != "" || ids.TvdbID != "" || ids.ImdbID != "tt42" || ids.SeasonNumber != 0 || ids.EpisodeNumber != 2 {
 		t.Fatalf("episode identity leaked into show lookup: %+v", ids)
+	}
+	if ids.Episode != (EpisodeIDs{TmdbID: "88", ImdbID: "tt99", TvdbID: "99"}) || ids.EpisodeTitle != "Special Two" {
+		t.Fatalf("episode refinement = %+v %q, want the episode's own IDs and trimmed title", ids.Episode, ids.EpisodeTitle)
 	}
 	if !ids.Released.Equal(time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("released=%v, want the episode air date", ids.Released)
@@ -452,4 +455,91 @@ type requestRecorder struct {
 func (r requestRecorder) FetchMarkers(ctx context.Context, req Request) (Result, error) {
 	*r.request = req
 	return r.populationProvider.FetchMarkers(ctx, req)
+}
+
+func TestMarkerResolverEpisodeNumberingFollowsLibraryChain(t *testing.T) {
+	fixture := newContributionStoreFixture(t)
+	ctx := t.Context()
+	seriesID := strconv.FormatInt(time.Now().UnixNano(), 10)
+	episodeID := strconv.FormatInt(time.Now().UnixNano()+1, 10)
+	if _, err := fixture.pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title,tmdb_id,tvdb_id) VALUES($1,'series','Numbering fixture','70','80')`, seriesID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,tmdb_id,tvdb_id)
+		VALUES($1,$2,1,3,'700','800')`, episodeID, seriesID); err != nil {
+		t.Fatal(err)
+	}
+	installations := map[string]int64{}
+	for _, capability := range []string{"tvdb", "tmdb"} {
+		var id int64
+		if err := fixture.pool.QueryRow(ctx, `INSERT INTO plugin_installations(plugin_id,version,install_path) VALUES($1,'1.0.0','/numbering-fixture') RETURNING id`,
+			fmt.Sprintf("numbering.%s.%d", capability, fixture.suffix)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		installations[capability] = id
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = fixture.pool.Exec(ctx, `DELETE FROM library_provider_chains WHERE media_folder_id=$1`, fixture.folderID)
+		_, _ = fixture.pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = ANY($1)`, []int64{installations["tvdb"], installations["tmdb"]})
+		_, _ = fixture.pool.Exec(ctx, `DELETE FROM episodes WHERE content_id=$1`, episodeID)
+		_, _ = fixture.pool.Exec(ctx, `DELETE FROM media_items WHERE content_id=$1`, seriesID)
+	})
+	type link struct {
+		capability string
+		level      string
+		enabled    bool
+	}
+	setChain := func(t *testing.T, links ...link) {
+		t.Helper()
+		if _, err := fixture.pool.Exec(ctx, `DELETE FROM library_provider_chains WHERE media_folder_id=$1`, fixture.folderID); err != nil {
+			t.Fatal(err)
+		}
+		for priority, l := range links {
+			if _, err := fixture.pool.Exec(ctx, `INSERT INTO library_provider_chains(media_folder_id,priority,content_level,enabled,plugin_installation_id,capability_id)
+				VALUES($1,$2,$3,$4,$5,$6)`, fixture.folderID, priority, l.level, l.enabled, installations[l.capability], l.capability); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	resolver := NewDBExternalIDResolver(fixture.pool)
+	numbering := func(t *testing.T) string {
+		t.Helper()
+		ids, err := resolver.ResolveForFile(ctx, &models.MediaFile{ID: fixture.fileIDs[0], EpisodeID: episodeID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ids.EpisodeNumbering
+	}
+
+	for _, tt := range []struct {
+		name  string
+		chain []link
+		want  string
+	}{
+		{name: "no chain", want: ""},
+		{name: "TVDB first", chain: []link{{"tvdb", "episode", true}, {"tmdb", "episode", true}}, want: "tvdb"},
+		{name: "TMDB first", chain: []link{{"tmdb", "episode", true}, {"tvdb", "episode", true}}, want: "tmdb"},
+		{name: "disabled TVDB is skipped", chain: []link{{"tvdb", "episode", false}, {"tmdb", "episode", true}}, want: "tmdb"},
+		{name: "legacy flat chain", chain: []link{{"tvdb", "", true}, {"tmdb", "", true}}, want: "tvdb"},
+		{name: "per-level chain wins over legacy", chain: []link{{"tvdb", "", true}, {"tmdb", "episode", true}}, want: "tmdb"},
+		{name: "other levels do not count", chain: []link{{"tvdb", "series", true}, {"tmdb", "episode", true}}, want: "tmdb"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setChain(t, tt.chain...)
+			if got := numbering(t); got != tt.want {
+				t.Fatalf("numbering = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("first provider the episode came from", func(t *testing.T) {
+		setChain(t, link{"tvdb", "episode", true}, link{"tmdb", "episode", true})
+		if _, err := fixture.pool.Exec(ctx, `UPDATE episodes SET tvdb_id='' WHERE content_id=$1`, episodeID); err != nil {
+			t.Fatal(err)
+		}
+		if got := numbering(t); got != "tmdb" {
+			t.Fatalf("numbering = %q, want tmdb for an episode TVDB did not supply", got)
+		}
+	})
 }

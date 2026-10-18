@@ -62,6 +62,9 @@ export const catalogKeys = {
   all: ["catalog"] as const,
   list: (params: CatalogParams) => ["catalog", "list", params] as const,
   filters: (params: Omit<CatalogParams, "limit">) => ["catalog", "filters", params] as const,
+  allLetters: ["catalog", "letters"] as const,
+  letters: (params: Pick<CatalogParams, "library_id" | "type" | "query_fingerprint">) =>
+    ["catalog", "letters", params] as const,
   itemDetail: (id: string, libraryId?: number) =>
     ["catalog", "items", id, "detail", libraryId ?? "default"] as const,
   itemVersions: (id: string) => ["catalog", "items", id, "versions"] as const,
@@ -98,6 +101,11 @@ export const favoriteKeys = {
   list: () => ["favorites", "list"] as const,
   exists: () => ["favorites", "exists"] as const,
   check: (itemId: string) => ["favorites", "check", itemId] as const,
+};
+
+export const notInterestedKeys = {
+  all: ["notInterested"] as const,
+  list: () => ["notInterested", "list"] as const,
 };
 
 export const watchlistKeys = {
@@ -242,6 +250,7 @@ export const settingsKeys = {
 export const notificationKeys = {
   all: ["notifications"] as const,
   list: (status: "all" | "unread" = "all") => ["notifications", "list", status] as const,
+  series: (status: "active" | "inactive") => ["notifications", "series", status] as const,
   unreadCount: () => ["notifications", "unread-count"] as const,
   preferences: () => ["notifications", "preferences"] as const,
   emailPreferences: () => ["notifications", "email-preferences"] as const,
@@ -324,14 +333,9 @@ export const recKeys = {
   forYouMain: () => [...recKeys.all, "for-you", "main"] as const,
   forYouRows: () => [...recKeys.all, "for-you", "rows"] as const,
   similar: (itemId: string) => [...recKeys.all, "similar", itemId] as const,
-  becauseWatched: (itemId: string) => [...recKeys.all, "because-watched", itemId] as const,
-  similarUsers: () => [...recKeys.all, "similar-users"] as const,
   tasteProfile: () => [...recKeys.all, "taste-profile"] as const,
   discover: () => [...recKeys.all, "discover"] as const,
   section: (kind: string, key?: string) => [...recKeys.all, "section", kind, key ?? ""] as const,
-  watchTonight: () => [...recKeys.all, "watch-tonight"] as const,
-  watchTonightCards: (mode: string, genres: string[]) =>
-    [...recKeys.all, "watch-tonight-cards", mode, ...genres.sort()] as const,
   tasteSeedItems: () => [...recKeys.all, "taste-seed", "items"] as const,
 };
 
@@ -349,7 +353,6 @@ export const downloadKeys = {
 
 export const themeKeys = {
   all: ["theme"] as const,
-  adminCss: () => ["theme", "admin-css"] as const,
   branding: () => ["theme", "branding"] as const,
 };
 
@@ -535,10 +538,16 @@ export const adminKeys = {
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
-  unmatchedItems: (search?: string) =>
-    search !== undefined
-      ? (["admin", "libraries", "unmatchedItems", search] as const)
-      : (["admin", "libraries", "unmatchedItems"] as const),
+  unmatchedItems: (search?: string, ignored = false) =>
+    search === undefined
+      ? (["admin", "libraries", "unmatchedItems"] as const)
+      : ([
+          "admin",
+          "libraries",
+          "unmatchedItems",
+          ignored ? "ignored" : "unmatched",
+          search,
+        ] as const),
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,
   hwAccel: () => ["admin", "system", "hwAccel"] as const,

@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -55,8 +56,8 @@ func (f *fakePushDeviceStore) UpsertFCM(ctx context.Context, registration FCMPus
 	}, nil
 }
 
-func (f *fakePushDeviceStore) DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error {
-	f.deleted = append(f.deleted, profileID+"/"+deviceID)
+func (f *fakePushDeviceStore) DeleteByProfileDevice(ctx context.Context, userID int, profileID, deviceID string) error {
+	f.deleted = append(f.deleted, fmt.Sprintf("%d/%s/%s", userID, profileID, deviceID))
 	return f.err
 }
 

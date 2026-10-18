@@ -34,6 +34,8 @@ need_env_file() {
 # Run a shell command on whichever host Silo runs on.
 on_host() {
 	if [[ -n "$SILO_SSH" ]]; then
+		# The caller builds one escaped remote command; expand its arguments locally.
+		# shellcheck disable=SC2029
 		ssh "$SILO_SSH" "$@"
 	else
 		bash -lc "$@"

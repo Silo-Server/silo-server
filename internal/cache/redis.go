@@ -69,6 +69,12 @@ const (
 	EventPluginsChanged = "plugins_changed"
 )
 
+// EventNodeUnreachable is published on ChannelAdmin when an API server could
+// not connect to a transcode node, so the other API servers stop selecting it
+// before their next health sweep. The payload is JSON naming the node URL and
+// the announcing process.
+const EventNodeUnreachable = "node_unreachable"
+
 // EventAuthProvidersChanged is published on ChannelAdmin after an auth
 // binding write, so every API replica rebuilds its sign-in providers without
 // a restart. Plugin install, config and removal changes arrive as
@@ -79,6 +85,12 @@ const EventAuthProvidersChanged = "auth_providers_changed"
 // login sessions were revoked, so every API replica drops that account's
 // in-memory Jellyfin-compatible sessions.
 const EventUserSessionsRevoked = "user_sessions_revoked"
+
+// EventNodeDrainChanged is published on ChannelAdmin by a transcode node when
+// it starts or stops draining, with its stream_nodes id as the payload, so
+// every API server rechecks that node instead of waiting for its next health
+// sweep. Draining means the node takes no new work; see nodepool.DrainState.
+const EventNodeDrainChanged = "node_drain_changed"
 
 // ---------------------------------------------------------------------------
 // Event
@@ -256,6 +268,37 @@ func redisChannel(channel string, db int) string {
 		return channel
 	}
 	return channel + "@db" + strconv.Itoa(db)
+}
+
+// eventBusChannels are the channels a starting server subscribes to. Redis
+// refuses a subscription that the user's ACL does not grant, and a refused
+// subscription stops the start.
+var eventBusChannels = []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelLogs, ChannelEvents}
+
+// CheckEventBusChannels subscribes client to every event bus channel on its
+// database number, as a starting server does, and returns the error Redis
+// answers with. It leaves no subscription behind.
+func CheckEventBusChannels(ctx context.Context, client *redis.Client) error {
+	db := client.Options().DB
+	channels := make([]string, 0, len(eventBusChannels))
+	for _, channel := range eventBusChannels {
+		channels = append(channels, redisChannel(channel, db))
+	}
+	pubsub := client.Subscribe(ctx, channels...)
+	defer func() { _ = pubsub.Close() }()
+	// Redis refuses the whole command when its ACL denies one channel, but a
+	// compatible server or a proxy can answer each channel on its own, so
+	// every channel's confirmation is read.
+	for confirmed := 0; confirmed < len(channels); {
+		msg, err := pubsub.Receive(ctx)
+		if err != nil {
+			return err
+		}
+		if _, ok := msg.(*redis.Subscription); ok {
+			confirmed++
+		}
+	}
+	return nil
 }
 
 // Publish serializes the event as JSON and publishes it on the given
@@ -479,9 +522,27 @@ func newRedisClient(cfg config.RedisConfig, honorContextDeadlines bool) (*redis.
 		return nil, false, err
 	}
 	if failover != nil {
-		failover.ContextTimeoutEnabled = failover.ContextTimeoutEnabled || honorContextDeadlines
+		if honorContextDeadlines {
+			failover.ContextTimeoutEnabled = true
+			keepSocketDeadlines(&failover.ReadTimeout, &failover.WriteTimeout)
+		}
 		return redis.NewFailoverClient(failover), true, nil
 	}
-	options.ContextTimeoutEnabled = options.ContextTimeoutEnabled || honorContextDeadlines
+	if honorContextDeadlines {
+		options.ContextTimeoutEnabled = true
+		keepSocketDeadlines(&options.ReadTimeout, &options.WriteTimeout)
+	}
 	return redis.NewClient(options), false, nil
+}
+
+// keepSocketDeadlines turns a negative timeout into -1, which go-redis reads
+// as no timeout of its own, so the context's deadline still reaches the
+// socket. go-redis sets no socket deadline at all, context or not, for any
+// other negative timeout, such as the -1s a URL's read_timeout=-1s gives.
+func keepSocketDeadlines(timeouts ...*time.Duration) {
+	for _, timeout := range timeouts {
+		if *timeout < 0 {
+			*timeout = -1
+		}
+	}
 }

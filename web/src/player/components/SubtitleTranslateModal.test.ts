@@ -43,6 +43,25 @@ describe("isTranslatableSource", () => {
 });
 
 describe("buildSubtitleTranslateRequest", () => {
+  it("keeps audio jobs in the spoken language when the server cannot translate", () => {
+    const body = buildSubtitleTranslateRequest({
+      mode: "audio",
+      mediaFileId: 42,
+      audioIndex: 1,
+      audioTracks: [audioTrack({ language: "eng" }), audioTrack({ language: "ger" })],
+      targetLang: "en",
+      translateTranscript: false,
+      startPosition: 0,
+    });
+
+    expect(body).toMatchObject({
+      kind: "transcribe",
+      source_index: 1,
+      source_language: "de",
+      target_language: "",
+    });
+  });
+
   it("normalizes 3-letter audio language codes before choosing the ASR job kind", () => {
     const body = buildSubtitleTranslateRequest({
       mode: "audio",

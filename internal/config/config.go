@@ -30,6 +30,9 @@ type ServerConfig struct {
 	// LANDiscovery advertises the API server on the local network with
 	// DNS-SD (see internal/landiscovery). Settings key server.lan_discovery.
 	LANDiscovery bool `yaml:"-"`
+	// LocalURL is the API server's local-network address for signed-in
+	// clients. Settings key server.local_url; empty when unset.
+	LocalURL string `yaml:"-"`
 }
 
 // DatabaseConfig holds the primary PostgreSQL connection settings.
@@ -199,6 +202,9 @@ type PlaybackConfig struct {
 	SubtitleSyncNodeCapacity int                   `yaml:"-"`
 	TranscodeEnabled         bool                  `yaml:"transcode_enabled"`
 	Routing                  PlaybackRoutingPolicy `yaml:"-"`
+	// KeyframePlaylist is playback.copy_keyframe_playlist: copy-remux HLS
+	// from one complete keyframe-planned playlist (#1466).
+	KeyframePlaylist bool `yaml:"-"`
 }
 
 // RedisConfig holds Redis connection settings.

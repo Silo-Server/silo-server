@@ -97,6 +97,9 @@ func TestPlaybackCapabilitiesV2IsAlwaysAvailable(t *testing.T) {
 	if !slices.Contains(view.Features, "marker_segments_v1") {
 		t.Fatal("marker collections are not advertised")
 	}
+	if !slices.Contains(view.Features, "bandwidth_probe_v1") {
+		t.Fatal("the bandwidth probe is not advertised")
+	}
 	for _, feature := range []string{"watch_party_source_fallback_v1", "watch_party_coordinator_v1"} {
 		if slices.Contains(view.Features, feature) {
 			t.Fatalf("unconfigured Watch Party feature advertised: %s", feature)
@@ -726,4 +729,88 @@ func TestReplanRefusesAStoppedAttempt(t *testing.T) {
 	}
 	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
 	assertPlaybackOperationError(t, err, http.StatusNotFound, "session_not_found")
+}
+
+// An attempt an administrator ended answers 410 on progress and replan, so the
+// player exits; an expired attempt keeps answering 404 so the player renews.
+func TestStoppedAttemptAnswersGoneOnlyWhenAnAdministratorEndedIt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stop   func(*PlaybackHandler, string)
+		status int
+		code   string
+	}{
+		{"administrator", func(h *PlaybackHandler, id string) { h.markAttemptStoppedByAdmin(context.Background(), id) }, http.StatusGone, "playback_session_ended"},
+		{"expiry", func(h *PlaybackHandler, id string) { h.markAttemptStoppedServerSide(context.Background(), id) }, http.StatusNotFound, "session_not_found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.stop(f.handler, f.session.ID)
+			_, err = f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
+			assertPlaybackOperationError(t, err, tc.status, tc.code)
+			_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
+			assertPlaybackOperationError(t, err, tc.status, tc.code)
+		})
+	}
+}
+
+// A client that stopped first keeps its own receipt: a later administrator
+// stop of the same attempt does not turn its progress into 410.
+func TestAdministratorStopKeepsAClientStopReceipt(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	stopID := uuid.NewString()
+	if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: stopID}); err != nil {
+		t.Fatal(err)
+	}
+	f.handler.markAttemptStoppedByAdmin(context.Background(), f.session.ID)
+	record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
+	if err != nil || record.StopID != stopID {
+		t.Fatalf("record = %+v, %v", record, err)
+	}
+	_, err = f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
+	assertPlaybackOperationError(t, err, http.StatusNotFound, "session_not_found")
+}
+
+// stopAfterFirstReadPlanStoreV3 runs stop once the first attempt read
+// returns, the window between the replan precheck and the replan itself.
+type stopAfterFirstReadPlanStoreV3 struct {
+	*playback.MemoryPlanStoreV3
+	stop func()
+	done bool
+}
+
+func (s *stopAfterFirstReadPlanStoreV3) GetAttempt(ctx context.Context, sessionID string) (*playback.AttemptRecordV3, error) {
+	record, err := s.MemoryPlanStoreV3.GetAttempt(ctx, sessionID)
+	if !s.done {
+		s.done = true
+		s.stop()
+	}
+	return record, err
+}
+
+// An administrator stop that lands after the replan precheck still answers
+// 410, not the 404 the player would renew from.
+func TestReplanAnswersGoneWhenAnAdministratorStopLandsMidReplan(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	start := v3HandlerStartRequest()
+	memory, ok := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
+	if !ok {
+		t.Fatalf("plan store = %T", f.handler.PlanStoreV3)
+	}
+	record, err := memory.GetAttempt(context.Background(), f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.handler.PlanStoreV3 = &stopAfterFirstReadPlanStoreV3{MemoryPlanStoreV3: memory, stop: func() {
+		if err := f.manager.StopSession(f.session.ID); err != nil {
+			t.Fatal(err)
+		}
+		f.handler.markAttemptStoppedByAdmin(context.Background(), f.session.ID)
+	}}
+	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"})
+	assertPlaybackOperationError(t, err, http.StatusGone, "playback_session_ended")
 }

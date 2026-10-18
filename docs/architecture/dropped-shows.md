@@ -2,7 +2,7 @@
 
 A profile can drop a series to take it off its Next Up and Continue Watching rows
 without touching its watch history. Drops sync both ways with watch providers that
-support them: Trakt, Simkl, and watch-sync plugins that advertise `sync_dropped`.
+support them: Simkl and watch-sync plugins that advertise `sync_dropped`.
 
 ## Local drops
 
@@ -10,7 +10,8 @@ support them: Trakt, Simkl, and watch-sync plugins that advertise `sync_dropped`
 dropped. A drop is **active** while no episode of the series has watch progress, or a
 history-hide stamp (mark unwatched, remove from history), newer than `dropped_at`. So
 watching any episode again undrops the series, whichever path recorded the watch, and no
-writer needs to know about drops. Imported history keeps its original watch time, so
+writer needs to know about drops. Clearing an episode's resume position is a progress write
+too, so like mark unwatched it ends the drop. Imported history keeps its original watch time, so
 re-importing old plays never undrops a series. An inactive row means the same as no row;
 watch sync removes it.
 
@@ -66,11 +67,11 @@ A tombstone whose key names neither changes nothing: that is usually the provide
 echoing an undrop whose agreement Silo already forgot. Local imports are compare-and-set on the row the run read, so a
 concurrent dismissal or undo wins.
 
-Provider reads can lag or omit Silo's writes. Trakt serves its GET responses from a cache
-for up to an hour, and its dropped list leaves out drops that apps make, so a drop Silo
-sends is usually never confirmed by a read. Such a drop stays agreed and is not sent
-again; resending it would drop the show again each time the user undropped it on Trakt,
-which Silo cannot see. An undrop of a drop a read had confirmed keeps its agreed row
+Provider reads can lag or omit Silo's writes. A provider may serve reads from a cache,
+or leave drops that apps make out of its dropped list, so a drop Silo sends may never be
+confirmed by a read. Such a drop stays agreed and is not sent again; resending it would
+drop the show again each time the user undropped it on the provider, which Silo cannot
+see. An undrop of a drop a read had confirmed keeps its agreed row
 until a read shows the show is gone, so a stale read resends the undrop instead of
 importing the old drop back; an undrop of a drop no read confirmed forgets the row at
 once. Both writes are idempotent.
@@ -85,10 +86,6 @@ undrop a show that is watched.
 
 ## Providers
 
-- Trakt: `GET /users/hidden/dropped` (every page, verified by a second read), and
-  `POST /users/hidden/dropped` and `/users/hidden/dropped/remove`. Trakt's older hidden
-  sections (`progress_watched`, `calendar`) are not drops and are not read. Trakt
-  undrops a show itself when the user watches it.
 - Simkl: `GET /sync/all-items/{shows,anime}/dropped`, skipped while the lists' `all`
   activity stamps are unchanged. Dropping moves a show to the `dropped` list with
   `POST /sync/add-to-list`; undropping moves it to `watching`. Simkl records no drop

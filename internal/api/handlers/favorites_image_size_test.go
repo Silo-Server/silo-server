@@ -63,7 +63,7 @@ func listFavoritesURLs(t *testing.T, handler *PersonalDataHandler, query string)
 
 func seedFavorite(t *testing.T, store userstore.UserStore) {
 	t.Helper()
-	if err := store.AddFavorite(context.Background(), "profile-1", "movie-1"); err != nil {
+	if _, err := store.AddFavorite(context.Background(), "profile-1", "movie-1"); err != nil {
 		t.Fatalf("AddFavorite: %v", err)
 	}
 }
@@ -83,6 +83,10 @@ func TestPersonalListsUnsetImageSizeUnchanged(t *testing.T) {
 	if !strings.Contains(item.BackdropURL, ":card:") || !strings.Contains(item.BackdropURL, "/backdrop/w300.") {
 		t.Errorf("backdrop URL = %q, want the card w300 backdrop", item.BackdropURL)
 	}
+	// Card images resolve in batches, not one lookup each.
+	if !strings.HasPrefix(item.PosterURL, "batch:") || !strings.HasPrefix(item.BackdropURL, "batch:") {
+		t.Errorf("poster %q, backdrop %q: want both resolved in a batch", item.PosterURL, item.BackdropURL)
+	}
 }
 
 // An explicit size applies to every image in the response, collapsing the
@@ -96,7 +100,7 @@ func TestPersonalListsHonorImageSize(t *testing.T) {
 	}{
 		{"small", ":card:", "/poster/w300.", "/backdrop/w300."},
 		{"medium", ":featured:", "/poster/w500.", "/backdrop/w1920."},
-		{"large", ":large:", "/poster/w780.", "/backdrop/w1920."},
+		{"large", ":large:", "/poster/w1000.", "/backdrop/w2560."},
 		{"original", ":original:", "/poster/original.", "/backdrop/original."},
 	}
 

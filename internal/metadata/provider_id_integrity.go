@@ -29,11 +29,21 @@ type ProviderIDIntegrityStats struct {
 }
 
 type ProviderIDIntegrityRepairer struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	recsStaler RecommendationStaler
 }
 
 func NewProviderIDIntegrityRepairer(pool *pgxpool.Pool) *ProviderIDIntegrityRepairer {
 	return &ProviderIDIntegrityRepairer{pool: pool}
+}
+
+// WithRecommendationStaler installs what marks recommendations stale after a
+// repair merges a duplicate item, and returns the repairer.
+func (r *ProviderIDIntegrityRepairer) WithRecommendationStaler(staler RecommendationStaler) *ProviderIDIntegrityRepairer {
+	if r != nil {
+		r.recsStaler = staler
+	}
+	return r
 }
 
 func (r *ProviderIDIntegrityRepairer) Run(ctx context.Context, batchSize int) (ProviderIDIntegrityStats, error) {
@@ -236,12 +246,12 @@ func (r *ProviderIDIntegrityRepairer) repairDriftRow(ctx context.Context, row pr
 		}
 		return "provisional_conflict", nil
 	case isConfirmedOwnershipStatus(owner.Status) && isProvisionalOwnershipStatus(row.Status):
-		if _, err := canonicalizeProviderIDDuplicateInto(ctx, r.pool, row.ContentID, owner.ContentID, false); err != nil {
+		if _, err := canonicalizeProviderIDDuplicateInto(ctx, r.pool, r.recsStaler, row.ContentID, owner.ContentID, false, false); err != nil {
 			return "", err
 		}
 		return "matched_canonicalization", nil
 	case isConfirmedOwnershipStatus(owner.Status) && isConfirmedOwnershipStatus(row.Status):
-		if _, err := canonicalizeProviderIDDuplicate(ctx, r.pool, row.ContentID, owner.ContentID, true); err != nil {
+		if _, err := canonicalizeProviderIDDuplicate(ctx, r.pool, r.recsStaler, row.ContentID, owner.ContentID, true, false); err != nil {
 			return "", err
 		}
 		return "matched_canonicalization", nil
@@ -359,11 +369,12 @@ func (s *MetadataService) canonicalizeProviderIDDuplicate(
 	leftContentID string,
 	rightContentID string,
 	allowMatchedSource bool,
+	markIdentity bool,
 ) (string, error) {
 	if s == nil || s.dbPool == nil {
 		return "", nil
 	}
-	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, leftContentID, rightContentID, allowMatchedSource)
+	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, s.recsStaler, leftContentID, rightContentID, allowMatchedSource, markIdentity)
 }
 
 // clearProvisionalProviderIDsLocked removes provider ID rows for an item only
@@ -402,12 +413,22 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	return nil
 }
 
+// canonicalizeProviderIDDuplicate merges two items that share a provider ID
+// onto the one chooseCanonicalProviderOwner picks, then marks stale through
+// staler the recommendations of profiles whose state moved with it. With
+// markIdentity (an Identify of leftContentID that hit the conflict with
+// rightContentID, the owner of the chosen IDs) the merge records the choice
+// when it keeps rightContentID: that item holds the chosen IDs. When it keeps
+// leftContentID, which still has its old IDs, the identity write that follows
+// marks it.
 func canonicalizeProviderIDDuplicate(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	staler RecommendationStaler,
 	leftContentID string,
 	rightContentID string,
 	allowMatchedSource bool,
+	markIdentity bool,
 ) (string, error) {
 	leftContentID = strings.TrimSpace(leftContentID)
 	rightContentID = strings.TrimSpace(rightContentID)
@@ -439,18 +460,32 @@ func canonicalizeProviderIDDuplicate(
 	if err := catalog.EnqueueSearchIndexRename(ctx, tx, source.ContentID, canonical.ContentID); err != nil {
 		return "", fmt.Errorf("enqueue catalog search provider-id canonicalization %s -> %s: %w", source.ContentID, canonical.ContentID, err)
 	}
+	if markIdentity && canonical.ContentID == rightContentID {
+		if err := catalog.MarkIdentityChosenTx(ctx, tx, canonical.ContentID); err != nil {
+			return "", err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
 	}
+	MarkRecommendationsStale(ctx, staler, canonical.ContentID)
 	return canonical.ContentID, nil
 }
 
+// canonicalizeProviderIDDuplicateInto merges sourceID onto canonicalID, the
+// item that owns the shared provider IDs, then marks stale through staler the
+// recommendations of profiles whose state moved with it. With markIdentity
+// (an Identify that hit the conflict) the merge also records the choice on
+// canonicalID, so the mark commits with the chosen IDs even if the identity
+// write after it fails.
 func canonicalizeProviderIDDuplicateInto(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	staler RecommendationStaler,
 	sourceID string,
 	canonicalID string,
 	allowMatchedSource bool,
+	markIdentity bool,
 ) (string, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	canonicalID = strings.TrimSpace(canonicalID)
@@ -517,9 +552,15 @@ func canonicalizeProviderIDDuplicateInto(
 	if err := catalog.EnqueueSearchIndexRename(ctx, tx, sourceID, canonicalID); err != nil {
 		return "", fmt.Errorf("enqueue catalog search provider-id canonicalization %s -> %s: %w", sourceID, canonicalID, err)
 	}
+	if markIdentity {
+		if err := catalog.MarkIdentityChosenTx(ctx, tx, canonicalID); err != nil {
+			return "", err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
 	}
+	MarkRecommendationsStale(ctx, staler, canonicalID)
 	return canonicalID, nil
 }
 
@@ -632,18 +673,22 @@ func mergeStepArgs(sql, sourceID, canonicalID string) []any {
 }
 
 var mediaItemMergeSteps = []mediaItemMergeStep{
+	// A provider ID is unique per (provider, provider_id, item_type), so the
+	// source row itself blocks inserting a copy for the canonical item. Move
+	// the rows for providers the canonical item has no ID for instead; the
+	// canonical item keeps its own ID for the rest.
 	{"merge provider ids", `
-			INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id, created_at, updated_at)
-			SELECT $2, item_type, provider, provider_id, created_at, NOW()
-			FROM media_item_provider_ids
+			UPDATE media_item_provider_ids
+			SET content_id = $2, updated_at = NOW()
 			WHERE content_id = $1
-			ON CONFLICT DO NOTHING`},
+			  AND provider NOT IN (SELECT provider FROM media_item_provider_ids WHERE content_id = $2)`},
 	{"drop source provider ids", `DELETE FROM media_item_provider_ids WHERE content_id = $1`},
 	{"merge legacy provider columns", `
 			UPDATE media_items dest
 			SET imdb_id = COALESCE(NULLIF(dest.imdb_id, ''), src.imdb_id),
 			    tmdb_id = COALESCE(NULLIF(dest.tmdb_id, ''), src.tmdb_id),
 			    tvdb_id = COALESCE(NULLIF(dest.tvdb_id, ''), src.tvdb_id),
+			    identity_chosen_at = GREATEST(dest.identity_chosen_at, src.identity_chosen_at),
 			    updated_at = NOW()
 			FROM media_items src
 			WHERE dest.content_id = $2 AND src.content_id = $1`},
@@ -673,12 +718,12 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			    updated_at = NOW()`},
 	{"delete source collection items", `DELETE FROM library_collection_items WHERE media_item_id = $1`},
 	{"merge personal collection items", `
-			INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id, position, added_at)
-			SELECT user_id, collection_id, $2, MIN(position), MIN(added_at)
+			INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id, sub_item_id, position, added_at)
+			SELECT user_id, collection_id, $2, sub_item_id, MIN(position), MIN(added_at)
 			FROM user_personal_collection_items
 			WHERE media_item_id = $1
-			GROUP BY user_id, collection_id
-			ON CONFLICT (user_id, collection_id, media_item_id) DO UPDATE
+			GROUP BY user_id, collection_id, sub_item_id
+			ON CONFLICT (user_id, collection_id, media_item_id, sub_item_id) DO UPDATE
 			SET position = LEAST(user_personal_collection_items.position, EXCLUDED.position),
 			    added_at = LEAST(user_personal_collection_items.added_at, EXCLUDED.added_at)`},
 	{"delete source personal collection items", `DELETE FROM user_personal_collection_items WHERE media_item_id = $1`},
@@ -700,6 +745,15 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET added_at = LEAST(user_watchlist.added_at, EXCLUDED.added_at)`},
 	{"delete source watchlist", `DELETE FROM user_watchlist WHERE media_item_id = $1`},
+	{"merge not interested", `
+			INSERT INTO user_not_interested (user_id, profile_id, media_item_id, added_at)
+			SELECT user_id, profile_id, $2, MIN(added_at)
+			FROM user_not_interested
+			WHERE media_item_id = $1
+			GROUP BY user_id, profile_id
+			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
+			SET added_at = LEAST(user_not_interested.added_at, EXCLUDED.added_at)`},
+	{"delete source not interested", `DELETE FROM user_not_interested WHERE media_item_id = $1`},
 	{"merge ratings", `
 			INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at)
 			SELECT DISTINCT ON (user_id, profile_id) user_id, profile_id, $2, rating, rated_at
@@ -743,6 +797,7 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			    progress = CASE WHEN EXCLUDED.updated_at >= ebook_reader_progress.updated_at THEN EXCLUDED.progress ELSE ebook_reader_progress.progress END,
 			    updated_at = GREATEST(ebook_reader_progress.updated_at, EXCLUDED.updated_at)`},
 	{"delete source ebook reader progress", `DELETE FROM ebook_reader_progress WHERE content_id = $1`},
+	{"move ebook reader annotations", `UPDATE ebook_reader_annotations SET content_id = $2 WHERE content_id = $1`},
 	{"move history", `UPDATE user_watch_history SET media_item_id = $2 WHERE media_item_id = $1`},
 	{"merge hidden history", `
 			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, updated_at)
@@ -803,11 +858,11 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 	{"delete source embeddings", `DELETE FROM media_item_embeddings WHERE media_item_id = $1`},
 	{"merge item localizations", `
 			INSERT INTO media_item_localizations (
-				content_id, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
-				backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
+				content_id, language, title, sort_title, overview, overview_source, tagline, tagline_source,
+				poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
 			)
-			SELECT $2, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
-			       backdrop_path, backdrop_thumbhash, logo_path, created_at, NOW()
+			SELECT $2, language, title, sort_title, overview, overview_source, tagline, tagline_source,
+			       poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path, created_at, NOW()
 			FROM media_item_localizations
 			WHERE content_id = $1
 			ON CONFLICT (content_id, language) DO NOTHING`},
@@ -916,6 +971,15 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
 			SET dropped_at = GREATEST(user_dropped_series.dropped_at, EXCLUDED.dropped_at)`},
 	{"delete source dropped series", `DELETE FROM user_dropped_series WHERE series_id = $1`},
+	// A notification mute follows its series; the earlier mute's time is kept.
+	{"merge notification mutes", `
+			INSERT INTO profile_series_notification_mutes (user_id, profile_id, series_id, muted_at)
+			SELECT user_id, profile_id, $2, muted_at
+			FROM profile_series_notification_mutes
+			WHERE series_id = $1
+			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
+			SET muted_at = LEAST(profile_series_notification_mutes.muted_at, EXCLUDED.muted_at)`},
+	{"delete source notification mutes", `DELETE FROM profile_series_notification_mutes WHERE series_id = $1`},
 	{"merge watch provider dropped items", `
 			INSERT INTO watch_provider_dropped_items (connection_id, provider_account_id, series_id, provider_item_key, remote_seen, updated_at)
 			SELECT connection_id, provider_account_id, $2, '', false, NOW()

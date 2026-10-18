@@ -195,6 +195,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		PreferredMetadataLanguage:  decision.PreferredMetadataLanguage,
 		MetadataLanguageOverrides:  preferences.MetadataLanguageOverrides,
 		NextUpMode:                 preferences.NextUpMode,
+		NextUpNewReleasesFirst:     preferences.NextUpNewReleasesFirst,
 		PreferencesDegraded:        preferences.Degraded,
 		PolicyRevision:             user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a

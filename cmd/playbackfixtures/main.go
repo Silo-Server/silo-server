@@ -57,6 +57,7 @@ const (
 	audioLayout71     = "7.1"
 	filmFrameRate     = "24000/1001"
 	languageEnglish   = "eng"
+	titleEnglish      = "English"
 	videoRangeSDR     = "SDR"
 	categoryMidSeek   = "mid_seek_replan"
 )
@@ -65,16 +66,17 @@ func main() {
 	out := flag.String("out", "", "directory to write fixtures into (required)")
 	flag.Parse()
 	if *out == "" {
-		fail("usage: playbackfixtures -out <dir>")
+		failf("usage: playbackfixtures -out <dir>")
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
-		fail("create %s: %v", *out, err)
+		failf("create %s: %v", *out, err)
 	}
 
 	write(*out, "start_request.json", goldenStartRequest())
 	write(*out, "replan_request.json", goldenReplanRequest())
 	write(*out, "decision_response.json", goldenDecisionResponse())
 	write(*out, "native-decision_response.json", goldenNativeDecisionResponse())
+	write(*out, "hls-subtitle-rendition-decision_response.json", goldenHLSSubtitleRenditionDecisionResponse())
 	write(*out, "capability_response.json", goldenCapabilityResponse())
 	write(*out, "error_response.json", goldenErrorResponse())
 	write(*out, "route_event.json", goldenRouteEvent())
@@ -90,16 +92,16 @@ func goldenErrorResponse() playback.ErrorResponseV3 {
 func write(dir, name string, value any) {
 	body, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		fail("marshal %s: %v", name, err)
+		failf("marshal %s: %v", name, err)
 	}
 	body = append(body, '\n')
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, body, 0o644); err != nil { //nolint:gosec // generated fixture
-		fail("write %s: %v", path, err)
+		failf("write %s: %v", path, err)
 	}
 }
 
-func fail(format string, args ...any) {
+func failf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
 }
@@ -193,7 +195,7 @@ func goldenReplanRequest() playback.ReplanRequestV3 {
 	audioIndex := 0
 	decision := goldenDecisionResponse()
 	if decision.PlaybackPlan == nil {
-		fail("golden decision has no plan")
+		failf("golden decision has no plan")
 	}
 	plan := decision.PlaybackPlan
 	return playback.ReplanRequestV3{
@@ -231,7 +233,7 @@ func goldenMediaFile() *models.MediaFile {
 	return &models.MediaFile{
 		ID: goldenMediaFileID,
 		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/library/movie.en.srt", Language: languageEnglish, Format: "srt", Title: "English"},
+			{Path: "/library/movie.en.srt", Language: languageEnglish, Format: "srt", Title: titleEnglish},
 		},
 		SubtitleTracks: []models.SubtitleTrack{
 			{Index: 0, Language: languageEnglish, Codec: "ass", Title: "English (Signs)", Forced: true},
@@ -309,11 +311,15 @@ func goldenNativeDecisionResponse() playback.DecisionResponseV3 {
 }
 
 func goldenDecisionForSource(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3) playback.DecisionResponseV3 {
+	return goldenDecisionForSourceWith(file, request, additional, nil)
+}
+
+func goldenDecisionForSourceWith(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3, configure func(*playback.PlannerInputV3)) playback.DecisionResponseV3 {
 	now, err := time.Parse(time.RFC3339, "2029-12-31T23:55:00Z")
 	if err != nil {
-		fail("parse golden planner time: %v", err)
+		failf("parse golden planner time: %v", err)
 	}
-	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
+	input := playback.PlannerInputV3{
 		Request:             request,
 		RequestedFile:       file,
 		EffectiveFile:       file,
@@ -322,9 +328,13 @@ func goldenDecisionForSource(file *models.MediaFile, request playback.StartReque
 		Registry:            conformanceRegistry(),
 		Now:                 now,
 		AdditionalSubtitles: additional,
-	})
+	}
+	if configure != nil {
+		configure(&input)
+	}
+	result := playback.PlanPlaybackV3(input)
 	if result.Plan == nil {
-		fail("golden planner returned terminal: %#v", result.Terminal)
+		failf("golden planner returned terminal: %#v", result.Terminal)
 	}
 	plan := *result.Plan
 	// These values belong to session/transport setup, which runs after the
@@ -370,7 +380,7 @@ func goldenCapabilityResponse() playback.CapabilityResponseV3 {
 func goldenRouteEvent() playback.RouteEventV3 {
 	decision := goldenDecisionResponse()
 	if decision.PlaybackPlan == nil {
-		fail("golden decision has no plan")
+		failf("golden decision has no plan")
 	}
 	plan := decision.PlaybackPlan
 	return playback.RouteEventV3{
@@ -728,7 +738,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	planner = append(planner, makePlannerScenario("embedded_ass_authored_render", "subtitle_matrix", assRequest, assFile, nil, settings, registry))
 
 	dvdFile := conformanceVideoFile()
-	dvdFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: languageEnglish, Codec: "dvd_subtitle", Title: "English"}}
+	dvdFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: languageEnglish, Codec: "dvd_subtitle", Title: titleEnglish}}
 	dvdRequest := conformanceStartRequest()
 	dvdRequest.PlaybackAttemptID = "attempt-dvd-burn-in"
 	dvdIndex := 0
@@ -744,7 +754,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	decision := goldenDecisionResponse()
 	plan := decision.PlaybackPlan
 	if plan == nil {
-		fail("golden decision has no plan")
+		failf("golden decision has no plan")
 	}
 	trackIndex := 1
 	trackChange := goldenReplanRequest()
@@ -797,7 +807,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	outputA := playback.PlanAttemptKeyV3(*plan, "output-a", nil)
 	outputB := playback.PlanAttemptKeyV3(*plan, "output-b", nil)
 	if outputA == outputB {
-		fail("output context must change the opaque plan attempt key")
+		failf("output context must change the opaque plan attempt key")
 	}
 	recovery := goldenReplanRequest()
 	recovery.ReplanRequestID = "replan-failure-matrix-0001"

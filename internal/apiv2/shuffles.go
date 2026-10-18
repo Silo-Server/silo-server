@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/shuffle"
 )
 
@@ -76,14 +77,14 @@ type SkipShuffleItemRequest struct {
 
 // CreateShuffleInput is the createShuffle request.
 type CreateShuffleInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign on the item cards"`
-	Body      CreateShuffleRequest
+	ArtworkQuery
+	Body CreateShuffleRequest
 }
 
 // ShuffleInput names one shuffle.
 type ShuffleInput struct {
 	ShuffleID string `path:"shuffle_id" doc:"Shuffle id"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign on the item cards"`
+	ArtworkQuery
 }
 
 // DeleteShuffleInput names the shuffle to stop.
@@ -166,7 +167,7 @@ func (reg *Registry) getShuffleCapability(ctx context.Context, _ *CapabilityInpu
 
 // shuffleViewer resolves what every shuffle operation needs: the service,
 // the owner, and the viewer the item cards render for.
-func (reg *Registry) shuffleViewer(ctx context.Context, imageSize string) (ShuffleAPI, shuffle.Owner, handlers.ItemViewer, *Problem) {
+func (reg *Registry) shuffleViewer(ctx context.Context, art imagesize.Request) (ShuffleAPI, shuffle.Owner, handlers.ItemViewer, *Problem) {
 	if reg.deps.Shuffles == nil {
 		return nil, shuffle.Owner{}, handlers.ItemViewer{}, unavailable("shuffle")
 	}
@@ -177,7 +178,7 @@ func (reg *Registry) shuffleViewer(ctx context.Context, imageSize string) (Shuff
 	if p != nil {
 		return nil, shuffle.Owner{}, handlers.ItemViewer{}, p
 	}
-	viewer, p := reg.itemViewer(ctx, imageSize, "", "")
+	viewer, p := reg.itemViewer(ctx, art, "", "")
 	if p != nil {
 		return nil, shuffle.Owner{}, handlers.ItemViewer{}, p
 	}
@@ -185,7 +186,7 @@ func (reg *Registry) shuffleViewer(ctx context.Context, imageSize string) (Shuff
 }
 
 func (reg *Registry) createShuffle(ctx context.Context, in *CreateShuffleInput) (*ShuffleCreatedOutput, error) {
-	svc, owner, viewer, p := reg.shuffleViewer(ctx, in.ImageSize)
+	svc, owner, viewer, p := reg.shuffleViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}
@@ -202,7 +203,7 @@ func (reg *Registry) createShuffle(ctx context.Context, in *CreateShuffleInput) 
 }
 
 func (reg *Registry) getShuffle(ctx context.Context, in *ShuffleInput) (*ShuffleOutput, error) {
-	svc, owner, viewer, p := reg.shuffleViewer(ctx, in.ImageSize)
+	svc, owner, viewer, p := reg.shuffleViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}
@@ -214,7 +215,7 @@ func (reg *Registry) getShuffle(ctx context.Context, in *ShuffleInput) (*Shuffle
 }
 
 func (reg *Registry) advanceShuffle(ctx context.Context, in *AdvanceShuffleInput) (*ShuffleOutput, error) {
-	svc, owner, viewer, p := reg.shuffleViewer(ctx, in.ImageSize)
+	svc, owner, viewer, p := reg.shuffleViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}
@@ -226,7 +227,7 @@ func (reg *Registry) advanceShuffle(ctx context.Context, in *AdvanceShuffleInput
 }
 
 func (reg *Registry) skipShuffleItem(ctx context.Context, in *SkipShuffleItemInput) (*ShuffleOutput, error) {
-	svc, owner, viewer, p := reg.shuffleViewer(ctx, in.ImageSize)
+	svc, owner, viewer, p := reg.shuffleViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}

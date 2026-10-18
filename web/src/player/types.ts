@@ -99,6 +99,7 @@ export interface PlayerAudioTrack {
   embedded_title?: string;
   language?: string;
   codec?: string;
+  profile?: string;
   layout?: string;
   channels?: number;
   bitrate?: number;
@@ -326,7 +327,6 @@ export interface QualityOption {
   sublabel: string;
   resolution: string;
   bitrateKbps: number;
-  isOriginal: boolean;
 }
 
 /** Context for series playback (episode navigation). */
@@ -347,6 +347,8 @@ export interface EpisodeRef {
   runtime: number;
   /** Optional display fields for post-roll / next-episode UI. */
   overview?: string;
+  /** Localized fields whose text was machine-translated by AI. */
+  machineTranslatedFields?: string[];
   stillUrl?: string;
   stillIsEpisodeStill?: boolean;
   stillThumbhash?: string;

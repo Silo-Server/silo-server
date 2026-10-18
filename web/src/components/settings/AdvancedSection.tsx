@@ -114,7 +114,7 @@ export function AdvancedSection({
         />
         <span className="min-w-0 font-medium">{title}</span>
         {typeof count === "number" ? (
-          <span aria-hidden="true" className="text-muted-foreground ml-auto shrink-0 text-[11.5px]">
+          <span aria-hidden="true" className="text-muted-foreground ml-auto shrink-0 text-xs">
             {count}
           </span>
         ) : null}

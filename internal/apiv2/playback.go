@@ -52,7 +52,7 @@ type PlaybackStartBody struct {
 	FileID                     ID                                 `json:"file_id"`
 	ProfileID                  ID                                 `json:"profile_id"`
 	PlaybackAttemptID          string                             `json:"playback_attempt_id"`
-	QualityPreference          string                             `json:"quality_preference"`
+	QualityPreference          string                             `json:"quality_preference" doc:"auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto."`
 	AllowAlternateVersions     *bool                              `json:"allow_alternate_versions,omitempty" nullable:"false" doc:"False keeps the requested source file for this attempt, including quality changes and failure recovery. Omitted or true allows alternate versions."`
 	SubtitleFidelityPreference playback.SubtitleFidelityV3        `json:"subtitle_fidelity_preference"`
 	StartPosition              *float64                           `json:"start_position,omitempty" nullable:"false"`
@@ -61,8 +61,8 @@ type PlaybackStartBody struct {
 	AudioTrackIndex            *int                               `json:"audio_track_index,omitempty" nullable:"false"`
 	SubtitleTrackID            string                             `json:"subtitle_track_id,omitempty"`
 	SubtitleTrackIndex         *int                               `json:"subtitle_track_index,omitempty" nullable:"false"`
-	Metered                    bool                               `json:"metered"`
-	BandwidthEstimateKbps      *int                               `json:"bandwidth_estimate_kbps,omitempty" nullable:"false"`
+	Metered                    bool                               `json:"metered,omitempty" doc:"Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead." deprecated:"true"`
+	BandwidthEstimateKbps      *int                               `json:"bandwidth_estimate_kbps,omitempty" nullable:"false" doc:"Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess."`
 	BandwidthCapKbps           *int                               `json:"bandwidth_cap_kbps,omitempty" nullable:"false"`
 	Capabilities               playback.ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext      playback.ClientPlaybackContextV3   `json:"client_playback_context"`
@@ -83,7 +83,7 @@ type PlaybackPlan struct {
 	Transformations        []playback.TransformationV3     `json:"transformations"`
 	AppliedQuirks          []playback.AppliedQuirkV3       `json:"applied_quirks"`
 	RuntimeCorrections     []string                        `json:"runtime_corrections"`
-	AvailableQualities     []playback.AvailableQualityV3   `json:"available_qualities"`
+	AvailableQualities     []playback.AvailableQualityV3   `json:"available_qualities" doc:"Fixed quality rungs a quality_change replan may request, in menu order. The source is not listed: quality_preference auto returns to it. Empty when no rung applies."`
 	DegradationWarnings    []playback.DegradationWarningV3 `json:"degradation_warnings"`
 	DecisionReason         string                          `json:"decision_reason"`
 	RequestedMediaFileID   ID                              `json:"requested_media_file_id"`
@@ -237,10 +237,10 @@ type PlaybackReplanBody struct {
 	AttemptedPlanKeys     []string                           `json:"attempted_plan_keys" maxItems:"16"`
 	LocalMutations        []string                           `json:"local_mutations,omitempty" maxItems:"8"`
 	AttemptCount          int                                `json:"attempt_count" minimum:"1" maximum:"8"`
-	QualityPreference     string                             `json:"quality_preference"`
+	QualityPreference     string                             `json:"quality_preference" doc:"auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto."`
 	PositionSeconds       float64                            `json:"position_seconds" minimum:"0"`
-	Metered               bool                               `json:"metered"`
-	BandwidthEstimateKbps *int                               `json:"bandwidth_estimate_kbps,omitempty" nullable:"false"`
+	Metered               bool                               `json:"metered,omitempty" doc:"Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead." deprecated:"true"`
+	BandwidthEstimateKbps *int                               `json:"bandwidth_estimate_kbps,omitempty" nullable:"false" doc:"Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess."`
 	BandwidthCapKbps      *int                               `json:"bandwidth_cap_kbps,omitempty" nullable:"false"`
 	SelectedTracks        playback.SelectedTracksV3          `json:"selected_tracks"`
 	Failure               playback.FailureV3                 `json:"failure,omitzero"`
@@ -500,20 +500,14 @@ func playbackDecision(in playback.DecisionResponseV3) PlaybackDecision {
 	return out
 }
 
-// sourceQualityDisplayName is the v2 display name of the source quality entry.
-const sourceQualityDisplayName = "Original"
-
-// playbackQualities names the source entry "Original" on v2, so clients that
-// show display_name do not fall back to the wire label "original". The shared
-// plan keeps it unnamed: v1 serializes that plan and is frozen.
+// playbackQualities drops the source entry from the v2 menu: auto already
+// plays the source whenever the device can, so a separate Original choice
+// only duplicated it. The shared plan keeps the entry because v1 serializes
+// that plan and is frozen.
 func playbackQualities(in []playback.AvailableQualityV3) []playback.AvailableQualityV3 {
-	out := slices.Clone(in)
-	for i := range out {
-		if out[i].PreservesSource && out[i].DisplayName == "" {
-			out[i].DisplayName = sourceQualityDisplayName
-		}
-	}
-	return out
+	return slices.DeleteFunc(slices.Clone(in), func(quality playback.AvailableQualityV3) bool {
+		return quality.Label == playback.QualityOriginalV3
+	})
 }
 func playbackSource(in playback.SourceDescriptorV3) PlaybackSource {
 	return PlaybackSource{MediaFileID: ID(strconv.Itoa(in.MediaFileID)), DurationSeconds: in.DurationSeconds, Container: in.Container, VideoCodec: in.VideoCodec, VideoProfile: in.VideoProfile, VideoLevel: in.VideoLevel, BitDepth: in.BitDepth, ColorRange: in.ColorRange, Width: in.Width, Height: in.Height, FrameRate: in.FrameRate, BitrateKbps: in.BitrateKbps, DynamicRange: in.DynamicRange, HDR10Plus: in.HDR10Plus, DVProfile: in.DVProfile, DVLevel: in.DVLevel, DVBLCompatID: in.DVBLCompatID, DVBaseLayerProven: in.DVBaseLayerProven, DVEnhancementLayer: in.DVEnhancementLayer, AudioCodec: in.AudioCodec, AudioChannels: in.AudioChannels, AudioLayout: in.AudioLayout, VideoCopyUnsafe: in.VideoCopyUnsafe}

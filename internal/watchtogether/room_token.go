@@ -68,7 +68,7 @@ func (s *RoomTokenService) Validate(tokenStr string) (*RoomTokenClaims, error) {
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return nil, fmt.Errorf("%w: expired", ErrInvalidRoomToken)
 		}
-		return nil, fmt.Errorf("%w: %v", ErrInvalidRoomToken, err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidRoomToken, err) //nolint:errorlint // the sentinel is the verdict on a client token; the jwt parse error is only reported
 	}
 	if !token.Valid {
 		return nil, ErrInvalidRoomToken

@@ -235,15 +235,15 @@ func TestAdminSettingsWritesRejectMachineManagedCheckpoint(t *testing.T) {
 func TestAdminSettingsValidationIncludesEnvironmentManagedValues(t *testing.T) {
 	newHandler := func() (*AdminHandler, *fakeServerSettingsStore) {
 		settings := &fakeServerSettingsStore{values: map[string]string{
-			"watchsync.trakt.client_id": "configured-client-id",
+			"watchsync.simkl.client_id": "configured-client-id",
 		}}
 		return &AdminHandler{
 			SettingsRepo: settings,
 			BootstrapSensitiveConfigured: map[string]bool{
-				"watchsync.trakt.client_secret": true,
+				"watchsync.simkl.client_secret": true,
 			},
 			BootstrapSensitiveValues: map[string]string{
-				"watchsync.trakt.client_secret": "clawrouter-e2e-secret",
+				"watchsync.simkl.client_secret": "clawrouter-e2e-secret",
 			},
 		}, settings
 	}
@@ -898,10 +898,10 @@ func TestAdminUpdateSettingPreservesLegacyPairedWriteFlow(t *testing.T) {
 		{
 			name: "clear first half of pair",
 			initial: map[string]string{
-				"watchsync.trakt.client_id":     "configured-client-id",
-				"watchsync.trakt.client_secret": "clawrouter-e2e-secret",
+				"watchsync.simkl.client_id":     "configured-client-id",
+				"watchsync.simkl.client_secret": "clawrouter-e2e-secret",
 			},
-			key:   "watchsync.trakt.client_id",
+			key:   "watchsync.simkl.client_id",
 			value: "",
 		},
 	} {
@@ -1499,7 +1499,7 @@ func TestHandleCheckSettingsConnectionRejectsInvalidDraftValues(t *testing.T) {
 }
 
 func TestAdminGetSettingRedactsSensitiveSetting(t *testing.T) {
-	for _, key := range []string{"watchsync.trakt.client_secret", "watchsync.simkl.client_secret"} {
+	for _, key := range []string{"watchsync.simkl.client_secret"} {
 		t.Run(key, func(t *testing.T) {
 			const storedSecret = "stored-watch-provider-secret"
 			handler := &AdminHandler{
@@ -1527,7 +1527,7 @@ func TestAdminGetSettingRedactsSensitiveSetting(t *testing.T) {
 }
 
 func TestAdminUpdateSettingRedactsSensitiveSetting(t *testing.T) {
-	for _, key := range []string{"watchsync.trakt.client_secret", "watchsync.simkl.client_secret"} {
+	for _, key := range []string{"watchsync.simkl.client_secret"} {
 		t.Run(key, func(t *testing.T) {
 			const submittedSecret = "submitted-watch-provider-secret"
 			settings := &fakeServerSettingsStore{}

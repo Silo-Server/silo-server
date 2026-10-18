@@ -111,6 +111,25 @@ func TestEmbyProviderParseWebhookMultipart(t *testing.T) {
 	}
 }
 
+// NextPart reports a body that stops before its closing boundary with a
+// wrapped io.EOF, so a truncated delivery must not decode the part it read
+// as if the body were complete.
+func TestDecodeEmbyMultipartRejectsMissingClosingBoundary(t *testing.T) {
+	t.Parallel()
+
+	const part = "--B\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\n{\"Event\":\"playback.stop\"}\r\n"
+	var payload embyWebhookPayload
+	if err := decodeEmbyMultipart([]byte(part+"--B--\r\n"), "B", &payload); err != nil {
+		t.Fatalf("complete body: %v", err)
+	}
+	if payload.Event != "playback.stop" {
+		t.Fatalf("complete body Event = %q, want playback.stop", payload.Event)
+	}
+	if err := decodeEmbyMultipart([]byte(part+"--B"), "B", &embyWebhookPayload{}); err == nil {
+		t.Fatal("truncated body decoded; want an error")
+	}
+}
+
 func TestEmbyProviderParseWebhookMarkUnplayed(t *testing.T) {
 	t.Parallel()
 
@@ -223,6 +242,83 @@ func TestEmbyProviderParseWebhookItemRateAsToggleFavorite(t *testing.T) {
 	}
 }
 
+// Emby's Test Notification button sends only the event and server fields
+// (system.notificationtest on current servers, system.webhooktest on older
+// ones). It must be accepted as an ignored delivery, or Emby reports Bad
+// Request and the connection shows an error.
+func TestEmbyProviderIgnoresTestNotification(t *testing.T) {
+	t.Parallel()
+
+	for _, eventName := range []string{"system.notificationtest", "system.webhooktest", "System.NotificationTest"} {
+		t.Run(eventName, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest("POST", "/webhook", strings.NewReader(`{
+				"Title": "Test Notification",
+				"Description": "Test Notification Description",
+				"Date": "2026-10-14T01:02:03.4567890Z",
+				"Event": "`+eventName+`",
+				"Server": { "Name": "Emby", "Id": "server-1", "Version": "4.9.5.0" }
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+
+			event, err := NewEmbyProvider().ParseWebhook(context.Background(), &Connection{ServerName: "Emby"}, req)
+			if err != nil {
+				t.Fatalf("ParseWebhook() error = %v", err)
+			}
+			if event == nil || event.Apply || event.EventKind != strings.ToLower(eventName) || event.Summary != "Ignored unsupported Emby event type" {
+				t.Fatalf("expected ignored test notification, got %#v", event)
+			}
+		})
+	}
+}
+
+// Events Silo does not apply are ignored whatever fields they carry; only the
+// events it applies need a user and an item.
+func TestEmbyProviderIgnoresUnsupportedEventsWithoutUserOrItem(t *testing.T) {
+	t.Parallel()
+
+	for name, body := range map[string]string{
+		"no user or item":   `{"Event":"system.updateavailable","Server":{"Name":"Emby"}}`,
+		"user without item": `{"Event":"user.authenticated","User":{"Id":"user-1","Name":"Alice"}}`,
+		"item without user": `{"Event":"library.new","Item":{"Id":"item-1","Name":"Movie","Type":"Movie"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest("POST", "/webhook", strings.NewReader(body))
+			event, err := NewEmbyProvider().ParseWebhook(context.Background(), &Connection{ServerName: "Emby"}, req)
+			if err != nil {
+				t.Fatalf("ParseWebhook() error = %v", err)
+			}
+			if event == nil || event.Apply {
+				t.Fatalf("expected ignored event, got %#v", event)
+			}
+		})
+	}
+}
+
+func TestEmbyProviderRejectsMalformedPayloads(t *testing.T) {
+	t.Parallel()
+
+	const movie = `"Item":{"Id":"item-1","Name":"Movie","Type":"Movie"}`
+	for name, body := range map[string]string{
+		"empty object":                 `{}`,
+		"not json":                     `not json`,
+		"missing event":                `{"User":{"Id":"user-1"},` + movie + `}`,
+		"stop without user":            `{"Event":"playback.stop",` + movie + `}`,
+		"mixed-case stop without user": `{"Event":"Playback.Stop",` + movie + `}`,
+		"mark played without item":     `{"Event":"item.markplayed","User":{"Id":"user-1"}}`,
+		"favorite without type":        `{"Event":"item.addedtofavorites","User":{"Id":"user-1"},"Item":{"Id":"item-1"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest("POST", "/webhook", strings.NewReader(body))
+			if event, err := NewEmbyProvider().ParseWebhook(context.Background(), &Connection{ServerName: "Emby"}, req); err == nil {
+				t.Fatalf("ParseWebhook() = %#v, want error", event)
+			}
+		})
+	}
+}
+
 func TestDecodeEmbyPayloadFormEncoded(t *testing.T) {
 	t.Parallel()
 
@@ -257,6 +353,7 @@ func TestEmbyWebhookAction(t *testing.T) {
 		{eventName: "item.addedtofavorites", want: ActionAddFavorite, ok: true},
 		{eventName: "item.removedfromfavorites", want: ActionRemoveFavorite, ok: true},
 		{eventName: "user.created", ok: false},
+		{eventName: "system.notificationtest", ok: false},
 	}
 
 	for _, tc := range tests {
@@ -454,6 +551,11 @@ func newPlexMetadataServer(t *testing.T) *httptest.Server {
 
 func parsePlex(t *testing.T, server *httptest.Server, payload string) (*CanonicalEvent, error) {
 	t.Helper()
+	return parsePlexAt(t, t.Context(), server, payload)
+}
+
+func parsePlexAt(t *testing.T, ctx context.Context, server *httptest.Server, payload string) (*CanonicalEvent, error) {
+	t.Helper()
 	var body strings.Builder
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField("payload", payload); err != nil {
@@ -466,7 +568,27 @@ func parsePlex(t *testing.T, server *httptest.Server, payload string) (*Canonica
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	conn := &Connection{UserID: 7, BaseURL: server.URL, AccessToken: "owner-token"}
 	trusted := historyimport.NewLocalNetworkAccess(staticSettings{historyimport.SettingAllowPrivateDestinations: "true"}, nil)
-	return NewPlexProvider(historyimport.NewPlexClient()).ParseWebhook(trusted.Context(t.Context(), conn.UserID), conn, req)
+	return NewPlexProvider(historyimport.NewPlexClient()).ParseWebhook(trusted.Context(ctx, conn.UserID), conn, req)
+}
+
+// The receipt time is when the delivery started arriving, not when its body
+// finished uploading, so a slow upload cannot look newer than Silo activity
+// written meanwhile.
+func TestPlexProviderUsesRecordedReceiptTime(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	receivedAt := time.Now().Add(-time.Minute)
+	play, err := parsePlexAt(t, withWebhookReceivedAt(t.Context(), receivedAt), server, `{"event":"media.play","Account":{"id":5,"title":"Kid"},"Metadata":{"ratingKey":"42","type":"movie"}}`)
+	if err != nil {
+		t.Fatalf("play: %v", err)
+	}
+	if want := receivedAt.UTC().Truncate(time.Microsecond); !play.OccurredAt.Equal(want) {
+		t.Fatalf("OccurredAt = %v, want receipt time %v", play.OccurredAt, want)
+	}
 }
 
 func TestPlexProviderUsesEventStateNotOwnerMetadata(t *testing.T) {
@@ -538,10 +660,11 @@ func TestPlexProviderRejectsMalformedPayloads(t *testing.T) {
 	server := newPlexMetadataServer(t)
 
 	for name, payload := range map[string]string{
-		"not json":        `not json`,
-		"missing event":   `{"Account":{"id":5},"Metadata":{"ratingKey":"42","type":"movie"}}`,
-		"missing account": `{"event":"media.scrobble","Metadata":{"ratingKey":"42","type":"movie"}}`,
-		"missing item":    `{"event":"media.scrobble","Account":{"id":5}}`,
+		"not json":                     `not json`,
+		"missing event":                `{"Account":{"id":5},"Metadata":{"ratingKey":"42","type":"movie"}}`,
+		"missing account":              `{"event":"media.scrobble","Metadata":{"ratingKey":"42","type":"movie"}}`,
+		"missing item":                 `{"event":"media.scrobble","Account":{"id":5}}`,
+		"play without account or item": `{"event":"media.play"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -549,6 +672,37 @@ func TestPlexProviderRejectsMalformedPayloads(t *testing.T) {
 				t.Fatalf("ParseWebhook() = %#v, want error", event)
 			}
 		})
+	}
+}
+
+// Plex sends every event to every webhook, including server events without an
+// item. Events Silo does not apply are ignored without a metadata lookup,
+// whatever fields they carry.
+func TestPlexProviderIgnoresUnsupportedEventsWithoutItem(t *testing.T) {
+	t.Parallel()
+	var lookups atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lookups.Add(1)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	for name, payload := range map[string]string{
+		"database backup": `{"event":"admin.database.backup","Account":{"id":1,"title":"Owner"},"Server":{"title":"Plex"}}`,
+		"new device":      `{"event":"device.new","Account":{"id":1,"title":"Owner"},"Player":{"title":"Phone"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			event, err := parsePlex(t, server, payload)
+			if err != nil {
+				t.Fatalf("ParseWebhook() error = %v", err)
+			}
+			if event == nil || event.Apply || event.Summary != "Ignored unsupported Plex event type" {
+				t.Fatalf("expected ignored event, got %#v", event)
+			}
+		})
+	}
+	if n := lookups.Load(); n != 0 {
+		t.Fatalf("unsupported events made %d metadata lookups, want 0", n)
 	}
 }
 

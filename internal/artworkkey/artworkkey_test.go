@@ -49,3 +49,36 @@ func TestOriginalOfNamesTheRevisionsOriginal(t *testing.T) {
 		}
 	}
 }
+
+func TestIsLocal(t *testing.T) {
+	for key, want := range map[string]bool{
+		"local/movies/1/0badf00d/poster/original.webp": true,
+		"nfo/movies/1/poster/original.webp":            true,
+		"tmdb/movies/1/poster/original.webp":           false,
+		"nfo-extra/movies/1/poster/original.webp":      false,
+		"": false,
+	} {
+		if got := IsLocal(key); got != want {
+			t.Errorf("IsLocal(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
+func TestImageTypeOf(t *testing.T) {
+	tests := []struct {
+		key, fallback, want string
+	}{
+		{"tvdb/series/1/seasons/2/episodes/3/still/original.webp", ImagePoster, ImageStill},
+		{"/tmdb/movies/550/backdrop/original.abc.jpg", ImageThumb, ImageBackdrop},
+		{"local/movies/m/aa/clearart/original.r1.webp", "", ImageClearArt},
+		{"collections/7/cover/original.webp", ImagePoster, ImagePoster},
+		{"plugin://tmdb/still/original.webp", ImagePoster, ImagePoster},
+		{"original.webp", ImageLogo, ImageLogo},
+		{"", ImageBackdrop, ImageBackdrop},
+	}
+	for _, tt := range tests {
+		if got := ImageTypeOf(tt.key, tt.fallback); got != tt.want {
+			t.Errorf("ImageTypeOf(%q, %q) = %q, want %q", tt.key, tt.fallback, got, tt.want)
+		}
+	}
+}

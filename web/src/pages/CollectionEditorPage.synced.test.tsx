@@ -339,7 +339,7 @@ describe("Synced list step, server", () => {
     const search = screen.getByRole("searchbox", { name: "Search lists" });
     expect(search).toBeDisabled();
     expect(search).toHaveAccessibleDescription(/Searching MDBList needs an API key/);
-    expect(screen.getByRole("link", { name: "Settings › Subtitles & Metadata" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Settings › Providers" })).toHaveAttribute(
       "href",
       "/admin/settings/providers",
     );

@@ -707,7 +707,7 @@ func (w *MatchWorker) processFiles(ctx context.Context, files []*models.MediaFil
 			if ctx.Err() != nil {
 				return false
 			}
-			contentID := key.(string)
+			contentID := key.(string) //nolint:errcheck,forcetypeassert // processFileWithFolderCache stores content ID strings as keys
 			if err := w.service.ensureSeriesEpisodeLinks(ctx, contentID); err != nil {
 				slog.WarnContext(ctx, "metadata: deferred series episode link failed", "component", "metadata",
 					"content_id", contentID, "error", err)
@@ -894,8 +894,8 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, job models.Mov
 			w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched", "content_id", skeleton.ContentID, "file_id", file.ID, "path", file.FilePath)
 			return false
 		} else if result == nil || !result.Pinned {
-			// A pinned result is an unmatched split target: nothing matched or
-			// changed, and the job is complete.
+			// A pinned result is an item an admin left unmatched: nothing
+			// matched or changed, and the job is complete.
 			w.publishCatalogItemChanged(ctx, file.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 		}
 	}
@@ -1093,7 +1093,7 @@ func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models
 	if override == nil || !isProvisionalOwnershipStatus(skeleton.ItemStatus) {
 		return false, nil
 	}
-	if pinned, err := w.service.pinnedUnmatchedBySplit(ctx, skeleton.ContentID); err != nil || pinned {
+	if pinned, err := w.service.pinnedUnmatched(ctx, skeleton.ContentID); err != nil || pinned {
 		return false, err
 	}
 	owned, err := w.itemOwnsContentGroup(ctx, file)
@@ -1557,12 +1557,12 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	return len(groupFiles), nil
 }
 
-// synthesizePinnedSeriesEpisodes gives an unmatched split target the same
-// file-derived episodes an automatic match failure would, so its episodes stay
-// browsable while it waits for an admin to identify it.
+// synthesizePinnedSeriesEpisodes gives a series an admin left unmatched (an
+// ignored item or an unmatched split target) the same file-derived episodes
+// an automatic match failure would, so its episodes stay browsable.
 func (w *MatchWorker) synthesizePinnedSeriesEpisodes(ctx context.Context, contentID string) {
 	if err := w.service.SynthesizeFallbackEpisodes(ctx, contentID); err != nil {
-		slog.WarnContext(ctx, "metadata: fallback episode synthesis failed for unmatched split target", "component", "metadata",
+		slog.WarnContext(ctx, "metadata: fallback episode synthesis failed for a series left unmatched", "component", "metadata",
 			"content_id", contentID, "error", err)
 	}
 }
@@ -1655,6 +1655,9 @@ func matchFailureFromDecision(decision *MatchDecision) MatchFailure {
 			message = "selected providers returned no usable metadata"
 		case MatchOutcomeProviderTransient:
 			message = "metadata provider is temporarily unavailable"
+			if decision.localSidecarUnreadable {
+				message = "local metadata (NFO) could not be read; the match will retry"
+			}
 		case MatchOutcomeProviderPermanent:
 			message = "metadata provider rejected the request permanently"
 		}

@@ -77,6 +77,8 @@ import {
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
+import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { playbackQualitySettings } from "./playbackQualitySettings";
 
 const WatchPage = lazy(() =>
   import("@/player/components/WatchPage").then((module) => ({ default: module.WatchPage })),
@@ -590,6 +592,14 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
     );
+  // A server below revision 20 rejects the whole batch for a key it does not
+  // define, so the cellular pair is read only where the server has it.
+  const supportsCellularQuality =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+    );
   // Resolved through the contract, so a device override winning over the
   // profile's own choice is the manifest's resolution order rather than a
   // precedence rule spelled out here.
@@ -612,6 +622,13 @@ function WatchPlaybackHostContent() {
       // The bandwidth cap that pairs with it; the player keeps its startup
       // tier under this so the setting does what its label says.
       SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
+      // The pair that replaces those two on a metered link, as in the apps.
+      ...(supportsCellularQuality
+        ? [
+            SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+            SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS,
+          ]
+        : []),
     ],
     enabled: signedIn,
   });
@@ -1081,19 +1098,18 @@ function WatchPlaybackHostContent() {
     return <PlaybackUnavailableScreen error={error} onBack={() => navigate(-1)} />;
   }
 
-  const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]
-    ?.value as string | undefined;
-  const maxBitrateKbps = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]
-    ?.value as number | null | undefined;
+  const { qualityPreference: canonicalQuality, maxBitrateKbps } = playbackQualitySettings(
+    effectivePlaybackSettings,
+    onMeteredConnection(),
+  );
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
     item: activeItem,
     currentProfile,
     seriesEpisodes,
-    // Passed through verbatim: "original" and "auto" are distinct wire values
-    // (the planner preserves the source for "original", adapts for "auto").
-    // Undefined until the read resolves, which leaves the profile-column
-    // fallback in place rather than blocking playback on a settings fetch.
+    // The session reads a legacy "original" as "auto". Undefined until the
+    // read resolves, which leaves the profile-column fallback in place rather
+    // than blocking playback on a settings fetch.
     qualityPreference: canonicalQuality,
   });
   // The resolved answer already folds in the profile layer, so the props built

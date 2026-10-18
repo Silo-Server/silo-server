@@ -16,6 +16,7 @@ const BRANDING_DEFAULTS: BrandingContextValue = {
   faviconUrl: null,
   loginBgUrl: null,
   storageAvailable: false,
+  loaded: false,
 };
 
 function renderBrandSrc(

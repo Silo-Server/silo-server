@@ -35,6 +35,7 @@ type fakeLibraryAdmin struct {
 	lastSearch      string
 	lastLimit       int
 	lastOffset      int
+	lastIgnored     bool
 	// stage B commands.
 	lastRefreshMode adminjob.LibraryRefreshMode
 	lastPosterType  string
@@ -260,24 +261,40 @@ func (f *fakeLibraryAdmin) RematchStaleID(_ context.Context, contentID string) e
 	return f.err
 }
 
-func (f *fakeLibraryAdmin) ListUnmatchedItems(_ context.Context, search string, limit, offset int) ([]handlers.UnmatchedItemView, int, error) {
+func (f *fakeLibraryAdmin) ListUnmatchedItems(_ context.Context, search string, ignored bool, limit, offset int) ([]handlers.UnmatchedItemView, int, error) {
 	if f.err != nil {
 		return nil, 0, f.err
 	}
-	f.lastSearch, f.lastLimit, f.lastOffset = search, limit, offset
-	rows := f.unmatched
-	if search != "" {
-		rows = nil
-		for _, r := range f.unmatched {
-			if strings.Contains(strings.ToLower(r.Title), strings.ToLower(search)) {
-				rows = append(rows, r)
-			}
+	f.lastSearch, f.lastIgnored, f.lastLimit, f.lastOffset = search, ignored, limit, offset
+	rows := []handlers.UnmatchedItemView{}
+	for _, r := range f.unmatched {
+		if (r.IgnoredAt != nil) == ignored && strings.Contains(strings.ToLower(r.Title), strings.ToLower(search)) {
+			rows = append(rows, r)
 		}
 	}
 	if offset > len(rows) {
 		return []handlers.UnmatchedItemView{}, len(rows), nil
 	}
 	return rows[offset:min(offset+limit, len(rows))], len(rows), nil
+}
+
+func (f *fakeLibraryAdmin) SetUnmatchedItemIgnored(_ context.Context, contentID string, ignored bool) error {
+	if f.err != nil {
+		return f.err
+	}
+	for i := range f.unmatched {
+		if f.unmatched[i].ContentID != contentID {
+			continue
+		}
+		switch {
+		case !ignored:
+			f.unmatched[i].IgnoredAt = nil
+		case f.unmatched[i].IgnoredAt == nil:
+			f.unmatched[i].IgnoredAt = ptr(fixedTime())
+		}
+		return nil
+	}
+	return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
 }
 
 func libraryDeps(t *testing.T) (Dependencies, *fakeLibraryAdmin) {
@@ -301,6 +318,7 @@ func withLibraryAdmin(deps Dependencies) (Dependencies, *fakeLibraryAdmin) {
 			{ContentID: "movie:a", Title: "Alpha", Year: 2001, ContentType: "movie", LibraryID: 1, LibraryName: "Movies", Status: "unmatched"},
 			{ContentID: "movie:b", Title: "Beta", Year: 2002, ContentType: "movie", Status: "pending"},
 			{ContentID: "movie:c", Title: "Gamma", Year: 2003, ContentType: "movie", LibraryID: 1, LibraryName: "Movies", Status: "ambiguous"},
+			{ContentID: "movie:d", Title: "Delta", Year: 2004, ContentType: "movie", LibraryID: 1, LibraryName: "Movies", Status: "unmatched", IgnoredAt: ptr(fixedTime())},
 		},
 	}
 	deps.LibraryAdmin = fake
@@ -563,7 +581,7 @@ func TestGetLibraryProviderDefaults(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	if want := `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true}]}]}`; strings.TrimSpace(rec.Body.String()) != want {
+	if want := `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true,"local":false}]}]}`; strings.TrimSpace(rec.Body.String()) != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/libraries/provider-defaults?library_type=podcasts", "", bearer(adminToken))
@@ -766,6 +784,98 @@ func TestListUnmatchedItems(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unmatched-items?limit=2&q=x&cursor="+first.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unmatched-items?offset=1", "", bearer(adminToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unmatched-items", "", bearer(memberToken)), TypePermissionDenied)
+}
+
+func TestIgnoreUnmatchedItem(t *testing.T) {
+	deps, fake := libraryDeps(t)
+	h := newTestHandler(t, deps)
+	list := func(query string) rootPage {
+		t.Helper()
+		rec := do(t, h, http.MethodGet, "/api/v2/libraries/unmatched-items"+query, "", bearer(adminToken))
+		if rec.Code != 200 {
+			t.Fatalf("list %s: %d %s", query, rec.Code, rec.Body.String())
+		}
+		var page rootPage
+		decodeJSON(t, rec.Body, &page)
+		return page
+	}
+	titles := func(page rootPage) []string {
+		out := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			out = append(out, strings.Trim(string(item["title"]), `"`))
+		}
+		return out
+	}
+
+	// Delta is ignored already: it stays out of the default list, which
+	// carries no ignored_at, and is the only item of the ignored view.
+	page := list("")
+	if got := titles(page); page.Total != 3 || strings.Join(got, ",") != "Alpha,Beta,Gamma" || page.Items[0]["ignored_at"] != nil {
+		t.Fatalf("default list = %s total %d", got, page.Total)
+	}
+	page = list("?ignored=true")
+	if got := titles(page); page.Total != 1 || strings.Join(got, ",") != "Delta" || string(page.Items[0]["ignored_at"]) != `"2026-01-02T03:04:05.678Z"` || !fake.lastIgnored {
+		t.Fatalf("ignored list = %s total %d: %v", got, page.Total, page.Items)
+	}
+
+	rec := do(t, h, http.MethodPut, "/api/v2/libraries/unmatched-items/movie:a/ignore", "", bearer(adminToken))
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("ignore = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := titles(list("")); strings.Join(got, ",") != "Beta,Gamma" {
+		t.Fatalf("after ignore, default list = %v", got)
+	}
+	if got := titles(list("?ignored=true")); strings.Join(got, ",") != "Alpha,Delta" {
+		t.Fatalf("after ignore, ignored list = %v", got)
+	}
+	// Ignoring again is a no-op.
+	if rec := do(t, h, http.MethodPut, "/api/v2/libraries/unmatched-items/movie:a/ignore", "", bearer(adminToken)); rec.Code != http.StatusNoContent {
+		t.Fatalf("repeat ignore = %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, h, http.MethodDelete, "/api/v2/libraries/unmatched-items/movie:a/ignore", "", bearer(adminToken))
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("unignore = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := titles(list("")); strings.Join(got, ",") != "Alpha,Beta,Gamma" {
+		t.Fatalf("after unignore, default list = %v", got)
+	}
+
+	// The cursor is bound to the ignored filter.
+	first := list("?limit=1")
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unmatched-items?limit=1&ignored=true&cursor="+first.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
+
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/libraries/unmatched-items/movie:missing/ignore", "", bearer(adminToken)), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/libraries/unmatched-items/movie:missing/ignore", "", bearer(adminToken)), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/libraries/unmatched-items/movie:a/ignore", "", bearer(memberToken)), TypePermissionDenied)
+	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/libraries/unmatched-items/movie:a/ignore", "", bearer(memberToken)), TypePermissionDenied)
+	fake.err = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: "Only an unmatched item can be ignored"}
+	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/libraries/unmatched-items/movie:a/ignore", "", bearer(adminToken)), TypeConflict)
+}
+
+// unmatchedItemIgnoreFixtureCases pin the ignored view of the unmatched
+// list and the mark that puts an item there. The ignore and unignore cases
+// leave the shared fake as they found it.
+func unmatchedItemIgnoreFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "list_ignored_unmatched_items_ok", operationID: opListUnmatchedItems,
+			scenario: "The items an admin marked as intentionally unmatched, each with when it was ignored.",
+			method:   http.MethodGet, path: "/api/v2/libraries/unmatched-items?ignored=true", headers: bearer(adminToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/UnmatchedItemCollection"},
+		{name: "ignore_unmatched_item_ok", operationID: opIgnoreUnmatchedItem,
+			scenario: "An admin marks an item as intentionally unmatched; ignoring an ignored item again is a no-op. Success answers 204 with no body.",
+			method:   http.MethodPut, path: "/api/v2/libraries/unmatched-items/movie:d/ignore", headers: bearer(adminToken),
+			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
+		{name: "ignore_unmatched_item_not_found", operationID: opIgnoreUnmatchedItem,
+			scenario: "Ignoring an item the catalog does not hold.",
+			method:   http.MethodPut, path: "/api/v2/libraries/unmatched-items/movie:missing/ignore", headers: bearer(adminToken),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "unignore_unmatched_item_ok", operationID: opUnignoreUnmatchedItem,
+			scenario: "Clearing the mark of an item that is not ignored leaves it as is. Success answers 204 with no body.",
+			method:   http.MethodDelete, path: "/api/v2/libraries/unmatched-items/movie:b/ignore", headers: bearer(adminToken),
+			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
+	}
 }
 
 func TestDiagnosticsSearchAndSkippedPagination(t *testing.T) {

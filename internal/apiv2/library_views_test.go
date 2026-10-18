@@ -280,7 +280,7 @@ func TestLibraryProviders(t *testing.T) {
 	deps, fake := libraryDeps(t)
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(adminToken))
-	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true}]}]}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true,"local":false}]}]}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodPut, "/api/v2/libraries/1/providers", `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","priority":1,"enabled":true}]},{"content_level":"episode","entries":[]}]}`, bearer(adminToken))
@@ -303,6 +303,24 @@ func TestLibraryProviders(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(memberToken)), TypePermissionDenied)
 }
 
+// TestLibraryProvidersMarksLocalEntry: the built-in local metadata entry is
+// flagged so a client can pin it and offer one switch for it.
+func TestLibraryProvidersMarksLocalEntry(t *testing.T) {
+	deps, fake := libraryDeps(t)
+	fake.providers = map[string][]handlers.ChainLevelEntryView{
+		"movie": {
+			{PluginInstallationID: 1, CapabilityID: "nfo", ProviderSlug: "nfo", Priority: 0, Enabled: true, Local: true},
+			{PluginInstallationID: 3, CapabilityID: "tmdb", ProviderSlug: "tmdb", Priority: 1, Enabled: true},
+		},
+	}
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(adminToken))
+	want := `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"1","capability_id":"nfo","provider_slug":"nfo","priority":0,"enabled":true,"local":true},{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":1,"enabled":true,"local":false}]}]}` + "\n"
+	if rec.Code != 200 || rec.Body.String() != want {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+}
+
 // TestLibraryProvidersLegacyLevel: an upgraded database keeps unlevelled
 // (content_level empty) rows; v2 omits that level and a save of the remaining levels carries the
 // legacy rows across unchanged instead of dropping them.
@@ -314,7 +332,7 @@ func TestLibraryProvidersLegacyLevel(t *testing.T) {
 	}
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(adminToken))
-	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true}]}]}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":0,"enabled":true,"local":false}]}]}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodPut, "/api/v2/libraries/1/providers", `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"3","capability_id":"tmdb","priority":1,"enabled":true}]}]}`, bearer(adminToken))
@@ -412,7 +430,7 @@ func TestLibraryLayoutAndSections(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	card := body.Sections[0].Items[0]
-	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true}`, "item_source": `"in_progress"`} {
+	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true,"not_interested":false}`, "item_source": `"in_progress"`} {
 		if string(card[k]) != want {
 			t.Errorf("%s = %s, want %s", k, card[k], want)
 		}

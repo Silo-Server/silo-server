@@ -3,7 +3,10 @@ package imagesize
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 )
 
 func TestParse(t *testing.T) {
@@ -67,19 +70,19 @@ func TestVariantMatrix(t *testing.T) {
 		"poster": {
 			Small:    "w300",
 			Medium:   "w500",
-			Large:    "w780",
+			Large:    "w1000",
 			Original: "original",
 		},
 		"still": {
 			Small:    "w300",
 			Medium:   "w500",
-			Large:    "w780",
+			Large:    "w1280",
 			Original: "original",
 		},
 		"backdrop": {
 			Small:    "w300",
 			Medium:   "w1920",
-			Large:    "w1920",
+			Large:    "w2560",
 			Original: "original",
 		},
 		"logo": {
@@ -94,12 +97,44 @@ func TestVariantMatrix(t *testing.T) {
 			Large:    "w500",
 			Original: "original",
 		},
+		"banner": {
+			Small:    "w500",
+			Medium:   "w500",
+			Large:    "w1000",
+			Original: "original",
+		},
+		"thumb": {
+			Small:    "w300",
+			Medium:   "w500",
+			Large:    "w1280",
+			Original: "original",
+		},
+		"clearart": {
+			Small:    "w500",
+			Medium:   "w500",
+			Large:    "w1000",
+			Original: "original",
+		},
+		"disc": {
+			Small:    "w300",
+			Medium:   "w500",
+			Large:    "w1000",
+			Original: "original",
+		},
 	}
 
 	for imageType, sizes := range want {
 		for size, wantVariant := range sizes {
 			if got := Variant(imageType, size); got != wantVariant {
 				t.Errorf("Variant(%q, %q) = %q, want %q", imageType, size, got, wantVariant)
+			}
+		}
+		// Every size must name a variant the cacher generates for the type, or
+		// a request for it misses.
+		generated := artworkkey.VariantNames(imageType)
+		for size, variant := range sizes {
+			if !slices.Contains(generated, variant) {
+				t.Errorf("Variant(%q, %q) = %q is not among the generated variants %v", imageType, size, variant, generated)
 			}
 		}
 	}
@@ -137,12 +172,13 @@ func TestNextLower(t *testing.T) {
 		want      string
 		wantOK    bool
 	}{
-		{"poster", "w780", "w500", true},
+		{"poster", "w1000", "w500", true},
 		{"poster", "w500", "w300", true},
 		{"poster", "w300", "", false},
-		{"still", "w780", "w500", true},
+		{"still", "w1280", "w500", true},
 		{"logo", "w1280", "w500", true},
 		{"logo", "w500", "", false},
+		{"backdrop", "w2560", "w1920", true},
 		{"backdrop", "w1920", "w1280", true},
 		{"backdrop", "w1280", "w300", true},
 		{"backdrop", "w300", "", false},

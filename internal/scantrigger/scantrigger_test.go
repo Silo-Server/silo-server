@@ -605,3 +605,69 @@ func TestEnqueueAllUsesBatchQueue(t *testing.T) {
 		t.Fatalf("expected two queued calls from batch, got %d", len(queue.calls))
 	}
 }
+
+// An edited .nfo or replaced image in a video library scans its directory,
+// where change detection re-applies the items whose sidecars changed.
+func TestResolverRoutesLocalMetadataSidecarsToTheirDirectory(t *testing.T) {
+	root := t.TempDir()
+	movie := filepath.Join(root, "Film (2020)")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{
+		{ID: 3, Type: "movies", Enabled: true, Paths: []string{root}},
+	}}
+	resolver := NewResolver(repo)
+	for _, name := range []string{"movie.nfo", "poster.jpg", "Film (2020)-fanart.PNG", "clearlogo.webp"} {
+		path := filepath.Join(movie, name)
+		if err := os.MkdirAll(movie, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("sidecar"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		target, err := resolver.Resolve(t.Context(), Request{Path: path, Trigger: "realtime_monitor", SidecarFolder: true})
+		if err != nil || target.Mode != ModeSubtree || target.Path != movie || target.Trigger != "realtime_monitor" {
+			t.Fatalf("existing %s: target=%+v err=%v", name, target, err)
+		}
+		// The scan API still rejects a path that is not media.
+		var requestErr *RequestError
+		if _, err := resolver.Resolve(t.Context(), Request{Path: path}); !errors.As(err, &requestErr) || requestErr.Reason != ReasonUnsupportedExtension {
+			t.Fatalf("scan API request for %s: err=%v, want unsupported_extension", name, err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		target, err = resolver.ResolveVanishedPath(t.Context(), path, "realtime_monitor")
+		if err != nil || target.Mode != ModeSubtree || target.Path != movie {
+			t.Fatalf("vanished %s: target=%+v err=%v", name, target, err)
+		}
+	}
+}
+
+func TestResolverDoesNotRouteRootOrNonVideoSidecars(t *testing.T) {
+	root := t.TempDir()
+	books := t.TempDir()
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{
+		{ID: 3, Type: "movies", Enabled: true, Paths: []string{root}},
+		{ID: 4, Type: "audiobooks", Enabled: true, Paths: []string{books}},
+	}}
+	resolver := NewResolver(repo)
+	for _, path := range []string{
+		// A sidecar in a flat library's root would turn into a library scan.
+		filepath.Join(root, "Film (2020).nfo"),
+		// Book libraries read their own cover files.
+		filepath.Join(books, "Author", "cover.jpg"),
+		// Not a sidecar at all.
+		filepath.Join(root, "Film (2020)", "notes.txt"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := resolver.Resolve(t.Context(), Request{Path: path, SidecarFolder: true})
+		var requestErr *RequestError
+		if !errors.As(err, &requestErr) || requestErr.Reason != ReasonUnsupportedExtension {
+			t.Fatalf("%s: err=%v, want unsupported_extension", path, err)
+		}
+	}
+}

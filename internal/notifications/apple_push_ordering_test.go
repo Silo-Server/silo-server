@@ -56,7 +56,7 @@ func TestOrderedApplePushReplayAndCurrentRow(t *testing.T) {
 	if e != nil || !current.Enabled || current.APNsEnvironment != cmd.APNsEnvironment {
 		t.Fatalf("current=%+v err=%v", current, e)
 	}
-	if err = repo.DeleteAllForProfile(ctx, cmd.ProfileID); err != nil {
+	if err = repo.DeleteAllForProfile(ctx, cmd.UserID, cmd.ProfileID); err != nil {
 		t.Fatal(err)
 	}
 	removed, e := repo.ApplyApplePush(ctx, cmd, cipher)
@@ -98,7 +98,7 @@ func TestOrderedApplePushConflictsAndBridge(t *testing.T) {
 	if _, err := repo.UpsertApple(ctx, appleLegacyCommand(cmd), cipher); !errors.Is(err, ErrPushLegacyWriter) {
 		t.Fatalf("bridge=%v", err)
 	}
-	if err := repo.DeleteByProfileDevice(ctx, cmd.ProfileID, cmd.DeviceID); !errors.Is(err, ErrPushLegacyWriter) {
+	if err := repo.DeleteByProfileDevice(ctx, cmd.UserID, cmd.ProfileID, cmd.DeviceID); !errors.Is(err, ErrPushLegacyWriter) {
 		t.Fatalf("bridge delete=%v", err)
 	}
 	wrong := cmd

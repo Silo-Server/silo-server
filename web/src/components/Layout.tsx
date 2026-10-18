@@ -43,9 +43,13 @@ import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/startupPriority";
+import { useSettingsReturnPath } from "@/hooks/useSettingsReturnPath";
+import { useSidebarSwap } from "@/hooks/useSidebarSwap";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
 const ServerActivity = lazy(() => import("@/components/ServerActivity"));
+// Settings swap the app sidebar for their own; it loads with the settings pages.
+const UserSettingsSidebar = lazy(() => import("@/components/settings/UserSettingsSidebar"));
 
 /**
  * The lazily loaded activity indicator. Layout wraps every page, so a chunk
@@ -112,6 +116,9 @@ export default function Layout({ children }: LayoutProps) {
   const isLibraryRoute = location.pathname.startsWith("/library/");
   const isItemRoute = location.pathname.startsWith("/item/");
   const isPersonRoute = location.pathname.startsWith("/person/");
+  const isSettingsRoute = /^\/settings(\/|$)/.test(location.pathname);
+  const settingsReturnPath = useSettingsReturnPath(isSettingsRoute, "/");
+  const sidebarSwap = useSidebarSwap(isSettingsRoute);
   const itemRouteLocation = `${location.pathname}${location.search}`;
   // Breakpoint changes naturally cause other layout renders; navigation only
   // needs the viewport value at the moment it is attempted.
@@ -393,13 +400,26 @@ export default function Layout({ children }: LayoutProps) {
           states; `collapsed` only drives the moving frame that hides everything
           past the 64px rail, so entering a detail page never resizes it. */}
         <div className="hidden lg:block" onTransitionEnd={handleSidebarTransitionEnd}>
-          <AppSidebar collapsed={visualDetailImmersion} />
+          {isSettingsRoute ? (
+            // Settings take over the sidebar column rather than adding a
+            // second one beside it. The fallback holds the column's place.
+            <Suspense
+              fallback={
+                <div className="border-sidebar-border/70 bg-sidebar/92 fixed top-0 bottom-0 left-0 z-40 w-[260px] border-r" />
+              }
+            >
+              <UserSettingsSidebar backTo={settingsReturnPath} swap={sidebarSwap} />
+            </Suspense>
+          ) : (
+            <AppSidebar collapsed={visualDetailImmersion} swap={sidebarSwap} />
+          )}
         </div>
 
         {/* Mobile header — visible below lg. Slides up on scroll-down within
           the Calendar route to free vertical space; pulling up reveals it. */}
         <div
           ref={mobileHeaderRef}
+          data-sticky-header
           className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out lg:hidden ${
             mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
           }`}

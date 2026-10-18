@@ -7,8 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -88,6 +91,84 @@ func TestPlaybackDeliveryFailureAfterBytesAborts(t *testing.T) {
 		}
 	}()
 	http.Error(writer, "PRIVATE_ERROR", 500)
+}
+
+// A file served on the v2 stream route must reach the connection's ReadFrom,
+// which is net/http's sendfile path, with the file still visible under at most
+// one limiter. io.Copy finds ReadFrom only by direct assertion, so every writer
+// on the route has to forward it. The handler is the real direct-play path,
+// with its rolling-deadline writer on top.
+func TestPlaybackDeliveryKeepsZeroCopy(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	body := strings.Repeat("x", 64<<10)
+	path := filepath.Join(t.TempDir(), "fixture.mp4")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps.PlaybackMedia = &PlaybackMediaHandlers{Original: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := playback.ServeDirectPlay(w, r, path); err != nil {
+			t.Errorf("direct play: %v", err)
+		}
+	})}
+	h := newTestHandler(t, deps)
+	for _, tc := range []struct {
+		name, rangeHeader string
+		status            int
+		want              int64
+	}{
+		{"full", "", http.StatusOK, int64(len(body))},
+		{"range", "bytes=10-1033", http.StatusPartialContent, 1024},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession+"?st=opaque", nil)
+			for k, v := range viewerHeaders() {
+				r.Header.Set(k, v)
+			}
+			if tc.rangeHeader != "" {
+				r.Header.Set("Range", tc.rangeHeader)
+			}
+			inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
+			h.ServeHTTP(inner, r)
+			if inner.Code != tc.status || int64(inner.Body.Len()) != tc.want || inner.fromFile != tc.want {
+				t.Fatalf("status %d, body %d bytes, %d of them read from the file by ReadFrom; want %d and %d", inner.Code, inner.Body.Len(), inner.fromFile, tc.status, tc.want)
+			}
+		})
+	}
+}
+
+// A copy that starts before any status must not commit one until a byte
+// arrives: a source that fails at once still gets its problem response, and
+// one that fails after bytes ends the stream instead of appending JSON.
+func TestPlaybackDeliveryCopyBeforeStatus(t *testing.T) {
+	t.Run("fails before bytes", func(t *testing.T) {
+		inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
+		writer := &playbackDeliveryWriter{ResponseWriter: inner, request: httptest.NewRequest(http.MethodGet, "/", nil)}
+		if _, err := io.Copy(writer, iotest.ErrReader(io.ErrUnexpectedEOF)); err == nil {
+			t.Fatal("copy succeeded")
+		}
+		http.Error(writer, "PRIVATE_ERROR", http.StatusServiceUnavailable)
+		if inner.Code != http.StatusServiceUnavailable || inner.Header().Get("Content-Type") != problemContentType || strings.Contains(inner.Body.String(), "PRIVATE") {
+			t.Fatalf("problem response: %d %v %s", inner.Code, inner.Header(), inner.Body.String())
+		}
+	})
+	t.Run("fails after bytes", func(t *testing.T) {
+		inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
+		writer := &playbackDeliveryWriter{ResponseWriter: inner, request: httptest.NewRequest(http.MethodGet, "/", nil)}
+		// Hide MultiReader's WriteTo so io.Copy has to use the writer's ReadFrom.
+		src := struct{ io.Reader }{io.MultiReader(strings.NewReader("first"), iotest.ErrReader(io.ErrUnexpectedEOF))}
+		if _, err := io.Copy(writer, src); err == nil {
+			t.Fatal("copy succeeded")
+		}
+		defer func() {
+			if err, ok := recover().(error); !ok || !errors.Is(err, http.ErrAbortHandler) {
+				t.Fatalf("late failure did not abort: %v", err)
+			}
+			if inner.Code != http.StatusOK || inner.Body.String() != "first" {
+				t.Fatalf("appended error bytes: %d %q", inner.Code, inner.Body.String())
+			}
+		}()
+		http.Error(writer, "PRIVATE_ERROR", http.StatusBadGateway)
+	})
 }
 
 func TestPlaybackDecisionV2ProjectsOnlyLocalMediaURLs(t *testing.T) {

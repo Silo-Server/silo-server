@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -12,7 +13,7 @@ import (
 
 // WatchlistListInput is the listWatchlist query.
 type WatchlistListInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
@@ -58,10 +59,10 @@ func registerWatchlist(reg *Registry) {
 		"Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getWatchlistEntry)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/watchlist/{item_id}", "addToWatchlist", "watchlist",
-		"Add the item to the acting profile's watchlist. Automatic retries are unsafe because provider and refresh effects are not change-gated.")),
+		"Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.addToWatchlist)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/watchlist/{item_id}", "deleteWatchlistEntry", "watchlist",
-		"Remove the item from the acting profile's watchlist; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.")),
+		"Remove the item from the acting profile's watchlist. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.deleteWatchlistEntry)
 }
 
@@ -73,7 +74,7 @@ func (reg *Registry) listWatchlist(ctx context.Context, cursors *Cursors, in *Wa
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
 	}
-	viewer, p := personalListViewer(ctx, in.ImageSize)
+	viewer, p := personalListViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}
@@ -99,7 +100,7 @@ func (reg *Registry) getWatchlistEntry(ctx context.Context, in *WatchlistItemInp
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -121,7 +122,7 @@ func (reg *Registry) addToWatchlist(ctx context.Context, in *WatchlistItemInput)
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -135,7 +136,7 @@ func (reg *Registry) deleteWatchlistEntry(ctx context.Context, in *WatchlistItem
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}

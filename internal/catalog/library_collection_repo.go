@@ -377,12 +377,10 @@ func (r *LibraryCollectionRepository) ListAll(ctx context.Context, libraryID *in
 		args       []any
 		scopeJoin  string
 	)
-	argIdx := 1
 	if libraryID != nil {
-		scopeJoin = fmt.Sprintf(`JOIN library_collection_libraries scope_lcl
-			ON scope_lcl.collection_id = lc.id AND scope_lcl.library_id = $%d`, argIdx)
+		scopeJoin = `JOIN library_collection_libraries scope_lcl
+			ON scope_lcl.collection_id = lc.id AND scope_lcl.library_id = $1`
 		args = append(args, *libraryID)
-		argIdx++
 	} else {
 		scopeJoin = libraryCollectionScopeFallbackJoin
 	}
@@ -877,7 +875,7 @@ func (r *LibraryCollectionRepository) ListItems(ctx context.Context, collectionI
 
 // AddItem inserts or upserts a single item in a manual collection. The
 // caller is responsible for verifying the collection's type before invoking
-// this — synced collections (mdblist/tmdb/trakt) overwrite manual edits on
+// this — synced collections (mdblist/tmdb) overwrite manual edits on
 // their next sync.
 func (r *LibraryCollectionRepository) AddItem(ctx context.Context, collectionID, mediaItemID string, position int) error {
 	tx, err := r.pool.Begin(ctx)
@@ -1368,7 +1366,7 @@ func (r *LibraryCollectionRepository) ListDueForSync(ctx context.Context) ([]*mo
 		WHERE lc.sync_schedule IS NOT NULL
 		  AND lc.next_sync_at IS NOT NULL
 		  AND lc.next_sync_at <= NOW()
-		  AND lc.collection_type IN ('mdblist', 'tmdb', 'trakt')
+		  AND lc.collection_type IN ('mdblist', 'tmdb')
 		GROUP BY lc.id, scope_lcl.group_id, scope_lcl.sort_order
 		ORDER BY lc.next_sync_at ASC
 	`, libraryCollectionColumns, libraryCollectionScopeFallbackJoin)

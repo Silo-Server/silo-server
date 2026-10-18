@@ -403,11 +403,11 @@ describe("useOverlayPrefs", () => {
 
     const { result, rerender } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.hasOverride).toBe(true);
+    expect(result.current.hasBadgeOverride).toBe(true);
     expect(result.current.prefs?.preset).toBe("minimal");
 
     await act(async () => {
-      await result.current.resetPrefs();
+      await result.current.resetPrefs("badges");
     });
 
     expect(mocks.clearValue).toHaveBeenCalledWith({
@@ -420,8 +420,37 @@ describe("useOverlayPrefs", () => {
     mocks.effective = effectiveOverlayValue(null).data as Record<string, { value: unknown }>;
     rerender();
 
-    expect(result.current.hasOverride).toBe(false);
+    expect(result.current.hasBadgeOverride).toBe(false);
     expect(result.current.prefs?.preset).toBe("vibrant");
+  });
+
+  it("resets shortcuts without touching a stored badge choice", async () => {
+    mocks.profileId = "profile-1";
+    mocks.v2.mockResolvedValue({ enabled: true });
+    mocks.effective = {
+      ...(effectiveOverlayValue({ version: 2, preset: "minimal", order: [], items: {} })
+        .data as Record<string, { value: unknown }>),
+      [SETTING_KEYS.UI_CARD_QUICK_ACTIONS_ENABLED]: {
+        key: SETTING_KEYS.UI_CARD_QUICK_ACTIONS_ENABLED,
+        value: true,
+        source: "profile",
+      },
+    } as Record<string, { value: unknown }>;
+    mocks.clearValue.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasBadgeOverride).toBe(true);
+    expect(result.current.hasQuickActionOverride).toBe(true);
+
+    await act(async () => {
+      await result.current.resetPrefs("quickActions");
+    });
+
+    const cleared = mocks.clearValue.mock.calls.map(([request]) => request.key);
+    expect(cleared.sort()).toEqual(
+      [SETTING_KEYS.UI_CARD_QUICK_ACTIONS, SETTING_KEYS.UI_CARD_QUICK_ACTIONS_ENABLED].sort(),
+    );
   });
 
   it("treats a 404 from the canonical delete as already inheriting", async () => {
@@ -434,7 +463,7 @@ describe("useOverlayPrefs", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
-      await expect(result.current.resetPrefs()).resolves.toBeUndefined();
+      await expect(result.current.resetPrefs("badges")).resolves.toBeUndefined();
     });
   });
 
@@ -453,7 +482,7 @@ describe("useOverlayPrefs", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
-      await expect(result.current.resetPrefs()).rejects.toThrow("boom");
+      await expect(result.current.resetPrefs("badges")).rejects.toThrow("boom");
     });
   });
 });

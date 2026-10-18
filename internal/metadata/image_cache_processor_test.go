@@ -31,6 +31,12 @@ type targetImageCacheJobs struct {
 	runningResults []bool
 	runningCalls   int
 	alwaysRunning  bool
+	// deferredElsewhere answers targetHasDeferredLocalJobs.
+	deferredElsewhere bool
+}
+
+func (f *targetImageCacheJobs) targetHasDeferredLocalJobs(context.Context, string) (bool, error) {
+	return f.deferredElsewhere, nil
 }
 
 func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string) error {
@@ -49,7 +55,7 @@ func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, ta
 	return jobs, nil
 }
 
-func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string) (bool, error) {
+func (f *targetImageCacheJobs) targetHasRunningJobs(context.Context, string) (bool, error) {
 	running := f.alwaysRunning
 	if f.runningCalls < len(f.runningResults) {
 		running = f.runningResults[f.runningCalls]

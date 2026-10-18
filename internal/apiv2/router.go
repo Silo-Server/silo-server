@@ -75,6 +75,13 @@ func init() {
 type Dependencies struct {
 	ThemeSongs        ThemeSongService
 	ObserveThemeAudio func(string, http.Handler) http.Handler
+	// ObserveDownloadDelivery wraps the managed-download file and subtitle
+	// routes, given method and full path pattern, so their bytes count as
+	// viewer transfer egress like the v1 routes they mirror.
+	ObserveDownloadDelivery func(method, pattern string, handler http.Handler) http.Handler
+	// ObserveBandwidthProbe wraps the bandwidth probe so its bytes count as
+	// viewer transfer egress, like the Jellyfin-compat bitrate test.
+	ObserveBandwidthProbe func(http.Handler) http.Handler
 	// ObserveRoutes receives detached method/path values after this actual router
 	// is fully registered. It cannot mutate or recover the sealed router.
 	ObserveRoutes func([]streamtelemetry.WalkedRoute)
@@ -193,6 +200,7 @@ type Dependencies struct {
 	AdminDashboardInsights        AdminDashboardInsightsService
 	AdminNodesRead                AdminNodesReadService
 	AdminNodeCommands             AdminNodeCommandsService
+	AdminNodeDrain                AdminNodeDrainService
 	AdminNodeReload               AdminNodeReloadService
 	AdminNodeConfiguration        AdminNodeConfigurationService
 	AdminServerStatus             AdminServerStatusService
@@ -267,8 +275,10 @@ type Dependencies struct {
 	// HouseholdProfileGate run it after viewer access and fail closed when
 	// it is not wired.
 	HouseholdProfile func(http.Handler) http.Handler
-	// ActingAdmin is the admin-through-primary-profile gate.
-	ActingAdmin func(http.Handler) http.Handler
+	// ActingAdmin decides admin-through-primary-profile. The acting_admin
+	// class gate enforces it, and operations outside that class that widen
+	// what an admin sees read it through apimw.ActingAdmin.
+	ActingAdmin apimw.ActingAdminDecider
 	// PermissionGates maps a permission name (policy.Permission* constants)
 	// to the gate that enforces it.
 	PermissionGates map[string]func(http.Handler) http.Handler
@@ -382,6 +392,9 @@ type Dependencies struct {
 	// PersonalLists reads and edits a profile's favorites
 	// (*handlers.PersonalDataHandler).
 	PersonalLists PersonalListService
+	// NotInterested reads and edits a profile's Not interested marks
+	// (*handlers.PersonalDataHandler).
+	NotInterested NotInterestedService
 	// WatchlistTitles keeps a profile's watchlist entries for titles the
 	// library doesn't have (*handlers.PersonalDataHandler).
 	WatchlistTitles WatchlistTitleService
@@ -420,7 +433,6 @@ type Dependencies struct {
 	ArtworkBackend                     string
 	ArtworkSigner                      *artworkurl.Signer
 	ArtworkRepair                      ArtworkRepairService
-	ThemeOverrides                     ThemeOverrideService
 	AdminInviteCodes                   AdminInviteCodeService
 	Invitations                        InvitationService
 	PasswordResets                     PasswordResetService
@@ -493,6 +505,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(joinPreconditionFields)
 	r.Use(rejectMalformedDeviceHeader)
 	r.Use(withRequest)
+	if deps.ActingAdmin != nil {
+		r.Use(apimw.ProvideActingAdmin(deps.ActingAdmin))
+	}
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
@@ -933,7 +948,8 @@ type LibraryAdminService interface {
 	ListSkippedRoots(ctx context.Context, search string, limit, offset int) ([]handlers.SkippedRootView, int, error)
 	ListStaleIDs(ctx context.Context, search string, limit, offset int) ([]handlers.StaleMediaIDView, int, error)
 	RematchStaleID(ctx context.Context, contentID string) error
-	ListUnmatchedItems(ctx context.Context, search string, limit, offset int) ([]handlers.UnmatchedItemView, int, error)
+	ListUnmatchedItems(ctx context.Context, search string, ignored bool, limit, offset int) ([]handlers.UnmatchedItemView, int, error)
+	SetUnmatchedItemIgnored(ctx context.Context, contentID string, ignored bool) error
 	GetMetadataMatchQueue(ctx context.Context, id, limit, offset int) (handlers.MetadataMatchQueueDetailView, error)
 	RetryMetadataMatchQueue(ctx context.Context, id int) (handlers.MetadataMatchQueueActionView, error)
 	CancelMetadataMatchQueue(ctx context.Context, id int) (handlers.MetadataMatchQueueActionView, error)
@@ -1010,6 +1026,12 @@ type PersonalListService interface {
 	GetWatchlistEntry(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.WatchlistEntry, found bool, err error)
 	AddToWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
 	RemoveFromWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
+	// VisibleItemIDs reports which of the given catalog items the viewer
+	// may see, in one query.
+	VisibleItemIDs(ctx context.Context, viewer handlers.PersonalListViewer, ids []string) (map[string]bool, error)
+	// ResolveCards answers the cards of the given catalog items the viewer
+	// may see, in the order given.
+	ResolveCards(ctx context.Context, viewer handlers.PersonalListViewer, ids []string) ([]handlers.CollectionItemView, error)
 }
 
 // RatingService is the slice of *handlers.RatingsHandler the ratings
@@ -1046,7 +1068,7 @@ type RecommendationService interface {
 	TasteSeedItems(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, limit, offset int) (items []handlers.SectionItemView, candidates int, err error)
 	SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string, filter mediacatalog.AccessFilter) (int, error)
 	WatchTonight(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, limit int) (handlers.WatchTonightView, error)
-	WatchTonightCards(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) handlers.WatchTonightCardsView
+	WatchTonightCards(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) (handlers.WatchTonightCardsView, error)
 }
 
 // MediaRequestService is the slice of *requests.Service (the v1
@@ -1088,6 +1110,7 @@ type CatalogBrowseService interface {
 	Filters(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, includeTechnical bool) (handlers.CatalogFiltersView, error)
 	SearchFacet(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, facet, q string, limit int) (handlers.CatalogFacetSearchView, error)
 	AudiobookGroups(ctx context.Context, v handlers.ItemViewer, query mediacatalog.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error)
+	LetterIndex(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest) (mediacatalog.LetterIndex, error)
 }
 
 // CatalogItemService is the slice of *handlers.CatalogResourceHandler the

@@ -3,8 +3,10 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,50 @@ type fakeNotificationInbox struct {
 	writes int
 	patch  notifications.PreferencePatch
 	empty  bool
+	// series is the notified-series list; nil answers fixtureNotifiedSeries.
+	series []notifications.NotifiedSeries
+	// mutes and unmutes record the series each call named, as
+	// account/profile/series.
+	mutes, unmutes []string
+}
+
+// fixtureNotifiedSeries is a profile's notified-series list in service
+// order: Next Up alone, two active reasons, a series the viewer may not see,
+// a watchlist series the preferences silence, and a muted favorite.
+func fixtureNotifiedSeries() []notifications.NotifiedSeries {
+	nextUp := notifications.EpisodeKey(2, 9)
+	day := func(n int) time.Time { return fixedTime().Add(time.Duration(n) * 24 * time.Hour) }
+	latest := func(n int) *time.Time { t := day(n); return &t }
+	return []notifications.NotifiedSeries{
+		{SeriesID: "series:andor", SeriesSortFields: notifications.SeriesSortFields{SortKey: "andor", Title: "Andor", Year: 2022, AddedAt: day(0), LatestEpisodeAddedAt: latest(3)}, Reasons: notifications.ReasonFlags{NextUp: true}, Active: notifications.ReasonFlags{NextUp: true}, NextExpectedEpisodeKey: &nextUp},
+		{SeriesID: "series:bear", SeriesSortFields: notifications.SeriesSortFields{SortKey: "bear", Title: "The Bear", Year: 2024, AddedAt: day(1), LatestEpisodeAddedAt: latest(5)}, Reasons: notifications.ReasonFlags{Favorite: true, ContinueWatching: true}, Active: notifications.ReasonFlags{Favorite: true, ContinueWatching: true}},
+		{SeriesID: "series:hidden", SeriesSortFields: notifications.SeriesSortFields{SortKey: "hidden", Title: "Hidden", AddedAt: day(2)}, Reasons: notifications.ReasonFlags{Favorite: true}, Active: notifications.ReasonFlags{Favorite: true}},
+		{SeriesID: "series:slow-horses", SeriesSortFields: notifications.SeriesSortFields{SortKey: "slow horses", Title: "Slow Horses", Year: 2023, AddedAt: day(3), LatestEpisodeAddedAt: latest(1)}, Reasons: notifications.ReasonFlags{Watchlist: true}},
+		{SeriesID: "series:wire", SeriesSortFields: notifications.SeriesSortFields{SortKey: "wire", Title: "The Wire", Year: 2002, AddedAt: day(4), LatestEpisodeAddedAt: latest(2)}, Reasons: notifications.ReasonFlags{Favorite: true}, Active: notifications.ReasonFlags{Favorite: true}, Muted: true},
+	}
+}
+
+// notificationNotASeriesID is an item the viewer may see that is no series.
+const notificationNotASeriesID = "movie:heat-1995"
+
+func (f *fakeNotificationInbox) MuteNotificationSeries(_ context.Context, userID int, profile, seriesID string) error {
+	if seriesID == notificationNotASeriesID {
+		return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Series not found"}
+	}
+	f.mutes = append(f.mutes, fmt.Sprintf("%d/%s/%s", userID, profile, seriesID))
+	return nil
+}
+
+func (f *fakeNotificationInbox) UnmuteNotificationSeries(_ context.Context, userID int, profile, seriesID string) error {
+	f.unmutes = append(f.unmutes, fmt.Sprintf("%d/%s/%s", userID, profile, seriesID))
+	return nil
+}
+
+func (f *fakeNotificationInbox) ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error) {
+	if f.series == nil {
+		return fixtureNotifiedSeries(), nil
+	}
+	return f.series, nil
 }
 
 func fixtureNotificationInbox() *fakeNotificationInbox {
@@ -39,7 +85,7 @@ func (*fakeNotificationInbox) NotificationCapabilities(context.Context) handlers
 func (f *fakeNotificationInbox) row(profile string) notifications.DeliveryRowPayload {
 	return notifications.DeliveryRowPayload{ID: notificationFixtureID, Type: "request.approved", ProfileID: profile, CreatedAt: f.cutoff.CreatedAt, ReasonFlags: json.RawMessage(`{"request_id":"request-1"}`)}
 }
-func (f *fakeNotificationInbox) ListNotificationInbox(_ context.Context, profile string, _ bool, _ int, before, through *notifications.Cursor) (handlers.NotificationInboxPageView, error) {
+func (f *fakeNotificationInbox) ListNotificationInbox(_ context.Context, _ int, profile string, _ bool, _ int, before, through *notifications.Cursor) (handlers.NotificationInboxPageView, error) {
 	boundary := f.cutoff
 	if through != nil {
 		boundary = *through
@@ -54,19 +100,19 @@ func (f *fakeNotificationInbox) ListNotificationInbox(_ context.Context, profile
 	}
 	return handlers.NotificationInboxPageView{Items: rows, Through: boundary, More: before == nil && !f.empty}, nil
 }
-func (f *fakeNotificationInbox) SyncNotificationInbox(_ context.Context, profile string, _ int, _ *notifications.Cursor) ([]notifications.DeliveryRowPayload, bool, int, error) {
+func (f *fakeNotificationInbox) SyncNotificationInbox(_ context.Context, _ int, profile string, _ int, _ *notifications.Cursor) ([]notifications.DeliveryRowPayload, bool, int, error) {
 	if f.empty {
 		return nil, false, 0, nil
 	}
 	return []notifications.DeliveryRowPayload{f.row(profile)}, false, 1, nil
 }
-func (f *fakeNotificationInbox) GetNotificationInboxItem(_ context.Context, profile, id string) (notifications.DeliveryRowPayload, error) {
+func (f *fakeNotificationInbox) GetNotificationInboxItem(_ context.Context, _ int, profile, id string) (notifications.DeliveryRowPayload, error) {
 	if id != notificationFixtureID {
 		return notifications.DeliveryRowPayload{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "Notification not found"}
 	}
 	return f.row(profile), nil
 }
-func (*fakeNotificationInbox) NotificationUnreadCount(context.Context, string) (int, error) {
+func (*fakeNotificationInbox) NotificationUnreadCount(context.Context, int, string) (int, error) {
 	return 1, nil
 }
 func (f *fakeNotificationInbox) MarkNotificationRead(context.Context, int, string, string) error {
@@ -78,13 +124,13 @@ func (f *fakeNotificationInbox) MarkNotificationInboxThrough(_ context.Context, 
 	f.writes++
 	return nil
 }
-func (*fakeNotificationInbox) NotificationPreferences(_ context.Context, profile string) (notifications.Preferences, error) {
-	return notifications.DefaultPreferences(profile), nil
+func (*fakeNotificationInbox) NotificationPreferences(_ context.Context, userID int, profile string) (notifications.Preferences, error) {
+	return notifications.DefaultPreferences(userID, profile), nil
 }
-func (f *fakeNotificationInbox) PatchNotificationPreferences(_ context.Context, profile string, patch notifications.PreferencePatch) (notifications.Preferences, error) {
+func (f *fakeNotificationInbox) PatchNotificationPreferences(_ context.Context, userID int, profile string, patch notifications.PreferencePatch) (notifications.Preferences, error) {
 	f.patch = patch
 	f.writes++
-	p := notifications.DefaultPreferences(profile)
+	p := notifications.DefaultPreferences(userID, profile)
 	if patch.Enabled != nil {
 		p.Enabled = *patch.Enabled
 	}
@@ -171,7 +217,7 @@ func TestNotificationEmptySyncHasStableCheckpoint(t *testing.T) {
 	}
 }
 
-func (f *fakeNotificationInbox) NotificationPushDisplay(_ context.Context, profile, id string) (notifications.NotificationDisplay, error) {
+func (f *fakeNotificationInbox) NotificationPushDisplay(_ context.Context, _ int, profile, id string) (notifications.NotificationDisplay, error) {
 	if profile != "p-owner" || id != notificationFixtureID {
 		return notifications.NotificationDisplay{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "Notification not found"}
 	}
@@ -241,5 +287,44 @@ func TestNotificationDisplayCredentialScope(t *testing.T) {
 				t.Fatalf("%d: %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// reason_flags is notification data, not a settings value: the contract must
+// not borrow JSONValue's settings description for it.
+func TestNotificationItemReasonFlagsSchema(t *testing.T) {
+	NewHandler(Dependencies{testRegister: func(reg *Registry) {
+		item := reg.api.OpenAPI().Components.Schemas.Map()["NotificationItem"]
+		if item == nil {
+			t.Fatal("NotificationItem schema is not published")
+		}
+		flags := item.Properties["reason_flags"]
+		if flags == nil {
+			t.Fatal("NotificationItem.reason_flags is not declared")
+		}
+		if flags.Type != "object" || flags.AdditionalProperties != true {
+			t.Fatalf("reason_flags = type %q, additionalProperties %v; want an open object", flags.Type, flags.AdditionalProperties)
+		}
+		if flags.Extensions[extExtensionBag] != "notification-reason-flags" {
+			t.Fatalf("reason_flags extension bag = %v", flags.Extensions[extExtensionBag])
+		}
+		if !strings.Contains(flags.Description, "notification type") || strings.Contains(flags.Description, "value_schema") {
+			t.Fatalf("reason_flags description = %q", flags.Description)
+		}
+	}})
+}
+
+func TestNotificationReasonFlagsMarshal(t *testing.T) {
+	for _, tc := range []struct {
+		in   NotificationReasonFlags
+		want string
+	}{
+		{nil, `{}`},
+		{NotificationReasonFlags(`{"follower":true,"request_id":"request-1"}`), `{"follower":true,"request_id":"request-1"}`},
+	} {
+		got, err := json.Marshal(tc.in)
+		if err != nil || string(got) != tc.want {
+			t.Fatalf("marshal %q = %s, %v; want %s", tc.in, got, err, tc.want)
+		}
 	}
 }

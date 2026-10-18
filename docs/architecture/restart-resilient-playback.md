@@ -414,10 +414,13 @@ evolution:
   surviving token. No cross-process enumeration-failure mode for the supported
   topology.
 - **Signing-key blast radius (E / tr-7, G13).** A single `JWTSecret` signs native
-  auth, the stream token, and the node bearer, so a node-secret leak can forge
-  native logins. **Accepted risk** on the trusted-node precondition. **Deferred
-  hardening:** split the stream-token secret from the native-auth secret, then
-  asymmetric stream-token signing before any untrusted/edge node.
+  auth and the stream token, and every node holds it, so a compromised node can
+  forge native logins. **Accepted risk** on the trusted-node precondition.
+  Watching a node link is not the same as compromising a node: calls to nodes
+  carry an HMAC under a key derived from the secret, never the secret itself
+  (see [worker authentication](worker-http-protocol.md#authentication)).
+  **Deferred hardening:** split the stream-token secret from the native-auth
+  secret, then asymmetric stream-token signing before any untrusted/edge node.
 
 ---
 
@@ -645,7 +648,10 @@ sequenceDiagram
   requested segment (native path, P-3). A jellycompat session on a rebooted node
   reconstructs too: the node fetches the recipe central wrote to the shared Redis
   recipe store (`internal/noderecipe`) at transcode start, since the Jellyfin
-  client's token cannot carry it.
+  client's token cannot carry it. If the node dies and stays down while the API
+  relays a native session, the API moves the transcode to another executor
+  instead (see
+  [Transcode node lost under the API relay](#transcode-node-lost-under-the-api-relay)).
 - cleanup race: a segment dir is reaped only if absent from the live map AND the
   in-flight set AND older than 24h (max token TTL), so a token that can still
   reconstruct never gets its dir wiped.
@@ -740,6 +746,7 @@ request; **—** = the path never executes on that role (nothing to reconstruct)
 | native · direct | ✅ rebuild `Session` from `?st` token → `Range` re-serve | ✅ stateless re-serve from `claims.MediaPath` | — not served on a transcode node |
 | native · remux | ✅ token + `?seek`, or relay/reconstruct remote HLS | ✅ stateless per-request pipe or HLS relay | ✅ for remote HLS, using the same recipe carrier as native transcode |
 | native · transcode | ✅ token (full recipe) → respawn ffmpeg seeked to segment | ✅ same-node restart + token forward | ✅ self-contained — token is recipe-complete |
+| native · header-authenticated (any method) | ⚠️ API-origin transports: rebuild `Session` from the API's Redis recovery card for the authenticated owner, while the card exists and the durable attempt still names its plan; then as the token rows | ✅ proxy grant (`authorized_media_origins_v1`) | ✅ node recipe under the transport id |
 | jellycompat · direct | ✅ re-resolve from durable compat row → `Range` re-serve | ✅ stateless re-serve from token `MediaPath` | — |
 | jellycompat · remux | ✅ compat row + `?seek`, or relay remote HLS | ✅ stateless per-request pipe or HLS relay | ⚠️ for remote HLS, while the shared Redis recipe still exists |
 | jellycompat · transcode | ✅ `ReconstructTranscode(*ps.Recipe)` from compat row | ✅ same-node restart + token forward | ⚠️ reconstructs **iff** the shared Redis recipe (`internal/noderecipe`, ≤24h TTL) still exists; fails closed (404) otherwise |
@@ -752,6 +759,22 @@ request; **—** = the path never executes on that role (nothing to reconstruct)
 | proxy node | self-describing path token, re-derived per request — the proxy holds no per-session state | same path token (identity); the recipe is not needed at the proxy |
 | transcode node | forwarded `X-Silo-Stream-Token`, recipe-complete | identity token + Redis `noderecipe` recipe (the Jellyfin token cannot carry it) |
 
+A native attempt that negotiated `header_authenticated_media_v1` has no token on
+any URL, so its carriers are all server-side: the API's session recipe
+(`noderecipe.NewSessionRecipeStore`, keyed by playback session id), the proxy
+grant, and the node recipe. The session recipe is written when a transport
+served from the API origin commits, and re-recorded when a sidecar-only replan
+keeps the transport; a proxy-served transport has none, since its grant already
+covers it. A user's stop and an abort drop it on the replica that ends the
+session; a system teardown that leaves the attempt live (an FFmpeg exit, a
+copy-safety stop) keeps it for a transcode the API runs itself, so the next
+request rebuilds as a token would. A remote transcode's teardown drops it,
+since the node job and node recipe go with it. It is
+only a reconstruction aid: the durable v3 attempt row decides whether it may be
+used (same plan, same account and selected profile, not expired, not stopped),
+and the rebuilt session keeps refusing unauthenticated requests. Without Redis
+the session answers `404` after a restart and the client starts a new attempt.
+
 **Reading the matrix**
 
 - **Integrated restarts and restarts of the selected logical proxy node are
@@ -760,7 +783,10 @@ request; **—** = the path never executes on that role (nothing to reconstruct)
   transcode is reverse-proxied — and the artifact remains bound to the same
   `stream_nodes.id` across a process restart. A sibling proxy must not consume
   that artifact: failover to another node requires replanning and reminting so
-  capacity, group affinity, and the client-visible origin move together.
+  capacity, group affinity, and the client-visible origin move together. The
+  one exception is a transcode node that dies under an API-relayed transcode,
+  where the client-visible origin is the API and does not move (see
+  [Transcode node lost under the API relay](#transcode-node-lost-under-the-api-relay)).
 - **The two direct-play `—` cells are structural, not gaps.** Direct play has no
   executor. Remux is different: progressive remux can run on a proxy, while HLS
   remux can run on a transcode node and leave through either the API relay or a
@@ -793,5 +819,90 @@ holes — see §7, §10):
   next play, bounded by the ≤24h token, not by reconstruction.
 - Integrated transcode behind a non-sticky load balancer can split-brain into
   divergent segment dirs (P-1); safe single-front-end or with LB affinity. Remote
-  (node) sessions are immune — node affinity routes every front-end to the same
-  transcode node.
+  (node) sessions are immune while their node lives — node affinity routes every
+  front-end to the same transcode node. Once the API moves a transcode off a dead
+  node (below), the moved route lives only in that API process, so the same
+  limit applies to moved sessions.
+
+### Transcode node lost under the API relay
+
+The matrix covers a transcode node that *restarts*. A node that dies and stays
+down is a different event: nothing comes back to self-reconstruct, so before
+this rule every relayed request for the session failed until the client
+replanned. Now, when the API relays a remote HLS transcode (native protocol,
+API egress) and cannot reach the session's node, it moves the transcode itself:
+
+- **Trigger.** The relay got no HTTP response: the connection could not be
+  opened (refused, unroutable, DNS failure, dial timeout), or any transport
+  error occurred while the pool already lists the node as unhealthy or no
+  longer pools it. A node that answers with an HTTP error is alive; its answer
+  is relayed and nothing moves. A dial that failed on this host's own resources
+  (out of file descriptors or socket buffers, no local address) says nothing
+  about the node and does not count.
+- **Mark.** The relay marks the node unhealthy in this process's pool at once
+  (`Planner.MarkTranscodeNodeUnreachable`), so neither new sessions nor other
+  moves select it. The next health sweep overwrites the mark with whatever the
+  node answers.
+- **Recipe.** The same recipe the restart paths use: the client's `?st` token
+  when it names the session's current transport, otherwise the
+  `internal/noderecipe` card stored under the transport id for tokenless
+  (header-authenticated) sessions. The API's own session recipe never stands
+  in for a token here; a move of a header-authenticated session updates the
+  node recipe and then points the session recipe at the new executor. With
+  neither, nothing moves and the relay answers `502` as before. A stream-copy recipe answers to the persisted
+  copy-safety verdict first, like any other revival.
+- **Executor.** `noderouting.Resolve` with the current policy, restricted to
+  API-egress shapes and excluding the dead node: another pooled transcode node
+  per the normal selection rules, or this process when policy lets the API
+  execute. A hard `worker_only` boundary is still never crossed; with no other
+  node, that session's relay keeps failing until the client replans. Candidates
+  pass the same capability filter as a fresh start of the session's current v3
+  plan (advertised transformation recipe versions and tone-map support), and
+  the selected node is re-checked against a fresh inventory; a local move checks
+  this process's capabilities the same way. A node is started with the ordinary
+  `POST /transcode/start` contract and the same attestations as a fresh start;
+  a local move uses `ReconstructTranscode`. An executor that refuses is excluded
+  and the next one is tried; one that cannot be reached is also marked
+  unhealthy. A tone-map refusal about the source file itself
+  (`source_revision_changed`, `source_preflight_rejected`) ends the move, and
+  the client gets the documented terminal `422` with
+  `X-Silo-Tone-Map-Execution-Error` instead of a `502`.
+- **Continuity.** The transport id, the session id, and every client URL stay
+  the same. The new executor starts where a reconstruction would
+  (`playback.ReconstructResumePoint`): an encoded recipe at the requested
+  segment, a copy-video recipe at its recorded start with segment recovery
+  seeking forward. A manifest request carries no segment and starts at the
+  recorded position.
+- **Commit and accounting.** The session's route moves with a compare-and-swap
+  on the dead route (`SessionManager.MoveTranscodeExecutor`), taken under the
+  session lifecycle lock. A replan reads the route it replaces under that same
+  lock, so whichever commits second sees the first: a replan stops the moved
+  transport, and a move that loses stops what it started and releases its
+  planner reservation. The planner reservation otherwise moves to the new node
+  (or is released for a local move), and the dead node's job is asked to stop
+  in case it is only unreachable from here; a failed stop is logged as a
+  warning, and the node's idle reaper ends a job that still runs. A stored node
+  recipe follows the transport to its new node, written after that stop
+  because a node deletes a transport's stored recipe when it stops it; a
+  candidate's rollback stop restores the card for the same reason.
+- **Pacing.** Moves are single-flighted per session
+  (`TranscodeManager.RehomeTranscode`), so every request that finds the node
+  dead waits on one move, and each remote start holds a `reconstructSem` slot
+  like a local reconstruct. A dead node with many sessions is replaced at the
+  same pace as a restart wave. A move whose deadline passes stops at once
+  rather than counting as another executor's refusal.
+- **Per-process scope.** The health mark, the single-flight, the lifecycle lock
+  and the moved route all live in one API process. The client's stream token
+  still names the dead node, so a session rebuilt from that token after an API
+  restart, or served by another API replica without load-balancer affinity,
+  can run a second move of the same transport. On one front-end that costs at
+  most an encode on the first move's node that nobody fetches, which the
+  node's idle reaper ends after 10 minutes; playback continues from the second
+  move, or from the old node if it came back. Several API replicas need
+  load-balancer affinity for moved sessions, as for integrated transcode
+  (P-1). A cluster-wide record of the moved route belongs with multi-front-end
+  support (G8).
+
+Out of scope: a session whose media URLs point at a proxy origin keeps the
+replan-and-remint rule above, and Jellyfin compatibility relays remote HLS
+through its own compat-store recipe, which this path does not rewrite.

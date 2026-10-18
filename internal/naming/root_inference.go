@@ -283,8 +283,8 @@ func extractPathEvidence(filePath string, libraryType string, libraryRoots ...st
 
 	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
 	allowNumericSeason := seriesLibrary && (libraryRoot == "" || len(dirParts) > 1)
-	_, hasEpisodePattern := parseEpisodeToken(nameNoExt, dirParts, allowNumericSeason, seriesLibrary)
-	hasSeasonStructure, _ := detectSeasonStructure(dirParts, hasEpisodePattern || seriesLibrary, libraryRoot != "")
+	episode, hasEpisodePattern := parseEpisodeToken(nameNoExt, dirParts, libraryRoot != "", allowNumericSeason, seriesLibrary)
+	hasSeasonStructure, _ := detectSeasonStructure(dirParts, nameNoExt, episode.seriesTitle, hasEpisodePattern || seriesLibrary, libraryRoot != "")
 	parentTitle, parentYear, parentTrusted := parseInferFolderTitleYear(parentBase)
 	if parentDir == libraryRoot {
 		parentTitle, parentYear, parentTrusted = "", 0, false
@@ -320,7 +320,7 @@ func extractPathEvidence(filePath string, libraryType string, libraryRoots ...st
 		}
 	}
 
-	rootPath := parentDir
+	var rootPath string
 	var seriesContext *PathContext
 	if inferredType == "series" {
 		seriesContext = ResolvePathContext(cleanFilePath, libraryType, libraryRoot)
@@ -386,7 +386,7 @@ func normalizeInferLibraryType(value string) string {
 }
 
 func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
-	found, _ := detectSeasonStructure(parts, allowNumeric)
+	found, _ := detectSeasonStructure(parts, "", "", allowNumeric, false)
 	return found
 }
 
@@ -406,8 +406,9 @@ func IsMisplacedSeriesFile(filePath string, libraryRoots ...string) bool {
 	clean := filepath.Clean(filePath)
 	baseName := filepath.Base(clean)
 	nameNoExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
-	parts := directorySegmentsWithinRoot(clean, deepestContainingLibraryRoot(clean, libraryRoots))
-	if _, ok := parseEpisodeToken(nameNoExt, parts, false); !ok {
+	libraryRoot := deepestContainingLibraryRoot(clean, libraryRoots)
+	parts := directorySegmentsWithinRoot(clean, libraryRoot)
+	if _, ok := parseEpisodeToken(nameNoExt, parts, libraryRoot != "", false); !ok {
 		return false
 	}
 	for i, part := range parts {
@@ -415,7 +416,8 @@ func IsMisplacedSeriesFile(filePath string, libraryRoots ...string) bool {
 		if i > 0 {
 			parent = parts[i-1]
 		}
-		if _, ok := seasonDirectoryNumber(part, parent, false); ok {
+		topLevel := libraryRoot != "" && i == 0 && mayBeShowFolder(part, nameNoExt)
+		if _, ok := seasonDirectoryNumber(part, parent, false, topLevel); ok {
 			return true
 		}
 	}

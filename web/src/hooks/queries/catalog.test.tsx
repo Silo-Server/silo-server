@@ -13,7 +13,10 @@ vi.mock("@tanstack/react-query", () => ({
   keepPreviousData: Symbol("keepPreviousData"),
   useQueries: (...args: unknown[]) => mocks.useQueries(...args),
   useQuery: (...args: unknown[]) => mocks.useQuery(...args),
-  useQueryClient: () => ({ getQueryState: mocks.getQueryState }),
+  useQueryClient: () => ({
+    getQueryState: mocks.getQueryState,
+    getQueryCache: () => ({ findAll: () => [] }),
+  }),
 }));
 
 vi.mock("@/api/v2/request", () => ({
@@ -172,6 +175,37 @@ describe("useCatalogWindow", () => {
     expect(mocks.useQuery.mock.calls.at(-1)?.[0].queryKey).not.toEqual(initialKey);
   });
 
+  it("keeps counting a far page as loaded after scrolling back from it", () => {
+    const state = createCatalogSearchState("favorites");
+    const limit = 60;
+    const page0 = { ...makePage(0, limit), total_exact: false, snapshot: "s1" };
+    mocks.useQuery.mockReturnValue({ data: page0, isLoading: false });
+    mocks.useQueries.mockImplementation(
+      ({ queries }: { queries: Array<{ queryKey: [string, string, { offset?: number }] }> }) =>
+        queries.map((query) => ({
+          data: makePage(query.queryKey[2].offset ?? 0, limit),
+          isLoading: false,
+        })),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ visibleRange }: { visibleRange: [number, number] }) =>
+        useCatalogWindow(state, { limit, visibleRange }),
+      { initialProps: { visibleRange: [600, 659] as [number, number] } },
+    );
+    const farEnd = result.current.data.knownItems;
+    expect(farEnd).toBeGreaterThanOrEqual(660);
+
+    // Back at the top, the far pages leave the window but their titles exist.
+    rerender({ visibleRange: [0, 59] });
+    expect(result.current.data.knownItems).toBe(farEnd);
+
+    // A new snapshot starts over.
+    mocks.useQuery.mockReturnValue({ data: { ...page0, snapshot: "s2" }, isLoading: false });
+    rerender({ visibleRange: [0, 59] });
+    expect(result.current.data.knownItems).toBeLessThan(farEnd);
+  });
+
   it("does not assign stale placeholder data to newly visible page indices", () => {
     const state = createCatalogSearchState("favorites");
     const limit = 60;
@@ -200,7 +234,13 @@ describe("useCatalogWindow", () => {
         }>;
       }) => {
         const offsets = queries.map((query) => query.queryKey[2].offset ?? 0);
-        const hasPlaceholderData = queries.some((query) => "placeholderData" in query);
+        // keepPreviousData would hand each slot whatever page it held before
+        // the window moved; a placeholder may only come from the same offset.
+        const hasPlaceholderData = queries.some((query) =>
+          typeof query.placeholderData === "function"
+            ? (query.placeholderData as () => unknown)() !== undefined
+            : query.placeholderData !== undefined,
+        );
 
         if (offsets.join(",") === "60") {
           return [{ data: makePage(60, limit), isLoading: false }];

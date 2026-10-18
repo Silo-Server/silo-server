@@ -8,6 +8,7 @@ import {
   buildClientCapabilitiesV3,
   buildClientPlaybackContextV3,
   buildDeliveriesV3,
+  detectBandwidthEstimateKbpsV3,
   detectHLSSupport,
   type WebCapabilityProbe,
 } from "./client-context-v3";
@@ -37,7 +38,7 @@ describe("detectHLSSupport", () => {
 });
 
 describe("buildDeliveriesV3", () => {
-  it("advertises the embedded text artifacts rendered by the web player", () => {
+  it("advertises the embedded text and PGS artifacts rendered by the web player", () => {
     const deliveries = buildDeliveriesV3({
       containers: ["mp4"],
       codecsVideo: ["h264"],
@@ -60,6 +61,8 @@ describe("buildDeliveriesV3", () => {
     for (const delivery of Object.values(deliveries)) {
       expect(delivery.subtitles.embedded_text).toBe(true);
       expect(delivery.subtitles.sidecar_text).toBe(true);
+      expect(delivery.subtitles.embedded_bitmap).toBe(true);
+      expect(delivery.subtitles.sidecar_bitmap).toBe(false);
     }
   });
 });
@@ -158,5 +161,167 @@ describe("structured HDR capabilities", () => {
     expect(deliveries.original_http?.audio_decode_codecs).toEqual(["aac", "vorbis"]);
     expect(deliveries.progressive?.audio_decode_codecs).toEqual(["aac"]);
     expect(deliveries.hls?.audio_decode_codecs).toEqual(["aac", "vorbis"]);
+  });
+});
+
+describe("browser decode engine capabilities", () => {
+  const probe: WebCapabilityProbe = {
+    containers: ["mp4", "webm"],
+    codecsVideo: ["h264", "av1"],
+    progressiveCodecsVideo: ["h264", "av1"],
+    codecsAudio: ["aac", "opus"],
+    progressiveCodecsAudio: ["aac", "opus"],
+    maxResolution: "2160p",
+    hdr: false,
+    hdrDetails: {
+      hdr10: false,
+      hdr10_plus: false,
+      hlg: false,
+      dolby_vision_profiles: [],
+      dolby_vision_profile_levels: [],
+    },
+    hls: true,
+    nativeHLS: false,
+  };
+  const engine = {
+    containers: ["mkv", "mp4"],
+    videoCodecs: ["h264", "hevc", "av1"],
+    audioCodecs: ["aac", "opus", "ac3", "eac3", "dts", "truehd"],
+    hdr: true,
+  };
+
+  it("widens only original_http and claims track selection and managed range", () => {
+    const deliveries = buildDeliveriesV3(probe, "test", engine);
+    expect(deliveries.original_http).toMatchObject({
+      containers: ["mp4", "webm", "mkv"],
+      video_codecs: ["h264", "av1", "hevc"],
+      audio_decode_codecs: ["aac", "opus", "ac3", "eac3", "dts", "truehd"],
+      validated_claims: ["client_selected_audio_track_v1", "client_managed_dynamic_range_v1"],
+    });
+    expect(deliveries.progressive?.audio_decode_codecs).toEqual(["aac", "opus"]);
+    expect(deliveries.progressive?.validated_claims).toEqual([]);
+    expect(deliveries.hls?.video_codecs).toEqual(["h264", "av1"]);
+  });
+
+  it("claims managed range only when WebGPU can tone-map", () => {
+    const deliveries = buildDeliveriesV3(probe, "test", { ...engine, hdr: false });
+    expect(deliveries.original_http?.validated_claims).toEqual(["client_selected_audio_track_v1"]);
+  });
+
+  it("leaves HDR to HDR-preserving routes on an HDR display", () => {
+    // The engine tone-maps to SDR; claiming managed range here would take HDR
+    // sources off the remux that keeps them HDR.
+    const deliveries = buildDeliveriesV3({ ...probe, hdr: true }, "test", engine);
+    expect(deliveries.original_http?.validated_claims).toEqual(["client_selected_audio_track_v1"]);
+  });
+
+  it("carries the engine codecs in the device-level lists the planner reads first", () => {
+    const capabilities = buildClientCapabilitiesV3(probe, engine);
+    expect(capabilities.codecs_audio).toContain("truehd");
+    expect(capabilities.codecs_video).toContain("hevc");
+    expect(capabilities.containers).toContain("mkv");
+    expect(buildClientCapabilitiesV3(probe).codecs_audio).toEqual(["aac", "opus"]);
+    expect(
+      buildClientPlaybackContextV3(probe, engine).deliveries.original_http?.validated_claims,
+    ).toHaveLength(2);
+  });
+});
+
+describe("detectBandwidthEstimateKbpsV3", () => {
+  // Chromium rounds and caps `downlink`, so it is a guess. Auto sends the
+  // source when nothing was measured, rather than plan from it.
+  it("sends no estimate when only connection.downlink is available", () => {
+    for (const downlink of [4.5, 10, 0.05, undefined]) {
+      vi.stubGlobal("navigator", { connection: { downlink } });
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+    }
+  });
+
+  it("prefers a fresh probe measurement over the downlink hint", () => {
+    vi.stubGlobal("navigator", { connection: { downlink: 10 } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBe(180_000);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("ignores a cached measurement while Data Saver is on", () => {
+    vi.stubGlobal("navigator", { connection: { downlink: 10, saveData: true } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("ignores a cached measurement on cellular without falling back to the downlink", () => {
+    vi.stubGlobal("navigator", { connection: { downlink: 4.5, type: "cellular" } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("uses a limit playback observed even on a metered link", () => {
+    vi.stubGlobal("navigator", { connection: { downlink: 8, saveData: true } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({
+        kbps: 4_200,
+        measuredAt: Date.now(),
+        observed: true,
+        link: "unknown:save-data",
+      }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBe(4_200);
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("does not carry a limit observed on Wi-Fi onto a metered link", () => {
+    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({ kbps: 56_000, measuredAt: Date.now(), observed: true }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("does not carry a limit observed on cellular onto Data Saver Wi-Fi", () => {
+    vi.stubGlobal("navigator", { connection: { type: "wifi", saveData: true, downlink: 3 } });
+    localStorage.setItem(
+      "silo-bandwidth-estimate",
+      JSON.stringify({
+        kbps: 20_000,
+        measuredAt: Date.now(),
+        observed: true,
+        link: "cellular:full",
+      }),
+    );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
   });
 });

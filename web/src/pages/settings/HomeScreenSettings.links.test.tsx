@@ -29,6 +29,7 @@ vi.mock("@/hooks/queries/libraries", () => {
 vi.mock("@/hooks/queries/settingValues", () => ({
   useEffectiveSettings: () => ({ data: {}, isLoading: false }),
   useSetSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
+  useClearSettingValue: () => ({ mutateAsync: vi.fn(), isPending: false }),
   invalidateSettingValueQueries: vi.fn(),
 }));
 vi.mock("@/hooks/queries/useAllUserCollections", () => ({

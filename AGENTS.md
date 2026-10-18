@@ -185,7 +185,7 @@ changed-line findings as CI while analyzing only the packages the branch touched
 `./...` saturates every core for minutes, and parallel agents make that worse. Never pass
 `--allow-parallel-runners`; concurrent runs queue behind one another on purpose.
 
-Go stays `gofmt`/`goimports` clean; the frontend follows `web/.prettierrc`.
+Format Go files as touched with `gofmt`/`goimports`; the frontend follows `web/.prettierrc`.
 
 ## Development environment
 

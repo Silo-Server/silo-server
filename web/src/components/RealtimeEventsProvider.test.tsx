@@ -16,6 +16,7 @@ import {
   adminKeys,
   catalogKeys,
   collectionKeys,
+  itemKeys,
   libraryKeys,
   requestKeys,
   sectionKeys,
@@ -25,6 +26,7 @@ import { invalidateCatalogState } from "./realtimeCatalogInvalidation";
 import {
   buildEventsUrl,
   EVENTS_ACCESS_CHANGED_CLOSE_CODE,
+  HIDDEN_EVENTS_SOCKET_GRACE_MS,
   RealtimeEventsProvider,
 } from "./RealtimeEventsProvider";
 
@@ -813,6 +815,9 @@ describe("RealtimeEventsProvider", () => {
       };
       view.rerender(provider());
     });
+    await act(async () => {
+      vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS);
+    });
 
     expect(firstSocket.readyState).toBe(FakeWebSocket.CLOSED);
     await act(async () => {
@@ -879,6 +884,42 @@ describe("RealtimeEventsProvider", () => {
       user_data: { played: true },
       user_state: { played: true, is_favorite: true },
     });
+  });
+
+  it("drops a closed player's cached watch detail when progress changes elsewhere", async () => {
+    const queryClient = new QueryClient();
+    const watchKey = itemKeys.watchDetail("movie-1");
+    const otherKey = itemKeys.watchDetail("movie-2");
+    queryClient.setQueryData(watchKey, {
+      content_id: "movie-1",
+      user_data: { position_seconds: 600 },
+    });
+    queryClient.setQueryData(otherKey, {
+      content_id: "movie-2",
+      user_data: { position_seconds: 60 },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <div />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {});
+    await act(async () => {
+      FakeWebSocket.instances[0]?.emitMessage({
+        type: "event",
+        channel: "user_state",
+        event: "user_state.changed",
+        data: { profile_id: "profile-1", content_id: "movie-1", change: "progress" },
+      });
+    });
+
+    // Dropped at once: a play started now would use its resume position.
+    expect(queryClient.getQueryData(watchKey)).toBeUndefined();
+    expect(queryClient.getQueryData(otherKey)).toBeDefined();
   });
 
   it("refetches request state once per burst of request notifications, for any profile", async () => {
@@ -992,6 +1033,335 @@ describe("RealtimeEventsProvider", () => {
     });
     expect(invalidations(mine)).toBe(1);
     expect(invalidations(search)).toBe(1);
+  });
+
+  describe("hidden page", () => {
+    const catchUp = { type: "active", predicate: expect.any(Function) };
+
+    function setPage({ visible, frozen = false }: { visible: boolean; frozen?: boolean }) {
+      mockState.pageActivity = {
+        ...mockState.pageActivity,
+        isVisible: visible,
+        isFrozen: frozen,
+        canPollDashboard: visible && !frozen && mockState.pageActivity.isFocused,
+        canApplyRealtimeUpdates: visible && !frozen,
+      };
+    }
+
+    function renderProvider(queryClient: QueryClient) {
+      const provider = () => (
+        <QueryClientProvider client={queryClient}>
+          <RealtimeEventsProvider>
+            <div />
+          </RealtimeEventsProvider>
+        </QueryClientProvider>
+      );
+      const view = render(provider());
+      return () => view.rerender(provider());
+    }
+
+    function ticketMints() {
+      return vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).endsWith("/api/v2/events/ws-ticket")).length;
+    }
+
+    it("keeps the socket and skips the catch-up across a short tab switch", async () => {
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries");
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+      const socket = FakeWebSocket.instances[0]!;
+
+      await act(async () => {
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS - 1);
+      });
+      expect(socket.readyState).not.toBe(FakeWebSocket.CLOSED);
+
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      expect(ticketMints()).toBe(1);
+      expect(refetchQueries).not.toHaveBeenCalled();
+      expect(mockState.refreshAccount).not.toHaveBeenCalled();
+    });
+
+    it("applies frames and subscribes while the tab is briefly hidden", async () => {
+      const queryClient = new QueryClient();
+      const detailKey = catalogKeys.itemDetail("movie-1");
+      queryClient.setQueryData(detailKey, { content_id: "movie-1", type: "movie" });
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+      const socket = FakeWebSocket.instances[0]!;
+      socket.readyState = FakeWebSocket.OPEN;
+      const send = vi.spyOn(socket, "send");
+
+      await act(async () => {
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        socket.emitMessage({ type: "hello" });
+        socket.emitMessage({
+          type: "event",
+          channel: "user_state",
+          event: "favorite.updated",
+          data: { content_id: "movie-1", change: "favorite", is_favorite: true },
+        });
+      });
+
+      expect(send).toHaveBeenCalledWith(expect.stringContaining('"type":"subscribe"'));
+      expect(queryClient.getQueryData(detailKey)).toMatchObject({
+        user_state: { is_favorite: true },
+      });
+    });
+
+    it("closes the socket after the grace period and catches up once on return", async () => {
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+      const socket = FakeWebSocket.instances[0]!;
+      const hiddenAt = Date.now();
+
+      await act(async () => {
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS);
+      });
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+      // Leave the clock behind so only the closed socket can ask for the catch-up.
+      vi.setSystemTime(hiddenAt);
+
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("catches up after a long suspension even when the grace timer never ran", async () => {
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+
+      await act(async () => {
+        setPage({ visible: false });
+        rerender();
+      });
+      // A suspended page's clock moves on while its timers do not.
+      vi.setSystemTime(Date.now() + 2 * HIDDEN_EVENTS_SOCKET_GRACE_MS);
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+
+      // The old socket may have died without a close event, so it is replaced.
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(FakeWebSocket.instances[0]!.readyState).toBe(FakeWebSocket.CLOSED);
+      expect(ticketMints()).toBe(2);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes the socket at once when the page is frozen and catches up on resume", async () => {
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+      const socket = FakeWebSocket.instances[0]!;
+
+      await act(async () => {
+        setPage({ visible: false, frozen: true });
+        rerender();
+      });
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("catches up on return when the socket drops while the tab is hidden", async () => {
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+
+      await act(async () => {
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose();
+        vi.advanceTimersByTime(1_000);
+      });
+      // The usual reconnect still runs during the grace period.
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+
+    it("catches up at once when a socket that lived through a hide drops later", async () => {
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+
+      await act(async () => {
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      // A resumed phone browser can learn only now that its socket died.
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose();
+      });
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("catches up on the next return after the socket dropped while visible", async () => {
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+
+      // A visible page reconnects without a catch-up, as before.
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose();
+      });
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      // A quick switch before the reconnect lands catches up what it lost.
+      await act(async () => {
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+
+      // Once caught up, the next quick switch costs nothing.
+      await act(async () => {
+        vi.advanceTimersByTime(1_000);
+        setPage({ visible: false });
+        rerender();
+      });
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops a pending catch-up when the account signs out while hidden", async () => {
+      const signedInUser = mockState.user;
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+      try {
+        await act(async () => {
+          setPage({ visible: false });
+          rerender();
+        });
+        await act(async () => {
+          vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS);
+        });
+        await act(async () => {
+          (mockState as { user: unknown }).user = null;
+          rerender();
+        });
+        await act(async () => {
+          setPage({ visible: true });
+          rerender();
+        });
+        await act(async () => {
+          mockState.user = signedInUser;
+          rerender();
+        });
+        expect(refetchQueries).not.toHaveBeenCalled();
+        expect(mockState.refreshAccount).not.toHaveBeenCalled();
+      } finally {
+        mockState.user = signedInUser;
+      }
+    });
+
+    it("catches up when a background tab stays hidden past the grace period", async () => {
+      setPage({ visible: false });
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+      await act(async () => {
+        vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS);
+      });
+      expect(FakeWebSocket.instances[0]!.readyState).toBe(FakeWebSocket.CLOSED);
+
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+    });
+
+    it("connects in a background tab and skips the catch-up when shown soon after", async () => {
+      setPage({ visible: false });
+      const queryClient = new QueryClient();
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries");
+      const rerender = renderProvider(queryClient);
+      await act(async () => {});
+      expect(FakeWebSocket.instances).toHaveLength(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      await act(async () => {
+        setPage({ visible: true });
+        rerender();
+      });
+
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      expect(refetchQueries).not.toHaveBeenCalled();
+      expect(mockState.refreshAccount).not.toHaveBeenCalled();
+    });
   });
 
   describe("access changes", () => {

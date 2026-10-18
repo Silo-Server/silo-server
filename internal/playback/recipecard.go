@@ -65,6 +65,21 @@ type RecipeCard struct {
 	ClientUserAgent  string `json:"client_user_agent,omitempty"`
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
 
+	// Header-authenticated recovery. A session that negotiated
+	// header_authenticated_media_v1 publishes no stream token, so the API keeps
+	// its recipe server-side instead (see noderecipe.NewSessionRecipeStore).
+	// These fields exist only on that stored copy and are never projected into
+	// stream-token claims. PlanID binds the card to the v3 plan it was committed
+	// under, so a card a later replan failed to overwrite cannot rebuild a
+	// superseded transport. RequireMediaAuthorization carries the mode onto the
+	// rebuilt session, whose UUID must stay a route identifier rather than a
+	// bearer. RequestedMediaFileID and DisableProgressPersistence are the live
+	// session's when the card is written, so the rebuilt session keeps them.
+	PlanID                     string `json:"plan_id,omitempty"`
+	RequireMediaAuthorization  bool   `json:"require_media_authorization,omitempty"`
+	RequestedMediaFileID       int    `json:"requested_media_file_id,omitempty"`
+	DisableProgressPersistence bool   `json:"disable_progress_persistence,omitempty"`
+
 	// Encode parameters — mirror of the byte-affecting TranscodeOpts fields.
 	// Direct cards leave them zero; remux cards use the audio targets when the
 	// selected stream must be converted.
@@ -97,6 +112,7 @@ type RecipeCard struct {
 	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
+	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
 	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
 	CopySeekAnchorResolved     bool                   `json:"copy_seek_anchor_resolved,omitempty"`
@@ -113,6 +129,7 @@ type RecipeCard struct {
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in,omitempty"`
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
+	SubtitleRendition          bool                   `json:"subtitle_rendition,omitempty"`
 	AudioTrackIndex            int                    `json:"audio_track_index"`
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps,omitempty"`
 	TotalDuration              float64                `json:"total_duration"`
@@ -201,6 +218,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		VideoBitstreamFilter:       opts.VideoBitstreamFilter,
 		VideoSampleEntry:           opts.VideoSampleEntry,
 		CopyVideoMPEGTS:            opts.CopyVideoMPEGTS,
+		KeyframePlaylist:           opts.KeyframePlaylist,
 		SeekSeconds:                opts.SeekSeconds,
 		StreamOriginSeconds:        opts.StreamOriginSeconds,
 		CopySeekAnchorResolved:     opts.CopySeekAnchorResolved,
@@ -217,6 +235,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		SubtitleTrackIndex:         opts.SubtitleTrackIndex,
 		SubtitleBurnIn:             opts.SubtitleBurnIn,
 		SubtitleCodec:              opts.SubtitleCodec,
+		SubtitleRendition:          opts.SubtitleRendition,
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		TotalDuration:              opts.TotalDuration,
@@ -303,6 +322,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
+		KeyframePlaylist:           c.KeyframePlaylist,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -320,6 +340,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		SubtitleTrackIndex:         c.SubtitleTrackIndex,
 		SubtitleBurnIn:             c.SubtitleBurnIn,
 		SubtitleCodec:              c.SubtitleCodec,
+		SubtitleRendition:          c.SubtitleRendition,
 		AudioTrackIndex:            c.AudioTrackIndex,
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
@@ -415,6 +436,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		VideoBitstreamFilter:       c.VideoBitstreamFilter,
 		VideoSampleEntry:           c.VideoSampleEntry,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
+		KeyframePlaylist:           c.KeyframePlaylist,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,
 		CopySeekAnchorResolved:     c.CopySeekAnchorResolved,
@@ -423,6 +445,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		SubtitleTrackIndex:         c.SubtitleTrackIndex,
 		SubtitleBurnIn:             c.SubtitleBurnIn,
 		SubtitleCodec:              c.SubtitleCodec,
+		SubtitleRendition:          c.SubtitleRendition,
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
@@ -501,6 +524,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		VideoBitstreamFilter:          c.VideoBitstreamFilter,
 		VideoSampleEntry:              c.VideoSampleEntry,
 		CopyVideoMPEGTS:               c.CopyVideoMPEGTS,
+		KeyframePlaylist:              c.KeyframePlaylist,
 		SeekSeconds:                   c.SeekSeconds,
 		StreamOriginSeconds:           c.StreamOriginSeconds,
 		CopySeekAnchorResolved:        c.CopySeekAnchorResolved,
@@ -514,6 +538,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		SubtitleTrackIndex:            c.SubtitleTrackIndex,
 		SubtitleBurnIn:                c.SubtitleBurnIn,
 		SubtitleCodec:                 c.SubtitleCodec,
+		SubtitleRendition:             c.SubtitleRendition,
 		AudioTrackIndex:               c.AudioTrackIndex,
 		TargetBitrateKbps:             c.TargetBitrateKbps,
 		TotalDuration:                 c.TotalDuration,

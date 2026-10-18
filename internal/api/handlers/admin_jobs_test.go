@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -79,10 +80,38 @@ func assertSafeStorageJobPayload(t *testing.T, payload string, snapshot bool) {
 	}
 }
 
+// TestAdminJobReadFollowsActingAdmin: GET /admin/jobs/{id} sits outside the
+// admin group so item-refresh owners can poll their own jobs. An admin
+// account's profile that is not acting as the admin (a child profile) is held
+// to that owner rule; the acting admin reads any job in full.
+func TestAdminJobReadFollowsActingAdmin(t *testing.T) {
+	job := &models.AdminJob{ID: "export", JobType: adminjob.JobTypeCatalogExport, CreatedByUserID: 9,
+		RequestPayload: json.RawMessage(`{"target":"private request"}`), ErrorMessage: "private endpoint"}
+	handler := NewAdminJobsHandler(&fakeAdminJobRepository{job: job}, nil)
+	get := func(actingAdmin bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/admin/jobs/export", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "export")
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+		ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 1, Role: models.RoleAdmin})
+		ctx = apimw.SetActingAdminDecider(ctx, func(context.Context, apimw.ActingAdminRequest) (bool, error) { return actingAdmin, nil })
+		rec := httptest.NewRecorder()
+		handler.HandleGet(rec, req.WithContext(ctx))
+		return rec
+	}
+	if rec := get(false); rec.Code != http.StatusForbidden {
+		t.Fatalf("child profile on an admin account: status %d, want 403: %s", rec.Code, rec.Body)
+	}
+	rec := get(true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "private endpoint") {
+		t.Fatalf("acting admin: status %d body %s", rec.Code, rec.Body)
+	}
+}
+
 func TestCanReadAdminJob_AdminCanReadAnyJob(t *testing.T) {
 	claims := &auth.Claims{UserID: 1, Role: "admin"}
 	job := &models.AdminJob{CreatedByUserID: 2, JobType: adminjob.JobTypeCatalogExport}
-	if !canReadAdminJob(claims, job) {
+	if !canReadAdminJob(claims, claims.Role == "admin", job) {
 		t.Fatal("admin should be allowed to read any job")
 	}
 }
@@ -90,7 +119,7 @@ func TestCanReadAdminJob_AdminCanReadAnyJob(t *testing.T) {
 func TestCanReadAdminJob_CreatorCanReadOwnItemRefreshJob(t *testing.T) {
 	claims := &auth.Claims{UserID: 2, Role: "user"}
 	job := &models.AdminJob{CreatedByUserID: 2, JobType: adminjob.JobTypeItemRefresh}
-	if !canReadAdminJob(claims, job) {
+	if !canReadAdminJob(claims, claims.Role == "admin", job) {
 		t.Fatal("creator should be allowed to read own item refresh job")
 	}
 }
@@ -98,7 +127,7 @@ func TestCanReadAdminJob_CreatorCanReadOwnItemRefreshJob(t *testing.T) {
 func TestCanReadAdminJob_CreatorCannotReadOwnNonItemRefreshJob(t *testing.T) {
 	claims := &auth.Claims{UserID: 2, Role: "user"}
 	job := &models.AdminJob{CreatedByUserID: 2, JobType: adminjob.JobTypeCatalogExport}
-	if canReadAdminJob(claims, job) {
+	if canReadAdminJob(claims, claims.Role == "admin", job) {
 		t.Fatal("non-admin should not read non-item-refresh jobs")
 	}
 }
@@ -106,13 +135,12 @@ func TestCanReadAdminJob_CreatorCannotReadOwnNonItemRefreshJob(t *testing.T) {
 func TestCanReadAdminJob_OtherUserCannotReadItemRefreshJob(t *testing.T) {
 	claims := &auth.Claims{UserID: 3, Role: "user"}
 	job := &models.AdminJob{CreatedByUserID: 2, JobType: adminjob.JobTypeItemRefresh}
-	if canReadAdminJob(claims, job) {
+	if canReadAdminJob(claims, claims.Role == "admin", job) {
 		t.Fatal("non-admin should not read another user's item refresh job")
 	}
 }
 
-func TestAdminJobToResponseForClaims_NonAdminSanitizesItemRefreshPayloads(t *testing.T) {
-	claims := &auth.Claims{UserID: 2, Role: "user"}
+func TestAdminJobToResponseFor_NonAdminSanitizesItemRefreshPayloads(t *testing.T) {
 	job := &models.AdminJob{
 		JobType:         adminjob.JobTypeItemRefresh,
 		CreatedByUserID: 2,
@@ -126,7 +154,7 @@ func TestAdminJobToResponseForClaims_NonAdminSanitizesItemRefreshPayloads(t *tes
 		PublicURL:    "https://example.test/public",
 	}
 
-	resp := adminJobToResponseForClaims(nil, job, nil, claims)
+	resp := adminJobToResponseFor(nil, job, nil, false)
 
 	if string(resp.RequestPayload) != `{}` {
 		t.Fatalf("RequestPayload = %s, want sanitized empty object", resp.RequestPayload)

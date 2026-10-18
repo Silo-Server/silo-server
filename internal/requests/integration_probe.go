@@ -34,6 +34,9 @@ const (
 	integrationNoSuchHost     = "That host name couldn't be found."
 	integrationTimedOut       = "The server didn't answer in time."
 	integrationBadCertificate = "The server's HTTPS certificate wasn't accepted."
+	// integrationKeyReentry refuses a save that would keep a saved key for a
+	// different address.
+	integrationKeyReentry = "re-enter the API key when changing the base URL"
 )
 
 // IntegrationUnreachableError is a request server the host could not reach,

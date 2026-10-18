@@ -107,6 +107,15 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryCapabilities: mocks.useLibraryCapabilities,
 }));
 
+const resetProgressMocks = vi.hoisted(() => ({
+  useResetProgressAction: vi.fn((): (() => void) | undefined => undefined),
+}));
+
+vi.mock("@/hooks/queries/progress", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/progress")>()),
+  useResetProgressAction: resetProgressMocks.useResetProgressAction,
+}));
+
 vi.mock("@/hooks/queries/items", () => ({
   useRedetectItemMarkers: mocks.useRedetectItemMarkers,
   useRedetectEpisodeIntro: mocks.useRedetectEpisodeIntro,
@@ -469,6 +478,34 @@ describe("EpisodeContent", () => {
     } finally {
       spoilerPrefs.hideOverviews = false;
     }
+  });
+
+  it("passes the reset progress action for the episode's resume position", () => {
+    const resetProgress = vi.fn();
+    resetProgressMocks.useResetProgressAction.mockImplementation(() => resetProgress);
+    try {
+      renderToStaticMarkup(
+        <MemoryRouter initialEntries={["/item/episode-1"]}>
+          <EpisodeContent
+            item={makeEpisodeItem({
+              user_data: {
+                played: false,
+                is_in_progress: true,
+                position_seconds: 300,
+                duration_seconds: 1800,
+              },
+            })}
+          />
+        </MemoryRouter>,
+      );
+    } finally {
+      resetProgressMocks.useResetProgressAction.mockImplementation(() => undefined);
+    }
+
+    expect(resetProgressMocks.useResetProgressAction).toHaveBeenCalledWith(
+      expect.objectContaining({ content_id: "episode-1" }),
+    );
+    expect(mocks.capturedActionBarProps.value?.onResetProgress).toBe(resetProgress);
   });
 
   it("passes restartHref when the episode is partially watched", () => {

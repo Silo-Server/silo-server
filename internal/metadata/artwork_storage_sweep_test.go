@@ -90,13 +90,17 @@ func TestArtworkSweepAnomalyGuardThresholds(t *testing.T) {
 // fakeArtworkStorage records what the sweep asked it to delete so the
 // destructive path can be asserted rather than inferred.
 type fakeArtworkStorage struct {
-	pages   [][]blobstore.ObjectInfo
-	tokens  []string
-	deleted []string
-	calls   int
+	pages     [][]blobstore.ObjectInfo
+	tokens    []string
+	deleted   []string
+	calls     int
+	deleteErr error
 }
 
 func (f *fakeArtworkStorage) Delete(_ context.Context, keys []string) (int, error) {
+	if f.deleteErr != nil {
+		return 0, f.deleteErr
+	}
 	f.deleted = append(f.deleted, keys...)
 	return len(keys), nil
 }
@@ -418,5 +422,27 @@ func TestSweepConsultsTheGCScheduleOnlyForLopsidedPages(t *testing.T) {
 	}
 	if len(storage.deleted) != 50 || stats.LeftToGC != 0 {
 		t.Fatalf("deleted %d, left_to_gc %d; want 50 and 0", len(storage.deleted), stats.LeftToGC)
+	}
+}
+
+// An object the store keeps refusing to delete must not pin the cursor: the
+// task resumes at NextToken, so a cursor left at the failing page would fail
+// there on every run and never sweep the rest of the prefix.
+func TestSweepMovesPastAPageWhoseDeleteFails(t *testing.T) {
+	t.Parallel()
+	storage := &fakeArtworkStorage{
+		pages: [][]blobstore.ObjectInfo{
+			ageingObjects("local", 4, 72*time.Hour),
+			ageingObjects("local", 4, 72*time.Hour),
+		},
+		tokens:    []string{"t1", ""},
+		deleteErr: errors.New("access denied"),
+	}
+	stats, err := sweepWithoutDatabase(t, storage, map[string]struct{}{}, 2)
+	if err == nil {
+		t.Fatal("a failed delete must be reported")
+	}
+	if stats.NextToken != "t1" || stats.PrefixDone {
+		t.Fatalf("next token = %q, prefix done = %v; want the page after the failed one", stats.NextToken, stats.PrefixDone)
 	}
 }

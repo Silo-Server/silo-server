@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -48,7 +49,7 @@ type SectionItemMeta struct {
 	DurationSeconds   *float64
 	ProgressUpdatedAt *string
 	ItemSource        string    // "in_progress" or "next_up"
-	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+	SortTimestamp     time.Time // orders Continue Watching: progress time, or a next-up row's catalog.NextUpResult.ActivityAt
 }
 
 const recentSeasonPremiereBadgeWindowDays = 14
@@ -66,11 +67,16 @@ const fetchAllMaxConcurrency = 6
 const slowSectionFetchThreshold = 500 * time.Millisecond
 const slowAggregateFetchThreshold = time.Second
 
+// recommendationReader reads the recommendation rows sections show. Each
+// read returns the row's whole cached pool; the fetcher scopes it to the
+// section's libraries and trims it to the section's item limit.
+// SectionForYouFill is read only when a library leaves the For You row short.
 type recommendationReader interface {
-	GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
-	GetBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
-	GetSimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
-	GetTasteMatchRow(ctx context.Context, userID int, profileID, genre string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionForYouFill(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, string, error)
+	SectionSimilarUsersLiked(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SectionTasteMatchRow(ctx context.Context, userID int, profileID, genre string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
 }
 
 // trendingSnapshotGetter is the read side of the trending snapshot table.
@@ -313,9 +319,13 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		f.logSlowSectionFetch(resolved, libraryID, libraryIDs, result, time.Since(start), err)
 	}()
 
-	if resolved.SectionType == SectionBecauseYouWatched {
-		if reader, ok := f.RecommendationReader.(becauseWatchedSourceReader); ok {
-			result, err = f.fetchBecauseWatchedWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, reader)
+	if f.RecommendationReader != nil {
+		switch resolved.SectionType {
+		case SectionBecauseYouWatched:
+			result, err = f.fetchBecauseWatchedWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, f.RecommendationReader)
+			return result, err
+		case SectionRecommendedForYou, SectionTasteMatch:
+			result, err = f.fetchRecommendationRowWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, f.RecommendationReader)
 			return result, err
 		}
 	}
@@ -339,6 +349,9 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 			items, total, title, err = f.fetchEditorialSpotlightWithTitle(ctx, resolved, libraryID, libraryIDs, filter)
 		} else {
 			items, total, title, err = f.fetchGenreRouletteWithTitle(ctx, resolved, libraryID, libraryIDs, filter)
+		}
+		if err == nil {
+			items, total = f.withoutNotInterested(ctx, resolved, userID, profileID, items, total)
 		}
 		if err != nil {
 			return SectionWithItems{}, err
@@ -373,6 +386,10 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		})
 	} else {
 		items, total, err = f.fetchSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+	}
+	if err == nil && HidesNotInterested(resolved.SectionType) {
+		// Marks are per profile, so they leave the row after the shared cache.
+		items, total = f.withoutNotInterested(ctx, resolved, userID, profileID, items, total)
 	}
 	if err != nil {
 		return SectionWithItems{}, err
@@ -486,7 +503,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	// watch-progress store, so reading sections pull from that table and skip
 	// the next-up handling below.
 	if continueType == ContinueTypeReading {
-		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, false, orderedItems, itemMeta, completedCache,
 			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
 				if err != nil {
@@ -513,8 +530,11 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		}, nil
 	}
 
+	combined := ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp &&
+		NextUpMode(ctx, store, profileID) == NextUpModeCombined
+
 	dropped := f.activeDroppedSeries(ctx, userID, profileID)
-	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, combined, orderedItems, itemMeta, completedCache,
 		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
 			if err != nil {
@@ -526,30 +546,35 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		return SectionWithItems{}, err
 	}
 
-	nextUpMode := ""
-	if ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp {
-		nextUpMode = NextUpMode(ctx, store, profileID)
-	}
-	if ContinueTypeAllowsNextUp(continueType) && nextUpMode == NextUpModeCombined {
-		nextUpItems, nextUpMeta, nextUpErr := f.FetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit)
+	// Combined mode merges next-up cards into the row and keeps the newest
+	// limit cards of the two. A next-up card normally sorts by when its
+	// previous episode was completed, so once the in-progress cards fill the
+	// row the lookup only needs series completed since the oldest of them.
+	// With new releases first, a series finished before all of them still
+	// leads the row when its next episode was just released, so the lookup is
+	// not bounded.
+	if combined {
+		newReleasesFirst := NextUpNewReleasesFirst(ctx, store, profileID)
+		var since *time.Time
+		if !newReleasesFirst {
+			since = continueNextUpCutoff(orderedItems, itemMeta, limit)
+		}
+		nextUpItems, nextUpMeta, nextUpErr := f.fetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit, since, newReleasesFirst)
 		if nextUpErr != nil {
 			slog.ErrorContext(ctx, "fetching next-up items", "component", "sections", "error", nextUpErr)
 		} else {
 			orderedItems = append(orderedItems, nextUpItems...)
 			maps.Copy(itemMeta, nextUpMeta)
 		}
-	}
-
-	if nextUpMode == NextUpModeCombined && len(orderedItems) > 1 {
 		orderedItems = collapseContinueWatchingSeriesCandidates(orderedItems, itemMeta)
-	}
-
-	if nextUpMode == NextUpModeCombined && len(orderedItems) > 1 {
 		sort.SliceStable(orderedItems, func(i, j int) bool {
 			left := itemMeta[orderedItems[i].ContentID].SortTimestamp
 			right := itemMeta[orderedItems[j].ContentID].SortTimestamp
 			return left.After(right)
 		})
+		if len(orderedItems) > limit {
+			orderedItems = orderedItems[:limit]
+		}
 	}
 
 	if orderedItems == nil {
@@ -571,7 +596,9 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 // exhausted, or continueProgressMaxScanned entries have been scanned. Paging
 // past the requested limit matters because dismissal filtering and
 // library/access scoping happen after the source query: trimming at the
-// source LIMIT would under-fill the section whenever dismissals exist.
+// source LIMIT would under-fill the section whenever dismissals exist. With
+// collapseSeries, a series' in-progress episodes count as one card, as the
+// combined row shows them.
 func (f *Fetcher) collectContinueProgressItems(
 	ctx context.Context,
 	store userstore.UserStore,
@@ -583,6 +610,7 @@ func (f *Fetcher) collectContinueProgressItems(
 	libraryIDs []int,
 	filter catalog.AccessFilter,
 	limit int,
+	collapseSeries bool,
 	orderedItems []*models.MediaItem,
 	itemMeta map[string]SectionItemMeta,
 	completedCache *catalog.CompletedProgressCache,
@@ -620,8 +648,8 @@ func (f *Fetcher) collectContinueProgressItems(
 		if err != nil {
 			return nil, err
 		}
-		orderedItems = appendUniqueContinueItems(orderedItems, pageItems, seen, limit)
 		maps.Copy(itemMeta, pageMeta)
+		orderedItems = appendContinuePage(orderedItems, pageItems, itemMeta, seen, limit, collapseSeries)
 		if rawProgressCount < pageLimit {
 			break
 		}
@@ -629,23 +657,51 @@ func (f *Fetcher) collectContinueProgressItems(
 	return orderedItems, nil
 }
 
-// appendUniqueContinueItems appends pageItems to orderedItems up to limit,
-// skipping content IDs already recorded in seen and recording every appended
-// ID. Pages come from a live LIMIT/OFFSET scan, so without this guard an item
+// appendContinuePage appends one page of cards to orderedItems, skipping
+// content IDs already recorded in seen and recording every appended ID, then
+// with collapseSeries keeps one card per series, and trims the row to limit.
+// Pages come from a live LIMIT/OFFSET scan, so without the seen guard an item
 // shifted across a page boundary by a concurrent progress write would surface
-// twice in the same section.
-func appendUniqueContinueItems(orderedItems, pageItems []*models.MediaItem, seen map[string]struct{}, limit int) []*models.MediaItem {
+// twice in the same section. The whole page goes in before the trim because
+// collapsing can shrink the row: trimming first would drop this page's later
+// cards while the next page's older ones took their places.
+func appendContinuePage(orderedItems, pageItems []*models.MediaItem, meta map[string]SectionItemMeta, seen map[string]struct{}, limit int, collapseSeries bool) []*models.MediaItem {
 	for _, item := range pageItems {
-		if len(orderedItems) >= limit {
-			break
-		}
 		if _, dup := seen[item.ContentID]; dup {
 			continue
 		}
 		seen[item.ContentID] = struct{}{}
 		orderedItems = append(orderedItems, item)
 	}
+	if collapseSeries {
+		orderedItems = collapseContinueWatchingSeriesCandidates(orderedItems, meta)
+	}
+	if len(orderedItems) > limit {
+		orderedItems = orderedItems[:limit]
+	}
 	return orderedItems
+}
+
+// continueNextUpCutoff bounds the next-up lookup of a combined row. When the
+// in-progress cards fill the row on their own, a next-up card older than all
+// of them sorts below limit cards and cannot make the row, so the lookup only
+// needs series completed at or after the oldest in-progress card. Nil when
+// the row is not full or a card has no timestamp to sort by.
+func continueNextUpCutoff(items []*models.MediaItem, meta map[string]SectionItemMeta, limit int) *time.Time {
+	if len(items) < limit {
+		return nil
+	}
+	var oldest time.Time
+	for i, item := range items {
+		ts := meta[item.ContentID].SortTimestamp
+		if ts.IsZero() {
+			return nil
+		}
+		if i == 0 || ts.Before(oldest) {
+			oldest = ts
+		}
+	}
+	return &oldest
 }
 
 // ebookContinueWatchingProgressQuery lists in-progress ebook resume points for
@@ -808,7 +864,7 @@ func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSecti
 		limit = 20
 	}
 
-	items, meta, err := f.FetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit)
+	items, meta, err := f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil, NextUpNewReleasesFirst(ctx, store, profileID))
 	if err != nil {
 		return SectionWithItems{}, err
 	}
@@ -830,17 +886,35 @@ func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSecti
 // FetchNextUpItems returns the next unwatched episode per series for the given user profile.
 // It delegates to NextUpRepository for the optimized LATERAL JOIN query, then resolves
 // the full MediaItem objects via fetchEpisodeTargetsByContentIDs.
+// The order follows the profile's ui.next_up_new_releases_first.
 func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, limit int) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
+	if f.NextUpRepo == nil || f.StoreProvider == nil {
+		return nil, nil, nil
+	}
+	store, err := f.StoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting user store: %w", err)
+	}
+	return f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil, NextUpNewReleasesFirst(ctx, store, profileID))
+}
+
+// fetchNextUpItems is FetchNextUpItems with the profile's new-releases-first
+// preference already resolved, limited when since is set to series whose
+// newest completed episode is at or after since.
+func (f *Fetcher) fetchNextUpItems(ctx context.Context, userID int, profileID string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, limit int, since *time.Time, newReleasesFirst bool) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if f.NextUpRepo == nil {
 		return nil, nil, nil
 	}
 
 	results, err := f.NextUpRepo.ListNextUp(ctx, catalog.NextUpQuery{
-		UserID:     userID,
-		ProfileID:  profileID,
-		LibraryID:  libraryID,
-		LibraryIDs: libraryIDs,
-		Limit:      limit,
+		UserID:        userID,
+		ProfileID:     profileID,
+		LibraryID:     libraryID,
+		LibraryIDs:    libraryIDs,
+		AccessFilter:  filter,
+		Limit:         limit,
+		DateCutoff:    since,
+		RankByRelease: newReleasesFirst,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -878,7 +952,7 @@ func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID st
 			continue
 		}
 		m.ItemSource = "next_up"
-		m.SortTimestamp = res.CompletedAt
+		m.SortTimestamp = res.ActivityAt
 		meta[res.ContentID] = m
 
 		item, ok := itemByID[res.ContentID]
@@ -1129,12 +1203,20 @@ func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libr
 // LogFetchError records a section that failed to load and is shown empty. A
 // row whose server or personal collection was deleted is expected to stay on
 // a layout until someone removes it, so it logs at debug instead of error.
+// So does a fetch that failed only because the caller went away.
 func LogFetchError(ctx context.Context, component string, sec ResolvedSection, err error) {
-	if errors.Is(err, catalog.ErrLibraryCollectionNotFound) || errors.Is(err, userstore.ErrCollectionNotFound) {
+	if IsMissingCollection(err) {
 		slog.DebugContext(ctx, "section collection no longer exists", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
 		return
 	}
-	slog.ErrorContext(ctx, "fetching section items", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
+	slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelError), "fetching section items", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
+}
+
+// IsMissingCollection reports whether a fetch failed only because the
+// section's collection no longer exists. Such a section shows an empty row
+// rather than failing the read.
+func IsMissingCollection(err error) bool {
+	return errors.Is(err, catalog.ErrLibraryCollectionNotFound) || errors.Is(err, userstore.ErrCollectionNotFound)
 }
 
 type sectionFetchRunner func(context.Context, ResolvedSection) (SectionWithItems, error)
@@ -1718,61 +1800,68 @@ func limitUserCollectionSectionItems(items []*models.MediaItem, limit int) ([]*m
 	return items, total
 }
 
+// fetchRecommendationSection reads the row's whole cached pool, scopes it to
+// the section's libraries, then trims it to the section's item limit, so a
+// library's row fills from every cached candidate in that library rather than
+// only those in the row's first page. Because You Watched, For You and taste
+// match take a FetchOne branch whenever a reader is wired, which titles the
+// section after the row it serves.
 func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
-	if f.RecommendationReader == nil {
+	if f.RecommendationReader == nil || s.SectionType != SectionSimilarUsersLiked {
 		return []*models.MediaItem{}, 0, nil // graceful degradation
 	}
-
-	cfg := parseRecommendationSectionConfig(s.Config)
-	var scoredItems []recommendations.ScoredItem
-	switch s.SectionType {
-	case SectionRecommendedForYou:
-		row, err := f.RecommendationReader.GetForYouMain(ctx, userID, profileID, s.ItemLimit, filter)
-		if err != nil || row == nil {
-			return []*models.MediaItem{}, 0, err
-		}
-		scoredItems = row.Items
-	case SectionBecauseYouWatched:
-		items, err := f.RecommendationReader.GetBecauseYouWatched(ctx, userID, profileID, cfg.anchor(), s.ItemLimit, filter)
-		if err != nil {
-			return []*models.MediaItem{}, 0, err
-		}
-		scoredItems = items
-	case SectionSimilarUsersLiked:
-		items, err := f.RecommendationReader.GetSimilarUsersLiked(ctx, userID, profileID, s.ItemLimit, filter)
-		if err != nil {
-			return []*models.MediaItem{}, 0, err
-		}
-		scoredItems = items
-	case SectionTasteMatch:
-		// An empty genre is valid: the reader auto-picks the profile's
-		// strongest taste cluster (falling back to the server top genre).
-		row, err := f.RecommendationReader.GetTasteMatchRow(ctx, userID, profileID, strings.TrimSpace(cfg.Genre), s.ItemLimit, filter)
-		if err != nil || row == nil {
-			return []*models.MediaItem{}, 0, err
-		}
-		scoredItems = row.Items
-	default:
-		return []*models.MediaItem{}, 0, nil
+	scoredItems, err := f.RecommendationReader.SectionSimilarUsersLiked(ctx, userID, profileID, filter)
+	if err != nil {
+		return []*models.MediaItem{}, 0, err
 	}
 
-	if len(scoredItems) == 0 {
-		return []*models.MediaItem{}, 0, nil
-	}
-
-	// Resolve item IDs to full MediaItem objects
-	itemIDs := make([]string, len(scoredItems))
-	for i, item := range scoredItems {
-		itemIDs[i] = item.MediaItemID
-	}
-
-	mediaItems, err := f.fetchItemsByContentIDs(ctx, itemIDs, libraryID, libraryIDs, filter)
+	orderedItems, err := f.scopeRecommendationItems(ctx, scoredItems, libraryID, libraryIDs, filter)
 	if err != nil {
 		return nil, 0, err
 	}
-	orderedItems := orderMediaItems(mediaItems, itemIDs)
+	orderedItems = limitRecommendationItems(orderedItems, s.ItemLimit)
 	return orderedItems, len(orderedItems), nil
 }
+
+// scopeRecommendationItems loads the scored items that are in the section's
+// library scope, keeping their order.
+func (f *Fetcher) scopeRecommendationItems(ctx context.Context, scored []recommendations.ScoredItem, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, error) {
+	if len(scored) == 0 {
+		return []*models.MediaItem{}, nil
+	}
+	ids := make([]string, len(scored))
+	for i, item := range scored {
+		ids[i] = item.MediaItemID
+	}
+	items, err := f.fetchItemsByContentIDs(ctx, ids, libraryID, libraryIDs, filter)
+	if err != nil {
+		return nil, err
+	}
+	return orderMediaItems(items, ids), nil
+}
+
+// limitRecommendationItems cuts a recommendation row to the section's row
+// size (see recommendationSectionLimit).
+func limitRecommendationItems(items []*models.MediaItem, itemLimit int) []*models.MediaItem {
+	itemLimit = recommendationSectionLimit(itemLimit)
+	if len(items) > itemLimit {
+		return items[:itemLimit]
+	}
+	return items
+}
+
+// recommendationSectionLimit is a recommendation section's row size: its
+// item limit, or defaultRecommendationSectionLimit when it sets none.
+func recommendationSectionLimit(itemLimit int) int {
+	if itemLimit <= 0 {
+		return defaultRecommendationSectionLimit
+	}
+	return itemLimit
+}
+
+// defaultRecommendationSectionLimit is the row size of a recommendation
+// section that sets no item limit, the size the reader's public reads use.
+const defaultRecommendationSectionLimit = 20
 
 func (f *Fetcher) fetchHiddenGems(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	var p recipes.HiddenGemsParams
@@ -3154,6 +3243,8 @@ func itemColumnsList(alias string) []string {
 	cols := []string{
 		"content_id", "type", "title", "sort_title", "original_title", "year", "genres",
 		"content_rating", "runtime", "overview", "tagline",
+		// Localizing a card compares its target language with these.
+		"default_metadata_language", "original_language",
 		"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
 		"imdb_id", "tmdb_id", "tvdb_id",
 		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
@@ -3162,6 +3253,8 @@ func itemColumnsList(alias string) []string {
 		"show_status",
 		"matched_at", "status", "created_at", "updated_at",
 		"advisory_age", "advisory_source",
+		// Jellyfin-compatible lists advertise these images from the paths.
+		"banner_path", "thumb_path", "clearart_path", "disc_path",
 	}
 	prefixed := make([]string, len(cols))
 	for i, c := range cols {
@@ -3177,8 +3270,8 @@ func itemColumnsList(alias string) []string {
 	return prefixed
 }
 
-// itemColumns returns the SELECT column list matching scanMediaItems.
-// Mirrors catalog.browseItemColumns.
+// itemColumns returns the SELECT column list matching scanMediaItems by
+// position. It carries the columns section rows need, not catalog's list.
 func itemColumns(alias string) string {
 	return strings.Join(itemColumnsList(alias), ", ")
 }
@@ -3231,6 +3324,7 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 		err := rows.Scan(
 			&item.ContentID, &item.Type, &item.Title, &item.SortTitle, &item.OriginalTitle,
 			&item.Year, &item.Genres, &item.ContentRating, &item.Runtime, &item.Overview, &item.Tagline,
+			&item.DefaultMetadataLanguage, &item.OriginalLanguage,
 			&item.RatingIMDB, &item.RatingTMDB, &item.RatingRTCritic, &item.RatingRTAudience,
 			&item.ImdbID, &item.TmdbID, &item.TvdbID,
 			&item.PosterPath, &item.PosterThumbhash, &item.BackdropPath, &item.BackdropThumbhash, &item.LogoPath,
@@ -3239,6 +3333,7 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.ShowStatus,
 			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
 			&item.AdvisoryAge, &item.AdvisorySource,
+			&item.BannerPath, &item.ThumbPath, &item.ClearArtPath, &item.DiscPath,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning item: %w", err)
@@ -3269,7 +3364,7 @@ func newTrendingEntry(tmdbID, tvdbID int, imdbID, mediaType string) trendingDisc
 	return e
 }
 
-// fetchTrendingDiscover surfaces external global trending (TMDB or Trakt),
+// fetchTrendingDiscover surfaces external global trending (TMDB),
 // mixing movies + series, matched to titles in the viewer's enabled libraries.
 // The external fetch + ID resolution are cached briefly so it does not hit the
 // upstream API on every home-page load.
@@ -4100,31 +4195,16 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 
 	conditions = append(conditions,
 		"mi.type = 'series'",
-		// The profile has watched at least one episode of this series...
-		`EXISTS (
-			SELECT 1
-			FROM episodes we
-			JOIN user_watch_history uwh ON uwh.media_item_id = we.content_id
-			WHERE we.series_id = mi.content_id
-			  AND uwh.user_id = $1
-			  AND uwh.profile_id = $2
-		)`,
-		// ...and a season newer than any they've watched arrived recently
-		// with at least one playable file in an in-scope library.
+		// A season newer than any the profile has watched (joined from
+		// `watched` below) arrived recently with at least one playable file
+		// in an in-scope library.
 		fmt.Sprintf(`EXISTS (
 			SELECT 1
 			FROM episodes ne
 			WHERE ne.series_id = mi.content_id
 			  AND ne.season_number > 0
 			  AND ne.created_at > NOW() - make_interval(days => $3)
-			  AND ne.season_number > COALESCE((
-				SELECT MAX(we2.season_number)
-				FROM episodes we2
-				JOIN user_watch_history uwh2 ON uwh2.media_item_id = we2.content_id
-				WHERE we2.series_id = mi.content_id
-				  AND uwh2.user_id = $1
-				  AND uwh2.profile_id = $2
-			  ), 0)
+			  AND ne.season_number > COALESCE(w.max_season, 0)
 			  AND EXISTS (
 				SELECT 1 FROM media_files mf
 				WHERE mf.episode_id = ne.content_id
@@ -4144,8 +4224,21 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 		limit = 20
 	}
 
+	// `watched` reads the profile's history once: the series it has watched
+	// and the highest season watched in each. Correlating that lookup per
+	// series let Postgres's cached generic plan (which can't see how much
+	// history $1/$2 select) rescan the whole history once per watched series,
+	// turning a ~0.5s query into 10-40s for long-history profiles.
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s WHERE %s
+		`WITH watched AS MATERIALIZED (
+			SELECT we.series_id, MAX(we.season_number) AS max_season
+			FROM user_watch_history uwh
+			JOIN episodes we ON we.content_id = uwh.media_item_id
+			WHERE uwh.user_id = $1
+			  AND uwh.profile_id = $2
+			GROUP BY we.series_id
+		)
+		SELECT %s FROM %s JOIN watched w ON w.series_id = mi.content_id WHERE %s
 		ORDER BY (
 			SELECT MAX(ord.created_at)
 			FROM episodes ord

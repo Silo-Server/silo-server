@@ -31,7 +31,7 @@ func TestActingAdminGateHouseholdRule(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			deps := parityDeps(false)
 			restricted := tc.restricted
-			deps.ActingAdmin = apimw.RequireActingAdmin(primary, func(context.Context, int) (bool, error) { return restricted, nil })
+			deps.ActingAdmin = apimw.NewActingAdminDecider(primary, func(context.Context, int) (bool, error) { return restricted, nil })
 			rec := do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/probe/"+string(ClassActingAdmin), `{"name":"x","cleared":null}`, tc.headers)
 			if tc.want == (ProblemType{}) {
 				if rec.Code != http.StatusOK {

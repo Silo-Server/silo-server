@@ -368,8 +368,11 @@ func TestPersonRefreshWorkerPacesLookupsAcrossBatches(t *testing.T) {
 	w := NewPersonRefreshWorker(service, PersonRefreshWorkerConfig{BatchSize: 1})
 	const delay = 30 * time.Millisecond
 	w.delay.Store(int64(delay))
+	// Take each start from the worker's own clock: it paces from the moment
+	// it set nextLookup, just before the lookup, so a timestamp taken later
+	// in the hook can shave jitter off a correctly paced gap.
 	var starts []time.Time
-	service.onRefresh = func(int64) { starts = append(starts, time.Now()) }
+	service.onRefresh = func(int64) { starts = append(starts, w.nextLookup.Add(-delay)) }
 
 	w.drain()
 

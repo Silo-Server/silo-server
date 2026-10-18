@@ -2,6 +2,7 @@ package pglock
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -242,6 +243,98 @@ func TestAcquireAlsoGivesUpAfterTheWait(t *testing.T) {
 	}
 }
 
+func TestAcquireWaitsForTheHolderThenGivesUp(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	holder, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	if lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 100*time.Millisecond); err != nil || acquired {
+		_ = lock.Release(ctx)
+		t.Fatalf("Acquire while held = (%v, %v), want (false, nil) after the wait", acquired, err)
+	}
+	if waiters := lockWaiters(t, pool, pglockTestKey); waiters != 0 {
+		t.Fatalf("%d sessions still queued for the key, want none", waiters)
+	}
+
+	// A waiter gets the lock once the holder releases it.
+	got := make(chan error, 1)
+	go func() {
+		lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 20*time.Second)
+		if err == nil && !acquired {
+			err = errors.New("wait ran out")
+		}
+		if err == nil {
+			err = lock.Release(ctx)
+		}
+		got <- err
+	}()
+	for lockWaiters(t, pool, pglockTestKey) == 0 {
+		select {
+		case <-ctx.Done():
+			t.Fatal("the second Acquire never queued for the lock")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if err := holder.Release(ctx); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if err := <-got; err != nil {
+		t.Fatalf("waiting Acquire: %v", err)
+	}
+}
+
+// With no wait, Acquire only tries, and takes a free lock.
+func TestAcquireWithoutAWaitTakesAFreeLock(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 0)
+	if err != nil || !acquired {
+		t.Fatalf("Acquire without a wait = (%v, %v), want acquired", acquired, err)
+	}
+	if err := lock.Release(ctx); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+}
+
+// The wait also bounds getting a connection from an exhausted pool.
+func TestAcquireGivesUpWhenNoConnectionFrees(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	busy, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("Acquire connection: %v", err)
+	}
+	defer busy.Release()
+	start := time.Now()
+	if lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 100*time.Millisecond); err != nil || acquired {
+		_ = lock.Release(ctx)
+		t.Fatalf("Acquire with no free connection = (%v, %v), want (false, nil) after the wait", acquired, err)
+	}
+	if waited := time.Since(start); waited > 10*time.Second {
+		t.Fatalf("Acquire waited %v for a connection, want about the 100ms wait", waited)
+	}
+}
+
 // Without a wait, AcquireAlso only tries.
 func TestAcquireAlsoWithoutAWaitOnlyTries(t *testing.T) {
 	pool := testPool(t)
@@ -272,5 +365,77 @@ func TestAcquireAlsoWithoutALockFails(t *testing.T) {
 	var lock *Lock
 	if acquired, err := lock.AcquireAlso(context.Background(), pglockOtherTestKey, time.Minute); err == nil || acquired {
 		t.Fatalf("AcquireAlso on a nil Lock = (%v, %v), want an error", acquired, err)
+	}
+}
+
+func TestReleaseAlsoUnlocksOnlyThatKey(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	lock, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	defer func() { _ = lock.Release(ctx) }()
+	if acquired, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err != nil || !acquired {
+		t.Fatalf("AcquireAlso = (%v, %v), want acquired", acquired, err)
+	}
+	if err := lock.ReleaseAlso(ctx, pglockOtherTestKey); err != nil {
+		t.Fatalf("ReleaseAlso: %v", err)
+	}
+	if lockHeld(t, pool, pglockOtherTestKey) {
+		t.Fatal("the released key is still held")
+	}
+	if !lockHeld(t, pool, pglockTestKey) {
+		t.Fatal("ReleaseAlso dropped the lock's own key")
+	}
+	// A second release, or a key never taken, changes nothing.
+	if err := lock.ReleaseAlso(ctx, pglockOtherTestKey); err != nil {
+		t.Fatalf("second ReleaseAlso: %v", err)
+	}
+	// The key can be taken again on the same session, and Release unlocks
+	// everything still held.
+	if acquired, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err != nil || !acquired {
+		t.Fatalf("AcquireAlso again = (%v, %v), want acquired", acquired, err)
+	}
+	if err := lock.Release(ctx); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if lockHeld(t, pool, pglockTestKey) || lockHeld(t, pool, pglockOtherTestKey) {
+		t.Fatal("Release left a key held")
+	}
+}
+
+// A lock whose session dies fails Check and is no longer held, and
+// AcquireAlso on it fails.
+func TestHeldIsFalseAfterTheSessionDies(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	lock, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	defer func() { _ = lock.Release(ctx) }()
+	if !lock.Held() {
+		t.Fatal("Held = false for a fresh lock")
+	}
+	var pid int
+	if err := lock.conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Check(ctx); err == nil {
+		t.Fatal("Check succeeded on a dead session")
+	}
+	if lock.Held() {
+		t.Fatal("Held = true after the session died")
+	}
+	if _, err := lock.AcquireAlso(ctx, pglockOtherTestKey, 0); err == nil {
+		t.Fatal("AcquireAlso succeeded on a dead session")
 	}
 }

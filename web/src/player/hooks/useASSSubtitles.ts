@@ -129,6 +129,10 @@ export function useASSSubtitles(
   // (subtitle sync or a timing reset); changing it swaps the track's script
   // in the running renderer.
   cueRevision = 0,
+  // Bumped when the browser decode engine's transport starts or stops. JASSUB
+  // re-arms requestVideoFrameCallback only from inside its own callback, and
+  // callbacks registered on an engine end with it, so the renderer rebuilds.
+  transportRevision = 0,
 ): { isActive: boolean } {
   const onLoadStateRef = useRef(onLoadState);
   onLoadStateRef.current = onLoadState;
@@ -394,8 +398,8 @@ export function useASSSubtitles(
     };
     // videoRef is a stable ref object. streamOriginSeconds is read from
     // streamOriginRef inside the async function to always get the latest value.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeUrl, activeLanguage, activeFontBundleUrl, isDetached, rebuild]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- videoRef and streamOriginRef are refs
+  }, [activeUrl, activeLanguage, activeFontBundleUrl, isDetached, rebuild, transportRevision]);
 
   // A retime of the track on screen (subtitle sync, a timing reset) loads the
   // corrected script into the running renderer: the current events stay up

@@ -614,6 +614,11 @@ type ItemPerson struct {
 	Kind      PersonKind
 	Character string
 	SortOrder int
+	// LocalPhotoSource is a photo the item's local metadata (an NFO actor
+	// <thumb>) names for the person: a file:// sidecar or an http(s) URL. It
+	// travels through the metadata pipeline only; the person's photo takes it
+	// when the person has no cached photo (see metadata.applyLocalPersonPhotos).
+	LocalPhotoSource string
 }
 
 // AudiobookSeriesMembership captures a book's membership in an audiobook
@@ -731,6 +736,10 @@ type MediaItem struct {
 	// PlayContentID is transient presentation metadata populated by resolvers
 	// whose displayed item differs from the leaf item that should play.
 	PlayContentID string
+	// MachineTranslatedFields is transient presentation metadata set by
+	// localization: the fields ("overview", "tagline") whose localized text
+	// came from AI translation rather than a provider or a person.
+	MachineTranslatedFields []string `json:"-"`
 	// PosterIsEpisodeStill and BackdropIsEpisodeStill are transient provenance
 	// set by the query that picks an episode card's artwork: true when the
 	// path is the episode's own still, false for season or series artwork, nil
@@ -739,6 +748,29 @@ type MediaItem struct {
 	// because some frozen v1 responses serialize MediaItem directly.
 	PosterIsEpisodeStill   *bool `json:"-"`
 	BackdropIsEpisodeStill *bool `json:"-"`
+	// Banner, thumb (landscape), clear art and disc art follow the poster,
+	// backdrop and logo slots. Clear art and disc art are cut-outs and, like
+	// the logo, carry no thumbhash. json:"-" for the same frozen v1 responses.
+	BannerPath         string `json:"-"`
+	BannerSourcePath   string `json:"-"`
+	BannerThumbhash    string `json:"-"`
+	ThumbPath          string `json:"-"`
+	ThumbSourcePath    string `json:"-"`
+	ThumbThumbhash     string `json:"-"`
+	ClearArtPath       string `json:"-"`
+	ClearArtSourcePath string `json:"-"`
+	DiscPath           string `json:"-"`
+	DiscSourcePath     string `json:"-"`
+}
+
+// ItemBackdrop is one backdrop after an item's primary, a media_item_backdrops
+// row. Ordinal 1 is the second backdrop the item shows.
+type ItemBackdrop struct {
+	ID         int64
+	Ordinal    int
+	Path       string
+	SourcePath string
+	Thumbhash  string
 }
 
 // MediaItemAlias is a provider-confirmed searchable title for a media item.
@@ -767,6 +799,8 @@ type Season struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
 }
 
 // Episode represents a row in the episodes table.
@@ -794,6 +828,12 @@ type Episode struct {
 	MetadataSource          string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// MachineTranslatedFields is transient; see MediaItem.
+	MachineTranslatedFields []string `json:"-"`
+	// PendingTranslationLanguage is transient presentation metadata set by
+	// batch localization: the viewer's language this episode's description is
+	// missing, so an episode list can start on-view translation.
+	PendingTranslationLanguage string `json:"-"`
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.
@@ -832,8 +872,8 @@ type EpisodeLibrary struct {
 
 // Localization field provenance values. Precedence when writing:
 // manual beats provider beats ai — a provider refresh may overwrite an AI
-// translation but never a manual edit, and AI never overwrites either
-// (except provider, when the admin explicitly forces a re-translation).
+// translation but never a manual edit, and AI never overwrites either, not
+// even when the admin forces a re-translation.
 const (
 	LocalizationSourceProvider = "provider"
 	LocalizationSourceAI       = "ai"

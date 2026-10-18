@@ -16,7 +16,7 @@ import (
 
 // FavoriteListInput is the listFavorites query.
 type FavoriteListInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
@@ -62,26 +62,25 @@ func registerFavorites(reg *Registry) {
 		"Answer whether the item is one of the acting profile's favorites: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getFavorite)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/favorites/{item_id}", "addFavorite", "favorites",
-		"Add the item to the acting profile's favorites. Automatic retries are unsafe because provider and refresh effects are not change-gated.")),
+		"Add the item to the acting profile's favorites. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.addFavorite)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodDelete, Prefix+"/favorites/{item_id}", "deleteFavorite", "favorites",
-		"Remove the item from the acting profile's favorites; an absent entry succeeds, but automatic retries can repeat provider and refresh effects.")),
+		"Remove the item from the acting profile's favorites. An absent entry succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.deleteFavorite)
 }
 
 // personalListViewer is the identity a personal-list seam acts as. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
-func personalListViewer(ctx context.Context, imageSize string) (handlers.PersonalListViewer, *Problem) {
+func personalListViewer(ctx context.Context, art imagesize.Request) (handlers.PersonalListViewer, *Problem) {
 	userID, profileID, p := viewerIdentity(ctx)
 	if p != nil {
 		return handlers.PersonalListViewer{}, p
 	}
-	size, err := imagesize.Parse(imageSize)
-	if err != nil {
-		size = imagesize.Unset
-	}
-	return handlers.PersonalListViewer{UserID: userID, ProfileID: profileID, Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: size}, nil
+	return handlers.PersonalListViewer{
+		UserID: userID, ProfileID: profileID, Access: handlers.AccessFilterFromContext(ctx, ""),
+		ImageSize: art.Size, ImageWidths: art.Widths,
+	}, nil
 }
 
 // personalListScope binds a personal list's cursor to the profile and the
@@ -126,7 +125,7 @@ func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *Fa
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
 	}
-	viewer, p := personalListViewer(ctx, in.ImageSize)
+	viewer, p := personalListViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}
@@ -177,7 +176,7 @@ func (reg *Registry) getFavorite(ctx context.Context, in *FavoriteItemInput) (*F
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -199,7 +198,7 @@ func (reg *Registry) addFavorite(ctx context.Context, in *FavoriteItemInput) (*s
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -213,7 +212,7 @@ func (reg *Registry) deleteFavorite(ctx context.Context, in *FavoriteItemInput) 
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}

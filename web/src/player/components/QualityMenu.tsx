@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Settings } from "lucide-react";
-import { resolveActiveQualityOptionId } from "../playback-info";
-import type { EffectiveRecipeV3 } from "../protocol-v3";
+import { plainResolutionLabel, resolveActiveQualityOptionId } from "../playback-info";
+import type { EffectiveRecipeV3, SourceDescriptorV3 } from "../protocol-v3";
 import type { QualityOption } from "../types";
+import { PLAYBACK_SPEEDS, formatPlaybackSpeed } from "../utils/playbackSpeed";
+import { PlaybackSpeedTrack } from "./PlaybackSpeedTrack";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 export interface VersionInfo {
@@ -17,24 +19,32 @@ interface QualityMenuProps {
   activeId: string;
   /** The plan's effective recipe, which shows when a bitrate cap reduced the source. */
   deliveredRecipe?: EffectiveRecipeV3;
+  /** The source the plan delivers from, for showing Auto when it plays as-is. */
+  source?: Pick<SourceDescriptorV3, "height" | "bitrate_kbps">;
   isTranscoding: boolean;
   error: string | null;
   onSelect: (id: string) => void;
   versions?: VersionInfo[];
   versionLocked?: boolean;
   onSwitchVersion?: (fileId: number) => void;
+  /** Omitted while something else owns the rate (a Watch Party room). */
+  playbackSpeed?: number;
+  onPlaybackSpeedChange?: (rate: number) => void;
 }
 
 export function QualityMenu({
   options,
   activeId,
   deliveredRecipe,
+  source,
   isTranscoding,
   error,
   onSelect,
   versions,
   versionLocked,
   onSwitchVersion,
+  playbackSpeed = 1,
+  onPlaybackSpeedChange,
 }: QualityMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -76,9 +86,11 @@ export function QualityMenu({
 
     switch (e.key) {
       case "ArrowDown":
+      case "ArrowRight":
         nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
         break;
       case "ArrowUp":
+      case "ArrowLeft":
         nextIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
         break;
       case "Home":
@@ -99,13 +111,26 @@ export function QualityMenu({
 
   const showVersions = !versionLocked && versions && versions.length > 1 && onSwitchVersion;
   const showQuality = options.length > 1;
-  if (!showVersions && !showQuality) return null;
+  const showSpeed = onPlaybackSpeedChange !== undefined;
+  if (!showVersions && !showQuality && !showSpeed) return null;
 
-  const menuLabel = showQuality ? "Quality" : "Version";
+  let menuLabel = "Version";
+  if (showSpeed) menuLabel = "Playback settings";
+  else if (showQuality) menuLabel = "Quality";
 
-  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredRecipe);
+  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredRecipe, source);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
-  let menuItemIndex = 0;
+  let sourceLabel: string | null = null;
+  if (showQuality) {
+    sourceLabel = isTranscoding
+      ? "…"
+      : (activeOption?.label ?? plainResolutionLabel(activeId) ?? "Quality");
+  } else if (showVersions) sourceLabel = "Version";
+  // A speed other than 1x stays on the gear in every layout: inline after the
+  // quality label, or on the gear's corner where the label is hidden.
+  const changedSpeed = showSpeed && playbackSpeed !== 1 ? formatPlaybackSpeed(playbackSpeed) : null;
+  // The speed stops come first in the menu's arrow-key order.
+  let menuItemIndex = showSpeed ? PLAYBACK_SPEEDS.length : 0;
 
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
@@ -113,24 +138,46 @@ export function QualityMenu({
         type="button"
         className="player-quality-trigger player-utility-btn sm:w-auto sm:gap-1.5 sm:px-3"
         onClick={() => setOpen((v) => !v)}
-        aria-label={menuLabel}
+        aria-label={changedSpeed ? `${menuLabel}, ${changedSpeed}` : menuLabel}
         aria-expanded={open}
         aria-haspopup="menu"
       >
         <Settings className="h-[18px] w-[18px]" />
-        <span className="hidden text-[11px] font-medium tracking-wide sm:inline">
-          {!showQuality ? "Version" : isTranscoding ? "…" : (activeOption?.label ?? "Quality")}
-        </span>
+        {sourceLabel && (
+          <span className="player-quality-label hidden text-[11px] font-medium tracking-wide sm:inline">
+            {sourceLabel}
+          </span>
+        )}
+        {changedSpeed && (
+          <span
+            aria-hidden="true"
+            className="player-speed-badge pointer-events-none absolute top-0.5 left-6 rounded-full bg-white px-1 text-[9px] leading-[13px] font-semibold text-black tabular-nums shadow-[0_0_0_2px_rgba(0,0,0,0.65)] sm:static"
+          >
+            {changedSpeed}
+          </span>
+        )}
       </button>
 
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 min-w-[200px] rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
+          className="absolute right-0 bottom-full z-30 mb-2 max-h-[calc(100dvh-8rem)] min-w-[224px] overflow-y-auto rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           {error && <div className="px-3 py-1 text-xs text-red-400">{error}</div>}
+          {showSpeed && (
+            <>
+              <PlaybackSpeedTrack
+                value={playbackSpeed}
+                onChange={onPlaybackSpeedChange}
+                itemRef={(stop) => (el) => {
+                  menuItemsRef.current[stop] = el;
+                }}
+              />
+              {(showVersions || showQuality) && <div className="my-1 border-t border-white/10" />}
+            </>
+          )}
           {versionLocked && showQuality && (
             <p className="max-w-64 px-3 py-2 text-xs text-white/60">
               Watch Party keeps everyone on the same version. You can adjust your streaming quality

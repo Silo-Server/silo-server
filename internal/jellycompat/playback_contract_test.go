@@ -1,6 +1,8 @@
 package jellycompat
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
@@ -34,6 +36,30 @@ func TestBitrateProbeHonorsSize(t *testing.T) {
 				t.Fatalf("status=%d bytes=%d", rr.Code, rr.Body.Len())
 			}
 		})
+	}
+}
+
+// A compressing proxy must not be able to shrink the probe, or clients measure
+// an inflated bandwidth.
+func TestBitrateProbeIsIncompressible(t *testing.T) {
+	probe := func() []byte {
+		rr := httptest.NewRecorder()
+		(&PlaybackHandler{}).HandleBitrateTest(rr, httptest.NewRequest("GET", "/Playback/BitrateTest?size=200000", nil))
+		if rr.Code != 200 || rr.Body.Len() != 200000 {
+			t.Fatalf("status=%d bytes=%d", rr.Code, rr.Body.Len())
+		}
+		return rr.Body.Bytes()
+	}
+	first := probe()
+	var compressed bytes.Buffer
+	zw := gzip.NewWriter(&compressed)
+	_, _ = zw.Write(first)
+	_ = zw.Close()
+	if compressed.Len() < len(first) {
+		t.Fatalf("payload compressed from %d to %d bytes", len(first), compressed.Len())
+	}
+	if bytes.Equal(first, probe()) {
+		t.Fatal("two probes returned identical payloads")
 	}
 }
 

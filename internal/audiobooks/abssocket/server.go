@@ -43,9 +43,11 @@ func (noopLogger) Warn(string, ...any)  {}
 // connections without a server restart.
 type SecretFn func() []byte
 
-// TokenValidator checks whether a JTI is still valid (non-revoked). It is
-// optional — if nil, only JWT signature and expiry gate connections.
-type TokenValidator func(ctx context.Context, jti string) (revoked bool, err error)
+// TokenValidator checks whether a parsed access token is still valid: its
+// JTI not revoked and its profile still accepting it. Revoked or an error
+// refuses the connection. It is optional — if nil, only JWT signature and
+// expiry gate connections.
+type TokenValidator func(ctx context.Context, claims *abs.Claims) (revoked bool, err error)
 
 // Server is the Socket.io realtime server. Construct one per process and
 // reuse across reconfigures.
@@ -135,7 +137,7 @@ func (s *Server) onConnection(client *socket.Socket) {
 			return
 		}
 		if s.tokenValidator != nil {
-			revoked, err := s.tokenValidator(context.Background(), claims.JTI)
+			revoked, err := s.tokenValidator(context.Background(), claims)
 			if err != nil || revoked {
 				s.logger.Warn("abssocket: token revoked", "sid", client.Id(), "jti", claims.JTI)
 				_ = client.Emit("auth_failed", map[string]any{"message": "token revoked"})

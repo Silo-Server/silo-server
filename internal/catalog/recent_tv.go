@@ -91,9 +91,10 @@ func recentTVFilterTypeScope(filterType string) (explicitSeries bool, tvEligible
 // ResolveRecentTVLibraryIDs decides whether a recently-added section is
 // exclusively TV-targeted and returns the effective visible TV libraries.
 // filterType is the section's configured filter_type: an explicit "series"
-// scope may include mixed libraries, an empty scope requires every requested
-// library to be a dedicated series library, and any other type is not TV
-// scoped at all because event grouping cannot honor it.
+// scope may include mixed libraries and TV libraries typed with an alias such
+// as "tv", an empty scope requires every requested library to be a dedicated
+// series library, and any other type is not TV scoped at all because event
+// grouping cannot honor it.
 func ResolveRecentTVLibraryIDs(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -156,7 +157,7 @@ func ResolveRecentTVLibraryIDs(
 
 	ids := make([]int, 0, len(byID))
 	for id, libraryType := range byID {
-		if libraryType == recentTVTypeSeries || (explicitSeries && libraryType == "mixed") {
+		if libraryType == recentTVTypeSeries || (explicitSeries && (librarykind.IsTV(libraryType) || librarykind.IsMixed(libraryType))) {
 			ids = append(ids, id)
 		}
 	}

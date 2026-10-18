@@ -22,6 +22,7 @@ import (
 	"github.com/h2non/bimg"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -318,8 +319,62 @@ func TestCacheRefusesLocalNetworkSourceWithoutPrivateAccess(t *testing.T) {
 		ContentID:   "550",
 		ImageType:   metadata.ImagePoster,
 	})
-	if err == nil || !strings.Contains(err.Error(), "private image host") {
-		t.Fatalf("Cache error = %v, want private image host refusal", err)
+	if !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("Cache error = %v, want netguard.ErrPrivateDestination", err)
+	}
+	if got := s3.keys(); len(got) != 0 {
+		t.Fatalf("uploaded keys = %v, want none", got)
+	}
+}
+
+// Provider artwork URLs are untrusted, so the cache refuses every address
+// netguard does not class as Public: CGNAT (Tailscale), cloud metadata, and
+// NAT64 forms of either. The context is already canceled, so an address the
+// check misses fails with context.Canceled instead of being dialed.
+func TestCacheRefusesNonPublicSourcesWithoutPrivateAccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, host := range []string{
+		"100.64.1.1",
+		"100.101.102.103",
+		"100.100.100.200",
+		"198.18.0.1",
+		"0.1.2.3",
+		"[64:ff9b::a9fe:a9fe]",
+		"[64:ff9b::a00:5]",
+		"[::ffff:100.64.1.1]",
+	} {
+		t.Run(host, func(t *testing.T) {
+			s3 := &mockS3{bucket: "media"}
+			_, err := New(s3).Cache(ctx, CacheRequest{
+				SourceURL:   "http://" + host + "/poster.jpg",
+				ProviderID:  "tmdb",
+				ContentType: "movies",
+				ContentID:   "550",
+				ImageType:   metadata.ImagePoster,
+			})
+			if !errors.Is(err, netguard.ErrPrivateDestination) && !errors.Is(err, netguard.ErrBlockedDestination) {
+				t.Fatalf("Cache error = %v, want a netguard refusal", err)
+			}
+		})
+	}
+}
+
+// A host name passes the early literal-IP check, so the transport has to
+// refuse the private address it resolves to when it dials.
+func TestCacheRefusesHostResolvingToLocalNetworkWithoutPrivateAccess(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	s3 := &mockS3{bucket: "media"}
+
+	_, err := New(s3).Cache(context.Background(), CacheRequest{
+		SourceURL:   strings.Replace(srv.URL, "127.0.0.1", "localhost", 1) + "/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	})
+	if !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("Cache error = %v, want netguard.ErrPrivateDestination", err)
 	}
 	if got := s3.keys(); len(got) != 0 {
 		t.Fatalf("uploaded keys = %v, want none", got)
@@ -408,7 +463,7 @@ func TestCacheUploadsOnlyMissingVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prime immutable variants: %v", err)
 	}
-	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"])
+	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w1000"], first.VariantPaths["w500"])
 	s3.resetCalls()
 	result, err := c.Cache(context.Background(), req)
 	if err != nil {
@@ -446,11 +501,11 @@ func TestCache_Backdrop(t *testing.T) {
 	}
 
 	keys := s3.keys()
-	// Expect 4 variants: original, w1920, w1280, w300
-	if len(keys) != 4 {
-		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
+	// Expect 5 variants: original, w2560, w1920, w1280, w300
+	if len(keys) != 5 {
+		t.Errorf("expected 5 uploaded variants, got %d: %v", len(keys), keys)
 	}
-	for _, variant := range []string{"original", "w1920", "w1280", "w300"} {
+	for _, variant := range []string{"original", "w2560", "w1920", "w1280", "w300"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
@@ -501,7 +556,7 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 }
 
 func TestCache_CapsLargeOriginalVariant(t *testing.T) {
-	pngData := makeTestPNG(t, 2600, 900)
+	pngData := makeTestPNG(t, 4200, 900)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(pngData)
@@ -529,8 +584,8 @@ func TestCache_CapsLargeOriginalVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading original.webp size: %v", err)
 	}
-	if size.Width > 1920 {
-		t.Fatalf("original.webp width = %d, want <= 1920", size.Width)
+	if size.Width != imageutil.MaxCachedOriginalDimension {
+		t.Fatalf("original.webp width = %d, want %d", size.Width, imageutil.MaxCachedOriginalDimension)
 	}
 	if len(original) >= 10*1024*1024 {
 		t.Fatalf("original.webp size = %d bytes, want < 10 MiB", len(original))
@@ -796,7 +851,7 @@ func TestCache_ResolvesPluginURL(t *testing.T) {
 	if len(keys) != 4 {
 		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
 	}
-	for _, variant := range []string{"original", "w780", "w500", "w300"} {
+	for _, variant := range []string{"original", "w1000", "w500", "w300"} {
 		if want := result.VariantPaths[variant]; !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}
@@ -937,4 +992,14 @@ func newWithHTTPClient(s3 ObjectPutter, client *http.Client) *Cacher {
 		client = http.DefaultClient
 	}
 	return &Cacher{s3: s3, httpClient: client}
+}
+
+// The cache key's type segment must name the same type the variant ladder and
+// the metadata pipeline use, or cached paths stop matching their ladder.
+func TestImageTypeNameMatchesMetadataNames(t *testing.T) {
+	for imageType := metadata.ImagePoster; imageType <= metadata.ImageDisc; imageType++ {
+		if got, want := imageTypeName(imageType), metadata.ImageTypeToString(imageType); got != want {
+			t.Errorf("imageTypeName(%d) = %q, want %q", imageType, got, want)
+		}
+	}
 }

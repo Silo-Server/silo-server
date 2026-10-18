@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -79,6 +80,9 @@ func (f releaseFixture) eventTargets(t *testing.T) []string {
 		}
 		ids = append(ids, id)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("list release events: %v", err)
+	}
 	slices.Sort(ids)
 	return ids
 }
@@ -111,6 +115,67 @@ func TestEpisodeReleasesSkipEpisodesAddedLongAgo(t *testing.T) {
 	slices.Sort(want)
 	if got := f.eventTargets(t); !slices.Equal(got, want) {
 		t.Fatalf("release events for %v, want %v", got, want)
+	}
+	if got := f.releasedEpisodes(t); !slices.Equal(got, want) {
+		t.Fatalf("released_at set for %v, want %v", got, want)
+	}
+}
+
+func (f releaseFixture) releasedEpisodes(t *testing.T) []string {
+	t.Helper()
+	rows, err := f.pool.Query(context.Background(), `
+		SELECT episode_id FROM episode_availability
+		WHERE library_id = $1 AND released_at = available_at
+		ORDER BY episode_id`, f.libraryID)
+	if err != nil {
+		t.Fatalf("list released availability: %v", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("scan released availability: %v", err)
+	}
+	return ids
+}
+
+// TestEpisodeAvailabilityRecordsReleaseTime checks the released_at decision
+// Next Up orders by: set for a new episode in a seeded library even while
+// release events are off, and left empty for a late match and for any episode
+// recorded before the library is seeded.
+func TestEpisodeAvailabilityRecordsReleaseTime(t *testing.T) {
+	f := newReleaseFixture(t, "series")
+	ctx := context.Background()
+	series := f.prefix + "-series"
+	seeding, lateMatch, justAdded := f.prefix+"-e1", f.prefix+"-e2", f.prefix+"-e3"
+	f.exec(t, `INSERT INTO media_items (content_id, type, title, genres) VALUES ($1, 'series', 'Series', '{}')`, series)
+	f.exec(t, `INSERT INTO seasons (content_id, series_id, season_number) VALUES ($1 || '-s1', $1, 1)`, series)
+	f.exec(t, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title)
+		VALUES ($1, $4, $4 || '-s1', 1, 1, 'E1'), ($2, $4, $4 || '-s1', 1, 2, 'E2'), ($3, $4, $4 || '-s1', 1, 3, 'E3')`,
+		seeding, lateMatch, justAdded, series)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM notification_library_seed_state WHERE library_id = $1`, f.libraryID)
+	})
+
+	// The library's first full scan records its back catalog silently, even
+	// an episode whose file is new.
+	f.exec(t, `INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at) VALUES ($1, $2, now())`,
+		seeding, f.libraryID)
+	if _, _, err := f.repo.RecordAvailabilityForLibrary(ctx, f.libraryID, false); err != nil {
+		t.Fatalf("seeding scan: %v", err)
+	}
+	if err := f.repo.MarkLibrarySeeded(ctx, f.libraryID); err != nil {
+		t.Fatalf("MarkLibrarySeeded: %v", err)
+	}
+
+	// Later scans, with release events off: an old file matched late and a
+	// new episode.
+	f.exec(t, `INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
+		VALUES ($1, $3, now() - interval '30 days'), ($2, $3, now())`, lateMatch, justAdded, f.libraryID)
+	if _, events, err := f.repo.RecordAvailabilityForLibrary(ctx, f.libraryID, false); err != nil || events != 0 {
+		t.Fatalf("RecordAvailabilityForLibrary = %d events, %v; want 0, nil", events, err)
+	}
+
+	if got, want := f.releasedEpisodes(t), []string{justAdded}; !slices.Equal(got, want) {
+		t.Fatalf("released_at set for %v, want %v", got, want)
 	}
 }
 

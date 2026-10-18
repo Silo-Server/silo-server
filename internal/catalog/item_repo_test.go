@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -527,11 +528,11 @@ func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
 
 	// <<%, not %: full-string similarity is diluted by long titles ("avegners"
 	// must reach "Avengers: Endgame"); the same gin_trgm_ops index serves both.
-	if !strings.Contains(dataSQL, "public.normalize_search_text($1) <<% mi.title_normalized") {
+	if !strings.Contains(dataSQL, "$2 <<% mi.title_normalized") {
 		t.Fatalf("expected strict-word-similarity arm against title_normalized; got:\n%s", dataSQL)
 	}
-	if !strings.Contains(dataSQL, "0.65 * similarity(public.normalize_search_text($1), mi.title_normalized)") ||
-		!strings.Contains(dataSQL, "+ 0.35 * strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)") ||
+	if !strings.Contains(dataSQL, "0.65 * similarity($2, mi.title_normalized)") ||
+		!strings.Contains(dataSQL, "+ 0.35 * strict_word_similarity($2, mi.title_normalized)") ||
 		!strings.Contains(dataSQL, "AS fuzzy_rank") {
 		t.Fatalf("expected whole-title-weighted fuzzy ranking on title_normalized; got:\n%s", dataSQL)
 	}
@@ -566,12 +567,13 @@ func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
 	if !strings.Contains(countSQL, "SELECT COUNT(*) FROM scored") {
 		t.Fatalf("expected count sibling over the scored CTE; got:\n%s", countSQL)
 	}
-	// Arg order: $1 searchText, $2 type, $3 exclusion array, $4 limit, $5 offset.
-	if len(args) != 5 {
-		t.Fatalf("expected 5 args, got %d: %#v", len(args), args)
+	// Arg order: $1 searchText, $2 candidate text, $3 type, $4 exclusion
+	// array, $5 limit, $6 offset.
+	if len(args) != 6 {
+		t.Fatalf("expected 6 args, got %d: %#v", len(args), args)
 	}
-	if args[0] != "avegners" {
-		t.Fatalf("expected $1=searchText; got %#v", args[0])
+	if args[0] != "avegners" || args[1] != "avegners" {
+		t.Fatalf("expected $1=searchText and $2=candidate text; got %#v", args[:2])
 	}
 	if args[len(args)-2] != 20 || args[len(args)-1] != 0 {
 		t.Fatalf("expected trailing limit/offset args; got %#v", args[len(args)-2:])
@@ -605,11 +607,11 @@ func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
 	// Whole-title similarity, not word similarity: the augment floor must not
 	// admit embedded prefix words ("coral" scores 0.5 word-similarity to
 	// "coraline").
-	if !strings.Contains(floorSQL, "cs.fuzzy_full_rank >= $2") {
-		t.Fatalf("expected explicit whole-title similarity floor predicate as $2; got:\n%s", floorSQL)
+	if !strings.Contains(floorSQL, "cs.fuzzy_full_rank >= $3") {
+		t.Fatalf("expected explicit whole-title similarity floor predicate as $3; got:\n%s", floorSQL)
 	}
-	if len(floorArgs) < 2 || floorArgs[1] != fuzzyAugmentSimilarityFloor {
-		t.Fatalf("expected $2 = fuzzyAugmentSimilarityFloor; got args %#v", floorArgs)
+	if len(floorArgs) < 3 || floorArgs[2] != fuzzyAugmentSimilarityFloor {
+		t.Fatalf("expected $3 = fuzzyAugmentSimilarityFloor; got args %#v", floorArgs)
 	}
 	// Trailing limit/offset must still close the arg list for the count sibling.
 	if floorArgs[len(floorArgs)-2] != 20 || floorArgs[len(floorArgs)-1] != 0 {
@@ -617,7 +619,7 @@ func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
 	}
 
 	baseSQL, _, baseArgs := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, 0)
-	if strings.Contains(baseSQL, "cs.fuzzy_full_rank >= $2") {
+	if strings.Contains(baseSQL, "cs.fuzzy_full_rank >= $") {
 		t.Fatalf("zero floor must not add a similarity predicate; got:\n%s", baseSQL)
 	}
 	if len(baseArgs) != len(floorArgs)-1 {
@@ -883,22 +885,234 @@ func TestRerankFuzzyItemsUsesTokenEditCoverage(t *testing.T) {
 		{ContentID: "game", Title: "Game of Thrones"},
 		{ContentID: "last-watch", Title: "Game of Thrones: The Last Watch"},
 	}
-	if err := rerankFuzzyItems(context.Background(), "Gane of Throns", items, nil); err != nil { //nolint:misspell
+	got, err := rerankFuzzyItems(context.Background(), "Gane of Throns", items, nil, false)
+	if err != nil {
 		t.Fatalf("rerank: %v", err)
 	}
-	if items[0].ContentID != "game" {
-		t.Fatalf("first result = %q (%s), want Game of Thrones", items[0].Title, items[0].ContentID)
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"game", "last-watch"}) {
+		t.Fatalf("results = %v, want both Game of Thrones titles and no title missing a word", ids)
 	}
 
 	items = []*models.MediaItem{
 		{ContentID: "miss", Title: "Miss Potter"},
 		{ContentID: "harry", Title: "Harry Potter and the Order of the Phoenix"},
 	}
-	if err := rerankFuzzyItems(context.Background(), "Hary Poter", items, nil); err != nil { //nolint:misspell
+	got, err = rerankFuzzyItems(context.Background(), "Hary Poter", items, nil, false)
+	if err != nil {
 		t.Fatalf("rerank: %v", err)
 	}
-	if items[0].ContentID != "harry" {
-		t.Fatalf("first result = %q (%s), want Harry Potter title", items[0].Title, items[0].ContentID)
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"harry"}) {
+		t.Fatalf("results = %v, want only the Harry Potter title", ids)
+	}
+}
+
+func fuzzyItemIDs(items []*models.MediaItem) []string {
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ContentID
+	}
+	return ids
+}
+
+func TestRerankFuzzyItemsRequiresEveryWord(t *testing.T) {
+	// The typo of "The Good Place" is the only title matching all three words.
+	// Each other title shares "the" and "place" and was listed after it.
+	items := []*models.MediaItem{
+		{ContentID: "hiding", Title: "The Hiding Place"},
+		{ContentID: "plant", Title: "The God Plant"},
+		{ContentID: "good", Title: "The Good Place"},
+		{ContentID: "palace", Title: "The Palace"},
+		{ContentID: "sun", Title: "A Place in the Sun"},
+	}
+	got, err := rerankFuzzyItems(context.Background(), "the god place", items, nil, false)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"good"}) {
+		t.Fatalf("results = %v, want only The Good Place", ids)
+	}
+
+	// With no title matching every word and no exact hit, the titles missing
+	// the fewest words remain.
+	got, err = rerankFuzzyItems(context.Background(), "the god place", items[:2], nil, false)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if ids := fuzzyItemIDs(got); !slices.Equal(slices.Sorted(slices.Values(ids)), []string{"hiding", "plant"}) {
+		t.Fatalf("relaxed results = %v, want the two titles missing one word", ids)
+	}
+
+	// Exact search hits already answer the query; a partial typo match adds
+	// nothing.
+	got, err = rerankFuzzyItems(context.Background(), "the god place", items[:2], nil, true)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("results beside exact hits = %v, want none", fuzzyItemIDs(got))
+	}
+
+	// A title matching only stopwords never qualifies.
+	got, err = rerankFuzzyItems(context.Background(), "the god place", []*models.MediaItem{{ContentID: "other", Title: "The Other"}}, nil, false)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("stopword-only results = %v, want none", fuzzyItemIDs(got))
+	}
+}
+
+func TestRerankFuzzyItemsPrefersSingleWordMatches(t *testing.T) {
+	// "ofice" is exactly "of" + "ice" joined, but one edit from "office".
+	items := []*models.MediaItem{
+		{ContentID: "ice", Title: "The Clink of Ice"},
+		{ContentID: "office", Title: "The Office"},
+	}
+	got, err := rerankFuzzyItems(context.Background(), "the ofice", items, nil, false)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"office", "ice"}) {
+		t.Fatalf("results = %v, want The Office first", ids)
+	}
+}
+
+func TestScoreFuzzyTitleVariantRunTogetherWords(t *testing.T) {
+	for _, tc := range []struct {
+		query, title string
+		missing      int
+	}{
+		{"lordoftherings", "The Lord of the Rings: The Two Towers", 0},
+		{"gameofthrones", "Game of Thrones", 0},
+		// The run must start and end on word boundaries.
+		{"heat", "Theater Camp", 1},
+		{"ordofthe", "The Lord of the Rings", 1},
+	} {
+		tokens, _ := boundedFuzzyTokens(tc.query, fuzzyRerankMaxQueryTokens)
+		if got := scoreFuzzyTitleVariant(tc.query, tokens, tc.title).missingWords; got != tc.missing {
+			t.Errorf("%q vs %q missing %d words, want %d", tc.query, tc.title, got, tc.missing)
+		}
+	}
+}
+
+func TestFuzzyCandidateTextDropsStopwords(t *testing.T) {
+	for query, want := range map[string]string{
+		"The Godfathr":       "godfathr",
+		"Pirates of the Car": "pirates car",
+		"the in":             "the in",
+		"from up":            "from up",
+		"Spider-Man":         "spider man",
+	} {
+		if got := fuzzyCandidateText(query); got != want {
+			t.Errorf("fuzzyCandidateText(%q) = %q, want %q", query, got, want)
+		}
+	}
+}
+
+func TestScoreFuzzyTitleVariantStopwords(t *testing.T) {
+	for _, tc := range []struct {
+		query, title string
+		missing      int
+	}{
+		// A stopword need not appear in the title.
+		{"a quiet place", "Quiet Place", 0},
+		{"the good place", "Good Place", 0},
+		// A stopword takes no typo, so "she" does not stand in for "the".
+		{"the good place", "She Good Place", 0},
+		// A query of only stopwords requires each of them.
+		{"the in", "In", 1},
+		{"ed wood", "Wood", 1},
+	} {
+		tokens, _ := boundedFuzzyTokens(tc.query, fuzzyRerankMaxQueryTokens)
+		score := scoreFuzzyTitleVariant(tc.query, tokens, tc.title)
+		if score.missingWords != tc.missing {
+			t.Errorf("%q vs %q missing %d words, want %d", tc.query, tc.title, score.missingWords, tc.missing)
+		}
+	}
+	tokens, _ := boundedFuzzyTokens("the good place", fuzzyRerankMaxQueryTokens)
+	if got := scoreFuzzyTitleVariant("the good place", tokens, "She Good Place").matchedTokens; got != 2 {
+		t.Errorf("\"the\" matched \"she\": matched %d words, want 2", got)
+	}
+}
+
+func TestRerankFuzzyItemsIgnoresWordSpacing(t *testing.T) {
+	// "livestream" matches neither "live" nor "stream" on its own, so titles
+	// sharing more separate words with the query used to outrank the film.
+	items := []*models.MediaItem{
+		{ContentID: "volbeat", Title: "Volbeat - Live From Beyond Hell/Above Heaven"},
+		{ContentID: "heaven", Title: "Heaven & Hell: Live From Radio City Music Hall"},
+		{ContentID: "birds", Title: "Angry Birds: Live Stream"},
+		{ContentID: "liza", Title: "Liza: Warden from Hell"},
+		{ContentID: "film", Title: "Livestream from Hell"},
+	}
+	got, err := rerankFuzzyItems(context.Background(), "Live Stream From Hell", items, nil, false)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"film"}) {
+		t.Fatalf("results = %v, want only Livestream from Hell", ids)
+	}
+
+	// A typo keeps the title from matching exactly, so the joined words
+	// "live stream" must match "livestream" to keep it.
+	items = []*models.MediaItem{
+		{ContentID: "volbeat", Title: "Volbeat - Live From Beyond Hell/Above Heaven"},
+		{ContentID: "heaven", Title: "Heaven & Hell: Live From Radio City Music Hall"},
+		{ContentID: "film", Title: "Livestream from Hell"},
+	}
+	got, err = rerankFuzzyItems(context.Background(), "Live Stream From Hel", items, nil, false)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"film"}) {
+		t.Fatalf("results = %v, want only Livestream from Hell", ids)
+	}
+
+	items = []*models.MediaItem{
+		{ContentID: "compound", Title: "Livestream from Hell"},
+		{ContentID: "spaced", Title: "Live Stream from Hell"},
+	}
+	got, err = rerankFuzzyItems(context.Background(), "Live Stream From Hell", items, nil, false)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"spaced", "compound"}) {
+		t.Fatalf("results = %v, want the title spelled as typed first", ids)
+	}
+
+	items = []*models.MediaItem{
+		{ContentID: "superman", Title: "Superman"},
+		{ContentID: "spider", Title: "Spider"},
+		{ContentID: "spiderman", Title: "Spider-Man: Homecoming"},
+	}
+	got, err = rerankFuzzyItems(context.Background(), "spiderman homecoming", items, nil, false)
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"spiderman"}) {
+		t.Fatalf("results = %v, want only Spider-Man: Homecoming", ids)
+	}
+}
+
+func TestScoreFuzzyTitleVariantJoinsWordsWithinTheirTypoAllowance(t *testing.T) {
+	for _, tc := range []struct {
+		query, title string
+		want         int
+	}{
+		{"live stream from hel", "Livestream from Hell", 4}, //nolint:misspell
+		{"spiderman", "Spider-Man", 1},
+		// Joining must not drop a short word that has no typo allowance.
+		{"ed wood", "Wood", 1},
+		{"a spider", "Spider", 1},
+		{"live streem", "Livestream", 2},
+		// Adjacent numbers stay separate words: "1 2" is not "12".
+		{"1 2 monkeys", "Twelve Monkeys", 1},
+		{"12 monkeys", "One Two Monkeys", 1},
+	} {
+		tokens, _ := boundedFuzzyTokens(tc.query, fuzzyRerankMaxQueryTokens)
+		if got := scoreFuzzyTitleVariant(tc.query, tokens, tc.title).matchedTokens; got != tc.want {
+			t.Errorf("%q vs %q matched %d words, want %d", tc.query, tc.title, got, tc.want)
+		}
 	}
 }
 
@@ -910,11 +1124,12 @@ func TestRerankFuzzyItemsUsesBoundedAliases(t *testing.T) {
 	aliases := map[string][]string{
 		"localized": {"10 tokyo warriors"},
 	}
-	if err := rerankFuzzyItems(context.Background(), "Tokyo Warriros", items, aliases); err != nil { //nolint:misspell
+	got, err := rerankFuzzyItems(context.Background(), "Tokyo Warriros", items, aliases, false) //nolint:misspell // the misspelled query is the input under test
+	if err != nil {
 		t.Fatalf("rerank: %v", err)
 	}
-	if items[0].ContentID != "localized" {
-		t.Fatalf("first result = %q (%s), want alias-backed localized item", items[0].Title, items[0].ContentID)
+	if ids := fuzzyItemIDs(got); !slices.Equal(ids, []string{"localized"}) {
+		t.Fatalf("results = %v, want only the alias-backed localized item", ids)
 	}
 }
 
@@ -922,7 +1137,7 @@ func TestRerankFuzzyItemsHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	items := []*models.MediaItem{{ContentID: "one", Title: "One"}, {ContentID: "two", Title: "Two"}}
-	if err := rerankFuzzyItems(ctx, "three", items, nil); !errors.Is(err, context.Canceled) {
+	if _, err := rerankFuzzyItems(ctx, "three", items, nil, false); !errors.Is(err, context.Canceled) {
 		t.Fatalf("rerank error = %v, want context.Canceled", err)
 	}
 }
@@ -962,7 +1177,7 @@ func BenchmarkRerankFuzzyItemsCappedCandidateSet(b *testing.B) {
 	for i := range items {
 		contentID := fmt.Sprintf("item-%d", i)
 		items[i] = &models.MediaItem{ContentID: contentID, Title: fmt.Sprintf("Related Fantasy Title %d", i)}
-		for alias := 0; alias < fuzzyRerankMaxAliasesPerItem; alias++ {
+		for alias := 0; alias < 2*fuzzyRerankAliasesPerOrder; alias++ {
 			aliases[contentID] = append(aliases[contentID], fmt.Sprintf("Alternate Fantasy Title %d %d", i, alias))
 		}
 	}
@@ -972,7 +1187,7 @@ func BenchmarkRerankFuzzyItemsCappedCandidateSet(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		working := append([]*models.MediaItem(nil), items...)
-		if err := rerankFuzzyItems(context.Background(), "Gane of Throns", working, aliases); err != nil { //nolint:misspell
+		if _, err := rerankFuzzyItems(context.Background(), "Gane of Throns", working, aliases, false); err != nil {
 			b.Fatal(err)
 		}
 	}

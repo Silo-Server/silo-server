@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -47,7 +48,7 @@ type CatalogBrowseInput struct {
 	Sort          string   `query:"sort" doc:"sort=field or -field; one term. Fields: title, year, release_date, added_at, rating, runtime, random, … (see the filters document); absent applies the source's saved or default order" example:"-release_date"`
 	Group         string   `query:"group" enum:"work" doc:"group=work collapses editions of one book into one card"`
 	SkipTotal     bool     `query:"skip_total" doc:"true skips the exact count; the total is then an estimate"`
-	ImageSize     string   `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign"`
+	ArtworkQuery
 	LimitParam
 	Cursor      string `query:"cursor" doc:"Opaque cursor from page.next_cursor"`
 	Groups      string `query:"groups" maxLength:"32768" doc:"JSON array of structured rule groups; use POST catalog/query for larger queries"`
@@ -85,7 +86,7 @@ type AudiobookGroupsInput struct {
 	Sort      string `query:"sort" enum:"name,count,duration" doc:"Default name"`
 	Q         string `query:"q" doc:"Case-insensitive prefix on the group name"`
 	SkipTotal bool   `query:"skip_total" doc:"true skips the exact count; the total is then an estimate"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor"`
 }
@@ -93,8 +94,8 @@ type AudiobookGroupsInput struct {
 // CatalogQueryInput is the queryCatalogItems request: the JSON form of a
 // filtered, sorted page.
 type CatalogQueryInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
-	Body      CatalogQuery
+	ArtworkQuery
+	Body CatalogQuery
 }
 
 // CatalogQuery is the queryCatalogItems body.
@@ -135,10 +136,10 @@ type CatalogQueryRule struct {
 
 // CatalogItemInput names one item.
 type CatalogItemInput struct {
-	ID        string `path:"id" doc:"Content id" example:"movie:heat-1995"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
-	LibraryID ID     `query:"library_id" doc:"The library the item is being viewed in; picks its presentation when the item is in several"`
-	FileID    ID     `query:"file_id" doc:"The version the viewer selected; affects the effective playback answer"`
+	ID string `path:"id" doc:"Content id" example:"movie:heat-1995"`
+	ArtworkQuery
+	LibraryID ID `query:"library_id" doc:"The library the item is being viewed in; picks its presentation when the item is in several"`
+	FileID    ID `query:"file_id" doc:"The version the viewer selected; affects the effective playback answer"`
 }
 
 // CatalogItemDeviceInput names one item whose answer carries the effective
@@ -151,9 +152,9 @@ type CatalogItemDeviceInput struct {
 
 // CatalogSeriesInput names one series.
 type CatalogSeriesInput struct {
-	ID        string `path:"id" doc:"Series content id" example:"series:severance"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
-	LibraryID ID     `query:"library_id" doc:"The library the series is being viewed in"`
+	ID string `path:"id" doc:"Series content id" example:"series:severance"`
+	ArtworkQuery
+	LibraryID ID `query:"library_id" doc:"The library the series is being viewed in"`
 }
 
 // CatalogSeasonsInput selects artwork for a season list.
@@ -370,10 +371,16 @@ type CatalogItemDetail struct {
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
 	Tagline                         string                               `json:"tagline,omitempty"`
-	PendingTranslationLanguage      string                               `json:"pending_translation_language,omitempty" doc:"A translation of the overview is queued for this language"`
 	ImdbID                          string                               `json:"imdb_id,omitempty"`
 	TmdbID                          string                               `json:"tmdb_id,omitempty"`
 	TvdbID                          string                               `json:"tvdb_id,omitempty"`
+	BannerURL                       string                               `json:"banner_url,omitempty" doc:"Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork"`
+	BannerThumbhash                 string                               `json:"banner_thumbhash,omitempty"`
+	ThumbURL                        string                               `json:"thumb_url,omitempty" doc:"Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only"`
+	ThumbThumbhash                  string                               `json:"thumb_thumbhash,omitempty"`
+	ClearArtURL                     string                               `json:"clearart_url,omitempty" doc:"Presigned, short-lived. Transparent cut-out art. Movies and series only"`
+	DiscURL                         string                               `json:"disc_url,omitempty" doc:"Presigned, short-lived. Transparent disc art. Movies only"`
+	BackdropURLs                    []string                             `json:"backdrop_urls,omitempty" doc:"Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none"`
 	Cast                            []catalogpkg.CastCredit              `json:"cast" doc:"Empty, never null"`
 	Crew                            []catalogpkg.CrewCredit              `json:"crew" doc:"Empty, never null"`
 	Countries                       []string                             `json:"countries,omitempty"`
@@ -437,6 +444,11 @@ func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []C
 			item.Sources[source.Source] = source.Score
 		}
 	}
+	return builtRatingsOf(item, sel)
+}
+
+// builtRatingsOf renders item's ratings, keeping only the sources sel shows.
+func builtRatingsOf(item ratingsources.Item, sel ratingsources.Selection) []CatalogRating {
 	built := ratingsources.Build(item, sel)
 	out := make([]CatalogRating, 0, len(built))
 	for _, r := range built {
@@ -515,22 +527,25 @@ type EpisodeFile struct {
 
 // Episode is one episode row of a season listing.
 type Episode struct {
-	ContentID           string              `json:"content_id" example:"episode:severance-s01e01"`
-	SeasonNumber        int                 `json:"season_number"`
-	EpisodeNumber       int                 `json:"episode_number"`
-	Title               string              `json:"title"`
-	Overview            string              `json:"overview,omitempty"`
-	AirDate             *string             `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	Runtime             int                 `json:"runtime" doc:"Minutes"`
-	ImdbID              string              `json:"imdb_id,omitempty"`
-	TmdbID              string              `json:"tmdb_id,omitempty"`
-	TvdbID              string              `json:"tvdb_id,omitempty"`
-	StillIsEpisodeStill *bool               `json:"still_is_episode_still,omitempty" doc:"Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable."`
-	StillURL            string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
-	StillThumbhash      string              `json:"still_thumbhash,omitempty"`
-	UserData            *WatchRollup        `json:"user_data,omitempty"`
-	Files               []EpisodeFile       `json:"files,omitempty"`
-	OverlaySummary      *CatalogItemOverlay `json:"overlay_summary,omitempty"`
+	ContentID                  string              `json:"content_id" example:"episode:severance-s01e01"`
+	SeasonNumber               int                 `json:"season_number"`
+	EpisodeNumber              int                 `json:"episode_number"`
+	Title                      string              `json:"title"`
+	Overview                   string              `json:"overview,omitempty"`
+	AirDate                    *string             `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	Runtime                    int                 `json:"runtime" doc:"Minutes"`
+	ImdbID                     string              `json:"imdb_id,omitempty"`
+	TmdbID                     string              `json:"tmdb_id,omitempty"`
+	TvdbID                     string              `json:"tvdb_id,omitempty"`
+	Ratings                    []CatalogRating     `json:"ratings,omitempty" doc:"The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating."`
+	StillIsEpisodeStill        *bool               `json:"still_is_episode_still,omitempty" doc:"Whether still_url is an episode still. False when series artwork is used as a fallback; absent when provenance is unavailable."`
+	StillURL                   string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
+	StillThumbhash             string              `json:"still_thumbhash,omitempty"`
+	UserData                   *WatchRollup        `json:"user_data,omitempty"`
+	Files                      []EpisodeFile       `json:"files,omitempty"`
+	OverlaySummary             *CatalogItemOverlay `json:"overlay_summary,omitempty"`
+	MachineTranslatedFields    []string            `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
+	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"The language this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it"`
 }
 
 // EpisodeCollection is the episodes of one season.
@@ -545,17 +560,18 @@ type EpisodeCollectionOutput struct {
 
 // Season is one season row.
 type Season struct {
-	ContentID       string       `json:"content_id" example:"series:severance-S01"`
-	PlayContentID   string       `json:"play_content_id,omitempty" doc:"The episode to play next"`
-	SeasonNumber    int          `json:"season_number"`
-	IsSpecials      bool         `json:"is_specials,omitempty"`
-	Title           string       `json:"title" example:"Season 1"`
-	Overview        string       `json:"overview,omitempty"`
-	AirDate         *string      `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	EpisodeCount    int          `json:"episode_count"`
-	PosterURL       string       `json:"poster_url,omitempty" doc:"Presigned, short-lived"`
-	PosterThumbhash string       `json:"poster_thumbhash,omitempty"`
-	UserData        *WatchRollup `json:"user_data,omitempty"`
+	ContentID               string       `json:"content_id" example:"series:severance-S01"`
+	PlayContentID           string       `json:"play_content_id,omitempty" doc:"The episode to play next"`
+	SeasonNumber            int          `json:"season_number"`
+	IsSpecials              bool         `json:"is_specials,omitempty"`
+	Title                   string       `json:"title" example:"Season 1"`
+	Overview                string       `json:"overview,omitempty"`
+	AirDate                 *string      `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	EpisodeCount            int          `json:"episode_count"`
+	PosterURL               string       `json:"poster_url,omitempty" doc:"Presigned, short-lived"`
+	PosterThumbhash         string       `json:"poster_thumbhash,omitempty"`
+	UserData                *WatchRollup `json:"user_data,omitempty"`
+	MachineTranslatedFields []string     `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
 }
 
 // SeasonCollection is the seasons of a series.
@@ -576,14 +592,15 @@ type SeasonOutput struct {
 // --- registration ---
 
 const (
-	opListCatalogItems     = "listCatalogItems"
-	opQueryCatalogItems    = "queryCatalogItems"
-	locationQueryImageSize = "query.image_size"
-	opListAudiobookGroups  = "listAudiobookGroups"
+	opListCatalogItems    = "listCatalogItems"
+	opQueryCatalogItems   = "queryCatalogItems"
+	locationQueryGroups   = "query.groups"
+	opListAudiobookGroups = "listAudiobookGroups"
 )
 
 func registerCatalogItems(reg *Registry) {
 	registerCatalogSearchCapabilities(reg)
+	registerCatalogLetters(reg)
 	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog", opListCatalogItems, "catalog",
@@ -646,14 +663,14 @@ func (reg *Registry) catalogItems() (CatalogItemService, *Problem) {
 // context, access policy from the access seam, artwork size and
 // presentation hints from the query. The filter carries no device id; reads
 // that resolve device-scoped preferences use itemViewerOnDevice.
-func (reg *Registry) itemViewer(ctx context.Context, imageSize string, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
-	return reg.itemViewerOnDevice(ctx, "", imageSize, libraryID, fileID)
+func (reg *Registry) itemViewer(ctx context.Context, art imagesize.Request, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
+	return reg.itemViewerOnDevice(ctx, "", art, libraryID, fileID)
 }
 
 // itemViewerOnDevice is itemViewer for the caller's declared
 // X-Silo-Device-Id, so device-scoped playback preferences resolve as they
 // do on v1 and in getWatchState. The id is clamped like v1's header read.
-func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID, imageSize string, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
+func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, art imagesize.Request, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
 	_, profileID, p := viewerIdentity(ctx)
 	if p != nil {
 		return handlers.ItemViewer{}, p
@@ -678,11 +695,8 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID, imageSize
 	if err != nil {
 		return handlers.ItemViewer{}, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
-	size, err := imagesize.Parse(imageSize)
-	if err != nil {
-		size = imagesize.Unset
-	}
-	filter.ImageSize = size
+	filter.ImageSize = art.Size
+	filter.ImageWidths = art.Widths
 	return handlers.ItemViewer{Access: filter, ProfileID: profileID}, nil
 }
 
@@ -920,7 +934,7 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, "", "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -939,19 +953,13 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 		decoder := json.NewDecoder(strings.NewReader(in.Groups))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&groups); err != nil || !json.Valid([]byte(in.Groups)) {
-			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: "query.groups", Code: codeInvalid, Detail: "expected a JSON array of rule groups"})
+			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: "expected a JSON array of rule groups"})
 		}
-		for _, g := range groups {
-			rules := make([]catalogpkg.QueryRule, 0, len(g.Rules))
-			for _, rule := range g.Rules {
-				rules = append(rules, catalogpkg.QueryRule{Field: rule.Field, Op: rule.Op, Value: rule.Value})
-			}
-			req.Query.Groups = append(req.Query.Groups, catalogpkg.QueryGroup{Match: g.Match, Rules: rules})
-		}
+		req.Query.Groups = append(req.Query.Groups, catalogQueryGroups(groups)...)
 		canonical, _ := json.Marshal(groups)
 		values.Set("groups", string(canonical))
 		if err := req.ValidateQueryDefinition(); err != nil {
-			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: "query.groups", Code: codeInvalid, Detail: err.Error()})
+			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: err.Error()})
 		}
 	}
 	operationID := in.operationID
@@ -964,7 +972,7 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	scope := CursorScope{
 		OperationID: operationID,
 		Security:    strconv.Itoa(claims.UserID) + "/" + viewer.ProfileID + "/" + viewerScopeDigest(ctx),
-		Filter:      values.Encode() + "&group=" + in.Group + "&image_size=" + in.ImageSize,
+		Filter:      values.Encode() + "&group=" + in.Group + "&image_size=" + in.ImageSize + in.widthsCursorFilter(),
 		Sort:        req.Query.Sort.Field + "," + req.Query.Sort.Order,
 		Tiebreaker:  tiebreakerOffset,
 	}
@@ -1031,7 +1039,7 @@ func (reg *Registry) listAudiobookGroups(ctx context.Context, cursors *Cursors, 
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, "", "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -1044,7 +1052,7 @@ func (reg *Registry) listAudiobookGroups(ctx context.Context, cursors *Cursors, 
 	scope := CursorScope{
 		OperationID: opListAudiobookGroups,
 		Security:    strconv.Itoa(claims.UserID) + "/" + viewer.ProfileID + "/" + viewerScopeDigest(ctx),
-		Filter:      "library_id=" + strconv.Itoa(libraryID) + "&group_by=" + in.GroupBy + "&q=" + in.Q + "&image_size=" + in.ImageSize + "&limit=" + strconv.Itoa(in.Limit),
+		Filter:      "library_id=" + strconv.Itoa(libraryID) + "&group_by=" + in.GroupBy + "&q=" + in.Q + "&image_size=" + in.ImageSize + in.widthsCursorFilter() + "&limit=" + strconv.Itoa(in.Limit),
 		Sort:        in.Sort,
 		Tiebreaker:  "group_key",
 	}
@@ -1087,7 +1095,7 @@ func (reg *Registry) getCatalogFilters(ctx context.Context, in *CatalogFiltersIn
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, "", "", "")
+	viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -1115,7 +1123,7 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, "", "", "")
+	viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -1155,13 +1163,13 @@ func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in
 		Source: body.Source, Scope: body.Scope, SectionID: body.SectionID,
 		LibraryID: body.LibraryID, CollectionID: body.CollectionID, PersonID: body.PersonID,
 		Q: body.Q, NamePrefix: body.NamePrefix, Match: body.Match, Type: body.Type,
-		Sort: sort, Group: body.Group, SkipTotal: body.SkipTotal, ImageSize: in.ImageSize,
+		Sort: sort, Group: body.Group, SkipTotal: body.SkipTotal, ArtworkQuery: in.ArtworkQuery,
 		LimitParam: LimitParam{Limit: limit}, Cursor: body.Cursor, Groups: string(groups),
 		QueryLimit: body.QueryLimit, Seek: body.Seek, operationID: opQueryCatalogItems,
 	})
 	if p, ok := errors.AsType[*Problem](err); ok {
 		for i := range p.Errors {
-			if strings.HasPrefix(p.Errors[i].Location, "query.") && p.Errors[i].Location != locationQueryImageSize {
+			if strings.HasPrefix(p.Errors[i].Location, "query.") && !isArtworkQueryLocation(p.Errors[i].Location) {
 				p.Errors[i].Location = "body." + strings.TrimPrefix(p.Errors[i].Location, "query.")
 			}
 		}
@@ -1174,7 +1182,7 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.Artwork(), in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1186,7 +1194,7 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
 		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
 		if err != nil {
-			slog.WarnContext(ctx, "catalog theme lookup failed", "component", "apiv2", "item_id", in.ID, "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "catalog theme lookup failed", "component", "apiv2", "item_id", in.ID, "error", err)
 			return &CatalogItemDetailOutput{Body: out}, nil
 		}
 		out.Themes = &ThemeSongSet{OwnerID: themes.OwnerID, Items: []ThemeSong{}}
@@ -1202,7 +1210,7 @@ func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogIte
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.Artwork(), in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1218,7 +1226,7 @@ func (reg *Registry) listCatalogItemMangaFiles(ctx context.Context, in *CatalogI
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1239,7 +1247,7 @@ func (reg *Registry) listCatalogItemEpisodes(ctx context.Context, in *CatalogIte
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1255,7 +1263,7 @@ func (reg *Registry) listSeriesSeasons(ctx context.Context, in *CatalogSeasonsIn
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, "")
 	if p != nil {
 		return nil, p
 	}
@@ -1275,7 +1283,7 @@ func (reg *Registry) getSeriesSeason(ctx context.Context, in *CatalogSeasonInput
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, "")
 	if p != nil {
 		return nil, p
 	}
@@ -1291,7 +1299,7 @@ func (reg *Registry) listSeasonEpisodes(ctx context.Context, in *CatalogSeasonIn
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, "")
 	if p != nil {
 		return nil, p
 	}
@@ -1375,6 +1383,7 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		Overview: d.Overview, ReleaseDate: d.ReleaseDate, LastAirDate: d.LastAirDate,
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,
 		OverlaySummary: catalogOverlayOf(d.OverlaySummary), WorkID: d.WorkID, WorkTitle: d.WorkTitle,
+		PendingTranslationLanguage: d.PendingTranslationLanguage, MachineTranslatedFields: d.MachineTranslatedFields,
 	}
 	if d.Type == themeOwnerEpisode {
 		// An episode detail's poster is its still; the still's ThumbHash is
@@ -1383,7 +1392,7 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		card.BackdropIsEpisodeStill = new(false)
 	}
 	if s := d.UserState; s != nil {
-		card.UserState = &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist}
+		card.UserState = &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist, NotInterested: s.NotInterested}
 	}
 	for _, f := range d.WorkFormats {
 		card.WorkFormats = append(card.WorkFormats, CatalogWorkFormat{Type: f.Type, ContentID: f.ContentID, LibraryID: idOfPositive(f.LibraryID)})
@@ -1405,8 +1414,10 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 	}
 	out := CatalogItemDetail{
 		CatalogItem: card, PlaySeasonNumber: d.PlaySeasonNumber,
-		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
+		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline,
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
+		BannerURL: d.BannerURL, BannerThumbhash: d.BannerThumbhash, ThumbURL: d.ThumbURL, ThumbThumbhash: d.ThumbThumbhash,
+		ClearArtURL: d.ClearArtURL, DiscURL: d.DiscURL, BackdropURLs: d.BackdropURLs,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
 		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
@@ -1438,12 +1449,15 @@ func datePtr(s string) *string {
 	return &s
 }
 
+// episodesOf renders episode rows. An episode's ratings come from its IMDb and
+// TMDB columns only, which every selection shows, so it needs no rating policy.
 func episodesOf(views []handlers.EpisodeView) []Episode {
 	out := make([]Episode, 0, len(views))
 	for _, e := range views {
 		ep := Episode{ContentID: e.ContentID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Title: e.Title, Overview: e.Overview,
 			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillIsEpisodeStill: e.StillIsEpisodeStill, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
-			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
+			Ratings:  builtRatingsOf(ratingsources.Item{IMDB: e.RatingIMDB, TMDB: e.RatingTMDB}, ratingsources.Selection{}),
+			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary), MachineTranslatedFields: e.MachineTranslatedFields, PendingTranslationLanguage: e.PendingTranslationLanguage}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
 				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize, Unreadable: f.Unreadable})
@@ -1456,5 +1470,5 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 func seasonOf(s handlers.SeasonView) Season {
 	return Season{ContentID: s.ContentID, PlayContentID: s.PlayContentID, SeasonNumber: s.SeasonNumber, IsSpecials: s.IsSpecials, Title: s.Title,
 		Overview: s.Overview, AirDate: datePtr(s.AirDate), EpisodeCount: s.EpisodeCount, PosterURL: s.PosterURL, PosterThumbhash: s.PosterThumbhash,
-		UserData: watchRollupOf(s.UserData)}
+		UserData: watchRollupOf(s.UserData), MachineTranslatedFields: s.MachineTranslatedFields}
 }

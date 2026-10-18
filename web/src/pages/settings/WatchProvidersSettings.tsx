@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Check,
   CheckCircle2,
+  ChevronDown,
   Copy,
   ExternalLink,
   Loader2,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { V2ProblemError } from "@/api/v2/request";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -29,6 +31,7 @@ import {
   WatchProviderAuthMethod,
   type DeviceAuthSession,
   type WatchProviderConnection,
+  type WatchProviderConnectionSetting,
   type WatchProviderSyncRun,
 } from "@/hooks/queries/watchProviders";
 import { Input } from "@/components/ui/input";
@@ -69,7 +72,7 @@ function StatusPill({ variant, children }: { variant: StatusVariant; children: R
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
         STATUS_PILL_STYLES[variant],
       )}
     >
@@ -122,10 +125,20 @@ function ToggleRow({
   );
 }
 
+/** The connection's value for a boolean setting, or the setting's default when it has none. */
+function booleanSettingValue(
+  values: Record<string, unknown> | undefined,
+  setting: WatchProviderConnectionSetting,
+) {
+  const value = values?.[setting.key];
+  if (typeof value === "boolean") return value;
+  return setting.default_value === true;
+}
+
 function StatCell({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
         {label}
       </div>
       <div className="mt-0.5 truncate text-sm font-medium">{value}</div>
@@ -377,7 +390,13 @@ function formatLastSync(connection: WatchProviderConnection, latestRun?: WatchPr
   return `Synced ${formatRelativeTime(new Date(newest).toISOString())}`;
 }
 
-function WatchProviderCard({ providerKey }: { providerKey: string }) {
+function WatchProviderCard({
+  providerKey,
+  connectionSettings = [],
+}: {
+  providerKey: string;
+  connectionSettings?: WatchProviderConnectionSetting[];
+}) {
   const { data: savedConnection, isLoading, isFetching } = useWatchProviderConnection(providerKey);
   const updateConnection = useUpdateWatchProviderConnection(providerKey);
   const startAuth = useStartWatchProviderDeviceAuth(providerKey);
@@ -392,11 +411,27 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
   const [authSession, setAuthSession] = useState<DeviceAuthSession | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [apiKeyPrompt, setApiKeyPrompt] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsConflict =
     updateConnection.error instanceof V2ProblemError && updateConnection.error.status === 412;
+  // A settings conflict opens the section so the attempted change and its
+  // choices are visible. Opening it in state, not deriving visibility from
+  // the error, keeps it open while a retry clears the error.
+  const [conflictShown, setConflictShown] = useState(false);
+  if (settingsConflict !== conflictShown) {
+    setConflictShown(settingsConflict);
+    if (settingsConflict) setSettingsOpen(true);
+  }
   const connection =
     savedConnection && settingsConflict
-      ? { ...savedConnection, ...updateConnection.variables }
+      ? {
+          ...savedConnection,
+          ...updateConnection.variables,
+          connection_settings: {
+            ...savedConnection.connection_settings,
+            ...updateConnection.variables?.connection_settings,
+          },
+        }
       : savedConnection;
 
   if (isLoading || !connection) {
@@ -433,6 +468,7 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
   const showAuth = Boolean(authSession) && !connection.connected;
   const showAPIKey = usesAPIKey && apiKeyPrompt && !connection.connected;
   const runInfo = connection.connected ? deriveRunInfo(connection, latestRun) : null;
+  const settingsPanelId = `watch-provider-${providerKey}-settings`;
   const hasError = Boolean(runInfo?.errorMessage);
   const favoritesSyncEnabled =
     connection.import_favorites_enabled || connection.export_favorites_enabled;
@@ -464,7 +500,7 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
       const username = connection.provider_username || displayName;
       return `${username} · ${formatLastSync(connection, latestRun)}`;
     }
-    if (!connection.credentials_configured) return "Server credentials required.";
+    if (!connection.credentials_configured) return "Server setup required.";
     if (usesAPIKey)
       return `Connect with your ${displayName} API key to import watch history and scrobble playback.`;
     return "Connect to start importing watch history and scrobbling playback.";
@@ -668,181 +704,225 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
             </div>
           </div>
 
-          {settingsConflict && (
-            <div role="alert" className="border-border mb-4 rounded-xl border p-4 text-sm">
-              <p>These settings changed elsewhere. Your change is still shown below.</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  disabled={isFetching || updateConnection.isPending}
-                  onClick={() => {
-                    if (updateConnection.variables)
-                      updateConnection.mutate(updateConnection.variables);
-                  }}
-                >
-                  Apply my change
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={isFetching}
-                  onClick={() => updateConnection.reset()}
-                >
-                  Use latest settings
-                </Button>
+          <button
+            type="button"
+            aria-expanded={settingsOpen}
+            aria-controls={settingsPanelId}
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            className="text-muted-foreground hover:text-foreground flex w-full items-center justify-between gap-3 rounded-lg py-1 text-left text-sm font-medium transition-colors"
+          >
+            Settings
+            <ChevronDown
+              aria-hidden="true"
+              className={cn("h-4 w-4 shrink-0 transition-transform", settingsOpen && "rotate-180")}
+            />
+          </button>
+          {settingsOpen ? (
+            <div id={settingsPanelId}>
+              {settingsConflict && (
+                <div role="alert" className="border-border mb-4 rounded-xl border p-4 text-sm">
+                  <p>These settings changed elsewhere. Your change is still shown below.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      disabled={isFetching || updateConnection.isPending}
+                      onClick={() => {
+                        if (updateConnection.variables)
+                          updateConnection.mutate(updateConnection.variables);
+                      }}
+                    >
+                      Apply my change
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={isFetching}
+                      onClick={() => updateConnection.reset()}
+                    >
+                      Use latest settings
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+                <ToggleRow
+                  id={`watch-provider-${providerKey}-import-watched`}
+                  label="Import watched history"
+                  description={`Bring completed ${displayName} plays into this profile.`}
+                  checked={connection.import_watched_enabled}
+                  disabled={isBusy}
+                  onChange={(checked) =>
+                    updateConnection.mutate({ import_watched_enabled: checked })
+                  }
+                />
+                <ToggleRow
+                  id={`watch-provider-${providerKey}-import-progress`}
+                  label="Import paused progress"
+                  description={`Use newer ${displayName} resume points when local progress is older.`}
+                  checked={connection.import_progress_enabled}
+                  disabled={isBusy}
+                  onChange={(checked) =>
+                    updateConnection.mutate({ import_progress_enabled: checked })
+                  }
+                />
+                <ToggleRow
+                  id={`watch-provider-${providerKey}-export-watched`}
+                  label="Send watched changes"
+                  description="Send local watched marks and completed plays to this provider."
+                  checked={connection.export_watched_enabled}
+                  disabled={isBusy}
+                  onChange={(checked) =>
+                    updateConnection.mutate({ export_watched_enabled: checked })
+                  }
+                />
+                {connection.capabilities.export_unwatched ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-export-unwatched`}
+                    label="Send unwatched changes"
+                    description="When you mark something unwatched, remove matching history from this provider."
+                    checked={connection.export_unwatched_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ export_unwatched_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.import_favorites ||
+                connection.capabilities.export_favorites ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-favorites`}
+                    label="Sync favorites"
+                    description={`Import ${displayName} movie and show favorites, and send local favorite adds.`}
+                    checked={favoritesSyncEnabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({
+                        import_favorites_enabled: checked,
+                        export_favorites_enabled: checked,
+                        sync_favorite_removals_enabled: checked
+                          ? connection.sync_favorite_removals_enabled
+                          : false,
+                      })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.remove_favorites ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-favorite-removals`}
+                    label="Sync favorite removals"
+                    description="Remove provider-synced favorites on the other side when they are explicitly unfavorited."
+                    checked={connection.sync_favorite_removals_enabled}
+                    disabled={isBusy || !favoritesSyncEnabled}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ sync_favorite_removals_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.import_watchlist ||
+                connection.capabilities.export_watchlist ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-watchlist`}
+                    label="Sync watchlist"
+                    description={`Import your ${displayName} watchlist, and send local watchlist adds.`}
+                    checked={watchlistSyncEnabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({
+                        import_watchlist_enabled: checked,
+                        export_watchlist_enabled: checked,
+                        sync_watchlist_removals_enabled: checked
+                          ? connection.sync_watchlist_removals_enabled
+                          : false,
+                      })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.remove_watchlist ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-watchlist-removals`}
+                    label="Sync watchlist removals"
+                    description="Remove provider-synced watchlist items on the other side when they are removed locally."
+                    checked={connection.sync_watchlist_removals_enabled}
+                    disabled={isBusy || !watchlistSyncEnabled}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ sync_watchlist_removals_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.provides_watchlist_order ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-watchlist-order`}
+                    label="Mirror watchlist order"
+                    description={`Order your Silo watchlist to match its ${displayName} sort order. Items not on ${displayName} stay at the bottom.`}
+                    checked={connection.sync_watchlist_order_enabled}
+                    disabled={isBusy || !connection.import_watchlist_enabled}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ sync_watchlist_order_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.import_ratings ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-import-ratings`}
+                    label="Import ratings"
+                    description={`Bring ${displayName} movie and show ratings in as stars. A 7/10 becomes 4 stars.`}
+                    checked={connection.import_ratings_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ import_ratings_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.export_ratings ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-export-ratings`}
+                    label="Send ratings"
+                    description={`Send your star ratings to ${displayName} and clear ones you remove. 4 stars becomes 8/10.`}
+                    checked={connection.export_ratings_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ export_ratings_enabled: checked })
+                    }
+                  />
+                ) : null}
+                {connection.capabilities.sync_dropped ? (
+                  <ToggleRow
+                    id={`watch-provider-${providerKey}-sync-dropped`}
+                    label="Sync dropped shows"
+                    description={`Hide shows you dropped on ${displayName} from Next Up and Continue Watching, and drop shows on ${displayName} when you remove their episodes from Home. Watching a show again undrops it.`}
+                    checked={connection.sync_dropped_enabled}
+                    disabled={isBusy}
+                    onChange={(checked) =>
+                      updateConnection.mutate({ sync_dropped_enabled: checked })
+                    }
+                  />
+                ) : null}
+                <ToggleRow
+                  id={`watch-provider-${providerKey}-scrobble`}
+                  label="Scrobble playback"
+                  description="Report starts, pauses, resumes, and stops live during playback."
+                  checked={connection.scrobble_enabled}
+                  disabled={isBusy}
+                  onChange={(checked) => updateConnection.mutate({ scrobble_enabled: checked })}
+                />
+                {connectionSettings
+                  .filter((setting) => setting.type === "boolean")
+                  .map((setting) => (
+                    <ToggleRow
+                      key={setting.key}
+                      id={`watch-provider-${providerKey}-setting-${setting.key}`}
+                      label={setting.label}
+                      description={setting.description ?? ""}
+                      checked={booleanSettingValue(connection.connection_settings, setting)}
+                      disabled={isBusy}
+                      onChange={(checked) =>
+                        updateConnection.mutate({ connection_settings: { [setting.key]: checked } })
+                      }
+                    />
+                  ))}
               </div>
             </div>
-          )}
-          <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
-            <ToggleRow
-              id={`watch-provider-${providerKey}-import-watched`}
-              label="Import watched history"
-              description={`Bring completed ${displayName} plays into this profile.`}
-              checked={connection.import_watched_enabled}
-              disabled={isBusy}
-              onChange={(checked) => updateConnection.mutate({ import_watched_enabled: checked })}
-            />
-            <ToggleRow
-              id={`watch-provider-${providerKey}-import-progress`}
-              label="Import paused progress"
-              description={`Use newer ${displayName} resume points when local progress is older.`}
-              checked={connection.import_progress_enabled}
-              disabled={isBusy}
-              onChange={(checked) => updateConnection.mutate({ import_progress_enabled: checked })}
-            />
-            <ToggleRow
-              id={`watch-provider-${providerKey}-export-watched`}
-              label="Send watched changes"
-              description="Send local watched marks and completed plays to this provider."
-              checked={connection.export_watched_enabled}
-              disabled={isBusy}
-              onChange={(checked) => updateConnection.mutate({ export_watched_enabled: checked })}
-            />
-            {connection.capabilities.export_unwatched ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-export-unwatched`}
-                label="Send unwatched changes"
-                description="When you mark something unwatched, remove matching history from this provider."
-                checked={connection.export_unwatched_enabled}
-                disabled={isBusy}
-                onChange={(checked) =>
-                  updateConnection.mutate({ export_unwatched_enabled: checked })
-                }
-              />
-            ) : null}
-            {connection.capabilities.import_favorites ||
-            connection.capabilities.export_favorites ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-favorites`}
-                label="Sync favorites"
-                description={`Import ${displayName} movie and show favorites, and send local favorite adds.`}
-                checked={favoritesSyncEnabled}
-                disabled={isBusy}
-                onChange={(checked) =>
-                  updateConnection.mutate({
-                    import_favorites_enabled: checked,
-                    export_favorites_enabled: checked,
-                    sync_favorite_removals_enabled: checked
-                      ? connection.sync_favorite_removals_enabled
-                      : false,
-                  })
-                }
-              />
-            ) : null}
-            {connection.capabilities.remove_favorites ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-favorite-removals`}
-                label="Sync favorite removals"
-                description="Remove provider-synced favorites on the other side when they are explicitly unfavorited."
-                checked={connection.sync_favorite_removals_enabled}
-                disabled={isBusy || !favoritesSyncEnabled}
-                onChange={(checked) =>
-                  updateConnection.mutate({ sync_favorite_removals_enabled: checked })
-                }
-              />
-            ) : null}
-            {connection.capabilities.import_watchlist ||
-            connection.capabilities.export_watchlist ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-watchlist`}
-                label="Sync watchlist"
-                description={`Import your ${displayName} watchlist, and send local watchlist adds.`}
-                checked={watchlistSyncEnabled}
-                disabled={isBusy}
-                onChange={(checked) =>
-                  updateConnection.mutate({
-                    import_watchlist_enabled: checked,
-                    export_watchlist_enabled: checked,
-                    sync_watchlist_removals_enabled: checked
-                      ? connection.sync_watchlist_removals_enabled
-                      : false,
-                  })
-                }
-              />
-            ) : null}
-            {connection.capabilities.remove_watchlist ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-watchlist-removals`}
-                label="Sync watchlist removals"
-                description="Remove provider-synced watchlist items on the other side when they are removed locally."
-                checked={connection.sync_watchlist_removals_enabled}
-                disabled={isBusy || !watchlistSyncEnabled}
-                onChange={(checked) =>
-                  updateConnection.mutate({ sync_watchlist_removals_enabled: checked })
-                }
-              />
-            ) : null}
-            {connection.capabilities.provides_watchlist_order ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-watchlist-order`}
-                label="Mirror watchlist order"
-                description={`Order your Silo watchlist to match its ${displayName} sort order. Items not on ${displayName} stay at the bottom.`}
-                checked={connection.sync_watchlist_order_enabled}
-                disabled={isBusy || !connection.import_watchlist_enabled}
-                onChange={(checked) =>
-                  updateConnection.mutate({ sync_watchlist_order_enabled: checked })
-                }
-              />
-            ) : null}
-            {connection.capabilities.import_ratings ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-import-ratings`}
-                label="Import ratings"
-                description={`Bring ${displayName} movie and show ratings in as stars. A 7/10 becomes 4 stars.`}
-                checked={connection.import_ratings_enabled}
-                disabled={isBusy}
-                onChange={(checked) => updateConnection.mutate({ import_ratings_enabled: checked })}
-              />
-            ) : null}
-            {connection.capabilities.export_ratings ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-export-ratings`}
-                label="Send ratings"
-                description={`Send your star ratings to ${displayName} and clear ones you remove. 4 stars becomes 8/10.`}
-                checked={connection.export_ratings_enabled}
-                disabled={isBusy}
-                onChange={(checked) => updateConnection.mutate({ export_ratings_enabled: checked })}
-              />
-            ) : null}
-            {connection.capabilities.sync_dropped ? (
-              <ToggleRow
-                id={`watch-provider-${providerKey}-sync-dropped`}
-                label="Sync dropped shows"
-                description={`Hide shows you dropped on ${displayName} from Next Up and Continue Watching, and drop shows on ${displayName} when you remove their episodes from Home. Watching a show again undrops it.`}
-                checked={connection.sync_dropped_enabled}
-                disabled={isBusy}
-                onChange={(checked) => updateConnection.mutate({ sync_dropped_enabled: checked })}
-              />
-            ) : null}
-            <ToggleRow
-              id={`watch-provider-${providerKey}-scrobble`}
-              label="Scrobble playback"
-              description="Report starts, pauses, resumes, and stops live during playback."
-              checked={connection.scrobble_enabled}
-              disabled={isBusy}
-              onChange={(checked) => updateConnection.mutate({ scrobble_enabled: checked })}
-            />
-          </div>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -867,13 +947,10 @@ export default function WatchProvidersSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Watch Providers</h2>
-        <p className="text-muted-foreground text-[13px] leading-relaxed sm:text-sm">
-          Connect external trackers to import watch history, sync paused progress, and scrobble
-          playback in real time.
-        </p>
-      </div>
+      <PageHeader
+        title="Watch Providers"
+        subtitle="Connect external trackers to import watch history, sync paused progress, and scrobble playback in real time."
+      />
 
       {providers.length === 0 ? (
         <section className="surface-panel rounded-[1.7rem] border-0 px-4 py-5 shadow-none sm:px-6">
@@ -883,7 +960,11 @@ export default function WatchProvidersSettings() {
         </section>
       ) : (
         providers.map((provider) => (
-          <WatchProviderCard key={provider.key} providerKey={provider.key} />
+          <WatchProviderCard
+            key={provider.key}
+            providerKey={provider.key}
+            connectionSettings={provider.connection_settings}
+          />
         ))
       )}
     </div>

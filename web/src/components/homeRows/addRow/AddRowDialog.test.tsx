@@ -49,7 +49,6 @@ function row(overrides: Partial<HomeRow> = {}): HomeRow {
     hero: false,
     shown: true,
     own: false,
-    legacyTrakt: false,
     ...overrides,
   };
 }

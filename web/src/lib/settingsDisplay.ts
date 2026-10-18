@@ -61,17 +61,20 @@ export function isStructuredSetting(definition: SettingDisplay | null): boolean 
  * Enum members come straight from the contract. Open language tags use the
  * definition's generated advisory option set. A nullable definition gains a
  * leading, context-specific unset entry so a control can express clearing it.
+ * Deprecated members stay valid stored values but are not offered.
  */
 export function optionsFor(definition: SettingDisplay): SettingOption[] {
   if (definition.type === "language_tag") {
     return languageOptionsFor(definition.key);
   }
-  const members = (definition.values ?? []).map((member) => ({
-    value: String(member.value),
-    // The manifest leaves a label empty when the member is its own label
-    // (the date formats spell themselves).
-    label: member.label || String(member.value),
-  }));
+  const members = (definition.values ?? [])
+    .filter((member) => !member.deprecated)
+    .map((member) => ({
+      value: String(member.value),
+      // The manifest leaves a label empty when the member is its own label
+      // (the date formats spell themselves).
+      label: member.label || String(member.value),
+    }));
   if (definition.nullable) {
     return [{ value: "", label: "Unset" }, ...members];
   }
@@ -104,7 +107,8 @@ export function formatSettingValue(key: string, value: string | null | undefined
   }
   if (definition.unit === "kbps") {
     // A bandwidth cap reads in Mbps like its select; no value means no cap.
-    const raw = value || defaultValueToString(definition);
+    // A stored null is "No limit" even where the default is a cap.
+    const raw = value === null ? "" : value || defaultValueToString(definition);
     const kbps = Number(raw);
     return raw && Number.isFinite(kbps) ? formatBitrateKbps(kbps) : "No limit";
   }

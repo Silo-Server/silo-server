@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -42,9 +43,29 @@ func eventsWSTestConnWithHandler(
 	query string,
 ) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
 	t.Helper()
+	return eventsWSTestConnActing(t, handler, claims, query, actingAdminIs(true))
+}
+
+// actingAdminIs is an acting-admin decision that answers the same for every
+// profile.
+func actingAdminIs(acting bool) apimw.ActingAdminDecider {
+	return func(context.Context, apimw.ActingAdminRequest) (bool, error) { return acting, nil }
+}
+
+// eventsWSTestConnActing dials the v1 socket as claims, with decide as the
+// acting-admin decision for an admin account.
+func eventsWSTestConnActing(
+	t *testing.T,
+	handler *EventsHandler,
+	claims *auth.Claims,
+	query string,
+	decide apimw.ActingAdminDecider,
+) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
+	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := apimw.SetClaims(r.Context(), claims)
+		ctx = apimw.SetActingAdminDecider(ctx, decide)
 		handler.HandleWebSocket(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(server.Close)
@@ -284,6 +305,61 @@ func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
 	event := readFrame("event")
 	if string(event["channel"]) != `"user_settings"` {
 		t.Fatalf("received an event on a channel this connection was refused: %s", event["channel"])
+	}
+}
+
+// TestEventsWebSocketAdminAccountChildProfileIsNotAdmin: a connection from an
+// admin account that is not acting as its primary profile, such as a child
+// profile, gets the user channels and only its own account's events, as on
+// the v2 socket.
+func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
+	hub := evt.NewHub("test", &cache.NoopEventBus{})
+	_, readFrame := eventsWSTestConnActing(t, &EventsHandler{hub: hub},
+		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,user_settings", actingAdminIs(false))
+
+	hello := readFrame("hello")
+	if strings.Contains(string(hello["available_channels"]), `"sessions"`) {
+		t.Fatalf("child profile was offered an admin channel: %s", hello["available_channels"])
+	}
+	subscribed := readFrame("subscribed")
+	if strings.Contains(string(subscribed["channels"]), `"sessions"`) {
+		t.Fatalf("child profile was granted the sessions channel: %s", subscribed["channels"])
+	}
+	readFrame("snapshot") // user_settings
+
+	// Another account's event first, then this account's: receiving the
+	// second without the first proves the first was filtered.
+	publishUserSettingsEvent(context.Background(), hub, 2, "profile-2", "playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1", "playback.subtitle_language", "profile")
+	event := readFrame("event")
+	if !strings.Contains(string(event["data"]), `"profile-1"`) {
+		t.Fatalf("child profile received another account's event: %s", event["data"])
+	}
+}
+
+// TestEventsWebSocketAdminDecisionUsesTicketProfile: a browser cannot set
+// X-Profile-Id on the handshake, so the profile its ticket was minted for
+// decides whether an admin account's connection acts as the admin.
+func TestEventsWebSocketAdminDecisionUsesTicketProfile(t *testing.T) {
+	decide := func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
+		return in.ProfileID == "parent", nil
+	}
+	for profile, wantAdmin := range map[string]bool{"parent": true, "kid": false} {
+		t.Run(profile, func(t *testing.T) {
+			tickets := notifications.NewTicketStore(nil)
+			ticket, _, err := tickets.Mint(t.Context(), notifications.Ticket{UserID: 1, ProfileID: profile})
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{})}
+			handler.SetNotificationsSystem(&notifications.System{Tickets: tickets})
+			_, readFrame := eventsWSTestConnActing(t, handler, &auth.Claims{UserID: 1, Role: "admin"},
+				"?ticket="+url.QueryEscape(ticket), decide)
+			hello := readFrame("hello")
+			if got := strings.Contains(string(hello["available_channels"]), `"sessions"`); got != wantAdmin {
+				t.Fatalf("admin channels offered = %v, want %v: %s", got, wantAdmin, hello["available_channels"])
+			}
+		})
 	}
 }
 

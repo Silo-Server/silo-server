@@ -53,6 +53,11 @@
 # re-id can rename an item whatever child rows it has (#933).
 ./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
 
+# Watch detail artwork: movies, episodes and extras carry the poster and
+# backdrop clients publish to system media controls (#803).
+./internal/catalog TestGetWatchDetailArtwork
+./internal/catalog TestGetWatchDetailOmitsArtworkResolution
+
 # Detail and versions: localization and folder reads per detail build, and the
 # versions endpoint issuing fewer queries than full detail with no image work.
 ./internal/catalog TestBuildMediaItemDetailSharesLocalization
@@ -80,6 +85,7 @@
 # sparse first pages reuse one FTS probe, and trigger work stays bounded.
 ./migrations TestMediaSearchDocumentsMigrationPostgres
 ./migrations TestEpisodeSearchRefreshMigrationPostgres
+./migrations TestSkipUnchangedEpisodeCatalogRefreshMigrationPostgres
 ./migrations TestEpisodeExactSearchIndexMigrationPostgres
 ./internal/catalog TestMediaSearchDocumentsPostgres
 ./internal/catalog TestSearchOptimizedAccuracyPostgres
@@ -138,6 +144,18 @@
 # Corrected matches preserve destination IDs and remove rejected source IDs.
 ./internal/metadata TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs
 
+# An initial match whose NFO ids replace the folder-tag ids moves the
+# tag-anchored skeleton to the NFO's anchor without the tag ids.
+./internal/metadata TestInitialMatch_NFOIDsReplaceTagAnchoredSkeleton
+./internal/metadata TestInitialMatch_NFOOnlyChainReplacesTagAnchoredSkeleton
+
+# A scan never merges a tagged movie into a title it shares only one provider
+# ID with, and copies of one movie still merge (#2263).
+./internal/metadata TestScanKeepsTaggedMovieFoldersApartDB
+./internal/metadata TestScanStillMergesCopiesOfOneMovieDB
+./internal/metadata TestRescanAfterSplitKeepsTaggedMovieApartDB
+./internal/metadata TestScanKeepsTaggedMovieApartFromTitleWithItsTaggedIDDB
+
 # A corrected Identify moves a series and its anchored children in one rename.
 ./internal/metadata TestIdentify_CorrectedSeriesMovesWithItsChildren
 ./internal/metadata TestIdentify_CorrectionOntoExistingSeriesMovesUnpairedEpisodeState
@@ -166,12 +184,21 @@
 ./internal/scanner TestEbookScanBatchesSkipQueries
 ./internal/scanner TestEbookSkipPreloadPreservesEligibility
 
+# Variant finalization: one narrow scope load, one owner lookup, and one
+# batched write of the variant columns alone.
+./internal/scanner TestFinalizeVariantsBatchesQueriesDB
+./internal/scanner TestFinalizeVariantsLoadsMovieDiscsOutsideTheScopeDB
+
 # ID-less direct ranges reuse full session payloads while checking identities.
 ./internal/jellycompat TestWebOSDurableRangeDoesNotReloadSnapshots
 
 # Artwork storage sweep: the GC-schedule lookup its anomaly guard consults must
 # count armed candidates only, never parked (live) ones.
 ./internal/metadata TestArtworkSweepScheduledOriginalsPostgres
+
+# Artwork reference check (revision GC and storage sweep): every sweep surface
+# whose path column has an index uses it under a generic plan.
+./internal/metadata TestArtworkReferenceChecksUsePathIndexesDB
 
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
@@ -195,6 +222,10 @@
 
 ./internal/chapterthumbs TestWidthBackfillDefersCatalogScansUntilRetryDB
 ./internal/scanner TestChapterLockReusesHealthySessionsDB
+# Discover's default rows read each media type from its own index, however
+# large the catalog.
+./internal/recommendations TestDefaultRowQueriesWalkTypeIndexesPostgres
+
 # Seek preview workers stop after a library or file becomes ineligible.
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
@@ -231,5 +262,30 @@
 # DATABASE_URL already chose jit.
 ./internal/database TestNewPoolDisablesJITUnlessConfiguredPostgres
 
+# Pool connections move vectors in binary, report a NULL vector as an error
+# rather than a panic, still connect before the vector extension exists, and
+# switch to binary once the migrations create it.
+./internal/database TestNewPoolMovesVectorsInBinaryPostgres
+
 # Operational log pages: a cursor prunes the partitions newer than it.
 ./internal/opslog TestListCursorPrunesNewerPartitionsDB
+
+# Local metadata runs ahead of remote providers, is on by default, and an
+# admin's Identify choice is recorded on the item.
+./migrations TestLocalMetadataDefaultOnMigrationPostgres
+./internal/metadata TestLocalTierIsStoredAndResolvedFirst
+./internal/catalog TestIdentityChoiceSurvivesUpsertAndRenameDB
+./internal/metadata TestCanonicalizeKeepsIdentityChoicePostgres
+./internal/metadata TestPersistMarksIdentityWithTheIdentityWritePostgres
+./internal/metadata TestIdentifyMoveMarksTheMovedItemPostgres
+./internal/metadata TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres
+
+# Webhook deliveries are capped at 10 MiB on every receiver, the v2 route and
+# the frozen legacy bridge alike.
+./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
+./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB
+
+# A person write reindexes the person's titles only when it changes the name,
+# the only person field search documents carry.
+./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
+./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres
