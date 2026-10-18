@@ -27318,7 +27318,8 @@ export interface components {
         | "runtime_correction_succeeded"
         | "runtime_correction_failed"
         | "seek_reanchor_requested"
-        | "seek_reanchored";
+        | "seek_reanchored"
+        | "plan_summary";
       /**
        * @description Client-minted UUID; a retry with the same id after a lost 202 is recorded once
        * @example 1

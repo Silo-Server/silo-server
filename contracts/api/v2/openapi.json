@@ -38977,7 +38977,8 @@
               "runtime_correction_succeeded",
               "runtime_correction_failed",
               "seek_reanchor_requested",
-              "seek_reanchored"
+              "seek_reanchored",
+              "plan_summary"
             ],
             "type": "string"
           },

@@ -279,7 +279,7 @@ type PlaybackRouteEventBody struct {
 	PlanID                string            `json:"plan_id,omitempty" maxLength:"128"`
 	PlanAttemptID         string            `json:"plan_attempt_id,omitempty" maxLength:"128"`
 	PlanAttemptKey        string            `json:"plan_attempt_key,omitempty" maxLength:"128"`
-	Event                 string            `json:"event" enum:"plan_selected,plan_invalidated,plan_failed,first_frame,terminal,stopped,runtime_correction_applied,runtime_correction_succeeded,runtime_correction_failed,seek_reanchor_requested,seek_reanchored"`
+	Event                 string            `json:"event" enum:"plan_selected,plan_invalidated,plan_failed,first_frame,terminal,stopped,runtime_correction_applied,runtime_correction_succeeded,runtime_correction_failed,seek_reanchor_requested,seek_reanchored,plan_summary"`
 	FailureClassification string            `json:"failure_classification,omitempty" maxLength:"64"`
 	FallbackReason        string            `json:"fallback_reason,omitempty" maxLength:"64"`
 	AppliedQuirkIDs       []string          `json:"applied_quirk_ids,omitempty" maxItems:"16"`
