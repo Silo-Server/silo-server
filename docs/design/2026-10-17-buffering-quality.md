@@ -151,8 +151,9 @@ Trigger evaluation follows the media event clock:
 - Once a long-stall timer has fired, keep watching the stall. Re-evaluate when a
   time-based suppression expires if a stall is still in progress; expiry while
   playing does not itself trigger an offer.
-- A suppressed trigger (answered, cooldown, rearm, or re-offer) leaves stall
-  history intact. A prompt timeout or rearm clears history, with startup grace
+- A suppressed trigger (answered, cooldown, rearm, re-offer, or a buffering
+  prompt/undo pill already visible or waiting behind a higher-priority pill)
+  leaves stall history intact. A prompt timeout or rearm clears history, with startup grace
   already over, and times any in-progress stall again from that instant.
 - Back on an undo pill only hides it. It does not answer the title.
 - The no-lower-rung notice is once per title. A lowering whose adopted plan is

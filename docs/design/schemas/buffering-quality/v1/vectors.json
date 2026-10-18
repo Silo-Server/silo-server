@@ -2590,6 +2590,146 @@
       "buffering_action": {
         "p1": "lowered"
       }
+    },
+    {
+      "name": "visible_undo_retains_stall_history",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 134000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 31600,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 134000,
+          "type": "playing"
+        },
+        {
+          "t": 144000,
+          "type": "waiting"
+        },
+        {
+          "t": 145500,
+          "type": "playing"
+        },
+        {
+          "t": 146000,
+          "type": "waiting"
+        },
+        {
+          "t": 147500,
+          "type": "playing"
+        },
+        {
+          "t": 150000,
+          "type": "waiting"
+        },
+        {
+          "t": 150500,
+          "type": "playing"
+        }
+      ],
+      "until": 151000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        },
+        {
+          "t": 134000,
+          "type": "undo_shown"
+        },
+        {
+          "t": 150500,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 22120,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ],
+      "buffering_action": {
+        "p1": "lowered",
+        "p2": "lowered"
+      }
     }
   ],
   "connection_budget_cases": [
