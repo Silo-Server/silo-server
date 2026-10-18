@@ -2040,6 +2040,9 @@ type ItemDetailBatchOptions struct {
 	// up to three queries per series, the last of which loads every episode
 	// file when the series has no group or root claims.
 	SkipFolderPaths bool
+	// SkipSubtitleDefaults leaves a movie's effective subtitle defaults
+	// (EffectiveSubtitle*) unset. Resolving them costs two queries per movie.
+	SkipSubtitleDefaults bool
 }
 
 // GetItemDetailsByIDsWithOptions is GetItemDetailsByIDs without the parts opts
@@ -2099,6 +2102,10 @@ func (s *DetailService) GetItemDetailsByIDsWithOptions(ctx context.Context, cont
 	if err != nil {
 		return nil, err
 	}
+	var audioResolvers map[string]*audioPrefResolver
+	if haveFileBatch {
+		audioResolvers = s.prefetchAudioResolvers(ctx, visible, filesByID, filter)
+	}
 
 	// Work summaries for the whole page in one query, when the provider supports
 	// batching (ListSummariesForContentIDs is the documented batch equivalent of
@@ -2126,9 +2133,11 @@ func (s *DetailService) GetItemDetailsByIDsWithOptions(ctx context.Context, cont
 			localizedItem:      s.localizeItemModelWith(item, language, loc),
 			// Skipped credits count as prefetched, so the builder does not
 			// look them up item by item instead.
-			haveCredits:     s.personRepo != nil || opts.SkipCredits,
-			skipFolderPaths: opts.SkipFolderPaths,
-			trickplay:       trickplay,
+			haveCredits:          s.personRepo != nil || opts.SkipCredits,
+			skipFolderPaths:      opts.SkipFolderPaths,
+			skipSubtitleDefaults: opts.SkipSubtitleDefaults,
+			audioResolver:        audioResolvers[id],
+			trickplay:            trickplay,
 		}
 		if s.personRepo != nil && !opts.SkipCredits {
 			pf.castCredits, pf.crewCredits = splitCastCrew(s.personCredits(ctx, creditsByID[id], filter))
@@ -2386,9 +2395,13 @@ type itemDetailPrefetch struct {
 	ratingSources      []models.ItemRatingSource
 	haveExtras         bool
 	extras             []ExtraWithFile
-	// skipFolderPaths leaves a series' FolderPaths unresolved for a caller
-	// that never reads them (see ItemDetailBatchOptions).
-	skipFolderPaths bool
+	// skipFolderPaths and skipSubtitleDefaults leave those parts unresolved
+	// for a caller that never reads them (see ItemDetailBatchOptions).
+	skipFolderPaths      bool
+	skipSubtitleDefaults bool
+	// audioResolver, when set, carries the item's audio-preference lookups
+	// already resolved for the page (see prefetchAudioResolvers).
+	audioResolver *audioPrefResolver
 }
 
 func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.MediaItem, contentID string, filter AccessFilter, pf *itemDetailPrefetch) (*ItemDetail, error) {
@@ -2504,8 +2517,15 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		if pf != nil {
 			availability = pf.trickplay
 		}
+		var audioResolver *audioPrefResolver
+		if pf != nil {
+			audioResolver = pf.audioResolver
+		}
+		if audioResolver == nil {
+			audioResolver = s.newAudioPrefResolver(ctx, filter, item.ContentID)
+		}
 		detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfoWith(
-			ctx, files, filter, s.newAudioPrefResolver(ctx, filter, item.ContentID), availability,
+			ctx, files, filter, audioResolver, availability,
 		)
 		detail.OverlaySummary = overlays.BuildSummary(files)
 		// Movie pre-play selectors need the same effective subtitle defaults
@@ -2513,7 +2533,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		// from a previous play — so the item detail can't omit them. Scoped to
 		// movies: episodes resolve theirs in buildEpisodeDetail, and other
 		// types have no subtitle selector to feed.
-		if item.Type == "movie" {
+		if item.Type == playableTypeMovie && (pf == nil || !pf.skipSubtitleDefaults) {
 			s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files).applyToItemDetail(detail)
 		}
 	}
@@ -3960,7 +3980,16 @@ func (s *DetailService) resolvedAudioLanguage(
 ) string {
 	resolved, err := s.settingsResolver().Resolve(ctx, store, rc,
 		[]string{settingskeys.PlaybackAudioLanguage}, nil)
-	if err != nil || len(resolved) == 0 {
+	if err != nil {
+		return ""
+	}
+	return audioLanguageFromResolved(resolved)
+}
+
+// audioLanguageFromResolved reads playback.audio_language from a resolution
+// of that one key, or "" when nothing is stored.
+func audioLanguageFromResolved(resolved []settingsresolve.Effective) string {
+	if len(resolved) == 0 {
 		return ""
 	}
 	// The contract default is null, which means "no preference" — the caller

@@ -42,7 +42,7 @@ func (c *equivalencePageContent) GetItemDetail(_ context.Context, _ *Session, id
 	return &cp, nil
 }
 
-func (c *equivalencePageContent) GetItemDetailsByIDs(_ context.Context, _ *Session, ids []string, _ *int, _ map[string]bool) (map[string]*upstreamItemDetail, error) {
+func (c *equivalencePageContent) GetItemDetailsByIDs(_ context.Context, _ *Session, ids []string, _ *int, _ detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	c.batchCalls++
 	if c.failBatch {
 		return nil, &HTTPError{StatusCode: 500, Message: "batch unavailable"}

@@ -2627,7 +2627,7 @@ func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Sessio
 	if len(contentIDs) == 0 {
 		return nil
 	}
-	if details, err := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID, fields); err == nil {
+	if details, err := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID, detailBatchOptions{Fields: fields}); err == nil {
 		return details
 	}
 	if ctx.Err() != nil {
@@ -3054,9 +3054,10 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 // batch serves the movies, series, and episodes; GetItemDetail serves what the
 // batch leaves out, such as seasons, or every id when the batch fails. An id
 // GetItemDetail answers 404 for is left out, and any other error fails the
-// list. fields is the request's Fields, as for batchListItemDetails.
+// list. fields is the request's Fields, as for batchListItemDetails; the
+// details keep their subtitle defaults, which the Ids list renders.
 func (h *ItemsHandler) specificItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int, fields map[string]bool) ([]*upstreamItemDetail, error) {
-	batch, batchErr := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID, fields)
+	batch, batchErr := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID, detailBatchOptions{Fields: fields, SubtitleDefaults: true})
 	if batchErr != nil {
 		batch = nil
 	}

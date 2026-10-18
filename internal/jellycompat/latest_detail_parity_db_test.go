@@ -22,7 +22,10 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -92,8 +95,13 @@ type latestParityFixture struct {
 	seededAt  time.Time
 	movieLib  int
 	tvLib     int
-	movies    []string
-	series    []string
+	// spareLib holds an extra version of the first movie; a viewer may see
+	// it unless restrict disables it.
+	spareLib int
+	movies   []string
+	series   []string
+	// restrict, when set, narrows the viewer's access filter.
+	restrict func(*catalog.AccessFilter)
 }
 
 // newLatestParityFixture seeds a movie library and a TV library shaped like
@@ -152,6 +160,7 @@ func (f *latestParityFixture) seedViewer(t *testing.T, provider *pgstore.Postgre
 	ctx := context.Background()
 	f.queryID(t, &f.movieLib, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, TRUE) RETURNING id`, "latest-movies-"+f.suffix)
 	f.queryID(t, &f.tvLib, `INSERT INTO media_folders (type, name, enabled) VALUES ('series', $1, TRUE) RETURNING id`, "latest-tv-"+f.suffix)
+	f.queryID(t, &f.spareLib, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, TRUE) RETURNING id`, "latest-spare-"+f.suffix)
 	var userID int
 	f.queryID(t, &userID, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, "latest-"+f.suffix)
 	pool := f.pool
@@ -159,12 +168,13 @@ func (f *latestParityFixture) seedViewer(t *testing.T, provider *pgstore.Postgre
 		_, _ = pool.Exec(ctx, `DELETE FROM user_watch_history WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_watch_progress WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_audio_preferences WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM user_setting_values WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_profiles WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = ANY($1)`, []int{f.movieLib, f.tvLib})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = ANY($1)`, []int{f.movieLib, f.tvLib, f.spareLib})
 		_, _ = pool.Exec(ctx, `DELETE FROM episodes WHERE series_id = ANY($1)`, f.series)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, append(append([]string{}, f.movies...), f.series...))
-		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{f.movieLib, f.tvLib})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{f.movieLib, f.tvLib, f.spareLib})
 	})
 	f.store, _ = provider.ForUser(ctx, userID)
 	f.session = &Session{Token: "token", ProfileID: "latest-" + f.suffix, StreamAppUserID: userID}
@@ -219,9 +229,15 @@ func (f *latestParityFixture) seedMovies(t *testing.T, count int) {
 	profileID := f.session.ProfileID
 	if count > 0 {
 		first := f.movies[0]
+		f.exec(t, `INSERT INTO media_files (content_id, media_folder_id, file_path, file_size, container, codec_video, resolution, duration, bitrate, video_tracks, audio_tracks)
+			VALUES ($1, $2, '/media/spare/' || $1 || '/720p.mkv', 2000000000, 'mkv', 'h264', '720p', 7190, 4000, '[{"codec":"h264","width":1280,"height":720}]'::jsonb, $3::jsonb)`,
+			first, f.spareLib, latestAudioMulti)
 		f.exec(t, `INSERT INTO item_videos (id, content_id, provider, provider_key, kind, site, site_key, name) VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM item_videos), $1, 'tmdb', $1, 'trailer', 'youtube', 'abc123', 'Trailer')`, first)
 		f.exec(t, `INSERT INTO media_extras (content_id, parent_id, kind, title) VALUES ($1 || '-extra', $1, 'trailer', 'Local trailer')`, first)
-		if err := f.store.SetAudioPreference(ctx, userstore.AudioPreference{ProfileID: profileID, SeriesID: first, AudioTrackIndex: 1, AudioLanguage: "jpn"}); err != nil {
+		// The stored choice names the Japanese track, which outranks the
+		// spare library's English preference for that version.
+		if err := f.store.SetAudioPreference(ctx, userstore.AudioPreference{ProfileID: profileID, SeriesID: first, AudioTrackIndex: 1, AudioLanguage: "jpn",
+			TrackSignature: &userstore.AudioTrackSignature{Language: "jpn", Codec: "aac", Channels: 2}}); err != nil {
 			t.Fatalf("SetAudioPreference: %v", err)
 		}
 		if err := f.store.SetProgressAt(ctx, profileID, first, 1800, 7200, false, f.seededAt); err != nil {
@@ -232,6 +248,30 @@ func (f *latestParityFixture) seedMovies(t *testing.T, count int) {
 		if err := f.store.SetProgressAt(ctx, profileID, f.movies[1], 7200, 7200, true, f.seededAt); err != nil {
 			t.Fatalf("SetProgressAt: %v", err)
 		}
+	}
+	// Audio languages at every scope the per-item resolution ranks: the
+	// profile prefers Japanese, the movie library English, one movie French
+	// (no such track) and another its original language.
+	f.setAudioLanguage(t, userstore.SettingIdentity{Scope: settingscontract.ScopeProfile}, "jpn")
+	f.setAudioLanguage(t, userstore.SettingIdentity{Scope: settingscontract.ScopeProfileLibrary, LibraryID: f.spareLib}, "eng")
+	if count > 2 {
+		f.setAudioLanguage(t, userstore.SettingIdentity{Scope: settingscontract.ScopeProfileSeries, SeriesID: f.movies[2]}, "fra")
+	}
+	if count > 3 {
+		// English, unlike the profile, so the original-language rule decides
+		// this movie's track rather than the profile preference.
+		f.exec(t, `UPDATE media_items SET original_language = 'en' WHERE content_id = $1`, f.movies[3])
+		f.setAudioLanguage(t, userstore.SettingIdentity{Scope: settingscontract.ScopeProfileSeries, SeriesID: f.movies[3]}, playback.OriginalLanguageSentinel)
+	}
+}
+
+func (f *latestParityFixture) setAudioLanguage(t *testing.T, id userstore.SettingIdentity, language string) {
+	t.Helper()
+	id.Key = settingskeys.PlaybackAudioLanguage
+	id.ProfileID = f.session.ProfileID
+	value, _ := json.Marshal(language)
+	if _, err := f.store.UpsertSettingValue(context.Background(), id, value); err != nil {
+		t.Fatalf("UpsertSettingValue(%+v): %v", id, err)
 	}
 }
 
@@ -294,9 +334,13 @@ func (f *latestParityFixture) wire(provider *pgstore.PostgresProvider) {
 	detailSvc.SetGroupClaimRepository(catalog.NewGroupClaimRepository(pool))
 	detailSvc.SetImageResolver(latestTestImageResolver{})
 	detailSvc.SetUserStoreProvider(provider)
-	libraries := []int{f.movieLib, f.tvLib}
+	libraries := []int{f.movieLib, f.tvLib, f.spareLib}
 	accessFn := func(_ context.Context, uid int, pid string) catalog.AccessFilter {
-		return catalog.AccessFilter{UserID: uid, ProfileID: pid, AllowedLibraryIDs: libraries}
+		filter := catalog.AccessFilter{UserID: uid, ProfileID: pid, AllowedLibraryIDs: libraries}
+		if f.restrict != nil {
+			f.restrict(&filter)
+		}
+		return filter
 	}
 	browseRepo := catalog.NewBrowseRepository(pool)
 	content := newDirectContentService(browseRepo, itemRepo, seasonRepo, episodeRepo, detailSvc, folderRepo, provider, accessFn, nil)
@@ -440,14 +484,59 @@ func TestLatestMatchesDetailRenderingDB(t *testing.T) {
 		{"android tv all", latestAndroidTVFields, 0},
 		{"people", "People,MediaSources", f.movieLib},
 		{"people tv", "People,MediaSources", f.tvLib},
+		{"1080p ceiling", latestAndroidTVFields, f.movieLib},
+		{"disabled library", latestInfuseFields, f.movieLib},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			f.restrict = nil
+			switch tc.name {
+			case "1080p ceiling":
+				f.restrict = func(filter *catalog.AccessFilter) { filter.MaxPlaybackQuality = "1080p" }
+			case "disabled library":
+				f.restrict = func(filter *catalog.AccessFilter) { filter.DisabledLibraryIDs = []int{f.spareLib} }
+			}
+			defer func() { f.restrict = nil }()
 			req := f.latestRequest(tc.fields, tc.library, nil)
 			got, statements, elapsed := f.serveLatest(t, req)
 			want := f.legacyLatestBody(t, f.latestRequest(tc.fields, tc.library, nil))
 			t.Logf("%s: %d statements, %s", tc.name, statements, elapsed)
 			assertSameLatestJSON(t, tc.name, got, want)
+			if tc.library == f.movieLib {
+				f.assertMovieSourcesVary(t, tc.name, got)
+			}
 		})
+	}
+}
+
+// assertMovieSourcesVary guards the comparison against passing on cards that
+// carry nothing to compare: the first movie's sources must reflect the
+// viewer's access, and the stored audio languages must pick different
+// default tracks.
+func (f *latestParityFixture) assertMovieSourcesVary(t *testing.T, label string, body []byte) {
+	t.Helper()
+	var items []baseItemDTO
+	if err := json.Unmarshal(body, &items); err != nil {
+		t.Fatalf("%s: decode: %v", label, err)
+	}
+	firstID := f.handler.codec.EncodeStringID(EncodedIDItem, f.movies[0])
+	wantSources := 3 // 4K, 1080p and the spare-library 720p
+	switch label {
+	case "1080p ceiling", "disabled library":
+		wantSources = 2
+	}
+	defaultAudio := map[int]bool{}
+	for _, item := range items {
+		for _, source := range item.MediaSources {
+			if source.DefaultAudioStreamIndex != nil {
+				defaultAudio[*source.DefaultAudioStreamIndex] = true
+			}
+		}
+		if item.ID == firstID && len(item.MediaSources) != wantSources {
+			t.Errorf("%s: first movie has %d sources, want %d", label, len(item.MediaSources), wantSources)
+		}
+	}
+	if !defaultAudio[1] || !defaultAudio[2] {
+		t.Errorf("%s: default audio stream indexes %v, want both the English (1) and Japanese (2) tracks chosen somewhere", label, defaultAudio)
 	}
 }
 
@@ -461,13 +550,21 @@ func TestLatestStatementBudgetDB(t *testing.T) {
 		fields  string
 		library int
 	}{
+		{"infuse movies", latestInfuseFields, f.movieLib},
 		{"infuse tv", latestInfuseFields, f.tvLib},
+		{"android tv movies", latestAndroidTVFields, f.movieLib},
 		{"android tv tv", latestAndroidTVFields, f.tvLib},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			count := func(limit int) (int64, map[string]int) {
 				f.statement.reset()
-				body, statements, _ := f.serveLatest(t, f.latestRequest(tc.fields, tc.library, url.Values{"Limit": {strconv.Itoa(limit)}}))
+				// Without EnableTotalRecordCount=false a page smaller than the
+				// library also counts the whole library, which is not a
+				// per-card cost.
+				body, statements, _ := f.serveLatest(t, f.latestRequest(tc.fields, tc.library, url.Values{
+					"Limit":                  {strconv.Itoa(limit)},
+					"EnableTotalRecordCount": {"false"},
+				}))
 				var items []json.RawMessage
 				if err := json.Unmarshal(body, &items); err != nil || len(items) != limit {
 					t.Fatalf("Limit=%d returned %d items (%v)", limit, len(items), err)
@@ -476,6 +573,7 @@ func TestLatestStatementBudgetDB(t *testing.T) {
 			}
 			small, smallSQL := count(5)
 			large, largeSQL := count(20)
+			t.Logf("%s: %d statements for 20 cards", tc.name, large)
 			if small != large {
 				t.Errorf("%d statements for 5 cards, %d for 20", small, large)
 				for sql, n := range largeSQL {
@@ -485,5 +583,45 @@ func TestLatestStatementBudgetDB(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestIdsListKeepsSubtitleDefaultsDB: an Ids list renders each movie's
+// DefaultSubtitleStreamIndex from the viewer's stored subtitle defaults, so
+// its batched detail must keep them, unlike the Latest batch. The response
+// must match the one per-item lookups build.
+func TestIdsListKeepsSubtitleDefaultsDB(t *testing.T) {
+	f := newLatestParityFixture(t, 3, 0, 0)
+	value, _ := json.Marshal("off")
+	if _, err := f.store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: settingskeys.PlaybackSubtitleMode, Scope: settingscontract.ScopeProfile, ProfileID: f.session.ProfileID,
+	}, value); err != nil {
+		t.Fatalf("UpsertSettingValue: %v", err)
+	}
+	ids := make([]string, 0, len(f.movies))
+	for _, id := range f.movies {
+		ids = append(ids, f.handler.codec.EncodeStringID(EncodedIDItem, id))
+	}
+	serve := func(h *ItemsHandler) []byte {
+		req := httptest.NewRequest(http.MethodGet, "/Items?"+url.Values{"Ids": {strings.Join(ids, ",")}, "Fields": {latestInfuseFields}}.Encode(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, f.session))
+		rec := httptest.NewRecorder()
+		h.handleSpecificItems(rec, req, f.session, parseItemsQuery(req, h.codec))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Ids status %d: %s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.Bytes()
+	}
+	batched := serve(f.handler)
+	perItemHandler := *f.handler
+	perItemHandler.content = perItemDetails{f.handler.content}
+	perItem := serve(&perItemHandler)
+	if !bytes.Equal(normalizeJSON(t, batched), normalizeJSON(t, perItem)) {
+		t.Errorf("batched Ids list differs from per-item:\nbatched:  %s\nper item: %s", batched, perItem)
+	}
+	// Mode off is Jellyfin's OnlyForced: the forced Japanese track (4), not
+	// the default English one (3) a viewer without the setting gets.
+	if bytes.Contains(batched, []byte(`"DefaultSubtitleStreamIndex":3`)) || !bytes.Contains(batched, []byte(`"DefaultSubtitleStreamIndex":4`)) {
+		t.Error("the stored subtitle mode did not pick the forced track")
 	}
 }

@@ -787,8 +787,9 @@ func (s *directContentService) enrichDetailUserData(ctx context.Context, store u
 //
 // fields is the request's Fields (nil means all). Parts of the detail no list
 // mapping shows are never built: a series' folder paths, which the compat
-// surface does not expose, and cast and crew unless People is requested.
-func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int, fields map[string]bool) (map[string]*upstreamItemDetail, error) {
+// surface does not expose, a movie's effective subtitle defaults, and cast and
+// crew unless People is requested.
+func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int, opts detailBatchOptions) (map[string]*upstreamItemDetail, error) {
 	out := make(map[string]*upstreamItemDetail, len(contentIDs))
 	if len(contentIDs) == 0 || s.detailSvc == nil {
 		return out, nil
@@ -798,7 +799,7 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 	details := make(map[string]*catalog.ItemDetail, len(contentIDs))
 
 	// Movies/series (and any other media_items rows) in one batched call.
-	itemDetails, err := s.detailSvc.GetItemDetailsByIDsWithOptions(ctx, contentIDs, filter, compatListDetailOptions(fields))
+	itemDetails, err := s.detailSvc.GetItemDetailsByIDsWithOptions(ctx, contentIDs, filter, compatDetailBatchOptions(opts))
 	if err != nil {
 		return nil, wrapCatalogError(err)
 	}
@@ -918,14 +919,15 @@ func (s *directContentService) addUpstreamDetailsWithUserData(ctx context.Contex
 	}
 }
 
-// compatListDetailOptions trims the batched catalog detail to what the compat
-// list mapping shows for the requested Fields (nil means all).
-func compatListDetailOptions(fields map[string]bool) catalog.ItemDetailBatchOptions {
+// compatDetailBatchOptions trims the batched catalog detail to what the
+// caller reads.
+func compatDetailBatchOptions(opts detailBatchOptions) catalog.ItemDetailBatchOptions {
 	return catalog.ItemDetailBatchOptions{
 		// itemFromDetailWithFields reads Cast and Crew only for People.
-		SkipCredits: fields != nil && !fields["people"],
+		SkipCredits: opts.Fields != nil && !opts.Fields["people"],
 		// The compat surface never exposes a series' folder paths.
-		SkipFolderPaths: true,
+		SkipFolderPaths:      true,
+		SkipSubtitleDefaults: !opts.SubtitleDefaults,
 	}
 }
 

@@ -80,6 +80,8 @@
 # page, and every card identical to its single-item detail rendering.
 ./internal/jellycompat TestLatestStatementBudgetDB
 ./internal/jellycompat TestLatestMatchesDetailRenderingDB
+./internal/jellycompat TestIdsListKeepsSubtitleDefaultsDB
+./internal/userstore/pgstore TestListAudioPreferencesMatchesGet
 
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
