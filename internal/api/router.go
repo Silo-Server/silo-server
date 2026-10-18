@@ -295,6 +295,10 @@ type Dependencies struct {
 	// Built in main.go with TMDB wired.
 	TrendingRefresher *sections.TrendingRefresher
 
+	// SeasonalListRefresher downloads the MDBList lists seasonal rows show.
+	// Built in main.go alongside the trending refresher.
+	SeasonalListRefresher *sections.SeasonalListRefresher
+
 	// MDBListClient is used by user-facing list discovery endpoints
 	// (search/top). May be nil; the handlers report "not configured" in
 	// that case rather than failing.
@@ -2020,6 +2024,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.TrendingRefresher != nil {
 			sectionHandler.TrendingRefresher = deps.TrendingRefresher
 		}
+		if deps.SeasonalListRefresher != nil {
+			sectionHandler.SeasonalLists = deps.SeasonalListRefresher
+		}
 		sectionHandler.CollectionRepo = sectionFetcher.CollectionRepo
 		sectionHandler.FolderRepo = deps.FolderRepo
 		if deps.UserStoreProvider != nil {
@@ -2110,6 +2117,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// snapshot table; the upstream fetch happens out-of-band in the refresh
 		// task, so the read path never calls the provider.
 		sectionFetcher.TrendingSnapshots = sections.NewTrendingSnapshotRepository(deps.DB)
+		sectionFetcher.SeasonalLists = sections.NewSeasonalListRepository(deps.DB)
+		if sectionFetcher.RecommendationRepo != nil {
+			sectionFetcher.SeasonalNeighbors = sectionFetcher.RecommendationRepo
+		}
 
 		libraryCollectionHandler = handlers.NewLibraryCollectionHandler(
 			libraryCollectionRepo,

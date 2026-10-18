@@ -2895,6 +2895,7 @@ func main() {
 	var collectionSyncScheduler *catalog.CollectionSyncScheduler
 	var userCollectionScheduler *usercollections.Scheduler
 	var trendingRefresher *sections.TrendingRefresher
+	var seasonalListRefresher *sections.SeasonalListRefresher
 	if needsWorkers && deps.DB != nil {
 		collectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
 		collItemRepo := catalog.NewItemRepository(deps.DB)
@@ -2907,13 +2908,16 @@ func main() {
 		// The trending refresher reuses the section repo (to find used source/
 		// window combos beyond the calendar's fixed feed), a snapshot repo, an
 		// item repo (external-ID matching), and the TMDB fetcher.
+		sectionDemand := sections.NewSectionDemandLister(sectionRepo, auth.NewUserRepository(deps.DB), userStoreProvider)
 		trendingRefresher = sections.NewTrendingRefresher(
-			sections.NewTrendingDemandLister(sectionRepo, auth.NewUserRepository(deps.DB), userStoreProvider),
+			sectionDemand,
 			sections.NewTrendingSnapshotRepository(pool),
 			catalog.NewItemRepository(deps.DB),
 			collectionService.TMDBCollections,
 		)
 		deps.TrendingRefresher = trendingRefresher
+		seasonalListRefresher = sections.NewSeasonalListRefresher(sectionDemand, sections.NewSeasonalListRepository(pool))
+		deps.SeasonalListRefresher = seasonalListRefresher
 
 		if deps.UserStoreProvider != nil {
 			// Imports fill their item limit with titles their owner profile
@@ -3262,6 +3266,9 @@ func main() {
 		}
 		if trendingRefresher != nil {
 			taskMgr.Register(tasks.NewRefreshTrendingDiscoverTask(trendingRefresher))
+		}
+		if seasonalListRefresher != nil {
+			taskMgr.Register(tasks.NewRefreshSeasonalListsTask(seasonalListRefresher))
 		}
 		taskMgr.Register(tasks.NewRefreshAnimeIDsTask(animeids.NewRefresher(deps.DB)))
 		if userCollectionScheduler != nil {

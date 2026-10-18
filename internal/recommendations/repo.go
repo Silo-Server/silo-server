@@ -364,6 +364,99 @@ func (r *Repo) GetEmbedding(ctx context.Context, itemID string) ([]float32, erro
 	return v.Slice(), nil
 }
 
+// excludeEmbeddingIDsCondition drops the item IDs bound to $2 from an
+// embedding scan.
+const excludeEmbeddingIDsCondition = "e.media_item_id != ALL($2)"
+
+// ThemeMinSeeds is the fewest embedded seeds ThemeNeighbors builds a theme
+// from; one or two titles describe themselves, not a theme.
+const ThemeMinSeeds = 3
+
+// ThemeNeighbors returns movies and series near the theme the seed items
+// share: the average of their embeddings. Results are nearest first and stop
+// at the median seed's distance from that average, so every title returned is
+// at least as close to the theme as a typical seed. Seeds are excluded. It
+// returns nil when fewer than ThemeMinSeeds seeds have embeddings. filter's
+// library and maturity limits apply in the query; limit bounds the scan.
+func (r *Repo) ThemeNeighbors(ctx context.Context, seedIDs []string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	if len(seedIDs) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return nil, nil
+	}
+	var (
+		centroid pgvector.HalfVector
+		seeds    int
+		cutoff   *float64
+	)
+	err := r.pool.QueryRow(ctx, `
+		WITH seeds AS (
+			SELECT embedding::halfvec(3072) AS v
+			FROM   media_item_embeddings
+			WHERE  media_item_id = ANY($1)
+		), centroid AS (
+			SELECT avg(embedding)::halfvec(3072) AS v
+			FROM   media_item_embeddings
+			WHERE  media_item_id = ANY($1)
+		)
+		SELECT centroid.v,
+		       (SELECT count(*) FROM seeds),
+		       (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY seeds.v <=> centroid.v) FROM seeds)
+		FROM   centroid
+		WHERE  centroid.v IS NOT NULL`, seedIDs).Scan(&centroid, &seeds, &cutoff)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("theme centroid: %w", err)
+	}
+	if seeds < ThemeMinSeeds || cutoff == nil {
+		return nil, nil
+	}
+
+	conditions := []string{excludeEmbeddingIDsCondition, "mi.type IN ('movie', 'series')"}
+	args := []any{centroid, seedIDs, limit}
+	argIdx := len(args) + 1
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	query := fmt.Sprintf(`
+			SELECT e.media_item_id,
+			       e.embedding::halfvec(3072) <=> $1::halfvec(3072) AS distance
+			FROM   media_item_embeddings e
+			JOIN   media_items mi ON mi.content_id = e.media_item_id
+			WHERE  %s
+			ORDER  BY e.embedding::halfvec(3072) <=> $1::halfvec(3072)
+			LIMIT  $3`, strings.Join(conditions, " AND "))
+
+	var items []ScoredItem
+	err = r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var distance float64
+			if err := rows.Scan(&id, &distance); err != nil {
+				return fmt.Errorf("scanning theme neighbor: %w", err)
+			}
+			// Relaxed-order iterative scans can return a farther row before
+			// a nearer one, so filter rather than stop at the first miss.
+			if distance <= *cutoff {
+				items = append(items, ScoredItem{MediaItemID: id, Score: 1 - distance})
+			}
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("theme neighbors: %w", err)
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Score > items[j].Score })
+	return items, nil
+}
+
 // FindSimilar returns items ordered by cosine similarity to the given embedding,
 // excluding the specified item IDs. When mediaType is non-empty, results are
 // restricted to that media_items.type so cross-media-type results never appear
@@ -379,7 +472,7 @@ func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs 
 		excludeIDs = []string{}
 	}
 	conditions := []string{
-		"e.media_item_id != ALL($2)",
+		excludeEmbeddingIDsCondition,
 		"($4 = '' OR mi.type = $4)",
 	}
 	args := []any{pgvector.NewHalfVector(embedding), excludeIDs, limit, mediaType}
@@ -479,7 +572,7 @@ func (r *Repo) findTasteProfileCandidates(
 	conditions := []string{
 		matchedTitleSQL,
 		"mi.type = ANY($3)",
-		"e.media_item_id != ALL($2)",
+		excludeEmbeddingIDsCondition,
 	}
 	args := []any{pgvector.NewHalfVector(embedding), excludeIDs, mediaTypes}
 	argIdx := 4

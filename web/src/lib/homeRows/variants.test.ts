@@ -146,6 +146,27 @@ describe("seasonal themes", () => {
       ),
     ).toEqual({ enabled_themes: ["family_movie_night"], theme_titles: { x: "y" } });
   });
+
+  it("leaves no hidden custom holidays or holiday dates on a Family movie night row", () => {
+    const holiday = {
+      name: "Fourth",
+      start: "07-01",
+      end: "07-04",
+      list_url: "https://mdblist.com/lists/a/b",
+    };
+    expect(
+      applyVariant(
+        "seasonal_themed",
+        {
+          enabled_themes: ["halloween"],
+          custom_holidays: [holiday],
+          theme_dates: { halloween: { start: "10-20", end: "11-02" } },
+          source: "lists",
+        },
+        "se_family_movie_night",
+      ),
+    ).toEqual({ enabled_themes: ["family_movie_night"], source: "lists" });
+  });
 });
 
 describe("Shows line", () => {

@@ -66,7 +66,7 @@ func Category(key string) string {
 		return key
 	case "refresh_metadata", "refresh_all_library_metadata", "refresh_series_air_dates", "bulk_metadata_enrichment", "sync_manga_metadata", "sync_audiobook_metadata", "sync_ebook_metadata", "backfill_ebook_metadata", "sync_podcast_feeds", "metadata":
 		return "metadata"
-	case "refresh_trending_discover":
+	case "refresh_trending_discover", "refresh_seasonal_lists":
 		return "recommendations"
 	case "seed_content_availability", "rebuild_release_interest":
 		return workloadNotifications

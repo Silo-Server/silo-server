@@ -640,13 +640,15 @@
               "display_name": "Seasonal Picks",
               "icon": "🗓️",
               "description_short": "Cycles automatically — Halloween in October, Christmas in December, etc.",
-              "description_long": "One section that swaps in different theme picks based on the calendar. Toggle which holidays this profile celebrates from the Add section dialog.",
+              "description_long": "One section that swaps in curated holiday picks based on the calendar. Choose the holidays, a vibe for each, and add your own holidays.",
               "default_params": {
                 "enabled_themes": [
                   "halloween",
                   "christmas",
+                  "new_year",
                   "valentines",
                   "st_patricks",
+                  "easter",
                   "thanksgiving",
                   "summer_blockbuster",
                   "saturday_morning"

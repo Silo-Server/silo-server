@@ -792,6 +792,7 @@ POST /api/v2/scan/cancel	non-media
 GET /api/v2/scan/capabilities	non-media
 GET /api/v2/sections/recipes	non-media
 GET /api/v2/sections/recipes/{type}/candidates	non-media
+GET /api/v2/sections/seasonal-themes	non-media
 GET /api/v2/settings/contract	non-media
 GET /api/v2/settings/contract/capabilities	non-media
 DELETE /api/v2/settings/device/subtitle-appearance	non-media
@@ -2074,6 +2075,7 @@ POST /api/v2/scan/cancel	non-media
 GET /api/v2/scan/capabilities	non-media
 GET /api/v2/sections/recipes	non-media
 GET /api/v2/sections/recipes/{type}/candidates	non-media
+GET /api/v2/sections/seasonal-themes	non-media
 GET /api/v2/settings/contract	non-media
 GET /api/v2/settings/contract/capabilities	non-media
 DELETE /api/v2/settings/device/subtitle-appearance	non-media

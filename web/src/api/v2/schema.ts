@@ -10696,6 +10696,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/sections/seasonal-themes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The holidays a Seasonal Picks row can follow, with the curated vibes each offers. */
+    get: operations["listSeasonalThemes"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/settings/contract": {
     parameters: {
       query?: never;
@@ -29439,6 +29456,65 @@ export interface components {
       /** @example Season 1 */
       title: string;
       user_data?: components["schemas"]["WatchRollup"];
+    };
+    SeasonalTheme: {
+      /** @description Whether a row may set its own yearly window for this holiday in theme_dates. False for weekly themes. */
+      dates_editable: boolean;
+      /**
+       * @description Last day of the default window, MM-DD, inclusive; before start when the window wraps across New Year
+       * @example 10-31
+       */
+      end?: string;
+      /**
+       * @description Stored in the row's enabled_themes config; stable
+       * @example halloween
+       */
+      key: string;
+      /** @example Halloween */
+      name: string;
+      /**
+       * @description First day of the default window, MM-DD. Absent when the holiday moves (Easter) or recurs weekly.
+       * @example 10-01
+       */
+      start?: string;
+      /** @description The first vibe is the default; never empty */
+      vibes: components["schemas"]["SeasonalVibe"][];
+      /**
+       * @description When the holiday is in season by default, for display
+       * @example October
+       */
+      when: string;
+    };
+    SeasonalThemeCatalog: {
+      /**
+       * Format: int64
+       * @description The most custom holidays one row may define
+       * @example 12
+       */
+      max_custom_holidays: number;
+      /** @description In calendar order, for display: dated holidays by their usual start, then the weekly ones */
+      themes: components["schemas"]["SeasonalTheme"][];
+    };
+    SeasonalVibe: {
+      /** @example Spooky fun for all ages. */
+      description: string;
+      /**
+       * @description Stored in the row's vibes config; stable
+       * @example family
+       */
+      key: string;
+      /**
+       * @description The MDBList list behind the vibe
+       * @example https://mdblist.com/lists/purple_smurf/halloween-family2
+       */
+      list_url: string;
+      /** @example Family Halloween */
+      name: string;
+      /**
+       * @description The row's title while this vibe is in season, unless the row sets its own
+       * @example Family Halloween
+       */
+      title: string;
     };
     SeasonCollection: {
       /** @description The page's items; empty, never null */
@@ -126545,6 +126621,112 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RecipeCandidateCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listSeasonalThemes: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SeasonalThemeCatalog"];
         };
       };
       /** @description Bad Request */

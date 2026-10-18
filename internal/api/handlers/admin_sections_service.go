@@ -115,6 +115,9 @@ func (h *SectionHandler) CreateAdminSection(ctx context.Context, req AdminSectio
 	if err != nil {
 		return none, err
 	}
+	if created.SectionType == sections.SectionSeasonalThemed && created.Enabled {
+		h.refreshSeasonalLists(ctx, created.Config)
+	}
 
 	return toSectionResponse(created), nil
 }
@@ -491,6 +494,9 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		updated, err := h.repo.GetByID(ctx, id)
 		if err != nil {
 			return none, err
+		}
+		if updated.SectionType == sections.SectionSeasonalThemed && updated.Enabled {
+			h.refreshSeasonalLists(ctx, updated.Config)
 		}
 		return toSectionResponse(updated), nil
 	}

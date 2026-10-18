@@ -862,8 +862,10 @@
         "enabled_themes": [
           "halloween",
           "christmas",
+          "new_year",
           "valentines",
           "st_patricks",
+          "easter",
           "thanksgiving",
           "summer_blockbuster",
           "saturday_morning"
@@ -882,8 +884,10 @@
         "enabled_themes": [
           "halloween",
           "christmas",
+          "new_year",
           "valentines",
           "st_patricks",
+          "easter",
           "thanksgiving",
           "summer_blockbuster",
           "saturday_morning"

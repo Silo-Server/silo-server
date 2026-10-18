@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
 import { recipeCatalogFixture } from "@/lib/homeRows/recipeCatalogFixture.test-support";
 import type { RowDraft } from "@/lib/homeRows/rowDraft";
@@ -11,14 +11,29 @@ import type { EditSession, HomeRow, HomeRowsAdapter } from "@/lib/homeRows/types
 import { VARIANT_FAMILIES } from "@/lib/homeRows/variants";
 import { AddRowDialog } from "./AddRowDialog";
 import { paramFieldKeys } from "@/lib/homeRows/paramFields";
+import seasonalThemes from "../../../../../contracts/api/v2/fixtures/list_seasonal_themes_ok.json";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+// The real catalog body the server's contract fixture pins.
+vi.mock("@/hooks/queries/seasonalThemes", () => ({
+  useSeasonalThemes: () => ({ data: seasonalThemes, isError: false }),
+}));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
 vi.mock("@/hooks/queries/items", () => ({
   fetchWatchDetail: async (id: string) => ({ title: `Title ${id}` }),
 }));
+
+// Radix Select drives pointer capture and scrolling that jsdom lacks.
+beforeAll(() => {
+  Object.defineProperties(Element.prototype, {
+    hasPointerCapture: { configurable: true, value: () => false },
+    setPointerCapture: { configurable: true, value: () => {} },
+    releasePointerCapture: { configurable: true, value: () => {} },
+    scrollIntoView: { configurable: true, value: () => {} },
+  });
+});
 
 const COLLECTIONS: CollectionOption[] = [
   {
@@ -319,7 +334,9 @@ describe("Add row form", () => {
       if (box.getAttribute("aria-checked") === "true") await userEvent.click(box);
     }
     expect(within(form).getByRole("radio", { name: /Holidays/ })).toBeChecked();
-    expect(within(form).getByText("Pick at least one holiday.")).toBeInTheDocument();
+    expect(
+      within(form).getByText("Pick at least one holiday or add your own."),
+    ).toBeInTheDocument();
     expect(within(form).getByRole("button", { name: "Add row" })).toBeDisabled();
   });
 
@@ -335,6 +352,93 @@ describe("Add row form", () => {
     await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0].config.theme_titles).toEqual({ christmas: "Christmas movies" });
+  });
+
+  it("picks a vibe per holiday, names the row after it, and can skip recommendations", async () => {
+    const { dialog } = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Seasonal picks" }));
+    const form = await screen.findByRole("dialog", { name: "Seasonal picks" });
+    const name = within(form).getByRole("textbox", { name: "Row name during Halloween" });
+    expect(name).toHaveAttribute(
+      "placeholder",
+      'Name in season (defaults to "Halloween Favorites")',
+    );
+    await userEvent.click(within(form).getByRole("combobox", { name: "Vibe for Halloween" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Family Halloween" }));
+    expect(name).toHaveAttribute("placeholder", 'Name in season (defaults to "Family Halloween")');
+    await userEvent.click(within(form).getByRole("combobox", { name: "Picks from" }));
+    await userEvent.click(await screen.findByRole("option", { name: "The lists only" }));
+    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0].config).toMatchObject({
+      vibes: { halloween: "family" },
+      source: "lists",
+    });
+  });
+
+  it("moves a holiday to dates of the user's own, except weekly ones", async () => {
+    const { dialog } = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Seasonal picks" }));
+    const form = await screen.findByRole("dialog", { name: "Seasonal picks" });
+    expect(
+      within(form).getByText("Leave empty for the usual dates (October)."),
+    ).toBeInTheDocument();
+    expect(
+      within(form).queryByRole("textbox", { name: "Saturday Morning starts (MM-DD)" }),
+    ).not.toBeInTheDocument();
+    const start = within(form).getByRole("textbox", { name: "Halloween starts (MM-DD)" });
+    await userEvent.type(start, "10-20");
+    expect(within(form).getByText(/Enter both dates as MM-DD/)).toBeInTheDocument();
+    expect(within(form).getByRole("button", { name: "Add row" })).toBeDisabled();
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "Halloween ends (MM-DD)" }),
+      "11-02",
+    );
+    expect(within(form).getByText("Oct 20–Nov 2")).toBeInTheDocument();
+    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0].config.theme_dates).toEqual({
+      halloween: { start: "10-20", end: "11-02" },
+    });
+  });
+
+  it("adds a holiday of its own and saves only once it is complete", async () => {
+    const { dialog } = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Seasonal picks" }));
+    const form = await screen.findByRole("dialog", { name: "Seasonal picks" });
+    await userEvent.click(within(form).getByRole("button", { name: "Add a holiday" }));
+    expect(within(form).getByText("Give the holiday a name.")).toBeInTheDocument();
+    expect(within(form).getByRole("button", { name: "Add row" })).toBeDisabled();
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "Name of holiday 1" }),
+      "Fourth of July",
+    );
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "Fourth of July starts (MM-DD)" }),
+      "07-01",
+    );
+    await userEvent.type(
+      within(form).getByRole("textbox", { name: "Fourth of July ends (MM-DD)" }),
+      "07-04",
+    );
+    // Paste the links: typing them key by key is slow enough to time out
+    // under a full parallel run.
+    const list = within(form).getByRole("textbox", { name: "Fourth of July MDBList list" });
+    await userEvent.click(list);
+    await userEvent.paste("https://example.com/lists/a/b");
+    expect(within(form).getByText(/Use a public MDBList list link/)).toBeInTheDocument();
+    await userEvent.clear(list);
+    await userEvent.paste("https://mdblist.com/lists/a/fourth");
+    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]![0].config.custom_holidays).toEqual([
+      {
+        name: "Fourth of July",
+        start: "07-01",
+        end: "07-04",
+        list_url: "https://mdblist.com/lists/a/fourth",
+      },
+    ]);
   });
 });
 

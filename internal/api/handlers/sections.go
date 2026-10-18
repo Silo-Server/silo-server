@@ -50,6 +50,26 @@ type SectionHandler struct {
 	TrendingRefresher     interface {
 		RefreshConfig(context.Context, json.RawMessage)
 	}
+	// SeasonalLists fetches the lists a saved seasonal row needs, so it fills
+	// without waiting for the scheduled refresh.
+	SeasonalLists interface {
+		RefreshConfig(context.Context, json.RawMessage)
+	}
+}
+
+// refreshSeasonalLists fetches, in the background, the lists saved seasonal
+// row configs need. The refresher skips lists it already has.
+func (h *SectionHandler) refreshSeasonalLists(ctx context.Context, configs ...json.RawMessage) {
+	if h.SeasonalLists == nil || len(configs) == 0 {
+		return
+	}
+	go func() {
+		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		for _, config := range configs {
+			h.SeasonalLists.RefreshConfig(refreshCtx, config)
+		}
+	}()
 }
 
 // NewSectionHandler creates a new SectionHandler.
@@ -861,6 +881,7 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		config json.RawMessage
 	}
 	refreshCandidates := make([]trendingCandidate, 0, len(writes))
+	var seasonalConfigs []json.RawMessage
 	seenIDs := make(map[string]struct{}, len(writes))
 	baseSections := make(map[string]*sections.PageSection)
 	loadBaseSection := func(sectionID string) (*sections.PageSection, bool, error) {
@@ -908,6 +929,13 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 				}
 				refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
 			}
+			if hasBase && base.Enabled && base.SectionType == sections.SectionSeasonalThemed {
+				cfg := o.Config
+				if !hasSectionConfig(cfg) {
+					cfg = base.Config
+				}
+				seasonalConfigs = append(seasonalConfigs, append(json.RawMessage(nil), cfg...))
+			}
 			continue
 		}
 
@@ -937,6 +965,9 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		}
 		if recipeType == string(sections.SectionTrendingDiscover) && !o.Hidden && !o.Removed {
 			refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
+		}
+		if recipeType == string(sections.SectionSeasonalThemed) && !o.Hidden && !o.Removed {
+			seasonalConfigs = append(seasonalConfigs, append(json.RawMessage(nil), cfg...))
 		}
 	}
 
@@ -1035,6 +1066,7 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 			}()
 		}
 	}
+	h.refreshSeasonalLists(ctx, seasonalConfigs...)
 	return nil
 }
 
