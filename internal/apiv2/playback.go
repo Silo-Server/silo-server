@@ -39,11 +39,6 @@ type PlaybackService interface {
 	ReportRouteEventV2(context.Context, handlers.PlaybackCaller, handlers.PlaybackRouteEventCommand) error
 }
 
-const (
-	playbackProbeHTTP  = "http"
-	playbackProbeHTTPS = "https"
-)
-
 type PlaybackCapabilities struct {
 	BandwidthProbeURL string `json:"bandwidth_probe_url,omitempty"`
 	Capability
@@ -352,12 +347,10 @@ func registerPlayback(reg *Registry) {
 		}
 		probeURL := ""
 		if playback.HasFeatureV3(view.Features, playback.FeatureConnectionSpeedV1) {
+			// The origin the client reached, as a reverse proxy forwards it: r.Host
+			// behind a TLS-terminating proxy is the internal host the proxy dialed.
 			if r := requestFrom(ctx); r != nil {
-				scheme := playbackProbeHTTP
-				if handlers.IsSecureRequest(r) {
-					scheme = playbackProbeHTTPS
-				}
-				probeURL = scheme + "://" + r.Host + Prefix + "/playback/bandwidth-probe?media_path=true"
+				probeURL = handlers.RequestBaseURL(r) + Prefix + "/playback/bandwidth-probe?media_path=true"
 			}
 		}
 		return &PlaybackCapabilitiesOutput{CacheControl: playbackCacheControl, Body: PlaybackCapabilities{BandwidthProbeURL: probeURL, InstallationID: ID(view.InstallationID), Capability: Capability{State: view.State, Allowed: new(view.Allowed)}, ProtocolVersions: append([]int{}, view.ProtocolVersions...), Features: append([]string{}, view.Features...), Deliveries: append([]playback.DeliveryV3{}, view.Deliveries...)}}, nil
