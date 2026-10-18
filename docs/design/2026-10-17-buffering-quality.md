@@ -476,7 +476,10 @@ stall" is a wait from 125000 that reaches 6000 ms.
 | `unadopted_replan` | long stall, replan_failed, a long stall at 150000, another at 200000 | replans at 131000 and 206000 |
 
 Additional conformance cases cover `suppressed_history_retained` (a later
-`playing` event can evaluate retained history), `repeated_no_lower_result`
+`playing` event can evaluate retained history), `suppressed_ended_long_stall_retained`
+(a single long stall that ended during suppression still qualifies within the
+120-second window at the next `playing`, even if the new stall is under one
+second), `repeated_no_lower_result`
 (each unsuccessful adoption shows its notice), `back_hides_undo_without_answering`,
 and `cooldown_expires_during_stall` (an active long stall is evaluated at expiry).
 

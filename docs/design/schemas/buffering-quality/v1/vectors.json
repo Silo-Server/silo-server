@@ -2057,6 +2057,85 @@
           }
         }
       ]
+    },
+    {
+      "name": "suppressed_ended_long_stall_retained",
+      "mode": "ask",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "playing"
+        },
+        {
+          "t": 185000,
+          "type": "waiting"
+        },
+        {
+          "t": 192000,
+          "type": "playing"
+        },
+        {
+          "t": 255000,
+          "type": "waiting"
+        },
+        {
+          "t": 255500,
+          "type": "playing"
+        }
+      ],
+      "until": 256000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 255500,
+          "type": "prompt_shown"
+        }
+      ]
     }
   ],
   "connection_budget_cases": [
