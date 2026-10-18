@@ -1,6 +1,8 @@
 import {
   type ComponentProps,
+  Fragment,
   type KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -16,7 +18,8 @@ import {
   Heart,
   Plus,
   Check,
-  Captions,
+  ChevronLeft,
+  ChevronRight,
   Download,
   ExternalLink,
   FolderPlus,
@@ -35,6 +38,7 @@ import {
   ThumbsDown,
   UsersRound,
   Hand,
+  Wrench,
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -85,13 +89,31 @@ function visibleOverflowItems(menu: HTMLElement | null): HTMLButtonElement[] {
   );
 }
 
+function DetailOverflowSeparator() {
+  return <div role="separator" className="bg-border -mx-1 my-1 h-px" />;
+}
+
+/** Renders the non-empty groups with a separator between each. */
+function DetailOverflowGroups({ groups }: { groups: ReactNode[][] }) {
+  return groups
+    .map((group) => group.filter(Boolean))
+    .filter((group) => group.length > 0)
+    .map((group, index) => (
+      <Fragment key={index}>
+        {index > 0 && <DetailOverflowSeparator />}
+        {group}
+      </Fragment>
+    ));
+}
+
 function DetailOverflowMenuItem({
   className,
   closeMenu,
   onAction,
   ...props
 }: Omit<ComponentProps<"button">, "onClick"> & {
-  closeMenu: () => void;
+  /** Omitted by items that keep the menu open, such as the Manage drill-in. */
+  closeMenu?: () => void;
   onAction?: () => void;
 }) {
   return (
@@ -101,7 +123,7 @@ function DetailOverflowMenuItem({
       role="menuitem"
       className={`focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 ${className ?? ""}`}
       onClick={() => {
-        closeMenu();
+        closeMenu?.();
         onAction?.();
       }}
     />
@@ -324,6 +346,9 @@ export default function ActionBar({
   const playbackController = useWatchPlaybackController();
   const [playChoiceOpen, setPlayChoiceOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // The admin and curation actions live one level down, behind "Manage".
+  const [overflowPanel, setOverflowPanel] = useState<"main" | "manage">("main");
+  const returnToManageTriggerRef = useRef(false);
   const overflowMenuId = useId();
   const [overflowPosition, setOverflowPosition] = useState<{ left: number; top: number } | null>(
     null,
@@ -430,7 +455,13 @@ export default function ActionBar({
   const closeOverflowMenu = useCallback(() => setOverflowOpen(false), []);
   const toggleOverflowMenu = useCallback(() => {
     setOverflowPosition(null);
+    setOverflowPanel("main");
     setOverflowOpen((open) => !open);
+  }, []);
+  const openManagePanel = useCallback(() => setOverflowPanel("manage"), []);
+  const closeManagePanel = useCallback(() => {
+    returnToManageTriggerRef.current = true;
+    setOverflowPanel("main");
   }, []);
   const positionOverflowMenu = useCallback(() => {
     const trigger = overflowTriggerRef.current;
@@ -474,10 +505,20 @@ export default function ActionBar({
   // The portal starts hidden until its position is measured. Focus only once
   // it is painted, and skip actions hidden by the responsive layout.
   const overflowPositioned = overflowPosition !== null;
+  // Switching panels changes the menu's height, so measure again.
+  useLayoutEffect(() => {
+    if (overflowOpen) positionOverflowMenu();
+  }, [overflowOpen, overflowPanel, positionOverflowMenu]);
   useLayoutEffect(() => {
     if (!overflowOpen || !overflowPositioned) return;
-    visibleOverflowItems(overflowMenuRef.current)[0]?.focus({ preventScroll: true });
-  }, [overflowOpen, overflowPositioned]);
+    const items = visibleOverflowItems(overflowMenuRef.current);
+    // Coming back from Manage lands on the item that opened it.
+    const manageTrigger = returnToManageTriggerRef.current
+      ? items.find((item) => item.dataset.submenuTrigger !== undefined)
+      : undefined;
+    returnToManageTriggerRef.current = false;
+    (manageTrigger ?? items[0])?.focus({ preventScroll: true });
+  }, [overflowOpen, overflowPositioned, overflowPanel]);
 
   useEffect(() => {
     if (!overflowOpen) return;
@@ -494,6 +535,10 @@ export default function ActionBar({
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      if (overflowPanel === "manage") {
+        closeManagePanel();
+        return;
+      }
       closeOverflowMenu();
       overflowTriggerRef.current?.focus({ preventScroll: true });
     };
@@ -532,8 +577,22 @@ export default function ActionBar({
         scrollFrameRef.current = null;
       }
     };
-  }, [closeOverflowMenu, overflowOpen, positionOverflowMenu]);
+  }, [closeManagePanel, closeOverflowMenu, overflowOpen, overflowPanel, positionOverflowMenu]);
   const handleOverflowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.key === "ArrowRight" &&
+      event.target instanceof HTMLElement &&
+      event.target.dataset.submenuTrigger !== undefined
+    ) {
+      event.preventDefault();
+      openManagePanel();
+      return;
+    }
+    if (event.key === "ArrowLeft" && overflowPanel === "manage") {
+      event.preventDefault();
+      closeManagePanel();
+      return;
+    }
     const isNavigationKey = ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key);
     // Printable single characters jump to the next item whose label starts with
     // what has been typed, the way the menu behaved before.
@@ -579,28 +638,231 @@ export default function ActionBar({
     }
     items[nextIndex]?.focus({ preventScroll: true });
   };
-  const hasOverflowActions = Boolean(
-    restartHref ||
-    onResetProgress ||
-    onShuffle ||
-    onToggleWatchlist ||
-    onToggleNotInterested ||
-    onDownload ||
-    onSearchSubtitles ||
-    onRequestSeasons,
-  );
-  const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectMarkers));
-  const hasMetadataActions = Boolean(
-    (canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem || onShowMediaInfo)) ||
-    showMarkerEditor,
-  );
+  // With one version, Play already asks whether to resume or start over.
+  const showRestartInMenu = Boolean(restartHref) && !showPlayChoiceDialog;
+  const playbackItems = [
+    onShuffle && (
+      <DetailOverflowMenuItem key="shuffle" closeMenu={closeOverflowMenu} onAction={onShuffle}>
+        <Shuffle className="size-4" />
+        Shuffle
+      </DetailOverflowMenuItem>
+    ),
+    showRestartInMenu && (
+      <DetailOverflowMenuItem
+        key="restart"
+        closeMenu={closeOverflowMenu}
+        onAction={handleRestartPlayback}
+      >
+        <RotateCcw className="size-4" />
+        Play from Beginning
+      </DetailOverflowMenuItem>
+    ),
+    onResetProgress && (
+      <DetailOverflowMenuItem key="reset" closeMenu={closeOverflowMenu} onAction={onResetProgress}>
+        <TimerReset className="size-4" />
+        Reset Progress
+      </DetailOverflowMenuItem>
+    ),
+  ];
+  const libraryItems = [
+    onToggleWatchlist && (
+      <DetailOverflowMenuItem
+        key="watchlist"
+        closeMenu={closeOverflowMenu}
+        onAction={onToggleWatchlist}
+      >
+        {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
+        {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
+      </DetailOverflowMenuItem>
+    ),
+    contentId && canAddToCollection && (
+      <DetailOverflowMenuItem
+        key="collection"
+        closeMenu={closeOverflowMenu}
+        onAction={() => setAddToCollectionOpen(true)}
+      >
+        <FolderPlus className="size-4" />
+        Add to Collection
+      </DetailOverflowMenuItem>
+    ),
+    onDownload && (
+      <DetailOverflowMenuItem key="download" closeMenu={closeOverflowMenu} onAction={onDownload}>
+        <Download className="size-4" />
+        Download
+      </DetailOverflowMenuItem>
+    ),
+    onRequestSeasons && (
+      <DetailOverflowMenuItem
+        key="request-seasons"
+        closeMenu={closeOverflowMenu}
+        onAction={onRequestSeasons}
+      >
+        <Inbox className="size-4" />
+        Request Seasons
+      </DetailOverflowMenuItem>
+    ),
+    onToggleNotInterested && (
+      <DetailOverflowMenuItem
+        key="not-interested"
+        closeMenu={closeOverflowMenu}
+        onAction={onToggleNotInterested}
+      >
+        <ThumbsDown className={cn("size-4", notInterested && "fill-current")} />
+        {notInterested ? "Show in Recommendations" : "Not Interested"}
+      </DetailOverflowMenuItem>
+    ),
+  ];
+  const partyItems = watchTogether
+    ? [
+        <DetailOverflowMenuItem
+          key="start-party"
+          closeMenu={closeOverflowMenu}
+          onAction={watchTogether.onStartParty}
+        >
+          <UsersRound className="size-4" />
+          Start a Watch Party
+        </DetailOverflowMenuItem>,
+        watchTogether.liveRoom && (
+          <DetailOverflowMenuItem
+            key="suggest-party"
+            closeMenu={closeOverflowMenu}
+            onAction={watchTogether.liveRoom.onSuggest}
+          >
+            <Hand className="size-4" />
+            Suggest to {watchTogether.liveRoom.code}
+          </DetailOverflowMenuItem>
+        ),
+        watchTogether.liveRoom?.onPlay && (
+          <DetailOverflowMenuItem
+            key="play-party"
+            closeMenu={closeOverflowMenu}
+            onAction={watchTogether.liveRoom.onPlay}
+          >
+            <Zap className="size-4" />
+            Play in {watchTogether.liveRoom.code}
+          </DetailOverflowMenuItem>
+        ),
+      ]
+    : [];
+  const manageGroups = [
+    [
+      canCurateMetadata && onEditMetadata && (
+        <DetailOverflowMenuItem
+          key="edit-metadata"
+          closeMenu={closeOverflowMenu}
+          onAction={onEditMetadata}
+        >
+          <MediaActionIcon action="editMetadata" />
+          Edit Metadata
+        </DetailOverflowMenuItem>
+      ),
+      canCurateMetadata && onMatchItem && (
+        <DetailOverflowMenuItem key="match" closeMenu={closeOverflowMenu} onAction={onMatchItem}>
+          <MediaActionIcon action="matchItem" />
+          Match Item
+        </DetailOverflowMenuItem>
+      ),
+      canCurateMetadata && onRefresh && (
+        <DetailOverflowMenuItem
+          key="refresh"
+          closeMenu={closeOverflowMenu}
+          disabled={isRefreshing}
+          onAction={() => setRefreshDialogOpen(true)}
+        >
+          <MediaActionIcon action="refreshMetadata" isPending={isRefreshing} />
+          Refresh Metadata
+        </DetailOverflowMenuItem>
+      ),
+    ],
+    [
+      showMarkerEditor && (
+        <DetailOverflowMenuItem
+          key="edit-markers"
+          closeMenu={closeOverflowMenu}
+          onAction={() => setMarkerEditorOpen(true)}
+        >
+          <Tags className="size-4" />
+          Edit Markers
+        </DetailOverflowMenuItem>
+      ),
+      isAdmin && onRedetectMarkers && (
+        <DetailOverflowMenuItem
+          key="redetect"
+          closeMenu={closeOverflowMenu}
+          disabled={isRedetectingMarkers}
+          onAction={() =>
+            redetectKind ? onRedetectMarkers(redetectKind) : setRedetectDialogOpen(true)
+          }
+        >
+          <RefreshCw className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`} />
+          {redetectKind === "credits"
+            ? "Re-detect Credits"
+            : redetectKind === "intro"
+              ? "Re-detect Intro Markers"
+              : "Re-detect Markers"}
+        </DetailOverflowMenuItem>
+      ),
+      showTrickplay && (
+        <DetailOverflowMenuItem
+          key="trickplay"
+          closeMenu={closeOverflowMenu}
+          onAction={() => setTrickplayOpen(true)}
+        >
+          <GalleryHorizontal className="size-4" />
+          Seek Previews
+        </DetailOverflowMenuItem>
+      ),
+      canCurateMetadata && onSplitItem && (
+        <DetailOverflowMenuItem key="split" closeMenu={closeOverflowMenu} onAction={onSplitItem}>
+          <Scissors className="size-4" />
+          Split Versions
+        </DetailOverflowMenuItem>
+      ),
+    ],
+    [
+      canCurateMetadata && onShowMediaInfo && (
+        <DetailOverflowMenuItem
+          key="media-info"
+          closeMenu={closeOverflowMenu}
+          onAction={onShowMediaInfo}
+        >
+          <Info className="size-4" />
+          Media Info
+        </DetailOverflowMenuItem>
+      ),
+      isAdmin && contentId && (
+        <DetailOverflowMenuItem
+          key="play-history"
+          closeMenu={closeOverflowMenu}
+          onAction={() => navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)}
+        >
+          <MediaActionIcon action="viewPlayHistory" />
+          View Play History
+        </DetailOverflowMenuItem>
+      ),
+    ],
+  ];
+  const manageItems = manageGroups.flat().filter(Boolean);
+  // A single management action sits at the end of the menu instead of behind Manage.
+  const hasManagePanel = manageItems.length > 1;
+  const mainGroups = [
+    playbackItems,
+    libraryItems,
+    partyItems,
+    hasManagePanel
+      ? [
+          <DetailOverflowMenuItem key="manage" data-submenu-trigger="" onAction={openManagePanel}>
+            <Wrench className="size-4" />
+            Manage
+            <ChevronRight className="ml-auto size-4" />
+          </DetailOverflowMenuItem>,
+        ]
+      : manageItems,
+  ];
+  const hasMainMenuItems = mainGroups.some((group) => group.some(Boolean));
   const hasOverflowMenuItems =
-    hasOverflowActions ||
-    hasAdminActions ||
-    hasMetadataActions ||
-    Boolean(contentId && canAddToCollection) ||
-    (compactMobile && Boolean(onToggleFavorite || onRatingChange)) ||
-    Boolean(watchTogether);
+    hasMainMenuItems || (compactMobile && Boolean(onToggleFavorite || onRatingChange));
+  const showManagePanel = overflowPanel === "manage" && hasManagePanel;
 
   const formattedResumeTime = formatPlaybackTime(resumePositionSeconds ?? 0);
   const percentComplete =
@@ -778,226 +1040,49 @@ export default function ActionBar({
               role="menu"
               onKeyDown={handleOverflowKeyDown}
             >
-              {compactMobile && (
-                <div className="detail-mobile-menu-actions">
-                  {onToggleFavorite && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={onToggleFavorite}
-                    >
-                      <Heart className="size-4" />
-                      {isFavorite ? "Remove from favorites" : "Add to favorites"}
-                    </DetailOverflowMenuItem>
-                  )}
-                  {onRatingChange && (
-                    <div className="px-2 py-2" role="group" aria-label="Your rating">
-                      <span className="mb-2 block text-sm">Your rating</span>
-                      {/* ArrowUp/ArrowDown keep moving through the menu; only
-                          ArrowLeft/ArrowRight change the rating here. */}
-                      <StarRating
-                        value={rating ?? null}
-                        onChange={onRatingChange}
-                        size={18}
-                        verticalArrows={false}
-                      />
+              {showManagePanel ? (
+                <>
+                  <DetailOverflowMenuItem
+                    aria-label="Back"
+                    className="font-medium"
+                    onAction={closeManagePanel}
+                  >
+                    <ChevronLeft className="size-4" />
+                    Manage
+                  </DetailOverflowMenuItem>
+                  <DetailOverflowSeparator />
+                  <DetailOverflowGroups groups={manageGroups} />
+                </>
+              ) : (
+                <>
+                  {compactMobile && (
+                    <div className="detail-mobile-menu-actions">
+                      {onToggleFavorite && (
+                        <DetailOverflowMenuItem
+                          closeMenu={closeOverflowMenu}
+                          onAction={onToggleFavorite}
+                        >
+                          <Heart className="size-4" />
+                          {isFavorite ? "Remove from favorites" : "Add to favorites"}
+                        </DetailOverflowMenuItem>
+                      )}
+                      {onRatingChange && (
+                        <div className="px-2 py-2" role="group" aria-label="Your rating">
+                          <span className="mb-2 block text-sm">Your rating</span>
+                          {/* ArrowUp/ArrowDown keep moving through the menu; only
+                              ArrowLeft/ArrowRight change the rating here. */}
+                          <StarRating
+                            value={rating ?? null}
+                            onChange={onRatingChange}
+                            size={18}
+                            verticalArrows={false}
+                          />
+                        </div>
+                      )}
+                      {hasMainMenuItems && <DetailOverflowSeparator />}
                     </div>
                   )}
-                </div>
-              )}
-              {onShuffle && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onShuffle}>
-                  <Shuffle className="size-4" />
-                  Shuffle
-                </DetailOverflowMenuItem>
-              )}
-              {restartHref && (
-                <DetailOverflowMenuItem
-                  closeMenu={closeOverflowMenu}
-                  onAction={handleRestartPlayback}
-                >
-                  <RotateCcw className="size-4" />
-                  Play from Beginning
-                </DetailOverflowMenuItem>
-              )}
-              {onResetProgress && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onResetProgress}>
-                  <TimerReset className="size-4" />
-                  Reset Progress
-                </DetailOverflowMenuItem>
-              )}
-              {onToggleWatchlist && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onToggleWatchlist}>
-                  {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
-                  {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
-                </DetailOverflowMenuItem>
-              )}
-              {onToggleNotInterested && (
-                <DetailOverflowMenuItem
-                  closeMenu={closeOverflowMenu}
-                  onAction={onToggleNotInterested}
-                >
-                  <ThumbsDown className={cn("size-4", notInterested && "fill-current")} />
-                  {notInterested ? "Show in Recommendations" : "Not Interested"}
-                </DetailOverflowMenuItem>
-              )}
-              {contentId && canAddToCollection && (
-                <DetailOverflowMenuItem
-                  closeMenu={closeOverflowMenu}
-                  onAction={() => setAddToCollectionOpen(true)}
-                >
-                  <FolderPlus className="size-4" />
-                  Add to Collection
-                </DetailOverflowMenuItem>
-              )}
-              {onDownload && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onDownload}>
-                  <Download className="size-4" />
-                  Download
-                </DetailOverflowMenuItem>
-              )}
-              {onSearchSubtitles && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onSearchSubtitles}>
-                  <Captions className="size-4" />
-                  Add Subtitles
-                </DetailOverflowMenuItem>
-              )}
-              {onRequestSeasons && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onRequestSeasons}>
-                  <Inbox className="size-4" />
-                  Request Seasons
-                </DetailOverflowMenuItem>
-              )}
-              {watchTogether && (
-                <>
-                  <div role="separator" className="bg-border -mx-1 my-1 h-px" />
-                  <div
-                    role="presentation"
-                    className="text-muted-foreground flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-[0.625rem] font-semibold tracking-[0.16em] uppercase"
-                  >
-                    {watchTogether.liveRoom ? (
-                      <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-400" />
-                    ) : null}
-                    Watch Together
-                    {watchTogether.liveRoom ? ` · ${watchTogether.liveRoom.code} is live` : ""}
-                  </div>
-                  <DetailOverflowMenuItem
-                    closeMenu={closeOverflowMenu}
-                    onAction={watchTogether.onStartParty}
-                  >
-                    <UsersRound className="size-4" />
-                    Start a party with this
-                  </DetailOverflowMenuItem>
-                  {watchTogether.liveRoom && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={watchTogether.liveRoom.onSuggest}
-                    >
-                      <Hand className="size-4" />
-                      Suggest to {watchTogether.liveRoom.code}
-                    </DetailOverflowMenuItem>
-                  )}
-                  {watchTogether.liveRoom?.onPlay && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={watchTogether.liveRoom.onPlay}
-                    >
-                      <Zap className="size-4" />
-                      Play in {watchTogether.liveRoom.code}
-                    </DetailOverflowMenuItem>
-                  )}
-                </>
-              )}
-              {(hasAdminActions || hasMetadataActions) && (
-                <>
-                  {hasOverflowActions && (
-                    <div role="separator" className="bg-border -mx-1 my-1 h-px" />
-                  )}
-                  {canCurateMetadata && onShowMediaInfo && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={onShowMediaInfo}
-                    >
-                      <Info className="size-4" />
-                      Media Info
-                    </DetailOverflowMenuItem>
-                  )}
-                  {isAdmin && contentId && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={() =>
-                        navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)
-                      }
-                    >
-                      <MediaActionIcon action="viewPlayHistory" />
-                      View Play History
-                    </DetailOverflowMenuItem>
-                  )}
-                  {canCurateMetadata && onRefresh && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      disabled={isRefreshing}
-                      onAction={() => {
-                        setRefreshDialogOpen(true);
-                      }}
-                    >
-                      <MediaActionIcon action="refreshMetadata" isPending={isRefreshing} />
-                      Refresh Metadata
-                    </DetailOverflowMenuItem>
-                  )}
-                  {isAdmin && onRedetectMarkers && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      disabled={isRedetectingMarkers}
-                      onAction={() =>
-                        redetectKind ? onRedetectMarkers(redetectKind) : setRedetectDialogOpen(true)
-                      }
-                    >
-                      <RefreshCw
-                        className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`}
-                      />
-                      {redetectKind === "credits"
-                        ? "Re-detect Credits"
-                        : redetectKind === "intro"
-                          ? "Re-detect Intro Markers"
-                          : "Re-detect Markers"}
-                    </DetailOverflowMenuItem>
-                  )}
-                  {showTrickplay && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={() => setTrickplayOpen(true)}
-                    >
-                      <GalleryHorizontal className="size-4" />
-                      Seek Previews
-                    </DetailOverflowMenuItem>
-                  )}
-                  {canCurateMetadata && onEditMetadata && (
-                    <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onEditMetadata}>
-                      <MediaActionIcon action="editMetadata" />
-                      Edit Metadata
-                    </DetailOverflowMenuItem>
-                  )}
-                  {showMarkerEditor && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={() => setMarkerEditorOpen(true)}
-                    >
-                      <Tags className="size-4" />
-                      Edit Markers
-                    </DetailOverflowMenuItem>
-                  )}
-                  {canCurateMetadata && onMatchItem && (
-                    <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onMatchItem}>
-                      <MediaActionIcon action="matchItem" />
-                      Match Item
-                    </DetailOverflowMenuItem>
-                  )}
-                  {canCurateMetadata && onSplitItem && (
-                    <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onSplitItem}>
-                      <Scissors className="size-4" />
-                      Split Versions
-                    </DetailOverflowMenuItem>
-                  )}
+                  <DetailOverflowGroups groups={mainGroups} />
                 </>
               )}
             </div>,
@@ -1108,6 +1193,7 @@ export default function ActionBar({
               onSelectSubtitle={onSelectSubtitle}
               onSelectSubtitleOff={onSelectSubtitleOff}
               onResetSelection={onResetSubtitleSelection}
+              onSearchSubtitles={onSearchSubtitles}
             />
           )}
         </div>
