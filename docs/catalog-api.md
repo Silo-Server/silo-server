@@ -418,6 +418,12 @@ previous episode; with `ui.next_up_new_releases_first` on, it is when the next
 episode was released to the server if that came later. With `separate`, the row holds only in-progress cards and
 Next Up is its own row.
 
+The server inserts that Next Up row (`system-next-up`, type `next_up`) after
+Continue Watching; it is the only one. The recipe gallery does not list
+`next_up`, and creating an admin row of that type, changing a row to it, or
+adding it to a profile's page fails validation. A profile can still save a
+`next_up` row it already has, such as one brought in by a bridge import.
+
 ## Bridge note
 
 The alpha `/api/v1` surface exposes the same saved-sort and capability features at

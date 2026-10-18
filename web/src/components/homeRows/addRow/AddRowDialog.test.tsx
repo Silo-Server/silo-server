@@ -169,7 +169,7 @@ describe("Add row picker", () => {
     expect(tablist).toHaveAttribute("aria-orientation", "vertical");
     const tabs = within(tablist).getAllByRole("tab");
     expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Keep watching5 kinds",
+      "Keep watching4 kinds",
       "What's new4 kinds",
       "Popular4 kinds",
       "Picked for you4 kinds",

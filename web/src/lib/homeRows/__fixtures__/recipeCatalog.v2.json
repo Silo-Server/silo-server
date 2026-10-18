@@ -335,23 +335,6 @@
           "admin_only": false
         },
         {
-          "type": "next_up",
-          "category": "library_staples",
-          "presets": [
-            {
-              "key": "next_up_default",
-              "display_name": "On Deck",
-              "icon": "📺",
-              "description_short": "Next episodes ready to watch.",
-              "description_long": "",
-              "default_params": {}
-            }
-          ],
-          "avoid_duplicates": false,
-          "supports_rotation": false,
-          "admin_only": false
-        },
-        {
           "type": "random",
           "category": "library_staples",
           "presets": [

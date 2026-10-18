@@ -842,6 +842,20 @@ func adminOnlyRecipeError() *APIError {
 	return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
 }
 
+// refusesNewRow reports a section type no admin or profile may add a row of.
+// The only next_up row is the one maybeInjectNextUp inserts when a profile's
+// ui.next_up_mode is separate: an added copy showed nothing in the combined
+// mode, where Continue Watching carries next episodes, and repeated that row
+// in the separate mode. A profile may keep saving one it already has, which
+// a bridge import can bring in after 20261018213122_retire_next_up_rows.sql.
+func refusesNewRow(sectionType string) bool {
+	return sectionType == string(sections.SectionNextUp)
+}
+
+func newRowRefusedError(sectionType string) *APIError {
+	return apiError(http.StatusBadRequest, "bad_request", sectionType+" rows cannot be added; Next Up shows as its own row when ui.next_up_mode is separate")
+}
+
 // userAddedRecipe is the recipe a stored user-added override runs, read the
 // way the resolver reads it.
 func userAddedRecipe(o userstore.SectionOverride) string {
@@ -876,6 +890,8 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 	// ID -> recipe of the admin-only sections a non-admin sends; each must
 	// already be saved on this page with the same recipe.
 	keptAdminOnly := make(map[string]string)
+	// The same for the sections of a type no one may add (refusesNewRow).
+	keptRefused := make(map[string]string)
 
 	type trendingCandidate struct {
 		id     string
@@ -956,6 +972,12 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 			}
 			keptAdminOnly[o.ID] = recipeType
 		}
+		if refusesNewRow(recipeType) {
+			if o.ID == "" {
+				return newRowRefusedError(recipeType)
+			}
+			keptRefused[o.ID] = recipeType
+		}
 		// Validate whichever config the resolver will actually use.
 		cfg := o.UserConfig
 		if len(cfg) == 0 {
@@ -991,6 +1013,12 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		old, ok := existingByID[id]
 		if !ok || old.SectionID != "" || userAddedRecipe(old) != recipeType {
 			return adminOnlyRecipeError()
+		}
+	}
+	for id, recipeType := range keptRefused {
+		old, ok := existingByID[id]
+		if !ok || old.SectionID != "" || userAddedRecipe(old) != recipeType {
+			return newRowRefusedError(recipeType)
 		}
 	}
 	refreshConfigsByKey := make(map[string]json.RawMessage, len(refreshCandidates))

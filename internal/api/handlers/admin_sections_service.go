@@ -74,6 +74,9 @@ func (h *SectionHandler) CreateAdminSection(ctx context.Context, req AdminSectio
 	if !sections.ValidSectionTypes[sections.SectionType(req.SectionType)] {
 		return none, apiError(http.StatusBadRequest, "bad_request", "Invalid section_type")
 	}
+	if refusesNewRow(req.SectionType) {
+		return none, newRowRefusedError(req.SectionType)
+	}
 
 	scope := req.Scope
 	if scope == "" {
@@ -204,6 +207,9 @@ func (h *SectionBulkHandler) BulkCreateAdminSections(ctx context.Context, req Ad
 	rec, ok := recipes.Get(req.SectionType)
 	if !ok {
 		return none, apiError(http.StatusBadRequest, "bad_request", "unknown section_type")
+	}
+	if refusesNewRow(req.SectionType) {
+		return none, newRowRefusedError(req.SectionType)
 	}
 	if err := rec.Validate(req.Config); err != nil {
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
@@ -462,6 +468,9 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		}
 		if !sections.ValidSectionTypes[existing.SectionType] {
 			return none, apiError(400, "bad_request", "Invalid section_type")
+		}
+		if existing.SectionType != originalType && refusesNewRow(string(existing.SectionType)) {
+			return none, newRowRefusedError(string(existing.SectionType))
 		}
 		if msg, ok := validateSectionScope(existing.Scope, existing.LibraryID); !ok {
 			return none, apiError(400, "bad_request", msg)
