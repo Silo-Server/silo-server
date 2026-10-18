@@ -111,7 +111,7 @@ export class BufferingQualityController {
     if (this.plan && summary) this.onSummary?.(this.plan, { ...summary });
   }
   stop(now: number) {
-    this.tick(now);
+    this.tick(now, false);
     this.flush(now);
     this.plan = undefined;
   }
@@ -249,7 +249,7 @@ export class BufferingQualityController {
     }
     if (event.type === "playing") this.check(now);
   }
-  tick(now: number) {
+  tick(now: number, evaluate = true) {
     const previousTick = this.lastTick;
     const elapsed = Math.max(0, now - this.lastTick);
     this.lastTick = now;
@@ -274,6 +274,7 @@ export class BufferingQualityController {
       (previousTick < this.blockedUntil && now >= this.blockedUntil) ||
       (previousTick < this.offeredAt + 120_000 && now >= this.offeredAt + 120_000);
     if (
+      evaluate &&
       this.waiting &&
       ((this.stall !== undefined && now - this.stall >= 6_000) || suppressionEnded)
     )

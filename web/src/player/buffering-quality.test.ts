@@ -34,3 +34,24 @@ describe("buffering-quality wire vectors", () => {
         }
     });
 });
+
+it("does not request a new plan while stopping at the stall deadline", () => {
+  const outputs: unknown[] = [];
+  const c = new BufferingQualityController("always", (output) => outputs.push(output), 0);
+  c.event(
+    {
+      type: "plan_adopted",
+      plan: {
+        plan_id: "stop",
+        quality: "auto",
+        delivered_kbps: 63000,
+        available_qualities: [{ label: "1080p", bitrate_kbps: 10000 }],
+      },
+    },
+    0,
+  );
+  c.event({ type: "playing" }, 0);
+  c.event({ type: "waiting" }, 20000);
+  c.stop(26000);
+  expect(outputs).toEqual([]);
+});
