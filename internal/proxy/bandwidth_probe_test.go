@@ -54,7 +54,7 @@ func TestBandwidthProbeReapsAStalledReader(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer func() { _ = conn.Close() }()
+		t.Cleanup(func() { _ = conn.Close() })
 		if _, err := fmt.Fprintf(conn, "GET /stream/bandwidth-probe/%s?size=%d HTTP/1.1\r\nHost: proxy\r\n\r\n", token, bandwidthprobe.MaxSize); err != nil {
 			t.Fatal(err)
 		}
@@ -75,6 +75,7 @@ func TestBandwidthProbeReapsAStalledReader(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("last probe status %d, refused while stalled: %v; the stalled probes never released their slots", status, sawRefusal)
 		}
+		//nolint:forbidigo // polls the endpoint's answer until the write deadline reaps the stalled readers
 		time.Sleep(50 * time.Millisecond)
 	}
 }
