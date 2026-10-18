@@ -94,8 +94,12 @@ function isMDBListList(value: string): boolean {
   try {
     const url = new URL(value.trim());
     const host = url.hostname.toLowerCase().replace(/\.$/, "");
+    // The same rules as the server's ValidateMDBListURL.
     return (
       (url.protocol === "https:" || url.protocol === "http:") &&
+      url.username === "" &&
+      url.password === "" &&
+      (url.port === "" || url.port === "80" || url.port === "443") &&
       (host === "mdblist.com" || host === "www.mdblist.com") &&
       url.pathname.startsWith("/lists/")
     );
