@@ -1978,7 +1978,8 @@ connection is the trusted network-access provider, `local` for a private or
 loopback client, or an HMAC of the public IPv4 address or IPv6 /64 keyed by
 the server secret. Raw public addresses are never stored. Rows are deleted 30
 days after their last update and when the device's last registration is
-deleted.
+deleted. With the legacy SQLite user store, forgetting a device does not reach
+these rows, and only the 30-day retention removes them.
 
 Only a start or replan that the client sent with
 `bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
