@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -26,30 +25,48 @@ const (
 	labelLocal  = "local"
 )
 
-const TTL = 7 * 24 * time.Hour
+const (
+	// TTL is how long a learned limit applies after its latest observation.
+	TTL = 7 * 24 * time.Hour
+	// Retention is how long a row survives without an update.
+	Retention = 30 * 24 * time.Hour
+)
 
+// Limit is a learned limit: the step-down estimate a buffering client last
+// reported for one device on one connection.
 type Limit struct {
 	Kbps       int       `json:"kbps"`
 	ObservedAt time.Time `json:"observed_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 }
+
+// Probe is the latest connection speed test a device reported.
 type Probe struct {
 	Kbps       int       `json:"kbps"`
 	MeasuredAt time.Time `json:"measured_at"`
 	Transport  string    `json:"transport"`
 }
+
+// ProbeResult is one reported speed test, bounded by the API before it
+// reaches the store.
 type ProbeResult struct {
 	Kbps       int    `json:"kbps"`
 	Bytes      int64  `json:"bytes"`
 	DurationMS int    `json:"duration_ms"`
 	Transport  string `json:"transport"`
 }
+
+// State is what the calling device sees for the connection it is using now.
 type State struct {
 	Probe          *Probe `json:"probe,omitempty"`
 	AutoBudgetKbps *int   `json:"auto_budget_kbps,omitempty"`
 	Connection     string `json:"connection"`
 	LearnedLimit   *Limit `json:"learned_limit"`
 }
+
+// Store reads and writes playback_connections. Every method on a nil Store,
+// and every per-device method without a device or connection key, does
+// nothing: a request with no device identity neither learns nor applies.
 type Store struct{ Pool *pgxpool.Pool }
 
 // Key never retains a public address. IPv6 rotations within a /64 share a key.
@@ -78,48 +95,60 @@ func Key(ctx context.Context, secret string) (key, label string) {
 	mac.Write(ip)
 	return "remote:" + hex.EncodeToString(mac.Sum(nil)), labelRemote
 }
+
+// Get returns the unexpired learned limit for a device on a connection.
 func (s *Store) Get(ctx context.Context, user int, device, key string) (*Limit, error) {
 	if s == nil || device == "" || key == "" {
 		return nil, nil
 	}
 	var limit Limit
-	err := s.Pool.QueryRow(ctx, `SELECT limit_kbps, observed_at, observed_at + interval '7 days' FROM playback_connections WHERE user_id=$1 AND device_id=$2 AND connection_key=$3 AND observed_at > now()-interval '7 days'`, user, device, key).Scan(&limit.Kbps, &limit.ObservedAt, &limit.ExpiresAt)
+	err := s.Pool.QueryRow(ctx, `
+		SELECT limit_kbps, observed_at, observed_at + $4::interval
+		FROM playback_connections
+		WHERE user_id = $1 AND device_id = $2 AND connection_key = $3
+		  AND observed_at > now() - $4::interval`,
+		user, device, key, TTL).Scan(&limit.Kbps, &limit.ObservedAt, &limit.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return &limit, err
 }
+
+// Observe records a learned limit, replacing any earlier one and restarting
+// its TTL.
 func (s *Store) Observe(ctx context.Context, user int, device, key string, kbps int) error {
 	if s == nil || device == "" || key == "" {
 		return nil
 	}
-	_, err := s.Pool.Exec(ctx, `INSERT INTO playback_connections(user_id,device_id,connection_key,limit_kbps,observed_at,updated_at) VALUES($1,$2,$3,$4,now(),now()) ON CONFLICT(user_id,device_id,connection_key) DO UPDATE SET limit_kbps=EXCLUDED.limit_kbps,observed_at=now(),updated_at=now()`, user, device, key, kbps)
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO playback_connections (user_id, device_id, connection_key, limit_kbps, observed_at, updated_at)
+		VALUES ($1, $2, $3, $4, now(), now())
+		ON CONFLICT (user_id, device_id, connection_key) DO UPDATE
+		SET limit_kbps = EXCLUDED.limit_kbps, observed_at = now(), updated_at = now()`,
+		user, device, key, kbps)
 	return err
 }
+
+// Clear removes a learned limit and keeps the probe and plan summary.
 func (s *Store) Clear(ctx context.Context, user int, device, key string) error {
 	if s == nil || device == "" || key == "" {
 		return nil
 	}
-	_, err := s.Pool.Exec(ctx, `UPDATE playback_connections SET limit_kbps=NULL, observed_at=NULL, updated_at=now() WHERE user_id=$1 AND device_id=$2 AND connection_key=$3`, user, device, key)
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE playback_connections
+		SET limit_kbps = NULL, observed_at = NULL, updated_at = now()
+		WHERE user_id = $1 AND device_id = $2 AND connection_key = $3`,
+		user, device, key)
 	return err
 }
+
+// Cleanup deletes rows that have not been updated within Retention.
 func (s *Store) Cleanup(ctx context.Context) error {
-	_, err := s.Pool.Exec(ctx, `DELETE FROM playback_connections WHERE updated_at < now()-interval '30 days'`)
-	return err
-}
-func (s *Store) RunCleanup(ctx context.Context) {
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
-	for {
-		if err := s.Cleanup(ctx); err != nil && ctx.Err() == nil {
-			slog.WarnContext(ctx, "playback connection retention failed", "error", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
+	if s == nil {
+		return nil
 	}
+	_, err := s.Pool.Exec(ctx, `DELETE FROM playback_connections WHERE updated_at < now() - $1::interval`, Retention)
+	return err
 }
 
 // Budget uses the same margin as Auto. A missing measurement is not a zero-speed link.
@@ -140,26 +169,41 @@ func Budget(probe *Probe, limit *Limit, capKbps int) *int {
 	}
 	return &kbps
 }
+
+// ReportProbe stores a device's latest speed test on a connection.
 func (s *Store) ReportProbe(ctx context.Context, user int, device, key string, result ProbeResult) error {
 	if s == nil || device == "" || key == "" {
 		return nil
 	}
-	_, err := s.Pool.Exec(ctx, `INSERT INTO playback_connections(user_id,device_id,connection_key,probe_kbps,probe_bytes,probe_duration_ms,probe_transport,measured_at,updated_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,now(),now()) ON CONFLICT(user_id,device_id,connection_key) DO UPDATE SET probe_kbps=$4,probe_bytes=$5,probe_duration_ms=$6,probe_transport=$7,measured_at=now(),updated_at=now()`, user, device, key, result.Kbps, result.Bytes, result.DurationMS, result.Transport)
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO playback_connections (user_id, device_id, connection_key, probe_kbps, probe_bytes, probe_duration_ms, probe_transport, measured_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+		ON CONFLICT (user_id, device_id, connection_key) DO UPDATE
+		SET probe_kbps = $4, probe_bytes = $5, probe_duration_ms = $6, probe_transport = $7, measured_at = now(), updated_at = now()`,
+		user, device, key, result.Kbps, result.Bytes, result.DurationMS, result.Transport)
 	return err
 }
+
+// Probe returns the latest speed test a device reported on a connection.
 func (s *Store) Probe(ctx context.Context, user int, device, key string) (*Probe, error) {
 	if s == nil || device == "" || key == "" {
 		return nil, nil
 	}
 	var p Probe
-	err := s.Pool.QueryRow(ctx, `SELECT probe_kbps,measured_at,probe_transport FROM playback_connections WHERE user_id=$1 AND device_id=$2 AND connection_key=$3 AND measured_at IS NOT NULL AND updated_at > now()-interval '30 days'`, user, device, key).Scan(&p.Kbps, &p.MeasuredAt, &p.Transport)
+	err := s.Pool.QueryRow(ctx, `
+		SELECT probe_kbps, measured_at, probe_transport
+		FROM playback_connections
+		WHERE user_id = $1 AND device_id = $2 AND connection_key = $3
+		  AND measured_at IS NOT NULL AND updated_at > now() - $4::interval`,
+		user, device, key, Retention).Scan(&p.Kbps, &p.MeasuredAt, &p.Transport)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return &p, err
 }
 
+// AdminConnection is one connection a device used, as the admin device page
+// shows it. ID is the opaque connection key the admin reset addresses.
 type AdminConnection struct {
 	ID           string       `json:"id"`
 	Connection   string       `json:"connection"`
@@ -168,45 +212,58 @@ type AdminConnection struct {
 	PlanSummary  *PlanSummary `json:"plan_summary"`
 }
 
+// List returns a device's retained connections, most recently updated first.
 func (s *Store) List(ctx context.Context, user int, device string) ([]AdminConnection, error) {
 	result := []AdminConnection{}
 	if s == nil {
 		return result, nil
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT connection_key,probe_kbps,measured_at,probe_transport,limit_kbps,observed_at,plan_summary FROM playback_connections WHERE user_id=$1 AND device_id=$2 AND updated_at > now()-interval '30 days' ORDER BY updated_at DESC`, user, device)
+	rows, err := s.Pool.Query(ctx, `
+		SELECT connection_key, probe_kbps, measured_at, probe_transport,
+		       CASE WHEN observed_at > now() - $3::interval THEN limit_kbps END,
+		       CASE WHEN observed_at > now() - $3::interval THEN observed_at END,
+		       plan_summary
+		FROM playback_connections
+		WHERE user_id = $1 AND device_id = $2 AND updated_at > now() - $4::interval
+		ORDER BY updated_at DESC`,
+		user, device, TTL, Retention)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var r AdminConnection
-		var pk, lk *int
+		var probeKbps, limitKbps *int
 		var measured, observed *time.Time
 		var transport *string
-		if err := rows.Scan(&r.ID, &pk, &measured, &transport, &lk, &observed, &r.PlanSummary); err != nil {
+		if err := rows.Scan(&r.ID, &probeKbps, &measured, &transport, &limitKbps, &observed, &r.PlanSummary); err != nil {
 			return nil, err
 		}
 		r.Connection = r.ID
-		if strings.HasPrefix(r.ID, "remote:") {
-			r.Connection = "remote"
+		if strings.HasPrefix(r.ID, labelRemote+":") {
+			r.Connection = labelRemote
 		}
-		if pk != nil && measured != nil && transport != nil {
-			r.Probe = &Probe{*pk, *measured, *transport}
+		if probeKbps != nil && measured != nil && transport != nil {
+			r.Probe = &Probe{Kbps: *probeKbps, MeasuredAt: *measured, Transport: *transport}
 		}
-		if lk != nil && observed != nil && time.Since(*observed) < TTL {
-			r.LearnedLimit = &Limit{*lk, *observed, observed.Add(TTL)}
+		if limitKbps != nil && observed != nil {
+			r.LearnedLimit = &Limit{Kbps: *limitKbps, ObservedAt: *observed, ExpiresAt: observed.Add(TTL)}
 		}
 		result = append(result, r)
 	}
 	return result, rows.Err()
 }
 
+// PlanSummary is the latest plan_summary route event a device reported on a
+// connection, with the server's receipt time.
 type PlanSummary struct {
 	PlanID      string            `json:"plan_id"`
 	ReportedAt  time.Time         `json:"reported_at"`
 	Diagnostics map[string]string `json:"diagnostics"`
 }
 
+// ReportSummary keeps the newest plan summary; an older one that arrives late
+// does not replace it.
 func (s *Store) ReportSummary(ctx context.Context, user int, device, key string, summary PlanSummary) error {
 	if s == nil || device == "" || key == "" {
 		return nil
@@ -215,7 +272,12 @@ func (s *Store) ReportSummary(ctx context.Context, user int, device, key string,
 	if err != nil {
 		return err
 	}
-	_, err = s.Pool.Exec(ctx, `INSERT INTO playback_connections(user_id,device_id,connection_key,plan_summary,summary_at,updated_at)
- VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(user_id,device_id,connection_key) DO UPDATE SET plan_summary=$4,summary_at=$5,updated_at=now() WHERE playback_connections.summary_at IS NULL OR playback_connections.summary_at <= $5`, user, device, key, body, summary.ReportedAt)
+	_, err = s.Pool.Exec(ctx, `
+		INSERT INTO playback_connections (user_id, device_id, connection_key, plan_summary, summary_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, now())
+		ON CONFLICT (user_id, device_id, connection_key) DO UPDATE
+		SET plan_summary = $4, summary_at = $5, updated_at = now()
+		WHERE playback_connections.summary_at IS NULL OR playback_connections.summary_at <= $5`,
+		user, device, key, body, summary.ReportedAt)
 	return err
 }

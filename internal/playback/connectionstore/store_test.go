@@ -151,6 +151,10 @@ func checkResetPreservesObservations(t *testing.T, s *Store, user int) {
 	if err := s.ReportSummary(ctx, user, "device", "local", PlanSummary{PlanID: "plan-1", ReportedAt: time.Now(), Diagnostics: map[string]string{"stall_count": "2"}}); err != nil {
 		t.Fatal(err)
 	}
+	rows, err := s.List(ctx, user, "device")
+	if err != nil || len(rows) != 1 || rows[0].LearnedLimit == nil || rows[0].LearnedLimit.Kbps != 44100 || rows[0].LearnedLimit.ExpiresAt.Sub(rows[0].LearnedLimit.ObservedAt) != TTL {
+		t.Fatalf("admin view lost the limit: %+v %v", rows, err)
+	}
 	if err := s.Clear(ctx, user, "device", "local"); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +162,7 @@ func checkResetPreservesObservations(t *testing.T, s *Store, user int) {
 	if err != nil || limit != nil {
 		t.Fatal("reset failed")
 	}
-	rows, err := s.List(ctx, user, "device")
+	rows, err = s.List(ctx, user, "device")
 	if err != nil || len(rows) != 1 || rows[0].LearnedLimit != nil || rows[0].Probe == nil || rows[0].Probe.Kbps != 48000 || rows[0].PlanSummary == nil {
 		t.Fatalf("reset lost observations: %+v %v", rows, err)
 	}

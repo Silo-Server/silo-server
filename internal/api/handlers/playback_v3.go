@@ -6461,8 +6461,9 @@ func terminalStartRouteEventV3(event playback.RouteEventV3) bool {
 		event.PlanAttemptID == "" && event.PlanAttemptKey == ""
 }
 
-// StartV3Maintenance expires cached signed responses and old telemetry on the
-// application lifecycle rather than on latency-sensitive playback requests.
+// StartV3Maintenance expires cached signed responses, old telemetry and
+// connection observations past their retention on the application lifecycle
+// rather than on latency-sensitive playback requests.
 func (h *PlaybackHandler) StartV3Maintenance(ctx context.Context) {
 	if h == nil || h.PlanStoreV3 == nil || ctx == nil {
 		return
@@ -6478,6 +6479,9 @@ func (h *PlaybackHandler) StartV3Maintenance(ctx context.Context) {
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				if _, err := h.PlanStoreV3.CleanupExpired(cleanupCtx, now); err != nil {
 					slog.Warn("playback v3 cleanup failed", "error", err)
+				}
+				if err := h.Connections.Cleanup(cleanupCtx); err != nil {
+					slog.WarnContext(cleanupCtx, "playback connection retention failed", "error", err)
 				}
 				cancel()
 			}
@@ -6548,9 +6552,10 @@ func (h *PlaybackHandler) enqueueRouteEventV3(event playback.RouteEventRecordV3)
 }
 
 // recordRouteEventV3 writes one queued route event and feeds the metrics
-// derived from it. Only a newly inserted row is observed: a v2 retry after a
-// lost 202 reuses its event_id and must not be counted twice.
-func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRecordV3, connections ...*connectionstore.Store) {
+// derived from it; a plan summary also becomes its connection's latest. Only a
+// newly inserted row is observed: a v2 retry after a lost 202 reuses its
+// event_id and must not be counted twice.
+func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRecordV3, connections *connectionstore.Store) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	inserted, err := store.RecordRouteEvent(ctx, event)
@@ -6560,9 +6565,9 @@ func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRec
 	}
 	if inserted {
 		playback.ObserveStoredRouteEvent(event)
-		if event.Event == playback.RouteEventPlanSummaryV3 && len(connections) > 0 {
+		if event.Event == playback.RouteEventPlanSummaryV3 {
 			summary := connectionstore.PlanSummary{PlanID: event.PlanID, ReportedAt: event.ReceivedAt, Diagnostics: event.Diagnostics}
-			if err := connections[0].ReportSummary(ctx, event.UserID, event.ConnectionDeviceID, event.ConnectionKey, summary); err != nil {
+			if err := connections.ReportSummary(ctx, event.UserID, event.ConnectionDeviceID, event.ConnectionKey, summary); err != nil {
 				slog.Warn("playback connection summary write failed", "error", err)
 			}
 		}
