@@ -263,7 +263,11 @@ interface VideoPlayerProps {
    * server to leave alone.
    */
   introSkipMode?: IntroSkipMode | null;
-  bufferingMode?: BufferingMode;
+  /**
+   * null means the connected server's answer is not in yet. The controller
+   * then only watches, as in `never`, rather than lower quality on a guess.
+   */
+  bufferingMode?: BufferingMode | null;
   onBufferingSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
@@ -4162,7 +4166,7 @@ export function VideoPlayer({
     planRevision,
     enabled: !watchTogetherRoomActive,
     sessionId: bufferingTitleId ?? sessionId,
-    mode: bufferingMode,
+    mode: bufferingMode ?? "never",
     plan: bufferingPlan,
     obscured: higherPriorityPillActive,
     transportTrouble: () =>

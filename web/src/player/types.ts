@@ -3,6 +3,8 @@
  * Zero imports from app-specific code.
  */
 
+import type { BufferingMode } from "./buffering-quality";
+
 /** Subtitle display mode. */
 export type SubtitleMode = "off" | "auto" | "always";
 
@@ -295,7 +297,8 @@ export interface WatchPageProps {
   intro: PlayerTimeRange | null;
   /** null while the connected server's answer is still unknown; see VideoPlayer. */
   introSkipMode?: IntroSkipMode | null;
-  bufferingMode?: import("./buffering-quality").BufferingMode;
+  /** null while the connected server's answer is still unknown; see VideoPlayer. */
+  bufferingMode?: BufferingMode | null;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;

@@ -396,7 +396,8 @@ export function usePlaybackSession(
   initialSubtitleTrackIndexByFileId?: Record<number, number>,
   initialBitmapSubtitleTrackIndexByFileId?: Record<number, number>,
   allowAlternateVersions = true,
-  bufferingMode: BufferingMode = "always",
+  /** null while unknown; only a known `never` keeps learned limits out. */
+  bufferingMode: BufferingMode | null = "always",
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
   const probe = useCodecDetection();

@@ -46,6 +46,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
+import type { BufferingMode } from "@/player/buffering-quality";
 import type {
   EpisodeRef,
   IntroSkipMode,
@@ -609,14 +610,15 @@ function WatchPlaybackHostContent() {
   // consulted, so a recap or preview override an admin (or the user) set on a
   // device silently did nothing. One batched read costs no more than the single
   // key did and makes all three behave as the contract says they do.
+  const supportsBufferingQualityMode =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
+    );
   const { data: effectivePlaybackSettings } = useEffectiveSettings({
     keys: [
-      ...(settingsCapabilitiesSupportKey(
-        settingsCapabilities.data,
-        SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
-      )
-        ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]
-        : []),
+      ...(supportsBufferingQualityMode ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
@@ -1151,6 +1153,17 @@ function WatchPlaybackHostContent() {
     if (legacy === undefined) return watchPageProps.introSkipMode ?? null;
     return legacy ? "always" : "ask";
   })();
+  // null until known, like introSkipMode: a guess of `never` would keep a
+  // learned limit out of the start, and a guess of `always` could lower
+  // quality for a viewer who turned that off. A server without the setting
+  // keeps the automatic lowering it always had.
+  const bufferingMode: BufferingMode | null = supportsBufferingQualityMode
+    ? ((effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
+        | BufferingMode
+        | undefined) ?? null)
+    : capabilitiesKnown
+      ? "always"
+      : null;
   const autoSkipRecap = resolvedBool(
     SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
     watchPageProps.autoSkipRecap,
@@ -1171,20 +1184,7 @@ function WatchPlaybackHostContent() {
           {...watchPageProps}
           maxBitrateKbps={maxBitrateKbps ?? null}
           introSkipMode={introSkipMode}
-          bufferingMode={
-            (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
-              | "never"
-              | "ask"
-              | "always"
-              | undefined) ??
-            (settingsCapabilities.data &&
-            !settingsCapabilitiesSupportKey(
-              settingsCapabilities.data,
-              SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
-            )
-              ? "always"
-              : "never")
-          }
+          bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}
           canEditMarkers={canEditMarkers}
