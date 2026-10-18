@@ -122,6 +122,7 @@ function playbackSession(
     switchAudioTrack: vi.fn(),
     changeSubtitleTrack: vi.fn(),
     changeQuality: vi.fn(),
+    setKeptEstimate: vi.fn(),
     recoverFromFailure: vi.fn(),
     recoverConnection: vi.fn(),
     retryConnection: vi.fn(),

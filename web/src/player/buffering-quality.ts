@@ -7,6 +7,11 @@
  * (useAutoQualityDownshift) feeds it media events and the wall clock and
  * carries out the replans and pills it emits. That keeps it replayable against
  * the shared conformance vectors, which every client runs unchanged.
+ *
+ * It also keeps the step-down estimate of the latest Auto lowering, which the
+ * client's own later Auto replans repeat so the plan stays lowered. The
+ * session sends those replans; the controller reports the estimate through
+ * `onKeptEstimate` and answers `client_replan` for the vectors.
  */
 export type BufferingMode = "never" | "ask" | "always";
 
@@ -23,6 +28,7 @@ export interface BufferingPlan {
   degradation_warnings?: string[];
 }
 
+/** A lowering, or Restore quality, which the adapter sends as a quality change. */
 export interface BufferingReplan {
   operation: "quality_change";
   quality_preference: string;
@@ -31,11 +37,26 @@ export interface BufferingReplan {
   learned_limit?: "clear";
 }
 
+/** Replans the client sends for its own reasons rather than the controller's. */
+export type ClientReplanOperation =
+  | "track_change"
+  | "seek_reanchor"
+  | "seek_failure_recovery"
+  | "failure_recovery"
+  | "output_change";
+
+/** A client replan as the vectors describe it: the kept estimate, without a source. */
+export interface ClientReplan {
+  operation: ClientReplanOperation;
+  quality_preference: string;
+  bandwidth_estimate_kbps?: number;
+}
+
 export type BufferingPill = "prompt" | "undo";
 export type BufferingNotice = "lowered" | "cant_lower";
 
 export type BufferingOutput =
-  | { type: "replan"; body: BufferingReplan }
+  | { type: "replan"; body: BufferingReplan | ClientReplan }
   | { type: "prompt_shown" | "undo_shown" }
   | { type: "notice"; key: BufferingNotice };
 
@@ -56,9 +77,13 @@ export interface BufferingEvent {
     | "transport_error_end"
     | "replan_failed"
     | "quality_changed"
+    | "new_attempt"
+    | "client_replan"
     | "pill_obscured"
     | "pill_unobscured";
   plan?: BufferingPlan;
+  /** The operation of a `client_replan`. */
+  operation?: ClientReplanOperation;
   /** Why a `waiting` began, when the player itself caused it. */
   cause?: "seek" | "pause" | "reload";
   /** Whether a `plan_adopted` answers this controller's own replan. */
@@ -158,12 +183,15 @@ export class BufferingQualityController {
   /** A pill waiting behind a higher-priority one, with its timer frozen. */
   private deferredPill: BufferingPill | null = null;
   private obscured = false;
+  /** The latest Auto lowering's step-down estimate, for this playback attempt. */
+  private keptEstimate?: number;
 
   constructor(
     public mode: BufferingMode,
     private emit: (output: BufferingOutput, at: number) => void,
     now: number,
     private onSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void,
+    private onKeptEstimate?: (kbps: number | undefined) => void,
   ) {
     this.lastTick = now;
   }
@@ -256,6 +284,7 @@ export class BufferingQualityController {
         if (this.waiting) this.beginStall(now);
         break;
       case "quality_changed":
+        this.keep(undefined);
         this.answered = false;
         this.pill = null;
         this.deferredPill = null;
@@ -287,6 +316,7 @@ export class BufferingQualityController {
         if (this.pill === "undo" && this.plan) {
           this.pill = null;
           this.answered = true;
+          this.keep(undefined);
           this.setAction("restored");
           this.pending = { at: now, bitrate: this.plan.delivered_kbps, undo: false, restore: true };
           this.emit(
@@ -304,6 +334,22 @@ export class BufferingQualityController {
         break;
       case "replan_failed":
         // The rearm is timed from the request, whether it failed or was never adopted.
+        break;
+      case "new_attempt":
+        this.keep(undefined);
+        break;
+      case "client_replan":
+        if (this.plan && event.operation) {
+          const auto = this.plan.quality === "auto";
+          const body: ClientReplan = {
+            operation: event.operation,
+            quality_preference: this.plan.quality,
+            ...(auto && this.keptEstimate !== undefined
+              ? { bandwidth_estimate_kbps: this.keptEstimate }
+              : {}),
+          };
+          this.emit({ type: "replan", body }, now);
+        }
         break;
     }
   }
@@ -353,8 +399,12 @@ export class BufferingQualityController {
     const pending = controllerInitiated === false ? undefined : this.pending;
     this.pending = undefined;
     this.plan = plan;
-    // A quality change the controller did not make clears the answer.
-    if (previousQuality !== plan.quality && !pending) this.answered = false;
+    // A quality change the controller did not make clears the answer and the
+    // kept estimate.
+    if (previousQuality !== plan.quality && !pending) {
+      this.answered = false;
+      this.keep(undefined);
+    }
     this.summary = {
       played_ms: 0,
       stall_count: 0,
@@ -393,6 +443,12 @@ export class BufferingQualityController {
     this.deferredPill = null;
     this.pill = pill;
     this.emit({ type: pill === "prompt" ? "prompt_shown" : "undo_shown" }, now);
+  }
+
+  private keep(kbps: number | undefined) {
+    if (kbps === this.keptEstimate) return;
+    this.keptEstimate = kbps;
+    this.onKeptEstimate?.(kbps);
   }
 
   private setAction(action: BufferingAction) {
@@ -516,6 +572,8 @@ export class BufferingQualityController {
     }
     this.pending = { at: now, bitrate: plan.delivered_kbps, undo };
     this.setAction(undo ? "lowered" : "accepted");
+    // Kept from the moment the lowering is sent; the next one replaces it.
+    if (plan.quality === "auto") this.keep(estimate);
     // A lowered Auto teaches the server a limit; a picked quality steps down
     // one rung for this playback only.
     const body: BufferingReplan =

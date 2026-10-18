@@ -27,6 +27,8 @@ interface Options {
   enabled: boolean;
   /** The title; a new one starts a new controller. */
   sessionId: string;
+  /** The playback attempt; a new start within the title drops the kept estimate. */
+  attemptId?: string | null;
   plan: BufferingPlan;
   /** Changes whenever a plan is adopted; an in-place update keeps it. */
   planRevision: number;
@@ -46,6 +48,8 @@ interface Options {
   ) => void;
   onNotice: (key: BufferingNotice) => void;
   onSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
+  /** The step-down estimate the client's own Auto replans repeat, or undefined. */
+  onKeptEstimate?: (kbps: number | undefined) => void;
 }
 
 export interface BufferingPillState {
@@ -76,6 +80,7 @@ export function useAutoQualityDownshift(options: Options) {
   // mistaken for one the viewer or the server made.
   const requestedPlan = useRef<number | undefined>(undefined);
   const adoptedPlan = useRef<number | undefined>(undefined);
+  const attempt = useRef<string | null | undefined>(undefined);
   const [pill, setPill] = useState<BufferingPillState | null>(null);
   // The pill state changes only when it shows, hides, freezes or resumes; the
   // pill counts down from its deadline itself.
@@ -96,7 +101,9 @@ export function useAutoQualityDownshift(options: Options) {
     const c = new BufferingQualityController(
       latest.current.mode,
       (output) => {
-        if (output.type === "replan") {
+        // Client replans are the session's own; only lowerings and Restore
+        // are sent from here.
+        if (output.type === "replan" && output.body.operation === "quality_change") {
           requestedPlan.current = undefined;
           latest.current.onReplan(output.body, (_id, revision) => {
             if (controller.current === c) requestedPlan.current = revision;
@@ -106,14 +113,22 @@ export function useAutoQualityDownshift(options: Options) {
       },
       Date.now(),
       (plan, summary) => latest.current.onSummary?.(plan, summary),
+      (kbps) => latest.current.onKeptEstimate?.(kbps),
     );
     controller.current = c;
     adoptedPlan.current = undefined;
+    attempt.current = latest.current.attemptId;
     return () => {
       c.stop(Date.now());
       controller.current = null;
     };
   }, [options.sessionId, options.enabled]);
+  useEffect(() => {
+    const c = controller.current;
+    if (!c || options.attemptId === attempt.current) return;
+    attempt.current = options.attemptId;
+    c.event({ type: "new_attempt" }, Date.now());
+  }, [options.attemptId, options.enabled, options.sessionId]);
   useEffect(() => {
     const c = controller.current;
     if (!c) return;

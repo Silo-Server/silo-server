@@ -714,6 +714,8 @@ function WatchPagePlayer({
       introSkipMode={introSkipMode}
       bufferingMode={bufferingMode}
       bufferingTitleId={contentId}
+      playbackAttemptId={session.playbackAttemptId}
+      onKeptEstimate={session.setKeptEstimate}
       onBufferingSummary={(plan, summary) =>
         session.reportEvent("plan_summary", {
           adoptionId: plan.adoption_id,

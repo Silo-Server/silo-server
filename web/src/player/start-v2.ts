@@ -189,7 +189,8 @@ export async function startPlaybackV2(
  * Adds what the server's `features` allow: `buffering_quality_v1` with the
  * estimate's source and `learned_limit`, and `playback_plan_summary_v1`. A
  * server without the feature rejects those fields, so they are dropped. An
- * estimate without a named source is a probe result.
+ * estimate without a source stays without one: a repeated step-down estimate
+ * is not a new observation.
  */
 export function bufferingQualityWire<T extends StartRequestV3 | ReplanRequestV3>(
   body: T,
@@ -199,7 +200,6 @@ export function bufferingQualityWire<T extends StartRequestV3 | ReplanRequestV3>
   if (features.includes("buffering_quality_v1")) {
     if (!result.client_features.includes("buffering_quality_v1"))
       result.client_features.push("buffering_quality_v1");
-    if (result.bandwidth_estimate_kbps !== undefined) result.bandwidth_estimate_source ??= "probe";
   } else {
     delete result.bandwidth_estimate_source;
     delete result.learned_limit;

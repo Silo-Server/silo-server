@@ -30,6 +30,8 @@ function setup() {
     onReplan: vi.fn(),
     onNotice: vi.fn(),
     onSummary: vi.fn(),
+    onKeptEstimate: vi.fn(),
+    attemptId: "attempt-1" as string | null,
   };
   const hook = renderHook((props) => useAutoQualityDownshift(props), { initialProps: options });
   const send = (name: string) =>
@@ -150,4 +152,15 @@ it("does not treat an in-place update as a new adoption", () => {
   h.advance(100);
   expect(h.result.current.pill?.deadlineMs).toBe(deadline);
   expect(h.options.onSummary).toHaveBeenCalledTimes(1);
+});
+
+it("reports the kept estimate from a lowering until a new attempt", () => {
+  const h = setup();
+  h.send("waiting");
+  h.advance(6000);
+  expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(44100);
+  h.rerender({ ...h.options, attemptId: "attempt-2" });
+  expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(undefined);
+  // Client replans are the session's to send, never the hook's.
+  expect(h.options.onReplan).toHaveBeenCalledTimes(1);
 });

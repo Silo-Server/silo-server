@@ -269,6 +269,10 @@ interface VideoPlayerProps {
    */
   bufferingMode?: BufferingMode | null;
   onBufferingSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
+  /** The playback attempt; a new start drops the kept step-down estimate. */
+  playbackAttemptId?: string | null;
+  /** The latest Auto lowering's estimate, for the session's own later Auto replans. */
+  onKeptEstimate?: (kbps: number | undefined) => void;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
@@ -455,6 +459,8 @@ export function VideoPlayer({
   bufferingMode = "always",
   bufferingTitleId,
   onBufferingSummary,
+  playbackAttemptId,
+  onKeptEstimate,
   credits,
   recap = null,
   autoSkipRecap = false,
@@ -4166,6 +4172,7 @@ export function VideoPlayer({
     planRevision,
     enabled: !watchTogetherRoomActive,
     sessionId: bufferingTitleId ?? sessionId,
+    attemptId: playbackAttemptId,
     mode: bufferingMode ?? "never",
     plan: bufferingPlan,
     obscured: higherPriorityPillActive,
@@ -4184,6 +4191,7 @@ export function VideoPlayer({
         tone: "info",
       }),
     onSummary: onBufferingSummary,
+    onKeptEstimate,
   });
   const bufferingPill = isDetached ? null : bufferingQuality.pill;
   const { answer: answerBufferingPill } = bufferingQuality;

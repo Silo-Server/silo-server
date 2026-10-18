@@ -193,6 +193,12 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     buffering?: BufferingReplan,
     onAdopt?: (planId?: string, planRevision?: number) => void,
   ) => void;
+  /**
+   * The step-down estimate of the latest Auto lowering, or undefined. The
+   * session's own later Auto replans repeat it without a source, so the plan
+   * stays lowered; a new start drops it.
+   */
+  setKeptEstimate: (kbps: number | undefined) => void;
   /** `failure_recovery` replan after the client could not play the plan. */
   recoverFromFailure: (failure: FailureV3, currentPosition: number) => void;
   /**
@@ -470,6 +476,10 @@ export function usePlaybackSession(
   // The estimate on the start or replan in flight; requests are serialized,
   // so the next adoption answers it.
   const requestedEstimateRef = useRef<number | null | undefined>(undefined);
+  const keptEstimateRef = useRef<number | undefined>(undefined);
+  const setKeptEstimate = useCallback((kbps: number | undefined) => {
+    keptEstimateRef.current = kbps;
+  }, []);
   const planRevisionRef = useRef(0);
   const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
@@ -805,6 +815,7 @@ export function usePlaybackSession(
         explicitAudioTrackIndex: audioTrackIndex,
         subtitleTrackIndex,
         bandwidthEstimateKbps,
+        bandwidthEstimateSource: bandwidthEstimateKbps === undefined ? undefined : "probe",
         bandwidthCapKbps: maxBitrateKbps,
         learnedLimit: bufferingMode === "never" ? "ignore" : undefined,
         clientCapabilities,
@@ -1061,6 +1072,8 @@ export function usePlaybackSession(
 
         const adopted = adoptDecision(decisionToAdopt, initialSubtitleFailure);
         if (adopted) {
+          // The kept estimate belonged to the attempt this start replaced.
+          keptEstimateRef.current = undefined;
           // A start opens a new attempt. Its first frame is still to come:
           // whatever the player shows until the new transport loads belongs to
           // the attempt it replaced.
@@ -1280,10 +1293,27 @@ export function usePlaybackSession(
         : [];
       const attemptCount = isFailureRecovery ? attemptCountRef.current : 1;
 
-      const bandwidthEstimateKbps =
-        options.bandwidthEstimateKbps === undefined
+      // A lowering or Restore names its own estimate. The client's other Auto
+      // replans repeat the kept step-down estimate, without a source because
+      // it is not a new observation, or else send a fresh probe result.
+      const kept =
+        options.bandwidthEstimateKbps === undefined && qualityRef.current === "auto"
+          ? keptEstimateRef.current
+          : undefined;
+      const probe =
+        options.bandwidthEstimateKbps === undefined && kept === undefined
           ? detectBandwidthEstimateKbpsV3()
-          : options.bandwidthEstimateKbps;
+          : undefined;
+      const bandwidthEstimateKbps =
+        options.bandwidthEstimateKbps !== undefined
+          ? options.bandwidthEstimateKbps
+          : (kept ?? probe);
+      const bandwidthEstimateSource =
+        options.bandwidthEstimateKbps !== undefined
+          ? options.bandwidthEstimateSource
+          : probe !== undefined
+            ? "probe"
+            : undefined;
       requestedEstimateRef.current = bandwidthEstimateKbps;
       const body = buildReplanRequestV3({
         ...options,
@@ -1296,7 +1326,7 @@ export function usePlaybackSession(
         attemptedPlanKeys,
         attemptCount,
         bandwidthEstimateKbps,
-        bandwidthEstimateSource: options.bandwidthEstimateSource,
+        bandwidthEstimateSource,
         bandwidthCapKbps: maxBitrateKbps,
         learnedLimit: options.learnedLimit ?? (bufferingMode === "never" ? "ignore" : undefined),
         clientCapabilities,
@@ -1922,6 +1952,7 @@ export function usePlaybackSession(
     switchAudioTrack,
     changeSubtitleTrack,
     changeQuality,
+    setKeptEstimate,
     recoverFromFailure,
     recoverConnection,
     retryConnection,

@@ -3193,3 +3193,50 @@ it.each([
   expect(bodiesTo("/replan")[0]?.learned_limit).toBe(expected);
   unmount();
 });
+
+it("repeats the kept step-down estimate, without a source, on later Auto replans", async () => {
+  const plan = fixturePlanV3({ session_id: "session-1" });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/playback/start") || url.endsWith("/replan")) {
+      return jsonResponse({
+        protocol_version: 3,
+        server_features: ["playback_plan_v3", "buffering_quality_v1"],
+        outcome: "playable",
+        session_id: "session-1",
+        playback_plan: plan,
+      });
+    }
+    if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+    if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const replans = () =>
+    fetchMock.mock.calls
+      .filter(([url]) => String(url).endsWith("/replan"))
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  const { result, unmount } = renderHook(
+    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+
+  // The controller lowered Auto and reported its step-down estimate.
+  act(() => result.current.setKeptEstimate(44100));
+  act(() => result.current.recoverFromFailure({ classification: "decoder_failure" }, 120));
+  await waitFor(() => expect(replans()).toHaveLength(1));
+  expect(replans()[0]).toMatchObject({
+    operation: "failure_recovery",
+    quality_preference: "auto",
+    bandwidth_estimate_kbps: 44100,
+  });
+  expect(replans()[0]).not.toHaveProperty("bandwidth_estimate_source");
+  await waitFor(() => expect(result.current.replanning).toBe(false));
+
+  // A fixed quality the viewer picked does not carry it.
+  act(() => result.current.changeQuality("720p", 130));
+  await waitFor(() => expect(replans()).toHaveLength(2));
+  expect(replans()[1]).not.toHaveProperty("bandwidth_estimate_kbps");
+  unmount();
+});
