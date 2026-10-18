@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,13 +21,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
-type overlayQueryTrace struct{ rows atomic.Int64 }
+type overlayQueryTrace struct{ rows, selects atomic.Int64 }
 
 func (q *overlayQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
 	return ctx
 }
 func (q *overlayQueryTrace) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	if data.CommandTag.Select() {
+		q.selects.Add(1)
 		q.rows.Store(data.CommandTag.RowsAffected())
 	}
 }
@@ -104,7 +106,6 @@ func TestOverlaySummariesAccessAndGrouping(t *testing.T) {
 		}
 		return a.ID - b.ID
 	})
-	fetcher := &Fetcher{pool: pool}
 	ids := []string{"series", "episode-a", "episode-b", "movie", "absent", "series"}
 	for _, filter := range []catalog.AccessFilter{
 		{}, {AllowedLibraryIDs: []int{}}, {AllowedLibraryIDs: []int{1}},
@@ -112,7 +113,7 @@ func TestOverlaySummariesAccessAndGrouping(t *testing.T) {
 		{AllowedLibraryIDs: []int{1, 2}, DisabledLibraryIDs: []int{1}},
 		{MaxPlaybackQuality: "1080p"}, {MaxPlaybackQuality: "4k"},
 	} {
-		got, err := fetcher.ListOverlaySummaries(t.Context(), ids, filter)
+		got, err := catalog.ListOverlaySummaries(t.Context(), pool, ids, filter)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -130,7 +131,7 @@ func TestOverlaySummariesAccessAndGrouping(t *testing.T) {
 			if summary := overlays.BuildSummary(candidates); summary != nil {
 				want[id] = summary
 			}
-			alone, err := fetcher.ListOverlaySummaries(t.Context(), []string{id}, filter)
+			alone, err := catalog.ListOverlaySummaries(t.Context(), pool, []string{id}, filter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -146,24 +147,21 @@ func TestOverlaySummariesAccessAndGrouping(t *testing.T) {
 
 func TestOverlaySummariesReadCommittedChanges(t *testing.T) {
 	pool, _ := overlayTestPool(t)
-	fetchers := []*Fetcher{{pool: pool}, {pool: pool}}
 	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{1}}
 	ids := []string{"series", "episode"}
 	check := func(want string) {
 		t.Helper()
-		for _, fetcher := range fetchers {
-			got, err := fetcher.ListOverlaySummaries(t.Context(), ids, filter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, id := range ids {
-				if want == "" {
-					if got[id] != nil {
-						t.Fatalf("%s: stale summary %+v", id, got[id])
-					}
-				} else if got[id] == nil || got[id].Resolution != want {
-					t.Fatalf("%s: got %+v, want resolution %s", id, got[id], want)
+		got, err := catalog.ListOverlaySummaries(t.Context(), pool, ids, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			if want == "" {
+				if got[id] != nil {
+					t.Fatalf("%s: stale summary %+v", id, got[id])
 				}
+			} else if got[id] == nil || got[id].Resolution != want {
+				t.Fatalf("%s: got %+v, want resolution %s", id, got[id], want)
 			}
 		}
 	}
@@ -195,7 +193,7 @@ func TestOverlaySummariesOnlyDecodeWinner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := (&Fetcher{pool: pool}).ListOverlaySummaries(t.Context(), []string{"series"}, catalog.AccessFilter{})
+	got, err := catalog.ListOverlaySummaries(t.Context(), pool, []string{"series"}, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +232,6 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 		{Resolution: "1080p", HDR: true, VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR"}, {VideoRangeType: "HDR10"}}},
 	}
-	fetcher := &Fetcher{pool: pool}
 	for i, candidate := range cases {
 		for j, opponent := range cases {
 			id := fmt.Sprintf("pair-%d-%d", i, j)
@@ -246,7 +243,7 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 			candidate.CodecAudio = "aac"
 			opponent.CodecAudio = "flac"
 			seedOverlayFiles(t, pool, &candidate, &opponent)
-			got, err := fetcher.ListOverlaySummaries(t.Context(), []string{id}, catalog.AccessFilter{})
+			got, err := catalog.ListOverlaySummaries(t.Context(), pool, []string{id}, catalog.AccessFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -278,7 +275,6 @@ func BenchmarkOverlaySummaries(b *testing.B) {
 	for i := range ids {
 		ids[i] = fmt.Sprintf("series-%d", i)
 	}
-	fetcher := &Fetcher{pool: pool}
 	fileRepo := scanner.NewFileRepository(pool)
 	legacy := func(ctx context.Context) (map[string]*models.OverlaySummary, error) {
 		files, err := fileRepo.ListOverlayFilesByContentIDs(ctx, ids)
@@ -303,7 +299,7 @@ func BenchmarkOverlaySummaries(b *testing.B) {
 	}{
 		{name: "scanner-projection", read: legacy},
 		{name: "sql-winners", read: func(ctx context.Context) (map[string]*models.OverlaySummary, error) {
-			return fetcher.ListOverlaySummaries(ctx, ids, catalog.AccessFilter{})
+			return catalog.ListOverlaySummaries(ctx, pool, ids, catalog.AccessFilter{})
 		}},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
@@ -322,5 +318,65 @@ func BenchmarkOverlaySummaries(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// The cache answers repeat cards without a query, reads only the cards it
+// lacks, serves one result whatever the viewer's access, and refetches after
+// the TTL.
+func TestOverlaySummaryCache(t *testing.T) {
+	resetOverlaySummaryCacheForTest()
+	t.Cleanup(resetOverlaySummaryCacheForTest)
+	now := time.Date(2026, 10, 18, 4, 0, 0, 0, time.UTC)
+	overlaySummaryNow = func() time.Time { return now }
+
+	pool, trace := overlayTestPool(t)
+	seedOverlayFiles(t, pool,
+		&models.MediaFile{ID: 1, ContentID: "series", EpisodeID: "episode", MediaFolderID: 1, Resolution: "1080p"},
+		&models.MediaFile{ID: 2, ContentID: "series", EpisodeID: "episode", MediaFolderID: 2, Resolution: "2160p"},
+		&models.MediaFile{ID: 3, ContentID: "movie", MediaFolderID: 1, Resolution: "720p"},
+	)
+	base := trace.selects.Load()
+	countQueries := func() int64 { return trace.selects.Load() - base }
+	fetcher := &Fetcher{pool: pool}
+	read := func(ids []string, filter catalog.AccessFilter) map[string]*models.OverlaySummary {
+		t.Helper()
+		got, err := fetcher.ListOverlaySummaries(t.Context(), ids, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	got := read([]string{"series", "absent", "series"}, catalog.AccessFilter{AllowedLibraryIDs: []int{1}})
+	if got["series"] == nil || got["series"].Resolution != "2160p" {
+		t.Fatalf("series = %+v, want the 2160p file whatever the viewer's libraries", got["series"])
+	}
+	if _, ok := got["absent"]; ok || countQueries() != 1 {
+		t.Fatalf("got %v after %d queries, want series only after 1", got, countQueries())
+	}
+
+	// A cached card, a cached absence, and one new card: one query, for movie.
+	got = read([]string{"series", "absent", "movie"}, catalog.AccessFilter{MaxPlaybackQuality: "1080p"})
+	if countQueries() != 2 || trace.rows.Load() != 1 {
+		t.Fatalf("queries = %d, last read %d rows; want 2 queries, the second for movie only", countQueries(), trace.rows.Load())
+	}
+	if got["series"] == nil || got["series"].Resolution != "2160p" || got["movie"] == nil || got["movie"].Resolution != "720p" {
+		t.Fatalf("got %+v", got)
+	}
+	got["series"].Resolution = "changed by caller"
+
+	if _, err := pool.Exec(t.Context(), `UPDATE media_files SET resolution = '480p' WHERE id = 3`); err != nil {
+		t.Fatal(err)
+	}
+	got = read([]string{"series", "movie"}, catalog.AccessFilter{})
+	if countQueries() != 2 || got["series"].Resolution != "2160p" || got["movie"].Resolution != "720p" {
+		t.Fatalf("within the TTL: queries = %d, got %+v; want cached values", countQueries(), got)
+	}
+
+	now = now.Add(overlaySummaryTTL)
+	got = read([]string{"series", "movie"}, catalog.AccessFilter{})
+	if countQueries() != 3 || got["movie"] == nil || got["movie"].Resolution != "480p" {
+		t.Fatalf("after the TTL: queries = %d, movie = %+v; want a refetch showing 480p", countQueries(), got["movie"])
 	}
 }

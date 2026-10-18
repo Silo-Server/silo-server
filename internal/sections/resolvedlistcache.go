@@ -57,8 +57,9 @@ const (
 	resolvedListInvalidationInterval = 30 * time.Second
 	// A scan starts a refresh immediately on the next read. Keep the prior
 	// membership usable only while that bounded refresh runs, never for a
-	// full cache TTL or across repeated failed refreshes. Badges and per-user
-	// access/playability are still recomputed from current data on every read.
+	// full cache TTL or across repeated failed refreshes. Per-user
+	// access/playability is still recomputed from current data on every read;
+	// badges come from the overlay summary cache.
 	resolvedListInvalidationGrace = 30 * time.Second
 	// resolvedListGenerationPrefix heads every generation-scoped cache key.
 	// Keys without it (every non-recently-added section) are generation

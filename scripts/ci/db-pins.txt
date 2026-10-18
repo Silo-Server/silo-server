@@ -164,6 +164,7 @@
 # Home sections: one overlay summary row read per card.
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
+./internal/sections TestOverlaySummaryCache
 ./internal/sections TestNextUpModeStatementBudgetPostgres
 
 # Server collection rows: a cached row costs one revision read, which shows an

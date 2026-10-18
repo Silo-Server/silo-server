@@ -152,7 +152,10 @@ scoring and admission.
 Catalog and section badges select a file winner in SQL and decode only that
 file's track metadata. Their historical tie orders differ and remain distinct.
 SQL resolution and HDR ordering must match `internal/overlays`, including Go's
-Unicode whitespace rules.
+Unicode whitespace rules. The sections Fetcher caches each card's badge winner
+in process for ten minutes and shares it across viewers: it is computed over
+every available file, ignoring library access and quality limits, and a newly
+scanned better file appears once the entry expires.
 
 For a PostgreSQL progress store sharing the catalog pool and account, series
 and season play targets select the validated anchor, newest visible resumable
