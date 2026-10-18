@@ -3113,7 +3113,7 @@ it("keeps summary identities separate when adopted server plan IDs repeat", asyn
   });
   await waitFor(() => expect(summaries).toHaveLength(2));
   expect(summaries.map((s) => s.plan_id)).toEqual([plan.plan_id, plan.plan_id]);
-  expect(summaries[0].plan_attempt_id).not.toBe(summaries[1].plan_attempt_id);
+  expect(summaries[0]?.plan_attempt_id).not.toBe(summaries[1]?.plan_attempt_id);
   expect(summaries[0]).not.toHaveProperty("adoptionId");
   unmount();
 });
