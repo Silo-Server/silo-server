@@ -136,21 +136,24 @@ function HolidayDatesFields({
   const problem = dates ? holidayDatesProblem(dates) : null;
   return (
     <div className="grid gap-1">
-      <div className="flex items-center gap-2 text-[13px]">
+      {/* On the narrowest phones the dates wrap under "In season", kept together. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[13px]">
         <span className="text-muted-foreground">In season</span>
-        <MonthDayInput
-          label={`${theme.name} starts (MM-DD)`}
-          placeholder="MM-DD"
-          value={value.start}
-          onChange={(start) => set({ start })}
-        />
-        <span className="text-muted-foreground">to</span>
-        <MonthDayInput
-          label={`${theme.name} ends (MM-DD)`}
-          placeholder="MM-DD"
-          value={value.end}
-          onChange={(end) => set({ end })}
-        />
+        <span className="flex items-center gap-2">
+          <MonthDayInput
+            label={`${theme.name} starts (MM-DD)`}
+            placeholder="MM-DD"
+            value={value.start}
+            onChange={(start) => set({ start })}
+          />
+          <span className="text-muted-foreground">to</span>
+          <MonthDayInput
+            label={`${theme.name} ends (MM-DD)`}
+            placeholder="MM-DD"
+            value={value.end}
+            onChange={(end) => set({ end })}
+          />
+        </span>
       </div>
       {problem ? (
         <p className="text-destructive text-xs">{problem}</p>

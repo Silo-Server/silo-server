@@ -203,7 +203,8 @@ export function RowForm({
   );
   const showsLine = shows ? <ShowsSummary sectionType={draft.sectionType} {...shows} /> : null;
   return (
-    <div className="grid gap-5">
+    // minmax(0,1fr): a truncated line or a wide control can't widen the form past a phone screen.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       {CONTROL_KINDS.has(draft.sectionType) ? (
         <>
           {showsLine}
