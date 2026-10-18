@@ -510,6 +510,23 @@ it("shows no error when a refused approval's request has moved on", async () => 
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
+it("reports a refused approval when the reload after it fails", async () => {
+  let lookupCount = 0;
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") {
+      lookupCount += 1;
+      return lookupCount === 1 ? Promise.resolve(pending) : Promise.reject(new Error("offline"));
+    }
+    return Promise.reject(v2Problem(409, "conflict", "Device login request was canceled"));
+  }) as never);
+  mount("/activate?code=48217730");
+  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
+  // Without the reload there is no way to tell whether the request moved on.
+  expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't sign in the TV. Try again.");
+  expect(lookupCount).toBe(2);
+  expect(screen.getByText("Sign in Living room TV?")).toBeTruthy();
+});
+
 const remotePlayback = { ...pending, client_purpose: "remote_playback", temporary: true };
 
 it("sends a remote-playback request back to the app and can decline it", async () => {
