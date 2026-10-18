@@ -77,6 +77,14 @@ function inferSeasonal(config: Config): string | null {
       : "se_auto";
   }
   if (themes === undefined && config.theme === "family_movie_night") return "se_family_movie_night";
+  // Only Holidays shows custom holidays, so a row with nothing else is Holidays.
+  if (
+    themes === undefined &&
+    typeof config.theme !== "string" &&
+    Array.isArray(config.custom_holidays)
+  ) {
+    return "se_auto";
+  }
   return null;
 }
 

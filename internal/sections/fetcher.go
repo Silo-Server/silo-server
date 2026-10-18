@@ -3883,7 +3883,10 @@ func (f *Fetcher) fetchSeasonalThemed(ctx context.Context, s ResolvedSection, li
 // effort: a failure leaves the row with its list titles.
 func (f *Fetcher) seasonalNeighborItems(ctx context.Context, listIDs []string, want, limit int, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) []*models.MediaItem {
 	seeds := listIDs[:min(len(listIDs), seasonalSeedCount)]
-	neighbors, err := f.SeasonalNeighbors.ThemeNeighbors(ctx, seeds, max(limit*4, seasonalNeighborScanMin), filter)
+	// Scan only the row's libraries, so a library page's fill is not spent on
+	// titles the item fetch below would drop.
+	scope := collectionRailQueryAccess(filter, libraryID, libraryIDs)
+	neighbors, err := f.SeasonalNeighbors.ThemeNeighbors(ctx, seeds, max(limit*4, seasonalNeighborScanMin), scope)
 	if err != nil {
 		slog.WarnContext(ctx, "seasonal row: recommendation fill failed", "error", err)
 		return nil

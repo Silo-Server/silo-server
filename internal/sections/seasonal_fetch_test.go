@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -256,6 +257,67 @@ func TestSeasonalListRefresherFetchesUpcomingStaleLists(t *testing.T) {
 // TestSeasonalEntriesFromMDBList pins how an MDBList /json feed maps to list
 // entries: TMDB, IMDb and TVDB IDs kept, null or zero IDs dropped, and rows
 // that are neither movies nor shows skipped.
+// recordingThemeNeighbors records the access filter the fill searches with.
+type recordingThemeNeighbors struct{ filter catalog.AccessFilter }
+
+func (r *recordingThemeNeighbors) ThemeNeighbors(_ context.Context, _ []string, _ int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	r.filter = filter
+	return nil, nil
+}
+
+// TestSeasonalFillSearchesOnlyTheRowsLibraries pins that a library page's
+// fill looks for neighbors in that library alone, within the viewer's access.
+func TestSeasonalFillSearchesOnlyTheRowsLibraries(t *testing.T) {
+	neighbors := &recordingThemeNeighbors{}
+	f := &Fetcher{SeasonalNeighbors: neighbors}
+	library := 7
+	f.seasonalNeighborItems(context.Background(), []string{"movie:a"}, 5, 5, &library, nil, catalog.AccessFilter{AllowedLibraryIDs: []int{3, 7}})
+	if !slices.Equal(neighbors.filter.AllowedLibraryIDs, []int{7}) {
+		t.Fatalf("fill searched libraries %v, want [7]", neighbors.filter.AllowedLibraryIDs)
+	}
+}
+
+// recordingResolver answers external-ID lookups from fixed maps and records
+// the batches it was asked for.
+type recordingResolver struct {
+	batches map[string]catalog.ExternalIDBatch
+	lookups map[string]*catalog.ExternalIDLookup
+}
+
+func (r *recordingResolver) GetByExternalIDs(_ context.Context, batch catalog.ExternalIDBatch, itemType string) (*catalog.ExternalIDLookup, error) {
+	r.batches[itemType] = batch
+	if lookup := r.lookups[itemType]; lookup != nil {
+		return lookup, nil
+	}
+	return &catalog.ExternalIDLookup{ByTMDB: map[string]string{}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{}}, nil
+}
+
+// TestResolveSeasonalEntriesDedupesAndFallsBackToTVDB covers a list naming a
+// title twice and a movie the library knows only by its TVDB ID.
+func TestResolveSeasonalEntriesDedupesAndFallsBackToTVDB(t *testing.T) {
+	resolver := &recordingResolver{
+		batches: map[string]catalog.ExternalIDBatch{},
+		lookups: map[string]*catalog.ExternalIDLookup{
+			"movie": {ByTMDB: map[string]string{"1": "movie:one"}, ByIMDb: map[string]string{}, ByTVDB: map[string]string{"77": "movie:tvdb"}},
+		},
+	}
+	entries := []seasonalListEntry{
+		{TMDB: "1", Type: listEntryMovie},
+		{TMDB: "1", IMDb: "tt1", Type: listEntryMovie},
+		{TMDB: "2", TVDB: "77", Type: listEntryMovie},
+	}
+	ids, err := resolveSeasonalEntries(context.Background(), resolver, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"movie:one", "movie:tvdb"}; !slices.Equal(ids, want) {
+		t.Fatalf("resolved %v, want %v", ids, want)
+	}
+	if got := resolver.batches["movie"].TMDBIDs; !slices.Equal(got, []string{"1", "2"}) {
+		t.Fatalf("movie TMDB batch %v, want each ID once", got)
+	}
+}
+
 func TestSeasonalEntriesFromMDBList(t *testing.T) {
 	var items []mdblistListItem
 	feed := `[

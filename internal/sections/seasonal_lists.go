@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -371,7 +372,7 @@ func seasonalEntriesFromMDBList(items []mdblistListItem) []seasonalListEntry {
 // resolveSeasonalEntries maps list entries to library content IDs in list
 // order, skipping titles the library does not have. As in the trending
 // resolver, a show matches by TVDB first, then TMDB, then IMDb; a movie by
-// TMDB, then IMDb.
+// TMDB, then IMDb, then TVDB.
 func resolveSeasonalEntries(ctx context.Context, resolver externalIDResolver, entries []seasonalListEntry) ([]string, error) {
 	var movies, series catalog.ExternalIDBatch
 	for _, e := range entries {
@@ -389,6 +390,8 @@ func resolveSeasonalEntries(ctx context.Context, resolver externalIDResolver, en
 			batch.TVDBIDs = append(batch.TVDBIDs, e.TVDB)
 		}
 	}
+	dedupeExternalIDs(&movies)
+	dedupeExternalIDs(&series)
 	movieLookup, err := resolver.GetByExternalIDs(ctx, movies, "movie")
 	if err != nil {
 		return nil, fmt.Errorf("resolving seasonal movies: %w", err)
@@ -404,7 +407,7 @@ func resolveSeasonalEntries(ctx context.Context, resolver externalIDResolver, en
 		if e.Type == listEntryShow {
 			id = firstNonEmpty(seriesLookup.ByTVDB[e.TVDB], seriesLookup.ByTMDB[e.TMDB], seriesLookup.ByIMDb[e.IMDb])
 		} else {
-			id = firstNonEmpty(movieLookup.ByTMDB[e.TMDB], movieLookup.ByIMDb[e.IMDb])
+			id = firstNonEmpty(movieLookup.ByTMDB[e.TMDB], movieLookup.ByIMDb[e.IMDb], movieLookup.ByTVDB[e.TVDB])
 		}
 		if id == "" || seen[id] {
 			continue
@@ -413,6 +416,15 @@ func resolveSeasonalEntries(ctx context.Context, resolver externalIDResolver, en
 		out = append(out, id)
 	}
 	return out, nil
+}
+
+// dedupeExternalIDs drops repeated IDs from a lookup batch; a list can name
+// one title twice. Order does not matter to the lookup.
+func dedupeExternalIDs(batch *catalog.ExternalIDBatch) {
+	for _, ids := range []*[]string{&batch.TMDBIDs, &batch.IMDbIDs, &batch.TVDBIDs} {
+		slices.Sort(*ids)
+		*ids = slices.Compact(*ids)
+	}
 }
 
 func firstNonEmpty(values ...string) string {

@@ -66,6 +66,19 @@ describe("strict inference", () => {
     expect(variantOf("format_showcase", { format: "4k", sort: "title" })).toBeNull();
     expect(variantOf("continue_watching", { continue_type: "reading" })).toBeNull();
     expect(variantOf("seasonal_themed", { theme: "christmas" })).toBeNull();
+    // A row with only custom holidays is Holidays, the variant that edits them.
+    expect(
+      variantOf("seasonal_themed", {
+        custom_holidays: [
+          {
+            name: "Fourth",
+            start: "07-01",
+            end: "07-04",
+            list_url: "https://mdblist.com/lists/a/b",
+          },
+        ],
+      }),
+    ).toBe("se_auto");
     expect(variantOf("recently_added", {})).toBeNull();
   });
 
