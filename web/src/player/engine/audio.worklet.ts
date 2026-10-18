@@ -139,7 +139,10 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     }
     const frames = Math.floor(message.samples.length / this.channels);
     if (frames > 0) {
-      this.queue.push({ samples: message.samples, frames, timestamp: message.timestamp });
+      const chunk = { samples: message.samples, frames, timestamp: message.timestamp };
+      // The queue ran dry with the head past the end of the last chunk.
+      if (this.queue.length === 0) this.carryIntoGap(chunk);
+      this.queue.push(chunk);
       this.underrunReported = false;
     }
   }
@@ -202,13 +205,7 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
           const finished = this.queue.shift()!;
           this.offset -= finished.frames;
           this.renderedUntil = finished.timestamp + finished.frames / sampleRate;
-          // Above 1x the head can step past the end of a chunk. When the next
-          // one starts after a gap, those frames play the gap's silence
-          // instead of skipping into the next chunk.
-          if (this.queue.length > 0 && this.startsLate(this.queue[0]!, this.renderedUntil)) {
-            this.renderedUntil += this.offset / sampleRate;
-            this.offset = 0;
-          }
+          if (this.queue.length > 0) this.carryIntoGap(this.queue[0]!);
         }
       }
       if (rendered > 0 && this.queue[0] && !this.inGap(this.queue[0])) {
@@ -275,6 +272,22 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     return (
       this.offset < 1 && this.renderedUntil !== null && this.startsLate(chunk, this.renderedUntil)
     );
+  }
+
+  /**
+   * Above 1x the head can step past the end of a chunk. When `next` starts
+   * after a gap, those frames play the gap's silence instead of skipping
+   * into it.
+   */
+  private carryIntoGap(next: Chunk): void {
+    if (
+      this.offset > 0 &&
+      this.renderedUntil !== null &&
+      this.startsLate(next, this.renderedUntil)
+    ) {
+      this.renderedUntil += this.offset / sampleRate;
+      this.offset = 0;
+    }
   }
 
   private startsLate(chunk: Chunk, after: number): boolean {

@@ -212,6 +212,32 @@ describe("EngineAudioProcessor", () => {
       expect(media).toBeLessThanOrEqual((39 * 128 * 3) / RATE + 0.021);
     });
 
+    it("keeps a gap that starts after the queue ran dry", () => {
+      const { page, worker, render, lastClock } = setup(1);
+      for (let i = 0; i < 9; i++) {
+        worker({
+          type: "pcm",
+          generation: 1,
+          timestamp: (i * 1_024) / RATE,
+          samples: new Float32Array(1_024).fill(0.5),
+        });
+      }
+      render(1);
+      page({ type: "rate", rate: 3 });
+      render(25);
+      // Audio resumes 100 ms after the old audio ends.
+      const end = (9 * 1_024) / RATE;
+      worker({
+        type: "pcm",
+        generation: 1,
+        timestamp: end + 0.1,
+        samples: new Float32Array(48_000).fill(0.25),
+      });
+      const [out] = render(1);
+      expect(out!.every((sample) => sample === 0)).toBe(true);
+      expect(lastClock().mediaTime).toBeLessThan(end + 0.01);
+    });
+
     it("waits for more audio instead of playing silence it does not have", () => {
       const { processor, page, worker, render } = setup(1);
       page({ type: "rate", rate: 2 });
