@@ -12,7 +12,6 @@ import {
   type KeyboardEventHandler,
   type ReactNode,
 } from "react";
-import { useQueries } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router";
 import { GripVertical, Plus, Users } from "lucide-react";
 import {
@@ -57,8 +56,8 @@ import {
   useServerCollections,
   useSetCollectionShared,
 } from "@/hooks/queries/collections";
-import { libraryCollectionsQueryOptions } from "@/hooks/queries/libraryCollections";
 import { useProfiles } from "@/hooks/queries/profiles";
+import { useServerCollectionCards } from "@/hooks/queries/serverCollectionCards";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useDialogSearchParam } from "@/hooks/useDialogSearchParam";
@@ -716,62 +715,10 @@ function ServerCollectionsGrid({
   libraries: ServerCollectionsLibrary[];
   loadOnScroll: boolean;
 }) {
-  // The libraries whose rest the default view asked for, one per end of grid.
-  const [requested, setRequested] = useState<ReadonlySet<number>>(() => new Set());
-  const cutShort = (entry: ServerCollectionsLibrary) =>
-    entry.collections.length < entry.total_count;
-  const fullLists = useQueries({
-    queries: libraries.map((entry) => {
-      const options = libraryCollectionsQueryOptions(entry.library_id);
-      const asked = !loadOnScroll || requested.has(entry.library_id);
-      return { ...options, enabled: options.enabled && asked && cutShort(entry) };
-    }),
-  });
-  const lists = libraries.map((entry, index) => {
-    const query = fullLists[index];
-    // The first 20 always come from the aggregated answer, which is never
-    // older than a cached full list; the full list only adds the rest.
-    const full: LibraryTabCollection[] | undefined = cutShort(entry)
-      ? query?.data?.collections
-      : undefined;
-    const inFirst = new Set(entry.collections.map((collection) => collection.id));
-    return {
-      entry,
-      first: entry.collections,
-      rest: full ? full.filter((collection) => !inFirst.has(collection.id)) : [],
-      // Still to load: asked for and on its way, or waiting for the next ask.
-      loading: cutShort(entry) && !full && !query?.isError && query?.fetchStatus !== "idle",
-      waiting: cutShort(entry) && !full && !query?.isError && query?.fetchStatus === "idle",
-      failed: cutShort(entry) && !full && query?.isError === true,
-    };
-  });
-  // Each collection once. A collection in several libraries opens across all
-  // of them, so its card carries no library (and so no sidebar pin, which
-  // needs one).
-  const libraryCount = new Map<string, number>();
-  for (const { first, rest } of lists) {
-    for (const collection of [...first, ...rest]) {
-      libraryCount.set(collection.id, (libraryCount.get(collection.id) ?? 0) + 1);
-    }
-  }
-  const seen = new Set<string>();
-  const cards = [
-    ...lists.map(({ entry, first }) => ({ entry, collections: first })),
-    ...lists.map(({ entry, rest }) => ({ entry, collections: rest })),
-  ].flatMap(({ entry, collections }) =>
-    collections.flatMap((collection) => {
-      if (seen.has(collection.id)) return [];
-      seen.add(collection.id);
-      const inSeveral = (libraryCount.get(collection.id) ?? 0) > 1;
-      return [{ collection, libraryId: inSeveral ? undefined : entry.library_id }];
-    }),
+  const { cards, loading, next, failed, loadNext } = useServerCollectionCards(
+    libraries,
+    loadOnScroll,
   );
-  const loading = lists.some((list) => list.loading);
-  const next = lists.find((list) => list.waiting)?.entry;
-  const failed = lists.filter((list) => list.failed);
-  const loadNext = () => {
-    if (next) setRequested((asked) => new Set(asked).add(next.library_id));
-  };
   const sentinelRef = useIntersectionObserver({
     onIntersect: loadNext,
     enabled: loadOnScroll && !loading && next !== undefined,
@@ -802,7 +749,7 @@ function ServerCollectionsGrid({
       ) : null}
       {failed.length > 0 ? (
         <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {failed.map(({ entry }) => (
+          {failed.map((entry) => (
             <Link
               key={entry.library_id}
               to={`/library/${entry.library_id}?tab=collections`}
