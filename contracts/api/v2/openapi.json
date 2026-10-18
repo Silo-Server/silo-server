@@ -5007,9 +5007,43 @@
         ],
         "type": "object"
       },
+      "AdminDeviceConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "learned_limit": {
+            "$ref": "#/components/schemas/PlaybackLearnedLimit"
+          },
+          "plan_summary": {
+            "$ref": "#/components/schemas/PlaybackPlanSummary"
+          },
+          "probe": {
+            "$ref": "#/components/schemas/PlaybackProbe"
+          }
+        },
+        "required": [
+          "id",
+          "connection",
+          "probe",
+          "learned_limit",
+          "plan_summary"
+        ],
+        "type": "object"
+      },
       "AdminDeviceDetail": {
         "additionalProperties": false,
         "properties": {
+          "connections": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDeviceConnection"
+            },
+            "type": "array"
+          },
           "device_id": {
             "type": "string"
           },
@@ -38406,6 +38440,9 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "bandwidth_probe_url": {
+            "type": "string"
+          },
           "deliveries": {
             "items": {
               "type": "string"
@@ -38461,11 +38498,18 @@
       "PlaybackConnection": {
         "additionalProperties": false,
         "properties": {
+          "auto_budget_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
           "connection": {
             "type": "string"
           },
           "learned_limit": {
             "$ref": "#/components/schemas/PlaybackLearnedLimit"
+          },
+          "probe": {
+            "$ref": "#/components/schemas/PlaybackProbe"
           }
         },
         "required": [
@@ -38766,6 +38810,91 @@
           "effective_media_file_id",
           "source",
           "subtitle_fidelity_policy"
+        ],
+        "type": "object"
+      },
+      "PlaybackPlanSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_id",
+          "reported_at",
+          "diagnostics"
+        ],
+        "type": "object"
+      },
+      "PlaybackProbe": {
+        "additionalProperties": false,
+        "properties": {
+          "kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "measured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "transport": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "measured_at",
+          "transport"
+        ],
+        "type": "object"
+      },
+      "PlaybackProbeResultsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "duration_ms": {
+            "format": "int64",
+            "maximum": 60000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "kbps": {
+            "format": "int64",
+            "maximum": 1000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "transport": {
+            "enum": [
+              "wifi",
+              "ethernet",
+              "cellular",
+              "other"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "bytes",
+          "duration_ms",
+          "transport"
         ],
         "type": "object"
       },
@@ -70114,6 +70243,176 @@
           "admin"
         ],
         "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit": {
+      "delete": {
+        "operationId": "resetAdminDeviceLearnedLimit",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clear a device connection's learned limit, preserving measurements.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -180664,6 +180963,14 @@
               "minimum": 1,
               "type": "integer"
             }
+          },
+          {
+            "description": "Use the client media egress route.",
+            "in": "query",
+            "name": "media_path",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -180688,6 +180995,16 @@
                 "schema": {
                   "format": "int64",
                   "type": "integer"
+                }
+              }
+            }
+          },
+          "307": {
+            "description": "Selected media proxy; follow the short-lived probe URL",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -180765,6 +181082,191 @@
         "x-silo-class": "authenticated",
         "x-silo-raw-protocol": "bandwidth-probe",
         "x-silo-raw-reason": "A throughput measurement needs an unbuffered, uncompressible byte stream the client can time and abandon mid-transfer."
+      }
+    },
+    "/api/v2/playback/bandwidth-probe/results": {
+      "post": {
+        "operationId": "reportPlaybackBandwidthProbe",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaybackProbeResultsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Store the calling device's latest measured connection speed.",
+        "tags": [
+          "playback"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/playback/capabilities": {
@@ -222021,6 +222523,67 @@
           },
           "503": {
             "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": true,
+            "schema": {
+              "maximum": 100000000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "Requires an expiring token with bandwidth-probe purpose and an account. Returns random, uncompressed bytes with Cache-Control: no-store. Playback tokens are refused. Limits concurrent probes and bytes per account; rate limits return Retry-After.",
+        "listener": "proxy",
+        "method": "GET",
+        "path": "/stream/bandwidth-probe/{token}",
+        "handler": "(*internal/proxy.Server).handleBandwidthProbe",
+        "auth_class": "public",
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Probe bytes"
+          },
+          "400": {
+            "description": "Invalid size"
+          },
+          "401": {
+            "description": "Invalid or expired token"
+          },
+          "403": {
+            "description": "Wrong token purpose or account"
+          },
+          "429": {
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },

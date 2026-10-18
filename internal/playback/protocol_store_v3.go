@@ -163,6 +163,10 @@ type AttemptIdentityV3 struct {
 }
 
 type RouteEventRecordV3 struct {
+	ConnectionDeviceID string
+	ConnectionKey      string
+	Delivery           string
+	ReceivedAt         time.Time
 	RouteEventV3
 	// EventID is the client-minted identity of one report. Empty for legacy
 	// v1 reports; a v2 report always carries one so a retry after a lost 202

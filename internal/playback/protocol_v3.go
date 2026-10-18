@@ -18,6 +18,7 @@ const (
 
 	ProtocolV3                               = 3
 	FeatureBufferingQualityV1                = "buffering_quality_v1"
+	FeatureConnectionSpeedV1                 = "connection_speed_v1"
 	FeaturePlaybackPlanSummaryV1             = "playback_plan_summary_v1"
 	FeaturePlaybackPlanV3                    = "playback_plan_v3"
 	FeatureServerRemoteStreamBitratePolicyV3 = "server_remote_stream_bitrate_policy_v1"
@@ -134,6 +135,7 @@ const (
 	TransportFeatureProgressiveRemuxRelayV1     = "progressive_remux_relay_v1"
 	// Theme audio markers: a proxy that serves /stream/theme, and a transcode
 	// node that approves theme files as progressive AAC inputs.
+	TransportFeatureBandwidthProbeV1      = "bandwidth_probe_v1"
 	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
 	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
 	// A transcode node that executes the multi-track prepared-download layout
@@ -744,6 +746,7 @@ const (
 	RouteEventPlanSelectedV3               = "plan_selected"
 	RouteEventPlanInvalidatedV3            = "plan_invalidated"
 	RouteEventPlanFailedV3                 = "plan_failed"
+	RouteEventPlanSummaryV3                = "plan_summary"
 	RouteEventFirstFrameV3                 = "first_frame"
 	RouteEventTerminalV3                   = "terminal"
 	RouteEventStoppedV3                    = "stopped"
@@ -755,7 +758,7 @@ const (
 )
 
 var routeEventNamesV3 = []string{
-	"plan_summary",
+	RouteEventPlanSummaryV3,
 	RouteEventPlanSelectedV3,
 	RouteEventPlanInvalidatedV3,
 	RouteEventPlanFailedV3,

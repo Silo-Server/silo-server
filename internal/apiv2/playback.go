@@ -9,10 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/google/uuid"
 )
 
 const playbackCacheControl = "no-store"
@@ -38,7 +39,13 @@ type PlaybackService interface {
 	ReportRouteEventV2(context.Context, handlers.PlaybackCaller, handlers.PlaybackRouteEventCommand) error
 }
 
+const (
+	playbackProbeHTTP  = "http"
+	playbackProbeHTTPS = "https"
+)
+
 type PlaybackCapabilities struct {
+	BandwidthProbeURL string `json:"bandwidth_probe_url,omitempty"`
 	Capability
 	InstallationID   ID                    `json:"installation_id,omitempty"`
 	ProtocolVersions []int                 `json:"protocol_versions"`
@@ -343,7 +350,17 @@ func registerPlayback(reg *Registry) {
 		if err != nil {
 			return nil, playbackProblem(err)
 		}
-		return &PlaybackCapabilitiesOutput{CacheControl: playbackCacheControl, Body: PlaybackCapabilities{InstallationID: ID(view.InstallationID), Capability: Capability{State: view.State, Allowed: new(view.Allowed)}, ProtocolVersions: append([]int{}, view.ProtocolVersions...), Features: append([]string{}, view.Features...), Deliveries: append([]playback.DeliveryV3{}, view.Deliveries...)}}, nil
+		probeURL := ""
+		if playback.HasFeatureV3(view.Features, playback.FeatureConnectionSpeedV1) {
+			if r := requestFrom(ctx); r != nil {
+				scheme := playbackProbeHTTP
+				if handlers.IsSecureRequest(r) {
+					scheme = playbackProbeHTTPS
+				}
+				probeURL = scheme + "://" + r.Host + Prefix + "/playback/bandwidth-probe?media_path=true"
+			}
+		}
+		return &PlaybackCapabilitiesOutput{CacheControl: playbackCacheControl, Body: PlaybackCapabilities{BandwidthProbeURL: probeURL, InstallationID: ID(view.InstallationID), Capability: Capability{State: view.State, Allowed: new(view.Allowed)}, ProtocolVersions: append([]int{}, view.ProtocolVersions...), Features: append([]string{}, view.Features...), Deliveries: append([]playback.DeliveryV3{}, view.Deliveries...)}}, nil
 	})
 	Register(reg, op(http.MethodPost, "/start", opStartPlayback), func(ctx context.Context, in *PlaybackStartInput) (*PlaybackStartOutput, error) {
 		if in.Body.BandwidthEstimateSource != "" && in.Body.BandwidthEstimateKbps == nil {

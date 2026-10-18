@@ -18,6 +18,8 @@ export const v2Operations = {
   "DELETE /api/v2/admin/collections/{id}/image": "deleteAdminCollectionImage",
   "DELETE /api/v2/admin/collections/{id}/items/{item_id}": "removeAdminCollectionItem",
   "DELETE /api/v2/admin/dashboard/layout": "resetAdminDashboardLayout",
+  "DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit":
+    "resetAdminDeviceLearnedLimit",
   "DELETE /api/v2/admin/diagnostics/reports/{id}": "deleteAdminDiagnosticReport",
   "DELETE /api/v2/admin/history-import-sources/{id}": "deleteAdminHistoryImportSource",
   "DELETE /api/v2/admin/history-imports/mappings/{id}": "deleteAdminHistoryImportMapping",
@@ -778,6 +780,7 @@ export const v2Operations = {
   "POST /api/v2/notifications/{id}/read": "markNotificationRead",
   "POST /api/v2/password-resets": "requestPasswordReset",
   "POST /api/v2/password-resets/{token}/complete": "completePasswordReset",
+  "POST /api/v2/playback/bandwidth-probe/results": "reportPlaybackBandwidthProbe",
   "POST /api/v2/playback/route-events": "reportPlaybackRouteEvent",
   "POST /api/v2/playback/sessions/{session_id}/control/ws-ticket":
     "createPlaybackControlSocketTicket",

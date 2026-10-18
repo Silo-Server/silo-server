@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
 // Playback service seams for the v2 adapter (internal/apiv2/playback.go).
@@ -186,7 +187,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1")
+	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1", playback.FeatureConnectionSpeedV1)
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
@@ -766,7 +767,21 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 		return playbackOperationError(http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
 	}
 	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
-	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]})
+	record := playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]}
+	if event.Event == playback.RouteEventPlanSummaryV3 {
+		record.ConnectionDeviceID = clampHeaderValue(caller.ConnectionDeviceID, 128)
+		record.ConnectionKey, _ = connectionstore.Key(ctx, h.JWTSecret)
+		record.ReceivedAt = time.Now().UTC()
+		if lookup, ok := h.PlanStoreV3.(interface {
+			PlanDelivery(context.Context, string, string) (string, error)
+		}); ok {
+			record.Delivery, err = lookup.PlanDelivery(ctx, event.PlaybackAttemptID, event.PlanID)
+			if err != nil {
+				return playbackStoreOperationError()
+			}
+		}
+	}
+	h.enqueueRouteEventV3(record)
 	return nil
 }
 

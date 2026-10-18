@@ -1996,3 +1996,39 @@ The existing `bandwidth_estimate_kbps` key reports the requested estimate.
 Clients send a summary when a plan stops playing, including replacement,
 stop, and failure. See the buffering-quality design for controller semantics
 and the shared conformance vectors.
+
+
+### Connection speed and device observations
+
+`connection_speed_v1` adds optional `bandwidth_probe_url` to the native
+capability response. Fetch it with ordinary authenticated headers and follow
+redirects. Its stable URL chooses direct-play egress using the caller's network
+routing policy; a proxy download is authorized with a two-minute, probe-only
+stream token. Both API and proxy apply the same per-node/per-account probe
+limits and return `429` with `Retry-After`. Proxy-only routing with no capable
+proxy returns an unavailable error, never a measurement of the API link.
+
+`POST /api/v2/playback/bandwidth-probe/results` accepts
+`{kbps, bytes, duration_ms, transport}` and returns 204. It is profile-scoped and
+uses `X-Silo-Device-Id`; no device means no stored observation. Bounds are
+1–1,000,000 kbps, 1–100,000,000 bytes and 1–60,000 milliseconds. Transport is
+`wifi`, `ethernet`, `cellular` or `other`.
+
+The connection response adds optional `probe: {kbps, measured_at, transport}`
+and `auto_budget_kbps`. The budget is 80% of the lower of the latest probe and
+the unexpired learned limit, then capped by the administrator limit. Without
+either observation the budget is absent. Stored probes describe the latest
+test; clients still expire their start estimate after 30 minutes.
+
+The admin device detail adds optional `connections`. Each entry contains
+`id` (an opaque connection identifier), `connection`, nullable `probe`, nullable
+`learned_limit`, and nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
+`DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit`
+returns 204 and requires acting-admin authority. Both reset operations clear
+only the learned limit, preserving probe and summary observations.
+
+Newly inserted plan-summary events update the latest connection summary and
+feed `silo_playback_stall_ratio{client,delivery}` and
+`silo_playback_buffering_actions_total{mode,action}`. Event retries do not
+increment counters again. Delivery comes from the reported plan's stored
+start/replan receipt, not its replacement; unresolvable plans use `unknown`.

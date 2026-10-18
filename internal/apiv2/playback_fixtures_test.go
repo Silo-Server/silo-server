@@ -17,7 +17,7 @@ func (f *fixturePlaybackService) PlaybackCapabilities(ctx context.Context, userI
 		return handlers.PlaybackCapabilitiesView{Revision: "playback-unconfigured", State: "not_configured", ProtocolVersions: []int{}, Features: []string{}, Deliveries: []playback.DeliveryV3{}}, nil
 	}
 	view, err := f.fakePlaybackService.PlaybackCapabilities(ctx, userID, profileID)
-	view.Features = fixtureInitialPlaybackFeatures()
+	view.Features = append(fixtureInitialPlaybackFeatures(), playback.FeatureBufferingQualityV1, playback.FeaturePlaybackPlanSummaryV1, playback.FeatureConnectionSpeedV1)
 	return view, err
 }
 func (f *fixturePlaybackService) StartPlaybackV2(ctx context.Context, caller handlers.PlaybackCaller, request playback.StartRequestV3) (playback.DecisionResponseV3, error) {

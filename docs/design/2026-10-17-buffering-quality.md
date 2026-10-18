@@ -298,6 +298,13 @@ route. The server should serve the probe wherever it serves this client's
 media, and the capability response should name that URL. On a single-host
 server, it stays the API host.
 
+The advertised URL is stable and authenticated. A download can redirect to a
+short-lived, purpose-bound proxy URL; clients follow redirects. Discovery has
+no media item, so the server selects the reachable egress using the direct-play
+routing policy for the calling network/provider path. The endpoint returns an
+unavailable error when a proxy-only policy has no capable proxy, rather than
+measuring the API path instead.
+
 ## Reporting and display
 
 ### Probe results
@@ -325,7 +332,10 @@ Phase 1 returns `connection` and `learned_limit`; phase 2 adds `probe` and
 `auto_budget_kbps` is computed by the server: 80% of the lower of the probe
 result and the learned limit, then capped by the admin bitrate cap. Clients
 display it and never compute it. `DELETE /api/v2/playback/connection/learned-limit`
-resets the limit.
+resets the limit. Missing probe and budget fields mean that no measurement is
+available; an administrator cap alone is not a speed measurement. The latest
+probe is retained for display until row retention removes it; clients still
+expire their playback estimate after 30 minutes.
 
 ### Settings
 
@@ -350,6 +360,11 @@ Phase 2 adds a Connection group:
 `GET /api/v2/admin/devices/{user_id}/{device_id}` gains `connections`: for each
 key, the connection label, the latest probe, the learned limit, and the latest
 plan summary. The web admin device page shows them, with **Clear limit**.
+Each entry has an opaque `id`, `connection`, nullable `probe`, nullable
+`learned_limit`, and nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
+The admin resets one with `DELETE
+/api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit`
+(204). Both reset endpoints preserve probe and summary observations.
 
 Rows are deleted 30 days after their last update and when the device is
 deleted. Only the hash of a public address is stored. Admins can already see
@@ -423,6 +438,10 @@ the plan's delivered bitrate, quality, menu and warnings), `playing`, `waiting`
 the clock. Outputs are `replan` with its body, `prompt_shown`, `undo_shown`, and
 `notice` with its copy key. Some cases also give the `buffering_action` each
 plan's `plan_summary` must report.
+
+The same file's `connection_budget_cases` is a server-only oracle for the
+connection endpoint's 80% margin and administrator cap. It does not add events
+to the client controller cases.
 
 Each client vendors the file unchanged and replays it in unit tests against a
 fake clock, in the same way that `IntroAutoSkipControllerTest` and

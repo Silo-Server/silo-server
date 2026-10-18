@@ -1281,6 +1281,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Clear a device connection's learned limit, preserving measurements. */
+    delete: operations["resetAdminDeviceLearnedLimit"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/devices/capabilities": {
     parameters: {
       query?: never;
@@ -9701,6 +9718,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/playback/bandwidth-probe/results": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Store the calling device's latest measured connection speed. */
+    post: operations["reportPlaybackBandwidthProbe"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/playback/capabilities": {
     parameters: {
       query?: never;
@@ -14188,7 +14222,15 @@ export interface components {
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
     };
+    AdminDeviceConnection: {
+      connection: string;
+      id: string;
+      learned_limit: components["schemas"]["PlaybackLearnedLimit"];
+      plan_summary: components["schemas"]["PlaybackPlanSummary"];
+      probe: components["schemas"]["PlaybackProbe"];
+    };
     AdminDeviceDetail: {
+      connections?: components["schemas"]["AdminDeviceConnection"][];
       device_id: string;
       device_name: string;
       device_platform: string;
@@ -27112,6 +27154,7 @@ export interface components {
     PlaybackCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      bandwidth_probe_url?: string;
       deliveries: string[];
       features: string[];
       /**
@@ -27129,8 +27172,11 @@ export interface components {
       state: "available" | "disabled" | "not_configured" | "unsupported";
     };
     PlaybackConnection: {
+      /** Format: int64 */
+      auto_budget_kbps?: number;
       connection: string;
       learned_limit: components["schemas"]["PlaybackLearnedLimit"];
+      probe?: components["schemas"]["PlaybackProbe"];
     };
     PlaybackControlSocketCapabilitiesOutputBody: {
       /** @description Whether the current principal may use the capability */
@@ -27236,6 +27282,31 @@ export interface components {
       subtitle_fidelity_policy: string;
       timeline: components["schemas"]["TimelineV3"];
       transformations: components["schemas"]["TransformationV3"][];
+    };
+    PlaybackPlanSummary: {
+      diagnostics: {
+        [key: string]: string;
+      };
+      plan_id: string;
+      /** Format: date-time */
+      reported_at: string;
+    };
+    PlaybackProbe: {
+      /** Format: int64 */
+      kbps: number;
+      /** Format: date-time */
+      measured_at: string;
+      transport: string;
+    };
+    PlaybackProbeResultsInputBody: {
+      /** Format: int64 */
+      bytes: number;
+      /** Format: int64 */
+      duration_ms: number;
+      /** Format: int64 */
+      kbps: number;
+      /** @enum {string} */
+      transport: "wifi" | "ethernet" | "cellular" | "other";
     };
     PlaybackProgressBody: {
       /**
@@ -45044,6 +45115,115 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AdminDeviceDetail"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resetAdminDeviceLearnedLimit: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        connection_id: string;
+        device_id: string;
+        /** @description Opaque identifier */
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -118411,6 +118591,8 @@ export interface operations {
   getPlaybackBandwidthProbe: {
     parameters: {
       query?: {
+        /** @description Use the client media egress route. */
+        media_path?: boolean;
         /** @description Number of bytes to send. A client may close the connection early once it has timed enough of the transfer. */
         size?: number;
       };
@@ -118431,6 +118613,14 @@ export interface operations {
           "application/octet-stream": string;
         };
       };
+      /** @description Selected media proxy; follow the short-lived probe URL */
+      307: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Unauthorized */
       401: {
         headers: {
@@ -118442,6 +118632,142 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  reportPlaybackBandwidthProbe: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+        "X-Silo-Device-Id"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PlaybackProbeResultsInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };

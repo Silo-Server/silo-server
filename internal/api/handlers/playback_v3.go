@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -6526,9 +6527,10 @@ func (h *PlaybackHandler) enqueueRouteEventV3(event playback.RouteEventRecordV3)
 		// Capturing also matches what the queue is: work batched for the store
 		// that existed when it was created.
 		store := h.PlanStoreV3
+		connections := h.Connections
 		go func() {
 			for value := range h.v3EventQueue {
-				recordRouteEventV3(store, value)
+				recordRouteEventV3(store, value, connections)
 			}
 		}()
 	})
@@ -6542,7 +6544,7 @@ func (h *PlaybackHandler) enqueueRouteEventV3(event playback.RouteEventRecordV3)
 // recordRouteEventV3 writes one queued route event and feeds the metrics
 // derived from it. Only a newly inserted row is observed: a v2 retry after a
 // lost 202 reuses its event_id and must not be counted twice.
-func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRecordV3) {
+func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRecordV3, connections ...*connectionstore.Store) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	inserted, err := store.RecordRouteEvent(ctx, event)
@@ -6552,6 +6554,12 @@ func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRec
 	}
 	if inserted {
 		playback.ObserveStoredRouteEvent(event)
+		if event.Event == playback.RouteEventPlanSummaryV3 && len(connections) > 0 {
+			summary := connectionstore.PlanSummary{PlanID: event.PlanID, ReportedAt: event.ReceivedAt, Diagnostics: event.Diagnostics}
+			if err := connections[0].ReportSummary(ctx, event.UserID, event.ConnectionDeviceID, event.ConnectionKey, summary); err != nil {
+				slog.Warn("playback connection summary write failed", "error", err)
+			}
+		}
 	}
 }
 

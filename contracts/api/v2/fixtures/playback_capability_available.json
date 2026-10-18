@@ -1,5 +1,6 @@
 {
-  "revision": "e5f15968d75c1594cd21ce96cf6d861307e7b5968d1fb116c52158fd8179fc8e",
+  "bandwidth_probe_url": "http://api.example.test/api/v2/playback/bandwidth-probe?media_path=true",
+  "revision": "753796975b1aa44fda9d3136acdff21f1b4700cf4e89bdfa0f344d3d85552aea",
   "state": "available",
   "allowed": true,
   "installation_id": "11111111-1111-4111-8111-111111111111",
@@ -15,7 +16,10 @@
     "direct_stream_resume_v1",
     "software_video_decode_v1",
     "plan_source_duration_v1",
-    "sequenced_progress_v1"
+    "sequenced_progress_v1",
+    "buffering_quality_v1",
+    "playback_plan_summary_v1",
+    "connection_speed_v1"
   ],
   "deliveries": [
     "original_http",

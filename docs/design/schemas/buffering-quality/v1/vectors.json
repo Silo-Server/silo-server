@@ -2058,5 +2058,41 @@
         }
       ]
     }
+  ],
+  "connection_budget_cases": [
+    {
+      "name": "probe_only",
+      "probe_kbps": 48000,
+      "expected_kbps": 38400
+    },
+    {
+      "name": "learned_limit_wins",
+      "probe_kbps": 48000,
+      "learned_limit_kbps": 44100,
+      "expected_kbps": 35280
+    },
+    {
+      "name": "probe_wins",
+      "probe_kbps": 24000,
+      "learned_limit_kbps": 44100,
+      "expected_kbps": 19200
+    },
+    {
+      "name": "limit_only",
+      "learned_limit_kbps": 44100,
+      "expected_kbps": 35280
+    },
+    {
+      "name": "admin_cap",
+      "probe_kbps": 48000,
+      "learned_limit_kbps": 44100,
+      "admin_cap_kbps": 12000,
+      "expected_kbps": 12000
+    },
+    {
+      "name": "no_measurement",
+      "admin_cap_kbps": 12000,
+      "expected_kbps": null
+    }
   ]
 }

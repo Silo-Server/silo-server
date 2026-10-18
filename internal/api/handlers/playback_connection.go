@@ -21,6 +21,11 @@ func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string,
 	}
 	limit, err := h.Connections.Get(ctx, apimw.GetUserID(ctx), device, key)
 	state.LearnedLimit = limit
+	if err != nil {
+		return state, err
+	}
+	state.Probe, err = h.Connections.Probe(ctx, apimw.GetUserID(ctx), device, key)
+	state.AutoBudgetKbps = connectionstore.Budget(state.Probe, limit, serverBitrateCapV3(ctx))
 	return state, err
 }
 
@@ -127,4 +132,15 @@ func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.Sta
 		}
 	}
 	return base, req, audio
+}
+
+func (h *PlaybackHandler) ReportPlaybackProbe(ctx context.Context, device string, result connectionstore.ProbeResult) error {
+	key, _ := connectionstore.Key(ctx, h.JWTSecret)
+	return h.Connections.ReportProbe(ctx, apimw.GetUserID(ctx), clampHeaderValue(device, 128), key, result)
+}
+func (h *PlaybackHandler) AdminPlaybackConnections(ctx context.Context, user int, device string) ([]connectionstore.AdminConnection, error) {
+	return h.Connections.List(ctx, user, device)
+}
+func (h *PlaybackHandler) ClearAdminPlaybackLimit(ctx context.Context, user int, device, key string) error {
+	return h.Connections.Clear(ctx, user, device, key)
 }

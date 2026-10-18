@@ -73,3 +73,19 @@ func TestMemoryRecordRouteEventReportsInsert(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanSummaryMetricUsesReportedDelivery(t *testing.T) {
+	metric := &dto.Metric{}
+	histogram := stallRatio.WithLabelValues("web", "original_http").(prometheus.Metric)
+	if err := histogram.Write(metric); err != nil {
+		t.Fatal(err)
+	}
+	before := metric.GetHistogram().GetSampleCount()
+	ObserveStoredRouteEvent(RouteEventRecordV3{ClientName: "Silo Web", Delivery: "original_http", RouteEventV3: RouteEventV3{Event: RouteEventPlanSummaryV3, Diagnostics: map[string]string{"played_ms": "100000", "stall_total_ms": "6000", "buffering_mode": "always", "buffering_action": "lowered"}}})
+	if err := histogram.Write(metric); err != nil {
+		t.Fatal(err)
+	}
+	if metric.GetHistogram().GetSampleCount() != before+1 {
+		t.Fatal("summary not observed")
+	}
+}

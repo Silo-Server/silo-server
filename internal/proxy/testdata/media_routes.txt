@@ -12,6 +12,7 @@ POST /network-access/{provider}/connect	non-media
 POST /network-access/{provider}/disconnect	non-media
 GET /network-access/{provider}/status	non-media
 GET /status	non-media
+GET /stream/bandwidth-probe/{token}	media	transfer	viewer_egress	false	true
 GET /stream/direct/{token}	media	playback	viewer_egress	true	true
 HEAD /stream/direct/{token}	media	playback	viewer_egress	true	true
 GET /stream/remux/audio-v2/{token}	media	playback	viewer_egress	true	true
@@ -44,6 +45,7 @@ POST /network-access/{provider}/connect	non-media
 POST /network-access/{provider}/disconnect	non-media
 GET /network-access/{provider}/status	non-media
 GET /status	non-media
+GET /stream/bandwidth-probe/{token}	media	transfer	viewer_egress	false	true
 GET /stream/direct/{token}	media	playback	viewer_egress	true	true
 HEAD /stream/direct/{token}	media	playback	viewer_egress	true	true
 GET /stream/remux/audio-v2/{token}	media	playback	viewer_egress	true	true

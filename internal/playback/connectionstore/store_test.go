@@ -2,6 +2,7 @@ package connectionstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -87,13 +88,7 @@ func TestStoreLifecycle(t *testing.T) {
 	if err := s.Observe(ctx, user, "device", "local", 44100); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Clear(ctx, user, "device", "local"); err != nil {
-		t.Fatal(err)
-	}
-	limit, err = s.Get(ctx, user, "device", "local")
-	if err != nil || limit != nil {
-		t.Fatal("reset failed")
-	}
+	checkResetPreservesObservations(t, s, user)
 	if err := s.Observe(ctx, user, "device", "local", 44100); err != nil {
 		t.Fatal(err)
 	}
@@ -106,5 +101,65 @@ func TestStoreLifecycle(t *testing.T) {
 	limit, err = s.Get(ctx, user, "device", "local")
 	if err != nil || limit != nil {
 		t.Fatal("device deletion retained limit")
+	}
+}
+
+func TestBudgetVectors(t *testing.T) {
+	data, err := os.ReadFile("../../../docs/design/schemas/buffering-quality/v1/vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors struct {
+		Cases []struct {
+			Name  string `json:"name"`
+			Probe int    `json:"probe_kbps"`
+			Limit int    `json:"learned_limit_kbps"`
+			Cap   int    `json:"admin_cap_kbps"`
+			Want  *int   `json:"expected_kbps"`
+		} `json:"connection_budget_cases"`
+	}
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors.Cases) == 0 {
+		t.Fatal("no connection vectors")
+	}
+	for _, v := range vectors.Cases {
+		t.Run(v.Name, func(t *testing.T) {
+			var p *Probe
+			var l *Limit
+			if v.Probe > 0 {
+				p = &Probe{Kbps: v.Probe}
+			}
+			if v.Limit > 0 {
+				l = &Limit{Kbps: v.Limit}
+			}
+			got := Budget(p, l, v.Cap)
+			if (got == nil) != (v.Want == nil) || (got != nil && *got != *v.Want) {
+				t.Fatalf("budget=%v want=%v", got, v.Want)
+			}
+		})
+	}
+}
+
+func checkResetPreservesObservations(t *testing.T, s *Store, user int) {
+	t.Helper()
+	ctx := t.Context()
+	if err := s.ReportProbe(ctx, user, "device", "local", ProbeResult{Kbps: 48000, Bytes: 12000000, DurationMS: 2000, Transport: "wifi"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReportSummary(ctx, user, "device", "local", PlanSummary{PlanID: "plan-1", ReportedAt: time.Now(), Diagnostics: map[string]string{"stall_count": "2"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Clear(ctx, user, "device", "local"); err != nil {
+		t.Fatal(err)
+	}
+	limit, err := s.Get(ctx, user, "device", "local")
+	if err != nil || limit != nil {
+		t.Fatal("reset failed")
+	}
+	rows, err := s.List(ctx, user, "device")
+	if err != nil || len(rows) != 1 || rows[0].LearnedLimit != nil || rows[0].Probe == nil || rows[0].Probe.Kbps != 48000 || rows[0].PlanSummary == nil {
+		t.Fatalf("reset lost observations: %+v %v", rows, err)
 	}
 }

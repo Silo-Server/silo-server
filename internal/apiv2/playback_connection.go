@@ -20,8 +20,10 @@ type PlaybackLearnedLimit struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 type PlaybackConnection struct {
-	Connection   string                `json:"connection"`
-	LearnedLimit *PlaybackLearnedLimit `json:"learned_limit"`
+	Probe          *PlaybackProbe        `json:"probe,omitempty"`
+	AutoBudgetKbps *int                  `json:"auto_budget_kbps,omitempty"`
+	Connection     string                `json:"connection"`
+	LearnedLimit   *PlaybackLearnedLimit `json:"learned_limit"`
 }
 type PlaybackConnectionOutput struct {
 	CacheControl string `header:"Cache-Control"`
@@ -30,6 +32,7 @@ type PlaybackConnectionOutput struct {
 type PlaybackConnectionResetOutput struct{ Status int }
 
 func registerPlaybackConnection(reg *Registry) {
+	registerPlaybackProbeResults(reg)
 	op := func(method, path, id string) Operation {
 		result := Operation{Operation: humaOp(method, Prefix+"/playback/connection"+path, id, playbackTag, "Read or reset the calling device's learned connection limit."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 		if method == http.MethodGet {
@@ -46,7 +49,7 @@ func registerPlaybackConnection(reg *Registry) {
 		if err != nil {
 			return nil, playbackProblem(err)
 		}
-		body := PlaybackConnection{Connection: state.Connection}
+		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), AutoBudgetKbps: state.AutoBudgetKbps}
 		if limit := state.LearnedLimit; limit != nil {
 			body.LearnedLimit = &PlaybackLearnedLimit{Kbps: limit.Kbps, ObservedAt: limit.ObservedAt, ExpiresAt: limit.ExpiresAt}
 		}
@@ -63,4 +66,50 @@ func registerPlaybackConnection(reg *Registry) {
 		}
 		return &PlaybackConnectionResetOutput{Status: http.StatusNoContent}, nil
 	})
+}
+
+type playbackProbeResultService interface {
+	ReportPlaybackProbe(context.Context, string, connectionstore.ProbeResult) error
+}
+type PlaybackProbeResultsInput struct {
+	DeviceID string `header:"X-Silo-Device-Id" maxLength:"128"`
+	Body     struct {
+		Kbps       int    `json:"kbps" minimum:"1" maximum:"1000000"`
+		Bytes      int64  `json:"bytes" minimum:"1" maximum:"100000000"`
+		DurationMS int    `json:"duration_ms" minimum:"1" maximum:"60000"`
+		Transport  string `json:"transport" enum:"wifi,ethernet,cellular,other"`
+	}
+}
+
+func registerPlaybackProbeResults(reg *Registry) {
+	Register(reg, Operation{Operation: humaOp(http.MethodPost, Prefix+"/playback/bandwidth-probe/results", "reportPlaybackBandwidthProbe", playbackTag, "Store the calling device's latest measured connection speed."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, func(ctx context.Context, in *PlaybackProbeResultsInput) (*PlaybackConnectionResetOutput, error) {
+		service, ok := reg.deps.Playback.(playbackProbeResultService)
+		if !ok {
+			return nil, unavailable("connection observations")
+		}
+		err := service.ReportPlaybackProbe(ctx, in.DeviceID, connectionstore.ProbeResult{Kbps: in.Body.Kbps, Bytes: in.Body.Bytes, DurationMS: in.Body.DurationMS, Transport: in.Body.Transport})
+		if err != nil {
+			return nil, playbackProblem(err)
+		}
+		return &PlaybackConnectionResetOutput{Status: http.StatusNoContent}, nil
+	})
+}
+
+type PlaybackProbe struct {
+	Kbps       int       `json:"kbps"`
+	MeasuredAt time.Time `json:"measured_at"`
+	Transport  string    `json:"transport"`
+}
+
+func playbackProbeOf(p *connectionstore.Probe) *PlaybackProbe {
+	if p == nil {
+		return nil
+	}
+	return &PlaybackProbe{Kbps: p.Kbps, MeasuredAt: p.MeasuredAt, Transport: p.Transport}
+}
+func playbackLimitOf(p *connectionstore.Limit) *PlaybackLearnedLimit {
+	if p == nil {
+		return nil
+	}
+	return &PlaybackLearnedLimit{Kbps: p.Kbps, ObservedAt: p.ObservedAt, ExpiresAt: p.ExpiresAt}
 }

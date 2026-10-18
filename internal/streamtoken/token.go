@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	PlayMethodBandwidthProbe = "bandwidth_probe_v1"
 	// PlayMethodDownload identifies a token minted only after the API has
 	// authorized a file download. Proxy download routes reject playback tokens.
 	PlayMethodDownload = "download"

@@ -50,3 +50,60 @@ func TestPlaybackEstimateSourceRequiresEstimate(t *testing.T) {
 		t.Fatalf("status %d: %s", response.Code, response.Body.String())
 	}
 }
+
+func (f *connectionPlaybackFake) ReportPlaybackProbe(_ context.Context, device string, result connectionstore.ProbeResult) error {
+	f.device = device
+	if result.Kbps != 48000 || result.Bytes != 12000000 || result.DurationMS != 2000 || result.Transport != "wifi" {
+		panic("unexpected measurement")
+	}
+	return nil
+}
+func TestProbeResultsContract(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	fake := &connectionPlaybackFake{}
+	deps.Playback = fake
+	h := newTestHandler(t, deps)
+	headers := viewerHeaders()
+	headers["X-Silo-Device-Id"] = "probe-device"
+	path := Prefix + "/playback/bandwidth-probe/results"
+	body := `{"kbps":48000,"bytes":12000000,"duration_ms":2000,"transport":"wifi"}`
+	res := do(t, h, http.MethodPost, path, body, headers)
+	if res.Code != 204 || fake.device != "probe-device" {
+		t.Fatalf("report %d %s", res.Code, res.Body.String())
+	}
+	res = do(t, h, http.MethodPost, path, strings.Replace(body, `"wifi"`, `"satellite"`, 1), headers)
+	if res.Code != 422 {
+		t.Fatalf("invalid transport %d", res.Code)
+	}
+	res = do(t, h, http.MethodPost, path, body, nil)
+	if res.Code != 401 {
+		t.Fatalf("anonymous report %d", res.Code)
+	}
+}
+
+func (f *connectionPlaybackFake) AdminPlaybackConnections(context.Context, int, string) ([]connectionstore.AdminConnection, error) {
+	return []connectionstore.AdminConnection{}, nil
+}
+func (f *connectionPlaybackFake) ClearAdminPlaybackLimit(_ context.Context, user int, device, key string) error {
+	if user != 2 || key != "local" {
+		panic("wrong reset target")
+	}
+	f.device = device
+	f.clear = true
+	return nil
+}
+func TestAdminConnectionResetRequiresAdmin(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	fake := &connectionPlaybackFake{}
+	deps.Playback = fake
+	h := newTestHandler(t, deps)
+	path := Prefix + "/admin/devices/2/probe-device/connections/local/learned-limit"
+	res := do(t, h, http.MethodDelete, path, "", viewerHeaders())
+	if res.Code != 403 || fake.clear {
+		t.Fatalf("viewer reset: %d", res.Code)
+	}
+	res = do(t, h, http.MethodDelete, path, "", bearer(adminToken))
+	if res.Code != 204 || !fake.clear || fake.device != "probe-device" {
+		t.Fatalf("admin reset: %d %s", res.Code, res.Body.String())
+	}
+}

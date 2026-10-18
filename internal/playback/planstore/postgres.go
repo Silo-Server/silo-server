@@ -556,3 +556,18 @@ func (s *Postgres) CleanupExpired(ctx context.Context, now time.Time) (int64, er
 	}
 	return result.RowsAffected(), nil
 }
+
+// PlanDelivery resolves the reported plan, including one replaced by a replan.
+// Looking only at current_plan would attribute the old plan's stalls to its replacement.
+func (s *Postgres) PlanDelivery(ctx context.Context, attempt, plan string) (string, error) {
+	var delivery string
+	err := s.db.QueryRow(ctx, `SELECT p->>'delivery' FROM (
+ SELECT start_response->'playback_plan' p FROM playback_v3_attempts WHERE playback_attempt_id=$1
+ UNION ALL SELECT current_plan FROM playback_v3_attempts WHERE playback_attempt_id=$1
+ UNION ALL SELECT r.response->'playback_plan' FROM playback_v3_replans r JOIN playback_v3_attempts a ON a.session_id=r.session_id WHERE a.playback_attempt_id=$1
+ ) plans WHERE p->>'plan_id'=$2 LIMIT 1`, attempt, plan).Scan(&delivery)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return delivery, err
+}

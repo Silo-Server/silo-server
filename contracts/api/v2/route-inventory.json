@@ -50,7 +50,7 @@
       "id": "proxy",
       "entrypoint": "internal/proxy.(*Server).Handler",
       "description": "Proxy node listener: media relay, node control, and its own health/metrics probes.",
-      "route_count": 31
+      "route_count": 32
     },
     {
       "id": "transcode_node",
@@ -60,9 +60,9 @@
     }
   ],
   "totals": {
-    "routes": 873,
+    "routes": 874,
     "conditional_routes": 691,
-    "streaming_routes": 44,
+    "streaming_routes": 45,
     "websocket_routes": 4
   },
   "middleware_chains": [
@@ -483,7 +483,7 @@
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
         "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })"
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })"
       ]
     },
     {
@@ -491,7 +491,7 @@
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
         "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })",
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })",
         "s.meterEgress"
       ]
     },
@@ -500,7 +500,7 @@
       "middleware": [
         "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
         "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", }, MaxAge: 86400, })",
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })",
         "s.requireBearer"
       ]
     },
@@ -27425,6 +27425,34 @@
       "response_media_kind": "json",
       "delegates_to": "",
       "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/stream/bandwidth-probe/{token}",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleBandwidthProbe",
+      "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/bandwidth-probe/{token}\", s.handleBandwidthProbe)",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 27,
+      "auth_class": "public",
+      "auth_traits": [
+        "cors",
+        "egress_metered"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": true,
       "upgrades_websocket": false,
       "method_origin": "explicit",
       "success_statuses": null,
