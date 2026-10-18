@@ -240,16 +240,14 @@ export function buildDeliveriesV3(
  * Measured downlink in kbps for the planner's Auto choice: a source that fits
  * the estimate plays as-is, and only one that does not is converted.
  *
- * A fresh measurement from the background bandwidth probe wins, unless the
+ * A fresh measurement from the background bandwidth probe is used, unless the
  * link is metered (Data Saver or cellular): that measurement was taken on
- * another link, so only a limit playback observed on this kind of link counts
- * there. `connection.downlink` is never used: browsers round and cap it
- * (Chromium at 10 Mbps), so it is a guess, not a measurement. Returns
- * undefined when nothing was measured, which lets Auto send the source.
+ * another link, and a metered one is never probed. `connection.downlink` is
+ * never used: browsers round and cap it (Chromium at 10 Mbps), so it is a
+ * guess, not a measurement. Returns undefined when nothing was measured, which
+ * lets Auto send the source, under any limit the server learned.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
-  // On a metered link a probe result describes another link; only a limit
-  // playback observed on a metered link describes this one.
   return onMeteredConnection() ? undefined : readMeasuredBandwidthKbps();
 }
 

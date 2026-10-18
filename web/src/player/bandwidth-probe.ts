@@ -3,13 +3,14 @@ import { v2, V2_CLIENT_HEADERS } from "@/api/v2/request";
 import { storage } from "@/utils/storage";
 
 /**
- * Measured throughput to this server, for `bandwidth_estimate_kbps`.
+ * Measured throughput on the path media takes, for `bandwidth_estimate_kbps`.
  *
  * Browsers will not tell us: Chromium caps `navigator.connection.downlink` at
  * 10 Mbps and Safari and Firefox have no such API, while Auto quality needs to
  * know whether a viewer can sustain a 4K source at 60–100 Mbps. So the app
  * downloads random bytes from the server in the background, times them, and
- * caches the result for playback to read.
+ * caches the result for playback to read. With connection_speed_v1 the probe
+ * runs against the URL the server advertises and the result is reported back.
  */
 
 /** Bytes requested; the time budget usually ends the transfer first. */
@@ -54,10 +55,6 @@ export function networkInformation(): NetworkInformationLike | undefined {
 interface StoredEstimate {
   kbps: number;
   measuredAt: number;
-  /** Legacy observed limits are discarded when reading the cache. */
-  observed?: boolean;
-  /** Legacy metered-link cache entries are not used. */
-  link?: string;
 }
 
 function clampKbps(kbps: number): number | undefined {
@@ -67,26 +64,24 @@ function clampKbps(kbps: number): number | undefined {
 
 /**
  * The entry this page last wrote. localStorage can be full or unavailable,
- * and its writes then fail silently; this copy keeps a just-recorded limit
- * in effect for the replan that reads it straight back.
+ * and its writes then fail silently; this copy keeps the measurement in
+ * effect for this page anyway.
  */
 let pageEntry: string | undefined;
 
 function parseStored(raw: string | null | undefined, now: number): StoredEstimate | undefined {
   if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(raw) as Partial<StoredEstimate>;
+    const parsed = JSON.parse(raw) as Partial<StoredEstimate> & { observed?: unknown };
+    // A limit an older build recorded after a stall is not a measurement; the
+    // server learns those now. It shares the key and expires within the TTL.
     if (parsed.observed) return undefined;
     if (typeof parsed.kbps !== "number" || typeof parsed.measuredAt !== "number") return undefined;
     if (now - parsed.measuredAt > BANDWIDTH_ESTIMATE_TTL_MS || parsed.measuredAt > now)
       return undefined;
     const kbps = clampKbps(parsed.kbps);
     if (kbps === undefined) return undefined;
-    return {
-      kbps,
-      measuredAt: parsed.measuredAt,
-      ...(typeof parsed.link === "string" ? { link: parsed.link } : {}),
-    };
+    return { kbps, measuredAt: parsed.measuredAt };
   } catch {
     return undefined;
   }
@@ -113,21 +108,23 @@ export function forgetBandwidthEstimate(): void {
   storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
 }
 
-/**
- * The cached measurement in kbps for an unmetered link, or undefined when none
- * is fresh or the cached value was recorded on a metered link.
- */
+/** The cached measurement in kbps, or undefined when none is fresh. */
 export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined {
-  const stored = readStored(now);
-  // A limit recorded on a metered link describes that link only.
-  return stored && !stored.link ? stored.kbps : undefined;
+  return readStored(now)?.kbps;
+}
+
+/** One timed probe: the rate and the sample it was taken from. */
+export interface ProbeMeasurement {
+  kbps: number;
+  bytes: number;
+  duration_ms: number;
 }
 
 /**
  * Times one probe download. Returns undefined when the probe failed, was
  * aborted, or moved too little data in too short a window to mean anything.
  */
-async function measureBandwidth(
+export async function measureBandwidth(
   signal: AbortSignal,
   clock: () => number = () => performance.now(),
   probeURL = "/api/v2/playback/bandwidth-probe",
@@ -226,21 +223,10 @@ async function measureBandwidth(
     : { kbps, bytes, duration_ms: Math.max(1, Math.round(elapsed)) };
 }
 
-interface ProbeMeasurement {
-  kbps: number;
-  bytes: number;
-  duration_ms: number;
-}
 export class ProbeRateLimited extends Error {
   constructor(readonly retryAfter: number) {
     super(`Try again in ${retryAfter} seconds`);
   }
-}
-export async function measureBandwidthKbps(
-  signal: AbortSignal,
-  clock?: () => number,
-): Promise<number | undefined> {
-  return (await measureBandwidth(signal, clock))?.kbps;
 }
 async function collectProbe(signal: AbortSignal): Promise<number | undefined> {
   const cap = await v2("GET /api/v2/playback/capabilities");
@@ -423,22 +409,6 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
   } catch {
     // Cross-tab coordination is optional.
   }
-  const network = networkInformation() as (NetworkInformationLike & EventTarget) | undefined;
-  const onNetworkChange = () => {
-    cancelEpoch++;
-    activeProbe?.abort();
-    forgetBandwidthEstimate();
-    schedule(PROBE_START_DELAY_MS);
-  };
-  const onVisible = () => {
-    if (document.visibilityState === "visible") schedule(PROBE_START_DELAY_MS);
-  };
-  network?.addEventListener?.("change", onNetworkChange);
-  document.addEventListener("visibilitychange", onVisible);
-  scheduleCleanup = () => {
-    network?.removeEventListener?.("change", onNetworkChange);
-    document.removeEventListener("visibilitychange", onVisible);
-  };
   const generation = scheduleGeneration;
   const schedule = (ms: number) => {
     if (generation !== scheduleGeneration) return;
@@ -449,9 +419,7 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
   const awaitExpiry = (): boolean => {
     const now = Date.now();
     const stored = readStored(now);
-    // A limit from a metered link says nothing about an unmetered one, so it
-    // does not stand in for a probe there.
-    if (!stored || stored.link) return false;
+    if (!stored) return false;
     schedule(stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - now + 1000);
     return true;
   };
@@ -459,8 +427,7 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
     const controller = new AbortController();
     activeProbe = controller;
     try {
-      const kbps = await collectProbe(controller.signal);
-      if (kbps !== undefined && !controller.signal.aborted) writeStored(kbps, Date.now());
+      await collectProbe(controller.signal);
     } catch {
       // Best effort: without a measurement playback plans as it did before.
     } finally {
@@ -472,6 +439,8 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
   };
   const run = () => {
     scheduledTimer = undefined;
+    // A probe already running reschedules itself when it settles.
+    if (activeProbe) return;
     if (awaitExpiry()) return;
     if (!probeAllowed()) {
       schedule(PROBE_RETRY_MS);
@@ -503,6 +472,24 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
         await probe();
       })
       .catch(() => schedule(PROBE_RETRY_MS));
+  };
+  // A new network voids the measurement; a return to the foreground looks
+  // again, as a fresh sign-in does.
+  const network = networkInformation() as (NetworkInformationLike & EventTarget) | undefined;
+  const onNetworkChange = () => {
+    cancelEpoch++;
+    activeProbe?.abort();
+    forgetBandwidthEstimate();
+    schedule(PROBE_START_DELAY_MS);
+  };
+  const onVisible = () => {
+    if (document.visibilityState === "visible") schedule(PROBE_START_DELAY_MS);
+  };
+  network?.addEventListener?.("change", onNetworkChange);
+  document.addEventListener("visibilitychange", onVisible);
+  scheduleCleanup = () => {
+    network?.removeEventListener?.("change", onNetworkChange);
+    document.removeEventListener("visibilitychange", onVisible);
   };
   schedule(delayMs);
   return stopBandwidthProbes;

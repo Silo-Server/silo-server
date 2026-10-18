@@ -35,13 +35,16 @@ import {
   BANDWIDTH_ESTIMATE_TTL_MS,
   cancelBandwidthProbe,
   forgetBandwidthEstimate,
-  measureBandwidthKbps,
+  measureBandwidth,
   readMeasuredBandwidthKbps,
   scheduleBandwidthProbe,
   stopBandwidthProbes,
 } from "./bandwidth-probe";
 import { v2 } from "@/api/v2/request";
 import { storage } from "@/utils/storage";
+
+const measureBandwidthKbps = async (...args: Parameters<typeof measureBandwidth>) =>
+  (await measureBandwidth(...args))?.kbps;
 
 /** A body that yields `chunks` of `chunkBytes`, advancing a fake clock `stepMs` per chunk. */
 function timedBody(chunks: number, chunkBytes: number, stepMs: number) {
@@ -403,6 +406,35 @@ describe("reported connection speed", () => {
       }),
     });
     clock.mockRestore();
+  });
+  async function measureNow() {
+    const body = timedBody(1000, 1_000_000, 80);
+    fetchWithSession.mockResolvedValue({ res: body.res });
+    const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
+    vi.mocked(v2).mockResolvedValueOnce({ features: [] } as never);
+    try {
+      return await testConnectionSpeed();
+    } finally {
+      clock.mockRestore();
+    }
+  }
+  it("keeps a measurement for this page when localStorage refuses the write", async () => {
+    const set = vi.spyOn(storage, "set").mockImplementation(() => undefined);
+    try {
+      expect(await measureNow()).toBe(100000);
+      expect(readMeasuredBandwidthKbps()).toBe(100000);
+    } finally {
+      set.mockRestore();
+    }
+  });
+  it("prefers a newer result another tab stored over this page's own", async () => {
+    expect(await measureNow()).toBe(100000);
+    const now = Date.now();
+    storage.set(
+      storage.KEYS.BANDWIDTH_ESTIMATE,
+      JSON.stringify({ kbps: 90_000, measuredAt: now + 500 }),
+    );
+    expect(readMeasuredBandwidthKbps(now + 1_000)).toBe(90_000);
   });
   it("rejects a test that ran and measured nothing", async () => {
     fetchWithSession.mockResolvedValue({ res: { ok: false, status: 503, body: null } });
