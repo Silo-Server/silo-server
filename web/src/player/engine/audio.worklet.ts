@@ -69,6 +69,12 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
   private readonly stretcher: TimeStretcher;
   /** The PCM at the read head that the stretcher builds its next sequence from. */
   private readonly stretchInput: Float32Array;
+  /**
+   * Less than a sequence is left before the end of the stream: it plays
+   * unstretched, so its samples fill the media time left instead of a
+   * sequence padded with silence.
+   */
+  private finishing = false;
 
   constructor(options: { processorOptions: { channels: number } }) {
     super(options);
@@ -92,6 +98,7 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     this.underrunReported = false;
     this.consumedFrames = 0;
     this.renderedUntil = null;
+    this.finishing = false;
     this.stretcher.reset();
   }
 
@@ -162,14 +169,18 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
           this.stretcher.reset();
           continue;
         }
-        if (stretched) {
-          if (this.stretcher.pending === 0) {
-            if (!this.peek(this.stretcher.inputFrames(step))) {
-              starved = true;
-              break;
-            }
+        if (stretched && !this.finishing && this.stretcher.pending === 0) {
+          if (this.peek(this.stretcher.inputFrames(step))) {
             this.stretcher.build(step, this.stretchInput);
+          } else if (this.ended) {
+            this.finishing = true;
+            this.stretcher.release();
+          } else {
+            starved = true;
+            break;
           }
+        }
+        if (stretched && !this.finishing) {
           this.stretcher.take(output, rendered, channels);
         } else {
           const index = Math.floor(this.offset);
@@ -272,8 +283,8 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
 
   /**
    * Copies `frames` frames of the stream from the read head into
-   * stretchInput, with silence where the queue's timestamps leave a gap and
-   * after the end of the stream. False when less than that is queued yet.
+   * stretchInput, with silence where the queue's timestamps leave a gap.
+   * False when less than that is queued.
    */
   private peek(frames: number): boolean {
     const channels = this.channels;
@@ -301,10 +312,7 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
       for (let s = 0; s < count * channels; s++) into[to + s] = chunk.samples[from + s]!;
       written += count;
     }
-    if (written >= frames) return true;
-    if (!this.ended) return false;
-    into.fill(0, written * channels, frames * channels);
-    return true;
+    return written >= frames;
   }
 
   private postPage(message: WorkletToPageMessage): void {

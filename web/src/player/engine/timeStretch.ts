@@ -141,7 +141,8 @@ export class TimeStretcher {
    * does not click.
    */
   release(): void {
-    this.fadeRemaining = this.hasTail ? this.overlap : 0;
+    if (!this.hasTail) return;
+    this.fadeRemaining = this.overlap;
     this.fadePosition = 0;
     this.hasTail = false;
   }

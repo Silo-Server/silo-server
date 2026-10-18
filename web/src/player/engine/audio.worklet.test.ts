@@ -298,6 +298,26 @@ describe("EngineAudioProcessor", () => {
       expect(underruns()).toBe(2);
     });
 
+    it("plays the last of the stream through its whole media time when slowed", () => {
+      const { processor, page, worker, render } = setup(1);
+      page({ type: "rate", rate: 0.5 });
+      worker({
+        type: "pcm",
+        generation: 1,
+        timestamp: 0,
+        samples: new Float32Array(1_000).fill(0.5),
+      });
+      worker({ type: "end", generation: 1 });
+      const [out] = render(20);
+      // 1,000 frames at 0.5x last 2,000 output frames, all of them sound.
+      expect(out!.subarray(0, 1_990).every((sample) => sample === 0.5)).toBe(true);
+      expect(
+        (processor.port.posted as Array<{ type: string }>).some(
+          (message) => message.type === "drained",
+        ),
+      ).toBe(true);
+    });
+
     it("returns to 1x without a jump in the waveform", () => {
       const { page, worker, render } = setup(1);
       worker({ type: "pcm", generation: 1, timestamp: 0, samples: sine(440, 4, 1) });
