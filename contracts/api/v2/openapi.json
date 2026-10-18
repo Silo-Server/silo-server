@@ -7515,6 +7515,15 @@
             "format": "int64",
             "type": "integer"
           },
+          "max_lookback_hours": {
+            "description": "Largest accepted lookback_hours.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "played_lookback": {
+            "description": "Run and bulk-run accept lookback_hours for Jellyfin sources.",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -7535,6 +7544,8 @@
           "guarded_configuration",
           "durable_runs",
           "max_bulk_mappings",
+          "played_lookback",
+          "max_lookback_hours",
           "revision",
           "state",
           "allowed"
@@ -7875,6 +7886,22 @@
           "unmatched_samples",
           "created_at"
         ],
+        "type": "object"
+      },
+      "AdminHistoryImportRunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "lookback_hours": {
+            "description": "Import only items last played within this many hours before the run is queued. Resume positions and favorites are still read in full. Jellyfin sources only. Omit for a full import.",
+            "examples": [
+              72
+            ],
+            "format": "int64",
+            "maximum": 8760,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
         "type": "object"
       },
       "AdminHistoryImportSource": {
@@ -76480,6 +76507,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminHistoryImportRunCreate",
+                "description": "Absent runs a full import."
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {
@@ -76557,6 +76594,36 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
           },
           "422": {
             "content": {
@@ -77424,6 +77491,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminHistoryImportRunCreate",
+                "description": "Absent runs a full import."
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -77484,6 +77561,36 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
           },
           "422": {
             "content": {
