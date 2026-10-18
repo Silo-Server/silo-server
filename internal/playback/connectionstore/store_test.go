@@ -111,11 +111,12 @@ func TestBudgetVectors(t *testing.T) {
 	}
 	var vectors struct {
 		Cases []struct {
-			Name  string `json:"name"`
-			Probe int    `json:"probe_kbps"`
-			Limit int    `json:"learned_limit_kbps"`
-			Cap   int    `json:"admin_cap_kbps"`
-			Want  *int   `json:"expected_kbps"`
+			Name   string `json:"name"`
+			Probe  int    `json:"probe_kbps"`
+			Sample int    `json:"playback_sample_kbps"`
+			Limit  int    `json:"learned_limit_kbps"`
+			Cap    int    `json:"admin_cap_kbps"`
+			Want   *int   `json:"expected_kbps"`
 		} `json:"connection_budget_cases"`
 	}
 	if err := json.Unmarshal(data, &vectors); err != nil {
@@ -127,14 +128,18 @@ func TestBudgetVectors(t *testing.T) {
 	for _, v := range vectors.Cases {
 		t.Run(v.Name, func(t *testing.T) {
 			var p *Probe
+			var sample *Sample
 			var l *Limit
 			if v.Probe > 0 {
 				p = &Probe{Kbps: v.Probe}
 			}
+			if v.Sample > 0 {
+				sample = &Sample{Kbps: v.Sample}
+			}
 			if v.Limit > 0 {
 				l = &Limit{Kbps: v.Limit}
 			}
-			got := Budget(p, l, v.Cap)
+			got := Budget(p, sample, l, v.Cap)
 			if (got == nil) != (v.Want == nil) || (got != nil && *got != *v.Want) {
 				t.Fatalf("budget=%v want=%v", got, v.Want)
 			}

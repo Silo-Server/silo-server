@@ -3847,6 +3847,445 @@
       "name": "no_measurement",
       "admin_cap_kbps": 12000,
       "expected_kbps": null
+    },
+    {
+      "name": "sample_beats_probe",
+      "probe_kbps": 48000,
+      "playback_sample_kbps": 60000,
+      "expected_kbps": 48000
+    },
+    {
+      "name": "sample_only",
+      "playback_sample_kbps": 51200,
+      "expected_kbps": 40960
+    },
+    {
+      "name": "learned_limit_below_sample",
+      "probe_kbps": 30000,
+      "playback_sample_kbps": 60000,
+      "learned_limit_kbps": 44100,
+      "expected_kbps": 35280
+    }
+  ],
+  "probe_about": "probe_cases replay the speed test arithmetic in Connection speed test > Measuring. chunks are [t, bytes] arrivals in ms after the first byte; a chunk counts in window floor(t / PROBE_WINDOW_MS) and only before the test stops. end is when the transfer ended; absent, it ran past the test's limit. expect is null when the test measured nothing, else {kbps, lower_bound, bytes, duration_ms, stop}, stop being when the client stops reading. connection_budget_cases take current readings only; the reading is the higher of probe_kbps and playback_sample_kbps.",
+  "probe_constants": {
+    "PROBE_WINDOW_MS": 500,
+    "QUICK_PROBE_BYTES": 100000000,
+    "QUICK_PROBE_MAX_MS": 3000,
+    "QUICK_SETTLE_WINDOWS": 2,
+    "ACCURATE_PROBE_BYTES": 1000000000,
+    "ACCURATE_PROBE_MAX_MS": 10000,
+    "ACCURATE_SETTLE_WINDOWS": 6,
+    "PROBE_FIRST_BYTE_DEADLINE_MS": 10000,
+    "MIN_PROBE_KBPS": 100,
+    "MAX_PROBE_KBPS": 1000000
+  },
+  "probe_cases": [
+    {
+      "name": "quick_stops_once_a_window_beats_the_target",
+      "mode": "quick",
+      "target_kbps": 115000,
+      "chunks": [
+        [
+          0,
+          5187500
+        ],
+        [
+          750,
+          27562500
+        ],
+        [
+          1250,
+          29687500
+        ],
+        [
+          1750,
+          30250000
+        ],
+        [
+          2250,
+          30250000
+        ],
+        [
+          2750,
+          30250000
+        ]
+      ],
+      "expect": {
+        "kbps": 115000,
+        "lower_bound": true,
+        "bytes": 27562500,
+        "duration_ms": 500,
+        "stop": 1000
+      }
+    },
+    {
+      "name": "quick_ramp_window_never_counts",
+      "mode": "quick",
+      "target_kbps": 115000,
+      "chunks": [
+        [
+          0,
+          12500000
+        ],
+        [
+          750,
+          6250000
+        ],
+        [
+          1250,
+          6250000
+        ],
+        [
+          1750,
+          6250000
+        ],
+        [
+          2250,
+          6250000
+        ],
+        [
+          2750,
+          6250000
+        ]
+      ],
+      "expect": {
+        "kbps": 100000,
+        "lower_bound": false,
+        "bytes": 12500000,
+        "duration_ms": 1000,
+        "stop": 3000
+      }
+    },
+    {
+      "name": "quick_target_on_a_later_window",
+      "mode": "quick",
+      "target_kbps": 115000,
+      "chunks": [
+        [
+          0,
+          3125000
+        ],
+        [
+          750,
+          6875000
+        ],
+        [
+          1250,
+          7500000
+        ],
+        [
+          1750,
+          7500000
+        ],
+        [
+          2250,
+          7500000
+        ],
+        [
+          2750,
+          7500000
+        ]
+      ],
+      "expect": {
+        "kbps": 115000,
+        "lower_bound": true,
+        "bytes": 7500000,
+        "duration_ms": 500,
+        "stop": 1500
+      }
+    },
+    {
+      "name": "quick_settles_below_the_target",
+      "mode": "quick",
+      "target_kbps": 115000,
+      "chunks": [
+        [
+          0,
+          1250000
+        ],
+        [
+          750,
+          3000000
+        ],
+        [
+          1250,
+          3000000
+        ],
+        [
+          1750,
+          3000000
+        ],
+        [
+          2250,
+          3000000
+        ],
+        [
+          2750,
+          3000000
+        ]
+      ],
+      "expect": {
+        "kbps": 48000,
+        "lower_bound": false,
+        "bytes": 6000000,
+        "duration_ms": 1000,
+        "stop": 3000
+      }
+    },
+    {
+      "name": "quick_without_a_target_runs_to_its_limit",
+      "mode": "quick",
+      "chunks": [
+        [
+          0,
+          9375000
+        ],
+        [
+          750,
+          18750000
+        ],
+        [
+          1250,
+          18750000
+        ],
+        [
+          1750,
+          18750000
+        ],
+        [
+          2250,
+          18750000
+        ],
+        [
+          2750,
+          18750000
+        ]
+      ],
+      "expect": {
+        "kbps": 300000,
+        "lower_bound": false,
+        "bytes": 37500000,
+        "duration_ms": 1000,
+        "stop": 3000
+      }
+    },
+    {
+      "name": "quick_silence_counts",
+      "mode": "quick",
+      "target_kbps": 115000,
+      "chunks": [
+        [
+          0,
+          2500000
+        ],
+        [
+          750,
+          2500000
+        ],
+        [
+          1250,
+          2500000
+        ],
+        [
+          1750,
+          2500000
+        ],
+        [
+          2250,
+          2500000
+        ]
+      ],
+      "expect": {
+        "kbps": 20000,
+        "lower_bound": false,
+        "bytes": 2500000,
+        "duration_ms": 1000,
+        "stop": 3000
+      }
+    },
+    {
+      "name": "quick_transfer_ends_early",
+      "mode": "quick",
+      "chunks": [
+        [
+          0,
+          5000000
+        ],
+        [
+          750,
+          5000000
+        ],
+        [
+          1100,
+          1000000
+        ]
+      ],
+      "end": 1300,
+      "expect": {
+        "kbps": 80000,
+        "lower_bound": false,
+        "bytes": 5000000,
+        "duration_ms": 500,
+        "stop": 1300
+      }
+    },
+    {
+      "name": "too_short_to_measure",
+      "mode": "quick",
+      "target_kbps": 115000,
+      "chunks": [
+        [
+          0,
+          2000000
+        ]
+      ],
+      "end": 450,
+      "expect": null
+    },
+    {
+      "name": "accurate_reports_the_final_three_seconds",
+      "mode": "accurate",
+      "target_kbps": 115000,
+      "chunks": [
+        [
+          0,
+          5187500
+        ],
+        [
+          750,
+          27562500
+        ],
+        [
+          1250,
+          29687500
+        ],
+        [
+          1750,
+          30250000
+        ],
+        [
+          2250,
+          30000000
+        ],
+        [
+          2750,
+          30000000
+        ],
+        [
+          3250,
+          30000000
+        ],
+        [
+          3750,
+          30000000
+        ],
+        [
+          4250,
+          30000000
+        ],
+        [
+          4750,
+          30000000
+        ],
+        [
+          5250,
+          30000000
+        ],
+        [
+          5750,
+          30000000
+        ],
+        [
+          6250,
+          30000000
+        ],
+        [
+          6750,
+          30000000
+        ],
+        [
+          7250,
+          30000000
+        ],
+        [
+          7750,
+          30625000
+        ],
+        [
+          8250,
+          29375000
+        ],
+        [
+          8750,
+          30000000
+        ],
+        [
+          9250,
+          30625000
+        ],
+        [
+          9750,
+          29375000
+        ]
+      ],
+      "expect": {
+        "kbps": 480000,
+        "lower_bound": false,
+        "bytes": 180000000,
+        "duration_ms": 3000,
+        "stop": 10000
+      }
+    },
+    {
+      "name": "accurate_fast_link_is_a_lower_bound",
+      "mode": "accurate",
+      "chunks": [
+        [
+          0,
+          50000000
+        ],
+        [
+          750,
+          125000000
+        ],
+        [
+          1250,
+          125000000
+        ],
+        [
+          1750,
+          125000000
+        ],
+        [
+          2250,
+          125000000
+        ],
+        [
+          2750,
+          125000000
+        ],
+        [
+          3250,
+          125000000
+        ],
+        [
+          3750,
+          125000000
+        ],
+        [
+          4100,
+          75000000
+        ]
+      ],
+      "end": 4300,
+      "expect": {
+        "kbps": 1000000,
+        "lower_bound": true,
+        "bytes": 750000000,
+        "duration_ms": 3000,
+        "stop": 4300
+      }
     }
   ]
 }

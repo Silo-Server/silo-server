@@ -47,6 +47,13 @@ type Probe struct {
 	Transport  string    `json:"transport"`
 }
 
+// Sample is the best throughput playback reached on a connection, kept as a
+// lower bound on its speed.
+type Sample struct {
+	Kbps       int       `json:"kbps"`
+	MeasuredAt time.Time `json:"measured_at"`
+}
+
 // ProbeResult is one reported speed test, bounded by the API before it
 // reaches the store.
 type ProbeResult struct {
@@ -151,11 +158,17 @@ func (s *Store) Cleanup(ctx context.Context) error {
 	return err
 }
 
-// Budget uses the same margin as Auto. A missing measurement is not a zero-speed link.
-func Budget(probe *Probe, limit *Limit, capKbps int) *int {
+// Budget uses the same margin as Auto: 80% of the lower of the reading and the
+// learned limit, capped by capKbps. The reading is the higher of the probe and
+// the playback sample; callers pass only those within their lifetime. A
+// missing measurement is not a zero-speed link.
+func Budget(probe *Probe, sample *Sample, limit *Limit, capKbps int) *int {
 	kbps := 0
 	if probe != nil {
 		kbps = probe.Kbps
+	}
+	if sample != nil && sample.Kbps > kbps {
+		kbps = sample.Kbps
 	}
 	if limit != nil && (kbps == 0 || limit.Kbps < kbps) {
 		kbps = limit.Kbps

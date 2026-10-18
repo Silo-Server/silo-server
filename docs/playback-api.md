@@ -33,7 +33,16 @@ server instance UUID that diagnostics also report. `protocol_versions` is
 `fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`,
 `bandwidth_probe_v1` and `connection_speed_v1`. With `connection_speed_v1` the
 response adds `bandwidth_probe_url`, the media-path probe below, on the origin
-the request arrived on. When the room service and
+the request arrived on, and the speed test schedule:
+`bandwidth_probe_automatic` (the `playback.bandwidth_probe_automatic` server
+setting), `bandwidth_probe_max_age_seconds` (from
+`playback.bandwidth_probe_max_age_days`) and, when the server has video
+bitrates to go on, `bandwidth_probe_target_kbps`. The target is
+`ceil(P × 5 / 4)`, at most 1,000,000, where `P` is the lower of the
+administrator bitrate cap for the caller's network, when one applies, and the
+99.9th percentile of the video bitrates in the libraries the profile can play.
+The [buffering-quality design](design/2026-10-17-buffering-quality.md#connection-speed-test)
+defines how clients test with them. When the room service and
 authenticated room socket are configured, it also includes
 `watch_party_source_fallback_v1` and `watch_party_coordinator_v1`.
 The coordinator capability covers shared room
@@ -45,12 +54,12 @@ membership, command-aware readiness, and ready/buffering/syncing member status.
 ## Bandwidth probe
 
 `GET /api/v2/playback/bandwidth-probe?size=N` (feature `bandwidth_probe_v1`)
-sends `N` random bytes, 1 to 100,000,000, default 1,000,000, as
+sends `N` random bytes, 1 to 1,000,000,000, default 1,000,000, as
 `application/octet-stream` with `Cache-Control: no-store`. It needs an
-authenticated account but no profile. Each server runs at most 32 probes at
-once. On each server an account may run two of them and draw up to 400 MB per
-10 minutes; bytes a client does not read because it closed the connection early
-are not counted. Beyond any limit the probe gets `429 rate_limited` with
+authenticated account but no profile. Each server runs at most 4 probes at
+once. On each server an account may run two of them and draw up to
+2,000,000,000 bytes per 10 minutes; bytes a client does not read because it
+closed the connection early are not counted. Beyond any limit the probe gets `429 rate_limited` with
 `Retry-After`. The bytes are random so a compressing
 proxy cannot inflate the result. A client times the transfer from its first
 byte, may close the connection once it has timed enough, and sends the result
@@ -71,11 +80,13 @@ direct play, it sends the bytes itself. When a proxy-only policy has no proxy
 that serves probes, the answer is `503 dependency_unavailable`, never a
 measurement of the API path.
 
-The web app probes in the background a few seconds after sign-in, skips Data
-Saver and cellular connections and pages that are already playing media,
-cancels the probe when playback starts, and caches the result for 30 minutes,
-measuring again when it expires. Tabs share the cached result, and a Web Lock
-lets only one of them probe at a time. A tab holds a shared lock while its
+The web app looks for a current reading a few seconds after sign-in, when a
+hidden tab is shown again, and after the browser reports a new connection type.
+It runs the quick test only when the connection endpoint has no reading that
+proves the link, never while the tab is hidden, and never on Data Saver or
+cellular connections or while media plays; playback starting cancels a running
+test. **Test speed** runs the accurate test. Tabs share the reading, and a Web
+Lock lets only one of them probe at a time. A tab holds a shared lock while its
 media plays or playback starts, and no tab probes while any tab holds it. A
 playback start is also broadcast to the other tabs, so a probe already running
 in one of them stops and discards its measurement. On a metered link (Data Saver or cellular) it
@@ -463,23 +474,34 @@ reads find nothing.
 `GET /api/v2/playback/connection` returns the state for the connection the
 request arrives on: `connection` (`local`, `remote` or `provider:<name>`) and
 nullable `learned_limit: {kbps, observed_at, expires_at}`. With
-`connection_speed_v1` it adds optional `probe: {kbps, measured_at, transport}`
-and `auto_budget_kbps`: 80% of the lower of the latest probe and the unexpired
-learned limit, then capped by the administrator limit. Without either
-observation the budget is absent. A stored probe describes the latest test;
-clients still expire their start estimate after 30 minutes.
+`connection_speed_v1` it adds optional
+`probe: {kbps, lower_bound, measured_at, transport}`, the latest test, and
+optional `playback_sample: {kbps, measured_at}`, the best recent playback
+throughput, a lower bound. Both are returned until row retention removes them;
+clients judge them against `bandwidth_probe_max_age_seconds`. It also adds
+`auto_budget_kbps`: 80% of the lower of the reading and the unexpired learned
+limit, then capped by the administrator limit, where the reading is the higher
+of the probe and the sample within their lifetime. Without either observation
+the budget is absent.
 `DELETE /api/v2/playback/connection/learned-limit` clears that connection's
 limit and returns 204.
 
 `POST /api/v2/playback/bandwidth-probe/results` (`connection_speed_v1`)
-accepts `{kbps, bytes, duration_ms, transport}` and returns 204. Bounds are
-1–1,000,000 kbps, 1–100,000,000 bytes and 1–60,000 milliseconds; `transport` is
-`wifi`, `ethernet`, `cellular` or `other`. The server keeps the latest result
-per device and connection.
+accepts `{kbps, bytes, duration_ms, transport, lower_bound}` and returns 204.
+Bounds are 1–1,000,000 kbps, 1–1,000,000,000 bytes and 1–60,000 milliseconds;
+`transport` is `wifi`, `ethernet`, `cellular` or `other`; the optional
+`lower_bound` (default `false`) marks a result that proves only "at least
+`kbps`". The server keeps the latest result per device and connection.
+
+A `plan_summary` route event may carry the diagnostics key `throughput_kbps`,
+the rate the plan's media requests received data. The server keeps the highest
+per device and connection as `playback_sample`, replacing it with a later one
+that is higher or once it is older than the reading lifetime.
 
 The admin device detail adds optional `connections`. Each entry has `id`, an
-opaque connection identifier, `connection`, nullable `probe`, nullable
-`learned_limit` and nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
+opaque connection identifier, `connection`, nullable `probe` (with
+`lower_bound`), nullable `playback_sample`, nullable `learned_limit` and
+nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
 `DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit`
 needs acting-admin authority and returns 204. Both resets clear only the
 learned limit and keep the probe and plan summary.

@@ -21,9 +21,12 @@ This design defines:
 3. A server-side learned limit. When Auto is lowered because of buffering, the
    server keeps that limit for the device on that network for 7 days and plans
    Auto under it. Viewers can see and reset it in Settings.
-4. The bandwidth probe on Android and Apple, with the server's existing 80%
-   margin, and probe results reported to the server. Viewers see their
-   connection speed in Settings, and admins see it on the device page.
+4. One connection speed test on every client, with the server's existing 80%
+   margin and results reported to the server. A quick automatic test stops once
+   it proves the fastest rate the server would send, and runs only when the
+   server holds no current reading for this device and network. Viewers see
+   their connection speed in Settings and can run an accurate test there;
+   admins see it on the device page.
 
 ## Decisions
 
@@ -36,6 +39,18 @@ Settled on 2026-10-17:
 | Margin on a probe estimate | Keep the server's 80%. |
 | Report probe results to the server? | Yes. Admins can see per-device connection speeds. |
 | What do later replans send after a lowering? | The lowering's step-down estimate, without a source, until **Restore quality**, a quality change or a new start (see *Later replans after a lowering*). |
+
+Settled on 2026-10-18, for the connection speed test:
+
+| Question | Decision |
+| --- | --- |
+| How many connections? | One, as playback uses on every platform. |
+| How far does the automatic test go? | To a target the server publishes: the highest bitrate it would plan for this viewer, plus 25%. It stops as soon as a window after ramp-up reaches the target. |
+| Where does an accurate reading come from? | **Test speed** only: up to 10 seconds, the rate held over the final 3. |
+| How often do clients test? | Only when the server holds no current reading for this device and network, or the viewer taps **Test speed**. A reading lasts 7 days by default. No periodic test. |
+| How many tests at once? | 4 per server, refused beyond that with `429` and `Retry-After`. |
+| Can an admin turn automatic tests off? | Yes, with a server setting that also sets the reading lifetime. |
+| Does playback count as a measurement? | Yes: the throughput a plan saw is a lower bound the server keeps like a test result. |
 
 ## Motivation
 
@@ -329,27 +344,122 @@ title on that connection stall and lower again.
 Under this rule, the incident replans at a 44 Mbps estimate, a budget of about
 35 Mbps, and plays the item's 31.6 Mbps 1080p version.
 
-## Probe on Android and Apple
+## Connection speed test
 
-These clients adopt the web policy as it stands:
-
-- **Probe**: 40 MB, timed over a 2-second window from the first byte.
-- **When**: in the background a few seconds after sign-in or a return to the
-  foreground. Not while media plays or starts, and not on a metered or cellular
-  link.
-- **Cache**: 30 minutes. A network change discards the cached result.
-- **Sending**: the result goes out as `bandwidth_estimate_kbps` with
-  `bandwidth_estimate_source: "probe"`.
+Every client runs the same test: web, Android and Apple. It measures the path
+the media takes, over one connection, because playback uses one connection on
+every platform. Media3 runs one loader per stream, hls.js loads one fragment at
+a time, and Apple reads through one sequential `AVIOReader` pump or one Aether
+relay request per AVPlayer request. A second connection would measure
+throughput playback cannot use.
 
 Android removes its "send no estimate" rule, along with the
 `UNSENT_NETWORK_EVIDENCE` exemption in `PlaybackProtocolV3ConformanceTest`.
 Media3's bandwidth meter is still never sent.
 
-The probe has to measure the path the media takes. Today it measures the path
-to the API server, while media served from a remote node can take another
-route. The server should serve the probe wherever it serves this client's
-media, and the capability response should name that URL. On a single-host
-server, it stays the API host.
+### Probe URL and target
+
+With `connection_speed_v1`, the capability response carries:
+
+| Field | Meaning |
+| --- | --- |
+| `bandwidth_probe_url` | The probe on the path this client's media takes. |
+| `bandwidth_probe_target_kbps` | The rate a quick test has to prove. Absent when the server has no target, for example before any video is scanned. |
+| `bandwidth_probe_automatic` | `false` when the admin turned automatic tests off. **Test speed** still works. |
+| `bandwidth_probe_max_age_seconds` | How long a reading stays current. |
+
+The target is the highest bitrate the server would plan for this viewer, plus
+25%: `ceil(P × 5 / 4)`, at most 1,000,000, the estimate whose 80% budget carries
+P untouched. P is
+the lower of the administrator bitrate cap for the caller's network, when one
+applies, and the 99.9th percentile of the source bitrates of the video files
+this profile can play. It is a percentile because one file with a bogus bitrate
+would otherwise set the target. The server caches the percentile for each set
+of libraries.
+
+Two server settings control the schedule: `playback.bandwidth_probe_automatic`
+(default `true`) and `playback.bandwidth_probe_max_age_days` (1 to 30, default
+7, the lifetime of a learned limit).
+
+### Measuring
+
+The clock starts at the first byte of the response body, so request latency
+does not count. Bytes count in the 500 ms window (`PROBE_WINDOW_MS`) in which
+they arrive: window `k` covers `[500k, 500k + 500)` ms. A window's rate is
+`floor(bytes × 8 / 500)` kbps. Window 0 is TCP ramp-up and never counts. A window
+in which nothing arrived counts at 0, so a stalled transfer lowers the result;
+clients close windows on their clock, not only when data arrives.
+
+| | Quick test | Accurate test |
+| --- | --- | --- |
+| Runs | Automatically | Only from **Test speed** |
+| Requests | `size=100000000` | `size=1000000000` |
+| Stops | At the end of the first window after window 0 whose rate reaches the target; else 3,000 ms after the first byte, or when the transfer ends | 10,000 ms after the first byte, or when the transfer ends |
+| Reports | The target, with `lower_bound: true`, when a window reached it; else the settled rate over the final 1,000 ms | The settled rate over the final 3,000 ms |
+
+The settled rate uses the last complete windows after window 0 that fill the
+span: 2 for the quick test, 6 for the accurate one, or every complete window
+after window 0 when there are fewer. Its rate is `floor(bytes × 8 / (windows ×
+500))`. A window cut short by the end of the transfer does not count.
+
+- A test with no complete window after window 0, or with a result under 100
+  kbps, measured nothing.
+- A result above 1,000,000 kbps is reported as 1,000,000 with `lower_bound: true`.
+- Without a target, the quick test runs its full 3 seconds.
+- A test whose first byte has not arrived within 10 seconds is abandoned.
+
+The reported `bytes` and `duration_ms` are those of the windows the rate came
+from. `probe_cases` in the vectors pin this arithmetic (see *Conformance*).
+
+At a 400 Mbps line and a 115 Mbps target, the quick test stops after about one
+second and 30 MB. On a link just under the target it runs the full 3 seconds,
+about 45 MB, and slower links move less.
+
+### When to test
+
+A reading is what the server stores for this device on this connection: `probe`
+and `playback_sample` from `GET /api/v2/playback/connection`. It is current while
+it is younger than `bandwidth_probe_max_age_seconds`.
+
+- A settled rate proves the link.
+- A lower bound proves it only while it is at least the current
+  `bandwidth_probe_target_kbps`. Lower bounds are a quick test that reached its
+  target, or a playback sample. A larger library, a raised cap or a profile with
+  more to play makes the test due again.
+
+Clients check a few seconds after sign-in, on a return to the foreground and
+after a network change. A check reads `GET /api/v2/playback/connection` first.
+It runs a quick test only when automatic tests are on and no current reading
+proves the link. A reinstalled app, or a phone back on its usual Wi-Fi, finds
+the reading it left there.
+
+- There is no periodic test. A test that fails or is refused waits for the next
+  check, and after a `429` no earlier than `Retry-After`.
+- No test runs while media plays or starts, on a metered or cellular link, or
+  while the app is in the background. On the web, that includes a hidden tab. A
+  test that is running when one of these begins is cancelled and measured
+  nothing.
+- **Test speed** runs the accurate test whenever no media plays, even with
+  automatic tests off or a current reading.
+- A playback start sends the highest current reading as
+  `bandwidth_estimate_kbps` with `bandwidth_estimate_source: "probe"`. This holds
+  for as long as the reading is current; the 30-minute expiry is gone. On a
+  metered or cellular link it sends none, and the cellular quality settings
+  apply. The rules in *Later replans after a lowering* are unchanged.
+- Against a server without `connection_speed_v1`, a client may run the quick
+  test without a target against `/api/v2/playback/bandwidth-probe`, and keep
+  the result on the device for 7 days per network.
+
+The server plans only from the estimate a request carries. It does not put its
+stored reading in place of a missing one: only the client knows whether its link
+is metered, and the kept-estimate rules stay with the client.
+
+### Media path and limits
+
+The probe measures the path the media takes. Media served from a remote node
+can take another route than the API, so the server serves the probe wherever it
+serves this client's media, and `bandwidth_probe_url` names that URL. On a
+single-host server, it is the API host.
 
 The advertised URL is stable and uses normal authentication. Fetching it can
 redirect to a short-lived proxy URL that is valid only for probes; clients
@@ -358,37 +468,66 @@ that the direct-play routing policy would use for the caller's network or
 provider path. When a proxy-only policy has no proxy that serves probes, the
 endpoint returns an unavailable error instead of measuring the API path.
 
+A probe sends at most 1,000,000,000 bytes. Each server runs at most 4 probes at
+once, counting the API and each proxy separately. On each server, an account
+may run 2 probes at once and draw 2,000,000,000 bytes per 10 minutes; bytes left
+unread when the client closed early do not count. One accurate test is never
+refused for its size, while a run of back-to-back tests soon is. Beyond any
+limit, the probe answers `429` with `Retry-After`.
+
+### Playback samples
+
+A plan's `plan_summary` may carry `throughput_kbps`. It is the rate at which the
+plan's media requests received data, counted only while a request was receiving,
+from its first byte to its last.
+
+- A client that cannot measure this omits it.
+- Apple measures it on Aether's upstream reader. AVPlayer reads from Aether on
+  127.0.0.1, so its access log only sees that local hop.
+
+The server keeps one sample per device and connection as `playback_sample`. A
+new sample replaces it when it is higher, or when the kept one is older than the
+reading lifetime. Like a quick test that reached its target, it is a lower
+bound.
+
 ## Reporting and display
 
 ### Probe results
 
 `POST /api/v2/playback/bandwidth-probe/results` takes
-`{kbps, bytes, duration_ms, transport}`, where `transport` is `wifi`,
-`ethernet`, `cellular` or `other`, and returns 204. The server keeps the latest
-result per learned-limit key.
+`{kbps, bytes, duration_ms, transport, lower_bound}`, where `transport` is
+`wifi`, `ethernet`, `cellular` or `other`, and returns 204. `lower_bound` is
+optional and `false` by default. The server keeps the latest result per
+learned-limit key.
 
 ### `GET /api/v2/playback/connection`
 
 Returns the state for the calling device on the connection it is using now.
-Phase 1 returns `connection` and `learned_limit`; phase 2 adds `probe` and
-`auto_budget_kbps`:
+Phase 1 returns `connection` and `learned_limit`; phase 2 adds `probe`,
+`playback_sample` and `auto_budget_kbps`:
 
 ```json
 {
   "connection": "remote",
-  "probe": { "kbps": 48000, "measured_at": "2026-10-17T19:02:11Z", "transport": "wifi" },
+  "probe": { "kbps": 48000, "lower_bound": false, "measured_at": "2026-10-17T19:02:11Z", "transport": "wifi" },
+  "playback_sample": { "kbps": 51200, "measured_at": "2026-10-18T20:14:03Z" },
   "learned_limit": { "kbps": 44100, "observed_at": "2026-10-17T16:21:40Z", "expires_at": "2026-10-24T16:21:40Z" },
   "auto_budget_kbps": 35280
 }
 ```
 
-`auto_budget_kbps` is computed by the server: 80% of the lower of the probe
-result and the learned limit, then capped by the admin bitrate cap. Clients
-display it and never compute it. `DELETE /api/v2/playback/connection/learned-limit`
-resets the limit. Missing probe and budget fields mean that no measurement is
-available; an administrator cap alone is not a speed measurement. The latest
-probe is retained for display until row retention removes it; clients still
-expire their playback estimate after 30 minutes.
+The server returns the latest probe and playback sample until row retention
+removes them, current or not, and clients judge whether they are current (see
+*When to test*).
+
+`auto_budget_kbps` is computed by the server: 80% of the lower of the reading
+and the learned limit, then capped by the admin bitrate cap. The reading is the
+higher of the current probe and the current playback sample. Clients display
+the budget and never compute it.
+
+`DELETE /api/v2/playback/connection/learned-limit` resets the limit. Missing
+probe, sample and budget fields mean that no measurement is available; an
+administrator cap alone is not a speed measurement.
 
 ### Settings
 
@@ -400,9 +539,13 @@ Phase 1 adds to every client's Playback settings:
 
 Phase 2 adds a Connection group:
 
-- **Connection speed**: "48 Mbps · measured 3 minutes ago on Wi-Fi", with a
-  **Test speed** action. The test runs the probe in the foreground, reports the
-  result, and refreshes the row. A `429` shows "Try again in N seconds".
+- **Connection speed**: "48 Mbps · measured 3 minutes ago on Wi-Fi", or
+  "Faster than 115 Mbps · measured 3 minutes ago on Wi-Fi" for a lower bound,
+  with a **Test speed** action. Without a probe, the row shows a playback sample
+  as a lower bound: "Faster than 51 Mbps · seen during playback 2 hours ago".
+  **Test speed** runs the accurate test in the foreground, which takes up to 10
+  seconds, reports the result and refreshes the row. A `429` shows "Try again in
+  N seconds".
 - "Auto plays videos up to 35 Mbps without converting them," from
   `auto_budget_kbps`.
 - On cellular, the row says that speed tests are skipped on cellular, and the
@@ -413,8 +556,9 @@ Phase 2 adds a Connection group:
 `GET /api/v2/admin/devices/{user_id}/{device_id}` gains `connections`: for each
 key, the connection label, the latest probe, the learned limit, and the latest
 plan summary. The web admin device page shows them, with **Clear limit**.
-Each entry has an opaque `id`, `connection`, nullable `probe`, nullable
-`learned_limit`, and nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
+Each entry has an opaque `id`, `connection`, nullable `probe` (with
+`lower_bound`), nullable `playback_sample`, nullable `learned_limit`, and
+nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
 The admin resets one with `DELETE
 /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit`
 (204). Both reset endpoints preserve probe and summary observations.
@@ -442,6 +586,7 @@ The event adds these keys to the diagnostics allowlist:
 | `buffering_mode` | `never`, `ask` or `always` |
 | `buffering_action` | The last action on this plan: `none`, `ignored` (a trigger in `never`), `lowered` (automatically), `restored`, `accepted`, `kept`, `timed_out` or `cant_lower` |
 | `bandwidth_estimate_kbps` | Already on the allowlist: the estimate the plan was requested with |
+| `throughput_kbps` | Optional: the rate the plan's media requests received data (see *Playback samples*) |
 
 The server exports:
 
@@ -477,6 +622,7 @@ in parallel:
 | Setting | `playback.buffering_quality_mode`, introduced in the next manifest revision (21 at the time of writing). |
 | Telemetry | Feature `playback_plan_summary_v1`, route event `plan_summary`, and the allowlist keys under *Telemetry*. |
 | Phase 2 | The server advertises `connection_speed_v1` and adds `bandwidth_probe_url` to the capability response: the probe on the path this client's media takes. With it, clients probe that URL, report to `POST /api/v2/playback/bandwidth-probe/results`, and read `probe` and `auto_budget_kbps` from the connection endpoint. |
+| Speed test | With `connection_speed_v1`, the capability response also carries `bandwidth_probe_target_kbps` (optional integer), `bandwidth_probe_automatic` (boolean) and `bandwidth_probe_max_age_seconds` (integer). Probe results accept optional `lower_bound` (boolean), and `bytes` up to 1,000,000,000. The connection endpoint's `probe` gains `lower_bound`, and the endpoint gains optional `playback_sample: {kbps, measured_at}`; the admin device `connections` gain the same. `plan_summary` may carry `throughput_kbps`. Tests run as *Connection speed test* says, and `probe_cases` pins the measurement. |
 
 ## Conformance
 
@@ -515,8 +661,34 @@ with its copy key. Some cases also give the `buffering_action` each plan's
 `plan_summary` must report.
 
 The same file's `connection_budget_cases` is a server-only oracle for the
-connection endpoint's 80% margin and administrator cap. It does not add events
-to the client controller cases.
+connection endpoint's 80% margin and administrator cap, over current readings
+only. It does not add events to the client controller cases.
+
+`probe_cases` is the oracle for *Measuring*, which every client replays against
+its speed test arithmetic. Each case gives:
+
+- the `mode`, `quick` or `accurate`, and an optional `target_kbps`;
+- `chunks`, a list of `[t, bytes]` arrivals in milliseconds after the first
+  byte (the first chunk is at 0);
+- an optional `end`, the time the transfer ended (absent means it ran past the
+  test's limit).
+
+`expect` is `null` when the test measured nothing. Otherwise it is
+`{kbps, lower_bound, bytes, duration_ms, stop}`, where `stop` is when the client
+stops reading.
+
+| Case | Pins |
+| --- | --- |
+| `quick_stops_once_a_window_beats_the_target` | Ramp-up at 83 Mbps, then 441 Mbps beats a 115 Mbps target: stop at 1,000 ms with a lower bound of 115000. |
+| `quick_ramp_window_never_counts` | Window 0 above the target does not stop the test. |
+| `quick_target_on_a_later_window` | A window just under the target, then one above it: stop at 1,500 ms. |
+| `quick_settles_below_the_target` | A 48 Mbps link reports 48000 from the final second. |
+| `quick_without_a_target_runs_to_its_limit` | No target: 3,000 ms and the settled rate. |
+| `quick_silence_counts` | A final window with no bytes halves the settled rate. |
+| `quick_transfer_ends_early` | A transfer that ends mid-window counts only complete windows. |
+| `too_short_to_measure` | No complete window after window 0 measures nothing. |
+| `accurate_reports_the_final_three_seconds` | The accurate test ignores the target and reports the final 3 seconds. |
+| `accurate_fast_link_is_a_lower_bound` | A 2 Gbps link ends the 1 GB transfer early and reports 1000000 with `lower_bound: true`. |
 
 Each client vendors the file unchanged and replays it in unit tests against a
 fake clock, in the same way that `IntroAutoSkipControllerTest` and
@@ -578,7 +750,7 @@ The remaining cases pin the rules added since:
 | Phase | `silo-server` | `silo-android` | `silo-apple` |
 | --- | --- | --- | --- |
 | 1. Detect and lower | Add `bandwidth_estimate_source` and `learned_limit` to start and replan (optional fields, with schema and fixtures). Add the learned-limit store and its use in Auto, plus `bandwidth_limit` on the plan. Make Auto under a budget go lower or say so. Add `GET /api/v2/playback/connection` (connection and learned limit) and the reset endpoint. Add `playback.buffering_quality_mode` to the manifest with the default `always`, and regenerate bindings. Add `plan_summary` and its allowlist keys. Keep the vectors file in step with any spec change. In web, keep the automatic downshift as `always`, add the undo pill, the prompt for a picked quality, and the `ask` and `never` modes, send the estimate source and `learned_limit`, drop the local observed limit, and add the setting and limit rows. | A `BufferingQualityController` in `shared/` drives phone and TV, following the `IntroAutoSkipController` pattern. One Media3 adapter in `android-shared` feeds it. `PlayerNoticeOverlay` and `TvPlayerNoticeOverlay` gain actions, with `TvIntroAutoSkipBanner`'s focus rules. Revisit the startup detector's same-plan reopen: a slow plan that is still receiving data belongs to this controller. Regenerate `SettingKeys.kt`, and add the setting and limit rows to `PlaybackSettings.kt` and `TvSettingsScreen.kt`. | A shared controller like `IntroSkipPrompt`, fed by `AVPlayer` `timeControlStatus` and wait reasons, `AVPlayerItem` stall notifications, and AetherEngine buffering events. `PlayerNoticeOverlay` gains actions; on tvOS and macOS, focus follows the intro-skip pills. Regenerate `SettingKeys.generated.swift`, and add the setting and limit rows to `PlaybackSettingsView` and `TVPlaybackSettingsView`. |
-| 2. Measure and show | Serve the probe on the media path and advertise its URL. Add the probe-results endpoint, `probe` and `auto_budget_kbps` on the connection endpoint, and the device `connections` field. Add the web Connection group and the admin device view. | Probe in `android-shared`, skipped when `PlaybackNetworkMonitor` reports metered. Send the estimate and its source. Add the Connection group. Update `docs/playback/01-media3-only-player-architecture.md` §3.5–3.6. | Probe with `URLSession`, skipped when `NWPathMonitor` reports metered. Add the Connection group. |
+| 2. Measure and show | Serve the probe on the media path and advertise its URL, target and schedule settings. Add the probe-results endpoint, `probe`, `playback_sample` and `auto_budget_kbps` on the connection endpoint, and the device `connections` field. Lower the probe limits to 4 at once per server. Add the web Connection group, the admin device view, and the quick and accurate tests. | The speed test in `android-shared`, skipped when `PlaybackNetworkMonitor` reports metered. Send the estimate and its source, and `throughput_kbps` from the Media3 loader. Add the Connection group. Update `docs/playback/01-media3-only-player-architecture.md` §3.5–3.6. | The speed test with `URLSession`, skipped when `NWPathMonitor` reports metered. Send `throughput_kbps` from Aether's upstream reader. Add the Connection group. |
 | 3. Check the default | Add the dashboards, and run the 28-day check above. | None planned. | None planned. |
 
 Phase 1 alone fixes the incident.

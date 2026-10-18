@@ -2003,9 +2003,11 @@ the stored limit actually lowered adds
 
 `playback_plan_summary_v1` advertises the `plan_summary` route event. It adds
 `played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,
-`delivered_kbps`, `buffering_mode` and `buffering_action` to the diagnostics
-allowlist; the existing `bandwidth_estimate_kbps` key reports the requested
-estimate. Clients send a summary when a plan stops playing, whether it was
+`delivered_kbps`, `buffering_mode`, `buffering_action` and `throughput_kbps`
+to the diagnostics allowlist; the existing `bandwidth_estimate_kbps` key
+reports the requested estimate. `throughput_kbps`, the rate the plan's media
+arrived at, becomes the connection's `playback_sample` when it is higher than
+the kept one or the kept one has outlived the reading lifetime. Clients send a summary when a plan stops playing, whether it was
 replaced, stopped or failed. A newly inserted summary becomes its connection's
 latest and feeds `silo_playback_stall_ratio{client,delivery}` and
 `silo_playback_buffering_actions_total{mode,action}`; a retried event counts
