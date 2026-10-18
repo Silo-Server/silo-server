@@ -1962,73 +1962,54 @@ Three artifacts, in decreasing order of authority:
 A client that decodes the golden fixtures, echoes attempt keys byte-for-byte,
 and round-trips a replan without computing an identity is conforming.
 
-
 ## Buffering quality (native v2)
 
-`buffering_quality_v1` gates two optional start/replan fields. Clients echo the
-feature in `client_features` before sending `bandwidth_estimate_source` (`probe`
-or `observed_rebuffer`, requiring `bandwidth_estimate_kbps`) or `learned_limit`
-(`ignore` or `clear`). Requests without the feature neither record nor apply
-learned limits. The frozen v1 bridge does not negotiate this feature.
+`buffering_quality_v1` gates two optional start and replan fields. A client
+lists the feature in `client_features` before it sends
+`bandwidth_estimate_source` (`probe` or `observed_rebuffer`, which requires
+`bandwidth_estimate_kbps`) or `learned_limit` (`ignore` or `clear`). A request
+without the feature neither records nor applies learned limits. The frozen v1
+bridge does not negotiate the feature and ignores both fields, as it ignores
+any unknown field.
 
-Auto uses the lower of the request estimate and the seven-day learned estimate
-for the authenticated account, `X-Silo-Device-Id`, and trusted connection.
-Missing device identity disables learning. Fixed qualities ignore learned
-limits. `ignore` leaves the stored limit intact; `clear` removes it before
-planning. The existing 80% margin and administrator/client caps still apply.
-An observed budget tries playable versions of the same edition without video
-encoding before transcoding; an unchanged source carries
-`quality_reduction_unavailable`. A plan actually reduced by the stored limit
-adds `bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`.
+A learned limit is kept for the authenticated account, `X-Silo-Device-Id` and
+connection. A request without a device ID neither records nor applies one. The
+connection is the trusted network-access provider, `local` for a private or
+loopback client, or an HMAC of the public IPv4 address or IPv6 /64 keyed by
+the server secret. Raw public addresses are never stored. Rows are deleted 30
+days after their last update and when the device's last registration is
+deleted.
 
-`GET /api/v2/playback/connection` returns `connection` and nullable
-`learned_limit: {kbps, observed_at, expires_at}`. `DELETE
-/api/v2/playback/connection/learned-limit` clears the calling device's current
-connection limit and returns 204. Connection keys use the trusted network
-provider, local classification, or an HMAC of the public IPv4 address / IPv6
-/64. Raw public addresses are never stored in this table. Rows are removed
-30 days after their last update and when the last device registration is deleted.
+Only a start or replan that the client sent with
+`bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
+recording restarts its seven days. An estimate without a source, which is how a
+client repeats its kept step-down estimate on later replans, records nothing.
+A seek reanchor reuses the playing recipe and a seek failure recovery replays
+the stored start request; neither records nor clears a limit.
 
-`playback_plan_summary_v1` advertises the `plan_summary` route event. Its added
-diagnostics allowlist keys are `played_ms`, `stall_count`, `stall_total_ms`,
-`stall_longest_ms`, `delivered_kbps`, `buffering_mode`, and `buffering_action`.
-The existing `bandwidth_estimate_kbps` key reports the requested estimate.
-Clients send a summary when a plan stops playing, including replacement,
-stop, and failure. See the buffering-quality design for controller semantics
-and the shared conformance vectors.
+Auto plans with the lower of the request estimate and the unexpired limit, or
+the limit alone when the request has none. Fixed qualities ignore the limit.
+`ignore` plans without the limit, records nothing and leaves the limit
+stored; `clear` deletes it before planning. The 80% margin and the
+administrator and client caps still apply. On a start or `quality_change`
+replan that allows alternate versions, when an observed estimate or the limit
+puts the source over budget, Auto first tries versions of the same edition that
+fit and play without video encoding, then a transcode; an unchanged source
+carries `quality_reduction_unavailable`. A plan that the stored limit actually
+lowered adds `bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`.
 
+`playback_plan_summary_v1` advertises the `plan_summary` route event. It adds
+`played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,
+`delivered_kbps`, `buffering_mode` and `buffering_action` to the diagnostics
+allowlist; the existing `bandwidth_estimate_kbps` key reports the requested
+estimate. Clients send a summary when a plan stops playing, whether it was
+replaced, stopped or failed. A newly inserted summary becomes its connection's
+latest and feeds `silo_playback_stall_ratio{client,delivery}` and
+`silo_playback_buffering_actions_total{mode,action}`; a retried event counts
+once. The delivery is the reported plan's, read from the stored start or replan
+response, not its replacement's; an unresolvable plan reports `unknown`.
 
-### Connection speed and device observations
-
-`connection_speed_v1` adds optional `bandwidth_probe_url` to the native
-capability response. Fetch it with ordinary authenticated headers and follow
-redirects. Its stable URL chooses direct-play egress using the caller's network
-routing policy; a proxy download is authorized with a two-minute, probe-only
-stream token. Both API and proxy apply the same per-node/per-account probe
-limits and return `429` with `Retry-After`. Proxy-only routing with no capable
-proxy returns an unavailable error, never a measurement of the API link.
-
-`POST /api/v2/playback/bandwidth-probe/results` accepts
-`{kbps, bytes, duration_ms, transport}` and returns 204. It is profile-scoped and
-uses `X-Silo-Device-Id`; no device means no stored observation. Bounds are
-1–1,000,000 kbps, 1–100,000,000 bytes and 1–60,000 milliseconds. Transport is
-`wifi`, `ethernet`, `cellular` or `other`.
-
-The connection response adds optional `probe: {kbps, measured_at, transport}`
-and `auto_budget_kbps`. The budget is 80% of the lower of the latest probe and
-the unexpired learned limit, then capped by the administrator limit. Without
-either observation the budget is absent. Stored probes describe the latest
-test; clients still expire their start estimate after 30 minutes.
-
-The admin device detail adds optional `connections`. Each entry contains
-`id` (an opaque connection identifier), `connection`, nullable `probe`, nullable
-`learned_limit`, and nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
-`DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit`
-returns 204 and requires acting-admin authority. Both reset operations clear
-only the learned limit, preserving probe and summary observations.
-
-Newly inserted plan-summary events update the latest connection summary and
-feed `silo_playback_stall_ratio{client,delivery}` and
-`silo_playback_buffering_actions_total{mode,action}`. Event retries do not
-increment counters again. Delivery comes from the reported plan's stored
-start/replan receipt, not its replacement; unresolvable plans use `unknown`.
+The connection endpoints, probe results and the admin view are in the
+[Playback API](../playback-api.md#buffering-quality-native-v2). The
+[buffering-quality design](../design/2026-10-17-buffering-quality.md) and its
+shared conformance vectors define the client controller.

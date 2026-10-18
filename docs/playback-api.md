@@ -17,7 +17,10 @@ unavailable store is `503`.
 | `stopPlayback` | DELETE `/api/v2/playback/{session_id}` | 200 mutation receipt |
 | `replanPlayback` | POST `/api/v2/playback/{session_id}/replan` | 200 v3 decision |
 | `reportPlaybackRouteEvent` | POST `/api/v2/playback/route-events` | 202 `{event_id, outcome: "accepted"}` |
-| `getPlaybackBandwidthProbe` | GET `/api/v2/playback/bandwidth-probe` | 200 random bytes |
+| `getPlaybackBandwidthProbe` | GET `/api/v2/playback/bandwidth-probe` | 200 random bytes, or 307 to a proxy |
+| `reportPlaybackBandwidthProbe` | POST `/api/v2/playback/bandwidth-probe/results` | 204 |
+| `getPlaybackConnection` | GET `/api/v2/playback/connection` | 200 connection state |
+| `resetPlaybackLearnedLimit` | DELETE `/api/v2/playback/connection/learned-limit` | 204 |
 
 ## Capabilities
 
@@ -27,8 +30,10 @@ and `allowed` is `true`; a server without playback wired answers
 `not_configured` with `allowed: false`. `installation_id` is the persisted
 server instance UUID that diagnostics also report. `protocol_versions` is
 `[3]`. `features` is the v3 server feature set plus `sequenced_progress_v1`,
-`fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`, and
-`bandwidth_probe_v1`. When the room service and
+`fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`,
+`bandwidth_probe_v1` and `connection_speed_v1`. With `connection_speed_v1` the
+response adds `bandwidth_probe_url`, the media-path probe below, on the origin
+the request arrived on. When the room service and
 authenticated room socket are configured, it also includes
 `watch_party_source_fallback_v1` and `watch_party_coordinator_v1`.
 The coordinator capability covers shared room
@@ -51,10 +56,20 @@ proxy cannot inflate the result. A client times the transfer from its first
 byte, may close the connection once it has timed enough, and sends the result
 as `bandwidth_estimate_kbps` on start and replan. Without a measurement a
 browser has only `navigator.connection.downlink`, which Chromium caps at
-10 Mbps, too low for Auto quality ever to send a 4K source as-is. The probe
-measures the path to the API server; media served from a remote node can take
-a different path. Its bytes count as viewer transfer egress, not playback, and
-are exempt from stream caps, like the Jellyfin-compatible `/Playback/BitrateTest`.
+10 Mbps, too low for Auto quality ever to send a 4K source as-is. Its bytes
+count as viewer transfer egress, not playback, and are exempt from stream caps,
+like the Jellyfin-compatible `/Playback/BitrateTest`.
+
+Without `media_path` the probe measures the path to the API server, and media
+served from a remote node can take a different one. `media_path=true`, the form
+`bandwidth_probe_url` advertises, measures the media path instead: the server
+picks the egress that the direct-play routing policy would use for the
+caller's network or provider path. When that is a proxy, the answer is `307` to
+the proxy's `/stream/bandwidth-probe/{token}?size=N` with a two-minute token
+valid only for probes; the proxy applies the same limits. When the API serves
+direct play, it sends the bytes itself. When a proxy-only policy has no proxy
+that serves probes, the answer is `503 dependency_unavailable`, never a
+measurement of the API path.
 
 The web app probes in the background a few seconds after sign-in, skips Data
 Saver and cellular connections and pages that are already playing media,
@@ -435,73 +450,36 @@ Jellyfin chapter names, ticks and image mappings continue to represent embedded
 chapters; marker images are not projected as invented Jellyfin chapters. Offline
 marker inventories do not include these remotely served preview images.
 
-
 ## Buffering quality (native v2)
 
-`buffering_quality_v1` gates two optional start/replan fields. Clients echo the
-feature in `client_features` before sending `bandwidth_estimate_source` (`probe`
-or `observed_rebuffer`, requiring `bandwidth_estimate_kbps`) or `learned_limit`
-(`ignore` or `clear`). Requests without the feature neither record nor apply
-learned limits. The frozen v1 bridge does not negotiate this feature.
+`buffering_quality_v1` adds the start and replan fields, learned limits and
+`playback_plan.bandwidth_limit` described in
+[playback protocol v3](architecture/playback-protocol-v3.md#buffering-quality-native-v2).
+These operations read and reset what the server keeps for the calling device.
+They are profile-scoped and identify the device by `X-Silo-Device-Id`; they
+need no installation ID or body. Without a device ID nothing is stored, and the
+reads find nothing.
 
-Auto uses the lower of the request estimate and the seven-day learned estimate
-for the authenticated account, `X-Silo-Device-Id`, and trusted connection.
-Missing device identity disables learning. Fixed qualities ignore learned
-limits. `ignore` leaves the stored limit intact; `clear` removes it before
-planning. The existing 80% margin and administrator/client caps still apply.
-An observed budget tries playable versions of the same edition without video
-encoding before transcoding; an unchanged source carries
-`quality_reduction_unavailable`. A plan actually reduced by the stored limit
-adds `bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`.
+`GET /api/v2/playback/connection` returns the state for the connection the
+request arrives on: `connection` (`local`, `remote` or `provider:<name>`) and
+nullable `learned_limit: {kbps, observed_at, expires_at}`. With
+`connection_speed_v1` it adds optional `probe: {kbps, measured_at, transport}`
+and `auto_budget_kbps`: 80% of the lower of the latest probe and the unexpired
+learned limit, then capped by the administrator limit. Without either
+observation the budget is absent. A stored probe describes the latest test;
+clients still expire their start estimate after 30 minutes.
+`DELETE /api/v2/playback/connection/learned-limit` clears that connection's
+limit and returns 204.
 
-`GET /api/v2/playback/connection` returns `connection` and nullable
-`learned_limit: {kbps, observed_at, expires_at}`. `DELETE
-/api/v2/playback/connection/learned-limit` clears the calling device's current
-connection limit and returns 204. Connection keys use the trusted network
-provider, local classification, or an HMAC of the public IPv4 address / IPv6
-/64. Raw public addresses are never stored in this table. Rows are removed
-30 days after their last update and when the last device registration is deleted.
+`POST /api/v2/playback/bandwidth-probe/results` (`connection_speed_v1`)
+accepts `{kbps, bytes, duration_ms, transport}` and returns 204. Bounds are
+1–1,000,000 kbps, 1–100,000,000 bytes and 1–60,000 milliseconds; `transport` is
+`wifi`, `ethernet`, `cellular` or `other`. The server keeps the latest result
+per device and connection.
 
-`playback_plan_summary_v1` advertises the `plan_summary` route event. Its added
-diagnostics allowlist keys are `played_ms`, `stall_count`, `stall_total_ms`,
-`stall_longest_ms`, `delivered_kbps`, `buffering_mode`, and `buffering_action`.
-The existing `bandwidth_estimate_kbps` key reports the requested estimate.
-Clients send a summary when a plan stops playing, including replacement,
-stop, and failure. See the buffering-quality design for controller semantics
-and the shared conformance vectors.
-
-
-### Connection speed and device observations
-
-`connection_speed_v1` adds optional `bandwidth_probe_url` to the native
-capability response. Fetch it with ordinary authenticated headers and follow
-redirects. Its stable URL chooses direct-play egress using the caller's network
-routing policy; a proxy download is authorized with a two-minute, probe-only
-stream token. Both API and proxy apply the same per-node/per-account probe
-limits and return `429` with `Retry-After`. Proxy-only routing with no capable
-proxy returns an unavailable error, never a measurement of the API link.
-
-`POST /api/v2/playback/bandwidth-probe/results` accepts
-`{kbps, bytes, duration_ms, transport}` and returns 204. It is profile-scoped and
-uses `X-Silo-Device-Id`; no device means no stored observation. Bounds are
-1–1,000,000 kbps, 1–100,000,000 bytes and 1–60,000 milliseconds. Transport is
-`wifi`, `ethernet`, `cellular` or `other`.
-
-The connection response adds optional `probe: {kbps, measured_at, transport}`
-and `auto_budget_kbps`. The budget is 80% of the lower of the latest probe and
-the unexpired learned limit, then capped by the administrator limit. Without
-either observation the budget is absent. Stored probes describe the latest
-test; clients still expire their start estimate after 30 minutes.
-
-The admin device detail adds optional `connections`. Each entry contains
-`id` (an opaque connection identifier), `connection`, nullable `probe`, nullable
-`learned_limit`, and nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
+The admin device detail adds optional `connections`. Each entry has `id`, an
+opaque connection identifier, `connection`, nullable `probe`, nullable
+`learned_limit` and nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
 `DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit`
-returns 204 and requires acting-admin authority. Both reset operations clear
-only the learned limit, preserving probe and summary observations.
-
-Newly inserted plan-summary events update the latest connection summary and
-feed `silo_playback_stall_ratio{client,delivery}` and
-`silo_playback_buffering_actions_total{mode,action}`. Event retries do not
-increment counters again. Delivery comes from the reported plan's stored
-start/replan receipt, not its replacement; unresolvable plans use `unknown`.
+needs acting-admin authority and returns 204. Both resets clear only the
+learned limit and keep the probe and plan summary.
