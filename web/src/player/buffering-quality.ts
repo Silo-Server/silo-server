@@ -84,8 +84,11 @@ export interface BufferingEvent {
   plan?: BufferingPlan;
   /** The operation of a `client_replan`. */
   operation?: ClientReplanOperation;
-  /** Why a `waiting` began, when the player itself caused it. */
-  cause?: "seek" | "pause" | "reload";
+  /**
+   * Why a `waiting` began, when it is not the network's: the player itself
+   * caused it, or it began with media buffered (a renderer wait).
+   */
+  cause?: "seek" | "pause" | "reload" | "renderer";
   /** Whether a `plan_adopted` answers this controller's own replan. */
   controllerInitiated?: boolean;
 }
@@ -115,6 +118,12 @@ export interface BufferingSummary {
 const STARTUP_GRACE_MS = 10_000;
 /** A stall shorter than this is ordinary segment-boundary buffering. */
 const STALL_MIN_MS = 1_000;
+/**
+ * A wait that begins with more than this much media buffered past the playhead
+ * is the decoder or renderer catching up, not the network. It becomes a stall
+ * once the buffer falls to this.
+ */
+export const RENDERER_WAIT_BUFFER_MS = 1_000;
 /** This many counted stalls within the window means the link cannot keep up. */
 const STALLS_BEFORE_TRIGGER = 2;
 const STALL_WINDOW_MS = 120_000;

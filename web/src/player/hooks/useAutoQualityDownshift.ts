@@ -1,5 +1,6 @@
 import {
   BufferingQualityController,
+  RENDERER_WAIT_BUFFER_MS,
   type BufferingAnswer,
   type BufferingEvent,
   type BufferingMode,
@@ -20,6 +21,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 
 /** How often the controller's timers are advanced. */
 const TICK_MS = 100;
+
+/** Media buffered past the playhead, in milliseconds; 0 when none is. */
+function bufferedAheadMs(video: HTMLVideoElement): number {
+  const position = video.currentTime;
+  const ranges = video.buffered;
+  for (let i = 0; i < ranges.length; i++) {
+    if (ranges.start(i) <= position && position < ranges.end(i))
+      return (ranges.end(i) - position) * 1000;
+  }
+  return 0;
+}
 
 interface Options {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -175,6 +187,9 @@ export function useAutoQualityDownshift(options: Options) {
     // without a `playing` event (the player clears buffering on `timeupdate`),
     // so advancing time also ends it.
     let stalledAt: number | undefined;
+    // A wait that began with media buffered, until playback resumes or the
+    // buffer runs down and makes it a stall.
+    let rendererWait = false;
     const syncTrouble = () => {
       const next = latest.current.transportTrouble?.() ?? false;
       if (next !== trouble)
@@ -188,20 +203,34 @@ export function useAutoQualityDownshift(options: Options) {
     };
     const playing = () => {
       stalledAt = undefined;
+      rendererWait = false;
       send("playing");
     };
     const waiting = () => {
       stalledAt = video.currentTime;
-      send("waiting", video.seeking ? "seek" : video.paused ? "pause" : undefined);
+      const cause = video.seeking
+        ? "seek"
+        : video.paused
+          ? "pause"
+          : bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS
+            ? "renderer"
+            : undefined;
+      rendererWait = cause === "renderer";
+      send("waiting", cause);
     };
-    const pause = () => send("pause");
+    const pause = () => {
+      rendererWait = false;
+      send("pause");
+    };
     const play = () => send("play");
     const seek = () => {
       stalledAt = undefined;
+      rendererWait = false;
       send("seek");
     };
     const reload = () => {
       stalledAt = undefined;
+      rendererWait = false;
       send("reload");
     };
     const timeupdate = () => {
@@ -221,6 +250,10 @@ export function useAutoQualityDownshift(options: Options) {
     if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) playing();
     const timer = setInterval(() => {
       syncTrouble();
+      if (rendererWait && bufferedAheadMs(video) <= RENDERER_WAIT_BUFFER_MS) {
+        rendererWait = false;
+        c.event({ type: "waiting" }, Date.now());
+      }
       c.tick(Date.now());
       refresh();
     }, TICK_MS);

@@ -173,3 +173,25 @@ it("drops the kept estimate when the controller stops, as in a Watch Together ro
   h.rerender({ ...h.options, enabled: false });
   expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(undefined);
 });
+
+it("does not count a wait that begins with media buffered until the buffer runs down", () => {
+  const h = setup();
+  const video = h.options.videoRef.current;
+  let bufferedEnd = 0;
+  Object.defineProperty(video, "currentTime", { value: 30, configurable: true, writable: true });
+  Object.defineProperty(video, "buffered", {
+    configurable: true,
+    get: () => ({ length: 1, start: () => 0, end: () => bufferedEnd }),
+  });
+  // A decoder catching up stops playback with 5 s of media still buffered.
+  bufferedEnd = 35;
+  h.send("waiting");
+  h.advance(10_000);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+  // The buffer runs down to the threshold: the stall starts now.
+  bufferedEnd = 30.8;
+  h.advance(5_900);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+  h.advance(200);
+  expect(h.options.onReplan).toHaveBeenCalledTimes(1);
+});
