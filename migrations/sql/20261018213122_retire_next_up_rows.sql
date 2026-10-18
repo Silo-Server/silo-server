@@ -13,7 +13,9 @@
 -- added has no SectionID and runs UserSectionType, else the legacy
 -- SectionType. Overrides of an admin row keep their SectionID: the deleted
 -- admin rows' overrides then match nothing, as after any admin row delete.
--- A value that does not parse is left alone; one left empty is deleted, as
+-- An element is dropped only when it is positively a next_up row: one with no
+-- recipe fields at all keeps its place. A value that does not parse is left
+-- alone; one left empty is deleted, as
 -- the store does when a save leaves a page with no overrides.
 -- +goose StatementBegin
 CREATE FUNCTION pg_temp.retire_next_up_section_overrides(stored text)
@@ -36,11 +38,11 @@ BEGIN
   SELECT COALESCE(jsonb_agg(element ORDER BY ordinality), '[]'::jsonb)
     INTO kept
     FROM jsonb_array_elements(overrides) WITH ORDINALITY AS e(element, ordinality)
-   WHERE NOT (
+   WHERE (
            jsonb_typeof(element) = 'object'
            AND COALESCE(element->>'SectionID', '') = ''
            AND COALESCE(NULLIF(element->>'UserSectionType', ''), element->>'SectionType') = 'next_up'
-         );
+         ) IS NOT TRUE;
   IF jsonb_array_length(kept) = jsonb_array_length(overrides) THEN
     RETURN stored;
   END IF;
