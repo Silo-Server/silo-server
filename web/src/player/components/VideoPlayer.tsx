@@ -4164,7 +4164,8 @@ export function VideoPlayer({
     [plan, activeQualityId],
   );
   // Intro skip, the other segment skips and Next Up take priority; a
-  // buffering pill waits behind them with its timer frozen.
+  // buffering pill waits behind them with its timer frozen. A minimized
+  // player shows no pill either, so the pill waits for it to come back.
   const higherPriorityPillActive =
     activeIntroPrompt !== null || nextEpisode.showCountdown || activeSkipMarker !== undefined;
   const bufferingQuality = useAutoQualityDownshift({
@@ -4175,7 +4176,7 @@ export function VideoPlayer({
     attemptId: playbackAttemptId,
     mode: bufferingMode ?? "never",
     plan: bufferingPlan,
-    obscured: higherPriorityPillActive,
+    obscured: higherPriorityPillActive || isDetached,
     transportTrouble: () =>
       connectionStatus !== "connected" ||
       (typeof navigator !== "undefined" && navigator.onLine === false) ||

@@ -5563,4 +5563,37 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Keep quality" })).toBeInTheDocument();
   });
+
+  it("keeps a prompt's timer while the player is minimized", async () => {
+    const rendered = renderPlayer({
+      bufferingMode: "ask",
+      qualityPreference: "auto",
+      plan: fixturePlanV3({
+        ...directPlan,
+        available_qualities: [
+          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
+          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
+        ],
+        source: { ...directPlan.source, bitrate_kbps: 20_000 },
+      }),
+    });
+    const video = rendered.container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireEvent.loadedMetadata(video);
+    markPlaying(video);
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+
+    // Minimized past the 15-second timer, the prompt waits instead of expiring.
+    rendered.rerenderPlayer({ displayMode: "detached" });
+    act(() => vi.advanceTimersByTime(20_000));
+    rendered.rerenderPlayer({ displayMode: "foreground" });
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(15_000));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+  });
 });
