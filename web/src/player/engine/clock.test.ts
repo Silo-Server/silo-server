@@ -41,6 +41,27 @@ describe("EngineClock with audio", () => {
     audible = 4;
     expect(clock.now()).toBeCloseTo(5, 6);
   });
+
+  // The speakers lag the render by the output latency, so audio rendered at
+  // the old rate is still playing for a moment after a speed change.
+  it("keeps time across a rate change with output latency", () => {
+    let audible = 9.8;
+    const clock = new EngineClock(() => audible, 0);
+    for (let t = 9; t <= 10; t += 0.1) {
+      clock.onAnchor({ contextTime: t, mediaTime: 70 + (t - 9) * 3, advancing: true, rate: 3 });
+    }
+    const before = clock.now();
+    expect(before).toBeCloseTo(72.4, 6);
+    // The worklet switches to 0.5x at context time 10.
+    clock.setRate(0.5);
+    clock.onAnchor({ contextTime: 10.1, mediaTime: 73.05, advancing: true, rate: 0.5 });
+    expect(clock.now()).toBeCloseTo(before, 6);
+    // Audio from before the switch keeps playing at 3x until it is out.
+    audible = 9.9;
+    expect(clock.now()).toBeCloseTo(72.7, 6);
+    audible = 10.2;
+    expect(clock.now()).toBeCloseTo(73.1, 6);
+  });
 });
 
 describe("EngineClock without audio", () => {

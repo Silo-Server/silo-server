@@ -100,7 +100,13 @@ export interface EnginePlayerOptions {
   element: HTMLVideoElement;
   volume: number;
   muted: boolean;
+  /** The speed playback starts at, as a media element's defaultPlaybackRate. */
+  playbackRate?: number;
   onFailure: (failure: FailureV3) => void;
+}
+
+function clampRate(value: number): number {
+  return Math.min(4, Math.max(0.25, value || 1));
 }
 
 /**
@@ -187,6 +193,7 @@ export class EnginePlayer {
     this.onFailure = options.onFailure;
     this.volumeValue = options.volume;
     this.mutedValue = options.muted;
+    this.rateValue = clampRate(options.playbackRate ?? 1);
     this.seekTarget = options.source.startSeconds;
     this.resizeObserver = new ResizeObserver((entries) => {
       const box = entries[entries.length - 1]?.devicePixelContentBoxSize?.[0];
@@ -292,7 +299,7 @@ export class EnginePlayer {
   }
 
   set playbackRate(value: number) {
-    const rate = Math.min(4, Math.max(0.25, value || 1));
+    const rate = clampRate(value);
     if (rate === this.rateValue) return;
     this.rateValue = rate;
     this.audio?.setRate(rate);
@@ -527,6 +534,10 @@ export class EnginePlayer {
           return;
         }
         this.queue.push(picture);
+        // A hidden tab presents on a slow timer, and each picture held for it
+        // keeps the decoder waiting for a credit. Releasing due pictures as
+        // they arrive keeps video up with fast playback.
+        if (this.hiddenTimer !== null && !this.idle()) this.advance(false);
         return;
       }
       case "video-ended":

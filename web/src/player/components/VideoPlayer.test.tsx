@@ -3996,9 +3996,9 @@ describe("VideoPlayer source timeline", () => {
     }
   });
 
-  // The engine's audio follows playbackRate without keeping pitch, so it plays
-  // at 1x and the speed control is hidden, as in a Watch Party.
-  it("plays the browser engine at 1x and hides the speed control", async () => {
+  // The engine keeps its audio's pitch at speed, so the viewer's speed carries
+  // over when it takes the file and stays adjustable.
+  it("keeps the speed control and the viewer's speed on the browser engine", async () => {
     const engine = {
       containers: ["mkv"],
       videoCodecs: ["h264"],
@@ -4016,8 +4016,11 @@ describe("VideoPlayer source timeline", () => {
     try {
       rerenderPlayer({ planRevision: 2, browserEngine: engine });
       await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalled());
-      await waitFor(() => expect(controls.current!.onPlaybackSpeedChange).toBeUndefined());
-      expect(video.playbackRate).toBe(1);
+      // The engine starts at the element's default rate, which carries the speed.
+      expect(video.defaultPlaybackRate).toBe(1.5);
+      expect(controls.current!.onPlaybackSpeedChange).toBeDefined();
+      act(() => controls.current!.onPlaybackSpeedChange!(2));
+      expect(video.playbackRate).toBe(2);
     } finally {
       engineRoute.chosen = false;
     }

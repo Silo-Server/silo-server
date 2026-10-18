@@ -31,6 +31,7 @@ export function attachBrowserEngine(options: {
     element: video,
     volume: video.volume,
     muted: video.muted,
+    playbackRate: video.defaultPlaybackRate,
     onFailure,
   });
   const detach = attachEngineToElement(video, player);
