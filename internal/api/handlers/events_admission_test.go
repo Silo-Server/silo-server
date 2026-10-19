@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +15,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+
 	"github.com/gorilla/websocket"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func testSocketAdmission(t *testing.T) *evt.ClientSocketAdmission {
@@ -268,6 +271,7 @@ func (*failingAdmissionEventSocket) WriteJSON(any) error { return io.ErrClosedPi
 func TestClientSocketV2NilAndDrainDoNotConsumeTicket(t *testing.T) {
 	for _, absent := range []bool{false, true} {
 		h, _ := socketTestHandler(t)
+		admission := h.Events.socketAdmission
 		ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))
 		if absent {
 			h.Events.socketAdmission = nil
@@ -283,6 +287,24 @@ func TestClientSocketV2NilAndDrainDoNotConsumeTicket(t *testing.T) {
 		}
 		if _, err := h.Tickets.Consume(t.Context(), ticket); err != nil {
 			t.Fatal("pre-admission availability check spent ticket")
+		}
+		count := "1"
+		if absent {
+			count = "0" // Missing dependencies cannot invent a collector.
+		}
+		want := `
+# HELP silo_events_client_socket_refusals_total Refused client socket reservations by bounded reason.
+# TYPE silo_events_client_socket_refusals_total counter
+silo_events_client_socket_refusals_total{reason="account"} 0
+silo_events_client_socket_refusals_total{reason="process"} 0
+silo_events_client_socket_refusals_total{reason="draining"} ` + count + `
+silo_events_client_socket_refusals_total{reason="unavailable"} 0
+`
+		if err := testutil.CollectAndCompare(admission, strings.NewReader(want), "silo_events_client_socket_refusals_total"); err != nil {
+			t.Fatal(err)
+		}
+		if admission.Occupancy() != 0 {
+			t.Fatal("early refusal reserved capacity")
 		}
 	}
 }

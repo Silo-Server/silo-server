@@ -99,22 +99,31 @@ func (a *ClientSocketAdmission) Reserve(accountID int, draining bool) (*ClientSo
 		if processFull {
 			a.metrics.wouldRefuse[clientSocketProcessReason]++
 		}
-	} else {
-		// Process capacity takes precedence over account capacity: callers
-		// must return aggregate 503 rather than account 429 when both are full.
-		if processFull {
-			a.metrics.refusals[clientSocketProcessReason]++
-			return nil, ClientSocketProcessLimit
-		}
-		if accountFull {
-			a.metrics.refusals[clientSocketAccountReason]++
-			return nil, ClientSocketAccountLimit
-		}
+	}
+	// Process capacity takes precedence when both limits are full.
+	if a.mode == ClientSocketEnforce && processFull {
+		a.metrics.refusals[clientSocketProcessReason]++
+		return nil, ClientSocketProcessLimit
+	}
+	if a.mode == ClientSocketEnforce && accountFull {
+		a.metrics.refusals[clientSocketAccountReason]++
+		return nil, ClientSocketAccountLimit
 	}
 	a.total++
 	a.accounts[accountID]++
 	a.metrics.observeAdmission(a.total, a.accounts[accountID])
 	return &ClientSocketReservation{admission: a, accountID: accountID}, ""
+}
+
+// RecordDrainingRefusal counts a pre-admission shutdown refusal, without
+// reserving capacity or consuming a client's single-use credential.
+func (a *ClientSocketAdmission) RecordDrainingRefusal() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.metrics.refusals[clientSocketDrainingReason]++
 }
 
 // Release returns capacity exactly once, including when called concurrently.

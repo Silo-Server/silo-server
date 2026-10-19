@@ -37,7 +37,8 @@ type Dependencies struct {
 	// AppContext is the process lifecycle context. When set, it bounds the
 	// periodic orphan-transcode sweep so it stops on shutdown; nil (tests) makes
 	// the sweep a single boot-time run instead of a long-lived ticker.
-	AppContext            context.Context
+	AppContext context.Context
+
 	ClientSocketAdmission *events.ClientSocketAdmission
 	ShuttingDown          func() bool
 	// RegisterShutdownWork retains asynchronous cleanup completion until the

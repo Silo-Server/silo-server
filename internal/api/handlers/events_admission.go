@@ -6,6 +6,7 @@ import (
 	"time"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -26,7 +27,7 @@ type eventSocket interface {
 // Both native handlers and compatibility must receive the same instance.
 func (h *EventsHandler) SetClientSocketAdmission(admission *evt.ClientSocketAdmission, appContext context.Context, shuttingDown func() bool) {
 	h.socketAdmission = admission
-	h.appContext = appContext
+	h.appContext = appContext //nolint:fatcontext // Installed once at startup, never derived from an individual request.
 	h.shuttingDown = shuttingDown
 }
 
@@ -62,6 +63,7 @@ func (h *EventsHandler) admitClientSocket(w http.ResponseWriter, r *http.Request
 	}
 	if ctx.Err() != nil || h.socketDraining() {
 		release()
+		h.socketAdmission.RecordDrainingRefusal()
 		refuseEventSocket(w, evt.ClientSocketDraining)
 		return r, nil, false
 	}
@@ -69,6 +71,9 @@ func (h *EventsHandler) admitClientSocket(w http.ResponseWriter, r *http.Request
 }
 
 func (h *EventsHandler) upgradeEventSocket(w http.ResponseWriter, r *http.Request, upgrader websocket.Upgrader) (eventSocket, error) {
+	if err := r.Context().Err(); err != nil {
+		return nil, err
+	}
 	if h.upgradeSocket != nil {
 		return h.upgradeSocket(w, r, upgrader)
 	}

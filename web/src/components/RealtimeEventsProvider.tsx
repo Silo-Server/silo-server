@@ -973,7 +973,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       }
       // The profile-rebind path stretches the delay so a persistently failing
       // ticket mint cannot turn into a tight reconnect loop.
-      const delay = nextReconnectDelayRef.current ?? recovery.reconnect(retryAfterMs);
+      const profileDelay = nextReconnectDelayRef.current;
+      const delay =
+        profileDelay === 0 ? 0 : recovery.reconnect(Math.max(retryAfterMs, profileDelay ?? 0));
       nextReconnectDelayRef.current = null;
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = undefined;

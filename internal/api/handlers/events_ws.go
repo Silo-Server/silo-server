@@ -92,7 +92,7 @@ type EventsHandler struct {
 	// the admin channels acts as; see SetProfileVerifier.
 	profiles        apimw.ViewerResolver
 	socketAdmission *evt.ClientSocketAdmission
-	appContext      context.Context
+	appContext      context.Context //nolint:containedctx // Process lifecycle dependency shared with compatibility sockets.
 	shuttingDown    func() bool
 	upgradeSocket   func(http.ResponseWriter, *http.Request, websocket.Upgrader) (eventSocket, error)
 	subscribeSocket func() (<-chan evt.Envelope, func())
@@ -316,10 +316,13 @@ func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims,
 // serveWebSocket runs one events connection. When accessChanged closes, the
 // loop tells the client its access changed and closes the connection with
 // EventsCloseAccessChanged; a nil channel never fires.
+//
+//nolint:funlen // Keep the existing single-writer protocol loop together.
 func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}, startAuthority func(context.Context, context.CancelFunc)) {
-	if r.Context().Err() != nil {
-		return
-	}
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	// Watchers, snapshot work and transport closure must share cancellation.
+	r = r.WithContext(ctx)
 	conn, err := h.upgradeEventSocket(w, r, upgrader)
 	if err != nil {
 		// The Android/KMP client has a long history of silent handshake
@@ -345,8 +348,6 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 	configureWebSocket(conn)
 	conn.SetReadLimit(maxEventsFrameBytes)
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
 	if ctx.Err() != nil {
 		return
 	}
@@ -892,6 +893,9 @@ func (h *EventsHandler) writeSnapshotFrame(
 	channel evt.EventChannel,
 ) error {
 	data, err := h.snapshotForChannel(r, claims, boundProfileID, channel)
+	if ctxErr := r.Context().Err(); ctxErr != nil {
+		return ctxErr
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(),
 			"events: failed to build initial snapshot", "component", "api",

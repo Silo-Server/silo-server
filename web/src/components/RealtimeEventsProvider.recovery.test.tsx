@@ -362,25 +362,30 @@ describe("generic events provider recovery", () => {
     expect(fetchFixture).toHaveBeenCalledTimes(4);
   });
 
-  it("preserves the explicit profile-rebind delay", async () => {
+  it("advances the failure ladder through profile-rebind retries", async () => {
     setProfileId("fixture-profile");
     state.profile = { id: "fixture-profile", has_pin: false };
     mountProvider();
     await act(async () => {});
-    const socket = FixtureSocket.instances[0]!;
-    await act(async () => {
-      socket.open();
-      socket.message({
-        type: "subscribed",
-        channels: ["catalog"],
-        rejected: [{ channel: "notifications", code: "profile_required" }],
+    // The early profile floors (2s, 4s) cannot undercut 5s, 10s. Later
+    // profile floors remain an additional minimum, before jitter.
+    for (const delay of [5_000, 10_000, 20_000, 30_000, 32_000]) {
+      const attempts = fetchFixture.mock.calls.length;
+      const socket = FixtureSocket.instances.at(-1)!;
+      await act(async () => {
+        socket.open();
+        socket.message({
+          type: "subscribed",
+          channels: ["catalog"],
+          rejected: [{ channel: "notifications", code: "profile_required" }],
+        });
+        socket.end();
       });
-      socket.end();
-    });
-    await advance(1_999);
-    expect(fetchFixture).toHaveBeenCalledTimes(1);
-    await advance(1);
-    expect(fetchFixture).toHaveBeenCalledTimes(2);
+      await advance(delay - 1);
+      expect(fetchFixture).toHaveBeenCalledTimes(attempts);
+      await advance(1);
+      expect(fetchFixture).toHaveBeenCalledTimes(attempts + 1);
+    }
   });
 
   it("ignores an accepted ACK from a replaced socket", async () => {

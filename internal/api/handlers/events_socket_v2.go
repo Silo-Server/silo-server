@@ -112,7 +112,12 @@ func (h *EventsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid upgrade", http.StatusBadRequest)
 		return
 	}
-	if h.Events.socketAdmission == nil || h.Events.socketDraining() {
+	if h.Events.socketAdmission == nil {
+		refuseEventSocket(w, evt.ClientSocketUnavailable)
+		return
+	}
+	if h.Events.socketDraining() {
+		h.Events.socketAdmission.RecordDrainingRefusal()
 		refuseEventSocket(w, evt.ClientSocketDraining)
 		return
 	}

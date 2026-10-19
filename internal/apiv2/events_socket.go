@@ -18,6 +18,7 @@ const eventsProtocolHeader = "Sec-WebSocket-Protocol"
 const eventsUpgradeHeader = "Upgrade"
 const eventsOriginHeader = "Origin"
 const eventsChannelsQuery = "channels"
+const eventsRetryAfterHeader = "Retry-After"
 
 type EventsSocketService interface {
 	Mint(context.Context, evt.SocketIdentity) (string, error)
@@ -52,7 +53,7 @@ func registerEventsSocket(reg *Registry) {
 	responses := socketResponses([]string{"400", "401", "403", "429", "503"}, "Handshake refused.", "Realtime connection established.", "WebSocket handshake header.")
 	for _, status := range []string{"429", "503"} {
 		responses[status].Headers = map[string]*huma.Param{
-			"Retry-After": {Schema: &huma.Schema{Type: huma.TypeString}, Description: "Socket admission refusals use a five-second retry floor; this is not a release forecast."},
+			eventsRetryAfterHeader: {Schema: &huma.Schema{Type: huma.TypeString}, Description: "Socket admission refusals use a five-second retry floor; this is not a release forecast."},
 		}
 	}
 	op := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: Prefix + "/events/ws", OperationID: "connectEventsSocket", Tags: []string{"realtime"}, Summary: "Connect using one session-bound ticket in Sec-WebSocket-Protocol.", Responses: responses}, Class: ClassPublic, ServiceBacked: true}
