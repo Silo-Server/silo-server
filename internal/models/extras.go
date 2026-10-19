@@ -78,4 +78,10 @@ type MediaExtra struct {
 	Kind      ExtraKind
 	Title     string
 	SortOrder int
+	// StillPath is the cached 16:9 card image, empty when the extra has none.
+	// StillSource identifies what produced it (a sidecar's file:// URL with
+	// its size and modification time); the scanner owns both.
+	StillPath      string
+	StillSource    string
+	StillThumbhash string
 }

@@ -297,6 +297,32 @@ type WatchRollup struct {
 	LastEditionKey  *string `json:"last_edition_key,omitempty"`
 }
 
+// ItemExtraInfo is a local extra: a trailer, featurette or other video file
+// that belongs to a movie or series. Its content_id is a watch target.
+type ItemExtraInfo struct {
+	ContentID       string `json:"content_id"`
+	Kind            string `json:"kind"`
+	Title           string `json:"title,omitempty"`
+	DurationSeconds int    `json:"duration_seconds,omitempty"`
+	FileID          int    `json:"file_id,omitempty"`
+	StillURL        string `json:"still_url,omitempty" doc:"Presigned, short-lived. 16:9 image of the extra; absent when it has none"`
+	StillThumbhash  string `json:"still_thumbhash,omitempty"`
+}
+
+func itemExtrasOf(extras []catalogpkg.ItemExtraInfo) []ItemExtraInfo {
+	if extras == nil {
+		return nil
+	}
+	out := make([]ItemExtraInfo, 0, len(extras))
+	for _, e := range extras {
+		out = append(out, ItemExtraInfo{
+			ContentID: e.ContentID, Kind: e.Kind, Title: e.Title, DurationSeconds: e.DurationSeconds, FileID: e.FileID,
+			StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
+		})
+	}
+	return out
+}
+
 // FileVersion is one playable file of an item.
 type FileVersion struct {
 	FileID                   ID                                `json:"file_id" example:"120"`
@@ -399,7 +425,7 @@ type CatalogItemDetail struct {
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
 	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series; absent when there are none. Only the sources clients show, in the same order as ratings, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
 	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
-	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
+	Extras                          []ItemExtraInfo                      `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
 	Subtitles                       []catalogpkg.SubtitleInfo            `json:"subtitles" doc:"Empty, never null"`
 	Intro                           *catalogpkg.Marker                   `json:"intro,omitempty"`
@@ -1420,7 +1446,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 		ClearArtURL: d.ClearArtURL, DiscURL: d.DiscURL, BackdropURLs: d.BackdropURLs,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
-		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
+		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: itemExtrasOf(d.Extras),
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
 		EffectiveVersionHDR:        d.EffectiveVersionHDR, EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo, EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,

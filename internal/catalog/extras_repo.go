@@ -30,15 +30,18 @@ func NewExtraRepository(pool *pgxpool.Pool) *ExtraRepository {
 
 // Upsert inserts or refreshes an extra. The content_id is deterministic
 // (contentid.ForLocal of the backing file path), so rescans converge on the
-// same row; kind/title/parent follow the latest scan classification.
-func (r *ExtraRepository) Upsert(ctx context.Context, extra models.MediaExtra) error {
+// same row; kind/title/parent follow the latest scan classification. The
+// still columns are left alone; Upsert returns the row's current
+// still_source so the scanner can tell whether its sidecar changed.
+func (r *ExtraRepository) Upsert(ctx context.Context, extra models.MediaExtra) (string, error) {
 	if strings.TrimSpace(extra.ContentID) == "" {
-		return fmt.Errorf("extra content_id is required")
+		return "", errors.New("extra content_id is required")
 	}
 	if strings.TrimSpace(extra.ParentID) == "" {
-		return fmt.Errorf("extra parent_id is required")
+		return "", errors.New("extra parent_id is required")
 	}
-	_, err := r.pool.Exec(ctx, `
+	var stillSource string
+	err := r.pool.QueryRow(ctx, `
 		INSERT INTO media_extras (content_id, parent_id, kind, title, sort_order)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (content_id) DO UPDATE SET
@@ -46,23 +49,58 @@ func (r *ExtraRepository) Upsert(ctx context.Context, extra models.MediaExtra) e
 			kind = EXCLUDED.kind,
 			title = EXCLUDED.title,
 			sort_order = EXCLUDED.sort_order,
-			updated_at = now()`,
-		extra.ContentID, extra.ParentID, string(extra.Kind), extra.Title, extra.SortOrder)
+			updated_at = now()
+		RETURNING still_source`,
+		extra.ContentID, extra.ParentID, string(extra.Kind), extra.Title, extra.SortOrder).
+		Scan(&stillSource)
 	if err != nil {
-		return fmt.Errorf("upsert media extra: %w", err)
+		return "", fmt.Errorf("upsert media extra: %w", err)
+	}
+	return stillSource, nil
+}
+
+// SetStill records an extra's cached card image and the source it came
+// from. Empty values clear it.
+func (r *ExtraRepository) SetStill(ctx context.Context, contentID, path, source, thumbhash string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE media_extras
+		SET still_path = $2, still_source = $3, still_thumbhash = $4, updated_at = now()
+		WHERE content_id = $1`,
+		contentID, path, source, thumbhash)
+	if err != nil {
+		return fmt.Errorf("set media extra still: %w", err)
 	}
 	return nil
 }
+
+// ClearEmptiedExtraStillsCTE follows a "deleted" CTE that deletes media_files
+// rows RETURNING id, extra_id. It clears the image of each local extra those
+// rows leave without any file, so the artwork revision GC collects it; the
+// media_extras row itself is kept. A file that is only marked missing still
+// counts, so an offline share keeps its extras' images.
+const ClearEmptiedExtraStillsCTE = `,
+	emptied_extras AS (
+		UPDATE media_extras e
+		SET still_path = '', still_source = '', still_thumbhash = '', updated_at = now()
+		WHERE e.content_id IN (SELECT extra_id FROM deleted WHERE extra_id IS NOT NULL)
+		  AND (e.still_path <> '' OR e.still_source <> '')
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_files f
+			WHERE f.extra_id = e.content_id AND f.id NOT IN (SELECT id FROM deleted)
+		  )
+	)`
 
 // GetByID returns a single extra, or ErrExtraNotFound.
 func (r *ExtraRepository) GetByID(ctx context.Context, contentID string) (*models.MediaExtra, error) {
 	var extra models.MediaExtra
 	var kind string
 	err := r.pool.QueryRow(ctx, `
-		SELECT content_id, parent_id, kind, title, sort_order
+		SELECT content_id, parent_id, kind, title, sort_order,
+			still_path, still_source, still_thumbhash
 		FROM media_extras
 		WHERE content_id = $1`, contentID).
-		Scan(&extra.ContentID, &extra.ParentID, &kind, &extra.Title, &extra.SortOrder)
+		Scan(&extra.ContentID, &extra.ParentID, &kind, &extra.Title, &extra.SortOrder,
+			&extra.StillPath, &extra.StillSource, &extra.StillThumbhash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrExtraNotFound
@@ -102,6 +140,7 @@ func (r *ExtraRepository) ListWithFilesByParentIDs(ctx context.Context, parentID
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT ON (e.content_id)
 			e.content_id, e.parent_id, e.kind, e.title, e.sort_order,
+			e.still_path, e.still_thumbhash,
 			f.id, COALESCE(f.duration, 0)
 		FROM media_extras e
 		JOIN media_files f ON f.extra_id = e.content_id AND f.missing_since IS NULL
@@ -116,7 +155,8 @@ func (r *ExtraRepository) ListWithFilesByParentIDs(ctx context.Context, parentID
 	for rows.Next() {
 		var e ExtraWithFile
 		var kind string
-		if err := rows.Scan(&e.ContentID, &e.ParentID, &kind, &e.Title, &e.SortOrder, &e.FileID, &e.Duration); err != nil {
+		if err := rows.Scan(&e.ContentID, &e.ParentID, &kind, &e.Title, &e.SortOrder,
+			&e.StillPath, &e.StillThumbhash, &e.FileID, &e.Duration); err != nil {
 			return nil, fmt.Errorf("scan media extra: %w", err)
 		}
 		e.Kind = models.ExtraKind(kind)

@@ -336,7 +336,22 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
 | Disc art (movies only) | `<basename>-disc`, `<basename>-cdart`, `<basename>-discart`, then `disc`, `cdart`, `discart` |
 | Season poster | `poster`, `folder`, `cover` in the season folder, then `seasonNN-poster` (`season-specials-poster` for season 0) in the series root |
 | Episode still | `<basename>-thumb`, then `<basename>` |
+| Local extra still | `<basename>-thumb`, then `<basename>`, beside the extra's own file (below) |
 
+- A local extra (a trailer or featurette file, `media_extras`) has no metadata
+  refresh, so the scanner reads its image instead
+  (`internal/scanner/extra_stills.go`): every scan that walks the extra checks
+  the folder listing the walk already read (a single-file scan reads the
+  folder), copies a new or changed sidecar into the image cache as a 16:9
+  still, and clears the image when the sidecar is gone. A folder that cannot
+  be read leaves the stored image alone. `media_extras.still_source` records
+  the sidecar's path, size and mtime, so an unchanged image is not read again,
+  and an image that cannot be decoded is recorded without a still until it
+  changes. When the scanner or a library delete removes an extra's last file
+  row, the extra's image is cleared for the artwork revision GC. Adding or replacing the image starts a
+  subtree scan of its folder, like any sidecar change. API v2 detail returns it
+  as `extras[].still_url`, and Jellyfin clients get it as the extra's Primary
+  image.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and

@@ -77,7 +77,7 @@ it draws each slot at:
 | `poster_width` | every `poster_url` |
 | `backdrop_width` | every `backdrop_url` and `backdrop_urls` entry |
 | `logo_width` | every `logo_url` |
-| `still_width` | an episode row's `still_url` |
+| `still_width` | an episode row's or a local extra's `still_url` |
 | `photo_width` | a cast or crew `photo_url` |
 
 ```http
