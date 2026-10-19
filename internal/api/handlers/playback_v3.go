@@ -242,6 +242,10 @@ type transportErrorV3 struct {
 	message   string
 	retryable bool
 	cause     error
+	// executorIneligible marks a route skipped because its executor
+	// definitely cannot run the recipe, so nothing was attempted there.
+	// combineTransportErrorsV3 lets an attempted route's verdict win over it.
+	executorIneligible bool
 }
 
 func subtitleArtifactErrorV3(message string, cause error) *transportErrorV3 {
@@ -2445,8 +2449,12 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 		plan := decision.Plan
 		nodeURL := plan.TranscodeNode.URL
 		transformations, capabilityErr := h.remoteTransformationsV3(r.Context(), nodeURL)
+		// A failed capability read may be transient; only a node whose
+		// advertised capabilities rule the recipe out is ineligible.
+		ineligible := false
 		if capabilityErr == nil {
 			capabilityErr = validateAdvertisedTransformationsV3(result.Plan, transformations)
+			ineligible = capabilityErr != nil
 		}
 		if capabilityErr == nil && planRequiresToneMapV3(result.Plan) {
 			capabilities, err := h.remoteToneMapCapabilitiesV3(r.Context(), nodeURL, false)
@@ -2454,6 +2462,7 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 				capabilityErr = err
 			} else {
 				capabilityErr = validateToneMapExecutorV3(result, capabilities)
+				ineligible = capabilityErr != nil
 			}
 		}
 		if capabilityErr != nil {
@@ -2462,7 +2471,7 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 				releaser.ReleaseSession(session.ID)
 			}
 			excludedNodes[nodeURL] = struct{}{}
-			lastErr = combineTransportErrorsV3(lastErr, &transportErrorV3{reason: routeCapabilityUnavailableReasonV3, message: "No available worker can execute the selected playback recipe.", retryable: true, cause: capabilityErr})
+			lastErr = combineTransportErrorsV3(lastErr, &transportErrorV3{reason: routeCapabilityUnavailableReasonV3, message: "No available worker can execute the selected playback recipe.", retryable: true, cause: capabilityErr, executorIneligible: ineligible})
 			continue
 		}
 
@@ -2571,7 +2580,7 @@ func (h *PlaybackHandler) validateLocalTransportCapabilitiesV3(ctx context.Conte
 		}
 	}
 	if err := validateAdvertisedTransformationsV3(result.Plan, localRegistry.Advertised()); err != nil {
-		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: err}
+		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: err, executorIneligible: true}
 	}
 	if !requiresToneMap {
 		return nil
@@ -2581,7 +2590,7 @@ func (h *PlaybackHandler) validateLocalTransportCapabilitiesV3(ctx context.Conte
 		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "Local tone-map capability validation is temporarily unavailable.", retryable: true, cause: capabilityErr}
 	}
 	if err := validateToneMapExecutorV3(result, capabilities); err != nil {
-		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected tone-map recipe.", retryable: true, cause: err}
+		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected tone-map recipe.", retryable: true, cause: err, executorIneligible: true}
 	}
 	return nil
 }
@@ -4063,7 +4072,15 @@ func manifestStartupTransportErrorV3(running bool, cause error) *transportErrorV
 	return &transportErrorV3{reason: transcodeStartFailedReasonV3, message: message, retryable: running, cause: cause}
 }
 
+// sourcePreflightRejectedMessageV3 tells the viewer, and an admin reading the
+// log, that the file itself failed the tone-map check, so a retry gets the
+// same answer.
+const sourcePreflightRejectedMessageV3 = "This file's HDR video failed Silo's conversion check, so trying again won't help. Its HDR metadata may not match the video."
+
 func toneMapExecutionTransportErrorV3(cause error, message string) *transportErrorV3 {
+	if errors.Is(cause, tonemap.ErrSourcePreflightRejected) {
+		message = sourcePreflightRejectedMessageV3
+	}
 	return &transportErrorV3{
 		reason:    transcodeStartFailedReasonV3,
 		message:   message,
@@ -4078,6 +4095,18 @@ func combineTransportErrorsV3(first, second *transportErrorV3) *transportErrorV3
 	}
 	if second == nil {
 		return first
+	}
+	// A route skipped because its executor can't run the recipe says nothing
+	// about the file, so a route that ran keeps its reason, message and
+	// retryability. Otherwise any retryable failure makes the result retryable.
+	if first.executorIneligible != second.executorIneligible {
+		attempted := first
+		if first.executorIneligible {
+			attempted = second
+		}
+		combined := *attempted
+		combined.cause = errors.Join(first.cause, second.cause)
+		return &combined
 	}
 	combined := *second
 	combined.retryable = first.retryable || second.retryable
