@@ -187,7 +187,7 @@ function TitleSearch({
   const results = useQuery({
     queryKey: [...catalogKeys.all, "collectionTitleSearch", libraryIds, debounced],
     queryFn: ({ signal }) => searchTitles(debounced, libraryIds, signal),
-    enabled: debounced.length > 0,
+    enabled: !disabled && debounced.length > 0,
     staleTime: 30 * 1000,
   });
   const found = results.data ?? [];
@@ -195,6 +195,7 @@ function TitleSearch({
   const active = showList ? found[Math.min(highlight, found.length - 1)] : undefined;
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (disabled) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       setOpen(true);
@@ -279,9 +280,9 @@ function TitleSearch({
               id={`${listId}-${item.content_id}`}
               role="option"
               aria-selected={highlighted}
-              aria-disabled={already || undefined}
+              aria-disabled={disabled || already || undefined}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => (already ? undefined : onAdd(item))}
+              onClick={() => (disabled || already ? undefined : onAdd(item))}
               className={cn(
                 "flex cursor-pointer items-center gap-3 rounded-[10px] px-2.5 py-2",
                 highlighted && "bg-accent",
@@ -455,7 +456,7 @@ export interface ManualContentsPanelProps {
   onStagedChange: (itemIds: string[]) => void;
   /** After create: try the titles that failed again, at this position onwards. */
   onRetryStaged?: (firstPosition: number | "append") => void;
-  /** The collection's title count, for appending when the list isn't all loaded. */
+  /** Summary count; never used to choose a write position. */
   itemCount?: number | null;
   /** After every title write, so the editor refreshes its save token. */
   onItemsChanged: () => void;
@@ -474,21 +475,22 @@ export function ManualContentsPanel({
   staged,
   onStagedChange,
   onRetryStaged,
-  itemCount = 0,
   onItemsChanged,
 }: ManualContentsPanelProps) {
   const queryClient = useQueryClient();
   const headingId = useId();
+  const panelRef = useRef<HTMLElement>(null);
   const source = scope.itemSource;
   const created = Boolean(collectionId);
+  const focusAfterCreate = useRef(!created);
   const [page, setPage] = useState({ collectionId, cursor: "" });
   const cursor = page.collectionId === collectionId ? page.cursor : "";
   const items = useCollectionItems(collectionId ?? "", cursor, source, created);
   const loaded = useMemo(() => items.data?.items ?? [], [items.data]);
   const personalCapabilities = useCollectionCapabilities();
   const adminCapabilities = useAdminCollectionCapabilities(scope.kind === "server");
-  const capabilities =
-    scope.kind === "personal" ? personalCapabilities.data : adminCapabilities.data;
+  const capabilityQuery = scope.kind === "personal" ? personalCapabilities : adminCapabilities;
+  const capabilities = capabilityQuery.data;
   const orderSnapshot = useCollectionItemOrderSnapshot(
     collectionId ?? "",
     created && capabilities?.item_reorder === true,
@@ -548,7 +550,8 @@ export function ManualContentsPanel({
   );
   const existing = new Set(rows.map((row) => row.id));
 
-  const fullyLoaded = !cursor && items.data?.page?.has_more === false;
+  const fullyLoaded =
+    !cursor && !items.isLoading && !items.error && items.data?.page?.has_more === false;
   const sameOrder =
     !!orderSnapshot &&
     orderSnapshot.ordered_ids.length === loaded.length &&
@@ -556,13 +559,40 @@ export function ManualContentsPanel({
   const canReorder = created
     ? capabilities?.item_reorder === true && sameOrder && !orderSnapshot?.has_more && fullyLoaded
     : staged.length > 1;
-  const nextPosition =
-    fullyLoaded && loaded.length > 0
-      ? Math.max(...loaded.map((item) => item.position)) + 1
-      : Math.max(itemCount ?? 0, loaded.length);
+  const addProblem = !created
+    ? null
+    : !capabilityQuery.isSuccess
+      ? capabilityQuery.isPending
+        ? "Checking whether titles can be added…"
+        : "Couldn't check whether titles can be added. Try loading again."
+      : capabilities?.item_append === true || fullyLoaded
+        ? null
+        : items.isLoading
+          ? "Loading titles before adding more…"
+          : items.error
+            ? "Load the titles again before adding more."
+            : "This server can't safely add titles while only part of the collection is loaded. You can still remove titles and edit the collection.";
+  const nextPosition = Math.max(0, ...loaded.map((item) => item.position + 1));
+  useEffect(() => {
+    if (!created || addProblem || !focusAfterCreate.current) return;
+    focusAfterCreate.current = false;
+    // The editor's Create handoff can run while the title search is disabled.
+    if (document.activeElement === document.body) {
+      panelRef.current?.querySelector<HTMLInputElement>("[data-title-search]")?.focus();
+    }
+  }, [addProblem, created]);
   // The position after the last add sent: the server stores what it's given,
   // so an add picked before the list refreshes goes after the one before it.
-  const claimed = useRef(0);
+  const claimed = useRef({ collectionId, position: 0 });
+
+  function claimAddPosition(count = 1): number | "append" | undefined {
+    if (addProblem) return undefined;
+    if (capabilities?.item_append === true) return "append";
+    const previous = claimed.current.collectionId === collectionId ? claimed.current.position : 0;
+    const position = Math.max(nextPosition, previous);
+    claimed.current = { collectionId, position: position + count };
+    return position;
+  }
 
   async function afterWrite() {
     await scope.invalidate(queryClient, collectionId);
@@ -577,16 +607,11 @@ export function ManualContentsPanel({
       if (!staged.includes(item.content_id)) onStagedChange([...staged, item.content_id]);
       return;
     }
+    const position = claimAddPosition();
+    if (position === undefined) return;
     setSaved("saving");
-    const position = Math.max(nextPosition, claimed.current);
-    claimed.current = position + 1;
     try {
-      await putCollectionItem(
-        scope,
-        collectionId,
-        item.content_id,
-        capabilities?.item_append === true ? "append" : position,
-      );
+      await putCollectionItem(scope, collectionId, item.content_id, position);
       await afterWrite();
     } catch (error) {
       setSaved("idle");
@@ -697,6 +722,7 @@ export function ManualContentsPanel({
 
   return (
     <section
+      ref={panelRef}
       aria-labelledby={headingId}
       className="surface-panel grid content-start gap-4 rounded-[22px] p-5 sm:p-6"
     >
@@ -739,7 +765,26 @@ export function ManualContentsPanel({
         libraries={searchLibraries}
         existing={existing}
         onAdd={(item) => void add(item)}
+        disabled={Boolean(addProblem)}
       />
+
+      {addProblem ? (
+        <div
+          role={capabilityQuery.isPending ? "status" : "alert"}
+          className="text-muted-foreground grid justify-items-start gap-2 text-[13px]"
+        >
+          <p>{addProblem}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={capabilityQuery.isFetching}
+            onClick={() => void capabilityQuery.refetch()}
+          >
+            Try loading again
+          </Button>
+        </div>
+      ) : null}
 
       {problem ? (
         <p role="alert" className="text-destructive text-[13px]">
@@ -759,9 +804,11 @@ export function ManualContentsPanel({
               size="sm"
               variant="outline"
               className="h-8"
-              onClick={() =>
-                onRetryStaged(capabilities?.item_append === true ? "append" : nextPosition)
-              }
+              disabled={Boolean(addProblem)}
+              onClick={() => {
+                const position = claimAddPosition(staged.length);
+                if (position !== undefined) onRetryStaged(position);
+              }}
             >
               Try again
             </Button>
