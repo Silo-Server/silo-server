@@ -10,6 +10,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/realtimeadmission"
 )
 
+const realtimeRetryAfterHeader = "Retry-After"
+
 // RealtimeWorkAdmission projects the startup enforcement status into the native
 // contract. Store implementation types do not own published API schemas.
 type RealtimeWorkAdmission struct {
@@ -68,7 +70,7 @@ func realtimeWorkStatus(service any) *RealtimeWorkAdmission {
 func addRealtimeWorkResponses(reg *Registry, responses map[string]*huma.Response) {
 	for _, status := range []string{"429", "503"} {
 		responses[status].Headers = map[string]*huma.Param{
-			"Retry-After": {Schema: &huma.Schema{Type: huma.TypeString}, Description: "Minimum retry delay in seconds."},
+			realtimeRetryAfterHeader: {Schema: &huma.Schema{Type: huma.TypeString}, Description: "Minimum retry delay in seconds."},
 		}
 		responses[status].Content[mediaTypeJSON] = &huma.MediaType{Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[RealtimeWorkRefusal](), true, "")}
 	}
