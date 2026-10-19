@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func accountRequest(account int, tokenType, ip string) *http.Request {
@@ -108,6 +110,9 @@ func TestAccountAllowanceSharesCredentialsAndSeparatesHouseholds(t *testing.T) {
 		claims := apimw.GetClaims(r.Context())
 		claims.SessionID = fmt.Sprintf("session-%d", i)
 		claims.ProfileID = fmt.Sprintf("profile-%d", i)
+		if i == 0 {
+			claims.SessionPurpose = models.SessionPurposeRemotePlayback
+		}
 		r.Header.Set("X-Device-Id", fmt.Sprintf("device-%d", i))
 		if i%2 != 0 {
 			claims.TokenType, claims.APIKeyID = auth.TokenTypeAPIKey, int64(i+1)
@@ -136,5 +141,54 @@ func TestAccountAdapterDoesNotGrantNativeAuthority(t *testing.T) {
 	ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 43})
 	if accountFromContext(ctx) != 43 {
 		t.Fatal("native identity must take precedence")
+	}
+}
+
+type accountKeyStore struct{ owner int }
+
+func (s *accountKeyStore) GetByKey(_ context.Context, token string) (*models.APIKey, error) {
+	if token != "sa_test" {
+		return nil, auth.ErrAPIKeyNotFound
+	}
+	return &models.APIKey{ID: 7, UserID: s.owner}, nil
+}
+func (*accountKeyStore) UpdateLastUsed(context.Context, int64) error { return nil }
+
+type accountOwnerStore struct{ enabled bool }
+
+func (s *accountOwnerStore) GetByID(_ context.Context, id int) (*models.User, error) {
+	return &models.User{ID: id, Role: models.RoleUser, Enabled: s.enabled}, nil
+}
+
+func TestAccountLimiterUsesCurrentNativeAPIKeyOwner(t *testing.T) {
+	keys, owners := &accountKeyStore{owner: 42}, &accountOwnerStore{enabled: true}
+	authn := apimw.NewAuthMiddleware(nil, nil, keys, owners)
+	limiter := &recordingLimiter{}
+	mw := NewMiddleware(limiter, limiter, nil, true)
+	mw.cfg = DefaultConfig()
+	h := authn.RequireAuth(mw.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })))
+	send := func(token string) int {
+		r := httptest.NewRequest(http.MethodGet, "/api/v2/account/me", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec.Code
+	}
+	for _, owner := range []int{42, 43} {
+		keys.owner = owner
+		limiter.keys = nil
+		if code := send("sa_test"); code != 204 {
+			t.Fatal(code)
+		}
+		if want := []string{"key:7", fmt.Sprintf("account:%d", owner), "global"}; !slices.Equal(limiter.keys, want) {
+			t.Fatalf("calls = %v, want %v", limiter.keys, want)
+		}
+	}
+	owners.enabled = false
+	for _, token := range []string{"sa_test", "sa_unknown"} {
+		limiter.keys = nil
+		if code := send(token); code != 401 || len(limiter.keys) != 0 {
+			t.Fatalf("invalid/disabled key: status=%d, calls=%v", code, limiter.keys)
+		}
 	}
 }
