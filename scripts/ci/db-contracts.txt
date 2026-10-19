@@ -402,3 +402,7 @@
 # values fails the run without allocating it.
 ./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+
+# Count availability preserves v2 editors and known-ID v1 repair/delete.
+./internal/api/handlers TestCollectionCountAvailabilityRecoveryDB
+./internal/apiv2 TestCollectionCountUnavailableRecoveryDB

@@ -50,6 +50,51 @@ Collections tab. It never changes what a viewer can open elsewhere.
 Smart rules on watch state, favorites and the watchlist, and display filters, are evaluated for
 the viewer. A shared collection never reveals its creator's activity.
 
+## Count availability and query admission
+
+`getCollectionCapabilities` reports `count_availability: true`. Personal collection
+responses, personal collections returned by `listLibraryUserCollections`, and collection
+cards from `getLibraryCollections` carry `item_count_status`:
+
+- `available`: `item_count` is usable, including a genuine zero.
+- `unavailable`: the count failed or exceeded its construction or execution budget.
+  Ignore `item_count`; its numeric placeholder does not describe membership.
+
+Clients must also ignore counts with an unknown status. A missing status from an older
+server keeps that server's existing count behavior. Count availability does not gate
+navigation, item loading, editing or deletion. Keep unavailable collections in lists,
+show **Count unavailable**, and put them after available counts in a most-items sort.
+Retrying the read can recover a transient failure. Repair an oversized legacy definition
+through `updateCollection`, or delete the collection. Count status participates in the
+editor's strong `ETag`, including a transition between unavailable and available zero.
+
+Structural admission runs before normalization and SQL construction. A source definition
+and its display filter or browse overlay share one effective-definition budget: 16 groups,
+128 rules, 256 library IDs before deduplication, and 65,536 aggregate encoded value bytes.
+Discarded display rules and empty groups still count. Oversized new or changed definitions
+fail validation; metadata-only edits of legacy definitions remain usable in v2.
+
+One list request shares a ledger across all owners: at most 128 distinct effective count
+definitions, 16,384 rules and four seconds, including construction and execution. Batches
+contain at most 32 definitions, 262,144 SQL bytes and 8,192 arguments. Two fixed workers
+execute the request; shared admission allows at most two active count statements per
+account and four per server process, lowered for smaller connection pools. These limits
+are local to the serving process, not coordinated across cluster nodes. Exhaustion fails
+admission without an unbounded wait queue. A failed batch is not retried individually.
+Each count statement runs in a read-only transaction with a server statement deadline;
+cancellation retains its admission lease through connection cleanup.
+
+These are starting defaults, not measured production capacity limits. They limit query
+work, never saved collection count or membership. A smart query's existing ordering and
+item-limit semantics still apply. Background collage refresh keeps its separate bounds.
+
+The frozen v1 bridge cannot express unavailable counts. Count-budget exhaustion returns
+`503 collection_count_unavailable`; ordinary count failures return their normal error.
+Creation and update preflight the proposed count before writing and reuse it in their
+response. Known-ID updates that replace an oversized definition and deletion remain
+available, even when listing fails. Repeating an oversized request will not repair it;
+v2 provides discovery and editing while its count is unavailable.
+
 ## Posters
 
 A collection's poster is an image its creator uploaded (`uploadCollectionPoster`), linked

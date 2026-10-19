@@ -248,6 +248,9 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 		collections = []usercollections.ServerVisibleCollection{}
 	}
 	collections = h.withVisibleItemCounts(ctx, userID, profileID, collections)
+	if err := v1LibraryCollectionCountError(ctx, collections); err != nil {
+		return nil, err
+	}
 	for i := range collections {
 		collections[i].PosterURL = h.presignGPURLCtx(ctx, collections[i].PosterPath)
 	}
@@ -275,8 +278,11 @@ func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, us
 		if reads.unavailable[c.ID] {
 			continue
 		}
+		c.ItemCountStatus = CollectionCountAvailable
 		if n, ok := reads.counts[c.ID]; ok {
 			c.ItemCount = n
+		} else {
+			c.ItemCount, c.ItemCountStatus, c.CountError = 0, CollectionCountUnavailable, reads.countError
 		}
 		if collage, ok := reads.posters[c.ID]; ok {
 			c.PosterPath, c.PosterThumbhash, c.PosterIsCollage = collage.Path, collage.Thumbhash, true
@@ -327,6 +333,9 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 					return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user collections")
 				}
 				userCollections = h.withVisibleItemCounts(ctx, userID, profileID, loadedUserCollections)
+				if err := v1LibraryCollectionCountError(ctx, userCollections); err != nil {
+					return LibraryCollectionTabView{}, err
+				}
 				userCollectionsLoaded = true
 			}
 			sorted := applyUserCollectionSort(userCollections, g.DefaultSortMode)
@@ -339,6 +348,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 					PosterURL:        posterURL,
 					PosterThumbhash:  sorted[i].PosterThumbhash,
 					ItemCount:        sorted[i].ItemCount,
+					ItemCountStatus:  sorted[i].ItemCountStatus,
 					CreatorProfileID: &creatorProfileID,
 					PosterIsCollage:  sorted[i].PosterIsCollage,
 				})
@@ -440,4 +450,16 @@ func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, l
 // either library too.
 func collectionSpansLibrary(collection *models.LibraryCollection, libraryID int) bool {
 	return collection.LibraryID == libraryID || slices.Contains(collection.LibraryIDs, libraryID)
+}
+
+func v1LibraryCollectionCountError(ctx context.Context, collections []usercollections.ServerVisibleCollection) error {
+	if isNativeAPIV2(ctx) {
+		return nil
+	}
+	for _, c := range collections {
+		if c.ItemCountStatus == CollectionCountUnavailable {
+			return collectionCountReadError(c.CountError)
+		}
+	}
+	return nil
 }

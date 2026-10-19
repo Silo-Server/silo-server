@@ -117,9 +117,11 @@ type PersonalCollectionView struct {
 	LastSyncMessage            string          `json:"last_sync_message,omitempty"`
 	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty"`
 	ItemCount                  int             `json:"item_count"`
-	IncludeInServerCollections bool            `json:"include_in_server_collections"`
-	PosterURL                  string          `json:"poster_url,omitempty"`
-	PosterThumbhash            string          `json:"poster_thumbhash,omitempty"`
+	ItemCountStatus            string          `json:"-"`
+	itemCountError             error
+	IncludeInServerCollections bool   `json:"include_in_server_collections"`
+	PosterURL                  string `json:"poster_url,omitempty"`
+	PosterThumbhash            string `json:"poster_thumbhash,omitempty"`
 	// PosterIsCollage reports that PosterURL is the collection's collage for
 	// the reading profile rather than an uploaded or imported poster. Only
 	// /api/v2 reads show collages and carry it.
@@ -150,7 +152,8 @@ type CollectionCapabilitiesView struct {
 	// PosterCollages reports that /api/v2 personal collection reads show a
 	// collage when a collection has no uploaded or imported poster. The
 	// frozen /api/v1 body does not carry it.
-	PosterCollages bool `json:"-"`
+	PosterCollages    bool `json:"-"`
+	CountAvailability bool `json:"-"`
 }
 
 type CollectionDisplayFilterPresetsView struct {
@@ -496,6 +499,7 @@ func toCollectionResponse(c userstore.Collection) PersonalCollectionView {
 		LastSyncStatus:             c.LastSyncStatus,
 		LastSyncMessage:            c.LastSyncMessage,
 		ItemCount:                  c.ItemCount,
+		ItemCountStatus:            CollectionCountAvailable,
 		IncludeInServerCollections: c.IncludeInServerCollections,
 		PosterURL:                  c.PosterURL,
 		PosterThumbhash:            c.PosterThumbhash,
@@ -528,11 +532,17 @@ func defaultJSON(raw []byte) json.RawMessage {
 }
 
 func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
+	if err := catalog.ValidatePersonalCollectionQueryBudget(string(raw), ""); err != nil {
+		return nil, err
+	}
 	var def catalog.QueryDefinition
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &def); err != nil {
 			return nil, err
 		}
+	}
+	if err := catalog.ValidateQueryStructure(def); err != nil {
+		return nil, err
 	}
 	def = def.Normalize()
 	if err := def.ValidateWithOptions(allowPersonalizedSorts, allowPersonalizedFields); err != nil {

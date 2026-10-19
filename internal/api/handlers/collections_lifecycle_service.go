@@ -67,6 +67,18 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		Description:                req.Description,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	}
+	if len(req.QueryDefinition) > 0 || req.DisplayQueryDefinition != nil {
+		source, display := existing.QueryDefinition, existing.DisplayQueryDefinition
+		if len(req.QueryDefinition) > 0 {
+			source = string(req.QueryDefinition)
+		}
+		if req.DisplayQueryDefinition != nil {
+			display = string(req.DisplayQueryDefinition)
+		}
+		if err := catalog.ValidatePersonalCollectionQueryBudget(source, display); err != nil {
+			return none, fieldError("query_definition", err.Error())
+		}
+	}
 	if req.DisplayQueryDefinition != nil {
 		displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
 		if err != nil {
@@ -161,6 +173,17 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 	}
 
+	proposed := *existing
+	if input.QueryDefinition != nil {
+		proposed.QueryDefinition = *input.QueryDefinition
+	}
+	if input.DisplayQueryDefinition != nil {
+		proposed.DisplayQueryDefinition = *input.DisplayQueryDefinition
+	}
+	ctx, err = h.preflightV1CollectionCount(ctx, store, userID, profileID, proposed)
+	if err != nil {
+		return none, err
+	}
 	if err := store.UpdateCollection(ctx, input); err != nil {
 		if errors.Is(err, userstore.ErrCollectionRevisionMismatch) {
 			return none, err

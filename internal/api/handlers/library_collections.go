@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -703,6 +704,7 @@ type libraryTabCollection struct {
 	PosterURL        string  `json:"poster_url"`
 	PosterThumbhash  string  `json:"poster_thumbhash,omitempty"`
 	ItemCount        int     `json:"item_count"`
+	ItemCountStatus  string  `json:"-"`
 	Featured         bool    `json:"featured,omitempty"`
 	CreatorProfileID *string `json:"creator_profile_id,omitempty"`
 	// PosterIsCollage reports that PosterURL is the viewer's collage. The
@@ -839,7 +841,16 @@ func applyUserCollectionSort(collections []usercollections.ServerVisibleCollecti
 	case models.GroupSortRecent:
 		sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt > out[j].UpdatedAt })
 	case models.GroupSortMostItems:
-		sort.Slice(out, func(i, j int) bool { return out[i].ItemCount > out[j].ItemCount })
+		slices.SortStableFunc(out, func(a, b usercollections.ServerVisibleCollection) int {
+			aUnavailable, bUnavailable := a.ItemCountStatus != "" && a.ItemCountStatus != CollectionCountAvailable, b.ItemCountStatus != "" && b.ItemCountStatus != CollectionCountAvailable
+			if aUnavailable != bUnavailable {
+				if aUnavailable {
+					return 1
+				}
+				return -1
+			}
+			return cmp.Compare(b.ItemCount, a.ItemCount)
+		})
 	}
 	return out
 }
@@ -2588,11 +2599,17 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, 
 		return nil, false, fmt.Errorf("query executor is not configured")
 	}
 
+	if err := catalog.ValidatePersonalCollectionQueryBudget(string(collection.QueryDefinition), ""); err != nil {
+		return nil, false, smartCollectionQueryError{err}
+	}
 	var def catalog.QueryDefinition
 	if len(collection.QueryDefinition) > 0 {
 		if err := json.Unmarshal(collection.QueryDefinition, &def); err != nil {
 			return nil, false, smartCollectionQueryError{fmt.Errorf("parsing smart collection query definition: %w", err)}
 		}
+	}
+	if err := catalog.ValidateQueryStructure(def, catalog.QueryDefinition{LibraryIDs: collection.LibraryIDs}); err != nil {
+		return nil, false, smartCollectionQueryError{err}
 	}
 	def = def.Normalize()
 	if err := def.ValidateWithOptions(false, false); err != nil {

@@ -114,3 +114,13 @@ func TestCollectionCountUnavailableRecoveryDB(t *testing.T) {
 	}
 	t.Log("legacy list/editor retain collection with unavailable count; metadata edit, definition repair, delete and over-budget creation refusal verified")
 }
+
+func TestPersonalCollectionEditorTagCountAvailability(t *testing.T) {
+	view := handlers.PersonalCollectionEditorView{Revision: 7, Collection: handlers.PersonalCollectionView{ItemCountStatus: handlers.CollectionCountAvailable}}
+	available := personalCollectionEditorTag(t.Context(), "synthetic", view)
+	view.Collection.ItemCountStatus = handlers.CollectionCountUnavailable
+	unavailable := personalCollectionEditorTag(t.Context(), "synthetic", view)
+	if available == unavailable {
+		t.Fatal("available zero and unavailable count must have different strong validators")
+	}
+}

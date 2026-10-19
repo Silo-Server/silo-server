@@ -56,7 +56,7 @@ func collectionEditorTag(ctx context.Context, kind, id string, revision int64) E
 // catalog contents or watch state change without a collection edit. The
 // collection revision still fences stored edits in the mutation transaction.
 func personalCollectionEditorTag(ctx context.Context, id string, view handlers.PersonalCollectionEditorView) EntityTag {
-	return collectionEditorTag(ctx, "collection:count:"+strconv.Itoa(view.Collection.ItemCount), id, view.Revision)
+	return collectionEditorTag(ctx, "collection:count:"+strconv.Itoa(view.Collection.ItemCount)+":"+countStatusOf(view.Collection.ItemCountStatus), id, view.Revision)
 }
 
 func collectionGuard(ctx context.Context, headers CollectionPreconditions, tag EntityTag, revision int64) (context.Context, *Problem) {
