@@ -558,7 +558,7 @@ output supports HDR10, and the plan carries the `hdr_range_assumed_hdr10`
 degradation warning. Refusing to play those outright would be worse than an
 assumption the client is told about.
 
-An `hdr10_plus` source is HDR10 plus dynamic metadata that HDR10-only displays
+An `hdr10_plus` source is HDR10 with dynamic metadata that HDR10-only displays
 ignore, so an output that claims HDR10 but not HDR10+ takes it as HDR10, within
 its HDR10 ceilings, and the plan claims HDR10. The jellycompat device profile
 checks follow Jellyfin 10.11: each HDR10+ range type (`HDR10Plus`,
