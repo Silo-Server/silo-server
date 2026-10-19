@@ -6,6 +6,22 @@ export function eventSocketRetryAfterMs(error: unknown): number {
   return seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds * 1_000 : 0;
 }
 
+/** Keep long readable floors from overflowing the browser's signed 32-bit timer. */
+export function scheduleEventSocketReconnect(callback: () => void, delayMs: number): () => void {
+  const deadline = performance.now() + delayMs;
+  let timer: number;
+  const check = () => {
+    const remaining = deadline - performance.now();
+    if (remaining > 0) {
+      timer = window.setTimeout(check, Math.min(remaining, 2_147_483_647));
+    } else {
+      callback();
+    }
+  };
+  timer = window.setTimeout(check, Math.min(delayMs, 2_147_483_647));
+  return () => window.clearTimeout(timer);
+}
+
 /** Generic events only. Known work refusals and input-shield recovery take precedence. */
 export function createEventSocketRecovery(random = Math.random, now = () => performance.now()) {
   let failures = 0;
@@ -27,7 +43,9 @@ export function createEventSocketRecovery(random = Math.random, now = () => perf
         failures = Math.min(failures + 1, 3);
       }
       acceptedAt = null;
-      if (Number.isFinite(retryAfterMs)) floor = Math.max(floor, retryAfterMs);
+      // A finite seconds header can overflow milliseconds; keep that floor deferred.
+      if (retryAfterMs > 0) floor = Math.max(floor, retryAfterMs);
+      if (!Number.isFinite(floor)) return floor;
       return floor + Math.floor(floor * 0.5 * Math.min(1, Math.max(0, random())));
     },
   };

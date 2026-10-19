@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { V2ProblemError } from "@/api/v2/request";
-import { createEventSocketRecovery, eventSocketRetryAfterMs } from "./eventSocketRecovery";
+import {
+  createEventSocketRecovery,
+  eventSocketRetryAfterMs,
+  scheduleEventSocketReconnect,
+} from "./eventSocketRecovery";
 
 describe("generic event socket recovery", () => {
   it.each([
@@ -102,5 +106,34 @@ describe("ticket mint retry floor", () => {
 
   it("has no readable floor for an opaque error", () => {
     expect(eventSocketRetryAfterMs(new TypeError("fixture failure"))).toBe(0);
+  });
+
+  it.each([2_147_484, Number.MAX_VALUE])("retains a large readable floor: %s", (seconds) => {
+    vi.useFakeTimers();
+    try {
+      const error = new V2ProblemError(
+        "mintEventsSocketTicket",
+        { type: "about:blank", title: "Unavailable", status: 503 },
+        seconds,
+      );
+      const callback = vi.fn();
+      const delay = createEventSocketRecovery(() => 0).reconnect(eventSocketRetryAfterMs(error));
+      const cancel = scheduleEventSocketReconnect(callback, delay);
+      expect(vi.getTimerCount()).toBe(1);
+      vi.advanceTimersByTime(2_147_483_647);
+      expect(callback).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(1);
+      if (Number.isFinite(delay)) {
+        vi.advanceTimersByTime(delay - 2_147_483_647 - 1);
+        expect(callback).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(callback).toHaveBeenCalledTimes(1);
+      }
+      cancel();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 });

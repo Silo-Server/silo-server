@@ -252,6 +252,20 @@ describe("generic events provider recovery", () => {
     }
   });
 
+  it("honors a readable floor longer than one browser timer without an immediate retry", async () => {
+    const seconds = 2_147_484;
+    fetchFixture.mockResolvedValueOnce(problemResponse(String(seconds)));
+    const view = mountProvider();
+    await act(async () => {});
+    await advance(1);
+    expect(fetchFixture).toHaveBeenCalledTimes(1);
+    await advance(2_147_483_646);
+    expect(fetchFixture).toHaveBeenCalledTimes(1);
+    view.unmount();
+    await advance(353);
+    expect(fetchFixture).toHaveBeenCalledTimes(1);
+  });
+
   it("does not count open/hello time, empty ACKs, snapshots or events as healthy acceptance", async () => {
     mountProvider();
     await act(async () => {});

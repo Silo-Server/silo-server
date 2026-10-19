@@ -44,7 +44,11 @@ import {
 } from "@/components/realtimeCatalogInvalidation";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { createRealtimeQueryRefreshScheduler } from "@/components/realtimeQueryRefresh";
-import { createEventSocketRecovery, eventSocketRetryAfterMs } from "@/lib/eventSocketRecovery";
+import {
+  createEventSocketRecovery,
+  eventSocketRetryAfterMs,
+  scheduleEventSocketReconnect,
+} from "@/lib/eventSocketRecovery";
 import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
 import {
   adminDownloadPreparationsKey,
@@ -494,7 +498,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     () => createCatalogInvalidationScheduler(queryClient),
     [queryClient],
   );
-  const reconnectTimerRef = useRef<number | undefined>(undefined);
+  const reconnectTimerRef = useRef<(() => void) | undefined>(undefined);
   const profileRebindAttemptsRef = useRef(0);
   const nextReconnectDelayRef = useRef<number | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -962,7 +966,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
     const clearReconnect = () => {
       if (reconnectTimerRef.current !== undefined) {
-        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current();
         reconnectTimerRef.current = undefined;
       }
     };
@@ -977,7 +981,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       const delay =
         profileDelay === 0 ? 0 : recovery.reconnect(Math.max(retryAfterMs, profileDelay ?? 0));
       nextReconnectDelayRef.current = null;
-      reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = scheduleEventSocketReconnect(() => {
         reconnectTimerRef.current = undefined;
         if (closedByEffect) {
           return;
