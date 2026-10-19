@@ -814,7 +814,7 @@ func (h *ItemsHandler) writeSimilarFromGenre(w http.ResponseWriter, r *http.Requ
 }
 
 // HandleItemStub serves stub responses for unimplemented sub-item endpoints
-// like /Items/{id}/ThemeMedia, /Items/{id}/SpecialFeatures, /Items/{id}/Intros.
+// like /Items/{id}/Intros and /Videos/{id}/AdditionalParts.
 func (h *ItemsHandler) HandleItemStub(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())
 	if session == nil {

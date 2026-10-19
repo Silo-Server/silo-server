@@ -36,6 +36,7 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 		{http.MethodGet, "/Items/Filters2"},
 		{http.MethodGet, "/Items/abc/LocalTrailers"},
 		{http.MethodGet, "/Users/u1/Items/abc/LocalTrailers"},
+		{http.MethodGet, "/Videos/abc/AdditionalParts"},
 		{http.MethodGet, "/Sessions"},
 		{http.MethodPost, "/ClientLog/Document"},
 	}
@@ -78,5 +79,14 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 		t.Errorf("authed GET /Sessions = %d, want 200", rec.Code)
 	} else if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
 		t.Errorf("authed GET /Sessions body = %q, want []", got)
+	}
+	// Moonfin for Roku asks for additional parts in lowercase (#1097).
+	for _, path := range []string{"/Videos/abc/AdditionalParts", "/videos/abc/additionalparts"} {
+		rec := authed(http.MethodGet, path)
+		if rec.Code != http.StatusOK {
+			t.Errorf("authed GET %s = %d, want 200; body=%s", path, rec.Code, rec.Body.String())
+		} else if !strings.Contains(rec.Body.String(), `"Items":[]`) || !strings.Contains(rec.Body.String(), `"TotalRecordCount":0`) {
+			t.Errorf("authed GET %s body = %s, want an empty QueryResult", path, rec.Body.String())
+		}
 	}
 }

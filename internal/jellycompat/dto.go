@@ -78,15 +78,15 @@ type baseItemDTO struct {
 	OriginalLanguage         string                                 `json:"OriginalLanguage,omitempty"`
 	PremiereDate             string                                 `json:"PremiereDate,omitempty"`
 	Path                     string                                 `json:"Path,omitempty"`
-	ExternalURLs             []map[string]any                       `json:"ExternalUrls,omitempty"`
-	RemoteTrailers           []map[string]any                       `json:"RemoteTrailers,omitempty"`
-	Genres                   []string                               `json:"Genres,omitempty"`
-	GenreItems               []namePairDTO                          `json:"GenreItems,omitempty"`
-	Studios                  []namePairDTO                          `json:"Studios,omitempty"`
-	Taglines                 []string                               `json:"Taglines,omitempty"`
-	Tags                     []string                               `json:"Tags,omitempty"`
+	ExternalURLs             []map[string]any                       `json:"ExternalUrls,omitzero"`
+	RemoteTrailers           []map[string]any                       `json:"RemoteTrailers,omitzero"`
+	Genres                   []string                               `json:"Genres,omitzero"`
+	GenreItems               []namePairDTO                          `json:"GenreItems,omitzero"`
+	Studios                  []namePairDTO                          `json:"Studios,omitzero"`
+	Taglines                 []string                               `json:"Taglines,omitzero"`
+	Tags                     []string                               `json:"Tags,omitzero"`
 	ProviderIDs              map[string]string                      `json:"ProviderIds,omitempty"`
-	ProductionLocations      []string                               `json:"ProductionLocations,omitempty"`
+	ProductionLocations      []string                               `json:"ProductionLocations,omitzero"`
 	ImageTags                map[string]string                      `json:"ImageTags"`
 	PrimaryImageItemID       string                                 `json:"PrimaryImageItemId,omitempty"`
 	BackdropImageTags        jsonStringArray                        `json:"BackdropImageTags"`
@@ -98,7 +98,7 @@ type baseItemDTO struct {
 	SeasonName               string                                 `json:"SeasonName,omitempty"`
 	SeriesName               string                                 `json:"SeriesName,omitempty"`
 	SeriesPrimaryImageTag    string                                 `json:"SeriesPrimaryImageTag,omitempty"`
-	ParentBackdropImageTags  []string                               `json:"ParentBackdropImageTags,omitempty"`
+	ParentBackdropImageTags  []string                               `json:"ParentBackdropImageTags,omitzero"`
 	ParentBackdropItemID     string                                 `json:"ParentBackdropItemId,omitempty"`
 	ParentThumbImageTag      string                                 `json:"ParentThumbImageTag,omitempty"`
 	ParentThumbItemID        string                                 `json:"ParentThumbItemId,omitempty"`
@@ -111,7 +111,7 @@ type baseItemDTO struct {
 	ForcedSortName           string                                 `json:"ForcedSortName,omitempty"`
 	IndexNumber              *int                                   `json:"IndexNumber,omitempty"`
 	ParentIndexNumber        *int                                   `json:"ParentIndexNumber,omitempty"`
-	People                   []personDTO                            `json:"People,omitempty"`
+	People                   []personDTO                            `json:"People,omitzero"`
 	ChildCount               int                                    `json:"ChildCount,omitempty"`
 	RecursiveItemCount       int                                    `json:"RecursiveItemCount,omitempty"`
 	LocalTrailerCount        int                                    `json:"LocalTrailerCount,omitempty"`
@@ -120,13 +120,13 @@ type baseItemDTO struct {
 	SeriesCount              int                                    `json:"SeriesCount,omitempty"`
 	SeasonCount              int                                    `json:"SeasonCount,omitempty"`
 	EpisodeCount             int                                    `json:"EpisodeCount,omitempty"`
-	LockedFields             []string                               `json:"LockedFields,omitempty"`
+	LockedFields             []string                               `json:"LockedFields,omitzero"`
 	LockData                 bool                                   `json:"LockData,omitempty"`
-	Chapters                 []map[string]any                       `json:"Chapters,omitempty"`
+	Chapters                 []map[string]any                       `json:"Chapters,omitzero"`
 	Trickplay                map[string]map[string]trickplayInfoDTO `json:"Trickplay,omitempty"`
 	MediaSourceCount         int                                    `json:"MediaSourceCount,omitempty"`
-	MediaSources             []mediaSourceDTO                       `json:"MediaSources,omitempty"`
-	MediaStreams             []mediaStreamDTO                       `json:"MediaStreams,omitempty"`
+	MediaSources             []mediaSourceDTO                       `json:"MediaSources,omitzero"`
+	MediaStreams             []mediaStreamDTO                       `json:"MediaStreams,omitzero"`
 	Width                    int                                    `json:"Width,omitempty"`
 	Height                   int                                    `json:"Height,omitempty"`
 }
@@ -265,7 +265,7 @@ type mediaSourceDTO struct {
 	Bitrate                             int               `json:"Bitrate,omitempty"`
 	DefaultAudioStreamIndex             *int              `json:"DefaultAudioStreamIndex,omitempty"`
 	DefaultSubtitleStreamIndex          *int              `json:"DefaultSubtitleStreamIndex,omitempty"`
-	MediaStreams                        []mediaStreamDTO  `json:"MediaStreams,omitempty"`
+	MediaStreams                        []mediaStreamDTO  `json:"MediaStreams,omitzero"`
 }
 
 // MarshalJSON adds the flag labels Jellyfin sets on audio and subtitle streams
