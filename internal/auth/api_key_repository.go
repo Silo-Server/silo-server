@@ -20,7 +20,7 @@ var (
 	ErrAPIKeyNotFound = errors.New("api key not found")
 )
 
-const apiKeyColumns = `id, user_id, label, rate_tier, scopes, created_at, last_used_at`
+const apiKeyColumns = `id, user_id, label, rate_tier, scopes, created_at, last_used_at` //nolint:gosec // SQL column names, not credentials.
 
 // APIKeyRepository provides CRUD operations for the api_keys table.
 type APIKeyRepository struct {

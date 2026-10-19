@@ -41,7 +41,7 @@ type APIKeyPageKey struct {
 }
 
 // Neither bearer nor verifier is part of a management projection.
-const apiKeyMetadataColumns = `ak.id,ak.user_id,ak.label,ak.key_prefix,ak.rate_tier,COALESCE(ak.scopes,'{}'::text[]),ak.created_at,ak.revision`
+const apiKeyMetadataColumns = `ak.id,ak.user_id,ak.label,ak.key_prefix,ak.rate_tier,COALESCE(ak.scopes,'{}'::text[]),ak.created_at,ak.revision` //nolint:gosec // SQL column names, not credentials.
 
 func apiKeyMetadataFields(k *models.APIKeyMetadata) []any {
 	return []any{&k.ID, &k.UserID, &k.Label, &k.KeyPrefix, &k.RateTier, &k.Scopes, &k.CreatedAt, &k.Revision}
