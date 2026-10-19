@@ -68,7 +68,7 @@ show **Count unavailable**, and put them after available counts in a most-items 
 Retrying the read can recover a transient failure. Repair an oversized legacy definition
 through `updateCollection`, or delete the collection. Count status participates in the
 editor's strong `ETag`, including a transition between unavailable and available zero.
-Import responses report `unavailable`: their sync membership total is not a current
+Personal import responses report `unavailable`: their sync membership total is not a current
 viewer-filtered catalog count. Reload the collection to evaluate its count.
 
 Library smart collections derive structural availability from the saved definition and
