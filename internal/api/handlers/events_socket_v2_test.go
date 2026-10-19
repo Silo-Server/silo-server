@@ -26,9 +26,10 @@ type socketValidity struct{ err atomic.Pointer[error] }
 
 func (v *socketValidity) fail(err error) { v.err.Store(&err) }
 
-func socketTestHandler() (*EventsSocketV2, *socketValidity) {
+func socketTestHandler(t *testing.T) (*EventsSocketV2, *socketValidity) {
 	validity := new(socketValidity)
 	h := &EventsSocketV2{Events: NewEventsHandler(evt.NewHub("socket-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: evt.NewSocketTicketStore(nil, evt.SocketAudienceEvents), checkInterval: time.Millisecond * 10}
+	h.Events.socketAdmission = testSocketAdmission(t)
 	h.Validate = func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		if err := validity.err.Load(); err != nil {
 			return ctx, nil, *err
@@ -46,7 +47,7 @@ func socketTestTicket(t *testing.T, h *EventsSocketV2, expires time.Time) string
 	return ticket
 }
 func TestEventsSocketV2ProofOriginProtocolAndReplay(t *testing.T) {
-	h, _ := socketTestHandler()
+	h, _ := socketTestHandler(t)
 	server := httptest.NewServer(h)
 	defer server.Close()
 	h.PublicOrigin = server.URL
@@ -89,7 +90,7 @@ func TestEventsSocketV2ProofOriginProtocolAndReplay(t *testing.T) {
 func TestEventsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
 	for _, expiry := range []bool{false, true} {
 		t.Run(map[bool]string{false: "revoked", true: "expired"}[expiry], func(t *testing.T) {
-			h, validity := socketTestHandler()
+			h, validity := socketTestHandler(t)
 			server := httptest.NewServer(h)
 			defer server.Close()
 			until := time.Now().Add(time.Minute)
@@ -160,7 +161,7 @@ func (s *socketViewerFixture) Resolve(context.Context, access.ResolveInput) (acc
 }
 
 func TestEventsSocketV2ValidatesCurrentSessionAccountAndProfile(t *testing.T) {
-	events, _ := socketTestHandler()
+	events, _ := socketTestHandler(t)
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
 	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "secondary", ProfileVerified: true, PolicyRevision: 1}}
@@ -262,7 +263,7 @@ func TestEventsSocketV2SignalsAccessChangeBeforeClosing(t *testing.T) {
 		"session revoked": {err: evt.ErrSocketTicket},
 	} {
 		t.Run(name, func(t *testing.T) {
-			h, validity := socketTestHandler()
+			h, validity := socketTestHandler(t)
 			server := httptest.NewServer(h)
 			defer server.Close()
 			ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))
@@ -296,7 +297,7 @@ func TestEventsSocketV2SignalsAccessChangeBeforeClosing(t *testing.T) {
 func TestEventsSocketV2MalformedHandshakeDoesNotConsumeProof(t *testing.T) {
 	for _, kind := range []string{"protocol", "key", "version", "body", "query-token"} {
 		t.Run(kind, func(t *testing.T) {
-			h, _ := socketTestHandler()
+			h, _ := socketTestHandler(t)
 			ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))
 			req := httptest.NewRequest(http.MethodGet, "http://example.test/events/ws", nil)
 			req.Header.Set("Connection", "Upgrade")
@@ -332,7 +333,7 @@ func TestEventsSocketV2MalformedHandshakeDoesNotConsumeProof(t *testing.T) {
 // account role "user", even on an admin account, and a ticket naming another
 // profile is refused.
 func TestSocketValidatorBindsRemotePlayback(t *testing.T) {
-	events, _ := socketTestHandler()
+	events, _ := socketTestHandler(t)
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
 	sessions := &socketSessionFixture{valid: true, account: users, remoteProfile: "kid"}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "kid", ProfileVerified: true, PolicyRevision: 1}}
@@ -378,7 +379,7 @@ func TestWatchTogetherSocketRefusesRemotePlayback(t *testing.T) {
 // a ticket minted after the household gains a PIN or a limit carries the user
 // role, and one minted before it stops validating.
 func TestSocketValidatorProfileLessAdminFollowsHouseholdRequirement(t *testing.T) {
-	events, _ := socketTestHandler()
+	events, _ := socketTestHandler(t)
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
 	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileVerified: true, PolicyRevision: 1}}
@@ -437,7 +438,7 @@ func TestSocketValidatorProfileLessAdminFollowsHouseholdRequirement(t *testing.T
 // The acting-admin decision sees the minting request's device, as the HTTP
 // admin gate does, so a policy keyed on the device answers the same on both.
 func TestSocketValidatorPassesDeviceToActingAdmin(t *testing.T) {
-	events, _ := socketTestHandler()
+	events, _ := socketTestHandler(t)
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
 	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "parent", ProfileVerified: true, PolicyRevision: 1}}
@@ -495,7 +496,7 @@ type monitorKeySocket struct {
 }
 
 func newMonitorKeySocket(t *testing.T) *monitorKeySocket {
-	events, _ := socketTestHandler()
+	events, _ := socketTestHandler(t)
 	f := &monitorKeySocket{users: &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}, keys: new(socketKeyFixture), acting: new(atomic.Bool)}
 	f.sessions = &socketSessionFixture{valid: true, account: f.users}
 	f.viewer = &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileVerified: true, PolicyRevision: 1}}
@@ -652,7 +653,7 @@ func TestV2OnlyEventsSkipTheBridgeSocket(t *testing.T) {
 	})
 
 	t.Run("v2", func(t *testing.T) {
-		h, _ := socketTestHandler()
+		h, _ := socketTestHandler(t)
 		server := httptest.NewServer(h)
 		defer server.Close()
 		ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))

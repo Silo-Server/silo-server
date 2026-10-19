@@ -129,7 +129,7 @@ func TestSocketKeepAliveAndRevocation(t *testing.T) {
 
 func TestSocketRejectsMissingToken(t *testing.T) {
 	rec := httptest.NewRecorder()
-	NewSocketHandler(NewSessionStore(time.Hour, nil), nil)(rec, httptest.NewRequest("GET", "/socket", nil))
+	NewSocketHandler(NewSessionStore(time.Hour, nil), nil, socketTestLifecycle(t))(rec, httptest.NewRequest("GET", "/socket", nil))
 	if rec.Code != 401 {
 		t.Fatal(rec.Code)
 	}

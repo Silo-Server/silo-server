@@ -106,7 +106,7 @@ func TestEventsSocketV2PersonalChannelIsolation(t *testing.T) {
 		{"unbound admin", models.RoleAdmin, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _ := socketTestHandler()
+			h, _ := socketTestHandler(t)
 			hub := h.Events.hub
 			read := openPersonalEventSocket(t, h, tc.role, tc.profile)
 
