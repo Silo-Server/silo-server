@@ -75,12 +75,27 @@ const (
 	// of the WebVTT conversion, which cannot carry every SRT feature. Embedded
 	// SRT tracks keep their existing delivery. It exists only on /api/v2 (see
 	// NativeServerFeaturesV3).
-	FeatureMarkerThumbnailsV3  = "marker_thumbnails_v1"
-	FeatureSubripSidecarV3     = "subrip_sidecar_v1"
-	PlanRecipeVersionV3        = "v3.4"
-	ClientDV7ToDV81V3          = "client_dv7_to_dv81"
-	ClientDV7ToHDR10V3         = "client_dv7_to_hdr10"
-	ClientDVTransformVersionV3 = "1"
+	FeatureMarkerThumbnailsV3 = "marker_thumbnails_v1"
+	FeatureSubripSidecarV3    = "subrip_sidecar_v1"
+	// FeatureHLSSubtitleRenditionsV3 is the client's statement that it plays
+	// a subtitle carried as a WebVTT SUBTITLES rendition of the plan's HLS
+	// stream (subtitle.hls_rendition) instead of a sidecar artifact. Only a
+	// server_transcode_hls plan uses it, for an embedded text track. It
+	// exists only on /api/v2 (see NativeServerFeaturesV3).
+	FeatureHLSSubtitleRenditionsV3 = "hls_subtitle_renditions_v1"
+	// FailureSubtitleHLSRenditionFailedV3 is the failure_recovery
+	// classification a client sends when the plan's subtitle rendition never
+	// became selectable in its player. The server stops offering renditions
+	// for the rest of the attempt, as subtitle_embedded_failed does for
+	// native embedded selection.
+	FailureSubtitleHLSRenditionFailedV3 = "subtitle_hls_rendition_failed"
+	// FailureSubtitleEmbeddedFailedV3 is the failure_recovery classification
+	// for a native embedded selection the player could not mount.
+	FailureSubtitleEmbeddedFailedV3 = "subtitle_embedded_failed"
+	PlanRecipeVersionV3             = "v3.4"
+	ClientDV7ToDV81V3               = "client_dv7_to_dv81"
+	ClientDV7ToHDR10V3              = "client_dv7_to_hdr10"
+	ClientDVTransformVersionV3      = "1"
 	// ClaimClientManagedDynamicRangeV3 is scoped to the original_http
 	// delivery. A client that advertises it accepts responsibility for mapping
 	// any source dynamic range it declares decodable onto the active output;
@@ -123,6 +138,9 @@ const (
 	// request names, decodes on CUDA, and repairs missing and repeated cells.
 	// API servers that send the signal only use nodes that advertise it.
 	TransportFeatureTrickplayExtractV2 = "trickplay_extract_v2"
+	// A transcode node that emits and serves an HLS WebVTT subtitle rendition
+	// (TranscodeOpts.SubtitleRendition).
+	TransportFeatureHLSSubtitleRenditionV1 = "hls_subtitle_rendition_v1"
 )
 
 // Degradation warning codes reported by playback plans.
@@ -191,7 +209,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3)
+	return append(ServerFeaturesV3(), FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3)
 }
 
 // WithoutFeatureV3 returns features with every spelling of feature removed.
@@ -897,10 +915,25 @@ type EmbeddedSubtitleV3 struct {
 	ContainerTrackID string `json:"container_track_id,omitempty"`
 }
 
+// HLSSubtitleRenditionV3 places the selected subtitle inside the plan's HLS
+// presentation: the stream URL is a multivariant playlist whose SUBTITLES
+// group GroupID holds the track as one WebVTT rendition named Name, segmented
+// on the video's own timeline.
+type HLSSubtitleRenditionV3 struct {
+	GroupID  string `json:"group_id"`
+	Name     string `json:"name"`
+	Format   string `json:"format"`
+	MIMEType string `json:"mime_type"`
+}
+
 type SubtitleDecisionV3 struct {
 	Embedded *EmbeddedSubtitleV3 `json:"embedded,omitempty"`
-	Mode     SubtitleModeV3      `json:"mode"`
-	TrackID  string              `json:"track_id,omitempty"`
+	// HLSRendition is the selected track carried in the HLS stream itself,
+	// mutually exclusive with Embedded and Artifact. It is published only to
+	// clients that negotiated hls_subtitle_renditions_v1.
+	HLSRendition *HLSSubtitleRenditionV3 `json:"hls_rendition,omitempty"`
+	Mode         SubtitleModeV3          `json:"mode"`
+	TrackID      string                  `json:"track_id,omitempty"`
 	// Artifact is the selected sidecar, mutually exclusive with Embedded. It exists only under
 	// SubtitleRenderV3 and SubtitleConvertV3; SubtitleOffV3 and
 	// SubtitleBurnInV3 have no client-fetchable artifact and must publish none,
@@ -934,11 +967,15 @@ type DegradationWarningV3 struct {
 	Message string `json:"message"`
 }
 
-// QualityOriginalV3 is the quality preference that pins the source ladder
-// rung: the plan must preserve the source's own height and bitrate rather than
-// pick a transcode rung. Distinct from OriginalLanguageSentinel, which selects
-// a track's original language.
+// QualityOriginalV3 labels the source entry of the frozen v1 quality menu.
+// As a quality preference it is a legacy alias of "auto", which already
+// preserves the source whenever the device can play it. Distinct from
+// OriginalLanguageSentinel, which selects a track's original language.
 const QualityOriginalV3 = "original"
+
+// QualityAutoV3 is the default quality preference: preserve the source unless
+// the device, a bandwidth cap, or the server rules it out.
+const QualityAutoV3 = "auto"
 
 // Compound ladder rung labels pin a bitrate as well as a resolution class.
 // The plain resolution labels remain valid for stored/default preferences;
@@ -958,8 +995,9 @@ const (
 
 // AvailableQualityV3 is one server-ladder rung valid for this source and
 // client, published on the plan so clients can render a quality menu without
-// owning a bitrate table. The QualityOriginalV3 entry preserves the source;
-// DisplayName gives compound rungs their human-facing High/Medium/Low label.
+// owning a bitrate table. The QualityOriginalV3 entry preserves the source
+// and is published on v1 only; DisplayName gives compound rungs their
+// human-facing High/Medium/Low label.
 type AvailableQualityV3 struct {
 	Label           string `json:"label"`
 	DisplayName     string `json:"display_name,omitempty"`
@@ -1083,10 +1121,8 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 
 func NormalizeQualityV3(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "auto":
-		return "auto", false
-	case QualityOriginalV3, "source", "max":
-		return QualityOriginalV3, false
+	case "", QualityAutoV3, QualityOriginalV3, "source", "max":
+		return QualityAutoV3, false
 	case "2160p", "4k", "uhd":
 		return "2160p", false
 	case "1080p", "fhd":
@@ -1461,10 +1497,14 @@ func HasFeatureV3(features []string, wanted string) bool {
 //   - subrip_sidecar_v1 picks the representation of every SRT sidecar URL.
 //     Switching it mid-attempt would publish one track under two URLs, and a
 //     seek reanchor must reproduce the frozen plan's artifact exactly.
+//   - hls_subtitle_renditions_v1 decides whether the transcode's stream URL
+//     is a multivariant playlist carrying the subtitle or a media playlist
+//     beside a sidecar. A reused HLS transport keeps the shape it was built
+//     with, so the attempt has to keep the same answer.
 //
 // Stop/start is the explicit boundary for changing any of them.
 func AttemptStickyFeaturesV3() []string {
-	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3}
+	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3}
 }
 
 // PinAttemptStickyFeaturesV3 returns requested with every attempt-sticky

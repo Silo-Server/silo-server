@@ -181,6 +181,19 @@ type UserStore interface {
 	// hidden from display so they reappear when new episodes are added.
 	RemoveWatchedFromWatchlist(ctx context.Context, profileID string) (bool, error)
 
+	// Not interested. A mark keeps a movie or series out of the profile's
+	// recommendations and counts against similar titles there; it leaves
+	// every other surface alone. Mark and unmark report whether they changed
+	// a row.
+	MarkNotInterested(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	UnmarkNotInterested(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// GetNotInterested answers the profile's mark on the item, nil when the
+	// item is not marked.
+	GetNotInterested(ctx context.Context, profileID, mediaItemID string) (*NotInterestedEntry, error)
+	// ListNotInterestedPage pages the profile's marks like ListFavoritesPage.
+	ListNotInterestedPage(ctx context.Context, profileID string, after *ListKey, limit int) ([]NotInterestedEntry, error)
+	ListNotInterestedByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
+
 	// Collections
 	CreateCollection(ctx context.Context, input CreateCollectionInput) (*Collection, error)
 	GetCollection(ctx context.Context, id string) (*Collection, error)

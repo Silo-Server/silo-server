@@ -190,6 +190,9 @@ func queueRows(t *testing.T, pool *pgxpool.Pool) map[string]queueRow {
 		}
 		result[prefix] = row
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return result
 }
 

@@ -64,7 +64,7 @@ lets only one of them probe at a time. A tab holds a shared lock while its
 media plays or playback starts, and no tab probes while any tab holds it. A
 playback start is also broadcast to the other tabs, so a probe already running
 in one of them stops and discards its measurement. On a metered link (Data Saver or cellular) it
-sends no cached measurement, so the planner's metered limit applies.
+sends no cached measurement.
 
 Every mutation body carries the `installation_id` the client read from
 capabilities. A different value is `409 installation_changed`: refresh
@@ -312,7 +312,7 @@ id); clients never retry automatically and treat `429` as drop.
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
 | HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
-| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}` |
+| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 

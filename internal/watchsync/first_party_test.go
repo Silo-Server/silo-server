@@ -17,11 +17,11 @@ func TestPluginProviderKey(t *testing.T) {
 		siloManaged  bool
 		want         string
 	}{
-		{name: "first-party Trakt keeps the built-in key", pluginID: "silo.watchprovider.trakt", capabilityID: "trakt", siloManaged: true, want: "trakt"},
+		{name: "retired Trakt plugin no longer claims the built-in key", pluginID: "silo.watchprovider.trakt", capabilityID: "trakt", siloManaged: true, want: "plugin:3:trakt"},
 		{name: "first-party Simkl keeps the built-in key", pluginID: "silo.watchprovider.simkl", capabilityID: "simkl", siloManaged: true, want: "simkl"},
 		{name: "first-party MDBList keeps the built-in key", pluginID: "silo.watchprovider.mdblist", capabilityID: "mdblist", siloManaged: true, want: "mdblist"},
-		{name: "first-party ID from another repository", pluginID: "silo.watchprovider.trakt", capabilityID: "trakt", want: "plugin:3:trakt"},
-		{name: "unknown capability of a first-party plugin", pluginID: "silo.watchprovider.trakt", capabilityID: "other", siloManaged: true, want: "plugin:3:other"},
+		{name: "first-party ID from another repository", pluginID: "silo.watchprovider.simkl", capabilityID: "simkl", want: "plugin:3:simkl"},
+		{name: "unknown capability of a first-party plugin", pluginID: "silo.watchprovider.simkl", capabilityID: "other", siloManaged: true, want: "plugin:3:other"},
 		{name: "third-party plugin", pluginID: "silo.watchprovider.floppy", capabilityID: "floppy", siloManaged: true, want: "plugin:3:floppy"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,16 +55,17 @@ func (f *fakeFirstPartyStore) HasConnections(_ context.Context, providerKey stri
 }
 
 func TestFirstPartyPluginsToInstallUntilMigrated(t *testing.T) {
-	store := &fakeFirstPartyStore{connections: map[string]bool{"trakt": true, "mdblist": true}}
+	// Trakt connections no longer pull in the retired Trakt plugin.
+	store := &fakeFirstPartyStore{connections: map[string]bool{"simkl": true, "mdblist": true, "trakt": true}}
 	got, err := FirstPartyPluginsToInstall(t.Context(), store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"silo.watchprovider.mdblist", "silo.watchprovider.trakt"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"silo.watchprovider.mdblist", "silo.watchprovider.simkl"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("plugins to install = %v, want %v", got, want)
 	}
 
-	for _, key := range []string{"trakt", "plugin:4:floppy"} {
+	for _, key := range []string{"simkl", "plugin:4:floppy"} {
 		if err := MarkFirstPartyMigrated(t.Context(), store, key); err != nil {
 			t.Fatal(err)
 		}
@@ -77,7 +78,18 @@ func TestFirstPartyPluginsToInstallUntilMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := []string{"silo.watchprovider.mdblist"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("plugins to install after Trakt migrated = %v, want %v", got, want)
+		t.Fatalf("plugins to install after Simkl migrated = %v, want %v", got, want)
+	}
+}
+
+func TestRetiredPlugin(t *testing.T) {
+	if !RetiredPlugin("silo.watchprovider.trakt") {
+		t.Fatal("the Trakt plugin is not retired")
+	}
+	for _, pluginID := range []string{"silo.watchprovider.simkl", "silo.watchprovider.mdblist", "silo.watchprovider.floppy"} {
+		if RetiredPlugin(pluginID) {
+			t.Fatalf("%s is retired", pluginID)
+		}
 	}
 }
 
@@ -100,15 +112,15 @@ func (f *fakeConfigSeeder) SeedGlobalConfig(_ context.Context, installationID in
 
 func TestSeedFirstPartyAppConfig(t *testing.T) {
 	store := &fakeFirstPartyStore{settings: map[string]string{
-		"watchsync.trakt.client_id":     "trakt-id",
-		"watchsync.trakt.client_secret": "trakt-secret",
+		"watchsync.simkl.client_id":     "simkl-id",
+		"watchsync.simkl.client_secret": "simkl-secret",
 	}}
 	seeder := &fakeConfigSeeder{}
-	seeded, err := SeedFirstPartyAppConfig(t.Context(), "trakt", 5, store, seeder)
+	seeded, err := SeedFirstPartyAppConfig(t.Context(), "simkl", 5, store, seeder)
 	if err != nil || !seeded {
 		t.Fatalf("SeedFirstPartyAppConfig() = %t, %v", seeded, err)
 	}
-	want := map[string]any{"client_id": "trakt-id", "client_secret": "trakt-secret"}
+	want := map[string]any{"client_id": "simkl-id", "client_secret": "simkl-secret"}
 	if seeder.installationID != 5 || seeder.key != "app" || !reflect.DeepEqual(seeder.value, want) {
 		t.Fatalf("seeded %d %q %v", seeder.installationID, seeder.key, seeder.value)
 	}
@@ -116,7 +128,7 @@ func TestSeedFirstPartyAppConfig(t *testing.T) {
 	// Seeding runs once: app credentials an admin clears from the plugin later
 	// are not restored from the old settings.
 	again := &fakeConfigSeeder{}
-	if seeded, err := SeedFirstPartyAppConfig(t.Context(), "trakt", 5, store, again); err != nil || seeded || again.value != nil {
+	if seeded, err := SeedFirstPartyAppConfig(t.Context(), "simkl", 5, store, again); err != nil || seeded || again.value != nil {
 		t.Fatalf("second seed = %t, err = %v, value = %v; want nothing", seeded, err, again.value)
 	}
 
@@ -126,41 +138,6 @@ func TestSeedFirstPartyAppConfig(t *testing.T) {
 		if err != nil || seeded || seeder.value != nil {
 			t.Fatalf("%s: seeded = %t, err = %v, value = %v; want nothing without saved credentials", key, seeded, err, seeder.value)
 		}
-	}
-}
-
-func TestServiceAppClientID(t *testing.T) {
-	registry := NewRegistry()
-	provider, err := NewPluginProvider(PluginProviderOptions{
-		InstallationID: 2,
-		ProviderKey:    "trakt",
-		CapabilityID:   "trakt",
-		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
-			AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE},
-			ExportWatched: true,
-		},
-		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
-			return nil, errors.New("not used")
-		},
-		ResolveConfig: func(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error) {
-			return &pluginv1.WatchSyncProviderConfig{
-				Values:       map[string]string{"app.client_id": " plugin-id "},
-				SecretValues: map[string]string{"app.client_secret": "secret"},
-			}, nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := registry.ReplacePluginProviders([]Provider{provider}); err != nil {
-		t.Fatal(err)
-	}
-	service := NewService(nil, registry)
-	if got, err := service.AppClientID(t.Context(), "trakt"); err != nil || got != "plugin-id" {
-		t.Fatalf("AppClientID(trakt) = %q, %v", got, err)
-	}
-	if got, err := service.AppClientID(t.Context(), "simkl"); err != nil || got != "" {
-		t.Fatalf("AppClientID(simkl) = %q, %v; want empty for an unregistered key", got, err)
 	}
 }
 
@@ -180,8 +157,8 @@ func TestPluginConnectionStatusReportsAppConfigReadiness(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			provider, err := NewPluginProvider(PluginProviderOptions{
 				InstallationID: 4,
-				ProviderKey:    "trakt",
-				CapabilityID:   "trakt",
+				ProviderKey:    "simkl",
+				CapabilityID:   "simkl",
 				Descriptor: &pluginv1.WatchSyncProviderDescriptor{
 					AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE},
 					ExportWatched: true,
@@ -198,7 +175,7 @@ func TestPluginConnectionStatusReportsAppConfigReadiness(t *testing.T) {
 			if err := registry.ReplacePluginProviders([]Provider{provider}); err != nil {
 				t.Fatal(err)
 			}
-			status, err := NewService(newServiceFakeRepo(), registry).GetConnectionStatus(t.Context(), 7, "profile-1", "trakt")
+			status, err := NewService(newServiceFakeRepo(), registry).GetConnectionStatus(t.Context(), 7, "profile-1", "simkl")
 			if err != nil {
 				t.Fatal(err)
 			}

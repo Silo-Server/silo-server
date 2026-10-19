@@ -24,6 +24,9 @@ type ViewerPreferences struct {
 	// NextUpMode is ui.next_up_mode. It rides along so home-section requests
 	// can read it from the resolved scope instead of resolving it again.
 	NextUpMode string
+	// NextUpNewReleasesFirst is ui.next_up_new_releases_first, carried for the
+	// same reason.
+	NextUpNewReleasesFirst bool
 	// Degraded reports that the read failed and the values are the contract
 	// defaults rather than the profile's own.
 	Degraded bool
@@ -69,6 +72,7 @@ func ResolveViewerPreferencesStrict(ctx context.Context, store ViewerPreferenceR
 			settingskeys.CatalogMetadataLanguage,
 			settingskeys.CatalogMetadataLanguageOverrides,
 			settingskeys.UiNextUpMode,
+			settingskeys.UiNextUpNewReleasesFirst,
 		}, nil)
 	if err != nil {
 		return ViewerPreferences{}, err
@@ -91,6 +95,8 @@ func ResolveViewerPreferencesStrict(ctx context.Context, store ViewerPreferenceR
 			if json.Unmarshal(value.Value, &mode) == nil {
 				out.NextUpMode = strings.TrimSpace(mode)
 			}
+		case settingskeys.UiNextUpNewReleasesFirst:
+			_ = json.Unmarshal(value.Value, &out.NextUpNewReleasesFirst)
 		}
 	}
 	return out, nil

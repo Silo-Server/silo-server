@@ -234,7 +234,7 @@ func TestEmailVerificationDispatchAuthorizesUnderClaim(t *testing.T) {
 			}
 		}},
 		{"deleted", func(in EmailVerificationIntent) {
-			if err := repo.DeleteForProfile(ctx, in.ProfileID); err != nil {
+			if err := repo.DeleteForProfile(ctx, in.UserID, in.ProfileID); err != nil {
 				t.Fatal(err)
 			}
 		}},

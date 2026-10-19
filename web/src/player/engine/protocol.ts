@@ -116,6 +116,8 @@ export type WorkletToPageMessage =
       mediaTime: number;
       /** False when the worklet output silence for this quantum. */
       advancing: boolean;
+      /** Media seconds the worklet plays per second from this anchor on. */
+      rate: number;
     }
   | {
       type: "underrun";

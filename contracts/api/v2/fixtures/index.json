@@ -7768,6 +7768,70 @@
       "body_file": "get_metadata_match_queue_ok.json"
     },
     {
+      "name": "get_not_interested_capability_ok",
+      "operation_id": "getNotInterestedCapability",
+      "scenario": "Profiles on this server can mark movies and series Not interested.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/not-interested",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"996fd28cc2dbccbf14bdf4956a1a604fa0d47ccabb65c1d747db33b60edf0d41\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotInterestedCapability",
+      "body_file": "get_not_interested_capability_ok.json"
+    },
+    {
+      "name": "get_not_interested_not_found",
+      "operation_id": "getNotInterested",
+      "scenario": "The profile has not marked the title.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/not-interested/movie:nope",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_not_interested_not_found.json"
+    },
+    {
+      "name": "get_not_interested_ok",
+      "operation_id": "getNotInterested",
+      "scenario": "The profile marked the title Not interested: the mark with when it was made.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/not-interested/movie:c",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotInterestedEntry",
+      "body_file": "get_not_interested_ok.json"
+    },
+    {
       "name": "get_oauth_handshake_capabilities_ok",
       "operation_id": "getOAuthHandshakeCapabilities",
       "scenario": "An app discovers that the server hands OAuth sign-in off to native apps and links identities.",
@@ -10323,6 +10387,27 @@
       "body_file": "list_my_requests_ok.json"
     },
     {
+      "name": "list_not_interested_ok",
+      "operation_id": "listNotInterested",
+      "scenario": "The first page of the titles a profile marked Not interested as catalog cards, newest mark first, with an opaque cursor for the next page.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/not-interested?limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotInterestedCollection",
+      "body_file": "list_not_interested_ok.json"
+    },
+    {
       "name": "list_people_limit_out_of_range",
       "operation_id": "listPeople",
       "scenario": "A limit below the minimum.",
@@ -10789,6 +10874,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/EpisodeCollection",
       "body_file": "list_season_episodes_ok.json"
+    },
+    {
+      "name": "list_seasonal_themes_ok",
+      "operation_id": "listSeasonalThemes",
+      "scenario": "The holidays a Seasonal Picks row can follow in calendar order, each with its curated vibes; a holiday that moves or recurs weekly has no start and end, and a weekly one cannot take a row's own dates.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/sections/seasonal-themes",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SeasonalThemeCatalog",
+      "body_file": "list_seasonal_themes_ok.json"
     },
     {
       "name": "list_section_recipe_candidates_account_scoped",
@@ -11612,6 +11718,48 @@
       "body_file": "logout_permission_denied.json"
     },
     {
+      "name": "mark_not_interested_episode_rejected",
+      "operation_id": "markNotInterested",
+      "scenario": "An episode cannot be marked; the series can.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/not-interested/episode:x",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "mark_not_interested_episode_rejected.json"
+    },
+    {
+      "name": "mark_not_interested_not_found",
+      "operation_id": "markNotInterested",
+      "scenario": "A title the viewer may not see cannot be marked.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/not-interested/movie:hidden",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "mark_not_interested_not_found.json"
+    },
+    {
       "name": "mark_watched_not_found",
       "operation_id": "markWatched",
       "scenario": "An item outside the viewer's catalog cannot be marked.",
@@ -11961,6 +12109,27 @@
       "body_file": "notification_get_notification_unread_count.json"
     },
     {
+      "name": "notification_list_notification_series",
+      "operation_id": "listNotificationSeries",
+      "scenario": "Series that can notify the acting profile, with one the viewer may not see omitted.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/notifications/series",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotificationSeriesCollection",
+      "body_file": "notification_list_notification_series.json"
+    },
+    {
       "name": "notification_list_notifications",
       "operation_id": "listNotifications",
       "scenario": "Profile notification inbox with synthetic records.",
@@ -12021,6 +12190,47 @@
       "response_media_type": null,
       "schema": null,
       "body_file": null
+    },
+    {
+      "name": "notification_mute_notification_series",
+      "operation_id": "muteNotificationSeries",
+      "scenario": "The acting profile mutes one series: no new-episode notification for it on any channel until it unmutes. Repeating the call changes nothing.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/notifications/series/series:bear/mute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
+      "name": "notification_mute_notification_series_not_found",
+      "operation_id": "muteNotificationSeries",
+      "scenario": "A series the viewer may not see cannot be muted.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/notifications/series/series:hidden/mute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "notification_mute_notification_series_not_found.json"
     },
     {
       "name": "notification_relay_clear",
@@ -12143,6 +12353,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/NotificationSyncOutputBody",
       "body_file": "notification_sync_notifications.json"
+    },
+    {
+      "name": "notification_unmute_notification_series",
+      "operation_id": "unmuteNotificationSeries",
+      "scenario": "The acting profile unmutes a series; it notifies again from the next new episode. Unmuting a series that is not muted changes nothing.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/notifications/series/series:wire/mute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
     },
     {
       "name": "notification_update_notification_preferences",
@@ -14674,6 +14904,27 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "unknown_query_parameter.json"
+    },
+    {
+      "name": "unmark_not_interested_locked_profile",
+      "operation_id": "unmarkNotInterested",
+      "scenario": "A PIN-locked profile without X-Profile-Token.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/not-interested/movie:c",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-locked"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "unmark_not_interested_locked_profile.json"
     },
     {
       "name": "unmark_watched_not_found",

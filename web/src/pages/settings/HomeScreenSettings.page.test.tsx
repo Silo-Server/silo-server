@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   effective: {} as Record<string, unknown>,
   effectiveError: false,
   setSetting: vi.fn(),
+  mutateSetting: vi.fn(),
   clearSetting: vi.fn(),
 }));
 vi.mock("@/api/v2/request", async () => ({
@@ -46,7 +47,7 @@ vi.mock("@/hooks/queries/settingValues", () => ({
     isError: mocks.effectiveError,
   }),
   useSetSettingValue: () => ({
-    mutate: vi.fn(),
+    mutate: mocks.mutateSetting,
     mutateAsync: mocks.setSetting,
     isPending: false,
   }),
@@ -288,6 +289,32 @@ describe("Settings > Home Screen", () => {
       value: "separate",
       identity: { scope: "profile" },
     });
+  });
+
+  it("saves Show new episodes first for this profile, off until chosen", async () => {
+    await renderPage();
+    const toggle = screen.getByRole("switch", { name: "Show new episodes first" });
+    expect(toggle).not.toBeChecked();
+
+    await userEvent.click(toggle);
+
+    expect(mocks.mutateSetting).toHaveBeenCalledWith(
+      { key: "ui.next_up_new_releases_first", value: true, identity: { scope: "profile" } },
+      expect.anything(),
+    );
+  });
+
+  it("shows Show new episodes first on when the profile turned it on", async () => {
+    mocks.effective = {
+      "ui.next_up_new_releases_first": {
+        key: "ui.next_up_new_releases_first",
+        value: true,
+        source: "profile",
+      },
+    };
+    await renderPage();
+
+    expect(screen.getByRole("switch", { name: "Show new episodes first" })).toBeChecked();
   });
 
   it("locks next up while this profile's current values cannot be read", async () => {

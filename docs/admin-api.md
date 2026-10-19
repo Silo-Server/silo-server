@@ -1081,7 +1081,7 @@ Each entry:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `provider` | string | Provider key: `trakt`, `simkl`, or `mdblist` for the first-party plugins, otherwise `plugin:<installation id>:<capability id>`. |
+| `provider` | string | Provider key: `simkl` or `mdblist` for the first-party plugins, otherwise `plugin:<installation id>:<capability id>`. |
 | `display_name` | string | Human name from the registry, or the key when the provider is not registered. |
 | `registered` | bool | False when the provider only exists in stored rows. |
 | `scrobbling` | bool | The provider declares the scrobble-playback capability. |
@@ -1127,8 +1127,8 @@ Each entry:
       "scrobbles_24h": 0
     },
     {
-      "provider": "trakt",
-      "display_name": "Trakt",
+      "provider": "simkl",
+      "display_name": "Simkl",
       "registered": true,
       "scrobbling": true,
       "exporting": true,
@@ -2270,7 +2270,8 @@ the handshake is served on this process, the protocol (`silo.admin-logs.v2`) and
 selections (`app`, `audit`). `POST /api/v2/admin/logs/ws-ticket` (`createAdminLogsSocketTicket`)
 delegates the acting administrator's current access-token login session for one connection.
 API keys and credentials without a bounded expiry cannot mint; a login whose effective role is
-not administrator (a secondary profile on an administrator account) is refused with 403. The
+not administrator (a secondary profile on an administrator account, or a profile-less session
+on a household with a PIN-protected or access-limited profile) is refused with 403. The
 ticket is opaque, single-use, expires within 30 seconds and binds the account, login session,
 role, profile proof and resolved access scope. The response carries `ticket`, `expires_in`,
 `max_connection_seconds` (300) and `protocol`, is not cached, and minting is naturally
@@ -2288,7 +2289,8 @@ proof and administrator role are validated again before 101.
 
 The connection ends at the earlier of five minutes or access-token expiry, and the handler
 rechecks session, account, profile and administrator role every 15 seconds with a two-second
-bound; a failed check or a demotion closes the socket. Reconnect with a newly minted credential;
+bound; a failed check or a demotion closes the socket, including once the household of a
+profile-less session gains a PIN-protected or access-limited profile. Reconnect with a newly minted credential;
 this is bounded revocation detection, not instantaneous. Without Redis the ticket is
 process-local and requires affinity to the minting node.
 
@@ -3099,7 +3101,8 @@ version in place.
 
 `POST /api/v2/admin/plugins/installations/{id}/restart` stops the installation's process
 and, for a resident plugin, starts it again with a fresh failure budget; a non-resident plugin
-is only stopped and launches on its next use. A disabled installation is 409. Success is 200
+is only stopped, its recorded start failure is cleared, and it launches on its next use. A
+disabled installation is 409. Success is 200
 with the installation, whose `runtime` reports the outcome, including a launch that failed.
 Repeating the request converges on one running process, so it is naturally idempotent.
 
@@ -3109,7 +3112,9 @@ exponential backoff from 1 s to 60 s, and is parked as `failed` after ten consec
 failures until restarted or reconfigured), `state` (`stopped`, `starting`, `running`,
 `backoff`, `failed`), `restart_count`, `last_error`, `last_started_at` and `next_restart_at`.
 Plugins declaring `network_access_provider.v1` are resident; every other plugin starts on
-first use and reports only `running` or `stopped`.
+first use and reports `running`, `stopped`, or `failed` when its last launch on the answering
+server failed, with `last_error` saying why. A later successful launch, an administrator
+restart, an update or a configuration change clears that failure.
 
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete
@@ -3171,6 +3176,8 @@ automatically. A revision precondition (`If-Match`) is a follow-up, not part of 
 `POST /api/v2/admin/plugins/installations/{id}/config/test` probes one prospective entry:
 the server starts a temporary plugin instance with the merged configuration, runs the
 plugin's connection check under a 20 s timeout, and stops the instance. Nothing is stored.
+A metadata provider is checked with a movie search; a marker provider is asked for its
+account statistics, which need the staged credentials.
 A completed failed check, including a plugin without connection-check support, is a 200
 result with `success` false and the message; only transport or store failures are problems.
 The probe launches a process and may call a billed provider, so it is non-retryable: the

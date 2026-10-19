@@ -223,6 +223,11 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		return false, fmt.Errorf("get rewatch counts: %w", err)
 	}
 
+	marks, err := e.signalReader().NotInterestedMarks(ctx, userID, profileID)
+	if err != nil {
+		return false, fmt.Errorf("get not interested marks: %w", err)
+	}
+
 	now := time.Now()
 	halfLife := e.cfg.TasteDecayHalfLifeDays
 	if halfLife == 0 {
@@ -307,6 +312,16 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 	}
 	if len(favSet) > 0 {
 		signalCounts["favorited"] = len(favSet)
+	}
+
+	// A marked title says the profile does not want more like it, whatever
+	// it watched, rated or favorited. Marks are kept to movies and series,
+	// which are canonical already.
+	for _, m := range marks {
+		ensureSignal(m.MediaItemID).NotInterested = true
+	}
+	if len(marks) > 0 {
+		signalCounts[signalKindNotInterested] = len(marks)
 	}
 
 	watchlistSet := make(map[string]struct{}, len(watchlist))
@@ -414,7 +429,9 @@ func ratingSignal(rating int) (float64, string) {
 
 // positiveTasteItems returns the titles that shape the taste vector and its
 // clusters, in ID order: those with an embedding and a positive combined
-// weight. Disliked and abandoned titles are left out rather than subtracted:
+// weight, never one marked Not interested. Disliked, abandoned and marked
+// titles are left out rather than subtracted (the rows rank against them
+// instead; see aversion):
 // subtracting only nudges the vector off each disliked title's own direction,
 // and with nothing positive left it points at their opposites. It also
 // returns how many of the titles count toward the cold-start level
@@ -426,6 +443,9 @@ func positiveTasteItems(signals map[string]*canonicalWeightComponents, embedding
 		s := signals[id]
 		emb := embeddings[id]
 		if emb == nil {
+			continue
+		}
+		if s.NotInterested {
 			continue
 		}
 		weight := combineCanonicalWeight(s.Rating, s.ExplicitWeight, s.ImplicitWeight, s.IntentWeight)

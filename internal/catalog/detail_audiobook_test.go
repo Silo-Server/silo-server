@@ -88,7 +88,7 @@ func TestBuildEbookExtensionUsesAuthorsAndPublisherWithoutNarrators(t *testing.T
 		Studios:   []string{"Tor"},
 	}
 
-	extension := (&DetailService{}).buildEbookExtension(nil, item, crew, AccessFilter{})
+	extension := (&DetailService{}).buildEbookExtension(t.Context(), item, crew, AccessFilter{})
 
 	if extension == nil {
 		t.Fatal("buildEbookExtension returned nil")

@@ -149,6 +149,13 @@
 ./internal/metadata TestInitialMatch_NFOIDsReplaceTagAnchoredSkeleton
 ./internal/metadata TestInitialMatch_NFOOnlyChainReplacesTagAnchoredSkeleton
 
+# A scan never merges a tagged movie into a title it shares only one provider
+# ID with, and copies of one movie still merge (#2263).
+./internal/metadata TestScanKeepsTaggedMovieFoldersApartDB
+./internal/metadata TestScanStillMergesCopiesOfOneMovieDB
+./internal/metadata TestRescanAfterSplitKeepsTaggedMovieApartDB
+./internal/metadata TestScanKeepsTaggedMovieApartFromTitleWithItsTaggedIDDB
+
 # A corrected Identify moves a series and its anchored children in one rename.
 ./internal/metadata TestIdentify_CorrectedSeriesMovesWithItsChildren
 ./internal/metadata TestIdentify_CorrectionOntoExistingSeriesMovesUnpairedEpisodeState
@@ -192,10 +199,6 @@
 # Artwork reference check (revision GC and storage sweep): every sweep surface
 # whose path column has an index uses it under a generic plan.
 ./internal/metadata TestArtworkReferenceChecksUsePathIndexesDB
-
-# The local-only image-cache claim, run while metadata.cache_images is off, uses
-# its partial index instead of reading the remote jobs left queued.
-./internal/metadata TestLocalImageCacheClaimUsesLocalDueIndexDB
 
 ./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
 ./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
@@ -259,6 +262,11 @@
 # DATABASE_URL already chose jit.
 ./internal/database TestNewPoolDisablesJITUnlessConfiguredPostgres
 
+# Pool connections move vectors in binary, report a NULL vector as an error
+# rather than a panic, still connect before the vector extension exists, and
+# switch to binary once the migrations create it.
+./internal/database TestNewPoolMovesVectorsInBinaryPostgres
+
 # Operational log pages: a cursor prunes the partitions newer than it.
 ./internal/opslog TestListCursorPrunesNewerPartitionsDB
 
@@ -276,3 +284,8 @@
 # the frozen legacy bridge alike.
 ./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
 ./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB
+
+# A person write reindexes the person's titles only when it changes the name,
+# the only person field search documents carry.
+./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
+./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres

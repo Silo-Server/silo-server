@@ -592,6 +592,7 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 	}
 }
 
+//nolint:funlen,gocyclo // One end-to-end walk through a planned session; its steps share the running FFmpeg's state.
 func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source string) {
 	dir := t.TempDir()
 	// Planned sessions use a fully checked index; check it now rather than
@@ -640,7 +641,7 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 				if time.Now().After(deadline) {
 					t.Fatalf("%s: segment %d of %d was never assembled", label, n, segments)
 				}
-				time.Sleep(20 * time.Millisecond)
+				time.Sleep(20 * time.Millisecond) //nolint:forbidigo // Polls for the assembled segment file, which signals nothing when it appears.
 			}
 		}
 	}
@@ -837,7 +838,7 @@ func TestPlannedCopySessionSwitchesAudioAtTheStart(t *testing.T) {
 			if time.Now().After(deadline) {
 				t.Fatalf("%s: segment 0 was never assembled", label)
 			}
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond) //nolint:forbidigo // Polls for the assembled segment file, which signals nothing when it appears.
 		}
 	}
 	waitSegment0("first track")

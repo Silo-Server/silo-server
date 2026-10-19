@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -50,6 +51,7 @@ type serviceFakeRepo struct {
 	historyExports         []HistoryExport
 	historyLookupIDs       []string
 	historyLookupLimit     int
+	historyPageSizes       []int
 	listItemStates         []ListItemState
 	ratingStates           []RatingSyncState
 	droppedStates          []DroppedSyncState
@@ -194,6 +196,13 @@ func (r *serviceFakeRepo) DeferConnectionsForAccount(
 		deferred++
 	}
 	return deferred, nil
+}
+
+// withConnection stores conn the way a connected profile's row exists before
+// a sync, and returns it.
+func (r *serviceFakeRepo) withConnection(conn Connection) Connection {
+	r.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	return conn
 }
 
 func (r *serviceFakeRepo) GetConnectionByID(_ context.Context, id string) (Connection, bool, error) {
@@ -373,16 +382,25 @@ func (r *serviceFakeRepo) UpsertHistoryExports(_ context.Context, exports []Hist
 	return nil
 }
 
-func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, limit int) ([]HistoryExport, error) {
+func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, after HistoryExportCursor, limit int) ([]HistoryExport, error) {
+	r.historyPageSizes = append(r.historyPageSizes, limit)
 	var exports []HistoryExport
 	for _, export := range r.historyExports {
 		if export.ConnectionID == connectionID &&
-			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 {
+			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 &&
+			(after.ID == "" || export.WatchedAt.After(after.WatchedAt) ||
+				(export.WatchedAt.Equal(after.WatchedAt) && export.ID > after.ID)) {
 			exports = append(exports, export)
-			if limit > 0 && len(exports) >= limit {
-				break
-			}
 		}
+	}
+	slices.SortStableFunc(exports, func(a, b HistoryExport) int {
+		if c := a.WatchedAt.Compare(b.WatchedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if limit > 0 && len(exports) > limit {
+		exports = exports[:limit]
 	}
 	return exports, nil
 }
@@ -843,7 +861,7 @@ func (r *serviceFakeRepo) CompleteConfirmedScrobbleStop(_ context.Context, playb
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
 	key := playbackSessionID + "|" + connectionID
-	if r.confirmingScrobbles[key] != claimVersion {
+	if !r.confirmingScrobbles[key].Equal(claimVersion) {
 		return errConfirmedStopClaimLost
 	}
 	delete(r.confirmingScrobbles, key)
@@ -868,7 +886,7 @@ func (r *serviceFakeRepo) FailConfirmedScrobbleStop(_ context.Context, playbackS
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
 	key := playbackSessionID + "|" + connectionID
-	if r.confirmingScrobbles[key] != claimVersion {
+	if !r.confirmingScrobbles[key].Equal(claimVersion) {
 		return errConfirmedStopClaimLost
 	}
 	delete(r.confirmingScrobbles, key)
@@ -1128,12 +1146,12 @@ type watchedExporterStub struct {
 	source       userstore.WatchHistorySource
 }
 
-type singleBatchWatchedExporterStub struct {
+type batchedWatchedExporterStub struct {
 	watchedExporterStub
 	batchSize int
 }
 
-func (p singleBatchWatchedExporterStub) ExportBatchSize() int {
+func (p batchedWatchedExporterStub) ExportBatchSize() int {
 	return p.batchSize
 }
 
@@ -1940,6 +1958,32 @@ func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
 	}
 }
 
+// refreshedAccessToken returns a saved connection's access token through the
+// serialized refresh path, so tests can drive refreshConnectionIfNeeded the
+// way a sync does.
+func refreshedAccessToken(ctx context.Context, s *Service, connectionID string) (string, error) {
+	conn, ok, err := s.repo.GetConnectionByID(ctx, connectionID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", ErrConnectionNotFound
+	}
+	provider, ok := s.registry.Get(conn.Provider)
+	if !ok {
+		return "", UnknownProviderError{Key: conn.Provider}
+	}
+	cfg, err := s.serverConfig(ctx, conn.Provider)
+	if err != nil {
+		return "", err
+	}
+	conn, err = s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
+	if err != nil {
+		return "", err
+	}
+	return conn.AccessToken, nil
+}
+
 func TestServiceTokenRefreshPreservesConcurrentConnectionChanges(t *testing.T) {
 	for _, change := range []string{"disconnect", "reconnect", "account switch", "sync state"} {
 		t.Run(change, func(t *testing.T) {
@@ -1981,7 +2025,7 @@ func TestServiceTokenRefreshPreservesConcurrentConnectionChanges(t *testing.T) {
 				repo.connections[key] = current
 				return nil
 			}
-			_, err := service.AccessToken(t.Context(), conn.ID)
+			_, err := refreshedAccessToken(t.Context(), service, conn.ID)
 			current, exists := repo.connections[key]
 			switch change {
 			case "disconnect":
@@ -2034,7 +2078,7 @@ func TestServiceTokenRefreshReloadsAccountBinding(t *testing.T) {
 	}
 	service := NewService(repo, registry)
 	service.now = func() time.Time { return now }
-	if _, err := service.AccessToken(t.Context(), conn.ID); err != nil {
+	if _, err := refreshedAccessToken(t.Context(), service, conn.ID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2071,7 +2115,7 @@ func TestServiceDisconnectWaitsForAnInFlightTokenRefresh(t *testing.T) {
 
 	refreshDone := make(chan error, 1)
 	go func() {
-		_, err := service.AccessToken(ctx, "conn-1")
+		_, err := refreshedAccessToken(ctx, service, "conn-1")
 		refreshDone <- err
 	}()
 	<-entered
@@ -2539,12 +2583,12 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
 		store: userdb.NewSQLiteUserStore(db),
 	})
-	result, err := service.ExportWatched(context.Background(), Connection{
+	result, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{
 		ID:        "conn-1",
 		Provider:  "simkl",
 		UserID:    7,
 		ProfileID: "profile-1",
-	}, ServerConfig{}, watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl})
+	}), ServerConfig{}, watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl})
 	if err != nil {
 		t.Fatalf("ExportWatched: %v", err)
 	}
@@ -2610,12 +2654,12 @@ func TestServiceExportWatchedMatchesRemotePlaysAtProviderPrecision(t *testing.T)
 			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
 				store: userdb.NewSQLiteUserStore(db),
 			})
-			result, err := service.ExportWatched(context.Background(), Connection{
+			result, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{
 				ID:        "conn-1",
 				Provider:  "trakt",
 				UserID:    7,
 				ProfileID: "profile-1",
-			}, ServerConfig{}, provider)
+			}), ServerConfig{}, provider)
 			if err != nil {
 				t.Fatalf("ExportWatched: %v", err)
 			}
@@ -2916,7 +2960,7 @@ func TestServiceExportWatchedSendsCatalogTitles(t *testing.T) {
 	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
 	var exported []LocalPlay
 	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, nil}
-	if _, err := service.ExportWatched(context.Background(), Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+	if _, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}), ServerConfig{}, exporter); err != nil {
 		t.Fatal(err)
 	}
 	if len(exported) != 1 || exported[0].Title != "17 Again" || exported[0].Year != 2009 {
@@ -3646,7 +3690,7 @@ func TestServiceExportWatchedKeepsDeadlineForProviderWhenTitlesStall(t *testing.
 	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, &ctxErrs}
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
-	if _, err := service.ExportWatched(ctx, Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+	if _, err := service.ExportWatched(ctx, repo.withConnection(Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}), ServerConfig{}, exporter); err != nil {
 		t.Fatal(err)
 	}
 	if len(ctxErrs) != 1 || ctxErrs[0] != nil || len(exported) != 1 || exported[0].Title != "" {
@@ -4130,7 +4174,7 @@ func TestServiceLocalWatchEventBoundsHistoryLookupToProviderBatch(t *testing.T) 
 		context.Background(),
 		Connection{ID: "conn-1"},
 		ServerConfig{},
-		singleBatchWatchedExporterStub{
+		batchedWatchedExporterStub{
 			watchedExporterStub: watchedExporterStub{exported: &exported},
 			batchSize:           1,
 		},

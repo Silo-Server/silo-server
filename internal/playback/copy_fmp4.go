@@ -157,14 +157,9 @@ func fmp4FirstVideoPTS(segment []byte, trackID uint32) (int64, error) {
 			if !ok || len(tfdt) < 8 {
 				return 0, fmt.Errorf("%w: video fragment without tfdt", errFMP4Box)
 			}
-			var decode int64
-			if tfdt[0] == 1 {
-				if len(tfdt) < 12 {
-					return 0, errFMP4Box
-				}
-				decode = int64(binary.BigEndian.Uint64(tfdt[4:]))
-			} else {
-				decode = int64(binary.BigEndian.Uint32(tfdt[4:]))
+			decode, err := readFMP4DecodeTime(tfdt)
+			if err != nil {
+				return 0, err
 			}
 			offset, err := firstCompositionOffset(traf.payload)
 			if err != nil {
@@ -209,7 +204,7 @@ func firstCompositionOffset(traf []byte) (int64, error) {
 	}
 	raw := binary.BigEndian.Uint32(trun[off:])
 	if version == 1 {
-		return int64(int32(raw)), nil
+		return int64(int32(raw)), nil //nolint:gosec // G115: a version 1 trun stores composition offsets as signed 32-bit, in two's complement.
 	}
 	return int64(raw), nil
 }
@@ -381,14 +376,9 @@ func shiftTraf(traf fmp4Box, shift float64, scales map[uint32]uint32, videoTrack
 	if !ok {
 		return raw, 0, nil
 	}
-	var v int64
-	switch {
-	case tfdt[0] == 1 && len(tfdt) >= 12:
-		v = int64(binary.BigEndian.Uint64(tfdt[4:]))
-	case len(tfdt) >= 8:
-		v = int64(binary.BigEndian.Uint32(tfdt[4:]))
-	default:
-		return nil, 0, errFMP4Box
+	v, err := readFMP4DecodeTime(tfdt)
+	if err != nil {
+		return nil, 0, err
 	}
 	v += int64(math.Round(shift * float64(scale)))
 	if v >= 0 {
@@ -400,12 +390,31 @@ func shiftTraf(traf fmp4Box, shift float64, scales map[uint32]uint32, videoTrack
 	return trimTrafStart(payload, tfhd, v)
 }
 
+// readFMP4DecodeTime reads a tfdt box's base media decode time. A version 1
+// time past math.MaxInt64 isn't one a real stream has, so it is malformed.
+func readFMP4DecodeTime(tfdt []byte) (int64, error) {
+	switch {
+	case len(tfdt) >= 12 && tfdt[0] == 1:
+		t := binary.BigEndian.Uint64(tfdt[4:])
+		if t > math.MaxInt64 {
+			return 0, fmt.Errorf("%w: decode time out of range", errFMP4Box)
+		}
+		return int64(t), nil
+	case len(tfdt) >= 8 && tfdt[0] != 1:
+		return int64(binary.BigEndian.Uint32(tfdt[4:])), nil
+	}
+	return 0, errFMP4Box
+}
+
 func putFMP4DecodeTime(tfdt []byte, v int64) error {
+	if v < 0 {
+		return fmt.Errorf("%w: decode time out of range", errFMP4Box)
+	}
 	if tfdt[0] == 1 && len(tfdt) >= 12 {
 		binary.BigEndian.PutUint64(tfdt[4:], uint64(v))
 		return nil
 	}
-	if v < 0 || v > math.MaxUint32 {
+	if v > math.MaxUint32 {
 		return fmt.Errorf("%w: decode time out of range", errFMP4Box)
 	}
 	binary.BigEndian.PutUint32(tfdt[4:], uint32(v))
@@ -518,7 +527,11 @@ func trimTrunStart(trun []byte, defaultDuration, defaultSize uint32, v *int64) (
 		return nil, 0, fmt.Errorf("%w: negative decode time for a whole fragment", errFMP4Box)
 	}
 	out := append(append([]byte(nil), trun[:header]...), trun[header+drop*entry:]...)
-	binary.BigEndian.PutUint32(out[4:], uint32(count-drop))
+	kept := count - drop
+	if kept < 0 || kept > math.MaxUint32 {
+		return nil, 0, errFMP4Box
+	}
+	binary.BigEndian.PutUint32(out[4:], uint32(kept))
 	return out, dropped, nil
 }
 
@@ -543,7 +556,7 @@ func moveTrunData(traf []byte, delta int64) error {
 		if len(c.payload) < 12 || binary.BigEndian.Uint32(c.payload)&0x1 == 0 {
 			return fmt.Errorf("%w: trun without a data offset in a moof that changed size", errFMP4Box)
 		}
-		o := int64(int32(binary.BigEndian.Uint32(c.payload[8:]))) + delta
+		o := int64(int32(binary.BigEndian.Uint32(c.payload[8:]))) + delta //nolint:gosec // G115: a trun's data offset is signed 32-bit, in two's complement.
 		if o < 0 || o > math.MaxInt32 {
 			return fmt.Errorf("%w: data offset out of range", errFMP4Box)
 		}
@@ -553,7 +566,7 @@ func moveTrunData(traf []byte, delta int64) error {
 }
 
 func appendFMP4Box(out []byte, typ string, payload []byte) []byte {
-	out = binary.BigEndian.AppendUint32(out, uint32(8+len(payload)))
+	out = binary.BigEndian.AppendUint32(out, uint32(8+len(payload))) //nolint:gosec // G115: payloads are boxes of one HLS segment, far below 4 GiB.
 	out = append(out, typ...)
 	return append(out, payload...)
 }

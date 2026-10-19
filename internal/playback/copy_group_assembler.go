@@ -177,7 +177,7 @@ func (a *copyGroupAssembler) scan() {
 	for {
 		name := fmt.Sprintf("%s%06d.m4s", run.prefix, run.nextFile)
 		path := filepath.Join(a.dir, name)
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
 			// The next group isn't written yet. FFmpeg renames each finished
 			// group into place, so a present file is complete.
@@ -311,7 +311,7 @@ func (a *copyGroupAssembler) dropGroupsLocked(run *copyGroupRun, n int) {
 func (a *copyGroupAssembler) writeSegmentLocked(run *copyGroupRun, n int, paths []string) error {
 	groups := make([][]byte, len(paths))
 	for i, p := range paths {
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(filepath.Clean(p))
 		if err != nil {
 			return err
 		}
@@ -328,7 +328,7 @@ func (a *copyGroupAssembler) writeSegmentLocked(run *copyGroupRun, n int, paths 
 	}
 	final := filepath.Join(a.dir, plannedSegmentName(n))
 	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, joined, 0o644); err != nil {
+	if err := os.WriteFile(tmp, joined, 0o644); err != nil { //nolint:gosec // G306: a served segment, readable like the ones FFmpeg writes beside it.
 		return err
 	}
 	return os.Rename(tmp, final)

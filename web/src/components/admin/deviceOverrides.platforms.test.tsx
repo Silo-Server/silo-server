@@ -19,11 +19,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     ResizeObserverStub;
 }
 
-const NATIVE_ONLY_PLAYER_KEYS = [
-  "player.playback_speed",
-  "player.subtitle_sync_ms",
-  "player.hdr_enabled",
-];
+const NATIVE_ONLY_PLAYER_KEYS = ["player.playback_speed", "player.hdr_enabled"];
 
 function renderAllSettings(devicePlatform: string, settings: AdminDeviceSetting[] = []) {
   render(
@@ -84,6 +80,8 @@ describe("DeviceProfileTabs platform filtering", () => {
       expect(web).not.toContain(key);
       expect(tv).toContain(key);
     }
+    // The web player applies the subtitle offset from manifest revision 19.
+    expect(web).toContain("player.subtitle_sync_ms");
     expect(deviceSettingKeysForPlatform("Windows Web", ["player.playback_speed"])).toHaveLength(
       web.length + 1,
     );

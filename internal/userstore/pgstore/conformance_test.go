@@ -281,6 +281,7 @@ func TestPostgresPersonalListPage(t *testing.T) {
 	}
 	storetest.RunPersonalListPage(t, newListStore)
 	storetest.RunPersonalListMembership(t, newListStore)
+	storetest.RunNotInterested(t, newListStore)
 }
 
 // TestPostgresProgressPage runs the keyset progress paging conformance test

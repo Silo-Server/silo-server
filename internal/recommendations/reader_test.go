@@ -445,6 +445,8 @@ func TestForYouPageAsksForMissingRowsOnlyWithPositiveSignals(t *testing.T) {
 		{"picks awaiting embeddings", map[string]int{"favorited": 3, signalCountPositiveTitles: 0}, false, 1},
 		{"level 2 without rows", map[string]int{"favorited": 3, signalCountPositiveTitles: 3}, false, 1},
 		{"level 2 with rows", map[string]int{"favorited": 3, signalCountPositiveTitles: 3}, true, 0},
+		// Every interest turned away: the main row was built, empty.
+		{"main row cached empty", map[string]int{"favorited": 3, signalCountPositiveTitles: 3}, true, 0},
 		{"watchlist only with rows", map[string]int{"watchlist": 2, signalCountPositiveTitles: 0}, true, 0},
 		{"only negative signals", map[string]int{"rated_low": 1, "watch_low": 2, signalCountPositiveTitles: 0}, false, 0},
 		{"only 3-star ratings", map[string]int{"rated_3": 2, signalCountPositiveTitles: 0}, false, 0},
@@ -455,7 +457,11 @@ func TestForYouPageAsksForMissingRowsOnlyWithPositiveSignals(t *testing.T) {
 				global: map[string][]ScoredItem{RecTypePopular: {{MediaItemID: "popular"}}},
 			}
 			if tc.rowsCached {
-				repo.personal = map[string][]ScoredItem{RecTypeForYouMain + "|": {{MediaItemID: "personal-main"}}}
+				main := []ScoredItem{{MediaItemID: "personal-main"}}
+				if tc.name == "main row cached empty" {
+					main = []ScoredItem{}
+				}
+				repo.personal = map[string][]ScoredItem{RecTypeForYouMain + "|": main}
 			}
 			refresher := &countingReadRefresher{}
 			r := &Reader{repo: repo, refresh: refresher, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
@@ -562,6 +568,22 @@ func TestAnchorItemIDsPassOverDislikedCompletions(t *testing.T) {
 				t.Fatalf("anchors = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A title the profile marked Not interested never anchors, however it was
+// rated.
+func TestAnchorItemIDsPassOverMarkedCompletions(t *testing.T) {
+	signals := NewSignalReader(&fakeSignalRepo{
+		fallbackRecentCompleted: []string{"marked", "liked", "next", "later"},
+		fallbackMarks:           []NotInterestedMark{{MediaItemID: "marked"}},
+	}, nil)
+	got, err := anchorItemIDs(t.Context(), signals, fakeItemRatings{"marked": 5}, 7, "p1", BecauseYouWatchedAnchors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"liked", "next", "later"}; !slices.Equal(got, want) {
+		t.Fatalf("anchors = %v, want %v", got, want)
 	}
 }
 

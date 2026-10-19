@@ -94,8 +94,6 @@ var SensitiveSettingKeys = map[string]bool{
 
 	// Watch-sync OAuth client credentials. The client_id entries are low-value
 	// but kept as a harmless safe superset and to match existing redaction.
-	"watchsync.trakt.client_id":     true,
-	"watchsync.trakt.client_secret": true,
 	"watchsync.simkl.client_id":     true,
 	"watchsync.simkl.client_secret": true,
 

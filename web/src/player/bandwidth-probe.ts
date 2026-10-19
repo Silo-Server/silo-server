@@ -43,7 +43,6 @@ const MAX_ESTIMATE_KBPS = 1_000_000;
  */
 export interface NetworkInformationLike {
   saveData?: boolean;
-  downlink?: number;
   type?: string;
 }
 

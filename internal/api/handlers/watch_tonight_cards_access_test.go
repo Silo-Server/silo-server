@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -73,7 +74,7 @@ func TestSwipeCardsSkipADroppedCandidateWithoutShiftingCast(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cards, more := h.swipeCards(t.Context(), candidates, enriched, 3)
+	cards, more := h.swipeCards(t.Context(), candidates, enriched, 3, imagesize.Request{})
 	var got []string
 	for _, card := range cards {
 		if len(card.Cast) != 1 || card.Cast[0].Name != card.ContentID+"-actor" {
@@ -85,7 +86,7 @@ func TestSwipeCardsSkipADroppedCandidateWithoutShiftingCast(t *testing.T) {
 		t.Fatalf("cards = %v more=%v, want [a c d] and no more", got, more)
 	}
 
-	cards, more = h.swipeCards(t.Context(), candidates, enriched, 2)
+	cards, more = h.swipeCards(t.Context(), candidates, enriched, 2, imagesize.Request{})
 	if len(cards) != 2 || cards[1].ContentID != "c" || !more {
 		t.Fatalf("limit 2: %d cards, more=%v; want a and c with more", len(cards), more)
 	}

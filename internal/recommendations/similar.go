@@ -10,10 +10,22 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// SimilarItems returns items most similar to the given item. Blends embedding
-// similarity (70%) with co-watch Jaccard score (30%), applies a validation
-// pipeline, MMR re-ranking, and assigns connection reasons.
-func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+// SimilarItems returns items most similar to the given item for a profile.
+// Blends embedding similarity (70%) with co-watch Jaccard score (30%),
+// applies a validation pipeline, MMR re-ranking, and assigns connection
+// reasons. Titles the profile marked Not interested are left out before
+// ranking, so they do not take the list's places.
+func (e *Engine) SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	marks, err := e.signalReader().NotInterestedMarks(ctx, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get not interested marks: %w", err)
+	}
+	excludeIDs := make([]string, 0, len(marks)+1)
+	excludeIDs = append(excludeIDs, itemID)
+	for _, m := range marks {
+		excludeIDs = append(excludeIDs, m.MediaItemID)
+	}
+
 	// 1. Fetch source embedding.
 	embedding, err := e.repo.GetEmbedding(ctx, itemID)
 	if err != nil {
@@ -38,7 +50,7 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, fil
 	// Similar rail (and vice versa) once audiobook embeddings exist. Titles
 	// the viewer cannot see are left out before ranking, so they do not take
 	// the list's places.
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3, filter)
+	embCandidates, err := e.repo.FindSimilar(ctx, embedding, excludeIDs, sourceType, limit*3, filter)
 	if err != nil {
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}
@@ -56,8 +68,16 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, fil
 		cowatchMap = map[string]float64{}
 	}
 
-	// 5. Blend scores (70% embedding, 30% co-watch).
+	// 5. Blend scores (70% embedding, 30% co-watch), leaving out the marked
+	// titles co-watch brought in.
 	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
+	if len(marks) > 0 {
+		marked := make(map[string]struct{}, len(marks))
+		for _, m := range marks {
+			marked[m.MediaItemID] = struct{}{}
+		}
+		blended = excludeScoredItems(blended, marked)
+	}
 
 	// 6. Validation pipeline.
 	if sourceMeta != nil && len(blended) > 0 {
@@ -105,6 +125,9 @@ func (e *Engine) applyValidation(ctx context.Context, sourceMeta *ItemMetadata, 
 			if rows.Scan(&id, &title, &year) == nil {
 				candTitles[id] = titleYear{title: title, year: year}
 			}
+		}
+		if err := rows.Err(); err != nil {
+			slog.WarnContext(ctx, "reading candidate titles failed; validating without them", "component", "recommendations", "error", err)
 		}
 	}
 
@@ -191,6 +214,9 @@ func (e *Engine) assignReasons(ctx context.Context, sourceItemID string, sourceM
 			if rows.Scan(&id, &studios) == nil {
 				candStudios[id] = studios
 			}
+		}
+		if err := rows.Err(); err != nil {
+			slog.WarnContext(ctx, "reading candidate studios failed; assigning reasons without them", "component", "recommendations", "error", err)
 		}
 	}
 

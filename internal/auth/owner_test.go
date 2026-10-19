@@ -327,6 +327,9 @@ func requireOwner(t *testing.T, r *UserRepository, id int) {
 		}
 		owners = append(owners, owner)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if len(owners) != 1 || owners[0] != id {
 		t.Fatalf("owners = %v, want [%d]", owners, id)
 	}

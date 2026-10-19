@@ -88,6 +88,7 @@ func registerOrderedApplePush(reg *Registry) {
 		identity := evt.SocketIdentity{UserID: user, ProfileID: profile, SessionID: claims.SessionID, Role: claims.Role, ImpersonatorUserID: claims.ImpersonatorUserID, AccessExpiresAt: claims.ExpiresAt.Time}
 		if r := requestFrom(ctx); r != nil {
 			identity.ProfileToken = r.Header.Get("X-Profile-Token")
+			identity.DeviceID = socketDeviceID(r)
 		}
 		receipt, token, expiry, err := reg.deps.OrderedApplePush.RegisterApplePush(ctx, cmd, identity)
 		if err != nil {

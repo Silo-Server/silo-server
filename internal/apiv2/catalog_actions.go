@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
 )
@@ -376,7 +377,7 @@ func (reg *Registry) translateCatalogItemDescription(ctx context.Context, in *Tr
 	if userID != 0 {
 		requestedBy = &userID
 	}
-	viewer, p := reg.itemViewer(ctx, "", "", "")
+	viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 	if p != nil {
 		return nil, p
 	}

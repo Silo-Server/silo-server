@@ -55,8 +55,7 @@ export function useNextEpisode(
         clearInterval(countdownRef.current);
         countdownRef.current = null;
       }
-      // The playback position ends the timer and its overlay together.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the playback position ends the timer and its overlay together
       if (showCountdown) setShowCountdown(false);
       return;
     }

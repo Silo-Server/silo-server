@@ -125,7 +125,7 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 		language := subtitles.NormalizeProviderLanguage("subdl", rawLanguage)
 		format := detectFormat(s.ReleaseName)
 		result := subtitles.SubtitleResult{
-			ID:              s.URL, // relative download path
+			ID:              resultID(s.URL),
 			Provider:        "subdl",
 			Language:        language,
 			ReleaseName:     s.ReleaseName,

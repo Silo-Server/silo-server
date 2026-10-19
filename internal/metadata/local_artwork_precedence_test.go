@@ -160,6 +160,8 @@ func TestMergeAndPersistKeepsCachedLocalArtworkUntilSidecarIsGone(t *testing.T) 
 			t.Run(fmt.Sprintf("mode %d/%s", mode, tc.name), func(t *testing.T) {
 				localSource := "file://" + tc.layout(t, t.TempDir()) + "?v=12-1"
 				h := newTestHarness()
+				h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
+				h.service.SetAutoCacheImages(true)
 				ctx := withLocalArtworkSearched(context.Background(), localArtworkItem)
 				if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
 					ContentID:        contentID,

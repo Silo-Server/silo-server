@@ -32,6 +32,7 @@ import { useSubtitleSyncFeedback } from "../hooks/useSubtitleSyncFeedback";
 import { syncKeyOf } from "../utils/subtitleSync";
 import { SubtitleSyncIndicator } from "./SubtitleSyncIndicator";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
+import { useSubtitleDelay } from "../hooks/useSubtitleDelay";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
@@ -593,12 +594,9 @@ export function VideoPlayer({
   );
   const lastSubtitleIndexRef = useRef<number | null>(null);
   const subtitleSelectionWasManualRef = useRef(false);
-  // Per-session subtitle delay in ms. Positive = show later. Reset when the
-  // underlying file changes so sync adjustments don't carry across media.
-  const [subtitleDelayMs, setSubtitleDelayMs] = useState(0);
-  useEffect(() => {
-    setSubtitleDelayMs(0);
-  }, [activeFileId]);
+  // Subtitle delay in ms; positive shows later. It is the profile's timing
+  // offset, so a change here follows the profile to every device.
+  const [subtitleDelayMs, setSubtitleDelayMs] = useSubtitleDelay();
 
   // -- Live AI subtitle translation (streamed over the realtime websocket) --
   // While a translation runs, a synthetic "live" track is added to the list and
@@ -924,15 +922,15 @@ export function VideoPlayer({
   // Read by timers that must use the newest clock estimate without restarting.
   const serverTimeOffsetRef = useRef(watchTogether.serverTimeOffsetMs);
   serverTimeOffsetRef.current = watchTogether.serverTimeOffsetMs;
-  // The browser decode engine's audio follows playbackRate without keeping
-  // pitch, so room sync corrects it by seeking instead of nudging.
+  // Room sync corrects the browser decode engine by seeking. Its audio keeps
+  // pitch at other rates too, but rate nudges have not been checked against
+  // room drift on it, so it keeps the seek path it had when they could not.
   const roomRateCapableRef = useRef(!browserEngineActive);
   roomRateCapableRef.current = !browserEngineActive;
   // The viewer's speed for this player session. A room plays everyone at 1x
-  // and nudges the rate itself to keep viewers together. The browser engine
-  // also plays at 1x: its audio follows the rate without keeping pitch.
+  // and nudges the rate itself to keep viewers together.
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const baseRate = roomPlaybackActive || browserEngineActive ? 1 : playbackSpeed;
+  const baseRate = roomPlaybackActive ? 1 : playbackSpeed;
   const roomSyncWaiting = watchTogether.room?.playback_state === "waiting";
   // Media events acknowledge readiness while the room waits and while this
   // viewer recovers from a stall the room did not wait for.
@@ -3950,8 +3948,8 @@ export function VideoPlayer({
   // Continuous drift loop: while the room and this viewer both play, absorb
   // drift from the room reference with a rate nudge. It never seeks a player
   // that can nudge; drift too large for a nudge is the server's to correct,
-  // and that correction arrives as a command. A player without pitch-kept
-  // rate changes seeks within reach instead. Around a command (scheduled,
+  // and that correction arrives as a command. A player room sync does not
+  // nudge seeks within reach instead. Around a command (scheduled,
   // just executed, or loading media) the loop only waits, before looking at
   // the room state: the snapshot that announces a command can arrive before
   // it executes, and a received command must not change the rate. Otherwise,
@@ -4122,9 +4120,10 @@ export function VideoPlayer({
     lastTransportErrorAtRef.current = 0;
   }, [planRevision]);
 
-  // Auto quality chose this stream from an estimate taken before playback. When
-  // the link proves slower, record what it could not sustain and replan Auto,
-  // which reads that lower estimate. Rooms have their own lower-quality offer.
+  // Auto plays the source unless a measured estimate says the link cannot
+  // carry it. When the link proves slower, record what it could not sustain
+  // and replan Auto, which reads that lower estimate. Rooms have their own
+  // lower-quality offer.
   useAutoQualityDownshift({
     videoRef,
     // Buffering while the session reconnects is the outage, not a slow link.
@@ -4165,18 +4164,18 @@ export function VideoPlayer({
   }, [activeQualityId, sessionId, watchTogetherRoomId]);
 
   const lowerQualityChoiceRef = useRef(() =>
-    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe),
+    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source),
   );
   useEffect(() => {
     lowerQualityChoiceRef.current = () =>
-      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe);
+      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source);
     // A replan can leave no lower rung; an offer that cannot act is withdrawn.
     if (!lowerQualityChoiceRef.current()) {
       setNotice((current) =>
         current?.actionLabel === LOWER_QUALITY_ACTION_LABEL ? null : current,
       );
     }
-  }, [activeQualityId, plan.effective_recipe, qualityOptions]);
+  }, [activeQualityId, plan.effective_recipe, plan.source, qualityOptions]);
 
   // A viewer who keeps stalling in a room cannot keep up at this quality.
   // Offer one step down, once per quality; the room's shared source is kept.
@@ -4186,7 +4185,7 @@ export function VideoPlayer({
     const recent = roomStallTimesRef.current.filter((at) => now - at < ROOM_STALL_WINDOW_MS);
     roomStallTimesRef.current = recent;
     if (recent.length < ROOM_STALLS_BEFORE_LOWER_QUALITY) return;
-    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe)) {
+    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source)) {
       return;
     }
     lowerQualityOfferedRef.current = true;
@@ -4204,6 +4203,7 @@ export function VideoPlayer({
   }, [
     activeQualityId,
     plan.effective_recipe,
+    plan.source,
     qualityOptions,
     roomStallSignal,
     showWatchTogetherNotice,
@@ -4926,6 +4926,7 @@ export function VideoPlayer({
           qualityOptions={qualityOptions}
           activeQualityId={activeQualityId}
           deliveredRecipe={plan.effective_recipe}
+          playbackSource={plan.source}
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={handleQualitySelect}
@@ -4948,9 +4949,7 @@ export function VideoPlayer({
               : undefined
           }
           playbackSpeed={playbackSpeed}
-          onPlaybackSpeedChange={
-            roomPlaybackActive || browserEngineActive ? undefined : setPlaybackSpeed
-          }
+          onPlaybackSpeedChange={roomPlaybackActive ? undefined : setPlaybackSpeed}
           onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
           onPlayPause={handlePlayPause}
           onSeek={handlePlayerSeek}

@@ -22,6 +22,7 @@ import (
 	"github.com/h2non/bimg"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -462,7 +463,7 @@ func TestCacheUploadsOnlyMissingVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prime immutable variants: %v", err)
 	}
-	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"])
+	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w1000"], first.VariantPaths["w500"])
 	s3.resetCalls()
 	result, err := c.Cache(context.Background(), req)
 	if err != nil {
@@ -500,11 +501,11 @@ func TestCache_Backdrop(t *testing.T) {
 	}
 
 	keys := s3.keys()
-	// Expect 4 variants: original, w1920, w1280, w300
-	if len(keys) != 4 {
-		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
+	// Expect 5 variants: original, w2560, w1920, w1280, w300
+	if len(keys) != 5 {
+		t.Errorf("expected 5 uploaded variants, got %d: %v", len(keys), keys)
 	}
-	for _, variant := range []string{"original", "w1920", "w1280", "w300"} {
+	for _, variant := range []string{"original", "w2560", "w1920", "w1280", "w300"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
@@ -555,7 +556,7 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 }
 
 func TestCache_CapsLargeOriginalVariant(t *testing.T) {
-	pngData := makeTestPNG(t, 2600, 900)
+	pngData := makeTestPNG(t, 4200, 900)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(pngData)
@@ -583,8 +584,8 @@ func TestCache_CapsLargeOriginalVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading original.webp size: %v", err)
 	}
-	if size.Width > 1920 {
-		t.Fatalf("original.webp width = %d, want <= 1920", size.Width)
+	if size.Width != imageutil.MaxCachedOriginalDimension {
+		t.Fatalf("original.webp width = %d, want %d", size.Width, imageutil.MaxCachedOriginalDimension)
 	}
 	if len(original) >= 10*1024*1024 {
 		t.Fatalf("original.webp size = %d bytes, want < 10 MiB", len(original))
@@ -850,7 +851,7 @@ func TestCache_ResolvesPluginURL(t *testing.T) {
 	if len(keys) != 4 {
 		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
 	}
-	for _, variant := range []string{"original", "w780", "w500", "w300"} {
+	for _, variant := range []string{"original", "w1000", "w500", "w300"} {
 		if want := result.VariantPaths[variant]; !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}

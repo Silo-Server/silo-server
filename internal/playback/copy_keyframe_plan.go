@@ -57,7 +57,7 @@ var probeInputStart = func(ctx context.Context, opts TranscodeOpts) (float64, er
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	ffprobe := mediaprobe.FFprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath))
-	out, err := exec.CommandContext(ctx, ffprobe, "-v", "error",
+	out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", //nolint:gosec // G204: the configured ffprobe with fixed flags and the media path, no shell.
 		"-show_entries", "format=start_time", "-of", "default=noprint_wrappers=1:nokey=1",
 		opts.InputPath).Output()
 	if err != nil {
@@ -257,7 +257,7 @@ func writeCopyPlanRecord(path string, plan *copySegmentPlan) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o644); err != nil { //nolint:gosec // G306: the plan record sits in the session's output directory, readable like its segments.
 		return err
 	}
 	return os.Rename(tmp, path)

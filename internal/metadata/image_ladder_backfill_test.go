@@ -233,8 +233,9 @@ func TestLadderRungLiteralMatchesBothKeyForms(t *testing.T) {
 		imageType string
 		want      string
 	}{
-		{ImageCacheImagePoster, "'%/w780.%'"},
-		{ImageCacheImageStill, "'%/w780.%'"},
+		{ImageCacheImagePoster, "'%/w1000.%'"},
+		{ImageCacheImageStill, "'%/w1280.%'"},
+		{ImageCacheImageBackdrop, "'%/w2560.%'"},
 		{ImageCacheImageLogo, "'%/w1280.%'"},
 	}
 	for _, tt := range tests {

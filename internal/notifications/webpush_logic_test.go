@@ -18,10 +18,10 @@ func TestBuildWebPushPayload(t *testing.T) {
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Title != "The latest episode of Severance S02E01 just dropped!" {
+		if payload.Title != "Severance" {
 			t.Fatalf("unexpected title %q", payload.Title)
 		}
-		if payload.Body != "Hello, Ms. Cobel" {
+		if payload.Body != "New episode · S02E01 · Hello, Ms. Cobel" {
 			t.Fatalf("unexpected body %q", payload.Body)
 		}
 		if payload.URL != "/item/episode-456" {
@@ -102,12 +102,48 @@ func TestBuildNotificationDisplay(t *testing.T) {
 	t.Run("episode available", func(t *testing.T) {
 		display := BuildNotificationDisplay(webhookTestRow())
 		if display.DeliveryID != "01DELIVERY" ||
-			display.Title != "The latest episode of Severance S02E01 just dropped!" ||
-			display.Body != "Hello, Ms. Cobel" ||
+			display.Title != "Severance" ||
+			display.Body != "New episode · S02E01 · Hello, Ms. Cobel" ||
 			display.ThreadID != "series:series-123" ||
 			display.Category != "episode_available" ||
 			display.URL != "/item/episode-456" {
 			t.Fatalf("display = %+v", display)
+		}
+	})
+
+	t.Run("episode body drops placeholder titles and missing parts", func(t *testing.T) {
+		season, episode := 10, 1
+		cases := []struct {
+			name      string
+			row       DeliveryRow
+			wantTitle string
+			wantBody  string
+		}{
+			{
+				name:      "placeholder episode title",
+				row:       DeliveryRow{SeriesTitle: "9-1-1", EpisodeTitle: "TBA", SeasonNumber: &season, EpisodeNumber: &episode},
+				wantTitle: "9-1-1",
+				wantBody:  "New episode · S10E01",
+			},
+			{
+				name:      "no episode numbers",
+				row:       DeliveryRow{SeriesTitle: "9-1-1", EpisodeTitle: "Pilot"},
+				wantTitle: "9-1-1",
+				wantBody:  "New episode · Pilot",
+			},
+			{
+				name:      "no series title",
+				row:       DeliveryRow{EpisodeTitle: "Pilot", SeasonNumber: &season, EpisodeNumber: &episode},
+				wantTitle: "New episode available",
+				wantBody:  "S10E01 · Pilot",
+			},
+		}
+		for _, tc := range cases {
+			tc.row.Type = DeliveryTypeEpisodeAvailable
+			display := BuildNotificationDisplay(tc.row)
+			if display.Title != tc.wantTitle || display.Body != tc.wantBody {
+				t.Errorf("%s: title %q body %q, want %q / %q", tc.name, display.Title, display.Body, tc.wantTitle, tc.wantBody)
+			}
 		}
 	})
 

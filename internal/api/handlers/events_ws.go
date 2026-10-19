@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -86,6 +88,9 @@ type EventsHandler struct {
 	// periodic login-session check; see SetSessionRoles.
 	sessionRoles         sessionRoleChecker
 	sessionCheckInterval time.Duration
+	// profiles re-verifies the PIN proof of the profile a connection holding
+	// the admin channels acts as; see SetProfileVerifier.
+	profiles apimw.ViewerResolver
 }
 
 // sessionRoleChecker reports whether a login session is still active and its
@@ -102,6 +107,16 @@ type sessionRoleChecker interface {
 func (h *EventsHandler) SetSessionRoles(sessions sessionRoleChecker) {
 	if h != nil {
 		h.sessionRoles = sessions
+	}
+}
+
+// SetProfileVerifier makes the v1 events socket re-verify, at the handshake
+// and on every session check, the PIN proof of the profile a connection on an
+// admin account acts as, so changing that profile's PIN takes the admin
+// channels away as it does on the v2 socket.
+func (h *EventsHandler) SetProfileVerifier(profiles apimw.ViewerResolver) {
+	if h != nil {
+		h.profiles = profiles
 	}
 }
 
@@ -149,11 +164,11 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	// identity arrives as a short-lived single-use ticket minted via
 	// POST /events/ws-ticket. A connection without a ticket stays unbound and
 	// simply cannot subscribe to the profile-scoped notifications channel.
-	boundProfileID := ""
+	var bound notifications.Ticket
 	if ticket := r.URL.Query().Get("ticket"); ticket != "" && h.notifications != nil {
-		ticketUserID, ticketProfileID, ok := h.notifications.Tickets.Consume(r.Context(), ticket)
-		if ok && ticketUserID == claims.UserID {
-			boundProfileID = ticketProfileID
+		binding, ok := h.notifications.Tickets.Consume(r.Context(), ticket)
+		if ok && binding.UserID == claims.UserID {
+			bound = binding
 		} else {
 			// Expired, reused, consumed on a different node, or minted for
 			// another user: degrade to an unbound connection instead of
@@ -172,15 +187,20 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	// Admin channels and other accounts' events follow the acting profile, as
 	// on the v2 socket: another profile on an admin's account connects with
 	// the user role. A handshake that declares no profile acts as the profile
-	// its ticket was minted for, which the viewer gate verified then. The
-	// session check below still compares the account's real role.
+	// its ticket was minted for, which the viewer gate verified then. Either
+	// way the profile's PIN proof is re-verified here and on every session
+	// check. The session check below still compares the account's real role.
+	boundProfileID := bound.ProfileID
 	effective := claims
 	var stillActingAdmin func(context.Context) (bool, error)
 	if claims.Role == models.RoleAdmin {
 		stillActingAdmin = apimw.ActingAdmin
-		if apimw.GetProfileID(r.Context()) == "" && boundProfileID != "" {
+		actingProfileID, profileToken := apimw.GetProfileID(r.Context()), r.Header.Get("X-Profile-Token")
+		if actingProfileID == "" && boundProfileID != "" {
+			actingProfileID, profileToken = boundProfileID, bound.ProfileToken
 			stillActingAdmin = func(ctx context.Context) (bool, error) { return apimw.ActingAdminAs(ctx, boundProfileID) }
 		}
+		stillActingAdmin = h.withProfileProof(stillActingAdmin, claims, actingProfileID, profileToken)
 		actingAdmin, err := stillActingAdmin(r.Context())
 		if err != nil {
 			http.Error(w, "failed to verify active profile", http.StatusInternalServerError)
@@ -203,11 +223,42 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	h.serveWebSocket(w, r, effective, boundProfileID, wsUpgrader, nil)
 }
 
+// withProfileProof narrows decide to while profileID's PIN proof still
+// verifies for the connection's login session. The proof is bound to the
+// profile's PIN revision, so a PIN change, or a PIN newly set on the profile,
+// ends it. With no verifier wired, or no profile, decide is returned as is.
+func (h *EventsHandler) withProfileProof(decide func(context.Context) (bool, error), claims *auth.Claims, profileID, profileToken string) func(context.Context) (bool, error) {
+	if h.profiles == nil || profileID == "" {
+		return decide
+	}
+	input := access.ResolveInput{
+		UserID:       claims.UserID,
+		SessionID:    claims.SessionID,
+		ProfileID:    profileID,
+		ProfileToken: profileToken,
+		// API keys carry no PIN proof by design, as at the viewer gate.
+		SkipPINVerification: claims.TokenType == auth.TokenTypeAPIKey,
+	}
+	return func(ctx context.Context) (bool, error) {
+		scope, err := h.profiles.Resolve(ctx, input)
+		if errors.Is(err, access.ErrProfileUnverified) || errors.Is(err, access.ErrProfileNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if !scope.ProfileVerified {
+			return false, nil
+		}
+		return decide(ctx)
+	}
+}
+
 // closeOnSessionChange cancels a v1 connection once its login session is no
 // longer active or the account's role differs from the access token's, and,
 // for a connection holding the admin channels, once stillActingAdmin stops
-// holding (say the household gained a PIN). A failed check is skipped; the
-// next one decides.
+// holding (say the household gained a PIN, or the acting profile's PIN
+// changed). A failed check is skipped; the next one decides.
 func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context.CancelFunc, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) {
 	interval := h.sessionCheckInterval
 	if interval <= 0 {
@@ -722,7 +773,7 @@ func (h *EventsHandler) snapshotForChannel(
 		if h == nil || h.notifications == nil || boundProfileID == "" {
 			return json.RawMessage("[]"), nil
 		}
-		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), boundProfileID, 25)
+		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), claims.UserID, boundProfileID, 25)
 		if err != nil {
 			return nil, err
 		}

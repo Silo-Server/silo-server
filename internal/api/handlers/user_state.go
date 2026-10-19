@@ -12,6 +12,8 @@ type itemUserStateResponse struct {
 	Played      bool `json:"played"`
 	IsFavorite  bool `json:"is_favorite"`
 	InWatchlist bool `json:"in_watchlist"`
+	// NotInterested is served by v2 only; the frozen v1 shape leaves it out.
+	NotInterested bool `json:"-"`
 }
 
 type itemUserStateOptions struct {
@@ -77,6 +79,10 @@ func resolveItemUserStatesWithOptions(
 		return nil, err
 	}
 	watchlistMap, err := store.ListWatchlistByMediaItems(ctx, profileID, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	notInterestedMap, err := store.ListNotInterestedByMediaItems(ctx, profileID, contentIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -154,8 +160,9 @@ func resolveItemUserStatesWithOptions(
 			continue
 		}
 		state := &itemUserStateResponse{
-			IsFavorite:  favoriteMap[item.ContentID],
-			InWatchlist: watchlistMap[item.ContentID],
+			IsFavorite:    favoriteMap[item.ContentID],
+			InWatchlist:   watchlistMap[item.ContentID],
+			NotInterested: notInterestedMap[item.ContentID],
 		}
 		switch item.Type {
 		case "series":

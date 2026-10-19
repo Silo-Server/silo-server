@@ -645,7 +645,7 @@ func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) er
 	if err == nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if purgeErr := s.system.PurgeProfile(purgeCtx, id); purgeErr != nil {
+		if purgeErr := s.system.PurgeProfile(purgeCtx, s.userID, id); purgeErr != nil {
 			slog.WarnContext(ctx, "notifications: profile purge failed", "component", "notifications", "profile_id", id, "error", purgeErr)
 		}
 	}

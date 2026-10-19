@@ -65,6 +65,7 @@ func TestSQLiteProgressPage(t *testing.T) {
 func TestSQLitePersonalListPage(t *testing.T) {
 	storetest.RunPersonalListPage(t, newConformanceStore)
 	storetest.RunPersonalListMembership(t, newConformanceStore)
+	storetest.RunNotInterested(t, newConformanceStore)
 }
 
 func TestSQLiteHistoryEntryOnce(t *testing.T) {

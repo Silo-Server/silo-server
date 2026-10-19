@@ -1,2 +1,9 @@
 # v1 scope lock — changes to the lock artifact require maintainer review
 /docs/architecture/v1-scope.md @Quick104
+
+# Lint configuration and protected contract files require maintainer review.
+/.golangci*.yml @Quick104
+/.github/actionlint.yaml @Quick104
+/.shellcheckrc @Quick104
+/web/eslint.config.js @Quick104
+/web/eslint-suppressions.json @Quick104

@@ -992,9 +992,6 @@ func (s *Scanner) scanPaths(
 		Unchanged:       result.Unchanged,
 		Errors:          result.Errors,
 	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
 
 	// If the scan was cancelled, return partial results without marking
 	// files as missing or deleting records — that would corrupt state.

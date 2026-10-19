@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -94,8 +95,12 @@ func TestHandleApplePushDisplayDB(t *testing.T) {
 	router := chi.NewRouter()
 	router.Get("/notifications/push/apple/display/{delivery_id}", handler.HandleApplePushDisplay)
 
-	req := httptest.NewRequest(http.MethodGet, "/notifications/push/apple/display/delivery-1", nil)
-	req = req.WithContext(apimw.SetProfileID(req.Context(), "profile-1"))
+	asProfile := func(userID int, profileID string) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/notifications/push/apple/display/delivery-1", nil)
+		ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: userID})
+		return req.WithContext(apimw.SetProfileID(ctx, profileID))
+	}
+	req := asProfile(42, "profile-1")
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -110,28 +115,35 @@ func TestHandleApplePushDisplayDB(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	if response.DeliveryID != "delivery-1" ||
-		response.Title != "The latest episode of Severance S02E01 just dropped!" ||
-		response.Body != "Hello, Ms. Cobel" ||
+		response.Title != "Severance" ||
+		response.Body != "New episode · S02E01 · Hello, Ms. Cobel" ||
 		response.ThreadID != "series:series-1" ||
 		response.Category != "episode_available" ||
 		response.URL != "/item/episode-1" {
 		t.Fatalf("response = %+v", response)
 	}
 
-	view, err := handler.NotificationPushDisplay(t.Context(), "profile-1", "delivery-1")
+	view, err := handler.NotificationPushDisplay(t.Context(), 42, "profile-1", "delivery-1")
 	if err != nil || view != response {
 		t.Fatalf("v2 service differs from bridge: %+v, %v", view, err)
 	}
-	if _, err := handler.NotificationPushDisplay(t.Context(), "other-profile", "delivery-1"); err == nil {
+	if _, err := handler.NotificationPushDisplay(t.Context(), 42, "other-profile", "delivery-1"); err == nil {
 		t.Fatal("v2 display admitted another profile")
 	}
+	// A profile with the same ID on another account does not see the row.
+	if _, err := handler.NotificationPushDisplay(t.Context(), 7, "profile-1", "delivery-1"); err == nil {
+		t.Fatal("v2 display admitted another account's profile")
+	}
 
-	req = httptest.NewRequest(http.MethodGet, "/notifications/push/apple/display/delivery-1", nil)
-	req = req.WithContext(apimw.SetProfileID(req.Context(), "other-profile"))
-	rr = httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("cross-profile status = %d, body = %s", rr.Code, rr.Body.String())
+	for _, viewer := range []struct {
+		userID  int
+		profile string
+	}{{42, "other-profile"}, {7, "profile-1"}} {
+		rr = httptest.NewRecorder()
+		router.ServeHTTP(rr, asProfile(viewer.userID, viewer.profile))
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("display for %d/%s status = %d, body = %s", viewer.userID, viewer.profile, rr.Code, rr.Body.String())
+		}
 	}
 	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("cross-profile Cache-Control = %q", got)

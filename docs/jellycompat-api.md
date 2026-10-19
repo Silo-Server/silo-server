@@ -154,7 +154,10 @@ When `Limit` is omitted, episode listings on this route and series/season
 `/Items?ParentId=` requests use a 1,000-row page. Explicit limits retain their
 requested page size, subject to the 1,000-row cap; `Limit=0` requests only the
 count. Longer lists still require paging using `TotalRecordCount` and
-`StartIndex`. Other `/Items` browsing retains the 24-row default.
+`StartIndex`. An `/Items?Ids=` request without `Limit` returns every named
+item the viewer can see, as in Jellyfin. When it names no collection and also
+filters, searches, or sorts, that list is capped at 1,000 rows. Other `/Items`
+browsing retains the 24-row default.
 
 `/Items?ParentId={boxSetId}` lists a collection's members (movies, series, and
 the episodes of episode-scoped smart collections) in collection order unless
@@ -194,7 +197,11 @@ carry none of the three. Similar and Suggestions ignore `Fields`.
 
 Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
 as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
-See [dropped-shows.md](architecture/dropped-shows.md).
+See [dropped-shows.md](architecture/dropped-shows.md). It orders series as
+Silo's Home does: by when the profile finished the previous episode, the order
+Jellyfin uses. A profile that turns on `ui.next_up_new_releases_first` instead
+gets a caught-up series back at the front when its next episode is released to
+the server. `nextUpDateCutoff` still filters on last played.
 
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,

@@ -924,7 +924,7 @@ func TestMeilisearchProviderFallsBackWhenScopedIndexCannotSatisfyRequest(t *test
 
 func TestMeilisearchProviderAllowsUnscopedIndexForAnyRequest(t *testing.T) {
 	provider := &MeilisearchSearchProvider{}
-	for _, itemTypes := range [][]string{nil, []string{"movie"}, []string{"audiobook", "ebook"}} {
+	for _, itemTypes := range [][]string{nil, {"movie"}, {"audiobook", "ebook"}} {
 		if !provider.indexCoversRequest(itemTypes) {
 			t.Fatalf("unscoped index should cover request %#v", itemTypes)
 		}

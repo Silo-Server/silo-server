@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -389,9 +390,16 @@ type Dependencies struct {
 	HomeSections HomeSectionService
 	// Recipes answers the section recipe gallery (*handlers.RecipeHandler).
 	Recipes RecipeService
+	// SeasonalThemes is the holiday catalog listSeasonalThemes serves; nil
+	// serves recipes.SeasonalThemes. Contract fixtures pass their own so the
+	// committed bodies name no real list hosts.
+	SeasonalThemes []recipes.SeasonalTheme
 	// PersonalLists reads and edits a profile's favorites
 	// (*handlers.PersonalDataHandler).
 	PersonalLists PersonalListService
+	// NotInterested reads and edits a profile's Not interested marks
+	// (*handlers.PersonalDataHandler).
+	NotInterested NotInterestedService
 	// WatchlistTitles keeps a profile's watchlist entries for titles the
 	// library doesn't have (*handlers.PersonalDataHandler).
 	WatchlistTitles WatchlistTitleService
@@ -1023,6 +1031,12 @@ type PersonalListService interface {
 	GetWatchlistEntry(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.WatchlistEntry, found bool, err error)
 	AddToWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
 	RemoveFromWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
+	// VisibleItemIDs reports which of the given catalog items the viewer
+	// may see, in one query.
+	VisibleItemIDs(ctx context.Context, viewer handlers.PersonalListViewer, ids []string) (map[string]bool, error)
+	// ResolveCards answers the cards of the given catalog items the viewer
+	// may see, in the order given.
+	ResolveCards(ctx context.Context, viewer handlers.PersonalListViewer, ids []string) ([]handlers.CollectionItemView, error)
 }
 
 // RatingService is the slice of *handlers.RatingsHandler the ratings

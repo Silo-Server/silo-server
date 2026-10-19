@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -586,7 +587,7 @@ func scanMediaItemLocalization(row pgx.Row) (*models.MediaItemLocalization, erro
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("scanning media item localization: %w", err)
@@ -608,7 +609,7 @@ func scanSeasonLocalization(row pgx.Row) (*models.SeasonLocalization, error) {
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("scanning season localization: %w", err)
@@ -627,7 +628,7 @@ func scanEpisodeLocalization(row pgx.Row) (*models.EpisodeLocalization, error) {
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("scanning episode localization: %w", err)

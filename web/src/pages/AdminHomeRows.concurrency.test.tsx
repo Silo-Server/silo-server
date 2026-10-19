@@ -570,7 +570,7 @@ describe("admin section captured snapshots", () => {
     rows[0]!.section_type = "collection";
     rows[0]!.config = {
       library_collection_id: "public",
-      source_provider: "trakt",
+      source_provider: "mdblist",
       source_preset: "popular",
       extra: { retained: true },
     };
@@ -583,7 +583,7 @@ describe("admin section captured snapshots", () => {
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]!.args.body?.config).toEqual({
       library_collection_id: "public",
-      source_provider: "trakt",
+      source_provider: "mdblist",
       source_preset: "popular",
       extra: { retained: true },
     });

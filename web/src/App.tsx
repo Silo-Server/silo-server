@@ -338,6 +338,7 @@ export function QueryCacheManager() {
     if (prevProfileId.current && prevProfileId.current !== profile?.id) {
       qc.removeQueries({ queryKey: ["favorites"] });
       qc.removeQueries({ queryKey: ["watchlist"] });
+      qc.removeQueries({ queryKey: ["notInterested"] });
       qc.removeQueries({ queryKey: ["history"] });
       qc.removeQueries({ queryKey: ["collections"] });
       qc.removeQueries({ queryKey: ["libraryPlaybackPreferences"] });

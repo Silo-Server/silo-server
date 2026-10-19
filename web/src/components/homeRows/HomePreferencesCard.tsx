@@ -23,6 +23,8 @@ export function HomePreferencesCard({
   nextUpChosen,
   onNextUpModeChange,
   onNextUpReset,
+  newReleasesFirst,
+  onNewReleasesFirstChange,
   hideWatched,
   onHideWatchedChange,
   disabled,
@@ -32,11 +34,14 @@ export function HomePreferencesCard({
   nextUpChosen: boolean;
   onNextUpModeChange: (mode: string) => void;
   onNextUpReset: () => void;
+  newReleasesFirst: boolean;
+  onNewReleasesFirstChange: (checked: boolean) => void;
   hideWatched: boolean;
   onHideWatchedChange: (checked: boolean) => void;
   disabled: boolean;
 }) {
   const nextUpId = useId();
+  const newReleasesFirstId = useId();
   const hideWatchedId = useId();
 
   return (
@@ -80,6 +85,27 @@ export function HomePreferencesCard({
             </Button>
           ) : null}
         </div>
+      </div>
+      <div className="flex items-center justify-between gap-4 py-5">
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={newReleasesFirstId} className="text-sm font-semibold">
+            Show new episodes first
+          </label>
+          <p
+            id={`${newReleasesFirstId}-help`}
+            className="text-muted-foreground text-[13px] leading-relaxed"
+          >
+            Move a show you&apos;re caught up on to the front of Continue Watching and Next Up when
+            a new episode or season arrives.
+          </p>
+        </div>
+        <Switch
+          id={newReleasesFirstId}
+          aria-describedby={`${newReleasesFirstId}-help`}
+          checked={newReleasesFirst}
+          disabled={disabled}
+          onCheckedChange={(next) => onNewReleasesFirstChange(next === true)}
+        />
       </div>
       <div className="flex items-center justify-between gap-4 py-5">
         <div className="min-w-0 space-y-1">

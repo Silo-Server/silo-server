@@ -7,11 +7,11 @@ import (
 )
 
 // TrendingDiscoverParams configures the trending_discover section: external
-// global trending pulled from a single source (TMDB or Trakt), mixing movies +
-// series in one list, matched to titles already in the library.
+// global trending pulled from TMDB, mixing movies + series in one list,
+// matched to titles already in the library.
 type TrendingDiscoverParams struct {
-	Source string `json:"source"` // "tmdb" | "trakt"
-	Window string `json:"window"` // "day" | "week" (TMDB only; ignored by Trakt)
+	Source string `json:"source"` // "tmdb"
+	Window string `json:"window"` // "day" | "week"
 }
 
 type trendingDiscoverRecipe struct{}
@@ -32,9 +32,9 @@ func (trendingDiscoverRecipe) Validate(raw json.RawMessage) error {
 		return err
 	}
 	switch p.Source {
-	case "", "tmdb", "trakt":
+	case "", "tmdb":
 	default:
-		return errors.New(`trending_discover: source must be "tmdb" or "trakt"`)
+		return errors.New(`trending_discover: source must be "tmdb"`)
 	}
 	switch p.Window {
 	case "", "day", "week":

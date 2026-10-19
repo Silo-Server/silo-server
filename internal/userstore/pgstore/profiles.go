@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -118,7 +119,7 @@ func getProfile(ctx context.Context, db preferenceSettingsExecutor, userID int, 
 		FROM user_profiles WHERE user_id = $1 AND id = $2`, userID, id)
 
 	p, err := scanProfile(row)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -339,6 +340,7 @@ var profileCascadeTables = []string{
 	// keep shaping other accounts' Similar Users rows, and its taste
 	// would be rebuilt every night.
 	"user_ratings",
+	"user_not_interested",
 	"user_taste_profiles",
 	"user_taste_clusters",
 	"recommendation_cache",
@@ -435,7 +437,7 @@ func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string
 		"SELECT pin_hash FROM user_profiles WHERE user_id = $1 AND id = $2",
 		s.userID, profileID,
 	).Scan(&pinHash)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("profile %s not found", profileID)
 	}
 	if err != nil {
@@ -446,7 +448,7 @@ func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if err == bcrypt.ErrMismatchedHashAndPassword {
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 		return false, nil
 	}
 	if err != nil {

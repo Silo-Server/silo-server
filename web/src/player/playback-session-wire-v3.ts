@@ -102,7 +102,6 @@ export interface StartRequestInput {
   progressPersistence?: ProgressPersistenceV3;
   explicitAudioTrackIndex?: number | null;
   subtitleTrackIndex?: number | null;
-  metered: boolean;
   bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
   clientCapabilities: ClientCodecCapabilitiesV3;
@@ -130,7 +129,6 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
     // The web player renders ASS with its own typesetting engine, so it asks
     // the server to keep authored fidelity rather than flatten it.
     subtitle_fidelity_preference: "preserve",
-    metered: input.metered,
     client_capabilities: input.clientCapabilities,
     client_playback_context: input.clientPlaybackContext,
     ...(input.forceStartPosition || input.position > 0
@@ -160,7 +158,6 @@ export interface ReplanRequestInput extends ReplanOptions {
   qualityPreference: string;
   attemptedPlanKeys: string[];
   attemptCount: number;
-  metered: boolean;
   bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
   clientCapabilities: ClientCodecCapabilitiesV3;
@@ -201,7 +198,6 @@ export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3
     attempt_count: input.attemptCount,
     quality_preference: input.qualityPreference,
     position_seconds: clampPosition(input.positionSeconds),
-    metered: input.metered,
     selected_tracks: selectedTracks,
     client_capabilities: input.clientCapabilities,
     client_playback_context: input.clientPlaybackContext,

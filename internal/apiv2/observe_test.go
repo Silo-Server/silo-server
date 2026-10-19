@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -207,15 +208,26 @@ func TestMethodLabelIsBounded(t *testing.T) {
 }
 
 // zeroCopyWriter stands in for net/http's response writer, whose ReadFrom is
-// the sendfile path, and records how many bytes arrived through it.
+// the sendfile path, and records how many bytes arrived through it. fromFile
+// counts the ones whose source sendfile could use: an *os.File, alone or under
+// one *io.LimitedReader.
 type zeroCopyWriter struct {
 	*httptest.ResponseRecorder
 	readFrom int64
+	fromFile int64
 }
 
 func (w *zeroCopyWriter) ReadFrom(src io.Reader) (int64, error) {
+	file := src
+	if limited, ok := src.(*io.LimitedReader); ok {
+		file = limited.R
+	}
+	_, isFile := file.(*os.File)
 	n, err := io.Copy(w.ResponseRecorder, src)
 	w.readFrom += n
+	if isFile {
+		w.fromFile += n
+	}
 	return n, err
 }
 

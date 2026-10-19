@@ -123,7 +123,7 @@ export function dropInactiveWatchDetail(
 export function removeItemFromHomeSectionCaches(
   queryClient: QueryClient,
   itemId: string,
-  sectionType?: string,
+  sectionType?: string | ReadonlySet<string>,
 ) {
   queryClient.setQueriesData<HomeSectionItemsResponse>(
     {
@@ -137,7 +137,11 @@ export function removeItemFromHomeSectionCaches(
       if (!current?.section) {
         return current;
       }
-      if (sectionType && current.section.section_type !== sectionType) {
+      if (
+        typeof sectionType === "string"
+          ? current.section.section_type !== sectionType
+          : sectionType && !sectionType.has(current.section.section_type)
+      ) {
         return current;
       }
       const nextItems = current.section.items.filter((item) => item.content_id !== itemId);

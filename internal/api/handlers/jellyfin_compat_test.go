@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -344,26 +343,18 @@ func TestPersistJellyfinCompatWebInstallSettingsEnablesWebUI(t *testing.T) {
 // asyncWebInstallRoot returns a temp dir for a handler that removes or installs
 // Jellyfin Web assets in a background goroutine.
 //
-// t.TempDir is wrong here: the endpoint returns 202 and its goroutine keeps
-// writing into the root after the test body returns, so t.TempDir's cleanup
-// trips "directory not empty" on an otherwise passing test.
-//
-// Removing the directory out from under a running goroutine only moves the
-// race, though: a write landing mid-traversal recreates a path RemoveAll has
-// already walked past, and the leftovers survive the run. The operation
-// records its own terminal state, so cleanup waits for that instead.
+// The endpoint returns 202 and its goroutine keeps writing into the root after
+// the test body returns. Removing the directory out from under it races: a
+// write landing mid-traversal recreates a path RemoveAll has already walked
+// past, which fails an otherwise passing test with "directory not empty" or
+// leaves files behind. The operation records its own terminal state, so a
+// cleanup waits for that first. It is registered after t.TempDir, and
+// cleanups run last registered first, so the wait always finishes before
+// t.TempDir removes the directory.
 func asyncWebInstallRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "jellyfin-web-root-*")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() {
-		waitForWebOperation(t, dir)
-		if err := os.RemoveAll(dir); err != nil {
-			t.Errorf("removing %s: %v", dir, err)
-		}
-	})
+	dir := t.TempDir()
+	t.Cleanup(func() { waitForWebOperation(t, dir) })
 	return dir
 }
 
