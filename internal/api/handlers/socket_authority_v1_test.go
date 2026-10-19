@@ -355,3 +355,52 @@ func TestSocketAuthorityV1RefusesEffectiveRoleChangedBeforeUpgrade(t *testing.T)
 		})
 	}
 }
+
+type terminalSocketRoomRepo struct {
+	watchtogether.RoomStore
+	err error
+}
+
+func (r terminalSocketRoomRepo) GetRoomByID(context.Context, string) (*watchtogether.Room, error) {
+	return nil, r.err
+}
+
+func TestV1RoomRetainsTerminalReconnectReason(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		reason string
+	}{{watchtogether.ErrRoomClosed, "ended"}, {watchtogether.ErrRoomNotFound, "not_found"}} {
+		t.Run(tc.reason, func(t *testing.T) {
+			f := newV1AuthorityFixture()
+			authority := f.monitor()
+			authority.checkInterval = time.Hour
+			service := watchtogether.NewService(terminalSocketRoomRepo{err: tc.err}, nil, nil, nil, nil, nil)
+			t.Cleanup(service.Close)
+			h := &WatchTogetherHandler{SocketAuthority: authority, Service: service, ScopeResolver: f}
+			mux := chi.NewRouter()
+			mux.Get("/rooms/{room_id}/ws", func(w http.ResponseWriter, r *http.Request) {
+				h.HandleRoomWebSocket(w, r.WithContext(apimw.SetClaims(r.Context(), apimw.GetClaims(v1SocketRequest(auth.TokenTypeAccess).Context()))))
+			})
+			server := httptest.NewServer(mux)
+			t.Cleanup(server.Close)
+			conn, resp, err := websocket.DefaultDialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"/rooms/room/ws?profile_id=profile", nil)
+			if resp != nil {
+				defer func() { _ = resp.Body.Close() }()
+			}
+			if err != nil {
+				t.Fatalf("terminal room reason replaced by handshake error: %v", err)
+			}
+			defer func() { _ = conn.Close() }()
+			if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			var frame map[string]string
+			if err := conn.ReadJSON(&frame); err != nil {
+				t.Fatal(err)
+			}
+			if frame["type"] != "room_closed" || frame["reason"] != tc.reason {
+				t.Fatalf("terminal frame = %v", frame)
+			}
+		})
+	}
+}

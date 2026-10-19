@@ -11,14 +11,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
-	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/websocket"
 )
 
 type WatchTogetherScopeResolver interface {
@@ -854,10 +855,9 @@ func (h *WatchTogetherHandler) HandleRoomWebSocket(w http.ResponseWriter, r *htt
 			return
 		}
 	}
-	r, cancel, err := h.SocketAuthority.bind(r, profileID, r.URL.Query().Get("profile_token"), watchtogether.RoomSocketMaxLifetime, proofExpiry, "", func(ctx context.Context) error {
-		_, err := h.Service.GetRoom(ctx, roomID)
-		return err
-	})
+	// The room service owns terminal room_closed frames, including reconnects
+	// to ended rooms. Only credential authority cancels the transport here.
+	r, cancel, err := h.SocketAuthority.bind(r, profileID, r.URL.Query().Get("profile_token"), watchtogether.RoomSocketMaxLifetime, proofExpiry, "", nil)
 	if err != nil {
 		http.Error(w, "room authority unavailable", http.StatusUnauthorized)
 		return

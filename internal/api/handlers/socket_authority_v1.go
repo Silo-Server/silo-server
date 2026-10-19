@@ -79,7 +79,7 @@ func (a *SocketAuthorityV1) validate(ctx context.Context, opening *auth.Claims, 
 
 // bind bounds every connection, including standalone handlers. The router
 // always supplies an authority validator; missing dependencies then refuse the
-// upgrade. extra repeats the surface's ownership/availability check.
+// upgrade. extra repeats the surface's ownership check.
 func (a *SocketAuthorityV1) bind(r *http.Request, profileID, profileToken string, lifetime time.Duration, proofExpiry time.Time, expectedRole string, extra func(context.Context) error) (*http.Request, context.CancelFunc, error) {
 	claims := apimw.GetClaims(r.Context())
 	deadline := time.Now().Add(lifetime)

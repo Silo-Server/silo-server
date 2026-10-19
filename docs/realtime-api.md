@@ -133,7 +133,8 @@ role or access-policy changes, loss of profile verification, or a failed authori
 read. API keys are rechecked by metadata ID and current owner; scoped keys cannot
 hold these sockets. Changes to presentation language alone do not close a socket.
 Playback control also rechecks that the playback session still belongs to the
-account; it does not require a profile header. Watch Together checks room availability.
+account; it does not require a profile header. Watch Together retains the room
+service's terminal `room_closed` messages.
 
 Each connection ends at access-token expiry or its maximum lifetime: five minutes
 for events, administrator logs and Watch Together, and four hours for playback
