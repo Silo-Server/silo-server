@@ -300,3 +300,5 @@
 ./internal/catalog TestCollectionCountServerDeadlineAndSessionIsolationDB
 ./internal/catalog TestCollectionCountNodeAndAccountLifetimeDB
 ./internal/catalog TestCollectionCountCanceledConnectionKeepsLeaseDB
+./internal/catalog TestCollectionCountMaximumStructureDB
+./internal/catalog TestCollectionCountManualAndSmartShareLedgerDB

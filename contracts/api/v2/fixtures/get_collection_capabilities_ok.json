@@ -1,5 +1,5 @@
 {
-  "revision": "6a87601d9e894507e052de99b434f0e5ab0aac86724c3801b517fef58c4d5aa2",
+  "revision": "a1ee36903f401bd893ac35adce1d2ef6cebfbb6f5e6820b261894daa451f9a66",
   "state": "available",
   "allowed": true,
   "groups": false,
@@ -43,5 +43,6 @@
   "sync_schedule_editable": false,
   "contains_item": true,
   "preview_posters": true,
+  "count_availability": false,
   "poster_collages": false
 }

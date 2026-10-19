@@ -21624,6 +21624,11 @@ export interface components {
        */
       contains_item: boolean;
       /**
+       * @description Collection responses include item_count_status. Ignore item_count when its status is not available; missing status on older servers means the count is usable
+       * @example true
+       */
+      count_availability: boolean;
+      /**
        * @description createCollection stores a description for the acting account
        * @example true
        */
@@ -24577,6 +24582,11 @@ export interface components {
        */
       item_count: number;
       /**
+       * @description available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible
+       * @example available
+       */
+      item_count_status: string;
+      /**
        * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
        * @example false
        */
@@ -26862,6 +26872,11 @@ export interface components {
        * @example 4
        */
       item_count: number;
+      /**
+       * @description available when item_count is current; unavailable when it could not be evaluated within the count budget or failed. Ignore item_count unless available. Collections remain accessible for editing and deletion
+       * @example available
+       */
+      item_count_status: string;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -31300,6 +31315,11 @@ export interface components {
        * @example 4
        */
       item_count: number;
+      /**
+       * @description available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible
+       * @example available
+       */
+      item_count_status: string;
       /** @example Rainy days */
       name: string;
       /**

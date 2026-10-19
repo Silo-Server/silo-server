@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
@@ -52,7 +53,8 @@ type requestKey struct{}
 // newChiRouter in front of the Huma adapter.
 func withRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestKey{}, r)))
+		ctx := handlers.WithNativeAPIV2(r.Context())
+		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, requestKey{}, r)))
 	})
 }
 

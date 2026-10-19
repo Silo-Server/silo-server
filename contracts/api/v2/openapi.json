@@ -24883,6 +24883,13 @@
             ],
             "type": "boolean"
           },
+          "count_availability": {
+            "description": "Collection responses include item_count_status. Ignore item_count when its status is not available; missing status on older servers means the count is usable",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "create_description": {
             "description": "createCollection stores a description for the acting account",
             "examples": [
@@ -25027,6 +25034,7 @@
           "sync_schedule_editable",
           "contains_item",
           "preview_posters",
+          "count_availability",
           "poster_collages",
           "revision",
           "state",
@@ -32195,6 +32203,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "poster_is_collage": {
             "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
             "examples": [
@@ -32221,6 +32236,7 @@
           "title",
           "poster_url",
           "item_count",
+          "item_count_status",
           "poster_is_collage"
         ],
         "type": "object"
@@ -37869,6 +37885,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is current; unavailable when it could not be evaluated within the count budget or failed. Ignore item_count unless available. Collections remain accessible for editing and deletion",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "last_sync_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "examples": [
@@ -38018,6 +38041,7 @@
           "last_sync_status",
           "last_sync_message",
           "item_count",
+          "item_count_status",
           "include_in_server_collections",
           "poster_url",
           "poster_thumbhash",
@@ -48166,6 +48190,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "name": {
             "examples": [
               "Rainy days"
@@ -48203,6 +48234,7 @@
           "name",
           "collection_type",
           "item_count",
+          "item_count_status",
           "poster_is_collage",
           "created_at",
           "updated_at"

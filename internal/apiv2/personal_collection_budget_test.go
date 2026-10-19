@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -116,10 +118,12 @@ func TestCollectionCountUnavailableRecoveryDB(t *testing.T) {
 }
 
 func TestPersonalCollectionEditorTagCountAvailability(t *testing.T) {
+	ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 1})
+	ctx = apimw.SetProfileID(ctx, "synthetic")
 	view := handlers.PersonalCollectionEditorView{Revision: 7, Collection: handlers.PersonalCollectionView{ItemCountStatus: handlers.CollectionCountAvailable}}
-	available := personalCollectionEditorTag(t.Context(), "synthetic", view)
+	available := personalCollectionEditorTag(ctx, "synthetic", view)
 	view.Collection.ItemCountStatus = handlers.CollectionCountUnavailable
-	unavailable := personalCollectionEditorTag(t.Context(), "synthetic", view)
+	unavailable := personalCollectionEditorTag(ctx, "synthetic", view)
 	if available == unavailable {
 		t.Fatal("available zero and unavailable count must have different strong validators")
 	}

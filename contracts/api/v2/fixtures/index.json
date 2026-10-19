@@ -6773,7 +6773,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"d1ab2d090e59fc1b188200e07381aad6e929278904a8e25da475b7882cdf3815\""
+        "ETag": "\"a91ed0179d17fbc83f4313795a5d923862df95a44c18758450a36dcbfb4d055c\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/CollectionCapabilities",
@@ -6814,7 +6814,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"457e318bf2388a46420c6eb8.1njpabgklvmqp\""
+        "ETag": "\"cfa68c66d6775b1d5979600c.3c8f1d9zvklhz\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollection",
