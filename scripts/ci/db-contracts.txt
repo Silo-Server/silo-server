@@ -405,6 +405,7 @@
 
 # Count availability preserves v2 editors and known-ID v1 repair/delete.
 ./internal/api/handlers TestCollectionCountAvailabilityRecoveryDB
+./internal/api/handlers TestLibraryCollectionLegacyCountRecoveryDB
 ./internal/apiv2 TestCollectionCountUnavailableRecoveryDB
 
 # Composed raw budgets return validation errors and keep legacy recovery usable.

@@ -42,6 +42,7 @@ type LibraryCollection struct {
 	SyncSchedule       *string
 	NextSyncAt         *time.Time
 	ItemCount          int
+	ItemCountStatus    string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

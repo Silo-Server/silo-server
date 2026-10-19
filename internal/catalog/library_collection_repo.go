@@ -172,7 +172,18 @@ func scanLibraryCollection(row pgx.Row) (*models.LibraryCollection, error) {
 	if len(collection.LibraryIDs) == 0 && collection.LibraryID > 0 {
 		collection.LibraryIDs = []int{collection.LibraryID}
 	}
+	setLibraryCollectionCountAvailability(&collection)
 	return &collection, nil
+}
+
+// A cache that the refresher cannot evaluate must not appear current. Derive
+// availability from the same saved row on every read, including untouched
+// legacy rows, without changing their definitions or stored cache.
+func setLibraryCollectionCountAvailability(collection *models.LibraryCollection) {
+	collection.ItemCountStatus = "available"
+	if collection.CollectionType == "smart" && ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition) != nil {
+		collection.ItemCount, collection.ItemCountStatus = 0, "unavailable"
+	}
 }
 
 func scanLibraryCollections(rows pgx.Rows) ([]*models.LibraryCollection, error) {

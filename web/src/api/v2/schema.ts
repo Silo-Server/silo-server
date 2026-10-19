@@ -13615,6 +13615,11 @@ export interface components {
       /** Format: int64 */
       item_count: number;
       /**
+       * @description available when item_count is usable; unavailable when the saved definition cannot be evaluated within the count budget. Ignore item_count for any other status; the collection remains editable and deletable
+       * @example available
+       */
+      item_count_status: string;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
@@ -22095,6 +22100,11 @@ export interface components {
        * @example 12
        */
       item_count: number;
+      /**
+       * @description available when item_count is usable; unavailable when the saved definition cannot be evaluated within the count budget. Ignore item_count for any other status; the collection remains accessible
+       * @example available
+       */
+      item_count_status: string;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision

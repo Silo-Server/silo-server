@@ -89,6 +89,9 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
 	collections := h.withViewerPosters(ctx, <-collectionsCh, AccessFilterFromContext(ctx, ""))
+	if err := v1CuratedCollectionCountError(ctx, collections); err != nil {
+		return none, err
+	}
 	var groups []models.LibraryCollectionGroup
 	if groupsCh != nil {
 		groups = <-groupsCh
@@ -571,6 +574,9 @@ func (h *LibraryCollectionHandler) GetAdminCollection(ctx context.Context, id st
 	}
 	c, err := h.repo.GetByID(ctx, id)
 	if err != nil {
+		return none, 0, err
+	}
+	if err := v1CuratedCollectionCountError(ctx, []*models.LibraryCollection{c}); err != nil {
 		return none, 0, err
 	}
 	after, err := h.repo.CollectionRevision(ctx, id)

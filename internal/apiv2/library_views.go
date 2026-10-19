@@ -112,6 +112,7 @@ type CuratedCollection struct {
 	SyncSchedule      string          `json:"sync_schedule,omitempty"`
 	NextSyncAt        *Instant        `json:"next_sync_at,omitempty"`
 	ItemCount         int             `json:"item_count" example:"12"`
+	ItemCountStatus   string          `json:"item_count_status" doc:"available when item_count is usable; unavailable when the saved definition cannot be evaluated within the count budget. Ignore item_count for any other status; the collection remains accessible" example:"available"`
 	CreatedAt         Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt         Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
 	PosterIsCollage   bool            `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages" example:"false"`
@@ -343,7 +344,7 @@ func curatedCollectionOf(v handlers.LibraryCollectionView) CuratedCollection {
 		SourceURL: v.SourceURL, QueryDefinition: jsonValue(v.QueryDefinition), SortConfig: jsonValue(v.SortConfig), SourceConfig: jsonValue(v.SourceConfig),
 		ManagementMode: v.ManagementMode, ManagementSource: v.ManagementSource, ManagementKey: v.ManagementKey,
 		LastSyncStatus: v.LastSyncStatus, LastSyncMessage: v.LastSyncMessage, LastSyncAt: instantOfStamp(v.LastSyncAt), SyncSchedule: v.SyncSchedule, NextSyncAt: instantOfStamp(v.NextSyncAt),
-		ItemCount: v.ItemCount, CreatedAt: created, UpdatedAt: updated,
+		ItemCount: v.ItemCount, ItemCountStatus: countStatusOf(v.ItemCountStatus), CreatedAt: created, UpdatedAt: updated,
 		PosterIsCollage: v.PosterIsCollage && v.PosterURL != "",
 	}
 }

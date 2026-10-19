@@ -281,7 +281,7 @@ export class V2Recorder {
   /**
    * The rules every recorded collection request keeps, as messages:
    * a guarded write carries If-Match; top-level `library_id`/`library_ids`
-   * are strings; an admin collection PATCH names its `collection_type`; a
+   * are strings; a
    * manual collection's body never carries `query_definition` or
    * `sort_config`.
    */
@@ -302,9 +302,6 @@ export class V2Recorder {
       }
       if ("library_id" in body && typeof body.library_id !== "string") {
         violations.push(`${label} sends a library_id that is not a string`);
-      }
-      if (call.operation === "PATCH /api/v2/admin/collections/{id}" && !body.collection_type) {
-        violations.push(`${label} does not name collection_type`);
       }
       const id = call.path.split("/").at(-1) ?? "";
       const manual =

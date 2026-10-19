@@ -53,8 +53,9 @@ the viewer. A shared collection never reveals its creator's activity.
 ## Count availability and query admission
 
 `getCollectionCapabilities` reports `count_availability: true`. Personal collection
-responses, personal collections returned by `listLibraryUserCollections`, and collection
-cards from `getLibraryCollections` carry `item_count_status`:
+responses, personal collections returned by `listLibraryUserCollections`, administrator
+and curated collection responses, and library and server collection cards carry
+`item_count_status`:
 
 - `available`: `item_count` is usable, including a genuine zero.
 - `unavailable`: the count failed or exceeded its construction or execution budget.
@@ -69,6 +70,13 @@ through `updateCollection`, or delete the collection. Count status participates 
 editor's strong `ETag`, including a transition between unavailable and available zero.
 Import responses report `unavailable`: their sync membership total is not a current
 viewer-filtered catalog count. Reload the collection to evaluate its count.
+
+Library smart collections derive structural availability from the saved definition and
+library bindings on every read, including before the refresher has visited a legacy row.
+A valid replacement restores structural availability immediately; its cached count keeps
+the existing asynchronous refresh behavior. A successful refresh can produce an available
+zero. Metadata-only web saves omit unchanged admission fields by comparing with the loaded
+editor snapshot; changing rules, library scope or Show only still sends those changes.
 
 Structural admission runs before normalization and SQL construction. A source definition
 and its display filter or browse overlay share one effective-definition budget: 16 groups,

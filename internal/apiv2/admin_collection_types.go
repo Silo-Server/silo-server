@@ -46,6 +46,7 @@ type AdminCollection struct {
 	SyncSchedule      string          `json:"sync_schedule,omitempty"`
 	NextSyncAt        *Instant        `json:"next_sync_at,omitempty" nullable:"false"`
 	ItemCount         int             `json:"item_count"`
+	ItemCountStatus   string          `json:"item_count_status" doc:"available when item_count is usable; unavailable when the saved definition cannot be evaluated within the count budget. Ignore item_count for any other status; the collection remains editable and deletable" example:"available"`
 	HomeRowCount      *int            `json:"home_row_count,omitempty" nullable:"false" minimum:"0" doc:"Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted."`
 	RowCount          *int            `json:"row_count,omitempty" nullable:"false" minimum:"0" doc:"Rows on the administrator Home and library pages that show this collection, turned-off rows included. Set on listAdminCollections items only. Rows profiles added themselves are not counted."`
 	CreatedAt         Instant         `json:"created_at"`
@@ -463,6 +464,7 @@ func adminCollectionOf(v handlers.AdminCollection) AdminCollection {
 		SyncSchedule:      v.SyncSchedule,
 		NextSyncAt:        instantOfStamp(v.NextSyncAt),
 		ItemCount:         v.ItemCount,
+		ItemCountStatus:   countStatusOf(v.ItemCountStatus),
 	}
 	if v.GroupID != nil {
 		out.GroupID = new(ID(*v.GroupID))

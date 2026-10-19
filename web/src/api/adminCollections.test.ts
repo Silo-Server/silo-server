@@ -39,6 +39,7 @@ const collection: components["schemas"]["AdminCollection"] = {
   last_sync_status: "idle",
   last_sync_message: "",
   item_count: 0,
+  item_count_status: "available",
   created_at: "2026-09-05T00:00:00Z",
   updated_at: "2026-09-05T00:00:00Z",
 };

@@ -264,6 +264,10 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		)
 	}
 	posterAspect := 2.0 / 3.0 // portrait poster; without it clients square-crop the card
+	count := c.ItemCount
+	if c.ItemCountStatus != "" && c.ItemCountStatus != "available" {
+		count = 0
+	}
 	dto := baseItemDTO{
 		ID:                      routeID,
 		Type:                    "BoxSet",
@@ -272,8 +276,8 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		ServerID:                h.mapper.serverID,
 		Overview:                c.Description,
 		SortName:                strings.ToLower(c.Title),
-		ChildCount:              c.ItemCount,
-		RecursiveItemCount:      c.ItemCount,
+		ChildCount:              count,
+		RecursiveItemCount:      count,
 		ImageTags:               imgTags,
 		PrimaryImageAspectRatio: &posterAspect,
 		UserData: &itemUserDataDTO{

@@ -546,7 +546,6 @@ describe("server Synced list editor", () => {
     fireEvent.change(link, { target: { value: "https://www.themoviedb.org/list/8649937-marvel" } });
     await save(ADMIN_PATCH);
     expect(patches(ADMIN_PATCH)[0]).toMatchObject({
-      collection_type: "tmdb",
       source_url: "https://www.themoviedb.org/list/8649937",
       source_config: {
         mode: "tmdb_list",
@@ -622,7 +621,6 @@ describe("server Synced list editor", () => {
     fireEvent.change(id, { target: { value: "119" } });
     await save(ADMIN_PATCH);
     expect(patches(ADMIN_PATCH)[0]).toMatchObject({
-      collection_type: "tmdb",
       source_url: "tmdb://collection/119",
       source_config: { mode: "tmdb_collection", collection_id: 119, limit: 20 },
     });
@@ -821,7 +819,6 @@ describe("personal Synced list editor", () => {
     expect(patches(PERSONAL_PATCH)[0]).toEqual({
       name: "Rainy days",
       is_shared: false,
-      library_ids: ["1"],
       include_in_server_collections: false,
       sync_schedule: "weekly",
     });

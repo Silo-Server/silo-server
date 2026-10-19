@@ -303,6 +303,9 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 	if err != nil {
 		return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
+	if err := v1CuratedCollectionCountError(ctx, adminCollections); err != nil {
+		return LibraryCollectionTabView{}, err
+	}
 	adminCollections = h.withViewerPosters(ctx, adminCollections, AccessFilterFromContext(ctx, ""))
 	resp := LibraryCollectionTabView{
 		LibraryID:   libraryID,
@@ -459,6 +462,18 @@ func v1LibraryCollectionCountError(ctx context.Context, collections []usercollec
 	for _, c := range collections {
 		if c.ItemCountStatus == CollectionCountUnavailable {
 			return collectionCountReadError(c.CountError)
+		}
+	}
+	return nil
+}
+
+func v1CuratedCollectionCountError(ctx context.Context, collections []*models.LibraryCollection) error {
+	if isNativeAPIV2(ctx) {
+		return nil
+	}
+	for _, c := range collections {
+		if c.ItemCountStatus == CollectionCountUnavailable {
+			return collectionCountReadError(catalog.ErrQueryComplexity)
 		}
 	}
 	return nil

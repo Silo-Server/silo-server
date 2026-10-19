@@ -93,6 +93,9 @@ func (h *LibraryCollectionHandler) ListServerCollections(ctx context.Context, ac
 		}
 
 		collections, total := capServerCollections(collections)
+		if err := v1CuratedCollectionCountError(ctx, collections); err != nil {
+			return ServerCollectionsView{}, err
+		}
 		collections = h.withViewerPosters(ctx, collections, access)
 
 		colls := make([]libraryTabCollection, 0, len(collections))

@@ -278,7 +278,8 @@ describe("the rules", () => {
     expect(await screen.findByRole("group", { name: "Rule not editable here" })).toBeTruthy();
     await rename();
     await save(1);
-    expect(patchBody().query_definition.groups[0]!.rules).toEqual([COMEDY, watched]);
+    expect(patchBody()).not.toHaveProperty("query_definition");
+    expect(screen.getByRole("group", { name: "Rule not editable here" })).toBeInTheDocument();
   });
 
   it("names Rules in the save bar and says the preview already shows them", async () => {
