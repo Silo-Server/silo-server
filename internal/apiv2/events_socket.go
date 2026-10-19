@@ -56,7 +56,7 @@ func registerEventsSocket(reg *Registry) {
 		return &EventsSocketTicketOutput{Body: EventsSocketTicket{Ticket: ticket, ExpiresIn: int(min(evt.SocketTicketTTL, time.Until(identity.AccessExpiresAt)).Seconds()), MaxConnectionSeconds: int(evt.SocketMaxLifetime.Seconds()), Protocol: "silo.events.v2", WorkAdmission: realtimeWorkStatus(svc)}}, nil
 	})
 	responses := socketResponses([]string{"400", "401", "403", "429", "503"}, "Handshake refused.", "Realtime connection established.", "WebSocket handshake header.")
-	addRealtimeWorkResponses(responses)
+	addRealtimeWorkResponses(reg, responses)
 	op := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: Prefix + "/events/ws", OperationID: "connectEventsSocket", Tags: []string{"realtime"}, Summary: "Connect using one session-bound ticket in Sec-WebSocket-Protocol.", Responses: responses}, Class: ClassPublic, ServiceBacked: true}
 	op.Parameters = []*huma.Param{
 		{Name: eventsProtocolHeader, In: paramInHeader, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Offer silo.events.v2 followed by silo.ticket.<single-use-ticket>."},

@@ -42440,6 +42440,35 @@
         ],
         "type": "object"
       },
+      "RealtimeWorkRefusal": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retry_after_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          },
+          "work_started": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "code",
+          "message",
+          "retry_after_ms",
+          "work_started"
+        ],
+        "type": "object"
+      },
       "RecipeCandidate": {
         "additionalProperties": false,
         "properties": {
@@ -159434,31 +159463,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "retry_after_ms": {
-                      "type": "integer"
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "work_started": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "code",
-                    "message",
-                    "retry_after_ms",
-                    "work_started"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/RealtimeWorkRefusal"
                 }
               },
               "text/plain": {
@@ -159481,31 +159486,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "retry_after_ms": {
-                      "type": "integer"
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "work_started": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "code",
-                    "message",
-                    "retry_after_ms",
-                    "work_started"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/RealtimeWorkRefusal"
                 }
               },
               "text/plain": {
@@ -214081,31 +214062,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "retry_after_ms": {
-                      "type": "integer"
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "work_started": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "code",
-                    "message",
-                    "retry_after_ms",
-                    "work_started"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/RealtimeWorkRefusal"
                 }
               },
               "text/plain": {
@@ -214128,31 +214085,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "retry_after_ms": {
-                      "type": "integer"
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "work_started": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "code",
-                    "message",
-                    "retry_after_ms",
-                    "work_started"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/RealtimeWorkRefusal"
                 }
               },
               "text/plain": {

@@ -44,7 +44,7 @@ func registerWatchTogetherSocket(reg *Registry) {
 		return &EventsSocketTicketOutput{Body: EventsSocketTicket{Ticket: ticket, ExpiresIn: max(0, int(time.Until(expiry).Seconds())), MaxConnectionSeconds: int(watchtogether.RoomSocketMaxLifetime.Seconds()), Protocol: watchtogether.RoomSocketProtocol, WorkAdmission: realtimeWorkStatus(reg.deps.WatchTogetherSocket)}}, nil
 	})
 	responses := socketResponses([]string{"400", "401", "403", "429", "503"}, "Room handshake refused.", "Room connection established.", "WebSocket handshake header.")
-	addRealtimeWorkResponses(responses)
+	addRealtimeWorkResponses(reg, responses)
 	raw := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: Prefix + "/watch-together/rooms/{room_id}/ws", OperationID: "connectWatchTogetherSocket", Tags: []string{"realtime"}, Summary: "Connect a room using a single-use session-bound credential.", Responses: responses}, Class: ClassPublic, ServiceBacked: true}
 	raw.Parameters = []*huma.Param{
 		{Name: "room_id", In: roomSocketPathParameter, Required: true, Schema: &huma.Schema{Type: huma.TypeString}},

@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -33,6 +34,14 @@ type RealtimeRoomWorkLimits struct {
 	Account RealtimeWorkLimit `json:"account"`
 }
 
+type RealtimeWorkRefusal struct {
+	Type         string `json:"type"`
+	Code         string `json:"code"`
+	Message      string `json:"message"`
+	RetryAfterMS int64  `json:"retry_after_ms"`
+	WorkStarted  bool   `json:"work_started"`
+}
+
 type realtimeWorkStatusProvider interface {
 	RealtimeWorkStatus() *realtimeadmission.Status
 }
@@ -56,19 +65,12 @@ func realtimeWorkStatus(service any) *RealtimeWorkAdmission {
 
 // Handshake refusal is JSON for work admission; other handshake failures keep
 // the existing plain-text representation.
-func addRealtimeWorkResponses(responses map[string]*huma.Response) {
+func addRealtimeWorkResponses(reg *Registry, responses map[string]*huma.Response) {
 	for _, status := range []string{"429", "503"} {
 		responses[status].Headers = map[string]*huma.Param{
 			"Retry-After": {Schema: &huma.Schema{Type: huma.TypeString}, Description: "Minimum retry delay in seconds."},
 		}
-		responses[status].Content["application/json"] = &huma.MediaType{Schema: &huma.Schema{
-			Type: huma.TypeObject,
-			Properties: map[string]*huma.Schema{
-				"type": {Type: huma.TypeString}, "code": {Type: huma.TypeString}, "message": {Type: huma.TypeString},
-				"retry_after_ms": {Type: huma.TypeInteger}, "work_started": {Type: huma.TypeBoolean},
-			},
-			Required: []string{"type", "code", "message", "retry_after_ms", "work_started"},
-		}}
+		responses[status].Content[mediaTypeJSON] = &huma.MediaType{Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[RealtimeWorkRefusal](), true, "")}
 	}
 }
 
