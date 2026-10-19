@@ -126,13 +126,20 @@ other profile on the account, such as a child profile, connects with the user
 channels. A rejected ticket (expired, reused, or for another account) leaves the
 connection unbound and judged as acting with no profile, so on a household with
 a PIN-protected or limited profile it also gets the user channels until the
-client reconnects with a fresh ticket. The socket rechecks the login session on the same interval and closes
-without a frame once the session ends, the account's role differs from the
-token's, or a connection holding the administrator channels is no longer the
-acting admin (including when its profile's PIN proof stops verifying after a PIN
-change) or that check fails.
-The playback-control and Watch Together sockets share the recheck but still
-close without a frame or dedicated code when it fails.
+client reconnects with a fresh ticket. All four v1 sockets (events, administrator logs, playback control and Watch Together)
+recheck current authority every 15 seconds, with a two-second read budget. They close
+without a frame or dedicated code on credential revocation, account disablement,
+role or access-policy changes, loss of profile verification, or a failed authority
+read. API keys are rechecked by metadata ID and current owner; scoped keys cannot
+hold these sockets. Changes to presentation language alone do not close a socket.
+Playback control also rechecks that the playback session still belongs to the
+account; it does not require a profile header. Watch Together checks room availability.
+
+Each connection ends at access-token expiry or its maximum lifetime: five minutes
+for events, administrator logs and Watch Together, and four hours for playback
+control. An API key has no access-token expiry, so its connection uses the same
+maximum lifetime. A Watch Together connection also ends when its room proof expires.
+Clients must reconnect with current authority; no successful check extends a deadline.
 
 ### Owner-bound playback control handshake (v2)
 

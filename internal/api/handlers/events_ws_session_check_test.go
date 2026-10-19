@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/gorilla/websocket"
 
@@ -63,10 +67,17 @@ func TestEventsWebSocketV1ClosesWhenSessionChanges(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sessions := new(sessionRoleFixture)
 			sessions.role.Store("admin")
-			handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{}), sessionCheckInterval: 10 * time.Millisecond}
-			handler.SetSessionRoles(sessions)
+			handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{})}
+			handler.SocketAuthority = NewSocketAuthorityV1(sessions, &socketUserFixture{user: models.User{ID: 1, Role: "admin", Enabled: true}}, nil,
+				&socketViewerFixture{scope: access.Scope{UserID: 1, ProfileVerified: true}}, func(context.Context, apimw.ActingAdminRequest) (bool, error) {
+					if sessions.decisionDown.Load() {
+						return false, errors.New("profile store down")
+					}
+					return !sessions.notActingAdmin.Load(), nil
+				})
+			handler.SocketAuthority.checkInterval = 10 * time.Millisecond
 			conn, readFrame := eventsWSTestConnActing(t, handler,
-				&auth.Claims{UserID: 1, Role: "admin", SessionID: "session"}, "?channels=user_settings",
+				&auth.Claims{UserID: 1, Role: "admin", SessionID: "session", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}, "?channels=user_settings",
 				func(context.Context, apimw.ActingAdminRequest) (bool, error) {
 					if sessions.decisionDown.Load() {
 						return false, errors.New("profile store down")
@@ -143,11 +154,12 @@ func TestEventsWebSocketV1RechecksTicketProfileProof(t *testing.T) {
 		}
 		sessions := new(sessionRoleFixture)
 		sessions.role.Store("admin")
-		handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{}), sessionCheckInterval: 10 * time.Millisecond}
+		handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{})}
 		handler.SetNotificationsSystem(&notifications.System{Tickets: tickets})
-		handler.SetSessionRoles(sessions)
+		handler.SocketAuthority = NewSocketAuthorityV1(sessions, &socketUserFixture{user: models.User{ID: 1, Role: "admin", Enabled: true}}, nil, proofs, decide)
+		handler.SocketAuthority.checkInterval = 10 * time.Millisecond
 		handler.SetProfileVerifier(proofs)
-		return eventsWSTestConnActing(t, handler, &auth.Claims{UserID: 1, Role: "admin", SessionID: "session"},
+		return eventsWSTestConnActing(t, handler, &auth.Claims{UserID: 1, Role: "admin", SessionID: "session", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}},
 			"?channels=user_settings&ticket="+url.QueryEscape(ticket), decide)
 	}
 	adminChannels := func(hello map[string]json.RawMessage) bool {
@@ -155,9 +167,26 @@ func TestEventsWebSocketV1RechecksTicketProfileProof(t *testing.T) {
 	}
 
 	t.Run("stale proof at the handshake", func(t *testing.T) {
-		_, readFrame := connect(t, new(profileProofFixture), "old-pin-proof")
-		if adminChannels(readFrame("hello")) {
-			t.Fatal("ticket with a stale PIN proof got the administrator channels")
+		proofs := new(profileProofFixture)
+		sessions := new(sessionRoleFixture)
+		sessions.role.Store("admin")
+		h := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{}), profiles: proofs}
+		h.SocketAuthority = NewSocketAuthorityV1(sessions, &socketUserFixture{user: models.User{ID: 1, Role: "admin", Enabled: true}}, nil, proofs, decide)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := &auth.Claims{UserID: 1, Role: "admin", SessionID: "session", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
+			ctx := apimw.SetActingAdminDecider(apimw.SetProfileID(apimw.SetClaims(r.Context(), claims), "parent"), decide)
+			h.HandleWebSocket(w, r.WithContext(ctx))
+		}))
+		defer server.Close()
+		conn, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+		if conn != nil {
+			_ = conn.Close()
+		}
+		if resp != nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
+		if err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
+			t.Fatal("stale PIN proof admitted")
 		}
 	})
 

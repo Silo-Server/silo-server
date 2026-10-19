@@ -185,6 +185,7 @@ type copySeekAnchorResolver func(
 
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
+	SocketAuthority        *SocketAuthorityV1
 	sessionMgr             SessionManagerInterface
 	fileResolver           FilePathResolver            // optional; enables stream_url in responses
 	StoreProvider          userstore.UserStoreProvider // optional; enables progress/history persistence

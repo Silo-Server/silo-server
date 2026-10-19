@@ -14,6 +14,8 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 )
@@ -21,13 +23,20 @@ import (
 const auditFilterAction = "action"
 
 type AdminLogsHandler struct {
-	opsRepo   *opslog.Repo
+	SocketAuthority *SocketAuthorityV1
+	opsRepo         interface {
+		List(context.Context, opslog.ListOptions) (opslog.ListResult, error)
+	}
 	auditRepo *activitylog.Repo
 	streamHub *logstream.Hub
 }
 
 func NewAdminLogsHandler(opsRepo *opslog.Repo, auditRepo *activitylog.Repo, streamHub *logstream.Hub) *AdminLogsHandler {
-	return &AdminLogsHandler{opsRepo: opsRepo, auditRepo: auditRepo, streamHub: streamHub}
+	h := &AdminLogsHandler{auditRepo: auditRepo, streamHub: streamHub}
+	if opsRepo != nil {
+		h.opsRepo = opsRepo
+	}
+	return h
 }
 
 func (h *AdminLogsHandler) HandleListOperationalLogs(w http.ResponseWriter, r *http.Request) {
@@ -277,6 +286,12 @@ func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	r, cancel, err := h.SocketAuthority.bind(r, apimw.GetProfileID(r.Context()), r.Header.Get("X-Profile-Token"), evt.SocketMaxLifetime, time.Time{}, eventsAdminRole, nil)
+	if err != nil {
+		http.Error(w, "log stream authority unavailable", http.StatusUnauthorized)
+		return
+	}
+	defer cancel()
 	h.serveLogStream(w, r, wsUpgrader)
 }
 

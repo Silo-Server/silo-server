@@ -76,43 +76,23 @@ type activeScanLister interface {
 }
 
 type EventsHandler struct {
-	hub            *evt.Hub
-	jobs           *AdminJobsHandler
-	admin          *AdminHandler
-	tasks          taskInfoLister
-	scans          *evt.ScanRegistry
-	persistedScans activeScanLister
-	historyImports historyImportActiveLister
-	notifications  *notifications.System
-	// sessionRoles and sessionCheckInterval drive the v1 connection's
-	// periodic login-session check; see SetSessionRoles.
-	sessionRoles         sessionRoleChecker
-	sessionCheckInterval time.Duration
-	// profiles re-verifies the PIN proof of the profile a connection holding
-	// the admin channels acts as; see SetProfileVerifier.
+	hub             *evt.Hub
+	jobs            *AdminJobsHandler
+	admin           *AdminHandler
+	tasks           taskInfoLister
+	scans           *evt.ScanRegistry
+	persistedScans  activeScanLister
+	historyImports  historyImportActiveLister
+	notifications   *notifications.System
+	SocketAuthority *SocketAuthorityV1
+	// profiles verifies the initial PIN proof used to select admin channels;
+	// SocketAuthority repeats the current profile check after admission.
 	profiles apimw.ViewerResolver
 }
 
-// sessionRoleChecker reports whether a login session is still active and its
-// authority, including the current role of its account;
-// auth.SessionRepository implements it.
-type sessionRoleChecker interface {
-	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
-}
-
-// SetSessionRoles makes the v1 events socket recheck its login session. The
-// connection picks its channels from the access token's role once, at the
-// handshake, so it closes when the session ends or the account's role
-// changes; the client reconnects with a refreshed token.
-func (h *EventsHandler) SetSessionRoles(sessions sessionRoleChecker) {
-	if h != nil {
-		h.sessionRoles = sessions
-	}
-}
-
-// SetProfileVerifier makes the v1 events socket re-verify, at the handshake
-// and on every session check, the PIN proof of the profile a connection on an
-// admin account acts as, so changing that profile's PIN takes the admin
+// SetProfileVerifier verifies the handshake PIN proof of the profile a
+// connection on an admin account acts as. SocketAuthority repeats that check
+// after admission, so changing that profile's PIN takes the admin
 // channels away as it does on the v2 socket.
 func (h *EventsHandler) SetProfileVerifier(profiles apimw.ViewerResolver) {
 	if h != nil {
@@ -210,16 +190,19 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 			demoted := *claims
 			demoted.Role = models.RoleUser
 			effective = &demoted
-			stillActingAdmin = nil
 		}
 	}
 
-	if h.sessionRoles != nil && claims.SessionID != "" {
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		go h.closeOnSessionChange(ctx, cancel, claims, stillActingAdmin)
-		r = r.WithContext(ctx)
+	profileID, profileToken := apimw.GetProfileID(r.Context()), r.Header.Get("X-Profile-Token")
+	if profileID == "" && boundProfileID != "" {
+		profileID, profileToken = boundProfileID, bound.ProfileToken
 	}
+	r, cancel, err := h.SocketAuthority.bind(r, profileID, profileToken, evt.SocketMaxLifetime, time.Time{}, effective.Role, nil)
+	if err != nil {
+		http.Error(w, "realtime authority unavailable", http.StatusUnauthorized)
+		return
+	}
+	defer cancel()
 	h.serveWebSocket(w, r, effective, boundProfileID, wsUpgrader, nil)
 }
 
@@ -252,52 +235,6 @@ func (h *EventsHandler) withProfileProof(decide func(context.Context) (bool, err
 		}
 		return decide(ctx)
 	}
-}
-
-// closeOnSessionChange cancels a v1 connection once its login session is no
-// longer active or the account's role differs from the access token's, and,
-// for a connection holding the admin channels, once stillActingAdmin stops
-// holding (say the household gained a PIN, or the acting profile's PIN
-// changed). A failed check is skipped; the next one decides.
-func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context.CancelFunc, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) {
-	interval := h.sessionCheckInterval
-	if interval <= 0 {
-		interval = eventsSessionCheckInterval
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-			changed := h.sessionChanged(checkCtx, claims, stillActingAdmin)
-			stop()
-			if changed {
-				cancel()
-				return
-			}
-		}
-	}
-}
-
-// sessionChanged reports whether one recheck found the connection's access
-// gone: the session ended, the account's role changed, or stillActingAdmin
-// (when set) no longer holds. A failed session lookup reports no change; a
-// failed acting-admin decision counts as lost, so a connection holding the
-// administrator channels fails closed like the HTTP routes and reconnects.
-func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) bool {
-	authority, active, err := h.sessionRoles.ActiveSession(ctx, claims.SessionID)
-	// A remote-playback handoff never holds a v1 socket.
-	if err == nil && (!active || authority.Role != claims.Role || authority.IsRemotePlayback()) {
-		return true
-	}
-	if stillActingAdmin == nil {
-		return false
-	}
-	acting, err := stillActingAdmin(ctx)
-	return err != nil || !acting
 }
 
 // serveWebSocket runs one events connection. When accessChanged closes, the

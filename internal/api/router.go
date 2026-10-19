@@ -2441,6 +2441,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 	}
 
+	// Keep unset concrete repositories out of interface parameters. The
+	// non-nil monitor refuses upgrades if its dependencies are unavailable.
+	socketAuthorityV1 := handlers.NewSocketAuthorityV1(nil, nil, nil, nil, nil)
+	if sessionRepo != nil && userRepo != nil && apiKeyRepo != nil {
+		socketAuthorityV1 = handlers.NewSocketAuthorityV1(sessionRepo, userRepo, apiKeyRepo, viewerResolver, actingAdmin)
+	}
+
 	// userRepo is a concrete pointer, so it has to stay out of the
 	// interface parameter when unset — a typed nil would satisfy the
 	// handler's nil check and panic on first use.
@@ -3449,9 +3456,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 						historyImportSvc,
 					)
 					eventsHandler.SetNotificationsSystem(deps.Notifications)
-					if sessionRepo != nil {
-						eventsHandler.SetSessionRoles(sessionRepo)
-					}
+					eventsHandler.SocketAuthority = socketAuthorityV1
 					eventsHandler.SetProfileVerifier(viewerResolver)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 					r.Get("/events/capability", eventsHandler.HandleCapability)
@@ -4066,6 +4071,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 						r.Get("/transcode/{session_id}/segment/{name}", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/playback/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment))
 
 						// Playback realtime control socket — needs auth but not profile.
+						playbackHandler.SocketAuthority = socketAuthorityV1
 						r.Get("/sessions/{session_id}/control/ws", playbackHandler.HandleSessionWebSocket)
 
 						// All mutation routes require profile auth.
@@ -4082,6 +4088,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 				if watchTogetherHandler != nil {
 					r.Route("/watch-together", func(r chi.Router) {
+						watchTogetherHandler.SocketAuthority = socketAuthorityV1
 						r.Get("/rooms/{room_id}/ws", watchTogetherHandler.HandleRoomWebSocket)
 						r.Group(func(r chi.Router) {
 							r.Use(apimw.RequireProfile)
@@ -4733,6 +4740,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 							}
 							if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil {
 								adminLogsHandler := handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub)
+								adminLogsHandler.SocketAuthority = socketAuthorityV1
 								r.Get("/logs/app", adminLogsHandler.HandleListOperationalLogs)
 								r.Get("/logs/audit", adminLogsHandler.HandleListAuditLogs)
 								r.Get("/logs/ws", adminLogsHandler.HandleLogStreamWebSocket)

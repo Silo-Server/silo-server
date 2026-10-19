@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -77,12 +78,30 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 		return
 	}
 
+	r, cancel, err := h.SocketAuthority.bind(r, apimw.GetProfileID(r.Context()), r.Header.Get("X-Profile-Token"), playbackControlMaxLifetime, time.Time{}, "", func(context.Context) error {
+		current, err := h.sessionMgr.GetSession(sessionID)
+		if err != nil {
+			return err
+		}
+		if current.UserID != userID {
+			return playback.ErrSessionNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		http.Error(w, "playback authority unavailable", http.StatusUnauthorized)
+		return
+	}
+	defer cancel()
+
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "websocket upgrade failed", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return
 	}
 
+	stopClose := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	defer stopClose()
 	realtimeConn := &sessionRealtimeConn{conn: conn}
 	registration := h.RealtimeHub.Register(sessionID, realtimeConn)
 	if registration == nil {
@@ -108,6 +127,9 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			break
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		if err := h.handleRealtimeClientMessage(sessionID, data); err != nil {
 			slog.WarnContext(r.Context(), "invalid realtime client message", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)

@@ -26,9 +26,10 @@ type WatchTogetherScopeResolver interface {
 }
 
 type WatchTogetherHandler struct {
-	Service       *watchtogether.Service
-	ScopeResolver WatchTogetherScopeResolver
-	TokenService  *watchtogether.RoomTokenService
+	SocketAuthority *SocketAuthorityV1
+	Service         *watchtogether.Service
+	ScopeResolver   WatchTogetherScopeResolver
+	TokenService    *watchtogether.RoomTokenService
 	// MemberState and Details serve the v2 member-state and picker reads.
 	// Both may be nil, in which case those operations fail closed.
 	MemberState        *watchtogether.MemberStateReader
@@ -845,11 +846,31 @@ func (h *WatchTogetherHandler) HandleRoomWebSocket(w http.ResponseWriter, r *htt
 		return
 	}
 
+	var proofExpiry time.Time
+	if h.TokenService != nil {
+		_, proofExpiry, err = h.TokenService.ValidateSocketProof(r.URL.Query().Get("room_token"))
+		if err != nil {
+			http.Error(w, "room access token required", http.StatusForbidden)
+			return
+		}
+	}
+	r, cancel, err := h.SocketAuthority.bind(r, profileID, r.URL.Query().Get("profile_token"), watchtogether.RoomSocketMaxLifetime, proofExpiry, "", func(ctx context.Context) error {
+		_, err := h.Service.GetRoom(ctx, roomID)
+		return err
+	})
+	if err != nil {
+		http.Error(w, "room authority unavailable", http.StatusUnauthorized)
+		return
+	}
+	defer cancel()
+
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	stopClose := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	defer stopClose()
 
 	h.serveRoomConnection(r.Context(), conn, roomID, claims.UserID, profileID)
 }
@@ -898,6 +919,9 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 			return
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
 		if err := h.handleRoomClientMessage(ctx, realtimeConn, reg, userID, profileID, data); err != nil {
 			realtimeConn.WriteError("bad_request", err.Error())
 		}
