@@ -30,7 +30,7 @@ vi.mock("@/components/realtimeEventsContext", () => ({ useEventChannel: vi.fn() 
 
 installV2Recorder();
 
-type AdminCollection = components["schemas"]["AdminCollection"];
+type AdminCollection = components["schemas"]["AdminCollection"] & { item_count_status?: string };
 
 function stored(title: string, overrides: Partial<AdminCollection> = {}): AdminCollection {
   return {
@@ -852,3 +852,23 @@ describe("AdminCollections List peeks", () => {
     expect(peekCalls()).toEqual([]);
   });
 });
+
+it.each(["unavailable", "future-status"])(
+  "keeps an admin collection with %s count visible and editable",
+  async (status) => {
+    items = [
+      {
+        ...stored("Synthetic smart", { collection_type: "smart", item_count: 999 }),
+        item_count_status: status,
+      },
+    ];
+    renderPage();
+    await screen.findByText("Synthetic smart");
+    const row = within(rowOf("Synthetic smart"));
+    expect(row.getByText(/Count unavailable/)).toBeInTheDocument();
+    expect(row.queryByText(/999 titles/)).not.toBeInTheDocument();
+    const { menu } = await openMenu("Synthetic smart");
+    expect(within(menu).getByRole("menuitem", { name: "Edit collection" })).toBeEnabled();
+    expect(within(menu).getByRole("menuitem", { name: "Delete…" })).toBeEnabled();
+  },
+);

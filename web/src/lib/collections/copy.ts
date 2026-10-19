@@ -1,3 +1,4 @@
+import { collectionCountLabel } from "./count";
 import type { DraftField } from "./draft";
 import type { ArtworkSlot, ScopeKind } from "./scope";
 import { COLLECTION_KIND_LABEL, type CollectionKind } from "./types";
@@ -374,8 +375,8 @@ export const ADD_TO_COLLECTION_FOOTNOTE =
   "Only manual collections take titles by hand. Ticking saves right away.";
 
 /** "Manual · 15 titles": a manual collection's line in a picker. */
-export function manualTitleCount(count: number): string {
-  return `${COLLECTION_KIND_LABEL.manual} · ${plural(count, "title")}`;
+export function manualTitleCount(count: number | null): string {
+  return `${COLLECTION_KIND_LABEL.manual} · ${collectionCountLabel(count)}`;
 }
 
 /** The Add to collection footer: how many of the profile's collections hold the title. */

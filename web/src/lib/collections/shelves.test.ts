@@ -307,3 +307,26 @@ describe("planShelfMove", () => {
     ).toEqual(["mine", "studios", "awards", UNGROUPED]);
   });
 });
+
+it("sorts unavailable and future counts after known zero without dropping collections", () => {
+  const shelf: Shelf = {
+    id: "smart",
+    kind: "regular",
+    name: "Smart",
+    sortMode: "most_items",
+    collections: [
+      collection("unknown", { item_count: 999, item_count_status: "future-status" }),
+      collection("zero", { item_count: 0, item_count_status: "available" }),
+      collection("unavailable", { item_count: 998, item_count_status: "unavailable" }),
+      collection("old-server", { item_count: 7 }),
+      collection("available", { item_count: 10, item_count_status: "available" }),
+    ],
+  };
+  expect(shownCollections(shelf).map((entry) => entry.id)).toEqual([
+    "available",
+    "old-server",
+    "zero",
+    "unknown",
+    "unavailable",
+  ]);
+});

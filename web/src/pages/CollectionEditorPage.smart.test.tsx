@@ -19,7 +19,7 @@ import {
   personalCapabilities,
   personalSmartCollection,
 } from "@/test/fixtures/collectionAnswers";
-import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
+import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 import CollectionEditorPage from "./CollectionEditorPage";
 
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
@@ -570,4 +570,55 @@ describe("the save bar before Create", () => {
       ),
     );
   });
+});
+
+describe("count availability in the editor", () => {
+  it.each(["server", "personal"] as const)(
+    "keeps %s rules repairable and recovers the count after saving",
+    async (scope) => {
+      const server = scope === "server";
+      const initial = {
+        ...(server ? adminSmartCollection(rules()) : personalSmartCollection(rules())),
+        item_count: 999,
+        item_count_status: "unavailable",
+      };
+      const operation = server
+        ? "GET /api/v2/admin/collections/{id}"
+        : "GET /api/v2/collections/{id}";
+      const listOperation = server ? "GET /api/v2/admin/collections" : "GET /api/v2/collections";
+      const patchOperation = server
+        ? "PATCH /api/v2/admin/collections/{id}"
+        : "PATCH /api/v2/collections/{id}";
+      let saved = initial;
+      v2Recorder.answer(operation, () => saved);
+      v2Recorder.answer(listOperation, () =>
+        server ? adminCollectionList(saved) : { items: [saved] },
+      );
+      v2Recorder.answer(patchOperation, (call: RecordedCall) => {
+        saved = {
+          ...saved,
+          ...(call.body as object),
+          item_count: 0,
+          item_count_status: "available",
+        };
+        return saved;
+      });
+      showPage(server ? "/admin/collections/c1/edit" : "/collections/c1/edit");
+      await nameField();
+      const header = screen.getByRole("heading", { level: 1 }).closest("header")!;
+      expect(within(header).getByText(/Count unavailable/)).toBeInTheDocument();
+      expect(screen.queryByText(/999 titles/)).not.toBeInTheDocument();
+      expect(await sentence()).toBeInTheDocument();
+      const max = screen.getByRole("spinbutton", { name: "Max titles" });
+      fireEvent.change(max, { target: { value: "50" } });
+      fireEvent.blur(max);
+      await userEvent.click(within(bar()).getByRole("button", { name: "Save" }));
+      await vi.waitFor(() => expect(within(header).getByText(/0 titles/)).toBeInTheDocument());
+      expect(within(header).queryByText(/Count unavailable/)).not.toBeInTheDocument();
+      expect(v2Recorder.callsOf(patchOperation)).toHaveLength(1);
+      expect(v2Recorder.callsOf(patchOperation)[0]?.body).toMatchObject({
+        query_definition: { limit: 50 },
+      });
+    },
+  );
 });

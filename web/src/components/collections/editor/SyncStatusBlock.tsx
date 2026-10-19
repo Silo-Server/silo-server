@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
+import { COUNT_UNAVAILABLE, collectionCountLabel } from "@/lib/collections/count";
 import { AlertCircle, Info, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,7 @@ export function SyncStatusBlock({
   canSync = true,
 }: {
   sync: SyncState;
-  itemCount: number;
+  itemCount: number | null;
   syncing: boolean;
   /** Titles the last sync run here skipped; unknown until one runs. */
   skipped?: number;
@@ -86,7 +87,7 @@ export function SyncStatusBlock({
         />
         <b className="font-semibold">{syncedAgo(sync.lastAt)}</b>
         <span className="text-muted-foreground text-[12.5px]">
-          {itemCount} title{itemCount === 1 ? "" : "s"}
+          {collectionCountLabel(itemCount)}
         </span>
       </>
     );
@@ -138,7 +139,7 @@ export function SyncFailedCallout({
   onSyncNow,
 }: {
   sync: SyncState;
-  itemCount: number;
+  itemCount: number | null;
   syncing: boolean;
   /** Unsaved changes to what the sync reads: Sync now waits for Save. */
   saveFirst?: boolean;
@@ -153,7 +154,8 @@ export function SyncFailedCallout({
       <AlertCircle aria-hidden className="text-destructive mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 flex-1">
         <b className="font-semibold">{syncFailedLead(sync.lastAt)}</b>
-        {sync.message ? ` ${sync.message}` : ""} {keepsTitles(itemCount)}
+        {sync.message ? ` ${sync.message}` : ""}{" "}
+        {itemCount === null ? `${COUNT_UNAVAILABLE}.` : keepsTitles(itemCount)}
         {retry}
       </p>
       {onSyncNow ? (

@@ -1,3 +1,4 @@
+import { COUNT_UNAVAILABLE, collectionItemCount } from "@/lib/collections/count";
 import type { ReactNode } from "react";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Pin, PinOff, User } from "lucide-react";
@@ -84,8 +85,8 @@ export function CollectionPosterCard({
             </div>
           )}
           {meta === undefined ? (
-            <span className="bg-background/60 text-foreground absolute right-2 bottom-2 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
-              {collection.item_count}
+            <span className="bg-background/60 text-foreground absolute right-2 bottom-2 max-w-[calc(100%_-_1rem)] rounded-md px-2 py-0.5 text-center text-[0.6875rem] font-bold backdrop-blur-sm">
+              {collectionItemCount(collection) ?? COUNT_UNAVAILABLE}
             </span>
           ) : null}
         </div>

@@ -35,7 +35,7 @@ const item = (id: string, position = 0) => ({
   position,
   added_at: "2026-09-05T00:00:00Z",
 });
-function show(staged: string[] = []) {
+function show(staged: string[] = [], itemCount?: number | null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
@@ -44,6 +44,7 @@ function show(staged: string[] = []) {
         collectionId="c"
         searchLibraries={[]}
         staged={staged}
+        itemCount={itemCount}
         onStagedChange={vi.fn()}
         onItemsChanged={vi.fn()}
       />
@@ -180,4 +181,20 @@ it("reorders only the saved titles when some couldn't be added", async () => {
     etag: '"order-one"',
   });
   rects.mockRestore();
+});
+
+it("loads and removes real members independently of an unavailable summary count", async () => {
+  mocks.page.mockReturnValue({
+    data: { items: [{ ...item("first"), title: "Synthetic member" }], page: { has_more: false } },
+    isLoading: false,
+  });
+  show([], null);
+  expect(screen.getByText("Synthetic member")).toBeInTheDocument();
+  expect(screen.queryByText(/No titles/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Remove Synthetic member" }));
+  await vi.waitFor(() =>
+    expect(mocks.v2).toHaveBeenCalledWith("DELETE /api/v2/collections/{id}/items/{item_id}", {
+      path: { id: "c", item_id: "first" },
+    }),
+  );
 });

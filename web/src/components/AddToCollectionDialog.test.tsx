@@ -342,3 +342,32 @@ describe("AddToCollectionDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
+
+it.each(["unavailable", "future-status"])(
+  "uses real membership with a %s count and still removes and adds",
+  async (status) => {
+    let contains = true;
+    listing(() => [{ ...rainyDays, item_count: 999, item_count_status: status, contains }]);
+    v2Recorder.answer("DELETE /api/v2/collections/{id}/items/{item_id}", () => {
+      contains = false;
+    });
+    v2Recorder.answer("PUT /api/v2/collections/{id}/items/{item_id}", () => {
+      contains = true;
+    });
+    show();
+    const box = await dialog().findByRole("checkbox", { name: "Rainy days" });
+    expect(box).toHaveAttribute("aria-checked", "true");
+    expect(box).toHaveAccessibleDescription("Manual · Count unavailable");
+    expect(dialog().getByText("In 1 collection")).toBeInTheDocument();
+    fireEvent.click(box);
+    await waitFor(() => expect(box).toHaveAttribute("aria-checked", "false"));
+    fireEvent.click(box);
+    await waitFor(() => expect(v2Recorder.writes()).toHaveLength(2));
+    expect(v2Recorder.writes().map((call) => call.operation)).toEqual([
+      "DELETE /api/v2/collections/{id}/items/{item_id}",
+      "PUT /api/v2/collections/{id}/items/{item_id}",
+    ]);
+    expect(box).toHaveAttribute("aria-checked", "true");
+    expect(dialog().queryByText(/999 titles/)).not.toBeInTheDocument();
+  },
+);

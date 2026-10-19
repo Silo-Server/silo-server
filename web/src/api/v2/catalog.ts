@@ -36,11 +36,15 @@ import type { components } from "@/api/v2/schema";
 
 type CatalogItemV2 = components["schemas"]["CatalogItem"];
 type SectionV2 = components["schemas"]["Section"];
-type CuratedCollectionV2 = components["schemas"]["CuratedCollection"];
-type LibraryCollectionCardV2 = components["schemas"]["LibraryCollectionCard"];
+type CuratedCollectionV2 = components["schemas"]["CuratedCollection"] & {
+  item_count_status?: string;
+};
+type LibraryCollectionCardV2 = components["schemas"]["LibraryCollectionCard"] & {
+  item_count_status?: string;
+};
 type LibraryCollectionGroupV2 = components["schemas"]["LibraryCollectionGroup"];
 type LibraryCollectionTabV2 = components["schemas"]["LibraryCollectionTab"];
-type UserCollectionV2 = components["schemas"]["UserCollection"];
+type UserCollectionV2 = components["schemas"]["UserCollection"] & { item_count_status?: string };
 
 /** A card that satisfies both the section and browse card component props. */
 export type CatalogCardItem = SectionItem & BrowseItem;
@@ -153,6 +157,7 @@ export function libraryCollectionFromV2(collection: CuratedCollectionV2): Librar
     sync_schedule: collection.sync_schedule,
     next_sync_at: collection.next_sync_at,
     item_count: collection.item_count,
+    item_count_status: collection.item_count_status,
     created_at: collection.created_at,
     updated_at: collection.updated_at,
   };
@@ -165,6 +170,7 @@ function libraryCollectionCardFromV2(card: LibraryCollectionCardV2): LibraryTabC
     poster_url: card.poster_url,
     poster_thumbhash: card.poster_thumbhash,
     item_count: card.item_count,
+    item_count_status: card.item_count_status,
     featured: card.featured,
     creator_profile_id: card.creator_profile_id,
   };

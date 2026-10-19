@@ -157,3 +157,16 @@ describe("CollectionPicker", () => {
     ).toBeInTheDocument();
   });
 });
+
+it.each(["unavailable", "future-status"])(
+  "keeps a %s count selectable for a Home row",
+  async (status) => {
+    const onPick = vi.fn();
+    const unavailable = { ...OPTIONS[0]!, item_count: 999, item_count_status: status };
+    render(<Harness source={collections({ options: [unavailable] })} onPick={onPick} />);
+    const radio = screen.getByRole("radio", { name: unavailable.title });
+    expect(radio).toHaveAccessibleDescription("Manual · Count unavailable · On Home");
+    await userEvent.click(radio);
+    expect(onPick).toHaveBeenCalledWith(unavailable);
+  },
+);

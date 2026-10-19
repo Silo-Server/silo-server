@@ -911,3 +911,26 @@ describe("personal Synced list editor", () => {
     expect(within(alert).queryByRole("button")).toBeNull();
   });
 });
+
+it.each(["unavailable", "future-status"])(
+  "does not present stale synced-list counts for %s status",
+  async (status) => {
+    serverList("mdblist", MDBLIST, {
+      last_sync_status: "failed",
+      last_sync_at: "2026-01-02T03:04:05Z",
+      item_count: 999,
+      item_count_status: status,
+    });
+    showPage(SERVER_EDIT);
+    await nameField();
+    expect(within(statusStrip()).getByText("Count unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Count unavailable.");
+    expect(screen.queryByText(/999 titles/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Keeps 0/)).not.toBeInTheDocument();
+    const menu = await openMoreActions();
+    expect(within(menu).getByRole("menuitem", { name: "Sync now" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  },
+);

@@ -9,6 +9,7 @@
  * `hooks/queries/collectionScope.ts`, not on these objects.
  */
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { collectionItemCount } from "@/lib/collections/count";
 
 import {
   adminCreateBody,
@@ -156,7 +157,7 @@ export interface CollectionView<Raw extends WireCollection = WireCollection> {
   /** `posterUrl` is the server's collage of its titles, not an image someone chose. */
   posterIsCollage: boolean;
   backdropUrl?: string;
-  itemCount: number;
+  itemCount: number | null;
   libraryIds: number[];
   /** Personal: the profile that created it, the only one that may change it. */
   ownerProfileId?: string;
@@ -719,7 +720,7 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
     posterThumbhash: raw.poster_thumbhash || undefined,
     posterIsCollage: Boolean(raw.poster_url && raw.poster_is_collage),
     backdropUrl: raw.backdrop_url || undefined,
-    itemCount: raw.item_count ?? 0,
+    itemCount: collectionItemCount(raw),
     libraryIds: serverLibraryIds(raw),
     sync: syncView(raw),
     server: {
@@ -847,7 +848,7 @@ export const PERSONAL_SCOPE: CollectionScope<Collection> = {
     posterUrl: raw.poster_url || undefined,
     posterThumbhash: raw.poster_thumbhash || undefined,
     posterIsCollage: Boolean(raw.poster_url && raw.poster_is_collage),
-    itemCount: raw.item_count ?? 0,
+    itemCount: collectionItemCount(raw),
     libraryIds: personalCollectionLibraryIds(raw),
     ownerProfileId: raw.creator_profile_id,
     sync: syncView(raw),

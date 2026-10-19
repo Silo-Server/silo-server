@@ -456,7 +456,7 @@ export interface ManualContentsPanelProps {
   /** After create: try the titles that failed again, at this position onwards. */
   onRetryStaged?: (firstPosition: number) => void;
   /** The collection's title count, for appending when the list isn't all loaded. */
-  itemCount?: number;
+  itemCount?: number | null;
   /** After every title write, so the editor refreshes its save token. */
   onItemsChanged: () => void;
 }
@@ -559,7 +559,7 @@ export function ManualContentsPanel({
   const nextPosition =
     fullyLoaded && loaded.length > 0
       ? Math.max(...loaded.map((item) => item.position)) + 1
-      : Math.max(itemCount, loaded.length);
+      : Math.max(itemCount ?? 0, loaded.length);
   // The position after the last add sent: the server stores what it's given,
   // so an add picked before the list refreshes goes after the one before it.
   const claimed = useRef(0);

@@ -1,3 +1,4 @@
+import { collectionItemCount } from "@/lib/collections/count";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -69,7 +70,7 @@ export function useListedPoster<Raw extends WireCollection>(
     select: (data) => data.collections.find((entry) => entry.id === id),
     refetchInterval: (query) => {
       const entry = query.state.data?.collections.find((c) => c.id === id);
-      if (!awaitCollage || !entry || entry.poster_url || !entry.item_count) {
+      if (!awaitCollage || !entry || entry.poster_url || collectionItemCount(entry) === 0) {
         waiting.current = null;
         return false;
       }

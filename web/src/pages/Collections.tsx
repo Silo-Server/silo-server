@@ -1,3 +1,4 @@
+import { collectionItemCount } from "@/lib/collections/count";
 import {
   fetchCollectionEditSnapshot,
   fetchCollectionOrderSnapshot,
@@ -250,6 +251,7 @@ function posterOf(collection: Collection): LibraryTabCollection {
     poster_url: collection.poster_url ?? "",
     poster_thumbhash: collection.poster_thumbhash,
     item_count: collection.item_count ?? 0,
+    item_count_status: collection.item_count_status,
   };
 }
 
@@ -267,7 +269,7 @@ function CardMeta({ collection, syncing = false }: { collection: Collection; syn
     <CollectionMetaLine
       className="text-xs"
       typeLabel={COLLECTION_KIND_LABEL[collectionKindOf(collection.collection_type)]}
-      itemCount={collection.item_count ?? 0}
+      itemCount={collectionItemCount(collection)}
       attention={syncAttention(collection, syncing)}
     />
   );
@@ -733,7 +735,12 @@ function ServerCollectionsSection() {
               collection={collection}
               kind="regular"
               libraryId={libraryId}
-              meta={<CollectionMetaLine className="text-xs" itemCount={collection.item_count} />}
+              meta={
+                <CollectionMetaLine
+                  className="text-xs"
+                  itemCount={collectionItemCount(collection)}
+                />
+              }
             />
           </li>
         ))}
