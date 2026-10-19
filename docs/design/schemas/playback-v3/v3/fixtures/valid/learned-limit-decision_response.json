@@ -165,7 +165,7 @@
     ],
     "degradation_warnings": [],
     "decision_reason": "validated_original_playback",
-    "requested_media_file_id": 42,
+    "requested_media_file_id": 41,
     "effective_media_file_id": 42,
     "source": {
       "media_file_id": 42,
@@ -188,7 +188,7 @@
     },
     "subtitle_fidelity_policy": "allow_simplified_rendering",
     "bandwidth_limit": {
-      "kbps": 44100,
+      "kbps": 10500,
       "source": "observed_rebuffer",
       "expires_at": "2026-10-24T16:21:40Z"
     }
