@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
 // Two independently constructed middleware/Redis clients model the shared counter
