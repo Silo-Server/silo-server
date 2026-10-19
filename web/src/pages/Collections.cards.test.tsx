@@ -372,9 +372,21 @@ describe("Server collections", () => {
 
   it("loads a picked library's whole list straight away", async () => {
     answerMoviesAndKids(3);
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    v2Recorder.answer("GET /api/v2/library/{id}/collections", async () => {
+      await released;
+      return libraryTab("1", [oscarWinners, heistNight, spaceOperas]);
+    });
     show();
     const server = await screen.findByRole("region", { name: "Server collections" });
     await userEvent.click(await within(server).findByRole("button", { name: "Movies" }));
+    await vi.waitFor(() => expect(libraryReads()).toEqual(["/api/v2/library/1/collections"]));
+    // A picked library has nothing to press while its list loads.
+    expect(within(server).queryByRole("button", { name: "Load more" })).toBeNull();
+    await act(async () => release());
     expect(libraryOf(await within(server).findByRole("link", { name: "Space operas" }))).toBe("1");
     expect(cardsIn(server)).toEqual([oscarWinners.title, "Heist night", "Space operas"]);
     expect(within(server).queryByRole("button", { name: "Load more" })).toBeNull();
@@ -402,6 +414,80 @@ describe("Server collections", () => {
     ).toHaveAttribute("href", "/library/1?tab=collections");
     expect(cardsIn(server)).toEqual([oscarWinners.title, "Studio Ghibli"]);
     expect(within(server).queryByRole("link", { name: /in Kids$/ })).toBeNull();
+  });
+
+  it("keeps Load more focused while a library's rest loads, then focuses the first card it added", async () => {
+    const kiki = { ...oscarWinners, id: "lc-kiki", title: "Kiki's Delivery Service" };
+    v2Recorder.answer("GET /api/v2/collections/server", {
+      libraries: [
+        serverLibrary("1", "Movies", [oscarWinners], 3),
+        serverLibrary("2", "Kids", [ghibli], 2),
+      ],
+    });
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    v2Recorder.answer("GET /api/v2/library/{id}/collections", async (call: { path: string }) => {
+      await released;
+      return call.path === "/api/v2/library/1/collections"
+        ? libraryTab("1", [oscarWinners, heistNight, spaceOperas])
+        : libraryTab("2", [ghibli, kiki]);
+    });
+    show();
+    const server = await screen.findByRole("region", { name: "Server collections" });
+    const loadMore = await within(server).findByRole("button", { name: "Load more" });
+    loadMore.focus();
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(loadMore).toHaveAttribute("aria-disabled", "true"));
+    expect(loadMore).toHaveFocus();
+    // A press while Movies loads does not ask for Kids too.
+    await userEvent.keyboard("{Enter}");
+    expect(libraryReads()).toEqual(["/api/v2/library/1/collections"]);
+
+    await act(async () => release());
+    await vi.waitFor(() =>
+      expect(within(server).getByRole("link", { name: "Heist night" })).toHaveFocus(),
+    );
+    expect(within(server).getByRole("button", { name: "Load more" })).not.toHaveAttribute(
+      "aria-disabled",
+    );
+
+    // The last library's rest: the button goes, and focus still lands on its first card.
+    within(server).getByRole("button", { name: "Load more" }).focus();
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() =>
+      expect(within(server).getByRole("link", { name: kiki.title })).toHaveFocus(),
+    );
+    expect(within(server).queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  it("keeps a library's rest on screen and offers Try again when refreshing it fails", async () => {
+    v2Recorder.answer("GET /api/v2/collections/server", {
+      libraries: [serverLibrary("1", "Movies", [oscarWinners], 3)],
+    });
+    let failing = false;
+    v2Recorder.answer("GET /api/v2/library/{id}/collections", () => {
+      if (failing) throw v2Problem(500, "internal_error", "Failed to load collections");
+      return libraryTab("1", [oscarWinners, heistNight, spaceOperas]);
+    });
+    const client = show();
+    const server = await screen.findByRole("region", { name: "Server collections" });
+    await userEvent.click(await within(server).findByRole("button", { name: "Load more" }));
+    await within(server).findByRole("link", { name: "Space operas" });
+
+    failing = true;
+    await act(() => client.refetchQueries({ type: "active" }));
+    expect(await within(server).findByRole("alert")).toHaveTextContent(
+      "Couldn't refresh the collections in Movies.",
+    );
+    expect(cardsIn(server)).toEqual([oscarWinners.title, "Heist night", "Space operas"]);
+
+    failing = false;
+    await userEvent.click(within(server).getByRole("button", { name: "Try again" }));
+    await vi.waitFor(() => expect(within(server).queryByRole("alert")).toBeNull());
+    expect(libraryReads()).toHaveLength(3);
+    expect(cardsIn(server)).toEqual([oscarWinners.title, "Heist night", "Space operas"]);
   });
 
   it("opens a collection in several libraries across all of them from All", async () => {

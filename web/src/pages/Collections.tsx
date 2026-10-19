@@ -46,6 +46,7 @@ import {
   type SyncAttention,
 } from "@/components/collections/editor/CollectionMetaLine";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import RefreshFailedNotice from "@/components/RefreshFailedNotice";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -706,7 +707,9 @@ function ServerCollectionsSection() {
  * the end of the grid nears the viewport or the viewer presses Load more, so
  * opening the page reads only the capped answer unless the grid is short.
  * Every library's first 20 come before any library's rest. If a list fails,
- * that library's first 20 stay with a link to its Collections tab.
+ * that library's first 20 stay with a link to its Collections tab; if a list
+ * already on screen fails to refresh, it stays with a notice offering Try
+ * again. Pressing Load more moves focus to the first card it added.
  */
 function ServerCollectionsGrid({
   libraries,
@@ -715,7 +718,7 @@ function ServerCollectionsGrid({
   libraries: ServerCollectionsLibrary[];
   loadOnScroll: boolean;
 }) {
-  const { cards, loading, next, failed, loadNext } = useServerCollectionCards(
+  const { cards, loading, next, failed, refreshFailed, loadNext } = useServerCollectionCards(
     libraries,
     loadOnScroll,
   );
@@ -723,9 +726,38 @@ function ServerCollectionsGrid({
     onIntersect: loadNext,
     enabled: loadOnScroll && !loading && next !== undefined,
   });
+  const gridRef = useRef<HTMLUListElement>(null);
+  const loadMoreRef = useRef<HTMLButtonElement>(null);
+  // A Load more press: the library it asked for and where its cards start.
+  const pressed = useRef<{ libraryId: number; from: number }>(undefined);
+  const pressLoadMore = () => {
+    if (loading || !next) return;
+    pressed.current = { libraryId: next.library_id, from: cards.length };
+    loadNext();
+  };
+  // Once that library's rest is in, focus its first card, unless the viewer
+  // moved on while it loaded. The button may be gone by then (nothing left
+  // to load), which leaves focus on the body.
+  useEffect(() => {
+    const press = pressed.current;
+    if (!press || loading || next?.library_id === press.libraryId) return;
+    pressed.current = undefined;
+    const focused = document.activeElement;
+    if (focused !== loadMoreRef.current && focused !== document.body) return;
+    gridRef.current?.children[press.from]?.querySelector<HTMLElement>("a[href]")?.focus();
+  });
   return (
     <>
-      <ul className={POSTER_GRID}>
+      {refreshFailed.map(({ library, error, retry, retrying }) => (
+        <RefreshFailedNotice
+          key={library.library_id}
+          message={`Couldn't refresh the collections in ${library.library_name}.`}
+          error={error}
+          onRetry={retry}
+          retrying={retrying}
+        />
+      ))}
+      <ul ref={gridRef} className={POSTER_GRID}>
         {cards.map(({ collection, libraryId }) => (
           <li key={collection.id}>
             <CollectionPosterCard
@@ -738,11 +770,20 @@ function ServerCollectionsGrid({
         ))}
       </ul>
       {loading ? <PosterGridSkeleton /> : null}
-      {!loading && next ? (
+      {next || (loadOnScroll && loading) ? (
         // Scrolling near it presses it; it stays for keyboard and screen
-        // reader users, who may read the grid without scrolling.
+        // reader users, who may read the grid without scrolling. It stays
+        // mounted while a library's rest loads so a press keeps its focus,
+        // and is aria-disabled rather than disabled, which would drop focus.
         <div ref={sentinelRef} className="flex justify-center">
-          <Button variant="outline" size="sm" onClick={loadNext}>
+          <Button
+            ref={loadMoreRef}
+            variant="outline"
+            size="sm"
+            className="aria-disabled:opacity-50"
+            aria-disabled={loading || undefined}
+            onClick={pressLoadMore}
+          >
             Load more
           </Button>
         </div>

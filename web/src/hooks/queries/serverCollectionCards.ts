@@ -10,6 +10,14 @@ export interface ServerCollectionCard {
   libraryId: number | undefined;
 }
 
+/** A library whose rest is on screen from an earlier read, which failed to refresh. */
+export interface ServerCollectionsRefreshFailure {
+  library: ServerCollectionsLibrary;
+  error: unknown;
+  retry: () => void;
+  retrying: boolean;
+}
+
 export interface ServerCollectionCards {
   cards: ServerCollectionCard[];
   /** A requested library's rest is on its way. */
@@ -18,6 +26,8 @@ export interface ServerCollectionCards {
   next: ServerCollectionsLibrary | undefined;
   /** Libraries whose full list failed; their first 20 stay. */
   failed: ServerCollectionsLibrary[];
+  /** Libraries whose cached rest stays on screen after its refresh failed. */
+  refreshFailed: ServerCollectionsRefreshFailure[];
   /** Asks for the next library's rest. */
   loadNext: () => void;
 }
@@ -55,12 +65,16 @@ export function useServerCollectionCards(
     const inFirst = new Set(entry.collections.map((collection) => collection.id));
     return {
       entry,
+      query,
       first: entry.collections,
       rest: full ? full.filter((collection) => !inFirst.has(collection.id)) : [],
       // Still to load: asked for and on its way, or waiting for the next ask.
       loading: cutShort(entry) && !full && !query?.isError && query?.fetchStatus !== "idle",
       waiting: cutShort(entry) && !full && !query?.isError && query?.fetchStatus === "idle",
       failed: cutShort(entry) && !full && query?.isError === true,
+      // A refetch (on focus, or after an admin change) failed: the cached rest
+      // stays, so the failure would otherwise go unseen.
+      refreshFailed: cutShort(entry) && query?.isRefetchError === true,
     };
   });
   // Each collection once. A collection in several libraries opens across all
@@ -93,6 +107,18 @@ export function useServerCollectionCards(
     loading: lists.some((list) => list.loading),
     next,
     failed: lists.filter((list) => list.failed).map(({ entry }) => entry),
+    refreshFailed: lists.flatMap(({ entry, query, refreshFailed }) =>
+      refreshFailed && query
+        ? [
+            {
+              library: entry,
+              error: query.error,
+              retry: () => void query.refetch(),
+              retrying: query.fetchStatus === "fetching",
+            },
+          ]
+        : [],
+    ),
     loadNext,
   };
 }
