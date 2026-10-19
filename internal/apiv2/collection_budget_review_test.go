@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -13,6 +14,63 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
+
+type facetBudgetHTTPStore struct {
+	userstore.UserStore
+	collection *userstore.Collection
+}
+
+func (s facetBudgetHTTPStore) GetCollection(context.Context, string) (*userstore.Collection, error) {
+	return s.collection, nil
+}
+
+type facetBudgetHTTPProvider struct {
+	userstore.UserStoreProvider
+	store userstore.UserStore
+	err   error
+}
+
+func (p facetBudgetHTTPProvider) ForUser(context.Context, int) (userstore.UserStore, error) {
+	return p.store, p.err
+}
+
+func TestCatalogFacetStoredBudgetValidation(t *testing.T) {
+	rules := make([]catalogsvc.QueryRule, 129)
+	for i := range rules {
+		rules[i] = catalogsvc.QueryRule{Field: "year", Op: "gte", Value: 2000}
+	}
+	raw, err := json.Marshal(catalogsvc.QueryDefinition{MediaScope: "movie", Groups: []catalogsvc.QueryGroup{{Rules: rules}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := facetBudgetHTTPStore{collection: &userstore.Collection{
+		ID: "synthetic", CreatorProfileID: "p-owner", CollectionType: "smart", QueryDefinition: string(raw),
+	}}
+	for _, failure := range []bool{false, true} {
+		provider := facetBudgetHTTPProvider{store: store}
+		if failure {
+			provider.err = errors.New("synthetic database unavailable")
+		}
+		browse, items := catalogsvc.NewBrowseRepository(nil), catalogsvc.NewItemRepository(nil)
+		itemsH := handlers.NewItemsHandler(browse, items, nil, nil, nil, nil, nil, nil, nil)
+		deps, _ := catalogDeps(t)
+		deps.CatalogAccess = &allowlistCatalogAccess{}
+		deps.CatalogBrowse = handlers.NewCatalogHandler(catalogsvc.NewCatalogResolver(browse, items).WithUserStoreProvider(provider), itemsH)
+		h := newTestHandler(t, deps)
+		for _, path := range []string{"/api/v2/catalog/filters?", "/api/v2/catalog/filters/search?facet=studio&q=synthetic&"} {
+			t.Run(fmt.Sprintf("%s/storage_failure=%t", path, failure), func(t *testing.T) {
+				rec := do(t, h, http.MethodGet, path+"source=user_collection&collection_id=synthetic&type=movie", "", viewerHeaders())
+				if failure {
+					if rec.Code != http.StatusInternalServerError {
+						t.Fatalf("ordinary storage failure changed classification: %d %s", rec.Code, rec.Body.String())
+					}
+				} else {
+					requireProblem(t, rec, TypeValidationFailed)
+				}
+			})
+		}
+	}
+}
 
 func TestAdminCollectionRawBudgetValidation(t *testing.T) {
 	deps, _ := libraryDeps(t)

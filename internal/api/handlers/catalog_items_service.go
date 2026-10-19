@@ -195,7 +195,7 @@ func (h *CatalogHandler) Filters(ctx context.Context, v ItemViewer, req catalog.
 	}
 	filters, err := h.resolver.ListFiltersWithOptions(ctx, req, v.Access, catalog.CatalogFilterOptions{IncludeTechnical: includeTechnical})
 	if err != nil {
-		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
+		if errors.Is(err, catalog.ErrInvalidCatalogRequest) || errors.Is(err, catalog.ErrQueryComplexity) {
 			return CatalogFiltersView{}, apiError(http.StatusBadRequest, "bad_request", err.Error())
 		}
 		return CatalogFiltersView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to list catalog filters")
@@ -228,7 +228,7 @@ func (h *CatalogHandler) SearchFacet(ctx context.Context, v ItemViewer, req cata
 
 // facetSearchError maps a facet typeahead failure to its API error.
 func facetSearchError(err error) error {
-	if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
+	if errors.Is(err, catalog.ErrInvalidCatalogRequest) || errors.Is(err, catalog.ErrQueryComplexity) {
 		return apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 	return apiError(http.StatusInternalServerError, "internal_error", "Failed to search catalog facet")
