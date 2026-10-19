@@ -13,6 +13,7 @@ import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useGridRowCap } from "@/hooks/useGridRowCap";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import { formatDate } from "@/lib/datetime";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
@@ -191,13 +192,7 @@ function SeasonEpisodeCard({
           <div className="text-muted-foreground flex items-center gap-2 text-xs">
             {episode.runtime > 0 && <span>{episode.runtime}m</span>}
             {episode.air_date && (
-              <span>
-                {new Intl.DateTimeFormat(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                }).format(new Date(episode.air_date))}
-              </span>
+              <span>{formatDate(episode.air_date, "medium") || episode.air_date}</span>
             )}
             {episode.overview &&
               !hideOverview &&
