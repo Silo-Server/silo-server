@@ -16,11 +16,13 @@ import (
 
 type recordingLimiter struct {
 	keys   []string
+	rates  []Rate
 	denied map[string]bool
 }
 
 func (l *recordingLimiter) Allow(_ context.Context, key string, limit Rate) AllowResult {
 	l.keys = append(l.keys, key)
+	l.rates = append(l.rates, limit)
 	return AllowResult{
 		Allowed:   !l.denied[key],
 		Limit:     max(1, int(limit.RequestsPerSecond)),

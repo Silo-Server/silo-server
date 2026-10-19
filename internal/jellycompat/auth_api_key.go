@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -145,7 +146,7 @@ func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuth
 	}
 	a.apiKeyLastUsed.Touch(apiKey.ID)
 	return adminAPIKeyAuthResult{
-		ctx:    context.WithValue(r.Context(), adminAPIKeyKey, true),
+		ctx:    ratelimit.WithAccount(context.WithValue(r.Context(), adminAPIKeyKey, true), apiKey.UserID),
 		status: http.StatusOK,
 		ok:     true,
 	}
