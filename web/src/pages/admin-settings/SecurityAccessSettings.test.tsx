@@ -131,7 +131,7 @@ describe("SecurityAccessSettings", () => {
     expect(rateLimiting.queryByRole("button", { name: /settings$/ })).not.toBeInTheDocument();
     expect(rateLimiting.getByRole("combobox", { name: /Where counters are kept/i })).toBeVisible();
     expect(rateLimiting.getByLabelText("Whole-server limit")).toBeVisible();
-    expect(rateLimiting.getByText("Per client address")).toBeVisible();
+    expect(rateLimiting.getByText("Per address and account")).toBeVisible();
     expect(rateLimiting.getByRole("heading", { level: 4, name: "API key tiers" })).toBeVisible();
     expect(rateLimiting.getByText("Standard API keys")).toBeVisible();
     expect(rateLimiting.getByText("Elevated API keys")).toBeVisible();
