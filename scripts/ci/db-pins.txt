@@ -292,3 +292,11 @@
 
 # Count construction shares one request ledger across collection owners.
 ./internal/api/handlers TestCollectionCountLedgerAcrossOwnersDB
+
+# Collection count construction, fixed workers, no retries, and connection cleanup admission.
+./internal/catalog TestCollectionCountConstructionAndWorkersDB
+./internal/catalog TestCollectionCountDuplicatesAndSingleConnectionDB
+./internal/catalog TestCollectionCountBatchFailureNoRetryDB
+./internal/catalog TestCollectionCountServerDeadlineAndSessionIsolationDB
+./internal/catalog TestCollectionCountNodeAndAccountLifetimeDB
+./internal/catalog TestCollectionCountCanceledConnectionKeepsLeaseDB

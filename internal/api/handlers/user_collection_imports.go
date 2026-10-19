@@ -362,6 +362,11 @@ func (h *UserCollectionImportHandler) artworkBackend() blobstore.Store {
 // collectionView renders a stored collection with its poster presigned.
 func (h *UserCollectionImportHandler) collectionView(ctx context.Context, c userstore.Collection) PersonalCollectionView {
 	resp := toCollectionResponse(c)
+	if isNativeAPIV2(ctx) {
+		// Sync records membership, not the viewer's current catalog count with
+		// its display filter. The next bounded collection read evaluates that.
+		resp.ItemCount, resp.ItemCountStatus = 0, CollectionCountUnavailable
+	}
 	resp.PosterURL = h.presignCollectionPoster(ctx, c.PosterURL)
 	return resp
 }
