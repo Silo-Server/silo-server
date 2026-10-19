@@ -24,6 +24,7 @@ const (
 	collectionCountTimeout            = 4 * time.Second
 	collectionCountMaxSQLBytes        = 256 << 10
 	collectionCountMaxArgs            = 8192
+	collectionCountSmartType          = "smart"
 )
 
 type collectionCountBudgetKey struct{}
@@ -132,9 +133,9 @@ func effectiveCollectionCountKey(accountID int, c PersonalCollectionDefinition, 
 		}
 		definition = ApplySmartCollectionItemLimit(definition)
 		c.ID = ""
-		c.CollectionType = "smart"
+		c.CollectionType = collectionCountSmartType
 	} else {
-		c.CollectionType = "manual"
+		c.CollectionType = libraryCollectionTypeManual
 	}
 	c.QueryDefinition = ""
 	c.DisplayQueryDefinition = display

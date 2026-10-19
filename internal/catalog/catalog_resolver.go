@@ -2190,7 +2190,7 @@ func parseCatalogCollectionQueryDefinition(config json.RawMessage) (QueryDefinit
 	legacy := false
 	if err := walkQueryJSONObject(bytes.TrimSpace(config), func(key string, _ []byte) error {
 		switch strings.ToLower(key) {
-		case "filter_type", "filter_library_id", "filter_library_ids":
+		case "filter_type", "filter_library_id", queryLegacyLibraryIDsKey:
 			legacy = true
 		}
 		return nil

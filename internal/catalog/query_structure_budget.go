@@ -14,10 +14,13 @@ import (
 var ErrQueryComplexity = errors.New("query definition exceeds structural budget")
 
 const (
-	queryMaxGroups     = 16
-	queryMaxRules      = 128
-	queryMaxLibraries  = 256
-	queryMaxValueBytes = 64 << 10
+	queryMaxGroups           = 16
+	queryMaxRules            = 128
+	queryMaxLibraries        = 256
+	queryMaxValueBytes       = 64 << 10
+	queryLibraryIDsKey       = "library_ids"
+	queryLegacyLibraryIDsKey = "filter_library_ids"
+	queryGroupsKey           = "groups"
 )
 
 type queryStructureBudget struct {
@@ -149,7 +152,7 @@ func validateQueryJSONStructure(definitions ...[]byte) (queryStructureBudget, er
 		}
 		err := walkQueryJSONObject(raw, func(key string, value []byte) error {
 			switch strings.ToLower(key) {
-			case "library_ids", "filter_library_ids":
+			case queryLibraryIDsKey, queryLegacyLibraryIDsKey:
 				return walkQueryJSONArray(value, func([]byte) error {
 					budget.libraries++
 					return budget.validate()
@@ -158,7 +161,7 @@ func validateQueryJSONStructure(definitions ...[]byte) (queryStructureBudget, er
 				if !bytes.Equal(value, []byte("null")) {
 					budget.libraries++
 				}
-			case "groups":
+			case queryGroupsKey:
 				return walkQueryJSONArray(value, func(group []byte) error {
 					budget.groups++
 					if err := budget.validate(); err != nil {
@@ -246,9 +249,10 @@ func queryJSONValueEnd(raw []byte, start int) int {
 	for i := start; i < len(raw); i++ {
 		c := raw[i]
 		if quoted {
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == '"' {
+			case '"':
 				quoted = false
 				if depth == 0 {
 					return i + 1

@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+const (
+	queryStatusParam  = "status"
+	queryYearMinParam = "year_min"
+)
+
 // URL grammar admission precedes builder maps, indexed-value arrays and rating
 // cleanup. The maps here can never grow beyond the structural limits.
 func validateCatalogURLStructure(values url.Values) error {
@@ -45,7 +50,7 @@ func validateCatalogURLStructure(values url.Values) error {
 	if err := budget.validate(); err != nil {
 		return err
 	}
-	for _, key := range []string{"genre", "status", "year_min", "year_max"} {
+	for _, key := range []string{facetGenre, queryStatusParam, queryYearMinParam, "year_max"} {
 		if err := addCatalogURLValueBytes(&budget, values[key]); err != nil {
 			return err
 		}
@@ -69,10 +74,7 @@ func addCatalogURLValueBytes(budget *queryStructureBudget, values []string) erro
 		if len(raw) > queryMaxValueBytes-budget.valueBytes {
 			return ErrQueryComplexity
 		}
-		encoded, err := json.Marshal(raw)
-		if err != nil {
-			return err
-		}
+		encoded, _ := json.Marshal(raw) // Strings always have a JSON representation.
 		budget.valueBytes += len(encoded)
 		if err := budget.validate(); err != nil {
 			return err

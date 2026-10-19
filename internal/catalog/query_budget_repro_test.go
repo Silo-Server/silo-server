@@ -284,8 +284,8 @@ func TestCollectionCountBatchFailureNoRetryDB(t *testing.T) {
 }
 
 type collectionDeadlineOnlyContext struct {
-	context.Context
-	deadline time.Time
+	context.Context //nolint:containedctx // Override only Deadline to prove server timeout without client cancellation.
+	deadline        time.Time
 }
 
 func (c collectionDeadlineOnlyContext) Deadline() (time.Time, bool) { return c.deadline, true }
