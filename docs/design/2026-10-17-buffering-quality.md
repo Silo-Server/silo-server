@@ -433,15 +433,21 @@ it is younger than `bandwidth_probe_max_age_seconds`.
   `bandwidth_probe_target_kbps`. Lower bounds are a quick test that reached its
   target, or a playback sample. A larger library, a raised cap or a profile with
   more to play makes the test due again.
+- Without a target, any current reading proves the link. The server then has
+  no bitrates to measure against, and a failed target lookup must not send
+  every client holding a lower bound into a test at once.
 
-Clients check a few seconds after sign-in, on a return to the foreground and
-after a network change. A check reads `GET /api/v2/playback/connection` first.
-It runs a quick test only when automatic tests are on and no current reading
-proves the link. A reinstalled app, or a phone back on its usual Wi-Fi, finds
-the reading it left there.
+Clients check on sign-in, on a return to the foreground and after a network
+change. A check reads `GET /api/v2/playback/connection` at once, as soon as the
+client is signed in and online, so a playback start in the first seconds already
+sends the reading. Only a test waits: a few seconds, so the first screen can
+settle, and it runs only if automatic tests are on and no current reading proves
+the link. A reinstalled app, or a phone back on its usual Wi-Fi, finds the
+reading it left there.
 
 - There is no periodic test. A test that fails or is refused waits for the next
-  check, and after a `429` no earlier than `Retry-After`.
+  check. A `429` holds automatic tests against the server that sent it until
+  its `Retry-After`.
 - No test runs while media plays or starts, on a metered or cellular link, or
   while the app is in the background. On the web, that includes a hidden tab. A
   test that is running when one of these begins is cancelled and measured
@@ -499,8 +505,9 @@ receiving, from its first byte to its last.
   a sample at least the target proves the link, so an overstated one would
   stand in for a test the link would not pass.
 - A client that cannot measure this omits it.
-- Apple measures it on Aether's upstream reader. AVPlayer reads from Aether on
-  127.0.0.1, so its access log only sees that local hop.
+- Apple will measure it on Aether's upstream reader once AetherEngine reports
+  it, and omits it until then. AVPlayer reads from Aether on 127.0.0.1, so its
+  access log only sees that local hop.
 
 The server keeps one sample per device and connection as `playback_sample`. A
 new sample replaces it when it is higher, or when the kept one is older than the
