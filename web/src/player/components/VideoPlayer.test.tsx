@@ -5607,7 +5607,9 @@ describe("VideoPlayer playback throughput", () => {
     hlsJS.latest = null;
   });
 
-  it("reports the rate hls.js fragments arrived at with the plan summary", async () => {
+  async function summaryAfterFragments(
+    fragments: { loaded: number; loading: { start: number; first: number; end: number } }[],
+  ) {
     hlsJS.supported = true;
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
     const onBufferingSummary = vi.fn();
@@ -5621,19 +5623,26 @@ describe("VideoPlayer playback throughput", () => {
     });
     const { unmount } = renderPlayer({ plan, onBufferingSummary });
     await waitFor(() => expect(hlsJS.latest).not.toBeNull());
-
-    // 4 MB received over 300 ms of transfer; the gap between requests and the
-    // wait for each first byte do not count.
-    for (const stats of [
-      { loaded: 1_000_000, loading: { start: 0, first: 50, end: 150 } },
-      { loaded: 3_000_000, loading: { start: 900, first: 1000, end: 1200 } },
-    ])
-      act(() => hlsJS.latest?.emit("fragLoaded", { frag: { stats } }));
+    for (const stats of fragments) act(() => hlsJS.latest?.emit("fragLoaded", { frag: { stats } }));
     unmount();
+    expect(onBufferingSummary).toHaveBeenCalled();
+    return onBufferingSummary.mock.calls.at(-1)![1] as Record<string, unknown>;
+  }
 
-    expect(onBufferingSummary).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ throughput_kbps: 106_666 }),
-    );
+  it("reports the rate hls.js fragments arrived at with the plan summary", async () => {
+    // 4 MB received over 1.2 s of transfer; the gap between requests and the
+    // wait for each first byte do not count.
+    const summary = await summaryAfterFragments([
+      { loaded: 1_000_000, loading: { start: 0, first: 50, end: 450 } },
+      { loaded: 3_000_000, loading: { start: 900, first: 1000, end: 1800 } },
+    ]);
+    expect(summary.throughput_kbps).toBe(26_666);
+  });
+
+  it("reports no throughput from under a second of receiving", async () => {
+    const summary = await summaryAfterFragments([
+      { loaded: 4_000_000, loading: { start: 0, first: 50, end: 350 } },
+    ]);
+    expect(summary).not.toHaveProperty("throughput_kbps");
   });
 });

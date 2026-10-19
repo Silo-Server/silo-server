@@ -415,6 +415,9 @@ function readStringPayload(
   return null;
 }
 
+/** The least receiving time a plan summary's throughput_kbps is taken from. */
+const MIN_THROUGHPUT_SAMPLE_MS = 1_000;
+
 export function VideoPlayer({
   title,
   year,
@@ -4215,8 +4218,12 @@ export function VideoPlayer({
       }),
     onSummary: (summaryPlan, summary) => {
       const fragments = fragmentThroughputRef.current;
+      // Under a second of receiving can be one burst from a buffer, a rate
+      // the link never held; the server keeps the highest sample.
       const kbps =
-        fragments && String(fragments.planRevision) === summaryPlan.adoption_id
+        fragments &&
+        String(fragments.planRevision) === summaryPlan.adoption_id &&
+        fragments.ms >= MIN_THROUGHPUT_SAMPLE_MS
           ? Math.min(Math.floor((fragments.bytes * 8) / fragments.ms), 1_000_000)
           : 0;
       onBufferingSummary?.(
