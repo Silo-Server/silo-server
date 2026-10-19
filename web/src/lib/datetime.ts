@@ -95,6 +95,8 @@ export function parseCalendarDate(value: string | null | undefined): Date | null
   const month = Number(match[2]) - 1;
   const day = Number(match[3]);
   const date = new Date(year, month, day);
+  // The constructor reads years 0-99 as 1900-1999; setFullYear does not.
+  date.setFullYear(year, month, day);
   return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day
     ? date
     : null;

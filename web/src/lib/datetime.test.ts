@@ -71,6 +71,7 @@ describe("formatDate", () => {
 describe("calendar dates", () => {
   it("parses YYYY-MM-DD as local midnight and rejects anything else", () => {
     expect(parseCalendarDate("2026-02-18")).toEqual(new Date(2026, 1, 18));
+    expect(parseCalendarDate("0063-09-23")?.getFullYear()).toBe(63);
     expect(parseCalendarDate("2024-02-30")).toBeNull();
     expect(parseCalendarDate("2026-02-18T00:00:00Z")).toBeNull();
     expect(parseCalendarDate(undefined)).toBeNull();
@@ -85,8 +86,10 @@ describe("calendar dates", () => {
 
   // West of UTC, reading the date as UTC midnight would show Feb 17. The time
   // zone is process-wide, so the check runs in a child process instead of
-  // switching TZ under the test files that share this one.
-  it("formats the stored day west of UTC", () => {
+  // switching TZ under the test files that share this one. Node before 22.6
+  // can't import datetime.ts there.
+  const canStripTypes = process.allowedNodeEnvironmentFlags.has("--experimental-strip-types");
+  it.skipIf(!canStripTypes)("formats the stored day west of UTC", () => {
     const script = `
       const { formatDate, setDateTimeFormatPreferences } = await import(${JSON.stringify(new URL("./datetime.ts", import.meta.url).href)});
       setDateTimeFormatPreferences({ dateFormat: "MM/DD/YYYY", timeFormat: "auto" });

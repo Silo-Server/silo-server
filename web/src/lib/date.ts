@@ -52,7 +52,7 @@ export function formatRelativeTime(
 }
 
 export function formatBirthDate(dateStr: string): string {
-  return formatDate(dateStr, "medium");
+  return formatDate(dateStr, "medium") || dateStr;
 }
 
 export function computeAge(birthStr: string, deathStr?: string): number {
