@@ -148,6 +148,13 @@ function setVisibility(state: "visible" | "hidden") {
   document.dispatchEvent(new Event("visibilitychange"));
 }
 
+/** Hides the tab for `ms`, then shows it again. */
+async function awayFor(ms: number) {
+  setVisibility("hidden");
+  await vi.advanceTimersByTimeAsync(ms);
+  setVisibility("visible");
+}
+
 beforeEach(() => {
   // Re-stubbed per test because tests unstub all globals afterwards.
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
@@ -484,10 +491,48 @@ describe("scheduleBandwidthProbe", () => {
     await vi.advanceTimersByTimeAsync(30 * DAY);
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
 
-    setVisibility("hidden");
-    setVisibility("visible");
+    await awayFor(60_000);
     await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends nothing after a quick tab switch when the reading proves the link", async () => {
+    server({ reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: DAY } } });
+    scheduleBandwidthProbe();
+    await readThenTest();
+    const reads = vi.mocked(v2).mock.calls.length;
+
+    await awayFor(59_000);
+    await readThenTest();
+    expect(vi.mocked(v2).mock.calls.length).toBe(reads);
+    expect(readMeasuredBandwidthKbps()).toBe(48_000);
+  });
+
+  it("resumes after a quick tab switch the test the switch stopped", async () => {
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await awayFor(5_000);
+    expect(fetchWithSession).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+    const signal = (fetchWithSession.mock.calls[0]![1] as RequestInit).signal!;
+
+    // Hiding again stops the test it resumed; the next quick return resumes it once more.
+    await awayFor(5_000);
+    expect(signal.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
+    expect(fetchWithSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads after a quick tab switch that came before the first read", async () => {
+    server({ reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: DAY } } });
+    scheduleBandwidthProbe();
+    await awayFor(5_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readMeasuredBandwidthKbps()).toBe(48_000);
   });
 
   it("neither looks nor tests in a hidden tab, and hiding stops a running test", async () => {
@@ -515,14 +560,11 @@ describe("scheduleBandwidthProbe", () => {
     await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
 
-    setVisibility("hidden");
-    setVisibility("visible");
+    await awayFor(60_000);
     await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(600_000);
-    setVisibility("hidden");
-    setVisibility("visible");
+    await awayFor(600_000);
     await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(2);
   });

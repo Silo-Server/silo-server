@@ -443,13 +443,10 @@ describe("app boot request budget", () => {
     signInReturningOwner();
     await boot(server);
     const bootRequests = server.requests.length;
-    // The bandwidth probe runs on its own timer whatever the tab does.
-    const sinceBoot = () =>
-      server.requests
-        .slice(bootRequests)
-        .filter((request) => request.operation !== "GET /api/v2/playback/bandwidth-probe");
+    const sinceBoot = () => server.requests.slice(bootRequests);
 
-    // A quick switch keeps the events socket open, so the cache is still current.
+    // A quick switch keeps the events socket open, so the cache is still current,
+    // and leaves the tab on the network whose speed it already read.
     await switchTabAway(server, 5_000);
     expect(describeRequests(sinceBoot())).toBe("");
 

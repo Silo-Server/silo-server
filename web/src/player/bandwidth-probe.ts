@@ -27,6 +27,12 @@ import {
 
 /** Let the first screen settle before spending bandwidth on a test. */
 const TEST_DELAY_MS = 5_000;
+/**
+ * A tab shown again this soon is still on the network it left, so it does
+ * not read again. Matches HIDDEN_EVENTS_SOCKET_GRACE_MS, so a short tab
+ * switch sends nothing anywhere in the app.
+ */
+const SHORT_ABSENCE_MS = 60_000;
 /** How long a reading lasts when the server does not say. */
 const DEFAULT_READING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** The probe without connection_speed_v1, which keeps nothing for us. */
@@ -447,10 +453,11 @@ function probeAllowed(): boolean {
 
 /**
  * Keeps a current reading while the app is signed in: reads the server's at
- * once on sign-in, when a hidden tab is shown again and after the browser
- * reports a new connection type, and runs the quick test `testDelayMs` later
- * only when none proves the link. A hidden tab neither reads nor tests.
- * Returns a function that stops the schedule.
+ * once on sign-in, when a tab hidden for a minute or more is shown again and
+ * after the browser reports a new connection type, and runs the quick test
+ * `testDelayMs` later only when none proves the link. A tab back from a
+ * shorter switch sends nothing unless it still owes a test. A hidden tab
+ * neither reads nor tests. Returns a function that stops the schedule.
  */
 export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void {
   stopBandwidthProbes();
@@ -480,15 +487,26 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
     Date.now() >= notBefore;
   const readingProvesLink = (schedule: ProbeSchedule) =>
     schedule.reporting ? readServerReading(schedule) : Promise.resolve(!!readStored(Date.now()));
+  // Until a look starts on this network, even a quick tab switch reads.
+  let lookDue = true;
+  // A look found nothing proving the link, and no test has reached an answer
+  // since: a hide or a playback start stopped it, or it never got to run.
+  let owedTest: ProbeSchedule | undefined;
+  let hiddenAt: number | undefined;
+  // The test is best effort too: one that fails waits for the next look.
+  const planTest = (schedule: ProbeSchedule) =>
+    later(testDelayMs, () => testUnderLock(schedule).catch(() => undefined));
   const look = async () => {
     // A test already running keeps what it measures when it settles.
     if (activeProbe || tabHidden() || generation !== scheduleGeneration) return;
+    lookDue = false;
+    owedTest = undefined;
     try {
       const schedule = await probeSchedule();
       if (await readingProvesLink(schedule)) return;
-      if (!schedule.automatic || !testMayRun()) return;
-      // The test is best effort too: one that fails waits for the next look.
-      later(testDelayMs, () => testUnderLock(schedule).catch(() => undefined));
+      if (!schedule.automatic) return;
+      owedTest = schedule;
+      if (testMayRun()) planTest(schedule);
     } catch {
       // Best effort: without a reading playback plans as it did before, and
       // the next look tries again.
@@ -514,6 +532,7 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
         if (error instanceof ProbeRateLimited) notBefore = Date.now() + error.retryAfter * 1000;
       } finally {
         if (activeProbe === controller) activeProbe = undefined;
+        if (!controller.signal.aborted) owedTest = undefined;
       }
     };
     const locks = lockManager();
@@ -534,18 +553,23 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
     cancelEpoch++;
     activeProbe?.abort();
     forgetBandwidthEstimate();
+    lookDue = true;
     later(0, look);
   };
   const onVisibility = () => {
-    if (!tabHidden()) {
-      later(0, look);
+    if (tabHidden()) {
+      hiddenAt = Date.now();
+      // A hidden tab does not test; one that is running stops and measured nothing.
+      clearTimeout(lookTimer);
+      lookTimer = undefined;
+      cancelEpoch++;
+      activeProbe?.abort();
       return;
     }
-    // A hidden tab does not test; one that is running stops and measured nothing.
-    clearTimeout(lookTimer);
-    lookTimer = undefined;
-    cancelEpoch++;
-    activeProbe?.abort();
+    const shortAbsence = hiddenAt !== undefined && Date.now() - hiddenAt < SHORT_ABSENCE_MS;
+    hiddenAt = undefined;
+    if (lookDue || !shortAbsence) later(0, look);
+    else if (owedTest) planTest(owedTest);
   };
   network?.addEventListener?.("change", onNetworkChange);
   document.addEventListener("visibilitychange", onVisibility);
