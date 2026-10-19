@@ -130,7 +130,7 @@ func TestClientSocketAuthorityCancellationReleasesBlockedWork(t *testing.T) {
 					revoke()
 					// Advance only the fake clock through the periodic check and
 					// the bounded access_changed grace when the writer is blocked.
-					time.Sleep(10 * time.Millisecond)
+					time.Sleep(10 * time.Millisecond) //nolint:forbidigo // Advance synctest's fake clock to the authority check; no wall-clock wait.
 					synctest.Wait()
 					if version == "v2 access changed" {
 						select {
@@ -138,7 +138,7 @@ func TestClientSocketAuthorityCancellationReleasesBlockedWork(t *testing.T) {
 							t.Error("access_changed lost its write grace")
 						default:
 						}
-						time.Sleep(eventsAccessChangedGrace)
+						time.Sleep(eventsAccessChangedGrace) //nolint:forbidigo // Advance only the fake grace timer while snapshot work is blocked.
 						synctest.Wait()
 					}
 					select {
