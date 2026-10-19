@@ -481,6 +481,10 @@ A plan's `plan_summary` may carry `throughput_kbps`. It is the rate at which the
 plan's media requests received data, counted only while a request was receiving,
 from its first byte to its last.
 
+- Time in which several requests were receiving at once counts once.
+- A client sends it only after at least 1,000 ms of receiving, capped at
+  1,000,000. The server keeps the highest sample, and a short transfer that
+  arrives in one burst from a buffer can report a rate the link never held.
 - A client that cannot measure this omits it.
 - Apple measures it on Aether's upstream reader. AVPlayer reads from Aether on
   127.0.0.1, so its access log only sees that local hop.
