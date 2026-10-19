@@ -16,11 +16,20 @@ const intelPCIVendorID = "0x8086"
 // tone mapper turns HLG teal and darkens PQ (#2414), so the VAAPI backend
 // offers it SDR sources only; QSV converts HDR on Intel through OpenCL.
 func vaapiHDRUnreliable(device string) bool {
+	return strings.EqualFold(drmVendor(device), intelPCIVendorID)
+}
+
+// drmVendor returns the PCI vendor ID of a /dev/dri device, or "" when the
+// device isn't a DRM node or sysfs can't be read.
+func drmVendor(device string) string {
 	if !strings.HasPrefix(device, "/dev/dri/") {
-		return false
+		return ""
 	}
 	data, err := os.ReadFile(filepath.Join(sysfsRoot, "class", "drm", drmNodeName(device), "device", "vendor"))
-	return err == nil && strings.EqualFold(strings.TrimSpace(string(data)), intelPCIVendorID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // drmNodeName returns the DRM node a device path names. A /dev/dri/by-path

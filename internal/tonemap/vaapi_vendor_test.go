@@ -112,6 +112,22 @@ func TestDRMNodeNameFollowsByPathLinks(t *testing.T) {
 	}
 }
 
+// TestDRMVendorUnreadableKeepsEveryKind covers a host whose sysfs can't be
+// read: no vendor is reported and VAAPI keeps every kind, as before.
+func TestDRMVendorUnreadableKeepsEveryKind(t *testing.T) {
+	if got := drmVendor("/dev/dri/renderD128"); got != "" {
+		t.Fatalf("drmVendor without sysfs = %q, want empty", got)
+	}
+	kinds := StandardSourceKinds()
+	if got := vaapiCandidateSourceKinds(kinds, "/dev/dri/renderD128"); !slices.Equal(got, kinds) {
+		t.Fatalf("candidate kinds without sysfs = %v, want %v", got, kinds)
+	}
+	fakeDRMVendor(t, "0x8086")
+	if got := drmVendor("/dev/dri/renderD128"); got != "0x8086" {
+		t.Fatalf("drmVendor = %q, want 0x8086", got)
+	}
+}
+
 // TestProbeIntelVAAPIResultDoesNotExpire keeps the narrowed Intel result
 // cached, so the GPU smoke matrix doesn't rerun every negative-cache interval.
 func TestProbeIntelVAAPIResultDoesNotExpire(t *testing.T) {
