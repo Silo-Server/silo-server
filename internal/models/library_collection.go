@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+// Collection count statuses distinguish a usable value from an unavailable count.
+const (
+	CollectionCountAvailable   = "available"
+	CollectionCountUnavailable = "unavailable"
+)
+
 // LibraryCollection is an admin-managed collection scoped to one or more libraries.
 type LibraryCollection struct {
 	ID                  string

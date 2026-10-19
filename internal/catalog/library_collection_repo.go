@@ -180,9 +180,9 @@ func scanLibraryCollection(row pgx.Row) (*models.LibraryCollection, error) {
 // availability from the same saved row on every read, including untouched
 // legacy rows, without changing their definitions or stored cache.
 func setLibraryCollectionCountAvailability(collection *models.LibraryCollection) {
-	collection.ItemCountStatus = "available"
-	if collection.CollectionType == "smart" && ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition) != nil {
-		collection.ItemCount, collection.ItemCountStatus = 0, "unavailable"
+	collection.ItemCountStatus = models.CollectionCountAvailable
+	if collection.CollectionType == collectionCountSmartType && ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition) != nil {
+		collection.ItemCount, collection.ItemCountStatus = 0, models.CollectionCountUnavailable
 	}
 }
 

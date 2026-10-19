@@ -281,8 +281,7 @@ export class V2Recorder {
   /**
    * The rules every recorded collection request keeps, as messages:
    * a guarded write carries If-Match; top-level `library_id`/`library_ids`
-   * are strings; a
-   * manual collection's body never carries `query_definition` or
+   * are strings; a manual collection's body never carries `query_definition` or
    * `sort_config`.
    */
   wireInvariantViolations(): string[] {

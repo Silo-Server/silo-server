@@ -265,7 +265,7 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 	}
 	posterAspect := 2.0 / 3.0 // portrait poster; without it clients square-crop the card
 	count := c.ItemCount
-	if c.ItemCountStatus != "" && c.ItemCountStatus != "available" {
+	if c.ItemCountStatus != "" && c.ItemCountStatus != models.CollectionCountAvailable {
 		count = 0
 	}
 	dto := baseItemDTO{

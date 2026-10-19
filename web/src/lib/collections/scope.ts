@@ -587,7 +587,8 @@ function serverListRequest(
 
 /**
  * A saved personal list's PATCH. Name, sharing and the Collections tab switch always go;
- * admission fields and other settings only go when changed from `base`. A "custom" schedule is never sent: it stays until another is picked.
+ * admission fields and other settings only go when changed from `base`. A
+ * "custom" schedule is never sent: it stays until another is picked.
  */
 function personalListRequest(draft: ListEditDraft, base: CollectionDraft): UpdateCollectionRequest {
   const changed = new Set(changedFields(base, draft));

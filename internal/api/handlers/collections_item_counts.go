@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // visiblePersonalCollectionCounts answers how many items each personal
@@ -32,9 +33,9 @@ func visiblePersonalCollectionCounts(ctx context.Context, executor *catalog.Quer
 
 const (
 	// CollectionCountAvailable means ItemCount is a current evaluated count.
-	CollectionCountAvailable = "available"
+	CollectionCountAvailable = models.CollectionCountAvailable
 	// CollectionCountUnavailable means clients must ignore ItemCount.
-	CollectionCountUnavailable = "unavailable"
+	CollectionCountUnavailable = models.CollectionCountUnavailable
 )
 
 // Frozen v1 cannot represent an unavailable count in its response body.

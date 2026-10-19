@@ -85,18 +85,11 @@ func TestLibraryCollectionLegacyCountRecoveryDB(t *testing.T) {
 	assertTab := func(grouped bool, status string) {
 		t.Helper()
 		tab, err := h.LibraryCollectionsTab(ctx, f.library, f.account, "owner")
-		if err != nil || len(tab.Collections) != 1 || tab.Collections[0].ItemCountStatus != status {
-			t.Fatalf("curated response = %+v, %v", tab, err)
+
+		if err != nil {
+			t.Fatal(err)
 		}
-		var cards []libraryTabCollection
-		if grouped && len(tab.Groups) == 1 {
-			cards = tab.Groups[0].Collections
-		} else if !grouped && tab.Ungrouped != nil {
-			cards = tab.Ungrouped.Collections
-		}
-		if len(cards) != 1 || cards[0].ID != c.ID || cards[0].ItemCountStatus != status || cards[0].ItemCount != 0 {
-			t.Fatalf("library cards = %+v", cards)
-		}
+		assertLibraryCollectionTabCount(t, tab, grouped, c.ID, status)
 	}
 	assertTab(false, CollectionCountUnavailable)
 	if _, err := h.LibraryCollectionsTab(t.Context(), f.library, f.account, "owner"); err == nil {
@@ -136,5 +129,21 @@ func TestLibraryCollectionLegacyCountRecoveryDB(t *testing.T) {
 	f.exec(t, `UPDATE library_collections SET query_definition=$2::jsonb WHERE id=$1`, c.ID, string(legacy))
 	if err := h.DeleteAdminCollection(t.Context(), c.ID); err != nil {
 		t.Fatalf("known-ID deletion = %v", err)
+	}
+}
+
+func assertLibraryCollectionTabCount(t *testing.T, tab LibraryCollectionTabView, grouped bool, id, status string) {
+	t.Helper()
+	if len(tab.Collections) != 1 || tab.Collections[0].ItemCountStatus != status {
+		t.Fatalf("curated response = %+v", tab)
+	}
+	var cards []libraryTabCollection
+	if grouped && len(tab.Groups) == 1 {
+		cards = tab.Groups[0].Collections
+	} else if !grouped && tab.Ungrouped != nil {
+		cards = tab.Ungrouped.Collections
+	}
+	if len(cards) != 1 || cards[0].ID != id || cards[0].ItemCountStatus != status || cards[0].ItemCount != 0 {
+		t.Fatalf("library cards = %+v", cards)
 	}
 }
