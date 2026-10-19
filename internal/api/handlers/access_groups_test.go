@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -112,7 +114,7 @@ func (s *accessGroupHandlerTestStore) Create(_ context.Context, input access.Cre
 		ID:                       s.nextID,
 		Name:                     input.Name,
 		Description:              input.Description,
-		LibraryIDs:               append([]int(nil), input.LibraryIDs...),
+		LibraryIDs:               slices.Clone(input.LibraryIDs),
 		MaxPlaybackQuality:       input.MaxPlaybackQuality,
 		DownloadAllowed:          input.DownloadAllowed,
 		DownloadTranscodeAllowed: input.DownloadTranscodeAllowed,
@@ -144,7 +146,7 @@ func (s *accessGroupHandlerTestStore) Update(_ context.Context, id int64, input 
 		group.Description = *input.Description
 	}
 	if input.LibraryIDs != nil {
-		group.LibraryIDs = append([]int(nil), (*input.LibraryIDs)...)
+		group.LibraryIDs = slices.Clone(*input.LibraryIDs)
 	}
 	if input.MaxPlaybackQuality != nil {
 		group.MaxPlaybackQuality = *input.MaxPlaybackQuality
@@ -217,4 +219,32 @@ func decodeAccessGroupResponse(t *testing.T, rec *httptest.ResponseRecorder) acc
 		t.Fatalf("decode response: %v", err)
 	}
 	return response
+}
+
+// An empty allowlist denies every library; null removes the group restriction.
+func TestAccessGroupUpdateLibraryPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want []int
+	}{
+		{"omitted", `{}`, []int{11}},
+		{"null", `{"library_ids":null}`, nil},
+		{"empty", `{"library_ids":[]}`, []int{}},
+		{"populated", `{"library_ids":[22]}`, []int{22}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newAccessGroupHandlerTestStore()
+			store.groups[1] = access.Group{ID: 1, Name: "Synthetic group", LibraryIDs: []int{11}}
+			h := NewAccessGroupHandler(store)
+			rec := httptest.NewRecorder()
+			h.HandleUpdate(rec, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(tc.body), "1"))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("update status = %d, body %s", rec.Code, rec.Body.String())
+			}
+			if got := decodeAccessGroupResponse(t, rec).LibraryIDs; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("library_ids = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
 }
