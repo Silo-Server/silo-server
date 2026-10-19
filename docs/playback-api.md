@@ -80,9 +80,9 @@ direct play, it sends the bytes itself. When a proxy-only policy has no proxy
 that serves probes, the answer is `503 dependency_unavailable`, never a
 measurement of the API path.
 
-The web app reads the connection endpoint at once on sign-in, when a tab hidden
-for a minute or more is shown again, and after the browser reports a new
-connection type, so a playback start in the first seconds already sends the
+The web app reads the connection endpoint as soon as a profile is active, when
+a tab hidden for a minute or more is shown again, and after the browser reports
+a new connection type, so a playback start in the first seconds already sends the
 reading. A tab back from a shorter switch sends nothing unless the hide stopped
 a test it owed, which it then resumes. A few seconds
 later it runs the quick test only when no current reading proves the link (any
