@@ -302,18 +302,21 @@ describe.each([PERSONAL_SCOPE, SERVER_SCOPE])("append readiness in $kind scope",
     return screen.findByRole("option", { name: /^New title/ });
   };
   it.each([
-    { phase: "pending", complete: false },
-    { phase: "failed", complete: false },
-    { phase: "pending", complete: true },
-    { phase: "failed", complete: true },
+    { phase: "pending", complete: false, loading: false },
+    { phase: "failed", complete: false, loading: false },
+    { phase: "pending", complete: true, loading: false },
+    { phase: "failed", complete: true, loading: false },
+    { phase: "failed", complete: false, loading: true },
   ])(
     "blocks adding and staged retry while capabilities are $phase (complete membership: $complete)",
-    ({ phase, complete }) => {
+    ({ phase, complete, loading }) => {
       capabilityMock(scope).mockReturnValue(unavailable(phase));
       mocks.page.mockReturnValue(
-        complete
-          ? { data: { items: [item("first", 31)], page: { has_more: false } }, isLoading: false }
-          : partialPage(),
+        loading
+          ? { isLoading: true }
+          : complete
+            ? { data: { items: [item("first", 31)], page: { has_more: false } }, isLoading: false }
+            : partialPage(),
       );
       const retry = vi.fn();
       show(["failed-title"], null, scope, { onRetryStaged: retry });

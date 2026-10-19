@@ -770,7 +770,11 @@ export function ManualContentsPanel({
 
       {addProblem ? (
         <div
-          role={capabilityQuery.isPending || items.isLoading ? "status" : "alert"}
+          role={
+            capabilityQuery.isPending || (capabilityQuery.isSuccess && items.isLoading)
+              ? "status"
+              : "alert"
+          }
           className="text-muted-foreground grid justify-items-start gap-2 text-[13px]"
         >
           <p>{addProblem}</p>
