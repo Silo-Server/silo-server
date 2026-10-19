@@ -29701,6 +29701,9 @@
           "subscribe_grace_period_seconds": {
             "format": "int64",
             "type": "integer"
+          },
+          "work_admission": {
+            "$ref": "#/components/schemas/RealtimeWorkAdmission"
           }
         },
         "required": [
@@ -29732,6 +29735,9 @@
           },
           "ticket": {
             "type": "string"
+          },
+          "work_admission": {
+            "$ref": "#/components/schemas/RealtimeWorkAdmission"
           }
         },
         "required": [
@@ -40554,6 +40560,10 @@
       "Problem": {
         "additionalProperties": false,
         "properties": {
+          "code": {
+            "description": "Optional domain-specific refusal code",
+            "type": "string"
+          },
           "detail": {
             "description": "Safe occurrence-specific explanation; not for control flow",
             "examples": [
@@ -40575,6 +40585,11 @@
             ],
             "format": "uri",
             "type": "string"
+          },
+          "retry_after_ms": {
+            "description": "Minimum delay before retrying refused realtime work",
+            "format": "int64",
+            "type": "integer"
           },
           "status": {
             "description": "HTTP status code, equal to the response status",
@@ -40598,6 +40613,10 @@
             ],
             "format": "uri",
             "type": "string"
+          },
+          "work_started": {
+            "description": "False means this realtime attempt started no downstream work",
+            "type": "boolean"
           }
         },
         "required": [
@@ -42338,6 +42357,86 @@
           "file_path",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "RealtimeRoomWorkLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/RealtimeWorkLimit"
+          },
+          "member": {
+            "$ref": "#/components/schemas/RealtimeWorkLimit"
+          }
+        },
+        "required": [
+          "member",
+          "account"
+        ],
+        "type": "object"
+      },
+      "RealtimeWorkAdmission": {
+        "additionalProperties": false,
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "deadline_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "epoch": {
+            "type": "string"
+          },
+          "events_account": {
+            "$ref": "#/components/schemas/RealtimeWorkLimit"
+          },
+          "room_action": {
+            "$ref": "#/components/schemas/RealtimeRoomWorkLimits"
+          },
+          "room_recovery": {
+            "$ref": "#/components/schemas/RealtimeRoomWorkLimits"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "semantics": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "backend",
+          "scope",
+          "epoch",
+          "semantics",
+          "deadline_ms",
+          "events_account",
+          "room_recovery",
+          "room_action"
+        ],
+        "type": "object"
+      },
+      "RealtimeWorkLimit": {
+        "additionalProperties": false,
+        "properties": {
+          "per_minute": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "per_second": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "per_second",
+          "per_minute"
         ],
         "type": "object"
       },
@@ -49951,6 +50050,9 @@
           "vote_host_override": {
             "description": "The host may promote any suggestion in a vote room, not only the leader",
             "type": "boolean"
+          },
+          "work_admission": {
+            "$ref": "#/components/schemas/RealtimeWorkAdmission"
           }
         },
         "required": [
@@ -159328,15 +159430,99 @@
             },
             "description": "Handshake refused."
           },
-          "503": {
+          "429": {
             "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "retry_after_ms": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "work_started": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "message",
+                    "retry_after_ms",
+                    "work_started"
+                  ],
+                  "type": "object"
+                }
+              },
               "text/plain": {
                 "schema": {
                   "type": "string"
                 }
               }
             },
-            "description": "Handshake refused."
+            "description": "Handshake refused.",
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum retry delay in seconds.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "retry_after_ms": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "work_started": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "message",
+                    "retry_after_ms",
+                    "work_started"
+                  ],
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Handshake refused.",
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum retry delay in seconds.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Connect using one session-bound ticket in Sec-WebSocket-Protocol.",
@@ -213891,15 +214077,99 @@
             },
             "description": "Room handshake refused."
           },
-          "503": {
+          "429": {
             "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "retry_after_ms": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "work_started": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "message",
+                    "retry_after_ms",
+                    "work_started"
+                  ],
+                  "type": "object"
+                }
+              },
               "text/plain": {
                 "schema": {
                   "type": "string"
                 }
               }
             },
-            "description": "Room handshake refused."
+            "description": "Room handshake refused.",
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum retry delay in seconds.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "retry_after_ms": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "work_started": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "message",
+                    "retry_after_ms",
+                    "work_started"
+                  ],
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Room handshake refused.",
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum retry delay in seconds.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Connect a room using a single-use session-bound credential.",

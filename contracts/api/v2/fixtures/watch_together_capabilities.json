@@ -1,5 +1,5 @@
 {
-  "revision": "efa2c8c12c9ace1fbcf4c6e3e159a3f97ee59741f73d3ca9e303b0b1e0179cf2",
+  "revision": "6acb8aaae9b41fff1c67f52490f5b350b7c281d5912225fbf7d360bc1110e109",
   "state": "available",
   "allowed": false,
   "staged_selection": true,
@@ -11,5 +11,37 @@
   "vote_host_override": true,
   "stop_playback": true,
   "max_member_state_ids": 200,
-  "socket_protocol": "silo.room.v2"
+  "socket_protocol": "silo.room.v2",
+  "work_admission": {
+    "version": 1,
+    "backend": "memory",
+    "scope": "per_node",
+    "epoch": "synthetic-epoch",
+    "semantics": "",
+    "deadline_ms": 0,
+    "events_account": {
+      "per_second": 0,
+      "per_minute": 0
+    },
+    "room_recovery": {
+      "member": {
+        "per_second": 0,
+        "per_minute": 0
+      },
+      "account": {
+        "per_second": 0,
+        "per_minute": 0
+      }
+    },
+    "room_action": {
+      "member": {
+        "per_second": 0,
+        "per_minute": 0
+      },
+      "account": {
+        "per_second": 0,
+        "per_minute": 0
+      }
+    }
+  }
 }

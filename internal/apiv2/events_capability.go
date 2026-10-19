@@ -13,12 +13,13 @@ type EventsCapabilityService interface {
 
 type EventsCapabilities struct {
 	Capability
-	SchemaVersion               int      `json:"schema_version"`
-	SubscribeFrame              bool     `json:"subscribe_frame"`
-	DeclaredChannels            bool     `json:"declared_channels"`
-	SubscribeGracePeriodSeconds int      `json:"subscribe_grace_period_seconds"`
-	MaxRequestedChannels        int      `json:"max_requested_channels"`
-	Channels                    []string `json:"channels"`
+	SchemaVersion               int                    `json:"schema_version"`
+	SubscribeFrame              bool                   `json:"subscribe_frame"`
+	DeclaredChannels            bool                   `json:"declared_channels"`
+	SubscribeGracePeriodSeconds int                    `json:"subscribe_grace_period_seconds"`
+	MaxRequestedChannels        int                    `json:"max_requested_channels"`
+	Channels                    []string               `json:"channels"`
+	WorkAdmission               *RealtimeWorkAdmission `json:"work_admission,omitempty"`
 }
 type EventsCapabilitiesOutput struct {
 	Status       int
@@ -38,6 +39,7 @@ func registerEventsCapability(reg *Registry) {
 		for _, channel := range value.Channels {
 			out.Channels = append(out.Channels, string(channel))
 		}
+		out.WorkAdmission = realtimeWorkStatus(reg.deps.EventsCapability)
 		return &EventsCapabilitiesOutput{Body: out}, nil
 	})
 }

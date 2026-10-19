@@ -69,6 +69,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/progresssync"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
+	"github.com/Silo-Server/silo-server/internal/realtimeadmission"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -192,6 +193,8 @@ type Dependencies struct {
 	PersonRefreshQueue    handlers.PersonRefreshQueue
 	PersonRefresher       handlers.PersonRefresher
 	RateLimitMW           *ratelimit.Middleware
+	// RealtimeAdmission is shared by both API versions and socket types.
+	RealtimeAdmission *realtimeadmission.Controller
 	// ProfilePINAttempts bounds wrong profile PIN guesses per profile,
 	// shared with the Jellyfin login so both count against one budget.
 	// Nil gets a process-local limiter.
@@ -425,6 +428,11 @@ func NewRouter(deps Dependencies) http.Handler {
 // inventory generator walks this function; every registration must be
 // reachable from its body.
 func newChiRouter(deps Dependencies) chi.Router {
+	if deps.RealtimeAdmission == nil {
+		// Embedded routers use the default per-process policy. Production sets
+		// the startup-active dependency independently of the HTTP enable flag.
+		deps.RealtimeAdmission = realtimeadmission.New(ratelimit.NewMemoryWorkStore(), "memory")
+	}
 	declareNativeMediaRoutes()
 	r := chi.NewRouter()
 
@@ -2738,6 +2746,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if watchTogetherHandler.MemberState != nil && watchTogetherHandler.Details != nil {
 			v2deps.WatchTogetherPicker = watchTogetherHandler
 		}
+		watchTogetherHandler.Admission = deps.RealtimeAdmission
 		v2deps.WatchTogetherCapability = watchTogetherHandler
 		v2deps.WatchTogetherCreate = watchTogetherHandler
 		if deps.RedisClient != nil && sessionRepo != nil && userRepo != nil {
@@ -2755,6 +2764,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.EventsHub != nil {
 		events := handlers.NewEventsHandler(deps.EventsHub, adminJobsHandler, adminHandler, deps.TaskManager, deps.ScanRegistry, deps.LibraryScanQueue, historyImportSvc)
 		events.SetNotificationsSystem(deps.Notifications)
+		events.SetRealtimeAdmission(deps.RealtimeAdmission)
 		v2deps.EventsCapability = events
 		if sessionRepo != nil && userRepo != nil {
 			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
@@ -3449,6 +3459,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 						historyImportSvc,
 					)
 					eventsHandler.SetNotificationsSystem(deps.Notifications)
+					eventsHandler.SetRealtimeAdmission(deps.RealtimeAdmission)
 					if sessionRepo != nil {
 						eventsHandler.SetSessionRoles(sessionRepo)
 					}

@@ -14,16 +14,17 @@ type WatchTogetherCapabilityService interface {
 
 type WatchTogetherCapabilities struct {
 	Capability
-	StagedSelection     bool   `json:"staged_selection" doc:"Lobbies stage an item and the host starts it explicitly"`
-	LobbyReady          bool   `json:"lobby_ready" doc:"Members mark themselves ready in the lobby over the room socket"`
-	ConnectionReplaced  bool   `json:"connection_replaced" doc:"Displaced v2 room sockets receive a terminal connection_replaced message before closing"`
-	SelectionModeSwitch bool   `json:"selection_mode_switch" doc:"The host may switch a lobby between host picks and voting"`
-	MemberState         bool   `json:"member_state" doc:"Member watch state and picker rows are computed server-side"`
-	Picker              bool   `json:"picker"`
-	VoteHostOverride    bool   `json:"vote_host_override" doc:"The host may promote any suggestion in a vote room, not only the leader"`
-	StopPlayback        bool   `json:"stop_playback" doc:"The host may stop playback and return the room to the lobby without ending it"`
-	MaxMemberStateIDs   int    `json:"max_member_state_ids"`
-	SocketProtocol      string `json:"socket_protocol"`
+	StagedSelection     bool                   `json:"staged_selection" doc:"Lobbies stage an item and the host starts it explicitly"`
+	LobbyReady          bool                   `json:"lobby_ready" doc:"Members mark themselves ready in the lobby over the room socket"`
+	ConnectionReplaced  bool                   `json:"connection_replaced" doc:"Displaced v2 room sockets receive a terminal connection_replaced message before closing"`
+	SelectionModeSwitch bool                   `json:"selection_mode_switch" doc:"The host may switch a lobby between host picks and voting"`
+	MemberState         bool                   `json:"member_state" doc:"Member watch state and picker rows are computed server-side"`
+	Picker              bool                   `json:"picker"`
+	VoteHostOverride    bool                   `json:"vote_host_override" doc:"The host may promote any suggestion in a vote room, not only the leader"`
+	StopPlayback        bool                   `json:"stop_playback" doc:"The host may stop playback and return the room to the lobby without ending it"`
+	MaxMemberStateIDs   int                    `json:"max_member_state_ids"`
+	SocketProtocol      string                 `json:"socket_protocol"`
+	WorkAdmission       *RealtimeWorkAdmission `json:"work_admission,omitempty"`
 }
 type WatchTogetherCapabilitiesOutput struct {
 	Status       int
@@ -60,6 +61,7 @@ func registerWatchTogetherCapabilities(reg *Registry) {
 			StopPlayback:        reg.deps.WatchTogetherStop != nil,
 			MaxMemberStateIDs:   maxIDs,
 			SocketProtocol:      socketProtocol,
+			WorkAdmission:       realtimeWorkStatus(reg.deps.WatchTogetherSocket),
 		}}, nil
 	})
 }

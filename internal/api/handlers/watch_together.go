@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/realtimeadmission"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -26,6 +27,8 @@ type WatchTogetherScopeResolver interface {
 }
 
 type WatchTogetherHandler struct {
+	Admission     *realtimeadmission.Controller
+	admissionOnce sync.Once
 	Service       *watchtogether.Service
 	ScopeResolver WatchTogetherScopeResolver
 	TokenService  *watchtogether.RoomTokenService
@@ -104,7 +107,8 @@ type watchTogetherSuggestionsResponse struct {
 }
 
 type watchTogetherClientMessage struct {
-	Type string `json:"type"`
+	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 type watchTogetherAttachMessage struct {
@@ -171,10 +175,12 @@ type watchTogetherSocket interface {
 	Close() error
 }
 type watchTogetherFrame struct {
-	data []byte
-	ping bool
+	data        []byte
+	ping        bool
+	policyClose bool
 }
 type watchTogetherRoomConn struct {
+	roomID              string
 	conn                watchTogetherSocket
 	outgoing            chan watchTogetherFrame
 	done                chan struct{}
@@ -284,6 +290,10 @@ func (c *watchTogetherRoomConn) writeLoop() {
 			if err == nil {
 				err = c.conn.WriteMessage(websocket.TextMessage, frame.data)
 			}
+		}
+		if err == nil && frame.policyClose {
+			_ = c.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, realtimeInputCloseReason), time.Now().Add(watchTogetherReplacementTimeout))
+			return
 		}
 		if err != nil || terminal {
 			return
@@ -845,6 +855,11 @@ func (h *WatchTogetherHandler) HandleRoomWebSocket(w http.ResponseWriter, r *htt
 		return
 	}
 
+	if err := h.workAdmission().Admit(r.Context(), realtimeadmission.RoomRecovery, realtimeadmission.Identity{UserID: claims.UserID, ProfileID: profileID, RoomID: roomID}); err != nil {
+		writeRealtimeHTTPRefusal(w, err)
+		return
+	}
+
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -857,11 +872,15 @@ func (h *WatchTogetherHandler) HandleRoomWebSocket(w http.ResponseWriter, r *htt
 // serveRoomConnection preserves the existing room message and disconnect loop.
 func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn *websocket.Conn, roomID string, userID int, profileID string) {
 	realtimeConn := newWatchTogetherRoomConn(conn)
+	realtimeConn.roomID = roomID
 	realtimeConn.includeMemberStatus = conn.Subprotocol() == watchtogether.RoomSocketProtocol
 	defer func() { _ = realtimeConn.Close() }()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
+	if ctx.Err() != nil {
+		return
+	}
 	reg, _, err := h.Service.Connect(ctx, roomID, userID, profileID, realtimeConn)
 	if err != nil {
 		// Terminal failures use room_closed so clients stop reconnecting
@@ -892,124 +911,19 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 	// Prime an RTT sample right away instead of waiting for the first tick.
 	_ = realtimeConn.WritePing()
 
+	shield := h.workAdmission().Socket(userID)
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			return
 		}
 
+		if !shield.Allow() {
+			realtimeConn.closeInputViolation()
+			return
+		}
 		if err := h.handleRoomClientMessage(ctx, realtimeConn, reg, userID, profileID, data); err != nil {
-			realtimeConn.WriteError("bad_request", err.Error())
+			realtimeConn.writeClientError(err)
 		}
-	}
-}
-
-func (h *WatchTogetherHandler) handleRoomClientMessage(
-	ctx context.Context,
-	rc *watchTogetherRoomConn,
-	reg *watchtogether.Registration,
-	userID int,
-	profileID string,
-	data []byte,
-) error {
-	var base watchTogetherClientMessage
-	if err := json.Unmarshal(data, &base); err != nil {
-		return err
-	}
-
-	switch base.Type {
-	case "attach_session":
-		var msg watchTogetherAttachMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
-		}
-		if msg.SessionID == "" {
-			return errors.New("session_id is required")
-		}
-		_, err := h.Service.AttachSessionForConnection(ctx, reg, userID, profileID, msg.SessionID)
-		return err
-	case "transport_request":
-		var msg watchTogetherTransportRequestMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
-		}
-		_, err := h.Service.HandleTransportRequestForConnection(ctx, reg, userID, profileID, watchtogether.TransportRequest{
-			Action:          msg.Action,
-			PositionSeconds: msg.PositionSeconds,
-			IsPaused:        msg.IsPaused,
-		})
-		return err
-	case "state_report":
-		var msg watchTogetherStateReportMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
-		}
-		if msg.SessionID == "" {
-			return errors.New("session_id is required")
-		}
-		_, err := h.Service.HandleStateReportForConnection(ctx, reg, userID, profileID, watchtogether.StateReport{
-			CommandID:       msg.CommandID,
-			SessionID:       msg.SessionID,
-			PositionSeconds: msg.PositionSeconds,
-			IsPaused:        msg.IsPaused,
-			IsReady:         msg.IsReady,
-		})
-		return err
-	case "ready":
-		var msg watchTogetherReadyMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
-		}
-		if msg.SessionID == "" {
-			return errors.New("session_id is required")
-		}
-		_, err := h.Service.HandleReadyForConnection(ctx, reg, userID, profileID, watchtogether.StateReport{
-			CommandID:       msg.CommandID,
-			SessionID:       msg.SessionID,
-			PositionSeconds: msg.PositionSeconds,
-			IsPaused:        msg.IsPaused,
-		})
-		return err
-	case "buffering":
-		var msg watchTogetherBufferingMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
-		}
-		if msg.SessionID == "" {
-			return errors.New("session_id is required")
-		}
-		_, err := h.Service.HandleBufferingForConnection(ctx, reg, userID, profileID, watchtogether.StateReport{
-			SessionID:       msg.SessionID,
-			PositionSeconds: msg.PositionSeconds,
-			IsPaused:        msg.IsPaused,
-		})
-		return err
-	case "lobby_ready":
-		if !rc.includeMemberStatus {
-			return errors.New("unsupported room websocket message")
-		}
-		var msg watchTogetherLobbyReadyMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
-		}
-		_, err := h.Service.HandleLobbyReadyForConnection(ctx, reg, userID, profileID, msg.Ready)
-		return err
-	case "ping":
-		var msg watchTogetherPingMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
-		}
-		// The echoed timestamps only serve the client's clock-offset estimate;
-		// latency for command scheduling is measured server-side from
-		// protocol-level ping/pong.
-		now := time.Now().UTC()
-		return rc.WriteJSON(map[string]string{
-			"type":               "pong",
-			"client_sent_at":     msg.ClientSentAt,
-			"server_received_at": now.Format(time.RFC3339Nano),
-			"server_sent_at":     time.Now().UTC().Format(time.RFC3339Nano),
-		})
-	default:
-		return errors.New("unsupported room websocket message")
 	}
 }

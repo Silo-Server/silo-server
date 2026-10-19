@@ -2594,3 +2594,11 @@ that fails compilation retains its identity. In-flight validation and save resul
 associated with their submitted source. Mutations disable both query-library retries and
 authentication refresh replay; read refresh remains enabled. Persistence and local application
 are reported separately.
+
+### Native realtime admission
+
+See [Native realtime work admission](realtime-admission.md) for charged work
+units, shared/account scope, prepaid tickets, refusal/recovery ordering and the
+critical v1 security bridge exception. Room control refusal is not a disconnect
+or an applied-action receipt. V2 success correlation is additive; v1 success
+shapes remain frozen.

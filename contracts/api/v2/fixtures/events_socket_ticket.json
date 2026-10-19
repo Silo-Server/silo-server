@@ -2,5 +2,37 @@
   "ticket": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "expires_in": 30,
   "max_connection_seconds": 300,
-  "protocol": "silo.events.v2"
+  "protocol": "silo.events.v2",
+  "work_admission": {
+    "version": 1,
+    "backend": "memory",
+    "scope": "per_node",
+    "epoch": "synthetic-epoch",
+    "semantics": "",
+    "deadline_ms": 0,
+    "events_account": {
+      "per_second": 0,
+      "per_minute": 0
+    },
+    "room_recovery": {
+      "member": {
+        "per_second": 0,
+        "per_minute": 0
+      },
+      "account": {
+        "per_second": 0,
+        "per_minute": 0
+      }
+    },
+    "room_action": {
+      "member": {
+        "per_second": 0,
+        "per_minute": 0
+      },
+      "account": {
+        "per_second": 0,
+        "per_minute": 0
+      }
+    }
+  }
 }

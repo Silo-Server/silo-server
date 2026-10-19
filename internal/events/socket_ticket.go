@@ -19,6 +19,8 @@ const SocketMaxLifetime = 5 * time.Minute
 // ProfileToken retains the PIN proof captured when the ticket was requested.
 // Neither it nor the opaque ticket may be included in logs or socket messages.
 type SocketIdentity struct {
+	// InitialWorkPrepaid and TicketExpiresAt bind one work unit to this single-use proof.
+	InitialWorkPrepaid bool      `json:"initial_work_prepaid,omitzero"`
 	ImpersonatorUserID *int      `json:"impersonator_user_id,omitempty"`
 	EffectiveRole      string    `json:"effective_role"`
 	AccessFingerprint  string    `json:"access_fingerprint"`
@@ -51,9 +53,14 @@ func (s *SocketTicketStore) Mint(ctx context.Context, identity SocketIdentity) (
 	if identity.AccessFingerprint == "" || identity.UserID <= 0 || identity.SessionID == "" || !identity.AccessExpiresAt.After(now) {
 		return "", ErrSocketTicket
 	}
-	identity.TicketExpiresAt = now.Add(SocketTicketTTL)
+	if identity.TicketExpiresAt.IsZero() || now.Add(SocketTicketTTL).Before(identity.TicketExpiresAt) {
+		identity.TicketExpiresAt = now.Add(SocketTicketTTL)
+	}
 	if identity.AccessExpiresAt.Before(identity.TicketExpiresAt) {
 		identity.TicketExpiresAt = identity.AccessExpiresAt
+	}
+	if !identity.TicketExpiresAt.After(now) || ctx.Err() != nil {
+		return "", ErrSocketTicket
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

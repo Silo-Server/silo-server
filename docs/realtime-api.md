@@ -29,8 +29,9 @@ and PIN proof must validate. The ticket is opaque, expires within 30 seconds,
 and binds the account, login session, account role, profile proof and resolved
 access policy. The response includes `ticket`, `expires_in`,
 `max_connection_seconds` (300), and `protocol` (`silo.events.v2`). It is not cached.
-Minting is naturally idempotent in effect: extra credentials are harmless
-orphans that expire, so shared session refresh may retry the mint. A consumed
+Minting spends one initial event-work permit before storing a ticket. A failed or
+unused credential burns that permit. Shared session refresh may retry the mint,
+but every successful admission spends credit; no refund is promised. A consumed
 credential is never reused for reconnects.
 
 Connect to `GET /api/v2/events/ws` with exactly these offered subprotocols,
@@ -602,3 +603,20 @@ Marker thumbnail readiness uses the playback event bus to reach sessions on
 other API replicas. Each serving replica resolves a protected image URL and
 checks the session's negotiated feature before delivery. Subscribers do not
 rebroadcast events; retired image references cannot acquire new URLs.
+
+## Client work admission
+
+Native events and room sockets enforce separate event, room recovery/report and
+explicit-action work allowances across v1 and v2. V2 startup metadata exposes
+`work_admission.version: 1` in both ticket responses, the events hello and both
+capability responses. It includes the startup backend, scope and enforcement
+epoch. Refusals preserve healthy sockets and carry correlated retry metadata;
+v2 one-shot room actions add an ordered `action_result`. The approved critical
+bridge exception adds refusal/timing/optional metadata and input-shield closure
+to v1 while preserving its success shapes.
+
+The complete limits, prepaid expiry, outage behavior, client retry and
+uncertain-delivery rules are in
+[Native realtime work admission](architecture/realtime-admission.md). Read that
+contract before changing native socket clients. Jellyfin and playback-control
+sockets do not use these work classes.

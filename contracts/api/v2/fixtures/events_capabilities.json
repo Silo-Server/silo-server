@@ -1,5 +1,5 @@
 {
-  "revision": "a1579201fa7920b06c303899b3e4b300acb99bc9cee3ea5dbd7669c2712c794c",
+  "revision": "abe29ba6b7ffb14bb6e3378759791021d5466b233c231e90b2b6f269dc043564",
   "state": "available",
   "allowed": false,
   "schema_version": 1,
@@ -19,5 +19,37 @@
     "settings",
     "notifications",
     "download_preparations"
-  ]
+  ],
+  "work_admission": {
+    "version": 1,
+    "backend": "memory",
+    "scope": "per_node",
+    "epoch": "synthetic-epoch",
+    "semantics": "",
+    "deadline_ms": 0,
+    "events_account": {
+      "per_second": 0,
+      "per_minute": 0
+    },
+    "room_recovery": {
+      "member": {
+        "per_second": 0,
+        "per_minute": 0
+      },
+      "account": {
+        "per_second": 0,
+        "per_minute": 0
+      }
+    },
+    "room_action": {
+      "member": {
+        "per_second": 0,
+        "per_minute": 0
+      },
+      "account": {
+        "per_second": 0,
+        "per_minute": 0
+      }
+    }
+  }
 }

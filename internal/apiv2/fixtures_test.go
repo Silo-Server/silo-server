@@ -2131,7 +2131,7 @@ func fixtureDeps() Dependencies {
 	deps.AdminNotificationDiscord = new(fakeAdminNotificationDiscord)
 	deps.NotificationDestinationTests = new(fakeNotificationDestinationTests)
 	deps.NotificationDestinationCreate = new(fakeNotificationDestinationCreate)
-	deps.EventsCapability = &handlers.EventsHandler{}
+	deps.EventsCapability = new(realtimeAdmissionService)
 	deps.WatchTogetherCapability = &fakeWatchTogetherCapability{available: true}
 	wireWatchTogetherCapabilityFakes(&deps)
 	deps.EventsSocket = new(fakeEventsSocket)

@@ -23,6 +23,7 @@ var ErrRoomSocketCredential = errors.New("invalid or unavailable room socket cre
 // The handler must validate current login/profile/room authority before minting,
 // after consumption and throughout the bounded connection lifetime.
 type RoomSocketCredential struct {
+	InitialWorkPrepaid bool                  `json:"initial_work_prepaid,omitzero"`
 	RoomID             string                `json:"room_id"`
 	Session            events.SocketIdentity `json:"session"`
 	RoomProofExpiresAt time.Time             `json:"room_proof_expires_at"`
@@ -47,7 +48,9 @@ func (s *RoomSocketCredentialStore) Mint(ctx context.Context, credential RoomSoc
 	if s == nil || s.redis == nil || !validRoomSocketCredential(credential, now) {
 		return "", ErrRoomSocketCredential
 	}
-	credential.ExpiresAt = now.Add(RoomSocketTicketTTL)
+	if credential.ExpiresAt.IsZero() || now.Add(RoomSocketTicketTTL).Before(credential.ExpiresAt) {
+		credential.ExpiresAt = now.Add(RoomSocketTicketTTL)
+	}
 	for _, expiry := range []time.Time{credential.Session.AccessExpiresAt, credential.RoomProofExpiresAt} {
 		if expiry.Before(credential.ExpiresAt) {
 			credential.ExpiresAt = expiry

@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/realtimeadmission"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -57,13 +58,16 @@ func (h *WatchTogetherSocketV2) MintRoomSocket(ctx context.Context, roomID, proo
 	}
 	identity.AccessFingerprint = eventsScopeFingerprint(scope)
 	identity.EffectiveRole = effective.Role
-	credential := watchtogether.RoomSocketCredential{RoomID: roomID, Session: identity, RoomProofExpiresAt: expiry}
+	if err := h.Room.workAdmission().Admit(validated, realtimeadmission.RoomRecovery, realtimeadmission.Identity{UserID: identity.UserID, ProfileID: identity.ProfileID, RoomID: roomID}); err != nil {
+		return "", time.Time{}, err
+	}
 	until := time.Now().Add(watchtogether.RoomSocketTicketTTL)
 	for _, limit := range []time.Time{expiry, identity.AccessExpiresAt} {
 		if limit.Before(until) {
 			until = limit
 		}
 	}
+	credential := watchtogether.RoomSocketCredential{RoomID: roomID, Session: identity, RoomProofExpiresAt: expiry, ExpiresAt: until, InitialWorkPrepaid: true}
 	ticket, err := h.Tickets.Mint(ctx, credential)
 	if err != nil {
 		return "", time.Time{}, apiError(503, "unavailable", "Room credential storage is unavailable")
@@ -114,6 +118,14 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		http.Error(w, "room authority expired", http.StatusUnauthorized)
 		return
+	}
+	// Older nodes may have minted a ticket without prepaid work. It gets
+	// ordinary admission here; an absent flag never supplies free Connect.
+	if !credential.InitialWorkPrepaid || !time.Now().Before(credential.ExpiresAt) {
+		if err := h.Room.workAdmission().Admit(validated, realtimeadmission.RoomRecovery, realtimeadmission.Identity{UserID: claims.UserID, ProfileID: credential.Session.ProfileID, RoomID: roomID}); err != nil {
+			writeRealtimeHTTPRefusal(w, err)
+			return
+		}
 	}
 	if _, err = h.Room.Service.GetRoom(validated, roomID); err != nil {
 		http.Error(w, "room unavailable", http.StatusForbidden)

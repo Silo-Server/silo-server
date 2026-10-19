@@ -150,12 +150,15 @@ type ProblemError struct {
 // Every member the contract requires is required here; `errors` is present
 // only on validation problems.
 type Problem struct {
-	Type     string         `json:"type" format:"uri" doc:"Stable problem type URI; the final segment is the problem identifier" example:"https://siloserver.org/docs/api/v2/problems/validation_failed"`
-	Title    string         `json:"title" doc:"Short summary fixed for the problem type" example:"Validation failed"`
-	Status   int            `json:"status" doc:"HTTP status code, equal to the response status" example:"422"`
-	Detail   string         `json:"detail" doc:"Safe occurrence-specific explanation; not for control flow" example:"The request did not pass validation; see errors."`
-	Instance string         `json:"instance" format:"uri" doc:"urn:silo:request:<request-id>, matching the X-Request-ID response header" example:"urn:silo:request:000000000000000000000003"`
-	Errors   []ProblemError `json:"errors,omitempty" doc:"Field-level validation details"`
+	Type         string         `json:"type" format:"uri" doc:"Stable problem type URI; the final segment is the problem identifier" example:"https://siloserver.org/docs/api/v2/problems/validation_failed"`
+	Title        string         `json:"title" doc:"Short summary fixed for the problem type" example:"Validation failed"`
+	Status       int            `json:"status" doc:"HTTP status code, equal to the response status" example:"422"`
+	Detail       string         `json:"detail" doc:"Safe occurrence-specific explanation; not for control flow" example:"The request did not pass validation; see errors."`
+	Instance     string         `json:"instance" format:"uri" doc:"urn:silo:request:<request-id>, matching the X-Request-ID response header" example:"urn:silo:request:000000000000000000000003"`
+	Errors       []ProblemError `json:"errors,omitempty" doc:"Field-level validation details"`
+	Code         string         `json:"code,omitempty" doc:"Optional domain-specific refusal code"`
+	RetryAfterMS int64          `json:"retry_after_ms,omitzero" doc:"Minimum delay before retrying refused realtime work"`
+	WorkStarted  *bool          `json:"work_started,omitempty" doc:"False means this realtime attempt started no downstream work"`
 
 	headers http.Header
 }

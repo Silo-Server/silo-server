@@ -150,3 +150,11 @@ refused in vote rooms; the host switches to host picks first.
 
 The frozen v1 promotion route retains its winner-only gate and rejects
 promotion before any votes are cast.
+
+### Native realtime admission
+
+See [Native realtime work admission](realtime-admission.md) for charged work
+units, shared/account scope, prepaid tickets, refusal/recovery ordering and the
+critical v1 security bridge exception. Room control refusal is not a disconnect
+or an applied-action receipt. V2 success correlation is additive; v1 success
+shapes remain frozen.

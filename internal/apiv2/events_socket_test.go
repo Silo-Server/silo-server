@@ -12,6 +12,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/realtimeadmission"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 )
@@ -19,6 +20,10 @@ import (
 type fakeEventsSocket struct {
 	calls    int
 	identity evt.SocketIdentity
+}
+
+func (*fakeEventsSocket) RealtimeWorkStatus() *realtimeadmission.Status {
+	return new(realtimeAdmissionService).RealtimeWorkStatus()
 }
 
 func (f *fakeEventsSocket) Mint(_ context.Context, identity evt.SocketIdentity) (string, error) {

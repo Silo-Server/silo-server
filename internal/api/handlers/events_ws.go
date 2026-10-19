@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -19,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/realtimeadmission"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/gorilla/websocket"
@@ -76,6 +78,8 @@ type activeScanLister interface {
 }
 
 type EventsHandler struct {
+	admission      *realtimeadmission.Controller
+	admissionOnce  sync.Once
 	hub            *evt.Hub
 	jobs           *AdminJobsHandler
 	admin          *AdminHandler
@@ -304,6 +308,18 @@ func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims,
 // loop tells the client its access changed and closes the connection with
 // EventsCloseAccessChanged; a nil channel never fires.
 func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}) {
+	allowedChannels := allowedChannelsForClaims(claims)
+	declaredChannels, declared := parseDeclaredChannels(r.URL.Query())
+	declaredSubs := make(map[evt.EventChannel]struct{})
+	var declaredAccepted []evt.EventChannel
+	var declaredRejected []evt.EventsRejectedChannel
+	if declared {
+		declaredSubs, declaredAccepted, declaredRejected = resolveChannelSelection(declaredChannels, allowedChannels, boundProfileID)
+		if err := h.admitEventsSelection(r.Context(), claims.UserID); err != nil {
+			writeRealtimeHTTPRefusal(w, err)
+			return
+		}
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// The Android/KMP client has a long history of silent handshake
@@ -338,28 +354,6 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 		return writeWebSocketControl(conn, websocket.PingMessage, nil)
 	})
 
-	allowedChannels := allowedChannelsForClaims(claims)
-
-	// A connection may declare its channels on the URL instead of sending a
-	// subscribe frame. That is all an observer needs — subscribe is the only
-	// inbound message this endpoint accepts — so declaring up front lets a
-	// read-only client skip the handshake, the grace period, and the write
-	// half of the socket entirely.
-	declaredChannels, declared := parseDeclaredChannels(r.URL.Query())
-
-	// Resolved before the hello frame so required_action can report what the
-	// connection actually owes. Resolution is pure — no query, no I/O — so
-	// nothing here can stall ahead of the reader that starts below; only the
-	// snapshots the accepted channels produce can, and those still run after
-	// it.
-	declaredSubs := make(map[evt.EventChannel]struct{})
-	var declaredAccepted []evt.EventChannel
-	var declaredRejected []evt.EventsRejectedChannel
-	if declared {
-		declaredSubs, declaredAccepted, declaredRejected =
-			resolveChannelSelection(declaredChannels, allowedChannels, boundProfileID)
-	}
-
 	// A declaration that yielded no subscription discharges nothing: the client
 	// still owes a subscribe frame, and saying "none" would send it to wait
 	// silently for events on a connection due to be closed in five seconds.
@@ -368,13 +362,20 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 		requiredAction = requiredActionNone
 	}
 	connectionID := ulid.Make().String()
-	if err := writeWebSocketJSON(conn, evt.EventsHelloMessage{
+	hello := struct {
+		evt.EventsHelloMessage
+		WorkAdmission *realtimeadmission.Status `json:"work_admission,omitempty"`
+	}{EventsHelloMessage: evt.EventsHelloMessage{
 		Type:              "hello",
 		SchemaVersion:     1,
 		ConnectionID:      connectionID,
 		AvailableChannels: allowedChannels,
 		RequiredAction:    requiredAction,
-	}); err != nil {
+	}}
+	if conn.Subprotocol() == EventsSocketProtocol {
+		hello.WorkAdmission = realtimeStatus(h.workAdmission())
+	}
+	if err := writeWebSocketJSON(conn, hello); err != nil {
 		return
 	}
 
@@ -385,22 +386,7 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 	// otherwise healthy connection the moment reading began. The handshake path
 	// is safe for free, building its snapshots downstream of an active reader;
 	// the declared path has to arrange that ordering deliberately.
-	readMessages := make(chan []byte, 8)
-	readDone := make(chan struct{})
-	go func() {
-		defer close(readDone)
-		for {
-			_, data, readErr := conn.ReadMessage()
-			if readErr != nil {
-				return
-			}
-			select {
-			case readMessages <- data:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	readMessages, readDone := readEventsInputs(ctx, conn, h.workAdmission().Socket(claims.UserID))
 
 	subscriptions := declaredSubs
 	if declared {
@@ -430,11 +416,13 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 	// every published event fans into. Such a client still owes a subscribe
 	// frame, and its rejected list told it why. A nil channel blocks forever,
 	// which is exactly the disarmed case.
+	deadline := time.NewTimer(subscribeGracePeriod)
+	defer deadline.Stop()
 	var deadlineC <-chan time.Time
 	if len(subscriptions) == 0 {
-		deadline := time.NewTimer(subscribeGracePeriod)
-		defer deadline.Stop()
 		deadlineC = deadline.C
+	} else {
+		deadline.Stop()
 	}
 
 	for {
@@ -454,19 +442,26 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "subscribe required"),
 			)
 			return
-		case data := <-readMessages:
-			nextSubs, handled, ok := h.handleEventsClientMessage(conn, r, claims, boundProfileID, data, allowedChannels)
-			if !ok {
+		case input := <-readMessages:
+			if input.violation {
+				_ = writeWebSocketJSON(conn, realtimeInputError())
+				_ = writeWebSocketControl(conn, websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, realtimeInputCloseReason))
 				return
 			}
-			if !handled {
+			result := h.handleEventsClientMessage(conn, r, claims, boundProfileID, input.data, allowedChannels)
+			if result.close {
+				return
+			}
+			if result.refusal != nil && len(subscriptions) == 0 {
+				deadline.Reset(realtimeInitialRetryGrace)
+				deadlineC = deadline.C
+			}
+			if !result.applied {
 				continue
 			}
-			// Obligation discharged: detach the timer so a later tick cannot
-			// close a connection that has since subscribed. The timer itself
-			// is stopped by the deferred Stop above.
+			deadline.Stop()
 			deadlineC = nil
-			subscriptions = nextSubs
+			subscriptions = result.selection
 		case env, ok := <-eventsCh:
 			if !ok {
 				return
@@ -504,67 +499,6 @@ func closeEventsAccessChanged(conn *websocket.Conn, readDone <-chan struct{}) {
 	case <-readDone:
 	case <-reply.C:
 	}
-}
-
-func (h *EventsHandler) handleEventsClientMessage(
-	conn *websocket.Conn,
-	r *http.Request,
-	claims *auth.Claims,
-	boundProfileID string,
-	data []byte,
-	allowed []evt.EventChannel,
-) (map[evt.EventChannel]struct{}, bool, bool) {
-	var base struct {
-		Type string `json:"type"`
-	}
-	if err := readWebSocketJSON(data, &base); err != nil {
-		writeWebSocketError(conn, "bad_request", "Malformed JSON")
-		_ = writeWebSocketControl(
-			conn,
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "malformed json"),
-		)
-		return nil, false, false
-	}
-	if base.Type != "subscribe" {
-		writeWebSocketError(conn, "bad_request", "Unknown message type")
-		_ = writeWebSocketControl(
-			conn,
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "unknown message type"),
-		)
-		return nil, false, false
-	}
-
-	var message evt.EventsSubscribeMessage
-	if err := readWebSocketJSON(data, &message); err != nil {
-		writeWebSocketError(conn, "bad_request", "Invalid subscribe payload")
-		_ = writeWebSocketControl(
-			conn,
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "invalid subscribe payload"),
-		)
-		return nil, false, false
-	}
-
-	nextSubs, accepted, rejected := resolveChannelSelection(message.Channels, allowed, boundProfileID)
-
-	if err := writeWebSocketJSON(conn, evt.EventsSubscribedMessage{
-		Type:      frameTypeSubscribed,
-		RequestID: message.RequestID,
-		Channels:  accepted,
-		Rejected:  rejected,
-	}); err != nil {
-		return nil, false, false
-	}
-
-	for _, channel := range accepted {
-		if err := h.writeSnapshotFrame(conn, r, claims, boundProfileID, channel); err != nil {
-			return nil, false, false
-		}
-	}
-
-	return nextSubs, true, true
 }
 
 // resolveChannelSelection decides which of the requested channels a connection

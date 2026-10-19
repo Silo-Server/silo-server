@@ -12,6 +12,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/realtimeadmission"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
@@ -22,6 +23,10 @@ type fakeRoomSocket struct {
 	calls       int
 	room, proof string
 	identity    evt.SocketIdentity
+}
+
+func (*fakeRoomSocket) RealtimeWorkStatus() *realtimeadmission.Status {
+	return new(realtimeAdmissionService).RealtimeWorkStatus()
 }
 
 func (f *fakeRoomSocket) MintRoomSocket(_ context.Context, room, proof string, identity evt.SocketIdentity) (string, time.Time, error) {

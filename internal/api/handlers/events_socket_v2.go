@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/realtimeadmission"
 	"github.com/gorilla/websocket"
 )
 
@@ -78,6 +79,11 @@ func (h *EventsSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity) 
 	}
 	identity.AccessFingerprint = eventsScopeFingerprint(scope)
 	identity.EffectiveRole = claims.Role
+	if err := h.Events.workAdmission().Admit(validated, realtimeadmission.Events, realtimeadmission.Identity{UserID: identity.UserID}); err != nil {
+		return "", err
+	}
+	identity.InitialWorkPrepaid = true
+	identity.TicketExpiresAt = time.Now().Add(evt.SocketTicketTTL)
 	return h.Tickets.Mint(ctx, identity)
 }
 
@@ -152,7 +158,7 @@ func (h *EventsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			cancel()
 		}
 	}()
-	h.Events.serveWebSocket(w, r.WithContext(ctx), claims, identity.ProfileID, websocket.Upgrader{Subprotocols: []string{EventsSocketProtocol}, CheckOrigin: h.validOrigin}, accessChanged)
+	h.Events.serveWebSocket(w, r.WithContext(withEventsInitialWork(ctx, identity.InitialWorkPrepaid, identity.TicketExpiresAt)), claims, identity.ProfileID, websocket.Upgrader{Subprotocols: []string{EventsSocketProtocol}, CheckOrigin: h.validOrigin}, accessChanged)
 }
 
 // awaitAuthorityLoss re-validates the connection's identity every check

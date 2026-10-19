@@ -2799,6 +2799,16 @@ func main() {
 		}
 	})
 
+	// Realtime client work remains bounded when generic HTTP limiting is off.
+	realtimeWork, closeRealtimeWork, err := newRealtimeWorkAdmission(cfg.RateLimit, cfg.Redis)
+	if err != nil {
+		log.Fatalf("failed to initialize realtime work admission: %v", err)
+	}
+	defer closeRealtimeWork()
+	deps.RealtimeAdmission = realtimeWork
+	workStatus := realtimeWork.Status()
+	slog.Info("realtime work admission initialized", "component", "app", "backend", workStatus.Backend, "scope", workStatus.Scope, "epoch", workStatus.Epoch)
+
 	// Step 6b: Create rate limiter.
 	if cfg.RateLimit.Enabled && deps.DB != nil {
 		var perKeyLimiter, globalLimiter ratelimit.RateLimiter
