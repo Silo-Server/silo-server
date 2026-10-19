@@ -48,6 +48,7 @@ func (h *RecommendationsHandler) BecauseWatched(ctx context.Context, userID int,
 	if limit <= 0 {
 		limit = recommendationsDefaultLimit
 	}
+	limit = min(limit, recommendations.MaxRowReadLimit)
 	visible, err := h.anchorVisible(ctx, itemID, filter)
 	if err != nil {
 		return nil, err

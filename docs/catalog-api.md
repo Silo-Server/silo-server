@@ -4,6 +4,13 @@
 > 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
 > window and is then retired. See [the native API contract](architecture/api-contract.md).
 
+## Recommendation limits
+
+`GET /api/v2/recommendations/because-watched/{item_id}` accepts `limit` from
+1 to 50 (default 20). The v1 bridge route clamps positive limits above 50
+to 50 and keeps its existing default of 50 for missing or invalid values.
+The shared service caps the limit before the engine expands its candidate queries.
+
 ## Section browsing
 
 Catalog reads with `source=section` resolve the row on the acting profile's
