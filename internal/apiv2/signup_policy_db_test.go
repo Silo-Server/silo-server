@@ -60,6 +60,11 @@ func TestSignupCommitPolicyErrorsDB(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO server_settings (key,value) VALUES ('signup.enabled','false')`); err != nil {
 		t.Fatal(err)
 	}
+	var creatorID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username,email,password_hash,role)
+		VALUES ('inviter','inviter@example.test','synthetic-hash','admin') RETURNING id`).Scan(&creatorID); err != nil {
+		t.Fatal(err)
+	}
 	users, sessions := auth.NewUserRepository(pool), auth.NewSessionRepository(pool)
 	jwt := auth.NewJWTService("synthetic-signup-mapping-secret", time.Minute, time.Hour)
 	svc := auth.NewService(auth.NewLocalProvider(users, sessions), jwt, sessions, users, auth.NewInviteCodeRepository(pool), staleSignupSettings{}, nil)
@@ -72,7 +77,7 @@ func TestSignupCommitPolicyErrorsDB(t *testing.T) {
 	for _, version := range []string{"v1", "v2"} {
 		t.Run(version, func(t *testing.T) {
 			name, code := "signup-"+version, "invite-"+version
-			if _, err := pool.Exec(ctx, `INSERT INTO invite_codes (code,max_uses) VALUES ($1,1)`, code); err != nil {
+			if _, err := pool.Exec(ctx, `INSERT INTO invite_codes (code,max_uses,created_by) VALUES ($1,1,$2)`, code, creatorID); err != nil {
 				t.Fatal(err)
 			}
 			body := fmt.Sprintf(`{"username":%q,"email":%q,"password":"synthetic-password","invite_code":%q}`, name, name+"@example.test", code)
