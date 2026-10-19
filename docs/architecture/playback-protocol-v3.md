@@ -1826,6 +1826,10 @@ pooled executors. The generic tone-map transformation does not reveal hardware
 selection policy; the server freezes a validated executor into each accepted
 recipe. Heterogeneous pools are filtered again at transport startup, and a stale
 or older node advertisement is rejected instead of silently changing modes.
+On an Intel GPU (PCI vendor `0x8086`), the VAAPI executor advertises only the
+SDR-base kinds: Intel's `tonemap_vaapi` turns HLG teal and darkens PQ, so HDR
+sources there use software tone mapping, and QSV is the Intel hardware path for
+HDR.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.

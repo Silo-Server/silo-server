@@ -124,7 +124,7 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 		}
 		entry := probeCacheEntry{capabilities: append(Capabilities(nil), result...)}
 		switch {
-		case !probeCapabilitiesComplete(result, hardwareBackend):
+		case !probeCapabilitiesComplete(result, hardwareBackend, hardwareDevice):
 			entry.expiresAt = now().Add(probeNegativeTTL)
 		case dolbyVisionUnsettled:
 			entry.expiresAt = now().Add(probeUnsettledDolbyVisionTTL)
@@ -293,27 +293,27 @@ func probeCacheEntryCurrent(entry probeCacheEntry, now time.Time) bool {
 // genuine answer for that build, and executors that cannot apply an RPU never
 // run it; counting it would re-probe those devices every negative-cache
 // interval for good.
-func probeCapabilitiesComplete(capabilities Capabilities, hardwareBackend string) bool {
-	if !capabilityCoversAllSourceKinds(capabilities, ModeSoftware, BackendSoftware) {
+func probeCapabilitiesComplete(capabilities Capabilities, hardwareBackend, hardwareDevice string) bool {
+	if !capabilityCoversSourceKinds(capabilities, ModeSoftware, BackendSoftware, StandardSourceKinds()) {
 		return false
 	}
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
 	switch backend {
 	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
-		return capabilityCoversAllSourceKinds(capabilities, ModeHardware, backend)
+		return capabilityCoversSourceKinds(capabilities, ModeHardware, backend, expectedHardwareSourceKinds(backend, hardwareDevice))
 	default:
 		return true
 	}
 }
 
-func capabilityCoversAllSourceKinds(capabilities Capabilities, mode Mode, backend string) bool {
+func capabilityCoversSourceKinds(capabilities Capabilities, mode Mode, backend string, kinds []SourceKind) bool {
 	index := slices.IndexFunc(capabilities, func(capability Capability) bool {
 		return capability.Mode == mode && capability.Backend == backend
 	})
 	if index < 0 {
 		return false
 	}
-	return !slices.ContainsFunc(StandardSourceKinds(), func(kind SourceKind) bool {
+	return !slices.ContainsFunc(kinds, func(kind SourceKind) bool {
 		return !slices.Contains(capabilities[index].SourceKinds, kind)
 	})
 }
@@ -427,6 +427,16 @@ func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath
 	devices := probeDevices(hardwareDevice, backend)
 	validated := smokeKindsForFilter(hardwareFilter(backend))
 	for _, device := range devices {
+		if backend == BackendVAAPI {
+			if narrowed := vaapiCandidateSourceKinds(validated, device); len(narrowed) < len(validated) {
+				slog.Info("VAAPI tone mapping is offered for SDR sources only on Intel GPUs; HDR sources use software tone mapping, or set hardware acceleration to QSV",
+					"component", "tonemap", "device", device)
+				validated = narrowed
+			}
+			if len(validated) == 0 {
+				break
+			}
+		}
 		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), validated, func(kind SourceKind) []string {
 			return hardwareSmokeArgs(fixturePath, backend, device, kind)
 		})
