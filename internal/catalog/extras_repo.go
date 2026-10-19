@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -89,6 +90,90 @@ const ClearEmptiedExtraStillsCTE = `,
 			WHERE f.extra_id = e.content_id AND f.id NOT IN (SELECT id FROM deleted)
 		  )
 	)`
+
+// Prefixes of a generated still's media_extras.still_source. The rest of the
+// source is the frame key of the file the frame came from
+// (PendingFrameStill.FrameKey), so a replaced file gets a new frame. A failed
+// extraction records its key too, with still_retry_after set when the failure
+// may pass, or NULL when the file cannot be decoded and waits for it to change.
+// A sidecar copy's source is a file:// URL instead, and a scan replaces a
+// generated still with it.
+const (
+	StillSourceFramePrefix       = "frame:"
+	StillSourceFrameFailedPrefix = "frame-failed:"
+)
+
+// PendingFrameStill is an extra that needs a generated still: it has no
+// sidecar image, and no frame (or failure still waiting out its retry)
+// recorded for its current file.
+type PendingFrameStill struct {
+	ExtraID     string
+	StillSource string // the source to compare against when saving
+	FileID      int
+	Duration    int    // seconds, 0 when unknown
+	FrameKey    string // identifies the file's current content
+}
+
+// ListPendingFrameStills returns up to limit extras that need a generated
+// still, one live file each. Extras in disabled libraries wait, since their
+// files are not scanned, and so do files whose first probe has not finished:
+// the frame position depends on the duration.
+func (r *ExtraRepository) ListPendingFrameStills(ctx context.Context, limit int) ([]PendingFrameStill, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT content_id, still_source, file_id, duration, frame_key
+		FROM (
+			SELECT DISTINCT ON (e.content_id)
+				e.content_id, e.still_source, e.still_retry_after,
+				f.id AS file_id, COALESCE(f.duration, 0)::int AS duration,
+				f.duration > 0 OR f.probe_updated_at IS NOT NULL OR f.probe_failed_at IS NOT NULL AS probed,
+				f.id || '?v=' || f.file_size || '-' ||
+					COALESCE(floor(extract(epoch FROM f.file_modified_at))::bigint, 0) AS frame_key
+			FROM media_extras e
+			JOIN media_files f ON f.extra_id = e.content_id AND f.missing_since IS NULL
+			JOIN media_folders folder ON folder.id = f.media_folder_id AND folder.enabled
+			WHERE e.still_source NOT LIKE 'file://%'
+			ORDER BY e.content_id, f.id
+		) candidates
+		WHERE probed
+			AND still_source <> $1 || frame_key
+			AND NOT (still_source = $2 || frame_key AND (still_retry_after IS NULL OR still_retry_after > now()))
+		ORDER BY content_id
+		LIMIT $3`,
+		StillSourceFramePrefix, StillSourceFrameFailedPrefix, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query extras needing a frame still: %w", err)
+	}
+	defer rows.Close()
+	var pending []PendingFrameStill
+	for rows.Next() {
+		var p PendingFrameStill
+		if err := rows.Scan(&p.ExtraID, &p.StillSource, &p.FileID, &p.Duration, &p.FrameKey); err != nil {
+			return nil, fmt.Errorf("scan extra needing a frame still: %w", err)
+		}
+		pending = append(pending, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate extras needing a frame still: %w", err)
+	}
+	return pending, nil
+}
+
+// SetStillIfSource is SetStill for the extra stills task: it applies only
+// while the extra's still_source is still expectedSource, so a sidecar a scan
+// saved meanwhile is never overwritten, and it records when a failure may be
+// retried (nil for a saved frame, or a file that cannot be decoded). It
+// reports whether the row changed.
+func (r *ExtraRepository) SetStillIfSource(ctx context.Context, contentID, expectedSource, path, source, thumbhash string, retryAfter *time.Time) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_extras
+		SET still_path = $3, still_source = $4, still_thumbhash = $5, still_retry_after = $6, updated_at = now()
+		WHERE content_id = $1 AND still_source = $2`,
+		contentID, expectedSource, path, source, thumbhash, retryAfter)
+	if err != nil {
+		return false, fmt.Errorf("set media extra still: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
 
 // GetByID returns a single extra, or ErrExtraNotFound.
 func (r *ExtraRepository) GetByID(ctx context.Context, contentID string) (*models.MediaExtra, error) {

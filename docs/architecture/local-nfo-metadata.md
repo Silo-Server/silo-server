@@ -352,6 +352,18 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   subtree scan of its folder, like any sidecar change. API v2 detail returns it
   as `extras[].still_url`, and Jellyfin clients get it as the extra's Primary
   image.
+- An extra without a sidecar gets a frame of its video instead
+  (`internal/extrastills`, the hidden `generate_extra_stills` task, at startup
+  and every 15 minutes, in every library): a tenth of the way in, between 5
+  seconds and a minute, taken through the chapter-thumbnail extractor and its
+  local or transcode-node routing. The frame is keyed to the file's size and
+  mtime, so a replaced file gets a new one. A file ffmpeg cannot decode is
+  skipped until it changes; other failures are tried again after six hours, and
+  a run stops early when no transcode node can be reserved. Extras in disabled
+  libraries, and files not yet probed, wait. A sidecar always wins: a scan
+  replaces a frame with it, and the task never overwrites one. An extra whose
+  sidecar cannot be decoded gets no frame either; it shows no image until the
+  sidecar is fixed or removed.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and
