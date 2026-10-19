@@ -14,12 +14,19 @@ type SourceBitrates struct{ Pool *pgxpool.Pool }
 // Percentile returns the fraction-th percentile (for example 0.999), in kbps,
 // of the bitrates of the present video files the filter admits, or 0 when
 // there are none. Audio-only files and cover-art streams are not video.
+//
+// A file counts only when playback would authorize it: the file passes
+// MediaFileAccessSQL, and its item passes the predicates EnsureAccessible
+// applies (item library membership, maturity limits, excluded media types).
 func (s *SourceBitrates) Percentile(ctx context.Context, filter AccessFilter, fraction float64) (int, error) {
 	if s == nil || s.Pool == nil {
 		return 0, nil
 	}
 	args := []any{fraction}
 	conditions, args := MediaFileAccessSQL("mf", filter, args)
+	argIdx := len(args) + 1
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 	conditions = append(conditions,
 		"mf.bitrate > 0",
 		"mf.missing_since IS NULL",
@@ -29,6 +36,7 @@ func (s *SourceBitrates) Percentile(ctx context.Context, filter AccessFilter, fr
 	err := s.Pool.QueryRow(ctx, `
 		SELECT COALESCE(percentile_disc($1) WITHIN GROUP (ORDER BY mf.bitrate), 0)
 		FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE `+strings.Join(conditions, " AND "), args...).Scan(&kbps)
 	return kbps, err
 }
