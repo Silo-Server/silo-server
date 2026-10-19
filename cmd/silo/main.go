@@ -1296,6 +1296,18 @@ func main() {
 	subtitlePlaySync := &subtitles.PlaySyncHook{}
 	// Set when shutdown begins; /api/v1/ready fails from then on.
 	var shuttingDown atomic.Bool
+	clientSocketAdmission, err := newEventSocketAdmission()
+	if err != nil {
+		log.Fatalf("event socket admission: %v", err)
+	}
+	if err := prometheus.Register(clientSocketAdmission); err != nil {
+		log.Fatalf("register event socket metrics: %v", err)
+	}
+	stopSocketDrain := context.AfterFunc(appCtx, clientSocketAdmission.BeginDrain)
+	defer stopSocketDrain()
+	// This startup-only registration does not retain a channel for each
+	// rotating socket. Completion means every client closed and unsubscribed.
+	registerShutdownWork(clientSocketAdmission.Done())
 	deps := api.Dependencies{
 		ShuttingDown:                 shuttingDown.Load,
 		SubtitlePlaySync:             subtitlePlaySync,
@@ -1316,6 +1328,7 @@ func main() {
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
+		ClientSocketAdmission:        clientSocketAdmission,
 		ScanRegistry:                 scanRegistry,
 		OpsLogRepo:                   opsRepo,
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
@@ -3656,23 +3669,25 @@ func main() {
 	var compatSrv *http.Server
 	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Enabled && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
-			ArtworkHandler:       apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair),
-			Config:               cfg,
-			AppContext:           appCtx,
-			RegisterShutdownWork: registerShutdownWork,
-			LiveConfig:           configWatcher.Config,
-			DB:                   deps.DB,
-			SecretCipher:         dataCipher,
-			ClientIPResolver:     ipResolver,
-			IngressTokens:        networkAccess.Registry,
-			ActivityLogWriter:    deps.ActivityLogWriter,
-			NodeID:               deps.NodeID,
-			StreamTelemetry:      streamTelemetryRegistry,
-			NodePlanner:          deps.NodePlanner,
-			JWTSecret:            cfg.Auth.JWTSecret,
-			RecWorker:            recWorker,
-			FrontendFS:           deps.FrontendFS,
-			ArtworkStore:         deps.Blobs.Assets,
+			ArtworkHandler:        apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair),
+			Config:                cfg,
+			AppContext:            appCtx,
+			RegisterShutdownWork:  registerShutdownWork,
+			ClientSocketAdmission: clientSocketAdmission,
+			ShuttingDown:          shuttingDown.Load,
+			LiveConfig:            configWatcher.Config,
+			DB:                    deps.DB,
+			SecretCipher:          dataCipher,
+			ClientIPResolver:      ipResolver,
+			IngressTokens:         networkAccess.Registry,
+			ActivityLogWriter:     deps.ActivityLogWriter,
+			NodeID:                deps.NodeID,
+			StreamTelemetry:       streamTelemetryRegistry,
+			NodePlanner:           deps.NodePlanner,
+			JWTSecret:             cfg.Auth.JWTSecret,
+			RecWorker:             recWorker,
+			FrontendFS:            deps.FrontendFS,
+			ArtworkStore:          deps.Blobs.Assets,
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),

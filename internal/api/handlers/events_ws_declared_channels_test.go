@@ -62,6 +62,9 @@ func eventsWSTestConnActing(
 	decide apimw.ActingAdminDecider,
 ) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
 	t.Helper()
+	if handler.socketAdmission == nil {
+		handler.socketAdmission = testSocketAdmission(t)
+	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := apimw.SetClaims(r.Context(), claims)

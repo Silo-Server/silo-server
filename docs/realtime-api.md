@@ -73,6 +73,43 @@ connection results and frames after that authority changes.
 Native socket/ticket adoption and independent domain review are required before
 these two migration rows can be ratified. No bridge socket or ticket was removed.
 
+### Client socket accounting and recovery
+
+Native v1/v2 and Jellyfin sockets share one pending-plus-active account and
+process counter. The accounting boundary is one API process; profiles, sessions,
+keys and aliases do not create separate allowances. Trusted internal hub
+subscriptions are exempt. Ticket minting reserves no socket capacity.
+
+Startup currently selects **observation only** with thresholds of 64 sockets
+per account per process and 2,048 per process. Exceeding either threshold records
+would-refuse metrics and still admits the connection. This does not protect
+resources or resolve the missing quota. See
+[client socket admission](architecture/client-socket-admission.md) for the
+lifecycle, metrics and the separately authorized rollout gates.
+
+The prepared enforcing mode refuses account capacity with `429` and process
+capacity with `503`, before upgrade. Draining and missing admission dependencies
+refuse with `503` in either mode. Socket admission refusals use `Retry-After: 5`
+and `Cache-Control: no-store`; native bodies retain bounded plain text. Process
+capacity wins when both limits are exceeded. Origin and authority checks precede
+account admission. A quota-refused v2 ticket has already been consumed and must
+never be reused or refunded. V1 checks its optional profile-binding ticket after
+reservation. Refusal allocates no subscriber or recurring authority watcher.
+Successful upgrades start watchers before subscribing. Shutdown closes the
+connection and unsubscribes before returning capacity.
+
+Generic event clients mint a fresh ticket for every attempt. Failed handshakes
+and connections whose first accepted `subscribed` acknowledgement was less than
+30 seconds ago use retry floors of 5, 10, 20 and then 30 seconds. A subscription
+accepted for at least 30 seconds resets the ladder and uses a one-second floor.
+Add uniform independent jitter from zero to 50 percent of the floor. Raise the
+floor to a readable larger `Retry-After`; browser WebSocket failures hide response
+headers. Keep one pending retry, cancel it when background work stops or identity
+changes, and preserve immediate `access_changed` recovery. Known work refusal,
+input-shield and unavailable reasons take precedence over this generic fallback;
+a structured in-socket work refusal keeps the connection. Room and playback
+clients have their own recovery contracts.
+
 ### Access changes
 
 When the recheck finds that the login session is still valid but the access the

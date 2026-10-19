@@ -50,10 +50,11 @@ func newObservedTestRouter(t testing.TB, artwork http.Handler, sessions *Session
 		sessions = NewSessionStore(time.Hour, time.Now)
 	}
 	return NewRouter(Dependencies{
-		Config:         cfg,
-		SessionStore:   sessions,
-		ContentService: &genresContentService{},
-		ArtworkHandler: artwork,
+		Config:                cfg,
+		ClientSocketAdmission: socketTestLifecycle(t).Admission,
+		SessionStore:          sessions,
+		ContentService:        &genresContentService{},
+		ArtworkHandler:        artwork,
 	})
 }
 

@@ -100,7 +100,7 @@ func TestSignedOutLoginSessionEndsItsJellyfinSessionDB(t *testing.T) {
 		// A recorder cannot be upgraded, so a token the socket accepts ends
 		// in 400 rather than 401.
 		"socket": func(t *testing.T, node *SessionStore, token string) int {
-			return serveCompat(NewSocketHandler(node, nil), compatRequest("/socket", token))
+			return serveCompat(NewSocketHandler(node, nil, socketTestLifecycle(t)), compatRequest("/socket", token))
 		},
 	}
 

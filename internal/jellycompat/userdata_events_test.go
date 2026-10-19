@@ -143,7 +143,7 @@ func TestSocketForwardsUserDataChangedForTheSession(t *testing.T) {
 	}
 	events := newFakeUserStateEvents()
 	codec := NewResourceIDCodec()
-	server := httptest.NewServer(NewSocketHandlerWithUserData(sessions, nil, events, codec))
+	server := httptest.NewServer(NewSocketHandlerWithUserData(sessions, nil, events, codec, socketTestLifecycle(t)))
 	defer server.Close()
 
 	header := http.Header{"X-Emby-Token": []string{"token-1"}}

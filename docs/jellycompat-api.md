@@ -483,6 +483,24 @@ node answers. A revoked or expired login session ends the compat session with `4
 lookup that fails is a retryable `503` and keeps it. `sa_` API keys have no login
 session and are checked as keys instead.
 
+`/socket`, including case-normalized `/emby` and `/jellyfin` aliases, shares native
+event socket accounting by `Session.StreamAppUserID`. KeepAlive-only connections
+spend capacity even when user-data notices are unavailable. Admission follows
+session/key validation and precedes upgrade; user-data forwarding starts only
+after upgrade succeeds. Close and unsubscribe complete before capacity returns.
+Application shutdown closes hijacked sockets explicitly.
+
+The production default is observation-only: 64 sockets per account per API
+process and 2,048 per process are thresholds, not enforced limits. Prepared
+quota refusal uses the existing Jellyfin error envelope: `429` for account
+capacity, `503` for process capacity, with `Retry-After: 5` and
+`Cache-Control: no-store`. Draining or missing admission dependencies return
+`503` in either mode. No eviction or cluster-wide quota exists. Independent
+clients should use fresh authentication attempts, honor readable retry headers,
+and back off after failed or short connections. KeepAlive and watched-state
+messages otherwise retain their existing shape. See
+[client socket admission](architecture/client-socket-admission.md).
+
 ### Quick Connect
 
 Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in
