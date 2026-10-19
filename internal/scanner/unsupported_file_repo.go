@@ -71,6 +71,12 @@ func NewUnsupportedFileRepository(pool *pgxpool.Pool) *UnsupportedFileRepository
 
 const unsupportedFileColumns = `media_folder_id, directory_path, reason, file_count, file_names, first_seen_at, last_seen_at`
 
+// unsupportedFileBatchSize caps the statements one database batch carries
+// when a scan records what it found, so a library with many skipped folders
+// sends several bounded batches instead of one. A var, not a const, so DB
+// tests can shrink it to cross a batch boundary.
+var unsupportedFileBatchSize = 500
+
 // Replace records what a scan of the given scopes, started at startedAt, found
 // in a library. Groups it found are inserted or refreshed; rows under a scope
 // that it did not find are deleted, except at or under a protected path, whose
@@ -109,21 +115,22 @@ func (r *UnsupportedFileRepository) Replace(
 	}
 	dirs := make([]string, 0, len(groups))
 	reasons := make([]string, 0, len(groups))
-	upserts := &pgx.Batch{}
 	for _, group := range groups {
 		dirs = append(dirs, group.DirectoryPath)
 		reasons = append(reasons, group.Reason)
+	}
+	upserts := queueInBatches(groups, func(batch *pgx.Batch, group models.UnsupportedMediaFileGroup) {
 		if groupDirProtected(group.DirectoryPath, protectedPaths, protectedParents) {
-			upserts.Queue(`
+			batch.Queue(`
 				INSERT INTO unsupported_media_files (
 					media_folder_id, directory_path, reason, file_count, file_names, first_seen_at, last_seen_at
 				)
 				VALUES ($1, $2, $3, $4, $5, $6, $6)
 				ON CONFLICT (media_folder_id, directory_path, reason) DO NOTHING
 			`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames, startedAt)
-			continue
+			return
 		}
-		upserts.Queue(`
+		batch.Queue(`
 			INSERT INTO unsupported_media_files (
 				media_folder_id, directory_path, reason, file_count, file_names, first_seen_at, last_seen_at
 			)
@@ -134,7 +141,7 @@ func (r *UnsupportedFileRepository) Replace(
 				last_seen_at = EXCLUDED.last_seen_at
 			WHERE unsupported_media_files.last_seen_at <= EXCLUDED.last_seen_at
 		`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames, startedAt)
-	}
+	})
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM unsupported_media_files u
@@ -156,10 +163,7 @@ func (r *UnsupportedFileRepository) Replace(
 		`, folderID, scopes, protectedPaths, dirs, reasons, startedAt, protectedParents); err != nil {
 			return fmt.Errorf("deleting stale unsupported files for folder %d: %w", folderID, err)
 		}
-		if upserts.Len() == 0 {
-			return nil
-		}
-		if err := tx.SendBatch(ctx, upserts).Close(); err != nil {
+		if err := sendBatches(ctx, tx, upserts); err != nil {
 			return fmt.Errorf("recording unsupported files for folder %d: %w", folderID, err)
 		}
 		return nil
@@ -174,18 +178,43 @@ func (r *UnsupportedFileRepository) AddNew(ctx context.Context, folderID int, st
 	if len(groups) == 0 {
 		return nil
 	}
-	inserts := &pgx.Batch{}
-	for _, group := range groups {
-		inserts.Queue(`
+	inserts := queueInBatches(groups, func(batch *pgx.Batch, group models.UnsupportedMediaFileGroup) {
+		batch.Queue(`
 			INSERT INTO unsupported_media_files (
 				media_folder_id, directory_path, reason, file_count, file_names, first_seen_at, last_seen_at
 			)
 			VALUES ($1, $2, $3, $4, $5, $6, $6)
 			ON CONFLICT (media_folder_id, directory_path, reason) DO NOTHING
 		`, folderID, group.DirectoryPath, group.Reason, group.FileCount, group.FileNames, startedAt)
-	}
-	if err := r.pool.SendBatch(ctx, inserts).Close(); err != nil {
+	})
+	// One transaction, as when this was a single batch: a failure adds nothing.
+	if err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		return sendBatches(ctx, tx, inserts)
+	}); err != nil {
 		return fmt.Errorf("adding unsupported files for folder %d: %w", folderID, err)
+	}
+	return nil
+}
+
+// queueInBatches queues one statement per group, starting a new batch every
+// unsupportedFileBatchSize statements.
+func queueInBatches(groups []models.UnsupportedMediaFileGroup, queue func(*pgx.Batch, models.UnsupportedMediaFileGroup)) []*pgx.Batch {
+	batches := make([]*pgx.Batch, 0, (len(groups)+unsupportedFileBatchSize-1)/unsupportedFileBatchSize)
+	for i, group := range groups {
+		if i%unsupportedFileBatchSize == 0 {
+			batches = append(batches, &pgx.Batch{})
+		}
+		queue(batches[len(batches)-1], group)
+	}
+	return batches
+}
+
+// sendBatches sends the batches in order on tx, closing each before the next.
+func sendBatches(ctx context.Context, tx pgx.Tx, batches []*pgx.Batch) error {
+	for _, batch := range batches {
+		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
